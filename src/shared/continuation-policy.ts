@@ -78,7 +78,7 @@ export const CHAT_PROVIDER_CHANGE_MESSAGE =
   "Start a new chat to use a different provider. This chat keeps its original provider and history.";
 
 export const MIXED_PROVIDER_HISTORY_MESSAGE =
-  "This chat's history includes turns from another provider, so it can't continue here. Start a new chat to keep working; this chat keeps its history.";
+  "This chat's provider changed after some of its turns ran, so it can't continue here. Start a new chat to keep working; this chat keeps its history.";
 
 export function conversationContinuationRefusal(
   conversation: { mixedProviderHistory?: boolean } | null | undefined,

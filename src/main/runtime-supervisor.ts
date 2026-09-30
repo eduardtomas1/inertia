@@ -12,6 +12,7 @@ import {
 } from "../node/runtime-process-protocol.js";
 import { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
 import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
+import { RuntimePrivateConnectRequestCoordinator } from "./runtime-private-connect-request-coordinator.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
@@ -39,7 +40,7 @@ import type { RuntimeProcessContainmentAdmission } from "./runtime-process-conta
 import { createRuntimeProcessContainmentAdmission,
   createRuntimeSupervisorProcessSafety } from "./runtime-supervisor-process-safety.js";
 import type {
-  PendingPrivateConnectRuntimeRequest, PendingProjectPath, RuntimeProcessRecord,
+  PendingProjectPath, RuntimeProcessRecord,
   RuntimeSupervisorOptions, RuntimeSupervisorPhase, RuntimeSupervisorSnapshot,
   RuntimeSupervisorTimer,
 } from "./runtime-supervisor-types.js";
@@ -97,7 +98,7 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: RuntimeSupervisorTimer | null = null;
   private readonly startupRecovery: RuntimeSupervisorStartupRecovery;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
-  private readonly pendingPrivateConnectRuntimeRequests = new Map<string, PendingPrivateConnectRuntimeRequest>();
+  private readonly privateConnectRequests: RuntimePrivateConnectRequestCoordinator;
   private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
   private readonly updatePreparation: RuntimeUpdatePreparationCoordinator;
   private readonly privateConnectPrompts: RuntimePrivateConnectPromptCoordinator<
@@ -225,6 +226,12 @@ export class RuntimeSupervisor {
         this.forceTerminate(record.child);
         this.emitState();
       },
+    });
+    this.privateConnectRequests = new RuntimePrivateConnectRequestCoordinator({
+      requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      post: (record, command) => this.post(record.child, command),
     });
     this.updatePreparation = new RuntimeUpdatePreparationCoordinator({
       timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
@@ -363,29 +370,7 @@ export class RuntimeSupervisor {
     if (this.phase !== "ready" || !record?.ready) {
       return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
     }
-    if (this.pendingPrivateConnectRuntimeRequests.has(request.requestId)) {
-      return Promise.reject(new Error(
-        "The Private Connect request identifier is already active.",
-      ));
-    }
-    return new Promise<PrivateConnectRuntimeResponse>((resolve, reject) => {
-      const timer = this.setTimer(() => {
-        this.pendingPrivateConnectRuntimeRequests.delete(request.requestId);
-        reject(new Error("The Private Connect request timed out."));
-      }, runtimeSupervisorDefaults.requestTimeoutMs);
-      this.pendingPrivateConnectRuntimeRequests.set(request.requestId, {
-        record,
-        timer,
-        resolve,
-        reject,
-      });
-      this.post(record.child, {
-        type: "runtime.private-connect-request",
-        requestId: request.requestId,
-        subject,
-        request,
-      });
-    });
+    return this.privateConnectRequests.request(record, subject, request);
   }
   preparePrivateConnectPrompt(
     subject: PrivateConnectRuntimeAuthorization,
@@ -396,9 +381,16 @@ export class RuntimeSupervisor {
       ? Promise.reject(record)
       : this.privateConnectPrompts.prepare(record, subject, request);
   }
-  focusMascotChat(conversationId: string | null, request: number): void { this.postWhenReady({ type: "runtime.mascot-focus", conversationId, request }); }
-  forgetPrivateConnectTranscripts(scope: RuntimePrivateConnectForgetScope): void { this.postWhenReady({ type: "runtime.private-connect-forget", scope }); }
-  private postWhenReady(command: RuntimeWorkerCommand): void { const record = this.current; if (this.phase === "ready" && record?.ready) this.post(record.child, command); }
+  focusMascotChat(conversationId: string | null, request: number): void {
+    this.postWhenReady({ type: "runtime.mascot-focus", conversationId, request });
+  }
+  forgetPrivateConnectTranscripts(scope: RuntimePrivateConnectForgetScope): void {
+    this.postWhenReady({ type: "runtime.private-connect-forget", scope });
+  }
+  private postWhenReady(command: RuntimeWorkerCommand): void {
+    const record = this.current;
+    if (this.phase === "ready" && record?.ready) this.post(record.child, command);
+  }
   commitPrivateConnectPrompt(
     subject: PrivateConnectRuntimeAuthorization,
     request: PrivateConnectPromptRequest,
@@ -691,11 +683,7 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.private-connect-response") {
-      const pending = this.pendingPrivateConnectRuntimeRequests.get(event.requestId);
-      if (!pending || pending.record !== record) return;
-      this.pendingPrivateConnectRuntimeRequests.delete(event.requestId);
-      this.clearTimer(pending.timer);
-      pending.resolve(event.response);
+      this.privateConnectRequests.handle(record, event);
       return;
     }
     if (event.type === "runtime.database-recovery-result") {
@@ -1186,11 +1174,7 @@ export class RuntimeSupervisor {
     record: RuntimeProcessRecord | null,
     message: string,
   ): void {
-    drainRuntimeRecordRequests(this.pendingPrivateConnectRuntimeRequests,
-      record, (pending) => {
-      this.clearTimer(pending.timer);
-      pending.reject(new Error(message));
-    });
+    this.privateConnectRequests.reject(record, message);
     if (!record) return;
     this.privateConnectPrompts.reject(record, message);
   }

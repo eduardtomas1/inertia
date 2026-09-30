@@ -11,7 +11,11 @@ import {
   CONVERSATION_MIXED_PROVIDER_SQL,
 } from "../../src/server/persistence/conversation-provider-policy";
 import { ConversationProviderChangeError } from "../../src/server/persistence/errors";
-import { CHAT_PROVIDER_CHANGE_MESSAGE, MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
+import {
+  CHAT_PROVIDER_CHANGE_MESSAGE,
+  MIXED_PROVIDER_HISTORY_MESSAGE,
+  conversationContinuationRefusal,
+} from "../../src/shared/continuation-policy";
 import { createQuietLedgerFixture } from "../e2e/support/quiet-ledger-fixture";
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
@@ -306,6 +310,37 @@ describe("chat provider isolation", () => {
         expect(message).toBe(CHAT_PROVIDER_CHANGE_MESSAGE);
       }
     }
+  });
+
+  it.each([
+    "a history whose provider differs from the saved selection",
+    "a mixed-provider history",
+  ] as const)("explains the refusal truthfully for %s", (evidence) => {
+    const { store, conversation, turnInput, databasePath, preparation } = fixture();
+    store.beginAgentTurn(turnInput("codex"));
+    const database = new Database(databasePath);
+    if (evidence === "a mixed-provider history") {
+      store.beginAgentTurn({ ...turnInput("codex"), runId: "second-run" });
+      database.prepare("UPDATE agent_turns SET provider_id = 'claude' WHERE run_id = 'run-codex'").run();
+    } else {
+      database.prepare("UPDATE conversations SET provider_id = ?, model_selection_json = ? WHERE id = ?")
+        .run("claude", JSON.stringify(providerNativeModelSelection({ providerId: "claude" })), conversation.id);
+    }
+    database.close();
+    const explanation = "This chat's provider changed after some of its turns ran, so it can't continue here. "
+      + "Start a new chat to keep working; this chat keeps its history.";
+    const saved = store.conversation(conversation.id).providerId;
+    let message: string | null = null;
+    try {
+      store.assertConversationProvider(conversation.id, saved);
+    } catch (error) {
+      message = publicRuntimeError(error);
+    }
+    expect(message).toBe(explanation);
+    expect(() => resolveTurnRequest(preparation, { conversationId: conversation.id, content: "Continue here" }))
+      .toThrow(explanation);
+    expect(conversationContinuationRefusal(store.conversationDetail(conversation.id)?.conversation))
+      .toBe(explanation);
   });
 
   it("publishes the Quiet Ledger fixture's restored history as mixed and rejects every provider in place", () => {

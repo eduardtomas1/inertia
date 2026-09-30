@@ -184,9 +184,12 @@ test("an agent can browse without the Browser panel, through a login, and on pag
   await expect(tools.getByRole("textbox", { name: "Preview address" })).toHaveValue(asyncUrl);
   await expect.poll(() => app.nativePreviewIsVisible(asyncUrl)).toBe(true);
   await expect(pageValue<number>(asyncUrl, "window.__loads")).resolves.toBe(2);
-  const shown = parsed(await browser(conversationId, { action: "snapshot" }));
+  let shown: PageSnapshot = {};
+  await expect.poll(async () => {
+    shown = parsed(await browser(conversationId, { action: "snapshot" }));
+    return shown.viewport?.width;
+  }).not.toBe(1_280);
   expect(shown.viewport?.width).toBeGreaterThan(0);
-  expect(shown.viewport?.width).not.toBe(1_280);
 
   await closeWorkspaceTools(page);
   await expect.poll(() => app.nativePreviewIsVisible(asyncUrl)).toBe(false);

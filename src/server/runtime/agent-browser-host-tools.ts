@@ -51,6 +51,11 @@ const tabsSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("close"), tabId: tabIdSchema }).strict(),
 ]);
 
+interface ActionBranch {
+  properties: Record<string, { const?: unknown }>;
+  required?: string[];
+}
+
 export const AGENT_BROWSER_TOOL_NAMES = new Set([
   "inertia_browser_snapshot",
   "inertia_browser_screenshot",
@@ -93,13 +98,40 @@ readonly ProviderHostToolDefinition[] = [
   },
 ].map((definition) => ({
   ...definition,
-  // Use input semantics so defaults remain optional for callers. Every branch
-  // is an object; the explicit root type also satisfies provider MCP schemas.
-  inputSchema: {
-    ...z.toJSONSchema(definition.inputValidator, { io: "input", target: "draft-7" }),
-    type: "object",
-  },
+  inputSchema: providerInputSchema(definition.inputValidator),
 }));
+
+function providerInputSchema(validator: z.ZodType): Record<string, unknown> {
+  const { oneOf, ...root } = z.toJSONSchema(validator, { io: "input", target: "draft-7" });
+  if (!oneOf) return root;
+  const branches = oneOf as ActionBranch[];
+  const actions = branches.map((branch) => branch.properties.action!.const as string);
+  const fields = new Map<string, { schema: object; required: string[]; optional: string[] }>();
+  branches.forEach((branch, index) => {
+    for (const [key, schema] of Object.entries(branch.properties)) {
+      if (key === "action") continue;
+      const field = fields.get(key) ?? { schema, required: [], optional: [] };
+      (branch.required?.includes(key) ? field.required : field.optional).push(actions[index]!);
+      fields.set(key, field);
+    }
+  });
+  return {
+    ...root,
+    type: "object",
+    properties: {
+      action: { type: "string", enum: actions },
+      ...Object.fromEntries([...fields].map(([key, field]) => [key, {
+        ...field.schema,
+        description: [
+          field.required.length > 0 ? `Required when action is ${field.required.join(" or ")}.` : "",
+          field.optional.length > 0 ? `Optional when action is ${field.optional.join(" or ")}.` : "",
+        ].filter(Boolean).join(" "),
+      }])),
+    },
+    required: ["action"],
+    additionalProperties: false,
+  };
+}
 
 function failure(code: string, message: string): ProviderHostToolResult {
   return { success: false, text: JSON.stringify({ error: { code, message } }) };

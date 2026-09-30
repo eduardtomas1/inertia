@@ -21,7 +21,12 @@ const identity = {
   runId: "33333333-3333-4333-8333-333333333333",
   turnId: "44444444-4444-4444-8444-444444444444",
 };
-const cases: Array<{ tool: string; args: Record<string, unknown> | null; valid: boolean }> = [
+const cases: Array<{
+  tool: string;
+  args: Record<string, unknown> | null;
+  valid: boolean;
+  advertised?: boolean;
+}> = [
   { tool: "snapshot", args: {}, valid: true },
   { tool: "screenshot", args: {}, valid: true },
   { tool: "snapshot", args: { extra: true }, valid: false },
@@ -36,11 +41,11 @@ const cases: Array<{ tool: string; args: Record<string, unknown> | null; valid: 
   { tool: "interact", args: { action: "press", key: "Enter" }, valid: true },
   { tool: "interact", args: { action: "scroll", deltaY: -2_000 }, valid: true },
   { tool: "interact", args: { action: "scroll", deltaY: 2_000 }, valid: true },
-  { tool: "interact", args: { action: "click" }, valid: false },
-  { tool: "interact", args: { action: "type", ref: "r1" }, valid: false },
-  { tool: "interact", args: { action: "press" }, valid: false },
-  { tool: "interact", args: { action: "scroll" }, valid: false },
-  { tool: "interact", args: { action: "click", ref: "r1", text: "wrong action" }, valid: false },
+  { tool: "interact", args: { action: "click" }, valid: false, advertised: true },
+  { tool: "interact", args: { action: "type", ref: "r1" }, valid: false, advertised: true },
+  { tool: "interact", args: { action: "press" }, valid: false, advertised: true },
+  { tool: "interact", args: { action: "scroll" }, valid: false, advertised: true },
+  { tool: "interact", args: { action: "click", ref: "r1", text: "wrong action" }, valid: false, advertised: true },
   { tool: "interact", args: { action: "click", ref: "bad ref" }, valid: false },
   { tool: "interact", args: { action: "click", ref: "x".repeat(65) }, valid: false },
   { tool: "interact", args: { action: "type", ref: "r1", text: "\0" }, valid: false },
@@ -56,10 +61,10 @@ const cases: Array<{ tool: string; args: Record<string, unknown> | null; valid: 
   { tool: "tabs", args: { action: "open", url: "http://localhost:3000/" }, valid: true },
   { tool: "tabs", args: { action: "activate", tabId }, valid: true },
   { tool: "tabs", args: { action: "close", tabId }, valid: true },
-  { tool: "tabs", args: { action: "activate" }, valid: false },
-  { tool: "tabs", args: { action: "close" }, valid: false },
+  { tool: "tabs", args: { action: "activate" }, valid: false, advertised: true },
+  { tool: "tabs", args: { action: "close" }, valid: false, advertised: true },
   { tool: "tabs", args: { action: "close", tabId: "not-a-uuid" }, valid: false },
-  { tool: "tabs", args: { action: "list", tabId }, valid: false },
+  { tool: "tabs", args: { action: "list", tabId }, valid: false, advertised: true },
   { tool: "tabs", args: null, valid: false },
 ];
 
@@ -80,22 +85,52 @@ function fixture() {
   return { runtime, perform };
 }
 
+const ROOT_COMBINATORS = new Set(["allOf", "anyOf", "oneOf", "not", "if", "then", "else"]);
+
 function assertContract(schemas: ReadonlyMap<string, Record<string, unknown>>) {
   const json = new AjvJsonSchemaValidator();
-  for (const { tool, args, valid } of cases) {
+  for (const { tool, args, valid, advertised = valid } of cases) {
     const name = `inertia_browser_${tool}`;
     const definition = AGENT_BROWSER_TOOL_DEFINITIONS.find((entry) => entry.name === name)!;
     const label = `${name}: ${JSON.stringify(args).slice(0, 150)}`;
     expect(definition.inputValidator!.safeParse(args).success, label).toBe(valid);
-    const advertised = schemas.get(name)!;
-    expect(advertised.type, name).toBe("object");
-    expect(json.getValidator(advertised)(args).valid, label).toBe(valid);
+    const schema = schemas.get(name)!;
+    expect(schema.type, name).toBe("object");
+    expect(Object.keys(schema).filter((key) => ROOT_COMBINATORS.has(key)), name).toEqual([]);
+    expect(json.getValidator(schema)(args).valid, label).toBe(advertised);
   }
 }
 
 describe("browser contracts received by providers", () => {
   it("advertises the same accepted actions and required fields as the runtime", () => {
     assertContract(new Map(AGENT_BROWSER_TOOL_DEFINITIONS.map((tool) => [tool.name, tool.inputSchema])));
+  });
+
+  it("names the fields each action needs in one flat object", () => {
+    const schemas = new Map(AGENT_BROWSER_TOOL_DEFINITIONS.map((tool) => [tool.name, tool.inputSchema]));
+    expect(schemas.get("inertia_browser_interact")).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["action"],
+      properties: {
+        action: { type: "string", enum: ["click", "type", "press", "scroll"] },
+        ref: { description: "Required when action is click or type." },
+        text: { description: "Required when action is type." },
+        replace: { default: true, description: "Optional when action is type." },
+        key: { description: "Required when action is press." },
+        deltaY: { description: "Required when action is scroll." },
+      },
+    });
+    expect(schemas.get("inertia_browser_tabs")).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["action"],
+      properties: {
+        action: { type: "string", enum: ["list", "open", "activate", "close"] },
+        url: { description: "Optional when action is open." },
+        tabId: { description: "Required when action is activate or close." },
+      },
+    });
   });
 
   it("lists the full contracts through Claude's real SDK and validates before execution", async () => {

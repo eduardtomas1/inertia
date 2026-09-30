@@ -55,8 +55,7 @@ reliability and safety fixes.
   credentials even when a streamed reply splits them across chunks.
 - Providers get complete Browser tool instructions, including the fields each
   action needs, such as the element to click or the tab to switch to. Claude
-  now receives the interaction and tab fields instead of empty lists, so its
-  Browser calls are no longer refused for a missing field.
+  now receives these fields instead of empty lists.
 
 ### Reliability and safety
 

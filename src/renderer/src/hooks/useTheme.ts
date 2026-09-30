@@ -1,8 +1,11 @@
 import { useLayoutEffect } from "react";
 import type { AppSettings } from "@shared/contracts";
-import { resolveThemePreference } from "../utils/theme";
-import { applyCustomPalette, cacheCustomColor, cachedCustomPalette, isCustomColor } from "../utils/customTheme";
+import type { buildCustomPaletteTokens } from "@shared/theme/color-theme-spec";
+import { resolveThemePreference, type ResolvedTheme } from "../utils/theme";
+import { applyCustomPalette, cacheCustomColor, cachedCustomColor, cachedCustomPalette, isCustomColor, type PaletteTokens } from "../utils/customTheme";
 import { layoutStorage } from "../utils/layoutStorage";
+
+let paletteBuilder: typeof buildCustomPaletteTokens | undefined;
 
 export function useTheme({
   theme: preference, colorTheme, lightColorTheme = colorTheme, darkColorTheme = colorTheme,
@@ -11,12 +14,14 @@ export function useTheme({
   useLayoutEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     let cancelled = false;
-    const palettes = {
-      light: cachedCustomPalette(layoutStorage, lightCustomColor, "light"),
-      dark: cachedCustomPalette(layoutStorage, darkCustomColor, "dark"),
+    const palettes: Record<ResolvedTheme, PaletteTokens | null> = { light: null, dark: null };
+    const loadPalettes = () => {
+      for (const [mode, color] of [["light", lightCustomColor], ["dark", darkCustomColor]] as const) {
+        palettes[mode] = paletteBuilder && isCustomColor(color) ? paletteBuilder(color, mode)
+          : cachedCustomPalette(layoutStorage, color && cachedCustomColor(layoutStorage, mode), mode);
+        if (paletteBuilder || !color) cacheCustomColor(layoutStorage, color, mode, palettes[mode] ?? []);
+      }
     };
-    if (!lightCustomColor) cacheCustomColor(layoutStorage, null, "light");
-    if (!darkCustomColor) cacheCustomColor(layoutStorage, null, "dark");
     const applyTheme = () => {
       const resolved = resolveThemePreference(preference, media.matches);
       const root = document.documentElement;
@@ -26,14 +31,13 @@ export function useTheme({
       root.style.colorScheme = resolved;
     };
 
+    loadPalettes();
     applyTheme();
-    if (lightCustomColor || darkCustomColor) {
+    if (!paletteBuilder && (lightCustomColor || darkCustomColor)) {
       void import("@shared/theme/color-theme-spec").then(({ buildCustomPaletteTokens }) => {
+        paletteBuilder = buildCustomPaletteTokens;
         if (cancelled) return;
-        for (const [mode, color] of [["light", lightCustomColor], ["dark", darkCustomColor]] as const) {
-          palettes[mode] = isCustomColor(color) ? buildCustomPaletteTokens(color, mode) : null;
-          cacheCustomColor(layoutStorage, color, mode, palettes[mode] ?? []);
-        }
+        loadPalettes();
         applyTheme();
       }).catch(() => undefined);
     }

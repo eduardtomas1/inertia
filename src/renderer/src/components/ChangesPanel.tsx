@@ -236,6 +236,7 @@ export function ChangesPanel({
   const scope = reviewScope ?? JSON.stringify([selectedPath]);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  const scopeGenerationRef = useRef(0);
   const dispatch = scopedReviewDispatch({
     onAsk,
     onRequestRevision,
@@ -288,6 +289,7 @@ export function ChangesPanel({
   };
 
   useEffect(() => {
+    scopeGenerationRef.current += 1;
     setNoteDraft(null);
     setSelection(null);
     setReviewAction(null);
@@ -356,7 +358,7 @@ export function ChangesPanel({
     setActiveHunkId(hunk.id);
     setSelectionError(null);
     setReviewAction(null);
-    if (selection) setComment("");
+    if (selection && !(extend && selection.hunkId === hunk.id)) setComment("");
   };
   const reviewSelection = (file: DiffFile, hunk: DiffHunk): DiffSelection | null => {
     if (!selection || selection.hunkId !== hunk.id || selection.lineIds.length === 0) return null;
@@ -373,6 +375,8 @@ export function ChangesPanel({
     const selected = reviewSelection(file, hunk);
     if (!selected || !reviewAction || submitting || reviewLocked) return;
     const submitted = draftRef.current;
+    const generation = scopeGenerationRef.current;
+    const current = () => scopeRef.current === scope && scopeGenerationRef.current === generation;
     setSubmitting(true);
     setSelectionError(null);
     try {
@@ -387,18 +391,19 @@ export function ChangesPanel({
         targetFingerprint: selectedLineFingerprint(file, hunk, selected.lineIds),
         body: comment,
       });
-      if (scopeRef.current !== scope) return;
-      const current = draftRef.current;
+      if (!current()) return;
+      const draft = draftRef.current;
+      if (draft.comment !== submitted.comment) return;
       if (
-        current.selection === submitted.selection
-        && current.reviewAction === submitted.reviewAction
-        && current.comment === submitted.comment
+        draft.selection === submitted.selection
+        && draft.reviewAction === submitted.reviewAction
       ) clearSelection();
+      else setComment("");
     } catch (error) {
-      if (scopeRef.current !== scope) return;
+      if (!current()) return;
       setSelectionError(error instanceof Error ? error.message : `${actionLabel(reviewAction)} failed.`);
     } finally {
-      if (scopeRef.current === scope) setSubmitting(false);
+      if (current()) setSubmitting(false);
     }
   };
   const addSelectionToPrompt = (file: DiffFile, hunk: DiffHunk, selected: DiffSelection) => {
@@ -460,14 +465,36 @@ export function ChangesPanel({
   const requestNoteRevision = async (note: DiffReviewNote, file: DiffFile, hunk: DiffHunk) => {
     if (reviewLocked) return;
     const lineIds = note.lineIds.length > 0 ? note.lineIds : hunk.lines.filter((line) => line.kind !== "meta").map((line) => line.id);
-    await dispatch.onRequestRevision({
-      fingerprint: structured.fingerprint,
-      file,
-      hunk,
-      lineIds,
-      reference: "",
-      repositoryPath,
-    }, note.body);
+    try {
+      await dispatch.onRequestRevision({
+        fingerprint: structured.fingerprint,
+        file,
+        hunk,
+        lineIds,
+        reference: "",
+        repositoryPath,
+      }, note.body);
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The revision could not be requested.");
+    }
+  };
+  const deleteNote = async (note: DiffReviewNote) => {
+    if (!window.confirm("Delete this local review note?")) return;
+    try {
+      await dispatch.onDeleteNote(note.id);
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The review note could not be deleted.");
+    }
+  };
+  const undoReversal = async () => {
+    try {
+      await onUndoReversal?.();
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The revert could not be undone.");
+    }
   };
   const navigateHunk = (direction: -1 | 1) => {
     const all = visibleFiles.flatMap((file) => file.hunks
@@ -494,7 +521,7 @@ export function ChangesPanel({
         <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>
           <span className="stat-additions">+{toolbarInsertions}</span><span className="stat-deletions">−{toolbarDeletions}</span>
           {lastReversal && onUndoReversal && (
-            <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void onUndoReversal()}>
+            <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void undoReversal()}>
               <RotateCcw size={13} />Undo revert
             </button>
           )}
@@ -588,7 +615,7 @@ export function ChangesPanel({
                     <span><StickyNote size={12} /><strong>File note{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                     <IconButton label={noteControlLabel("Edit", "file note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void dispatch.onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId !== null && note.stale && !selectedFile.hunks.some((hunk) => hunk.id === note.hunkId)).map((note) => (
@@ -596,7 +623,7 @@ export function ChangesPanel({
                     <span><StickyNote size={12} /><strong>Stale note · target changed</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                     <IconButton label={noteControlLabel("Edit", "stale note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void dispatch.onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
                 <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
@@ -632,7 +659,7 @@ export function ChangesPanel({
                         <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                         {agentRevision && <button type="button" disabled={note.stale || reviewLocked} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
                         <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => { if (window.confirm("Delete this local review note?")) void dispatch.onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                       </div>
                     ))}
                     {hunk.lines.map((line, index) => <div key={line.id}>

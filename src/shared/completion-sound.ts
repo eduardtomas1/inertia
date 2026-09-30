@@ -67,7 +67,7 @@ export function isCompletionSoundFile(value: unknown): value is CompletionSoundF
 }
 
 export function completionSoundName(value: string): string {
-  const name = [...value.replace(/[\p{Cc}\p{Cf}]/gu, "").replace(/\s+/gu, " ").trim()]
+  const name = [...value.replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, "").replace(/\s+/gu, " ").trim()]
     .slice(0, COMPLETION_SOUND_NAME_MAX_LENGTH).join("").trim();
   return name || "My sound";
 }

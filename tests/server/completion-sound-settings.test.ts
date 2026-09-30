@@ -24,6 +24,8 @@ const rain = { file: "fedcba9876543210.wav", name: "Rain" } as const;
 const NUL = String.fromCharCode(0);
 const BELL = String.fromCharCode(7);
 const RIGHT_TO_LEFT_OVERRIDE = String.fromCharCode(0x202e);
+const LONE_HIGH_SURROGATE = String.fromCharCode(0xd800);
+const LONE_LOW_SURROGATE = String.fromCharCode(0xdfff);
 
 function clips(count: number): Array<{ file: string; name: string }> {
   return Array.from({ length: count }, (_, index) => ({ file: `${index.toString(16).padStart(16, "0")}.wav`, name: `Clip ${index}` }));
@@ -98,6 +100,12 @@ describe("completion sound settings normalisation", () => {
     expect([...completionSoundName("é".repeat(200))]).toHaveLength(48);
   });
 
+  it("drops lone surrogates from display names and keeps complete pairs", () => {
+    expect(completionSoundName(`${LONE_HIGH_SURROGATE}Ding${LONE_LOW_SURROGATE}`)).toBe("Ding");
+    expect(completionSoundName(LONE_HIGH_SURROGATE.repeat(48))).toBe("My sound");
+    expect(completionSoundName("Bell \u{1f514}")).toBe("Bell \u{1f514}");
+  });
+
   it("decodes stored JSON defensively", () => {
     expect(parseCompletionSoundJson(null)).toEqual(DEFAULT_COMPLETION_SOUND);
     expect(parseCompletionSoundJson("{not json")).toEqual(DEFAULT_COMPLETION_SOUND);
@@ -155,6 +163,22 @@ describe("completion sound persistence", () => {
       .toMatchObject({ sound: "chime", library: [{ ...ding, name: "Door" }] });
     reopened.updateSettings(defaultSettings);
     expect(reopened.snapshot().settings.completionSound).toEqual(DEFAULT_COMPLETION_SOUND);
+    reopened.close();
+  });
+
+  it("stores eight names of 48 lone surrogates within the column bound", async () => {
+    const { databasePath, workspacePath, store } = await openStore();
+    const library = clips(8).map((clip) => ({
+      file: clip.file as `${string}.wav`,
+      name: LONE_HIGH_SURROGATE.repeat(48),
+    }));
+    expect(() => store.updateSettings({ completionSound: { enabled: true, library } })).not.toThrow();
+    store.close();
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().settings.completionSound).toMatchObject({
+      enabled: true,
+      library: clips(8).map((clip) => ({ ...clip, name: "My sound" })),
+    });
     reopened.close();
   });
 

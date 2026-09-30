@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+let reloadingPageLoads = 0;
+
 function page(response: ServerResponse, policy: string, html: string): true {
   response.writeHead(200, {
     "Content-Type": "text/html",
@@ -58,6 +60,33 @@ export function serveAgentBrowserCoverageFixture(
       + "'<div class=\"row\"><span>cell</span></div>'.repeat(3000);"
       + "document.querySelector('#top').addEventListener('click',()=>{window.__topClicked=true})</script>",
     );
+  }
+  if (url === "/agent-browser-large-credential") {
+    return page(
+      response,
+      "default-src 'none'; script-src 'unsafe-inline'",
+      "<title>Large credential page</title><p id='mirror'></p><main id='grid'></main>"
+      + "<script>const grid=document.querySelector('#grid');grid.innerHTML="
+      + "'<div class=\"row\"><span>cell</span></div>'.repeat(3000)"
+      + "+'<input id=\"late\" type=\"password\" value=\"late-password-sentinel\">';"
+      + "document.querySelector('#mirror').textContent=document.querySelector('#late').value</script>",
+    );
+  }
+  if (url === "/agent-browser-reloading-page") {
+    reloadingPageLoads += 1;
+    return page(
+      response,
+      "default-src 'none'; script-src 'unsafe-inline'",
+      reloadingPageLoads % 2 === 1
+        ? "<title>Reloading page</title><h1>Preparing build</h1>"
+          + "<script>setTimeout(()=>location.reload(),700)</script>"
+        : "<title>Reloading page</title><h1>Build finished</h1>",
+    );
+  }
+  if (url === "/agent-browser-remote-redirect") {
+    response.writeHead(302, { Location: "https://example.com/" });
+    response.end();
+    return true;
   }
   if (url === "/agent-browser-login") {
     return page(

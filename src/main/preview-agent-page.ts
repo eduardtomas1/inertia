@@ -492,7 +492,7 @@ export async function semanticPageSnapshot(
     let shadowRootsPresent = false;
     for (const element of scannedElementNodes) {
       if (element.shadowRoot) shadowRootsPresent = true;
-      if (element.tagName === "IFRAME" || element.tagName === "FRAME") {
+      if (["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(element.tagName)) {
         framesPresent = true;
         if (framePlaceholders >= ${MAX_FRAME_PLACEHOLDERS}
           || elements.length >= ${MAX_SEMANTIC_ELEMENTS}) continue;
@@ -647,19 +647,10 @@ export async function agentPageEvidencePrivacy(
     const normalize = (value) => String(value ?? "")
       .slice(0, ${MAX_PAGE_VALUE_SOURCE_CHARS})
       .replace(/\\s+/gu, " ").trim();
-    const root = document.documentElement || document.body;
-    const iterator = root && typeof document.createNodeIterator === "function"
-      ? document.createNodeIterator(root, 1)
-      : null;
-    let scanned = 0;
-    while (iterator && scanned < ${MAX_SEMANTIC_SCAN_NODES}) {
-      const input = iterator.nextNode();
-      if (!input) break;
-      scanned += 1;
-      if (input.tagName !== "INPUT") continue;
+    const inspect = (input) => {
       if (!(typeof input.type === "string" && input.type.length <= 20
         && input.type.toLowerCase() === "password")
-        && !state.passwordNodes.has(input)) continue;
+        && !state.passwordNodes.has(input)) return;
       const value = normalize(input.value);
       state.passwordNodes.add(input);
       if (value) {
@@ -669,10 +660,31 @@ export async function agentPageEvidencePrivacy(
           state.passwordValues.delete(state.passwordValues.values().next().value);
         }
       }
-    }
-    if (!iterator) state.evidenceWithheld ??= "credential-signal";
-    else if (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode()) {
-      state.scanLimitReached = true;
+    };
+    if (typeof document.getElementsByTagName === "function") {
+      const inputs = document.getElementsByTagName("input");
+      let index = 0;
+      for (; index < ${MAX_SEMANTIC_SCAN_NODES}; index += 1) {
+        const input = inputs[index];
+        if (!input) break;
+        inspect(input);
+      }
+      if (inputs[index]) state.evidenceWithheld ??= "credential-signal";
+    } else {
+      const root = document.documentElement || document.body;
+      const iterator = root && typeof document.createNodeIterator === "function"
+        ? document.createNodeIterator(root, 1)
+        : null;
+      let scanned = 0;
+      while (iterator && scanned < ${MAX_SEMANTIC_SCAN_NODES}) {
+        const candidate = iterator.nextNode();
+        if (!candidate) break;
+        scanned += 1;
+        if (candidate.tagName === "INPUT") inspect(candidate);
+      }
+      if (!iterator || (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode())) {
+        state.evidenceWithheld ??= "credential-signal";
+      }
     }
     if (state.passwordValues.size > 0) return "password";
     return state.evidenceWithheld === "hidden-input" ? "hidden-input"
@@ -968,8 +980,8 @@ export async function locateAgentPageRef(
       inputType === "password" || passwordNodes.has(element)
     );
     const blocked = inputType === "file"
-      || ["IFRAME", "FRAME"].includes(hit.tagName)
-      || ["IFRAME", "FRAME"].includes(element.tagName);
+      || ["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(hit.tagName)
+      || ["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(element.tagName);
     const editable = !element.readOnly && (
       element.tagName === "TEXTAREA"
       || editableHost(element)
@@ -1101,7 +1113,7 @@ export async function agentPageActivationBlocked(
       shadowDepth += 1;
     }
     if (active?.shadowRoot?.activeElement) return "disabled";
-    if (active?.tagName === "IFRAME" || active?.tagName === "FRAME") return "nested";
+    if (["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(active?.tagName)) return "nested";
     if (active?.tagName === "INPUT"
       && typeof active.type === "string" && active.type.length <= 20
       && active.type.toLowerCase() === "file") return "file";

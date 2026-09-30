@@ -23,6 +23,7 @@ import {
   agentOperationBudget,
   agentOperationFailure,
   AgentOperationScope,
+  blankTabRefusal,
   PARKED_PREVIEW_BOUNDS,
   PreviewAgentOperations,
   type AgentOperationSession,
@@ -118,9 +119,9 @@ export class PreviewBroker {
   connect(value: unknown): PreviewState {
     const { ownerId, contextId, priorContextId, accepted } = this.#registeredContexts.connect(value);
     if (accepted) {
-      if (priorContextId && priorContextId !== contextId) this.#park(priorContextId, ownerId);
       const session = this.#sessions.get(contextId);
       if (session) this.#attach(session, ownerId);
+      if (priorContextId && priorContextId !== contextId) this.#park(priorContextId, ownerId);
     }
     return this.#state(ownerId, contextId);
   }
@@ -258,7 +259,7 @@ export class PreviewBroker {
       }
       session.busy += 1;
       try {
-        const entered = await this.#serializeSessionAction(session, async () => {
+        const entered = await this.#serializeSessionAction(session, async (): Promise<AgentBrowserResult> => {
           if (this.#sessions.get(contextId) !== session) {
             return failure("unavailable", "This chat's Inertia Browser was closed. Call the tool again to start a new one.");
           }
@@ -267,6 +268,10 @@ export class PreviewBroker {
           session.lastUsedAt = this.#now();
           const operation = scope = new AgentOperationScope(budgetFor(request), signal);
           operation.keepAwake(this.#active(session).view.webContents);
+          if (request.action === "prepare-approval") {
+            const refusal = blankTabRefusal(this.#active(session).view.webContents, request.command);
+            if (refusal) return refusal;
+          }
           try {
             const resolved = await this.#approvals.resolve(
               request,
@@ -590,11 +595,11 @@ export class PreviewBroker {
 
   #attach(session: PreviewSession, ownerId: PreviewOwner): void {
     if (session.surface === ownerId) return;
-    for (const other of this.#sessions.values()) {
-      if (other !== session && other.surface === ownerId) this.#park(other.contextId, ownerId);
-    }
+    const displaced = [...this.#sessions.values()]
+      .filter((other) => other !== session && other.surface === ownerId);
     session.surface = ownerId;
     session.displayed = false;
+    for (const other of displaced) this.#park(other.contextId, ownerId);
     session.publishedEvidenceRevision = null;
     const pending = this.#pendingBounds.get(ownerId);
     if (pending?.contextId === session.contextId) this.#applyBounds(session, pending.bounds);

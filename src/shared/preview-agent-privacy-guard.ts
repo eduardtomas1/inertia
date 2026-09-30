@@ -396,7 +396,10 @@ export function installPreviewAgentShadowBoundarySignal(
     if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return;
     if (typeof createElement !== "function" || typeof getImplementation !== "function"
       || typeof createHTMLDocument !== "function" || typeof parseSafeHTML !== "function"
-      || typeof templateContent !== "function" || typeof querySelector !== "function") return;
+      || typeof templateContent !== "function" || typeof querySelector !== "function") {
+      signal();
+      return;
+    }
     try {
       // Parse in a fresh in-memory document with no browsing context or page
       // CSP. Its Trusted Types state cannot invoke a page-owned default policy,
@@ -675,9 +678,22 @@ export function installPreviewAgentPrivacyGuard(
     budget.remaining -= 1;
     return true;
   };
+  const inspectInputs = (root: Partial<Pick<Element, "getElementsByTagName">>): boolean => {
+    if (typeof root.getElementsByTagName !== "function") return false;
+    const inputs = root.getElementsByTagName("input");
+    let index = 0;
+    for (; index < maximumScanNodes; index += 1) {
+      const input = inputs[index];
+      if (!input) return true;
+      inspect(input);
+    }
+    if (inputs[index]) withhold("credential-signal");
+    return true;
+  };
   const inspectTree = (node: Node, budget: ScanBudget): void => {
     if (node.nodeType !== 1) return;
     const element = node as Element;
+    const inputsInspected = inspectInputs(element);
     const iterator = typeof document.createNodeIterator === "function"
       ? document.createNodeIterator(element, 1)
       : null;
@@ -689,12 +705,15 @@ export function installPreviewAgentPrivacyGuard(
     while (true) {
       const descendant = iterator.nextNode() as Element | null;
       if (!descendant) return;
-      if (!consume(budget)) return;
+      if (!consume(budget)) {
+        if (!inputsInspected) withhold("credential-signal");
+        return;
+      }
       // A declarative shadow template is consumed by the HTML parser before
       // ordinary page code can query it. Mutation records retain the added
       // template node, so the document-start observer can taint the document
       // without enumerating or serializing the closed subtree.
-      if (descendant.matches?.("iframe,frame")) state.framesObserved = true;
+      if (descendant.matches?.("iframe,frame,object,embed")) state.framesObserved = true;
       if (descendant.matches?.("template[shadowrootmode]") || descendant.shadowRoot) {
         state.shadowRootsObserved = true;
       }
@@ -884,6 +903,7 @@ export function installPreviewAgentPrivacyGuard(
         if (budget.exhausted) break;
       }
     }
+    if (budget.exhausted && !inspectInputs(document)) withhold("credential-signal");
   });
   observer.observe(document, {
     attributes: true,

@@ -180,11 +180,35 @@ describe("agent Browser page coverage", () => {
       .resolves.toMatchObject({ found: true, blocked: false });
   });
 
+  it("treats object and embed elements as frames", async () => {
+    const plugin = element("OBJECT", 10, { attributes: { title: "Report document", tabindex: "0" } });
+    const embedded = element("EMBED", 60);
+    const link = element("A", 110, { attributes: { href: "/next" } });
+    link.contains = (candidate: unknown) => candidate === link || candidate === embedded;
+    embedded.parentElement = link;
+    const { contents, context } = page([plugin, embedded, link]);
+    const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<Record<string, unknown>>;
+      notInspected: string[];
+    };
+    expect(snapshot.notInspected).toEqual(["frames"]);
+    expect(snapshot.elements.filter((entry) => entry.role === "frame").map((entry) => [entry.name, entry.ref]))
+      .toEqual([["Report document", undefined], ["Embedded frame", undefined]]);
+    const linkRef = String(snapshot.elements.find((entry) => entry.role === "link")?.ref);
+    context.document.elementFromPoint = () => embedded;
+    await expect(locateAgentPageRef(contents as never, linkRef))
+      .resolves.toMatchObject({ found: true, blocked: true });
+  });
+
   it("reports activation as nested only while an embedded frame owns focus", async () => {
     const { contents, context } = page([]);
     context.document.activeElement = element("IFRAME", 10);
     await expect(agentPageActivationBlocked(contents as never)).resolves.toBe("nested");
     context.document.activeElement = element("FRAME", 10);
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe("nested");
+    context.document.activeElement = element("OBJECT", 10);
+    await expect(agentPageActivationBlocked(contents as never)).resolves.toBe("nested");
+    context.document.activeElement = element("EMBED", 10);
     await expect(agentPageActivationBlocked(contents as never)).resolves.toBe("nested");
     context.document.activeElement = element("BUTTON", 10, { type: "button" });
     await expect(agentPageActivationBlocked(contents as never)).resolves.toBeNull();

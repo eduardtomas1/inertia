@@ -140,6 +140,28 @@ describe("conversation-owned Browser sessions", () => {
     expect(created.map((contents) => contents.isDestroyed()))
       .toEqual([true, false, false, false, false]);
 
+    const shown = { ownerId: "primary", contextId: identities[2]!.conversationId, connectionId };
+    broker.connect(shown);
+    broker.setBounds({ ...shown, bounds: { x: 0, y: 0, width: 800, height: 600 } });
+    now += 1_000;
+    await expect(broker.perform({
+      ...runIdentity,
+      conversationId: "66666669-6666-4666-8666-666666666666",
+    }, { action: "tabs" })).resolves.toMatchObject({ ok: true });
+    expect(electronState.contents.slice(contentsOffset).map((contents) => contents.isDestroyed()))
+      .toEqual([true, false, false, false, false, false]);
+    const leastRecent = {
+      ownerId: "primary",
+      contextId: identities[1]!.conversationId,
+      connectionId: "55555555-5555-4555-8555-555555555555",
+    };
+    expect(broker.connect(leastRecent).tabs).toHaveLength(1);
+    expect(electronState.contents.slice(contentsOffset).map((contents) => contents.isDestroyed()))
+      .toEqual([true, false, false, false, false, false]);
+    broker.closeRequest(leastRecent);
+    expect(electronState.contents.slice(contentsOffset).map((contents) => contents.isDestroyed()))
+      .toEqual([true, false, false, true, false, false]);
+
     vi.useFakeTimers();
     try {
       now += 31 * 60_000;
@@ -147,8 +169,8 @@ describe("conversation-owned Browser sessions", () => {
       broker.connect(owner);
       broker.setBounds({ ...owner, bounds: { x: 0, y: 0, width: 800, height: 600 } });
       broker.closeRequest(owner);
-      expect(created.map((contents) => contents.isDestroyed()))
-        .toEqual([true, true, true, true, false]);
+      expect(electronState.contents.slice(contentsOffset).map((contents) => contents.isDestroyed()))
+        .toEqual([true, true, true, true, false, true]);
     } finally {
       vi.useRealTimers();
     }
@@ -183,12 +205,30 @@ describe("conversation-owned Browser sessions", () => {
       action: "wait", text: "Ready", state: "present", timeoutMs: 5_000,
     });
     expect(waited).toMatchObject({ ok: true });
-    if (waited.ok) {
-      expect(JSON.parse(waited.text)).toMatchObject({
-        matched: false,
-        nextStep: expect.stringContaining("This tab is blank"),
-      });
-    }
+    expect(JSON.parse((waited as { text: string }).text)).toMatchObject({
+      matched: false,
+      nextStep: expect.stringContaining("This tab is blank"),
+    });
+
+    await expect(broker.perform(runIdentity, {
+      action: "prepare-approval",
+      command: { action: "click", ref: "e1" },
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "not-found",
+      message: expect.stringContaining("This tab is blank"),
+    });
+    await expect(broker.perform(runIdentity, {
+      action: "prepare-approval",
+      command: { action: "scroll", deltaY: 200 },
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "not-found",
+      message: expect.stringContaining("This tab is blank"),
+    });
+    const stillBlank = await broker.perform(runIdentity, { action: "snapshot" });
+    expect(JSON.parse((stillBlank as { text: string }).text)).toMatchObject({ blank: true });
+    expect(pageTools.semanticPageSnapshot).not.toHaveBeenCalled();
   });
 
   it("explains a failed navigation and names the recovery", async () => {
@@ -220,13 +260,21 @@ describe("conversation-owned Browser sessions", () => {
     });
     expect(JSON.stringify([refused, unknown])).not.toContain("never-echo");
 
-    const replaced = await navigate("ERR_ABORTED (-3) loading");
+    await expect(navigate("ERR_ABORTED (-3) loading")).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+      message: expect.stringContaining("cancelled before a page loaded"),
+    });
+
+    electronState.loadOverrides.push(async () => { throw new Error("ERR_ABORTED (-3) loading"); });
+    const replaced = await broker.perform(runIdentity, {
+      action: "navigate",
+      url: "http://127.0.0.1:3000/redirects-itself",
+    });
     expect(replaced).toMatchObject({ ok: true });
-    if (replaced.ok) {
-      expect(JSON.parse(replaced.text)).toMatchObject({
-        note: expect.stringContaining("replaced this navigation"),
-      });
-    }
+    expect(JSON.parse((replaced as { text: string }).text)).toMatchObject({
+      note: expect.stringContaining("replaced this navigation"),
+    });
   });
 
   it("reports a slow page as still loading without stopping it", async () => {
@@ -303,7 +351,8 @@ describe("conversation-owned Browser sessions", () => {
       const named = await broker.perform(runIdentity, {
         action: "wait", text: "save draft", state: "present", timeoutMs: 5_000,
       });
-      if (named.ok) expect(JSON.parse(named.text)).toMatchObject({ matched: true, waitedMs: 0 });
+      expect(named).toMatchObject({ ok: true });
+      expect(JSON.parse((named as { text: string }).text)).toMatchObject({ matched: true, waitedMs: 0 });
 
       pageTools.semanticPageSnapshot
         .mockResolvedValueOnce(pageWith("Saving…"))
@@ -313,7 +362,24 @@ describe("conversation-owned Browser sessions", () => {
       });
       await vi.advanceTimersByTimeAsync(400);
       const vanished = await vanish;
-      if (vanished.ok) expect(JSON.parse(vanished.text)).toMatchObject({ matched: true });
+      expect(vanished).toMatchObject({ ok: true });
+      expect(JSON.parse((vanished as { text: string }).text)).toMatchObject({ matched: true });
+
+      const contents = electronState.contents.at(-1)!;
+      const lifecycleCalls = contents.debugger.sendCommand.mock.calls
+        .filter(([method]) => method === "Page.setWebLifecycleState").length;
+      pageTools.semanticPageSnapshot
+        .mockRejectedValueOnce(new Error("The Browser page changed while it was frozen for evidence capture."))
+        .mockResolvedValueOnce(pageWith("Reloaded"));
+      const reloading = broker.perform(runIdentity, {
+        action: "wait", text: "Reloaded", state: "present", timeoutMs: 5_000,
+      });
+      await vi.advanceTimersByTimeAsync(400);
+      const reloaded = await reloading;
+      expect(reloaded).toMatchObject({ ok: true });
+      expect(JSON.parse((reloaded as { text: string }).text)).toMatchObject({ matched: true });
+      expect(contents.debugger.sendCommand.mock.calls
+        .filter(([method]) => method === "Page.setWebLifecycleState")).toHaveLength(lifecycleCalls);
 
       pageTools.semanticPageSnapshot.mockResolvedValue(pageWith("Loading"));
       const never = broker.perform(runIdentity, {
@@ -386,7 +452,7 @@ describe("conversation-owned Browser sessions", () => {
       await expect(click).resolves.toMatchObject({
         ok: false,
         code: "timeout",
-        message: expect.stringContaining("had already been sent to the page, so its effect is unknown"),
+        message: expect.stringContaining("Input may already have reached the page, so its effect is unknown"),
       });
       expect(children[0]!.webContents.sentInputs).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "mouseDown" }),

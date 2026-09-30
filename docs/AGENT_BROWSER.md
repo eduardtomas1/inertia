@@ -93,7 +93,8 @@ JavaScript world and become invalid when their DOM node disappears or is no
 longer visible.
 
 Inertia reads only the top-level document's own DOM. Content inside embedded
-frames and shadow roots is never read. When a page has them, the snapshot says
+frames (`iframe`, `frame`, `object`, `embed`) and shadow roots is never read,
+and a click whose target is one of those frame elements is refused. When a page has them, the snapshot says
 so in `notInspected` (`frames`, `shadow-roots`), and each visible frame is
 listed as a `frame` element with no ref. A document with more than 4,000
 elements is read up to that bound and marked `truncated`. None of these stop
@@ -104,9 +105,11 @@ parser created from a declarative template is not reported in `notInspected`;
 its content is still never read.
 
 `inertia_browser_wait_for` polls the same guarded snapshot the agent could
-request itself, so it cannot reveal anything a snapshot would withhold. It
-returns `matched: true` or `matched: false` rather than failing when the
-condition is not reached. Its text matches visible text and control names,
+request itself, so it cannot reveal anything a snapshot would withhold. Its
+polls run the privacy check before and after reading but do not freeze the
+page or block the user's input, and a poll interrupted by the page reloading
+is retried. It returns `matched: true` or `matched: false` rather than
+failing when the condition is not reached. Its text matches visible text and control names,
 case-insensitively. URL paths are not a wait condition because the agent only
 ever sees a page's origin.
 
@@ -168,6 +171,11 @@ if the page's own script copies such a value into the top-level document as
 ordinary text, a snapshot will include it like any other visible text. A
 script-created blank frame cannot be instrumented before page code reaches it,
 so this cannot be closed without refusing every page that has a frame.
+
+Password fields are found by enumerating the document's inputs rather than by
+walking its elements, so a password field is seen wherever it sits in a large
+document. A document with more than 4,000 inputs is treated as unverifiable
+and its evidence is withheld.
 
 Enter and Space are refused while focus is inside an embedded frame or a
 closed shadow root, because Inertia cannot see the control they would
@@ -245,7 +253,9 @@ deadline is not stopped: the result is successful, reports `loading: true`,
 and tells the agent to wait or take a snapshot. A navigation started by a
 click is treated the same way after 20 seconds. A failed load returns
 `unavailable` with the cause, such as a refused connection, without echoing
-the address.
+the address. A navigation that is cancelled before any page loads, for
+example because it redirected to a remote address, is reported as
+`unavailable` and the tab keeps its previous page.
 
 A page that is hidden, covered, or in a minimized or background window
 produces no animation frames, and the input path waits for one. Inertia

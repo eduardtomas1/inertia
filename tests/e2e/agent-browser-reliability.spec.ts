@@ -138,6 +138,21 @@ test("an agent can browse without the Browser panel, through a login, and on pag
     action: "wait", state: "present", timeoutMs: 5_000,
   }))).toMatchObject({ matched: true });
 
+  await expect(browser(conversationId, {
+    action: "navigate", url: `${app.previewUrl}agent-browser-reloading-page`,
+  })).resolves.toMatchObject({ ok: true });
+  expect(parsed(await browser(conversationId, {
+    action: "wait", text: "Build finished", state: "present", timeoutMs: 8_000,
+  }))).toMatchObject({ matched: true });
+  await expect(browser(conversationId, { action: "navigate", url: asyncUrl }))
+    .resolves.toMatchObject({ ok: true });
+  const reopened = parsed(await browser(conversationId, { action: "snapshot" }));
+  await expect(browser(conversationId, { action: "click", ref: refFor(reopened, "Load more") }))
+    .resolves.toMatchObject({ ok: true });
+  expect(parsed(await browser(conversationId, {
+    action: "wait", text: "report ready", state: "present", timeoutMs: 8_000,
+  }))).toMatchObject({ matched: true });
+
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
   const whileSettings = parsed(await browser(conversationId, { action: "snapshot" }));
@@ -155,6 +170,12 @@ test("an agent can browse without the Browser panel, through a login, and on pag
   await expect(browser(backgroundConversationId, { action: "click", ref: refFor(large, "Top action") }))
     .resolves.toMatchObject({ ok: true });
   await expect(pageValue<boolean>(backgroundUrl, "window.__topClicked")).resolves.toBe(true);
+  await expect(browser(backgroundConversationId, {
+    action: "navigate", url: `${app.previewUrl}agent-browser-large-credential`,
+  })).resolves.toMatchObject({ ok: true });
+  const lateCredential = await browser(backgroundConversationId, { action: "snapshot" });
+  expect(lateCredential).toMatchObject({ ok: false, code: "sensitive" });
+  expect(JSON.stringify(lateCredential)).not.toContain("late-password-sentinel");
   await expect(pageValue<number>(asyncUrl, "window.__loads")).resolves.toBe(2);
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
@@ -243,6 +264,11 @@ test("an agent can browse without the Browser panel, through a login, and on pag
   expect(parsed(await browser(conversationId, { action: "snapshot" })).title).toBe("Shadow coverage");
   await expect(browser(conversationId, { action: "navigate", url: "https://example.com/" }))
     .resolves.toMatchObject({ ok: false, code: "invalid" });
+  const redirected = await browser(conversationId, {
+    action: "navigate", url: `${app.previewUrl}agent-browser-remote-redirect`,
+  });
+  expect(redirected, JSON.stringify(redirected)).toMatchObject({ ok: false, code: "unavailable" });
+  expect(parsed(await browser(conversationId, { action: "snapshot" })).title).toBe("Shadow coverage");
 
   expect(app.rendererErrors).toEqual([]);
 });

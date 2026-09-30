@@ -241,7 +241,7 @@ export async function expectScreenshotPrivacyGuard(
     screenshot: {
       ok: false,
       code: "sensitive",
-      message: "Screenshots are unavailable while the document contains sensitive evidence.",
+      message: "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.",
     },
     closed: { ok: true },
     restored: { ok: true },

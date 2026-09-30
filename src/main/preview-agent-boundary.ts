@@ -169,6 +169,7 @@ export async function agentPageFocusIsHidden(contents: WebContents): Promise<boo
     ));
     const node = objectRecord(description?.node);
     if (node?.nodeType !== 1) return true;
+    if (node.frameId !== undefined || node.contentDocument !== undefined) return true;
     if (node.shadowRoots === undefined) return false;
     if (!Array.isArray(node.shadowRoots)) return true;
     return node.shadowRoots.some((root) => {

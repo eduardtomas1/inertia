@@ -15,7 +15,7 @@ import {
 
 describe("agent Browser structural boundaries", () => {
   function boundaryContents(
-    focused: { subtype?: string; shadowRoots?: unknown } = {},
+    focused: { subtype?: string; shadowRoots?: unknown; frameId?: string; contentDocument?: unknown } = {},
     url = "http://127.0.0.1:3000/",
   ) {
     const debuggerEvents = new EventEmitter();
@@ -26,7 +26,14 @@ describe("agent Browser structural boundaries", () => {
         return { result: { type: "object", subtype: focused.subtype ?? "node", objectId: "focused-element" } };
       }
       if (method === "DOM.describeNode") {
-        return { node: { nodeType: 1, shadowRoots: focused.shadowRoots } };
+        return {
+          node: {
+            nodeType: 1,
+            shadowRoots: focused.shadowRoots,
+            ...(focused.frameId ? { frameId: focused.frameId } : {}),
+            ...(focused.contentDocument ? { contentDocument: focused.contentDocument } : {}),
+          },
+        };
       }
       return undefined;
     });
@@ -130,6 +137,8 @@ describe("agent Browser structural boundaries", () => {
     ["a closed shadow root owns focus", { shadowRoots: [{ nodeType: 11, shadowRootType: "closed" }] }],
     ["the focused shadow root has an unknown type", { shadowRoots: [{ nodeType: 11 }] }],
     ["the focused node description is malformed", { shadowRoots: "closed" }],
+    ["the focused element owns a frame", { frameId: "child-frame" }],
+    ["the focused element owns a nested document", { contentDocument: { nodeType: 9 } }],
     ["the focused element cannot be resolved", { subtype: "null" }],
   ])("refuses activation keys when %s", async (_label, focused) => {
     const { contents, debuggerEvents } = boundaryContents(focused);

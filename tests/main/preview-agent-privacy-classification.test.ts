@@ -9,22 +9,21 @@ import {
 } from "../../src/main/preview-agent-page";
 
 describe("agent Browser privacy classification", () => {
-  it("keeps a large document inspectable and records that its scan was bounded", async () => {
-    let nextNodeCalls = 0;
+  it("finds a password value wherever it sits in a large document", async () => {
+    const text = { tagName: "INPUT", type: "text", value: "plain" };
+    const password = { tagName: "INPUT", type: "password", value: "" };
+    const state = {
+      privacyGuardInstalled: true,
+      passwordNodes: new WeakSet(),
+      passwordValues: new Set<string>(),
+    } as Record<string, unknown>;
+    const createNodeIterator = vi.fn();
     const context = {
-      __inertiaAgentBrowser: {
-        privacyGuardInstalled: true,
-        passwordNodes: new WeakSet(),
-        passwordValues: new Set(),
-      } as Record<string, unknown>,
+      __inertiaAgentBrowser: state,
       document: {
         documentElement: {},
-        createNodeIterator: () => ({
-          nextNode: () => {
-            nextNodeCalls += 1;
-            return { tagName: "DIV" };
-          },
-        }),
+        createNodeIterator,
+        getElementsByTagName: (name: string): unknown[] => name === "input" ? [text, password] : [],
       },
     };
     const contents = {
@@ -36,9 +35,51 @@ describe("agent Browser privacy classification", () => {
 
     await expect(agentPageEvidencePrivacy(contents as never)).resolves.toEqual({ withheld: null });
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(false);
-    expect(nextNodeCalls).toBe(8_002);
-    expect(context.__inertiaAgentBrowser.scanLimitReached).toBe(true);
-    expect(context.__inertiaAgentBrowser.evidenceWithheld).toBeUndefined();
+    expect(createNodeIterator).not.toHaveBeenCalled();
+    expect(state.evidenceWithheld).toBeUndefined();
+
+    password.value = "beyond-the-element-bound";
+    await expect(agentPageEvidencePrivacy(contents as never))
+      .resolves.toEqual({ withheld: "password" });
+    expect([...(state.passwordValues as Set<string>)]).toEqual(["beyond-the-element-bound"]);
+  });
+
+  it("withholds evidence when it cannot enumerate every input", async () => {
+    const run = async (document: Record<string, unknown>) => {
+      const context = {
+        __inertiaAgentBrowser: {
+          privacyGuardInstalled: true,
+          passwordNodes: new WeakSet(),
+          passwordValues: new Set<string>(),
+        },
+        document,
+      };
+      return await agentPageEvidencePrivacy({
+        executeJavaScriptInIsolatedWorld: vi.fn(async (
+          _worldId: number,
+          scripts: Array<{ code: string }>,
+        ) => runInNewContext(scripts[0]!.code, context)),
+      } as never);
+    };
+    const manyInputs = Array.from({ length: 4_001 }, () => ({ tagName: "INPUT", type: "text", value: "" }));
+    await expect(run({ documentElement: {}, getElementsByTagName: () => manyInputs }))
+      .resolves.toEqual({ withheld: "credential-signal" });
+
+    let nextNodeCalls = 0;
+    await expect(run({
+      documentElement: {},
+      createNodeIterator: () => ({
+        nextNode: () => {
+          nextNodeCalls += 1;
+          return { tagName: "DIV" };
+        },
+      }),
+    })).resolves.toEqual({ withheld: "credential-signal" });
+    expect(nextNodeCalls).toBe(4_001);
+    await expect(run({
+      documentElement: {},
+      createNodeIterator: () => ({ nextNode: () => null }),
+    })).resolves.toEqual({ withheld: null });
   });
 
   it("classifies exactly why a document's evidence is withheld", async () => {
@@ -87,7 +128,7 @@ describe("agent Browser privacy classification", () => {
       .resolves.toEqual({ withheld: "credential-signal" });
   });
 
-  it("bounds document-start privacy discovery on a dense DOM", async () => {
+  it.each([true, false])("bounds document-start privacy discovery on a dense DOM (inputs enumerable: %s)", async (enumerable) => {
     let nextNodeCalls = 0;
     class MutationObserver {
       constructor(_callback: (records: unknown[]) => void) {}
@@ -95,7 +136,11 @@ describe("agent Browser privacy classification", () => {
     }
     const context = {
       document: {
-        documentElement: { nodeType: 1, tagName: "HTML" },
+        documentElement: {
+          nodeType: 1,
+          tagName: "HTML",
+          getElementsByTagName: enumerable ? (): unknown[] => [] : undefined,
+        },
         addEventListener: vi.fn(),
         createNodeIterator: () => ({
           nextNode: () => {
@@ -120,7 +165,7 @@ describe("agent Browser privacy classification", () => {
       context,
     )).toMatchObject({ scanLimitReached: true });
     expect(runInNewContext("globalThis.__inertiaAgentBrowser.evidenceWithheld", context))
-      .toBeUndefined();
+      .toBe(enumerable ? undefined : "credential-signal");
   });
 
   it("records a consumed declarative shadow template and an added frame as not inspected", async () => {
@@ -197,11 +242,14 @@ describe("agent Browser privacy classification", () => {
       constructor(observer: (records: unknown[]) => void) { callback = observer; }
       observe(): void {}
     }
-    const documentElement = { nodeType: 1, tagName: "HTML" };
+    const lateCredential = { tagName: "INPUT", type: "password", value: "" };
+    const noInputs = (): unknown[] => [];
+    const documentElement = { nodeType: 1, tagName: "HTML", getElementsByTagName: noInputs };
     const context = {
       document: {
         documentElement,
         addEventListener: vi.fn(),
+        getElementsByTagName: (): unknown[] => [lateCredential],
         createNodeIterator: (root: { nodeType?: number }) => {
           let first = true;
           return {
@@ -240,7 +288,9 @@ describe("agent Browser privacy classification", () => {
     callback!(attributeRecords);
     expect(attributeTargetsInspected).toBe(4_000);
 
-    const addedNodes = Array.from({ length: 5_000 }, () => ({ nodeType: 1, tagName: "DIV" }));
+    const addedNodes = Array.from({ length: 5_000 }, () => ({
+      nodeType: 1, tagName: "DIV", getElementsByTagName: noInputs,
+    }));
     callback!([{
       type: "childList",
       target: { tagName: "DIV" },
@@ -250,8 +300,21 @@ describe("agent Browser privacy classification", () => {
     }]);
     expect(addedNodesInspected).toBe(2_000);
     expect(runInNewContext(
-      "[globalThis.__inertiaAgentBrowser.scanLimitReached, globalThis.__inertiaAgentBrowser.evidenceWithheld]",
+      "[globalThis.__inertiaAgentBrowser.scanLimitReached, globalThis.__inertiaAgentBrowser.evidenceWithheld, globalThis.__inertiaAgentBrowser.passwordValues.size]",
       context,
-    )).toEqual([true, undefined]);
+    )).toEqual([true, undefined, 0]);
+
+    lateCredential.value = "added-after-the-budget";
+    callback!([{
+      type: "childList",
+      target: { tagName: "DIV" },
+      oldValue: null,
+      removedNodes: [],
+      addedNodes,
+    }]);
+    expect(runInNewContext(
+      "[...globalThis.__inertiaAgentBrowser.passwordValues]",
+      context,
+    )).toEqual(["added-after-the-budget"]);
   });
 });

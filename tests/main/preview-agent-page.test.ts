@@ -721,6 +721,34 @@ describe("agent browser semantic snapshots", () => {
       new Document().write('x'.repeat(4000), 'y'.repeat(200));
     `, context);
     expect(dispatched).toHaveLength(15);
+
+    const withoutSanitizer: string[] = [];
+    class BareEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        withoutSanitizer.push(event.type);
+        return true;
+      }
+    }
+    class BareElement extends BareEventTarget {
+      attachShadow(): object { return {}; }
+      set innerHTML(_source: string) {}
+    }
+    class BareHTMLElement extends BareElement {
+      attachInternals(): object { return { shadowRoot: null }; }
+    }
+    const bareContext = {
+      document: new BareEventTarget(),
+      Element: BareElement,
+      HTMLElement: BareHTMLElement,
+      EventTarget: BareEventTarget,
+      Event: FakeEvent,
+    };
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      bareContext,
+    );
+    runInNewContext("new Element().innerHTML = '<p>ordinary</p>'", bareContext);
+    expect(withoutSanitizer).toEqual(["credential-signal"]);
   });
 
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {

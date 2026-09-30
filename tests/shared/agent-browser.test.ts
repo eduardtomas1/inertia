@@ -9,6 +9,7 @@ import {
   AGENT_BROWSER_RUNTIME_BACKSTOP_MS,
   MAX_AGENT_BROWSER_TEXT_BYTES,
   MAX_AGENT_BROWSER_WAIT_MS,
+  agentBrowserTextLength,
   parseAgentBrowserCommand,
   parseAgentBrowserResult,
 } from "../../src/shared/agent-browser";
@@ -53,6 +54,23 @@ describe("agent browser boundary", () => {
       { action: "wait", text: "x".repeat(201), state: "present", timeoutMs: 1_000 },
       { action: "wait", text: "Saved", state: "present", timeoutMs: 1_000, url: "/done" },
     ]) expect(parseAgentBrowserCommand(invalid), JSON.stringify(invalid)).toBeNull();
+  });
+
+  it("counts command text lengths in Unicode code points", () => {
+    const emoji = "\u{1F600}";
+    expect(agentBrowserTextLength(emoji.repeat(3))).toBe(3);
+    expect(agentBrowserTextLength("\uD83D\uD83Dx\uDE00")).toBe(4);
+    expect(parseAgentBrowserCommand({ action: "type", ref: "e1", text: emoji.repeat(4_000), replace: true }))
+      .not.toBeNull();
+    expect(parseAgentBrowserCommand({ action: "type", ref: "e1", text: emoji.repeat(4_001), replace: true }))
+      .toBeNull();
+    expect(parseAgentBrowserCommand({ action: "wait", text: emoji.repeat(200), state: "present", timeoutMs: 1_000 }))
+      .not.toBeNull();
+    expect(parseAgentBrowserCommand({ action: "wait", text: emoji.repeat(201), state: "present", timeoutMs: 1_000 }))
+      .toBeNull();
+    const url = `http://localhost:3000/${emoji.repeat(4_096 - 22)}`;
+    expect(parseAgentBrowserCommand({ action: "navigate", url })).not.toBeNull();
+    expect(parseAgentBrowserCommand({ action: "navigate", url: `${url}x` })).toBeNull();
   });
 
   it("carries every failure code across the process boundary and rejects unknown ones", () => {

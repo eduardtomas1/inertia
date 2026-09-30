@@ -3,6 +3,7 @@ import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "./provider-host-tools";
 export const MAX_AGENT_BROWSER_TEXT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
 export const MAX_AGENT_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
+export const MAX_AGENT_BROWSER_URL_CHARS = 4_096;
 export const MAX_AGENT_BROWSER_WAIT_TEXT_CHARS = 200;
 export const MIN_AGENT_BROWSER_WAIT_MS = 250;
 export const MAX_AGENT_BROWSER_WAIT_MS = 30_000;
@@ -131,6 +132,20 @@ function exactKeys(
     && Object.keys(value).every((key) => allowed.has(key));
 }
 
+export function agentBrowserTextLength(value: string): number {
+  let length = value.length;
+  for (let index = 0; index < value.length - 1; index += 1) {
+    if (
+      (value.charCodeAt(index) & 0xfc00) === 0xd800
+      && (value.charCodeAt(index + 1) & 0xfc00) === 0xdc00
+    ) {
+      length -= 1;
+      index += 1;
+    }
+  }
+  return length;
+}
+
 function safeText(value: unknown, maximum: number, multiline = false): value is string {
   return typeof value === "string"
     && value.length > 0
@@ -139,8 +154,16 @@ function safeText(value: unknown, maximum: number, multiline = false): value is 
     && (multiline || !/[\r\n]/u.test(value));
 }
 
+function safeCommandText(value: unknown, maximum: number, multiline = false): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && agentBrowserTextLength(value) <= maximum
+    && !value.includes("\0")
+    && (multiline || !/[\r\n]/u.test(value));
+}
+
 function safeUrl(value: unknown): value is string {
-  return safeText(value, 4_096, true);
+  return safeCommandText(value, MAX_AGENT_BROWSER_URL_CHARS, true);
 }
 
 function safeTabId(value: unknown): value is string {
@@ -171,7 +194,7 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
         && typeof value.ref === "string"
         && SAFE_REF_PATTERN.test(value.ref)
         && typeof value.text === "string"
-        && value.text.length <= MAX_AGENT_BROWSER_TYPE_CHARS
+        && agentBrowserTextLength(value.text) <= MAX_AGENT_BROWSER_TYPE_CHARS
         && !value.text.includes("\0")
         && typeof value.replace === "boolean"
         ? {
@@ -204,7 +227,7 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
         && value.timeoutMs >= MIN_AGENT_BROWSER_WAIT_MS
         && value.timeoutMs <= MAX_AGENT_BROWSER_WAIT_MS
         && (value.text === undefined
-          || (safeText(value.text, MAX_AGENT_BROWSER_WAIT_TEXT_CHARS) && value.text.trim().length > 0))
+          || (safeCommandText(value.text, MAX_AGENT_BROWSER_WAIT_TEXT_CHARS) && value.text.trim().length > 0))
         ? {
             action: "wait",
             ...(typeof value.text === "string" ? { text: value.text } : {}),

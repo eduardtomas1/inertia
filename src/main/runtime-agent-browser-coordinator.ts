@@ -66,6 +66,14 @@ export class RuntimeAgentBrowserCoordinator {
       });
       return;
     }
+    if (!event.command) {
+      this.reply(record, event.requestId, {
+        ok: false,
+        code: "invalid",
+        message: "The browser request arguments were not accepted. Check the tool's input schema and try again.",
+      });
+      return;
+    }
     if (record.agentBrowserRequestIds.has(event.requestId)) {
       const repeated = this.pending.get(event.requestId);
       if (repeated?.record === record) {

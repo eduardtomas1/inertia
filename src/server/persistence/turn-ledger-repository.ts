@@ -351,6 +351,16 @@ export class TurnLedgerRepository {
         || attempt.terminal_reason === "provider-process-crash"));
   }
 
+  turnHasProviderActivity(conversationId: string, turnId: string): boolean {
+    const row = this.context.database.prepare(`
+      SELECT EXISTS(
+        SELECT 1 FROM activities
+        WHERE conversation_id = ? AND turn_id = ? AND kind <> 'error'
+      ) AS progressed
+    `).get(conversationId, turnId) as { progressed: 0 | 1 };
+    return row.progressed === 1;
+  }
+
   restartOnFreshSession(turnId: string, input: {
     expectedSessionId: string;
     executionContext: PersistedTurnExecutionContext;

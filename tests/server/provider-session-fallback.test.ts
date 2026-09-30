@@ -299,7 +299,8 @@ describe("unavailable session classification", () => {
     expect(acpSessionUnavailable("session/load", "cwd does not exist")).toBe(false);
     expect(acpSessionUnavailable("session/load", "command not found")).toBe(false);
     expect(acpSessionUnavailable("session/load", "This Cursor ACP server does not advertise session resume support.")).toBe(true);
-    expect(acpSessionUnavailable("initialize", "This Kimi ACP server does not advertise session resume support.")).toBe(true);
+    expect(acpSessionUnavailable("session/load", "This Kimi ACP server does not advertise session resume support.")).toBe(true);
+    expect(acpSessionUnavailable("initialize", "This Kimi ACP server does not advertise session resume support.")).toBe(false);
     expect(acpSessionUnavailable("session/new", "Session not found")).toBe(false);
     expect(acpSessionUnavailable("session/prompt", "File not found")).toBe(false);
   });
@@ -554,7 +555,7 @@ describe.each([
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
-  function fixture(label: string) {
+  function fixture(label: string, capabilities: Record<string, unknown> = agentCapabilities) {
     const root = portableFixtureRoot(label);
     roots.push(root);
     const capturePath = join(root, "capture.jsonl");
@@ -567,7 +568,7 @@ const modes = { currentModeId: "build", availableModes: [{ id: "build", name: "B
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   fs.appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message) + "\\n");
-  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: ${JSON.stringify(agentCapabilities)}, agentInfo: { name: ${JSON.stringify(agentName)}, version: "test" } } });
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: ${JSON.stringify(capabilities)}, agentInfo: { name: ${JSON.stringify(agentName)}, version: "test" } } });
   if (message.method === ${JSON.stringify(resumeMethod)}) return send({ jsonrpc: "2.0", id: message.id, error: { code: -32002, message: "Session not found: " + message.params.sessionId } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "fresh-acp-session", modes, configOptions: [] } });
   if (message.method === "session/prompt") {
@@ -604,6 +605,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(requests().filter(({ method }) => method === resumeMethod)).toHaveLength(1);
     expect(requests().some(({ method }) => method === "session/new")).toBe(false);
+  });
+
+  it("reports a server without session resume as unavailable at the session step", async () => {
+    const { manager, runInput, requests } = fixture(`${providerId} ACP without resume`, {});
+    await expect(manager.run(runInput)).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      failure: { sessionUnavailable: true },
+    });
+    expect(requests().some(({ method }) => method === resumeMethod || method === "session/new")).toBe(false);
   });
 
   it("answers from a new session when the saved one is rejected", async () => {

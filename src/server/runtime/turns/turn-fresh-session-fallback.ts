@@ -35,6 +35,14 @@ export function applyFreshSessionFallback(
     || active.deferredSettlement !== null
     || active.assistantText !== ""
     || active.latestAssistantMessageId !== null
+    || active.reasoningText !== ""
+    || active.reasoningId !== null
+    || active.approvalIds.size > 0
+    || active.inputIds.size > 0
+    || store.turnLedgerRepository.turnHasProviderActivity(
+      active.conversation.id,
+      active.turn.id,
+    )
   ) return null;
   const request = active.freshSessionRequest(active.turn.userMessageId);
   active.turn = store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {

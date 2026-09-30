@@ -67,12 +67,12 @@ describe("guide transitions", () => {
     );
     const leavingSteps = () => document.querySelectorAll(".welcome-guide-step.is-leaving").length;
     fireEvent.click(screen.getByRole("button", { name: "Take the tour" }));
-    act(() => vi.advanceTimersByTime(100));
+    act(() => { vi.advanceTimersByTime(100); });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(leavingSteps()).toBe(1);
-    act(() => vi.advanceTimersByTime(199));
+    act(() => { vi.advanceTimersByTime(199); });
     expect(leavingSteps()).toBe(1);
-    act(() => vi.advanceTimersByTime(1));
+    act(() => { vi.advanceTimersByTime(1); });
     expect(leavingSteps()).toBe(0);
   });
 });

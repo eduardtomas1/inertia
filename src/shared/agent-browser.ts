@@ -110,8 +110,9 @@ export const AGENT_BROWSER_FAILURE_CODES = [
 
 export type AgentBrowserFailureCode = (typeof AGENT_BROWSER_FAILURE_CODES)[number];
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+export const AGENT_BROWSER_TAB_ID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
+const UUID_PATTERN = new RegExp(AGENT_BROWSER_TAB_ID_PATTERN, "u");
 const SAFE_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const SAFE_KEYS = new Set<AgentBrowserKey>([
   "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",

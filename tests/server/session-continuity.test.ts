@@ -120,25 +120,83 @@ describe("provider session continuity", () => {
     expect(queued.message.content).toBe("Try the export again.");
   });
 
-  it.each(["backend", "endpoint"] as const)("restores earlier messages when the %s changes under an established chat", async (boundary) => {
+  it("restores earlier messages when the same backend is reconfigured under an established chat", async () => {
     const f = await fixture();
-    const previous: typeof f.route.continuationIdentity = { ...f.previous };
-    if (boundary === "backend") previous.backendConfigurationRevision += 1;
-    if (boundary === "endpoint") previous.endpointIdentity = "different-account-endpoint";
-    f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: previous });
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "before-update",
+      continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
+    });
     const resolved = f.resolve();
     const queued = f.store.beginAgentTurn(resolved.input);
     const input = resolved.adopt(queued).active.providerInput;
     expect(input.sessionId).toBeUndefined();
     expect(input.prompt).toContain("The export must preserve accented names.");
-    expect(queued.turn.continuationReasonCode).toBe(
-      boundary === "backend" ? "backend-configuration-changed" : "backend-endpoint-changed",
-    );
+    expect(queued.turn.continuationReasonCode).toBe("backend-configuration-changed");
     expect(queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
   });
 
-  it("keeps restoring after a failed fresh launch and a runtime restart", async () => {
+  it.each([
+    ["endpoint", { endpointIdentity: "different-account-endpoint" }, "backend-endpoint-changed"],
+    ["backend profile", { backendProfileId: "custom-other-backend" }, "backend-profile-changed"],
+  ] as const)("does not send earlier messages to a new session when the %s changed", async (_label, change, reason) => {
+    const f = await fixture();
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "before-update",
+      continuationIdentity: { ...f.previous, ...change },
+    });
+    const resolved = f.resolve();
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const input = resolved.adopt(queued).active.providerInput;
+    expect(input.sessionId).toBeUndefined();
+    expect(input.prompt).not.toContain("The export must preserve accented names.");
+    expect(input.prompt).not.toContain("restored automatically");
+    expect(input.prompt).toContain("Continue the export.");
+    expect(queued.turn).toMatchObject({
+      continuationReasonCode: reason,
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "endpoint-changed" },
+    });
+    expect(f.restoredReferences(queued.turn.id)).toEqual([]);
+    expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
+  });
+
+  it("does not send history that earlier turns ran on another endpoint, even from a later session", async () => {
+    const f = await fixture("codex");
+    const oldIdentity = { ...f.route.continuationIdentity, endpointIdentity: "old-account-endpoint" };
+    const settle = (turnId: string, requestedAt: string, sessionId: string) => f.store.settleAgentTurn(turnId, {
+      status: "completed", terminalReason: "provider-completed", providerSessionAfter: sessionId,
+      startedAt: requestedAt, completedAt: requestedAt, updatedAt: requestedAt,
+    });
+    const first = f.resolve(f.store, { content: "First request on the old endpoint." });
+    const earlier = f.store.beginAgentTurn({ ...first.input, continuationIdentity: oldIdentity });
+    settle(earlier.turn.id, earlier.turn.requestedAt, "old-session");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: "old-session", continuationIdentity: oldIdentity });
+
+    const moved = f.resolve(f.store, { content: "First request on the new endpoint." });
+    const movedTurn = f.store.beginAgentTurn(moved.input);
+    expect(moved.adopt(movedTurn).active.providerInput.prompt).not.toContain("accented names");
+    expect(movedTurn.turn.sessionRecovery).toMatchObject({ historyWithheld: "endpoint-changed" });
+    settle(movedTurn.turn.id, movedTurn.turn.requestedAt, "new-session");
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "new-session",
+      continuationIdentity: movedTurn.turn.continuationIdentity,
+    });
+
+    const resumed = f.resolve(f.store, { content: "Second request on the new endpoint." });
+    const resumedTurn = f.store.beginAgentTurn(resumed.input);
+    const active = resumed.adopt(resumedTurn).active;
+    expect(active.providerInput.sessionId).toBe("new-session");
+    const fresh = active.freshSessionRequest!(resumedTurn.message.id);
+    expect(fresh.executionPrompt).not.toContain("accented names");
+    expect(fresh.executionPrompt).not.toContain("First request on the old endpoint.");
+    expect(fresh.sessionRecovery).toEqual({
+      restoredMessageCount: 0,
+      omittedMessageCount: 0,
+      historyWithheld: "endpoint-changed",
+    });
+  });
+
+  it("keeps withholding earlier messages after a failed fresh launch and a runtime restart", async () => {
     const f = await fixture();
     f.store.updateConversation(f.conversation.id, {
       providerSessionId: "before-update",
@@ -159,9 +217,13 @@ describe("provider session continuity", () => {
     const resumed = restarted.beginAgentTurn(next.input);
     const input = next.adopt(resumed).active.providerInput;
     expect(input.sessionId).toBeUndefined();
-    expect(input.prompt).toContain("The export must preserve accented names.");
+    expect(input.prompt).not.toContain("The export must preserve accented names.");
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
-    expect(resumed.turn.sessionRecovery).toEqual({ restoredMessageCount: 3, omittedMessageCount: 0 });
+    expect(resumed.turn.sessionRecovery).toEqual({
+      restoredMessageCount: 0,
+      omittedMessageCount: 0,
+      historyWithheld: "endpoint-changed",
+    });
   });
 
   it("does not restore history into the first turn of a new chat", async () => {
@@ -345,7 +407,7 @@ describe("restored history on a custom backend", () => {
     }
     f.store.updateConversation(f.conversation.id, {
       providerSessionId: "before-update",
-      continuationIdentity: { ...f.previous, endpointIdentity: "different-account-endpoint" },
+      continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
     });
     const restoredBytes = (custom: boolean) => {
       const resolved = resolveTurnRequest({

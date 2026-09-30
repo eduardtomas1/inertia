@@ -1050,6 +1050,7 @@ describe("server event conversation discriminant boundary", () => {
       null,
       { restoredMessageCount: 0, omittedMessageCount: 0 },
       { restoredMessageCount: 113, omittedMessageCount: 20 },
+      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "endpoint-changed" },
     ]) {
       expect(parseServerEvent(detail(accepted))).toMatchObject({ type: "request.result" });
     }
@@ -1061,6 +1062,9 @@ describe("server event conversation discriminant boundary", () => {
       { restoredMessageCount: 1.5, omittedMessageCount: 0 },
       { restoredMessageCount: 1, omittedMessageCount: "0" },
       { restoredMessageCount: 1, omittedMessageCount: 0, transcript: "leaked" },
+      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "other" },
+      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: true },
+      { resumeRejected: true },
       { restoredMessageCount: 2_000_000, omittedMessageCount: 0 },
     ]) {
       expect(() => parseServerEvent(detail(rejected))).toThrow("Malformed server event");

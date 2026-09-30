@@ -239,15 +239,25 @@ The token no longer retires native sessions, so a harness change that makes
 previously saved sessions unusable must retire them explicitly with a
 migration, as schema 65 did for Codex.
 
-A fresh session in an established chat never starts blank. The request carries
+A fresh session in an established chat does not start blank when the chat has
+only ever run on the current backend and endpoint. The request then carries
 the chat's earlier visible messages, selected by the same packer as an explicit
 reference to this chat: the opening request first, then the newest turns,
 bounded by the room left beside the selected context and, on a custom backend,
 by a smaller fixed share. Attachments, tool output and hidden provider state
-are not included, and known secret patterns are redacted. The turn records how
-many messages were restored and omitted, and the conversation shows that a new
-provider session started. An explicit reference to this chat in the same
-message is not duplicated.
+are not included, and known secret patterns (bearer, API, GitHub, Slack and
+AWS keys, JSON credential values, URL passwords and PEM private keys) are
+redacted. The turn records how many messages were restored and omitted, and
+the conversation shows that a new provider session started. An explicit
+reference to this chat in the same message is not duplicated.
+
+Earlier messages are never sent automatically to a different backend profile
+or endpoint. If the saved session, the conversation's recorded route or any
+earlier turn used another backend profile or endpoint, or an earlier turn
+already withheld its history, the fresh session starts without the earlier
+messages and the turn records that its history was withheld because the
+endpoint changed. The user can still attach this chat explicitly, with its
+preview, to carry the history across.
 
 ## Cross-version application handoff
 
@@ -382,7 +392,10 @@ observed after measurement.
   stay readable. Native routes resume them; custom backends fall back to a
   fresh session without deleting conversation data.
 - Schema 84 appends a nullable, bounded session-recovery column to agent
-  turns. Existing turns read as not recovered.
+  turns. Existing turns read as not recovered. The column holds either the
+  restored and omitted message counts of a fresh session, with an optional
+  marker that its history was withheld, or a marker that the provider
+  rejected the turn's resume.
 - Existing single-result backend probe JSON remains readable. The next
   successful probe writes a versioned, bounded collection with at most one
   monotonic result per configured model; incompatible profile revisions still

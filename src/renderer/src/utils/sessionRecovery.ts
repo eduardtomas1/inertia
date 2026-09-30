@@ -17,7 +17,9 @@ export function sessionRecoveryDetail(
   const recovery = turn.sessionRecovery;
   if (!recovery) return null;
   const { restoredMessageCount: restored, omittedMessageCount: omitted } = recovery;
-  const outcome = restored > 0
+  const outcome = recovery.historyWithheld === "endpoint-changed"
+    ? "Earlier messages were not restored because the model endpoint changed"
+    : restored > 0
     ? `${restored} earlier ${restored === 1 ? "message" : "messages"} restored${omitted > 0 ? ` · ${omitted} omitted` : ""}`
     : omitted > 0
       ? "Earlier messages did not fit and were not restored"

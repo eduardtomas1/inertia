@@ -236,10 +236,23 @@ export function resolveTurnRequest(
   } satisfies AssembleTurnRequestInput;
   const referencesOwnChat = dependencies.store.contextPackets
     .includesOwnConversation(conversation.id, contextPacketIds);
+  const historyStayedOnRoute = () => {
+    const { backendProfileId, endpointIdentity } = route.continuationIdentity;
+    const shell = conversation.continuationIdentity;
+    const turns = dependencies.store.turnLedgerRepository.historyStayedOnEndpoint(
+      conversation.id,
+      backendProfileId,
+      endpointIdentity,
+    );
+    return turns.stayed && (shell
+      ? shell.backendProfileId === backendProfileId && shell.endpointIdentity === endpointIdentity
+      : turns.turnCount > 0);
+  };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
+    const restoresHistory = !referencesOwnChat && historyStayedOnRoute();
     const fresh = assembleTurnRequest({
       ...assemblyInput,
-      ...(!referencesOwnChat
+      ...(restoresHistory
         ? {
             restoredHistory: (capacityBytes: number) => dependencies.store.continuationHistory(
               conversation.id,
@@ -256,7 +269,13 @@ export function resolveTurnRequest(
       ...fresh,
       sessionRecovery: fresh.sessionRecovery ?? (referencesOwnChat
         ? { restoredMessageCount: 0, omittedMessageCount: 0 }
-        : null),
+        : restoresHistory
+          ? null
+          : {
+              restoredMessageCount: 0,
+              omittedMessageCount: 0,
+              historyWithheld: "endpoint-changed" as const,
+            }),
     };
   };
   const canResume = continuation.action === "resume-session";

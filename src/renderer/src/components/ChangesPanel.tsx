@@ -358,7 +358,7 @@ export function ChangesPanel({
     setActiveHunkId(hunk.id);
     setSelectionError(null);
     setReviewAction(null);
-    if (selection) setComment("");
+    if (selection && !(extend && selection.hunkId === hunk.id)) setComment("");
   };
   const reviewSelection = (file: DiffFile, hunk: DiffHunk): DiffSelection | null => {
     if (!selection || selection.hunkId !== hunk.id || selection.lineIds.length === 0) return null;

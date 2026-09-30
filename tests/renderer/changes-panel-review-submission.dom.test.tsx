@@ -133,6 +133,44 @@ describe("changes panel review submission", () => {
     expect(screen.getByPlaceholderText("Describe the revision you want…")).toHaveValue("Rename this and that");
   });
 
+  it("keeps a held draft when the user reselects a range as the help text instructs", async () => {
+    const base = panelProps();
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<WorkspaceChangesPanel {...base} />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), { target: { value: "Held question" } });
+    const edited = patchFor("README.md").replace("+after", "+after edited");
+    await act(async () => {
+      view.rerender(<WorkspaceChangesPanel
+        {...base}
+        snapshot={structuredClone(snapshot)}
+        onLoadRepositoryDiff={vi.fn(async () => ({ repositoryPath: ".", patch: edited, truncated: false, files: [changedFile("README.md")] }))}
+      />);
+    });
+    await screen.findByText(/The diff changed while it refreshed/u);
+    fireEvent.click(screen.getByRole("button", { name: "− before" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ after edited" }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    expect(screen.getByText("2 selected lines")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
+  });
+
+  it("drops the comment when the user starts a new selection", async () => {
+    await act(async () => {
+      render(<WorkspaceChangesPanel {...panelProps()} />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), { target: { value: "About after" } });
+    fireEvent.click(screen.getByRole("button", { name: "− before" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    expect(screen.getByText("1 selected lines")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("");
+  });
+
   it("does not re-enable submit for a second in-flight question after an A-B-A scope round trip", async () => {
     const settles: Array<() => void> = [];
     const onAsk = vi.fn(() => new Promise<void>((resolve) => { settles.push(resolve); }));

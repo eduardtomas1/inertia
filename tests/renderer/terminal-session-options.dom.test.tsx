@@ -133,14 +133,18 @@ describe("TerminalSession live options", () => {
       .toHaveAttribute("data-terminal-state", "ready"));
     const terminal = terminals.instances[0]!;
     const clears = terminal.clears;
-    const commands = sendCommand.mock.calls.length;
+    const shellStarts = () => sendCommand.mock.calls
+      .filter(([sent]) => sent.type === "terminal.create" || sent.type === "terminal.attach");
+    expect(shellStarts()).toHaveLength(1);
 
     view.rerender(session(sendCommand, { projectName: "Inertia renamed" }));
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(sendCommand).toHaveBeenCalledTimes(commands);
+    expect(shellStarts()).toHaveLength(1);
     expect(terminal.clears).toBe(clears);
     expect(document.querySelector(".terminal-panel"))
       .toHaveAttribute("data-terminal-state", "ready");
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId);
   });
 });

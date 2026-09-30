@@ -16,6 +16,8 @@ import { stalledReplyServerSource, type StalledReplyScenario } from "../helpers/
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const REPLY_DEADLINE_MS = 300;
+const UNSETTLED_REPLY_DEADLINE_MS = 5_000;
+const PROMPT_CANCELLATION_MS = 2_000;
 
 describe("OpenCode interaction reply deadlines", () => {
   const roots: string[] = [];
@@ -112,12 +114,18 @@ describe("OpenCode interaction reply deadlines", () => {
   }, 10_000);
 
   it("stops promptly while an approval reply is unsettled", async () => {
-    const { manager, conversationId, result, replies } = stalledReplyRun({ protocol: "legacy", interaction: "permission" });
+    const { manager, conversationId, result, replies } = stalledReplyRun(
+      { protocol: "legacy", interaction: "permission" },
+      "supervised",
+      { initializationTimeoutMs: UNSETTLED_REPLY_DEADLINE_MS },
+    );
 
     await waitFor("the approval reply to reach OpenCode", () => replies().length === 1, 8_000);
+    const cancelledAt = performance.now();
     expect(manager.cancel(conversationId)).toBe(true);
 
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(performance.now() - cancelledAt).toBeLessThan(PROMPT_CANCELLATION_MS);
     expect(replies().filter(({ body }) => body?.reply === "once")).toHaveLength(1);
   }, 15_000);
 });

@@ -44,7 +44,6 @@ export function createClaudeHostTools(
     name: INERTIA_HOST_MCP_NAME,
     version: "1.0.0",
     instructions: "Manage bounded top-level Inertia chats in the current project. Inertia itself asks for approval before mutations.",
-    alwaysLoad: true,
   });
   const providerToolNames = new Set<string>();
   for (const definition of runtime.definitions()) {
@@ -88,7 +87,10 @@ export function createClaudeHostTools(
     );
   }
   config.instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: providerMcpTools(runtime.definitions()),
+    tools: providerMcpTools(runtime.definitions()).map((tool) => ({
+      ...tool,
+      _meta: { "anthropic/alwaysLoad": true },
+    })),
   }));
   let closePromise: Promise<void> | undefined;
   return {

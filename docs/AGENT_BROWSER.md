@@ -34,10 +34,13 @@ local runtime receives only a narrow command broker.
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill
   install is required. Claude, Cursor, Kimi Code, and OpenCode advertise the
   bridge again on native resumed turns. Codex App Server cannot
-  inject dynamic tools into an already-live native thread, so the database
-  capability epoch clears only its opaque native continuation once and starts
-  the next turn with current tools; the Inertia conversation and visible
-  transcript are preserved.
+  inject dynamic tools into an already-live native thread: a Codex thread
+  keeps the tools it started with until a new thread starts. When the Browser
+  tools were introduced, a one-time database capability epoch cleared the
+  opaque native continuation of Codex chats that predated them, so their next
+  turn started a new thread with the Browser tools; the Inertia conversation
+  and visible transcript were preserved. Later tool changes do not repeat that
+  epoch.
 
 ## Agent tools
 

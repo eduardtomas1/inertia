@@ -204,16 +204,18 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
       this.handlers.set(name, handlers);
     }
     once(name: string, handler: (...args: unknown[]) => void): void {
-      const onceHandler = (...args: unknown[]): void => {
+      const onceHandler = Object.assign((...args: unknown[]): void => {
         this.removeListener(name, onceHandler);
         handler(...args);
-      };
+      }, { listener: handler });
       this.on(name, onceHandler);
     }
     removeListener(name: string, handler: (...args: unknown[]) => void): void {
       const handlers = this.handlers.get(name);
       if (!handlers) return;
-      this.handlers.set(name, handlers.filter((candidate) => candidate !== handler));
+      const index = handlers.findLastIndex((candidate) => candidate === handler
+        || (candidate as { listener?: unknown }).listener === handler);
+      if (index >= 0) handlers.splice(index, 1);
     }
     emit(name: string, ...args: unknown[]): void {
       const handlers = this.handlers.get(name)?.slice() ?? [];

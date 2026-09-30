@@ -51,6 +51,7 @@ export class TranscriptRepository {
     capacityBytes: number,
     capturedAt: string,
     excludedMessageId?: string,
+    route?: Parameters<typeof readContinuationHistory>[5],
   ): ReturnType<typeof readContinuationHistory> {
     return readContinuationHistory(
       this.context.database,
@@ -58,6 +59,7 @@ export class TranscriptRepository {
       capacityBytes,
       capturedAt,
       excludedMessageId,
+      route,
     );
   }
 

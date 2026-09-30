@@ -390,7 +390,7 @@ export class TurnLedgerRepository {
             THEN json_extract(continuation_identity_json, '$.endpointIdentity')
           END) IS NOT @endpointIdentity
           OR (CASE WHEN json_valid(session_recovery_json)
-            THEN json_extract(session_recovery_json, '$.historyWithheld')
+            THEN json_extract(session_recovery_json, '$.withheldMessageCount')
           END) IS NOT NULL
         ), 0) AS crossed
       FROM agent_turns

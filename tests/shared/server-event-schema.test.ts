@@ -1050,7 +1050,7 @@ describe("server event conversation discriminant boundary", () => {
       null,
       { restoredMessageCount: 0, omittedMessageCount: 0 },
       { restoredMessageCount: 113, omittedMessageCount: 20 },
-      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "endpoint-changed" },
+      { restoredMessageCount: 2, omittedMessageCount: 0, withheldMessageCount: 3 },
     ]) {
       expect(parseServerEvent(detail(accepted))).toMatchObject({ type: "request.result" });
     }
@@ -1062,8 +1062,9 @@ describe("server event conversation discriminant boundary", () => {
       { restoredMessageCount: 1.5, omittedMessageCount: 0 },
       { restoredMessageCount: 1, omittedMessageCount: "0" },
       { restoredMessageCount: 1, omittedMessageCount: 0, transcript: "leaked" },
-      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "other" },
-      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: true },
+      { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: -1 },
+      { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: "2" },
+      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "endpoint-changed" },
       { resumeRejected: true },
       { restoredMessageCount: 2_000_000, omittedMessageCount: 0 },
     ]) {

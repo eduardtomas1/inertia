@@ -13,8 +13,10 @@ import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText, truncateUtf8 } from "../runtime/untrusted-agent-text";
 import { parseStoredAttachments as parseAttachments } from "./codecs";
 import {
+  continuationRouteSql,
   conversationContextOpeningRow,
   conversationContextSourceRows,
+  type ContinuationRouteFilter,
   type ConversationContextSourceRow,
 } from "./conversation-context-source";
 import type { ConversationRow } from "./rows";
@@ -144,6 +146,7 @@ export function scrubAndBoundExcerpt(
 export interface CollectedConversationContextExcerpts {
   excerpts: ConversationContextExcerpt[];
   droppedMessageCount: number;
+  withheldMessageCount: number;
 }
 
 export function collectConversationContextExcerpts(
@@ -151,23 +154,34 @@ export function collectConversationContextExcerpts(
   sourceConversationId: string,
   selectedIds: readonly string[] | null,
   excludedMessageId?: string,
+  route?: ContinuationRouteFilter,
 ): CollectedConversationContextExcerpts | null {
-  const eligibleCount = (database.prepare(`
+  const countEligible = (routed: ReturnType<typeof continuationRouteSql>) => (database.prepare(`
     SELECT COUNT(*) AS count FROM messages
     WHERE conversation_id = ? AND role IN ('user', 'assistant')
       ${selectedIds ? `AND id IN (${selectedIds.map(() => "?").join(", ")})` : ""}
       ${excludedMessageId ? "AND id <> ?" : ""}
+      ${routed.sql}
   `).get(
     sourceConversationId,
     ...(selectedIds ?? []),
     ...(excludedMessageId ? [excludedMessageId] : []),
+    ...routed.parameters,
   ) as { count: number }).count;
+  const eligibleCount = countEligible(continuationRouteSql(route));
+  const withheldMessageCount = route
+    ? Math.min(countEligible(continuationRouteSql()) - eligibleCount, 1_000_000)
+    : 0;
   if (selectedIds && eligibleCount !== selectedIds.length) {
     throw new Error(
       "Only visible user and assistant messages from the selected source chat can be shared.",
     );
   }
-  if (eligibleCount < 1) return null;
+  if (eligibleCount < 1) {
+    return withheldMessageCount > 0
+      ? { excerpts: [], droppedMessageCount: 0, withheldMessageCount }
+      : null;
+  }
   const perExcerptBudget = selectedIds
     ? Math.min(
         MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
@@ -189,7 +203,7 @@ export function collectConversationContextExcerpts(
   };
   const openingRow = selectedIds
     ? null
-    : conversationContextOpeningRow(database, sourceConversationId, excludedMessageId);
+    : conversationContextOpeningRow(database, sourceConversationId, excludedMessageId, route);
   let opening = openingRow ? scrubAndBoundExcerpt(openingRow, perExcerptBudget) : null;
   if (opening && !retain(opening)) opening = null;
   const window: ConversationContextExcerpt[] = [];
@@ -199,6 +213,7 @@ export function collectConversationContextExcerpts(
     MAX_CONVERSATION_CONTEXT_MESSAGES,
     selectedIds ?? undefined,
     excludedMessageId,
+    route,
   )) {
     if (window.length + (opening ? 1 : 0) >= MAX_CONVERSATION_CONTEXT_MESSAGES) break;
     if (opening && row.id === opening.sourceMessageId) {
@@ -220,5 +235,6 @@ export function collectConversationContextExcerpts(
       Math.max(eligibleCount - excerpts.length, 0),
       1_000_000,
     ),
+    withheldMessageCount,
   };
 }

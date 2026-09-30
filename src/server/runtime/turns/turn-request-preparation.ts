@@ -236,7 +236,7 @@ export function resolveTurnRequest(
   } satisfies AssembleTurnRequestInput;
   const referencesOwnChat = dependencies.store.contextPackets
     .includesOwnConversation(conversation.id, contextPacketIds);
-  const historyStayedOnRoute = () => {
+  const unattributedHistoryOnRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
     const shell = conversation.continuationIdentity;
     const turns = dependencies.store.turnLedgerRepository.historyStayedOnEndpoint(
@@ -249,10 +249,9 @@ export function resolveTurnRequest(
       : turns.turnCount > 0);
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
-    const restoresHistory = !referencesOwnChat && historyStayedOnRoute();
     const fresh = assembleTurnRequest({
       ...assemblyInput,
-      ...(restoresHistory
+      ...(!referencesOwnChat
         ? {
             restoredHistory: (capacityBytes: number) => dependencies.store.continuationHistory(
               conversation.id,
@@ -261,6 +260,11 @@ export function resolveTurnRequest(
                 : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES),
               requestedAt,
               excludedMessageId,
+              {
+                backendProfileId: route.continuationIdentity.backendProfileId,
+                endpointIdentity: route.continuationIdentity.endpointIdentity,
+                includeUnattributed: unattributedHistoryOnRoute(),
+              },
             ),
           }
         : {}),
@@ -269,13 +273,7 @@ export function resolveTurnRequest(
       ...fresh,
       sessionRecovery: fresh.sessionRecovery ?? (referencesOwnChat
         ? { restoredMessageCount: 0, omittedMessageCount: 0 }
-        : restoresHistory
-          ? null
-          : {
-              restoredMessageCount: 0,
-              omittedMessageCount: 0,
-              historyWithheld: "endpoint-changed" as const,
-            }),
+        : null),
     };
   };
   const canResume = continuation.action === "resume-session";

@@ -117,6 +117,7 @@ export interface RestoredChatHistory {
   blocks: readonly { label: string; content: string }[];
   messageCount: number;
   omittedMessageCount: number;
+  withheldMessageCount?: number;
 }
 
 export interface ConversationContextMaterialization {
@@ -760,15 +761,20 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         assembledPayloadBytes = candidateBytes;
         executionSegmentCount += restored.length;
       }
-      sessionRecovery = fits
-        ? {
-            restoredMessageCount: history.messageCount,
-            omittedMessageCount: history.omittedMessageCount,
-          }
-        : {
-            restoredMessageCount: 0,
-            omittedMessageCount: history.messageCount + history.omittedMessageCount,
-          };
+      sessionRecovery = {
+        ...(fits
+          ? {
+              restoredMessageCount: history.messageCount,
+              omittedMessageCount: history.omittedMessageCount,
+            }
+          : {
+              restoredMessageCount: 0,
+              omittedMessageCount: history.messageCount + history.omittedMessageCount,
+            }),
+        ...(history.withheldMessageCount
+          ? { withheldMessageCount: history.withheldMessageCount }
+          : {}),
+      };
     }
   }
 

@@ -69,6 +69,9 @@ function readySupervisor() {
     spawn: () => child as never,
     forceKill,
     recoverOwnedProcesses: () => true,
+    armProcessContainment: () => process.platform === "win32"
+      ? { kind: "windows-job-v1", name: `Global\\InertiaRuntime-${"a".repeat(64)}` }
+      : null,
     agentBrowserBroker,
   });
   supervisor.start();

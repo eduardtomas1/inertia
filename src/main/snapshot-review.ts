@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { desktopCapturer, nativeImage, type BrowserWindow, type DesktopCapturerSource, type NativeImage } from "electron";
+import { desktopCapturer, nativeImage, screen, type BrowserWindow, type DesktopCapturerSource, type NativeImage, type Size } from "electron";
 import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 import { SNAPSHOT_MAX_IMAGE_BYTES, type SnapshotDelivery } from "../shared/snapshots.js";
 import { reviewedSnapshotBackend, type SnapshotReview, type SnapshotReviewRequest, type SnapshotReviewArea } from "../shared/snapshot-review.js";
@@ -9,6 +9,16 @@ import type { AttachmentRegistry } from "./attachment-registry.js";
 const MAX_SOURCES = 48;
 const MAX_PREVIEW_BYTES = 4 * 1024 * 1024;
 const REVIEW_TIMEOUT = 180_000;
+const MAX_EDGE = 2048;
+
+function screenCaptureSize(displayId: string): Size {
+  const display = screen.getAllDisplays().find((candidate) => String(candidate.id) === displayId);
+  if (!display) return { width: MAX_EDGE, height: MAX_EDGE };
+  const width = Math.round(display.size.width * display.scaleFactor);
+  const height = Math.round(display.size.height * display.scaleFactor);
+  const scale = Math.min(1, MAX_EDGE / width, MAX_EDGE / height);
+  return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
+}
 
 export function editReviewedImage(image: NativeImage, operation: "crop" | "mask", area: SnapshotReviewArea): NativeImage {
   const { width, height } = image.getSize();
@@ -35,7 +45,7 @@ interface PendingReview extends ReviewOwner {
   id: string;
   image: NativeImage | null;
   revision: number;
-  sources: Map<string, string>;
+  sources: Map<string, { id: string; displayId: string }>;
   busy: boolean;
   controller: AbortController;
   batchId: string | null;
@@ -89,11 +99,13 @@ export class SnapshotReviewService {
     review.busy = true;
     try {
       if (request.type === "review-select") {
-        const sourceId = review.sources.get(request.sourceId);
-        if (!sourceId) throw new Error("Choose a window from this screenshot review.");
-        const sources = await this.capture(review, 2048, false, sourceId.startsWith("screen:"));
+        const choice = review.sources.get(request.sourceId);
+        if (!choice) throw new Error("Choose a window from this screenshot review.");
+        const isScreen = choice.id.startsWith("screen:");
+        const sources = await this.capture(review, isScreen ? ["screen"] : ["window"],
+          isScreen ? screenCaptureSize(choice.displayId) : { width: MAX_EDGE, height: MAX_EDGE }, false, isScreen);
         if (!this.live(review)) return;
-        const source = sources.find((candidate) => candidate.id === sourceId);
+        const source = sources.find((candidate) => candidate.id === choice.id);
         if (!source) throw new Error("The selected window closed. Start a new screenshot.");
         this.setImage(review, source.thumbnail);
       } else {
@@ -148,9 +160,11 @@ export class SnapshotReviewService {
     };
     this.pending = review;
     try {
-      const sources = await this.capture(review, backend === "system-picker" ? 2048 : 320, backend === "system-picker", backend === "system-picker");
+      const system = backend === "system-picker";
+      const size = system ? MAX_EDGE : 320;
+      const sources = await this.capture(review, ["window", "screen"], { width: size, height: size }, system, system);
       if (!this.live(review)) return;
-      if (backend === "system-picker") {
+      if (system) {
         if (sources.length !== 1) throw new Error("The system did not select a source.");
         this.setImage(review, sources[0]!.thumbnail);
       } else {
@@ -162,7 +176,7 @@ export class SnapshotReviewService {
           bytes += png.length;
           if (bytes > MAX_PREVIEW_BYTES) break;
           const key = randomUUID();
-          review.sources.set(key, source.id);
+          review.sources.set(key, { id: source.id, displayId: source.display_id });
           choices.push({ id: key, name: source.name.slice(0, 200), preview: `data:image/png;base64,${png.toString("base64")}` });
         }
         if (!choices.length) throw new Error("No capture sources are available.");
@@ -178,12 +192,13 @@ export class SnapshotReviewService {
     } finally { review.busy = false; }
   }
 
-  private async capture(review: PendingReview, size: number, interactive: boolean, hidePicker: boolean): Promise<DesktopCapturerSource[]> {
+  private async capture(review: PendingReview, types: ("window" | "screen")[], size: Size, interactive: boolean,
+    hidePicker: boolean): Promise<DesktopCapturerSource[]> {
     const hidden = hidePicker && review.window.isVisible();
     if (hidden) review.window.hide();
     try {
       if (hidden) await new Promise((resolve) => setTimeout(resolve, 150));
-      return await this.acquire(size, interactive, review.controller.signal);
+      return await this.acquire(types, size, interactive, review.controller.signal);
     } finally {
       if (hidden && !review.window.isDestroyed()) {
         if (this.live(review)) { review.window.show(); review.window.focus(); }
@@ -192,10 +207,10 @@ export class SnapshotReviewService {
     }
   }
 
-  private async acquire(size: number, interactive: boolean, signal: AbortSignal): Promise<DesktopCapturerSource[]> {
+  private async acquire(types: ("window" | "screen")[], size: Size, interactive: boolean, signal: AbortSignal): Promise<DesktopCapturerSource[]> {
     if (signal.aborted) throw new Error("Screenshot cancelled.");
     if (this.acquisition) throw new Error("The system picker is still open.");
-    const acquisition = desktopCapturer.getSources({ types: ["window", "screen"], thumbnailSize: { width: size, height: size }, fetchWindowIcons: false });
+    const acquisition = desktopCapturer.getSources({ types, thumbnailSize: size, fetchWindowIcons: false });
     this.acquisition = acquisition;
     let timer: NodeJS.Timeout | undefined;
     let abort: (() => void) | undefined;
@@ -211,7 +226,7 @@ export class SnapshotReviewService {
 
   private setImage(review: PendingReview, image: NativeImage): void {
     const { width, height } = image.getSize();
-    if (image.isEmpty() || width <= 0 || height <= 0 || width > 2048 || height > 2048) throw new Error("The selected image is unavailable.");
+    if (image.isEmpty() || width <= 0 || height <= 0 || width > MAX_EDGE || height > MAX_EDGE) throw new Error("The selected image is unavailable.");
     const png = image.toPNG();
     if (png.length > SNAPSHOT_MAX_IMAGE_BYTES) throw new Error("The selected screenshot is too large.");
     review.timer.refresh();

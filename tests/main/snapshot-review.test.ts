@@ -5,8 +5,8 @@ import { snapshotReviewRequestSchemas, reviewedSnapshotBackend } from "../../src
 import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import type { AttachmentImportDocument, RendererAttachmentImportCoordinator } from "../../src/main/attachment-import-ipc";
 import type { AttachmentRegistry } from "../../src/main/attachment-registry";
-const native = vi.hoisted(() => ({ sources: vi.fn(), bitmap: vi.fn() }));
-vi.mock("electron", () => ({ desktopCapturer: { getSources: native.sources }, nativeImage: { createFromBitmap: native.bitmap } }));
+const native = vi.hoisted(() => ({ sources: vi.fn(), bitmap: vi.fn(), displays: vi.fn() }));
+vi.mock("electron", () => ({ desktopCapturer: { getSources: native.sources }, nativeImage: { createFromBitmap: native.bitmap }, screen: { getAllDisplays: native.displays } }));
 import { editReviewedImage, SnapshotReviewService } from "../../src/main/snapshot-review";
 
 function image(width = 10, height = 10, byte = 255): NativeImage {
@@ -15,7 +15,7 @@ function image(width = 10, height = 10, byte = 255): NativeImage {
     crop: ({ width: w, height: h }: { width: number; height: number }) => image(w, h),
   } as unknown as NativeImage;
 }
-const source = (id = "window:1:0", thumbnail = image()) => ({ id, name: "Private window title", thumbnail });
+const source = (id = "window:1:0", thumbnail = image(), displayId = "") => ({ id, name: "Private window title", thumbnail, display_id: displayId });
 const services: SnapshotReviewService[] = [];
 beforeEach(() => { vi.stubEnv("DISPLAY", ":1"); vi.stubEnv("XDG_SESSION_TYPE", "x11"); vi.stubEnv("WAYLAND_DISPLAY", ""); });
 afterEach(async () => { for (const service of services.splice(0)) await service.stop(); vi.useRealTimers(); vi.resetAllMocks(); vi.unstubAllEnvs(); });
@@ -143,6 +143,35 @@ describe("reviewed screenshot ownership", () => {
     expect(f.last()).toMatchObject({ stage: "image", revision: 2, width: 4, height: 4 });
     await f.service.request(f.owner, { type: "review-approve", reviewId: f.reviewId, revision: 1 });
     expect(f.imports.begin).not.toHaveBeenCalled();
+  });
+
+  it("re-captures only the chosen window, bounded to 2048 px", async () => {
+    native.sources.mockResolvedValue([source("window:1:0"), source("screen:5:0", image(), "5")]);
+    const f = fixture(); await f.start(); await f.select();
+    expect(native.sources).toHaveBeenCalledTimes(2);
+    expect(native.sources.mock.calls[0]![0]).toEqual({ types: ["window", "screen"], thumbnailSize: { width: 320, height: 320 }, fetchWindowIcons: false });
+    expect(native.sources.mock.calls[1]![0]).toEqual({ types: ["window"], thumbnailSize: { width: 2048, height: 2048 }, fetchWindowIcons: false });
+    expect(native.displays).not.toHaveBeenCalled();
+    expect(f.last()).toMatchObject({ stage: "image", revision: 1 });
+  });
+
+  it.each([
+    ["a scaled display at its native size", { width: 1280, height: 720 }, 1.5, { width: 1920, height: 1080 }],
+    ["a small display without enlarging it", { width: 1024, height: 768 }, 1, { width: 1024, height: 768 }],
+    ["a large display scaled to fit 2048 px", { width: 3840, height: 2160 }, 1, { width: 2048, height: 1152 }],
+  ])("re-captures only the chosen screen for %s", async (_name, size, scaleFactor, thumbnailSize) => {
+    native.sources.mockResolvedValue([source("screen:5:0", image(), "5"), source("window:1:0")]);
+    native.displays.mockReturnValue([{ id: 4, size: { width: 800, height: 600 }, scaleFactor: 1 }, { id: 5, size, scaleFactor }]);
+    const f = fixture(); await f.start(); await f.select();
+    expect(native.sources.mock.calls[1]![0]).toEqual({ types: ["screen"], thumbnailSize, fetchWindowIcons: false });
+    expect(f.last()).toMatchObject({ stage: "image", revision: 1 });
+  });
+
+  it("bounds a screen without a matching display to 2048 px", async () => {
+    native.sources.mockResolvedValue([source("screen:5:0", image(), "")]);
+    native.displays.mockReturnValue([{ id: 5, size: { width: 1024, height: 768 }, scaleFactor: 1 }]);
+    const f = fixture(); await f.start(); await f.select();
+    expect(native.sources.mock.calls[1]![0]).toEqual({ types: ["screen"], thumbnailSize: { width: 2048, height: 2048 }, fetchWindowIcons: false });
   });
 
   it("rolls back a late import after the review is cancelled", async () => {

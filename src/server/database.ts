@@ -912,7 +912,7 @@ export class RuntimeStore {
   attachmentConversationIds(attachmentIds: readonly string[]): string[] { return this.transcriptRepository.attachmentConversationIds(attachmentIds); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
-  continuationHistory(conversationId: string) { return this.transcriptRepository.continuationHistory(conversationId); }
+  continuationHistory(...input: Parameters<TranscriptRepository["continuationHistory"]>) { return this.transcriptRepository.continuationHistory(...input); } restartAgentTurnOnFreshSession(...input: Parameters<TurnLedgerRepository["restartOnFreshSession"]>): AgentTurn { return this.turnLedgerRepository.restartOnFreshSession(...input); }
 
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);

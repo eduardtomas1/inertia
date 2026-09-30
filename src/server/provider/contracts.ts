@@ -191,6 +191,11 @@ export interface ProviderRunFailure {
   phase?: string;
   terminalEvent?: string;
   activityId?: string;
+  sessionUnavailable?: true;
+}
+
+export interface ProviderFreshSessionFallback {
+  prompt: string;
 }
 
 export interface ProviderEventBase {
@@ -371,6 +376,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
+  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;

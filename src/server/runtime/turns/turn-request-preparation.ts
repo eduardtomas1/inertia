@@ -10,7 +10,6 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
-  sameContinuationIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import type { RuntimeStore } from "../../database";
@@ -19,7 +18,11 @@ import type {
   ProviderActivityEvent,
 } from "../../provider/contracts";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
-import { assembleTurnRequest, RECOVERED_PROVIDER_HISTORY_LABEL } from "./request-context";
+import {
+  assembleTurnRequest,
+  type AssembleTurnRequestInput,
+  type ConversationContextMaterialization,
+} from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
@@ -198,25 +201,16 @@ export function resolveTurnRequest(
     throw new Error(continuation.reason);
   }
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
-  const assembled = assembleTurnRequest({
+  const requestedAt = dependencies.now();
+  let conversationContexts: ConversationContextMaterialization | undefined;
+  const assemblyInput = {
     ...(contextPacketIds.length > 0
       ? {
-          conversationContexts: (capacityBytes: number) => dependencies.store.contextPackets
-            .materialize(conversation.id, contextPacketIds, capacityBytes),
+          conversationContexts: (capacityBytes: number) => conversationContexts
+            ??= dependencies.store.contextPackets
+              .materialize(conversation.id, contextPacketIds, capacityBytes),
         }
       : {}),
-    continuationHistory: route.providerId === "claude"
-      && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
-      && continuation.action === "start-session"
-      && (continuation.reasonCode === "provider-installation-changed"
-        || (conversation.providerSessionId === null
-          && latestTurn !== null
-          && sameContinuationIdentity(latestTurn.continuationIdentity, route.continuationIdentity)
-          && dependencies.store.turnExecutionManifest(latestTurn.id)?.references.some(
-            ({ label }) => label === RECOVERED_PROVIDER_HISTORY_LABEL,
-          )))
-      ? dependencies.store.continuationHistory(conversation.id)
-      : undefined,
     cwd: dependencies.store.conversationPath(conversation.id),
     visibleContent: request.content,
     interactionMode: conversation.interactionMode,
@@ -228,8 +222,37 @@ export function resolveTurnRequest(
       ...capabilityInstructions,
       ...(request.internalInstructions ?? []),
     ],
-  });
+  } satisfies AssembleTurnRequestInput;
+  const referencesOwnChat = dependencies.store.contextPackets
+    .includesOwnConversation(conversation.id, contextPacketIds);
+  const assembleOnFreshSession = (excludedMessageId?: string) => {
+    const fresh = assembleTurnRequest({
+      ...assemblyInput,
+      ...(!referencesOwnChat
+        ? {
+            restoredHistory: (capacityBytes: number) => dependencies.store.continuationHistory(
+              conversation.id,
+              capacityBytes,
+              requestedAt,
+              excludedMessageId,
+            ),
+          }
+        : {}),
+    });
+    return {
+      ...fresh,
+      sessionRecovery: fresh.sessionRecovery ?? (referencesOwnChat
+        ? { restoredMessageCount: 0, omittedMessageCount: 0 }
+        : null),
+    };
+  };
   const canResume = continuation.action === "resume-session";
+  const startsFreshInEstablishedChat = !canResume
+    && continuation.reasonCode !== "first-turn"
+    && request.goalStart === undefined;
+  const assembled = startsFreshInEstablishedChat
+    ? assembleOnFreshSession()
+    : assembleTurnRequest(assemblyInput);
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
     : undefined;
@@ -289,7 +312,6 @@ export function resolveTurnRequest(
       "The resolved model route changed before the turn could start.",
     );
   }
-  const requestedAt = dependencies.now();
   const structuredContext = dependencies.hooks.captureStructuredContext?.({
     conversation,
     content: assembled.visibleContent,
@@ -317,6 +339,7 @@ export function resolveTurnRequest(
     modelSelection,
     continuationIdentity: route.continuationIdentity,
     continuationReasonCode: continuation.reasonCode,
+    sessionRecovery: assembled.sessionRecovery,
     harnessId,
     backendProfileId: modelSelection.backendProfileId,
     model: modelSelection.modelId,
@@ -376,6 +399,9 @@ export function resolveTurnRequest(
           deferredSettlement: null,
           providerStopStarted: false,
           sessionAfter: canResume ? conversation.providerSessionId : null,
+          freshSessionRequest: canResume && request.goalStart === undefined
+            ? assembleOnFreshSession
+            : null,
           lastUsage: null,
           assistantText: "",
           assistantPendingHighSurrogate: "",

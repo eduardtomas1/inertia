@@ -7,6 +7,7 @@ import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
+import { sessionRecoveryDetail } from "../../utils/sessionRecovery";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import {
   collapsedUserRequestPreview,
@@ -98,6 +99,7 @@ export function UserRequestLayer({
   const contextPackets = props.contextPackets?.filter(
     ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
   ) ?? [];
+  const sessionRecovery = sessionRecoveryDetail(turn.agentTurn);
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
@@ -135,6 +137,17 @@ export function UserRequestLayer({
         attachments={turn.userMessage.attachments}
         label="Request attachments"
       />
+      {sessionRecovery && (
+        <div className="sent-context" aria-label="Provider session">
+          <span data-session-recovery="">
+            <MessagesSquare size={13} aria-hidden="true" />
+            <span>
+              <strong>New provider session</strong>
+              <small title={sessionRecovery}>{sessionRecovery}</small>
+            </span>
+          </span>
+        </div>
+      )}
       {contextPackets.length > 0 && (
         <div className="sent-context" aria-label="Shared chat context">
           {contextPackets.map((packet) => {

@@ -182,10 +182,16 @@ function startAntigravityRun(
   const adoptSession = (conversationId: string | null): boolean => {
     if (!conversationId || conversationId === sessionId) return true;
     if (sessionId) {
-      fail(antigravityFailure(
-        "malformed", "", input.cwd,
-        "Antigravity returned an update for a different conversation.",
-      ));
+      fail({
+        ...antigravityFailure(
+          "malformed", "", input.cwd,
+          "Antigravity returned an update for a different conversation.",
+        ),
+        ...(sessionId === antigravitySessionId(input.sessionId)
+          && !sawText && tools.size === 0 && !result
+          ? { sessionUnavailable: true as const }
+          : {}),
+      });
       return false;
     }
     sessionId = conversationId;

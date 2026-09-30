@@ -98,6 +98,7 @@ export interface AgentTurnRow {
   model_selection_json: string | null;
   continuation_identity_json: string | null;
   continuation_reason_code: ContinuationReasonCode | null;
+  session_recovery_json: string | null;
   harness_id: string;
   backend_profile_id: string;
   model: string;

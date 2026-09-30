@@ -46,3 +46,18 @@ export function continuationRejectedForCompatibility(value: unknown): boolean {
       value as (typeof CONTINUATION_COMPATIBILITY_REJECTION_REASON_CODES)[number],
     );
 }
+
+export interface TurnSessionRecovery {
+  restoredMessageCount: number;
+  omittedMessageCount: number;
+}
+
+export function isTurnSessionRecovery(value: unknown): value is TurnSessionRecovery {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const count = (input: unknown): boolean => typeof input === "number"
+    && Number.isSafeInteger(input) && input >= 0 && input <= 1_002_000;
+  return Object.keys(record).length === 2
+    && count(record.restoredMessageCount)
+    && count(record.omittedMessageCount);
+}

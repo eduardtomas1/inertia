@@ -75,6 +75,7 @@ import {
 } from "./opencode-interaction-replies";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
+import { openCodeSessionUnavailable } from "./session-unavailable";
 import { openCodeModels } from "./opencode-sdk-metadata";
 import {
   createOpenCodeInteractionState,
@@ -252,6 +253,7 @@ function startOpenCodeRun(
   const ownership = new OpenCodeRunOwnership(promptLifecycle.messageId);
   const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
+  let sessionUnavailable = false;
   let client: OpencodeClient | undefined;
   let replies: OpenCodeInteractionReplies | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
@@ -513,7 +515,10 @@ function startOpenCodeRun(
             { sessionID: sessionId!, directory: options.input.cwd },
             { signal, throwOnError: true },
           ),
-        );
+        ).catch((error: unknown) => {
+          sessionUnavailable = openCodeSessionUnavailable(error);
+          throw error;
+        });
         if (resumed.data.id !== sessionId) {
           throw new Error("OpenCode did not confirm the exact session selected for this run.");
         }
@@ -790,14 +795,17 @@ function startOpenCodeRun(
         : {
             status: "failed",
             error: rawError,
-            failure: failureState.terminal ?? openCodeRuntimeFailure(
-              rawError,
-              rawError,
-              "sdk/exception",
-              child,
-              options.input.cwd,
-              serverStopDetail,
-            ),
+            failure: {
+              ...(failureState.terminal ?? openCodeRuntimeFailure(
+                rawError,
+                rawError,
+                "sdk/exception",
+                child,
+                options.input.cwd,
+                serverStopDetail,
+              )),
+              ...(sessionUnavailable ? { sessionUnavailable: true as const } : {}),
+            },
           };
     }
     acceptingFollowUps = false;

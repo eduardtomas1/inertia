@@ -335,7 +335,7 @@ describe("provider-default turn resolution", () => {
       providerSessionId: "session-from-previous-installation",
       continuationIdentity: {
         ...currentRoute.continuationIdentity,
-        providerCompatibilityToken: "b".repeat(64),
+        endpointIdentity: "endpoint-from-previous-configuration",
       },
     });
     let sequence = 0;
@@ -365,7 +365,7 @@ describe("provider-default turn resolution", () => {
       providerSessionInvalidation: {
         expectedSessionId: "session-from-previous-installation",
       },
-      continuationReasonCode: "provider-installation-changed",
+      continuationReasonCode: "backend-endpoint-changed",
     });
     const firstQueued = initial.beginAgentTurn(first.input);
     expect(first.adopt(firstQueued).active.providerInput.sessionId).toBeUndefined();

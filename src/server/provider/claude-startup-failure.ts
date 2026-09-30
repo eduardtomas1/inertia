@@ -23,6 +23,13 @@ const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
   bypass_root: "Claude Code won't run with full access as the root user. Choose another access mode.",
 };
 
+export function claudeSessionUnavailable(message: SDKMessage): boolean {
+  if (message.type !== "result" || message.subtype === "success") return false;
+  return message.startup_failure_reason === "worktree_resume_refused"
+    || (message.num_turns === 0 && message.errors.some((error) =>
+      typeof error === "string" && error.startsWith("No conversation found with session ID")));
+}
+
 export function claudeStartupFailure(
   result: Extract<SDKMessage, { type: "result" }>,
 ): { reason: SDKStartupFailureReason; message: string } | undefined {

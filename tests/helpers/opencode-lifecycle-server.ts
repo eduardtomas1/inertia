@@ -86,6 +86,7 @@ const server = http.createServer((req, res) => {
     if (req.method === "POST" && url.pathname === "/session") return json(res, session);
     if (url.pathname === "/session/" + sessionID && req.method === "GET") return json(res, { ...session, id: ${JSON.stringify(sessionReadId)} });
     if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
+    if (req.method === "GET" && /^\\/session\\/[^/]+$/.test(url.pathname)) return json(res, { name: "NotFoundError", data: { message: "Session not found: " + url.pathname.slice(9) } }, 404);
     if (req.method === "GET" && url.pathname === "/event") {
       const openEvents = () => {
         events = res;

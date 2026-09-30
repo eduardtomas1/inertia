@@ -672,6 +672,11 @@
       "version": 83,
       "name": "PersistCompletionSound",
       "digest": "00fbad4235b49b23aeb84643e241e240c970ecda15df4102a1c162c143416159"
+    },
+    {
+      "version": 84,
+      "name": "PersistTurnSessionRecovery",
+      "digest": "8a0416ff767a65a0143254f6b95376c52961d2f89a27b3637e4d417654cab5b0"
     }
   ]
 }

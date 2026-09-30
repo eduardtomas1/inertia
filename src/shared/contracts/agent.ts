@@ -1,5 +1,5 @@
 import type { ChatAttachmentMimeType } from "../attachments";
-import type { ContinuationReasonCode } from "../continuation-policy";
+import type { ContinuationReasonCode, TurnSessionRecovery } from "../continuation-policy";
 import type {
   ContinuationIdentity,
   HarnessId,
@@ -136,6 +136,8 @@ export interface AgentTurnUsageSnapshot {
   capturedAt: string;
 }
 
+export type { TurnSessionRecovery };
+
 /**
  * A durable, immutable unit of requested agent work. Conversation settings
  * remain mutable, so every turn captures the exact execution configuration
@@ -153,6 +155,7 @@ export interface AgentTurn {
   continuationIdentity: ContinuationIdentity;
   /** Safe immutable reason for starting or resuming this provider session. */
   continuationReasonCode?: ContinuationReasonCode | null;
+  sessionRecovery?: TurnSessionRecovery | null;
   /** @deprecated Read-only compatibility projections of modelSelection. */
   harnessId: HarnessId;
   backendProfileId: ModelBackendProfileId;

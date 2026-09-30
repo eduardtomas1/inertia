@@ -54,6 +54,7 @@ export function* conversationContextSourceRows(
   conversationId: string,
   limit: number,
   messageIds?: readonly string[],
+  excludedMessageId?: string,
 ): Generator<ConversationContextSourceRow> {
   const rows = database.prepare(`
     SELECT id, turn_id, role, created_at, attachments_json,
@@ -61,9 +62,16 @@ export function* conversationContextSourceRows(
     FROM messages
     WHERE conversation_id = ? AND role IN ('user', 'assistant')
       ${messageIds ? `AND id IN (${messageIds.map(() => "?").join(", ")})` : ""}
+      ${excludedMessageId ? "AND id <> ?" : ""}
     ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).iterate(MAX_SOURCE_BYTES + 1, conversationId, ...(messageIds ?? []), limit) as Iterable<StoredSourceRow>;
+  `).iterate(
+    MAX_SOURCE_BYTES + 1,
+    conversationId,
+    ...(messageIds ?? []),
+    ...(excludedMessageId ? [excludedMessageId] : []),
+    limit,
+  ) as Iterable<StoredSourceRow>;
   const read = sourceRowReader(database);
   for (const row of rows) yield read(row);
 }
@@ -71,14 +79,20 @@ export function* conversationContextSourceRows(
 export function conversationContextOpeningRow(
   database: Database.Database,
   conversationId: string,
+  excludedMessageId?: string,
 ): ConversationContextSourceRow | null {
   const row = database.prepare(`
     SELECT id, turn_id, role, created_at, attachments_json,
       COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content
     FROM messages
     WHERE conversation_id = ? AND role = 'user'
+      ${excludedMessageId ? "AND id <> ?" : ""}
     ORDER BY created_at ASC, id ASC
     LIMIT 1
-  `).get(MAX_SOURCE_BYTES + 1, conversationId) as StoredSourceRow | undefined;
+  `).get(
+    MAX_SOURCE_BYTES + 1,
+    conversationId,
+    ...(excludedMessageId ? [excludedMessageId] : []),
+  ) as StoredSourceRow | undefined;
   return row ? sourceRowReader(database)(row) : null;
 }

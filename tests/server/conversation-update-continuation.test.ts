@@ -86,4 +86,69 @@ describe("conversation update continuation ownership", () => {
       continuationIdentity: null,
     });
   });
+
+  it.each(["gpt-test", "gpt-next"])("keeps the saved session when %s is selected after the provider installation changed", async (modelId) => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-conversation-update-"));
+    temporaryDirectories.push(directory);
+    const workspace = join(directory, "workspace");
+    mkdirSync(workspace);
+    const store = new RuntimeStore(join(directory, "runtime.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+    stores.push(store);
+    const project = store.createProject("Continuation", workspace);
+    const saved = modelSelectionSchema.parse(nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-test",
+      reasoningEffort: "high",
+    }));
+    const selected = modelSelectionSchema.parse(nativeModelSelection({
+      providerId: "codex",
+      modelId,
+      reasoningEffort: "medium",
+    }));
+    const route = resolveNativeModelRoute(selected);
+    const conversation = store.createConversation(project.id, "Updated provider", {
+      modelSelection: saved,
+    });
+    const savedIdentity = {
+      ...resolveNativeModelRoute(saved).continuationIdentity,
+      providerCompatibilityToken: "b".repeat(64),
+    };
+    store.updateConversation(conversation.id, {
+      providerSessionId: "session-before-update",
+      continuationIdentity: savedIdentity,
+    });
+
+    const dependencies = {
+      store,
+      providers: {
+        resolveModelRoute: vi.fn(() => route),
+      },
+      backendProfileController: {
+        isExternalSelection: vi.fn(() => false),
+        validateSelection: vi.fn(() => selected),
+        supportsNativeFastModeControl: vi.fn(() => false),
+      },
+    } as unknown as ConversationCommandDependencies;
+    const command: Extract<ClientCommand, { type: "conversation.update" }> = {
+      type: "conversation.update",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      payload: {
+        conversationId: conversation.id,
+        modelSelection: selected,
+      },
+    };
+
+    expect(route.continuationIdentity.providerCompatibilityToken).not.toBe(savedIdentity.providerCompatibilityToken);
+    await expect(createConversationCommandHandler(dependencies)(
+      {} as never,
+      command,
+    )).resolves.toBe("mutation");
+    expect(store.conversation(conversation.id)).toMatchObject({
+      providerSessionId: "session-before-update",
+      continuationIdentity: savedIdentity,
+      modelSelection: { modelId, reasoningEffort: "medium" },
+    });
+  });
 });

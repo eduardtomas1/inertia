@@ -179,6 +179,7 @@ export function isStaleResumeError(error: unknown): boolean {
       "unknown",
       "does not exist",
       "no such",
+      "no rollout found",
     ].some((part) => message.includes(part));
 }
 

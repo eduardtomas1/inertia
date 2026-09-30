@@ -9,7 +9,7 @@ import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
-import { isContinuationReasonCode } from "../continuation-policy";
+import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
@@ -80,7 +80,8 @@ function continuationIdentity(value: unknown): boolean {
   return versionedContinuationIdentitySchema.safeParse(value).success;
 }
 function optionalContinuationReasonCode(value: UnknownRecord): boolean {
-  const reason = value.continuationReasonCode; return reason === undefined || reason === null || isContinuationReasonCode(reason);
+  const reason = value.continuationReasonCode; const recovery = value.sessionRecovery;
+  return (reason === undefined || reason === null || isContinuationReasonCode(reason)) && (recovery === undefined || recovery === null || isTurnSessionRecovery(recovery));
 }
 function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises } from "../support/turn-controller-runtime";
+import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises, turnControllerTestIdentity } from "../support/turn-controller-runtime";
 import { stopOwnedManagedTurn } from "../../src/server/runtime/managed-turn-ownership";
 import type { RuntimeStore } from "../../src/server/database";
 import type { TurnController } from "../../src/server/runtime/turns/turn-controller";
@@ -9,6 +9,7 @@ it("keeps an accepted follow-up ambiguous when its owner ends before acknowledge
   const runtime = await createTurnControllerTestRuntime();
   const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start" });
   runtime.controller.start(queued.turn.id);
+  runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
   let accept!: (value: boolean) => void;
   vi.spyOn(runtime.provider, "steer").mockImplementation(async () => new Promise<boolean>((resolve) => { accept = resolve; }));
   const lease = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;

@@ -220,9 +220,11 @@ missing-conversation result) fails with a missing-session error, every harness
 reports an unavailable session. Errors that name a missing working directory,
 model, field or file path, and errors from any later step, do not count. If the
 first attempt produced no text, reasoning, tool, command, status or approval
-activity, the same turn restarts once on a fresh session; otherwise it fails.
-Either way the dead native ID is cleared, the fresh session records
-`stale-provider-session`, and no later turn retries it.
+activity, the same turn restarts once on a fresh session; otherwise it fails,
+and every harness reports the same explanation: the saved session is no
+longer available and the next turn starts a fresh one. Either way the dead
+native ID is cleared, the fresh session records `stale-provider-session`, and
+no later turn retries it.
 
 A rejection the harness does not recognise cannot strand the chat. The Codex,
 Cursor, Kimi and OpenCode harnesses also report any provider error at their

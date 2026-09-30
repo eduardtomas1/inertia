@@ -14,6 +14,7 @@ import {
   type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import { startHarnessWithFreshSessionFallback } from "../../src/server/provider/fresh-session-fallback";
+import { staleProviderSessionDecision } from "../../src/shared/continuation-policy";
 import { providerNativeModelSelection, type ModelSelection } from "../../src/shared/model-routing";
 import { FakeTurnProvider } from "../support/fake-turn-provider";
 import { resolveNativeModelRoute } from "./model-route-fixture";
@@ -206,6 +207,36 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
         providerSessionBefore: "saved-session",
       });
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+});
+
+describe("explaining a declined restart", () => {
+  it.each([
+    ["claude", "No conversation found with session ID: saved-session"],
+    ["codex", "Codex rejected a protocol request."],
+  ] as const)("reports the same explanation for %s when the restart is declined", async (providerId, providerMessage) => {
+    const { runtime } = await establishedChat(providerId);
+    const provider = swapProvider(runtime);
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      provider.attempts[0]!.emit({ type: "activity", kind: "tool", phase: "started", label: "Read file", activityId: "tool-1" });
+      provider.attempts[0]!.finish({
+        status: "failed",
+        error: providerMessage,
+        failure: { reason: "provider-error", message: providerMessage, sessionUnavailable: true },
+      });
+      await flushTurnControllerTestPromises();
+      expect(provider.attempts).toHaveLength(1);
+      const activities = runtime.store.conversationDetail(runtime.conversationId)?.activities ?? [];
+      expect(activities.filter(({ kind, turnId }) => kind === "error" && turnId === queued.turn.id))
+        .toEqual([expect.objectContaining({ title: staleProviderSessionDecision().reason })]);
+      const errorDetail = activities.find(({ kind, turnId }) => kind === "error" && turnId === queued.turn.id)?.detail ?? "";
+      expect(errorDetail).toContain(providerMessage);
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

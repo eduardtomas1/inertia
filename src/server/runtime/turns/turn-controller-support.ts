@@ -5,6 +5,7 @@ import {
   type ProviderId,
   type ThreadUsageSnapshot,
 } from "../../../shared/contracts";
+import { staleProviderSessionDecision } from "../../../shared/continuation-policy";
 import {
   providerFailureActivityDetail,
   sanitizeProviderFailureSummary,
@@ -192,11 +193,13 @@ export function normalizedProviderRunFailure(
         ? "process-exit"
         : "provider-error");
   const fallback = `${providerLabel(result.providerId)} could not complete the request.`;
-  const message = sanitizeProviderFailureSummary(
-    result.error ?? reported?.message,
-    fallback,
-    { workspaceRoot: active.providerInput.cwd },
-  );
+  const message = reported?.sessionUnavailable === true
+    ? staleProviderSessionDecision().reason
+    : sanitizeProviderFailureSummary(
+        result.error ?? reported?.message,
+        fallback,
+        { workspaceRoot: active.providerInput.cwd },
+      );
   const technicalDetail = providerFailureActivityDetail({
     reason,
     phase: reported?.phase ?? active.turn.status,

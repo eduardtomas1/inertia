@@ -147,11 +147,6 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
   try {
     const page = app.page;
     await app.resizeWindow(1100, 850); await closeWorkspaceTools(page);
-    await app.electronApp.evaluate(async ({ BrowserWindow }) => {
-      const target = new BrowserWindow({ width: 640, height: 480, show: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
-      target.removeMenu();
-      await target.loadURL(`data:text/html,${encodeURIComponent('<title>Reviewed screenshot fixture</title><style>body{background:#f8f6f1;color:#242424;font:18px sans-serif;padding:24px}input{background:#ffcc00}</style><h1>Release checklist</h1><p>This is synthetic local test content.</p><label>Private note <input value="review-only-sentinel"></label>')}`);
-    });
     await page.bringToFront();
     await page.getByRole("textbox", { name: "Message" }).focus();
     expect((await page.evaluate(() => window.inertia.snapshot({ type: "state" }))).enabled).toBe(false);

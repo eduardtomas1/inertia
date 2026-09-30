@@ -12,6 +12,7 @@ import {
   createTurnControllerTestRuntime,
   flushTurnControllerTestPromises,
   turnControllerTestAttachment,
+  turnControllerTestIdentity,
 } from "../support/turn-controller-runtime";
 
 afterEach(cleanupTurnControllerTestDirectories);
@@ -20,6 +21,7 @@ async function activeFollowUpRuntime() {
   const runtime = await createTurnControllerTestRuntime();
   const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start" });
   runtime.controller.start(queued.turn.id);
+  runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
   const retained = await turnControllerTestAttachment(runtime, randomUUID());
   const conversationAttachments = {
     retain: vi.fn(async () => [retained]),

@@ -1648,9 +1648,45 @@ describe("message attachment ownership transfer", () => {
       },
       [],
       expect.any(Function),
+      expect.any(AbortSignal),
     );
     expect(handlerDependencies.workflows.resolveTurnSkills)
       .not.toHaveBeenCalled();
+  });
+
+  it("stops a follow-up waiting for its provider turn at the preparation deadline", async () => {
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    vi.mocked(handlerDependencies.turns.steer).mockImplementation(async (
+      _lease,
+      _input,
+      _attachments,
+      _acknowledge,
+      signal,
+    ) => {
+      await new Promise((resolve) => {
+        signal?.addEventListener("abort", resolve, { once: true });
+      });
+      return null;
+    });
+    const startedAt = Date.now();
+    const now = vi.spyOn(Date, "now")
+      .mockReturnValueOnce(startedAt)
+      .mockReturnValue(startedAt + MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+    const command = messageCommand();
+    command.payload.attachments = [];
+
+    try {
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        command,
+      )).rejects.toThrow("cannot accept a follow-up");
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("reports accepted delivery when follow-up persistence fails", async () => {

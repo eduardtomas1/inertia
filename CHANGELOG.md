@@ -42,8 +42,9 @@ reliability and safety fixes.
 - Use Codex 0.159.0, including GPT-6.1 Sol with its reasoning levels and Fast
   mode when Codex offers it for your account.
 - When Codex stops a turn after repeated approval denials, Inertia reports it
-  as failed with that reason instead of as cancelled. Codex sends this reason
-  only when its strict auto-review setting is on.
+  as failed with that reason instead of as cancelled, and a subagent stopped
+  the same way is shown as failed too. Codex sends this reason only when its
+  strict auto-review setting is on.
 - Update Codex from Settings when it is installed in its own npm location,
   such as `~/.local` or `~/.npm-global` on Linux. The update status, **Check**
   and **Instructions** stay visible even when the latest-version lookup fails.

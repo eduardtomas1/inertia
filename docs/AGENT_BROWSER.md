@@ -60,6 +60,13 @@ advertises the same arguments the runtime validates:
 | `inertia_browser_select_tab` | `tabId` | Activate a page. |
 | `inertia_browser_close_tab` | `tabId` | Close a page. |
 
+Text limits are counted in Unicode code points, the unit JSON Schema
+`maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at
+most 4,000, and `inertia_browser_wait_for` `text` at most 200. The runtime tool
+validator and the main-process parser call the same counting function, and a
+request that reaches main with arguments it does not accept is answered with
+an `invalid` tool error instead of restarting the runtime.
+
 `inertia_browser_interact` and the action-based form of
 `inertia_browser_tabs` are retired. They are no longer advertised, but a
 provider session that registered them before this change can still call them.
@@ -175,7 +182,9 @@ so this cannot be closed without refusing every page that has a frame.
 Password fields are found by enumerating the document's inputs rather than by
 walking its elements, so a password field is seen wherever it sits in a large
 document. A document with more than 4,000 inputs is treated as unverifiable
-and its evidence is withheld.
+and its evidence is withheld with its own reason: the page has too many inputs
+to check safely, so the agent is told to open a smaller page or a more
+specific route rather than to navigate to the same page again.
 
 Enter and Space are refused while focus is inside an embedded frame or a
 closed shadow root, because Inertia cannot see the control they would

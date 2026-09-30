@@ -669,7 +669,7 @@ export async function agentPageEvidencePrivacy(
         if (!input) break;
         inspect(input);
       }
-      if (inputs[index]) state.evidenceWithheld ??= "credential-signal";
+      if (inputs[index]) state.evidenceWithheld ??= "document-too-large";
     } else {
       const root = document.documentElement || document.body;
       const iterator = root && typeof document.createNodeIterator === "function"
@@ -682,16 +682,19 @@ export async function agentPageEvidencePrivacy(
         scanned += 1;
         if (candidate.tagName === "INPUT") inspect(candidate);
       }
-      if (!iterator || (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode())) {
-        state.evidenceWithheld ??= "credential-signal";
+      if (!iterator) state.evidenceWithheld ??= "credential-signal";
+      else if (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode()) {
+        state.evidenceWithheld ??= "document-too-large";
       }
     }
     if (state.passwordValues.size > 0) return "password";
-    return state.evidenceWithheld === "hidden-input" ? "hidden-input"
+    return state.evidenceWithheld === "hidden-input" || state.evidenceWithheld === "document-too-large"
+      ? state.evidenceWithheld
       : state.evidenceWithheld ? "credential-signal" : null;
   })()`);
   return {
     withheld: value === "password" || value === "hidden-input" || value === "credential-signal"
+      || value === "document-too-large"
       ? value
       : value === null ? null : "credential-signal",
   };

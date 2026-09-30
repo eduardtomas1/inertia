@@ -63,7 +63,7 @@ describe("agent Browser privacy classification", () => {
     };
     const manyInputs = Array.from({ length: 4_001 }, () => ({ tagName: "INPUT", type: "text", value: "" }));
     await expect(run({ documentElement: {}, getElementsByTagName: () => manyInputs }))
-      .resolves.toEqual({ withheld: "credential-signal" });
+      .resolves.toEqual({ withheld: "document-too-large" });
 
     let nextNodeCalls = 0;
     await expect(run({
@@ -74,7 +74,7 @@ describe("agent Browser privacy classification", () => {
           return { tagName: "DIV" };
         },
       }),
-    })).resolves.toEqual({ withheld: "credential-signal" });
+    })).resolves.toEqual({ withheld: "document-too-large" });
     expect(nextNodeCalls).toBe(4_001);
     await expect(run({
       documentElement: {},
@@ -113,6 +113,9 @@ describe("agent Browser privacy classification", () => {
     state.evidenceWithheld = "credential-signal";
     await expect(agentPageEvidencePrivacy(contents as never))
       .resolves.toEqual({ withheld: "credential-signal" });
+    state.evidenceWithheld = "document-too-large";
+    await expect(agentPageEvidencePrivacy(contents as never))
+      .resolves.toEqual({ withheld: "document-too-large" });
     (state.passwordValues as Set<string>).add("hunter2");
     await expect(agentPageEvidencePrivacy(contents as never))
       .resolves.toEqual({ withheld: "password" });
@@ -165,21 +168,44 @@ describe("agent Browser privacy classification", () => {
       context,
     )).toMatchObject({ scanLimitReached: true });
     expect(runInNewContext("globalThis.__inertiaAgentBrowser.evidenceWithheld", context))
-      .toBe(enumerable ? undefined : "credential-signal");
+      .toBe(enumerable ? undefined : "document-too-large");
   });
 
-  it("records a consumed declarative shadow template and an added frame as not inspected", async () => {
+  it("classifies a document with more than 4,000 inputs as too large at document start", async () => {
+    class MutationObserver {
+      constructor(_callback: (records: unknown[]) => void) {}
+      observe(): void {}
+    }
+    const inputs = Array.from({ length: 4_001 }, () => ({ nodeType: 1, tagName: "INPUT", type: "checkbox", value: "on" }));
+    const context = {
+      document: {
+        documentElement: {
+          nodeType: 1,
+          tagName: "HTML",
+          getElementsByTagName: (): unknown[] => inputs,
+        },
+        addEventListener: vi.fn(),
+        createNodeIterator: () => ({ nextNode: () => null }),
+      },
+      MutationObserver,
+    };
+    await installAgentPagePrivacyGuard({
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    } as never);
+    expect(runInNewContext("globalThis.__inertiaAgentBrowser.evidenceWithheld", context))
+      .toBe("document-too-large");
+  });
+
+  it("records an added frame as not inspected", async () => {
     let callback: ((records: unknown[]) => void) | undefined;
     class MutationObserver {
       constructor(observer: (records: unknown[]) => void) { callback = observer; }
       observe(): void {}
     }
     const documentElement = { nodeType: 1, tagName: "HTML", matches: () => false };
-    const template = {
-      nodeType: 1,
-      tagName: "TEMPLATE",
-      matches: (selector: string) => selector.includes("template[shadowrootmode]"),
-    };
     const frame = {
       nodeType: 1,
       tagName: "IFRAME",
@@ -220,18 +246,10 @@ describe("agent Browser privacy classification", () => {
       type: "childList",
       target: documentElement,
       oldValue: null,
-      removedNodes: [template],
-      addedNodes: [],
-    }]);
-    expect(observed()).toEqual([true, undefined, undefined]);
-    callback!([{
-      type: "childList",
-      target: documentElement,
-      oldValue: null,
       removedNodes: [],
       addedNodes: [frame],
     }]);
-    expect(observed()).toEqual([true, true, undefined]);
+    expect(observed()).toEqual([undefined, true, undefined]);
   });
 
   it("shares one bounded scan budget across each mutation callback", async () => {

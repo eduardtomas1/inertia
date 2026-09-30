@@ -303,7 +303,7 @@ export function createPreviewBrokerPageTools() {
     agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
     agentPageActivationTargetStillFocused: vi.fn<() => Promise<boolean>>(async () => true),
     agentPageEvidencePrivacy: vi.fn<() => Promise<{
-      withheld: "password" | "hidden-input" | "credential-signal" | null;
+      withheld: "password" | "hidden-input" | "credential-signal" | "document-too-large" | null;
     }>>(async () => ({ withheld: null })),
     agentPageHasSensitiveEvidence: vi.fn(async () => false),
     agentPageHasSensitiveScreenshotEvidence: vi.fn(async () => false),

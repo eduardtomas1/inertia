@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Camera, X } from "lucide-react";
 import type { SnapshotDelivery } from "@shared/snapshots";
 import type { SnapshotReview, SnapshotReviewArea, SnapshotReviewRequest } from "@shared/snapshot-review";
+import { ELECTRON_IPC_ERROR_PREFIX } from "../../hooks/useDesktopTools";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import { IconButton } from "../ui";
@@ -68,7 +69,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
     setPending(true); setError(null);
     try { await window.inertia.snapshot(input); }
     catch (cause) {
-      if (id.current === requested) setError(cause instanceof Error ? cause.message : "Screenshot is unavailable.");
+      if (id.current === requested) setError(cause instanceof Error ? cause.message.replace(ELECTRON_IPC_ERROR_PREFIX, "") : "Screenshot is unavailable.");
     } finally { if (id.current === requested) setPending(false); }
   };
   const close = (): void => {
@@ -77,18 +78,19 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
     if (reviewId) void window.inertia.snapshot({ type: "review-cancel", reviewId }).catch(() => undefined);
   };
   const start = (): void => {
+    if (open) return;
     id.current = crypto.randomUUID(); setOpen(true); setReview(null); setError(null);
     void request({ type: "review-start", reviewId: id.current, conversationId });
   };
   const edit = (operation: "crop" | "mask"): void => {
-    if (image) void request({ type: "review-edit", reviewId: image.reviewId, revision: image.revision, operation, area });
+    if (image && !pending) void request({ type: "review-edit", reviewId: image.reviewId, revision: image.revision, operation, area });
   };
   const validArea = image && area.x >= 0 && area.y >= 0 && area.width > 0 && area.height > 0
     && area.x + area.width <= image.width && area.y + area.height <= image.height;
 
   if (!navigator.platform.toLowerCase().includes("linux") || !window.inertia?.snapshot) return null;
   return <>
-    <IconButton label="Take reviewed screenshot" disabled={disabled || open} onClick={start}><Camera size={16} /></IconButton>
+    <IconButton label="Take reviewed screenshot" disabled={disabled} aria-disabled={open} onClick={start}><Camera size={16} /></IconButton>
     {open && createPortal(<div className="snapshot-backdrop" role="presentation">
       <section className="snapshot-dialog screenshot-review" role="dialog" aria-modal="true" aria-labelledby="screenshot-review-title"
         onKeyDown={(event) => {
@@ -122,7 +124,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
             <img src={image.preview} alt="Screenshot to review before attaching" draggable={false} />
             {validArea && <span className="screenshot-area" style={{ left: `${area.x / image.width * 100}%`, top: `${area.y / image.height * 100}%`, width: `${area.width / image.width * 100}%`, height: `${area.height / image.height * 100}%` }} />}
           </div>
-          <fieldset disabled={pending} className="screenshot-edit"><legend>Drag an area on the image or enter its pixel coordinates</legend>
+          <fieldset aria-disabled={pending} className="screenshot-edit"><legend>Drag an area on the image or enter its pixel coordinates</legend>
             {(["x", "y", "width", "height"] as const).map((key) => <label key={key}>{({ x: "Left", y: "Top", width: "Width", height: "Height" })[key]}
               <input type="number" min={key === "x" || key === "y" ? 0 : 1} max={key === "x" || key === "width" ? image.width : image.height}
                 value={area[key]} onChange={(event) => setArea({ ...area, [key]: Math.floor(Number(event.target.value)) })} />

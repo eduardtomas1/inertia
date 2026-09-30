@@ -24,7 +24,7 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
 
 export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
 export const PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT = "__inertia_agent_credential_signal__";
-export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input";
+export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input" | "document-too-large";
 export const PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL = "inertia:preview-agent-input-refusal";
 export type PreviewAgentInputRefusal = "disabled" | "file" | "nested" | "retargeted";
 
@@ -687,7 +687,7 @@ export function installPreviewAgentPrivacyGuard(
       if (!input) return true;
       inspect(input);
     }
-    if (inputs[index]) withhold("credential-signal");
+    if (inputs[index]) withhold("document-too-large");
     return true;
   };
   const inspectTree = (node: Node, budget: ScanBudget): void => {
@@ -706,13 +706,9 @@ export function installPreviewAgentPrivacyGuard(
       const descendant = iterator.nextNode() as Element | null;
       if (!descendant) return;
       if (!consume(budget)) {
-        if (!inputsInspected) withhold("credential-signal");
+        if (!inputsInspected) withhold("document-too-large");
         return;
       }
-      // A declarative shadow template is consumed by the HTML parser before
-      // ordinary page code can query it. Mutation records retain the added
-      // template node, so the document-start observer can taint the document
-      // without enumerating or serializing the closed subtree.
       if (descendant.matches?.("iframe,frame,object,embed")) state.framesObserved = true;
       if (descendant.matches?.("template[shadowrootmode]") || descendant.shadowRoot) {
         state.shadowRootsObserved = true;
@@ -903,7 +899,7 @@ export function installPreviewAgentPrivacyGuard(
         if (budget.exhausted) break;
       }
     }
-    if (budget.exhausted && !inspectInputs(document)) withhold("credential-signal");
+    if (budget.exhausted && !inspectInputs(document)) withhold("document-too-large");
   });
   observer.observe(document, {
     attributes: true,

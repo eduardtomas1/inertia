@@ -63,7 +63,7 @@ describe("Theme library", () => {
     expect(screen.getByRole("button", { name: "Use custom color for light" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Use Inertia for light" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Use Inertia for dark" })).toHaveAttribute("aria-pressed", "true");
-    const hex = screen.getByRole("textbox", { name: "Dark hex color" });
+    const hex = screen.getByRole("textbox", { name: "Dark color" });
     fireEvent.change(hex, { target: { value: "oops" } });
     fireEvent.keyDown(hex, { key: "Enter" });
     expect(onUpdate).not.toHaveBeenCalled();
@@ -81,5 +81,45 @@ describe("Theme library", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: "#009688" });
     fireEvent.click(screen.getByRole("button", { name: "Reset light custom color" }));
     expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: null });
+  });
+
+  it("names each hex field by its visible label", () => {
+    render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia" }} disabled={false} onUpdate={vi.fn()} />);
+    for (const label of ["Light color", "Dark color"]) {
+      const hex = screen.getByRole("textbox", { name: label });
+      expect(document.querySelector(`label[for="${hex.id}"]`)?.textContent).toBe(label);
+      expect(hex).not.toHaveAttribute("aria-label");
+    }
+    expect(screen.queryByRole("textbox", { name: "Light hex color" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Dark hex color" })).toBeNull();
+  });
+
+  it("reports an invalid hex color only after a failed commit", () => {
+    const onUpdate = vi.fn();
+    render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia" }} disabled={false} onUpdate={onUpdate} />);
+    const hex = screen.getByRole("textbox", { name: "Light color" });
+    for (const typed of ["#", "#3", "#3a", "#3a8", "#3a86", "#3a86f"]) {
+      fireEvent.change(hex, { target: { value: typed } });
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(hex).toHaveAttribute("aria-invalid", "false");
+    }
+    fireEvent.keyDown(hex, { key: "Enter" });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(hex).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    fireEvent.change(hex, { target: { value: "#3a86ff" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(hex).toHaveAttribute("aria-invalid", "false");
+    fireEvent.change(hex, { target: { value: "#3a86f" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.blur(hex);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    fireEvent.keyDown(hex, { key: "Escape" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(hex, { target: { value: "#3a86ff" } });
+    fireEvent.keyDown(hex, { key: "Enter" });
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ lightCustomColor: "#3a86ff" });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

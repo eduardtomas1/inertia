@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WelcomeGuide } from "../../src/renderer/src/components/welcome-guide/WelcomeGuide";
 import { WelcomeGuideHost } from "../../src/renderer/src/components/WelcomeGuideHost";
+import { closeHelpGuide, openHelpGuide } from "../../src/renderer/src/utils/helpGuide";
 import {
   closeWelcomeGuide,
   openWelcomeGuide,
@@ -273,6 +274,18 @@ describe("WelcomeGuideHost", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
 
     view.rerender(<WelcomeGuideHost {...hostProps()} />);
+    expect(await screen.findByRole("dialog", { name: "Welcome guide" })).toBeVisible();
+  });
+
+  it("waits for Help to close before opening", async () => {
+    act(() => openHelpGuide());
+    try {
+      render(<WelcomeGuideHost {...hostProps()} />);
+      await act(async () => undefined);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      act(() => closeHelpGuide());
+    }
     expect(await screen.findByRole("dialog", { name: "Welcome guide" })).toBeVisible();
   });
 

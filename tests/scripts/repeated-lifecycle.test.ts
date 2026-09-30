@@ -72,6 +72,7 @@ test("keeps common lifecycle ownership proof in every platform repetition", asyn
     expect(suites).toEqual(expect.arrayContaining([
       "tests/main/app-update-handoff.test.ts",
       "tests/main/runtime-supervisor-lifecycle.test.ts",
+      "tests/server/process-lifecycle-posix-classification.test.ts",
       "tests/server/process-lifecycle.test.ts",
       "tests/server/runtime-shutdown-authority.test.ts",
     ]));

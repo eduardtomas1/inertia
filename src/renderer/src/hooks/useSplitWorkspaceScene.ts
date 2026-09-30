@@ -8,7 +8,6 @@ import type {
   AppSettings,
   ChatAttachment,
   Conversation,
-  ModelSelection,
   MessageSendAcceptance,
   Project,
   ProviderMaintenanceProviderId,
@@ -25,8 +24,8 @@ import {
 } from "../components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "../components/workspace-scene/createWorkspaceTurnActions";
 import {
-  buildNewConversationPayload,
-  withNewConversationModelSelection,
+  replacementConversationPayload,
+  type ReplacementChatRequest,
 } from "../lib/newConversation";
 import {
   commandRefreshesConversationDetail,
@@ -34,8 +33,8 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { requestComposerPrefill } from "../utils/composerPrefill";
-import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
+import { persistComposerDraft } from "../utils/composerDraftPersistence";
+import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
@@ -196,10 +195,14 @@ export function useSplitWorkspaceScene({
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
+    runOptions?: { passive?: boolean },
   ): Promise<ServerEvent> => {
     const busyKey = `${busyPrefix}${key}`;
-    setBusyAction(busyKey);
-    setActionError(null);
+    const passive = runOptions?.passive === true;
+    if (!passive) {
+      setBusyAction(busyKey);
+      setActionError(null);
+    }
     try {
       const event = await connection.sendCommand(withRequestId(command));
       if (commandRefreshesConversationDetail(command, event)) {
@@ -214,7 +217,7 @@ export function useSplitWorkspaceScene({
       );
       throw error;
     } finally {
-      setBusyAction((current) => current === busyKey ? null : current);
+      if (!passive) setBusyAction((current) => current === busyKey ? null : current);
     }
   }, [
     busyPrefix,
@@ -295,35 +298,22 @@ export function useSplitWorkspaceScene({
   ]);
   const sceneActions = useStableActions({
     ...actions,
-    createConversationForSelection: async (
-      selection: ModelSelection,
-      options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
-    ) => {
+    createConversationForSelection: async (request: ReplacementChatRequest) => {
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
       }
       const event = resultEvent(await run("conversation.create", {
         type: "conversation.create",
-        payload: {
-          ...withNewConversationModelSelection(
-            buildNewConversationPayload(splitProject, settings),
-            selection,
-          ),
-          ...options?.configuration,
-          activate: false,
-        },
+        payload: replacementConversationPayload(splitProject, settings, request),
       }));
       if (event.result.kind !== "conversation.created") {
         throw new Error("The new split chat could not be identified.");
       }
-      onConversationCreated(event.result.conversationId);
-      if (options?.prefillText) {
-        const conversationId = event.result.conversationId;
-        window.requestAnimationFrame(() => requestComposerPrefill({
-          conversationId,
-          text: options.prefillText!,
-        }));
+      if (request.prefillText) {
+        persistComposerDraft(event.result.conversationId, request.prefillText);
       }
+      request.onCreated?.(event.result.conversationId);
+      onConversationCreated(event.result.conversationId);
     },
     sendMessage: async (
       content: string,
@@ -359,15 +349,9 @@ export function useSplitWorkspaceScene({
       }
     },
     followUpSubagent: (trace: SubagentTrace) => {
-      if (!splitConversation || !canFollowUpSubagentTrace(
-        trace,
-        projection.turns,
-      )) return;
-      const task = trace.description ?? trace.providerRole ?? "delegated task";
-      requestComposerPrefill({
-        conversationId: splitConversation.id,
-        text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
-      });
+      if (splitConversation) {
+        requestSubagentFollowUp(splitConversation.id, trace, projection.turns);
+      }
     },
     ...turnActions,
     stopSubagent: async (trace: SubagentTrace) => {

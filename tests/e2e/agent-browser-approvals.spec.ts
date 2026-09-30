@@ -19,6 +19,22 @@ test("binds inspectable browser approvals to the exact native document and hides
     await app.resizeWindow(1440, 920);
     const tools = await ensureWorkspaceTools(app.page);
     await selectWorkspaceTool(tools, "Browser");
+    const destination = { id: conversationId, url: `${app.previewUrl}agent-browser-destination` };
+    const opened = await app.electronApp.evaluate(async (_electron, { id, url }) => {
+      type Command = import("../../src/shared/agent-browser-approval").AgentBrowserRequest;
+      type Result = import("../../src/shared/agent-browser").AgentBrowserResult;
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (identity: { conversationId: string; runId: string; turnId: string }, command: Command) => Promise<Result>;
+      };
+      const result = await runtime.agentBrowser({ conversationId: id, runId: "11111111-1111-4111-8111-111111111111",
+        turnId: "22222222-2222-4222-8222-222222222222" }, { action: "navigate", url });
+      return result.ok ? "" : result.message;
+    }, destination);
+    expect(opened).toBe("");
+    await expect.poll(() => app.nativePreviewIsVisible(destination.url)).toBe(true);
+    await expect.poll(() => app.electronApp.evaluate(async ({ webContents }, url) =>
+      await webContents.getAllWebContents().find((item) => item.getURL() === url)
+        ?.executeJavaScript("innerWidth > 0 && innerHeight > 0") === true, destination.url)).toBe(true);
     const evidence = await app.electronApp.evaluate(async ({ webContents }, request) => {
       type Command = import("../../src/shared/agent-browser-approval").AgentBrowserRequest;
       type Result = import("../../src/shared/agent-browser").AgentBrowserResult;
@@ -28,8 +44,6 @@ test("binds inspectable browser approvals to the exact native document and hides
       const identity = { conversationId: request.id, runId: "11111111-1111-4111-8111-111111111111",
         turnId: "22222222-2222-4222-8222-222222222222" };
       const perform = (command: Command) => runtime.agentBrowser(identity, command);
-      const opened = await perform({ action: "navigate", url: request.url });
-      if (!opened.ok) throw new Error(opened.message);
       const contents = webContents.getAllWebContents().find((item) => item.getURL() === request.url);
       if (!contents) throw new Error("Missing native page");
       await contents.executeJavaScript('document.querySelector("input").removeAttribute("aria-label")');
@@ -74,7 +88,7 @@ test("binds inspectable browser approvals to the exact native document and hides
       await perform({ action: "discard-approval", token: sensitive.token });
       return { first, delivered, text, repeated, changedDocument, changedDuringFocus, changedFieldText,
         changedToPassword, passwordText, sensitive };
-    }, { id: conversationId, url: `${app.previewUrl}agent-browser-destination` });
+    }, destination);
     expect(evidence.first.detail).toContain("Search destination");
     expect(evidence.first.detail).toContain("textbox");
     expect(evidence.first.detail).toContain("inspected delivery");

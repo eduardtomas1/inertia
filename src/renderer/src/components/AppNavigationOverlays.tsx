@@ -7,6 +7,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { loadCommandPalette } from "./lazySurfaceLoaders";
 import { LoadingMark } from "./ui";
+import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
 import type { MessageSearchCommand } from "../hooks/useMessageSearch";
 
@@ -23,6 +24,8 @@ function PaletteLoadingShell(): React.JSX.Element {
 interface AppNavigationOverlaysProps {
   snapshot: AppSnapshot | null;
   paletteOpen: boolean;
+  paletteView: CommandPaletteView;
+  currentProjectId: string | null;
   newThreadShortcut: string;
   setPaletteOpen: (open: boolean) => void;
   setWorkspaceView: () => void;
@@ -31,6 +34,7 @@ interface AppNavigationOverlaysProps {
   selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   sendCommand: MessageSearchCommand;
   createConversation: () => void;
+  createConversationIn: (project: Project) => void;
   importProject: () => Promise<void>;
   openSettings: () => void;
 }
@@ -38,6 +42,8 @@ interface AppNavigationOverlaysProps {
 export function AppNavigationOverlays({
   snapshot,
   paletteOpen,
+  paletteView,
+  currentProjectId,
   newThreadShortcut,
   setPaletteOpen,
   setWorkspaceView,
@@ -46,6 +52,7 @@ export function AppNavigationOverlays({
   selectMessage,
   sendCommand,
   createConversation,
+  createConversationIn,
   importProject,
   openSettings,
 }: AppNavigationOverlaysProps): React.JSX.Element {
@@ -62,6 +69,8 @@ export function AppNavigationOverlays({
         CommandPalette ? (
           <CommandPalette
             open
+            initialView={paletteView}
+            currentProjectId={currentProjectId}
             projects={projects}
             conversations={conversations}
             newThreadShortcut={newThreadShortcut}
@@ -77,6 +86,7 @@ export function AppNavigationOverlays({
               selectConversation(conversation);
             }}
             onNewThread={createConversation}
+            onNewThreadIn={createConversationIn}
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
           />

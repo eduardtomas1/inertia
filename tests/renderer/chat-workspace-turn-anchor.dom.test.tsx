@@ -46,6 +46,9 @@ const timelineLifecycle = vi.hoisted(() => ({
   mounts: 0,
   unmounts: 0,
 }));
+const timelineRenderedProps = vi.hoisted(() => ({
+  values: [] as Array<Record<string, unknown>>,
+}));
 
 vi.mock("../../src/renderer/src/components/Composer", async () => {
   const { memo } = await import("react");
@@ -126,18 +129,7 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
 vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
   const { useEffect } = await import("react");
   return {
-    ResponseTimeline: ({
-      conversationId,
-      turns,
-      turnAnchorId,
-      inputRequests,
-      detailLoading,
-      compactingSince,
-      onFinalAnswerAutoScroll,
-      onReaderNavigationIntent,
-      onTurnAnchorSettled,
-      onStop,
-    }: {
+    ResponseTimeline: (props: {
       conversationId: string;
       turns: AgentTurn[];
       turnAnchorId: string | null;
@@ -149,6 +141,19 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       onTurnAnchorSettled?: (turnId: string) => void;
       onStop: () => void;
     }) => {
+      const {
+        conversationId,
+        turns,
+        turnAnchorId,
+        inputRequests,
+        detailLoading,
+        compactingSince,
+        onFinalAnswerAutoScroll,
+        onReaderNavigationIntent,
+        onTurnAnchorSettled,
+        onStop,
+      } = props;
+      timelineRenderedProps.values.push(props);
       useEffect(() => {
         timelineLifecycle.mounts += 1;
         return () => {
@@ -369,6 +374,7 @@ beforeEach(() => {
   timelineLifecycle.unmounts = 0;
   composerSendResult.value = undefined;
   composerHistoryProjection.value = [];
+  timelineRenderedProps.values = [];
 });
 
 afterEach(() => {
@@ -1192,6 +1198,66 @@ describe("draft turn anchoring", () => {
     }));
   });
 
+
+  it("keeps every timeline prop referentially stable when the workspace re-renders unchanged", async () => {
+    const activeConversation = conversation("conversation-stable-props");
+    const activeTurn = agentTurn(activeConversation, "running");
+    const request: AgentInputRequest = {
+      id: "question-stable",
+      providerId: "codex",
+      conversationId: activeConversation.id,
+      runId: activeTurn.runId,
+      turnId: activeTurn.id,
+      questions: [{
+        id: "scope",
+        header: "Scope",
+        question: "Which module should change?",
+        isOther: false,
+        isSecret: false,
+        allowMultiple: false,
+        options: [],
+      }],
+      autoResolutionMs: null,
+    };
+    HTMLElement.prototype.scrollTo = vi.fn();
+    const props: ComponentProps<typeof ChatWorkspace> = {
+      ...workspaceProps(activeConversation, async () => null),
+      turns: [activeTurn],
+      inputRequests: [request],
+      latestTurnSummary: {
+        id: activeTurn.id,
+        runId: activeTurn.runId,
+        status: "running",
+        providerId: activeTurn.providerId,
+        harnessId: activeTurn.harnessId,
+        backendProfileId: activeTurn.backendProfileId,
+        modelSelection: activeTurn.modelSelection,
+        continuationIdentity: activeTurn.continuationIdentity,
+        model: activeTurn.model,
+        reasoningEffort: activeTurn.reasoningEffort,
+        requestedAt: activeTurn.requestedAt,
+        startedAt: activeTurn.startedAt,
+        completedAt: null,
+        terminalReason: null,
+        updatedAt: activeTurn.updatedAt,
+      },
+    };
+    const view = render(<ChatWorkspace {...props} />);
+    await screen.findByTestId("turn-anchor-projection");
+    const before = timelineRenderedProps.values.at(-1)!;
+
+    view.rerender(<ChatWorkspace {...props} />);
+    const after = timelineRenderedProps.values.at(-1)!;
+
+    expect(after).not.toBe(before);
+    expect(after.latestTurnSummary).toEqual({
+      conversationId: activeConversation.id,
+      turn: props.latestTurnSummary,
+    });
+    expect(after.inputRequests).toEqual([request]);
+    expect(Object.keys(after).filter((key) => after[key] !== before[key]))
+      .toEqual([]);
+  });
 
   it("keeps a pending provider question actionable beside the composer", async () => {
     const request: AgentInputRequest = {

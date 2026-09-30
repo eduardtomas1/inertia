@@ -42,6 +42,67 @@ function fakeTerminal(pid: number): {
 }
 
 describe("TerminalManager cleanup recovery", () => {
+  it("carries the POSIX classification inputs on an unconfirmed terminal tree", async () => {
+    const terminal = fakeTerminal(43);
+    const failure = {
+      scope: "pid" as const,
+      reason: "incomplete-scan" as const,
+      rootStop: "sent" as const,
+      rootState: "running" as const,
+      rootRunningObserved: true,
+      scanStabilized: false,
+      groupExited: null,
+      descendantsExited: null,
+      rootExited: null,
+    };
+    const manager = new TerminalManager({
+      platform: "linux",
+      spawnTerminal: vi.fn(() => terminal.pty),
+      createProcessTreeTermination: () => Object.assign(
+        async () => false,
+        { posixCleanupFailure: failure },
+      ),
+      spawnOwnedTerminalProcess: (spawnProcess) => ({
+        process: spawnProcess(),
+        confirmStopped: () => false,
+        releaseIfGroupExited: () => undefined,
+        requestGuardianStop: () => false,
+        waitForGuardianStop: async () => false,
+      }),
+    });
+    const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+    const terminalId = manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24, vi.fn());
+
+    const outcome = await manager.closeManaged(terminalId).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).cause).toEqual({ posixCleanupFailure: failure });
+  });
+
+  it("never reports another termination's record for a terminal without one", async () => {
+    const terminal = fakeTerminal(44);
+    const manager = new TerminalManager({
+      platform: "linux",
+      spawnTerminal: vi.fn(() => terminal.pty),
+      createProcessTreeTermination: () => async () => false,
+      spawnOwnedTerminalProcess: (spawnProcess) => ({
+        process: spawnProcess(),
+        confirmStopped: () => false,
+        releaseIfGroupExited: () => undefined,
+        requestGuardianStop: () => false,
+        waitForGuardianStop: async () => false,
+      }),
+    });
+    const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+    const terminalId = manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24, vi.fn());
+
+    const outcome = await manager.closeManaged(terminalId).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).cause).toEqual({ posixCleanupFailure: null });
+  });
+
+
   it.each([
     { confirmed: false, exitTiming: "during stop" },
     { confirmed: false, exitTiming: "after failed stop" },

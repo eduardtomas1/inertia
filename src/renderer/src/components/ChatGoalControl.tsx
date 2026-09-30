@@ -27,6 +27,11 @@ import {
   MAX_GOAL_TOKEN_BUDGET,
   parseGoalTokenBudget,
 } from "../utils/goalBudget";
+import {
+  goalStatusLabel,
+  nextGoalActions,
+  type GoalActionIcon,
+} from "../utils/goalActions";
 import type { GoalExecutionStatus } from "../utils/goalExecution";
 
 interface GoalInput {
@@ -45,6 +50,8 @@ export interface ChatGoalControlProps {
   onRetry: () => Promise<void>;
   onSetGoal: (input: GoalInput) => Promise<void>;
   onClearGoal: (source: AgentGoalSource) => Promise<void>;
+  continuationRefusal?: string | null;
+  onStartNewChat?: () => void;
 }
 
 export interface ChatGoalInlineProps extends ChatGoalControlProps {
@@ -54,61 +61,16 @@ export interface ChatGoalInlineProps extends ChatGoalControlProps {
   ) => void;
 }
 
-function statusLabel(status: AgentGoalStatus): string {
-  if (status === "usageLimited") return "Usage limited";
-  if (status === "budgetLimited") return "Budget limited";
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
 function routeLabel(source: AgentGoalSource): string {
   return source === "codex-native" ? "Codex goal" : "Local objective";
 }
 
-function nextActions(
-  goal: AgentGoal,
-  executionStatus: GoalExecutionStatus,
-): Array<{
-  label: string;
-  status: AgentGoalStatus;
-  icon: React.JSX.Element;
-}> {
-  if (goal.status === "budgetLimited") return [];
-  if (
-    goal.status === "active"
-    && goal.source === "codex-native"
-    && executionStatus === "idle"
-  ) {
-    return [{
-      label: "Resume goal",
-      status: "active",
-      icon: <Play size={12} aria-hidden="true" />,
-    }];
-  }
-  if (goal.status === "active") {
-    return [
-      {
-        label: "Pause",
-        status: "paused",
-        icon: <CirclePause size={13} aria-hidden="true" />,
-      },
-      {
-        label: "Block",
-        status: "blocked",
-        icon: <Square size={11} aria-hidden="true" />,
-      },
-      {
-        label: "Complete",
-        status: "complete",
-        icon: <Check size={13} aria-hidden="true" />,
-      },
-    ];
-  }
-  return [{
-    label: goal.status === "complete" ? "Reopen goal" : "Mark active",
-    status: "active",
-    icon: <Play size={12} aria-hidden="true" />,
-  }];
-}
+const actionIcons: Record<GoalActionIcon, React.JSX.Element> = {
+  play: <Play size={12} aria-hidden="true" />,
+  pause: <CirclePause size={13} aria-hidden="true" />,
+  block: <Square size={11} aria-hidden="true" />,
+  complete: <Check size={13} aria-hidden="true" />,
+};
 
 function currentRouteGoal(workflow: AgentWorkflowState): AgentGoal | null {
   return workflow.goals.find(({ source }) =>
@@ -124,6 +86,8 @@ export function ChatGoalControl({
   onRetry,
   onSetGoal,
   onClearGoal,
+  continuationRefusal = null,
+  onStartNewChat,
   open,
   onDismiss,
 }: ChatGoalInlineProps): React.JSX.Element | null {
@@ -137,7 +101,10 @@ export function ChatGoalControl({
   const [tokenBudget, setTokenBudget] = useState("");
   const [recoveryBudget, setRecoveryBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const source = workflow?.goalCapability.kind ?? null;
+  const capability = workflow?.goalCapability;
+  const refusal = continuationRefusal
+    ?? (capability?.kind === "unavailable" ? capability.reason : null);
+  const source = !refusal && capability?.available ? capability.kind : null;
   const nativeGoal = source === "codex-native";
   const goal = workflow ? currentRouteGoal(workflow) : null;
   const recoveryBudgetFloor = Math.max(
@@ -150,9 +117,9 @@ export function ChatGoalControl({
   const separateGoalCount = workflow?.goals.filter(({ source: goalSource }) =>
     goalSource !== source).length ?? 0;
   const label = source ? routeLabel(source) : "Goal";
-  const stateLabel = goal ? statusLabel(goal.status) : null;
+  const stateLabel = goal ? goalStatusLabel(goal.status) : null;
   const controlsBusy = busy || executionStatus === "starting";
-  const ownerKey = workflow ? `${workflow.conversationId}:${source}` : null;
+  const ownerKey = workflow ? `${workflow.conversationId}:${capability?.kind ?? null}` : null;
   const ownerKeyRef = useRef(ownerKey);
   // A status action replaces the button that had focus (Pause becomes Resume,
   // the recovery section unmounts). Only an action from this control arms a
@@ -163,6 +130,13 @@ export function ChatGoalControl({
   useLayoutEffect(() => {
     if (!open) restoreActionFocus.current = false;
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !refusal) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    firstActionRef.current?.focus();
+  }, [open, refusal]);
 
   useLayoutEffect(() => {
     if (!open || !restoreActionFocus.current) return;
@@ -192,7 +166,7 @@ export function ChatGoalControl({
   useEffect(() => {
     if (!open) return;
     const dismissOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       onDismiss("escape");
     };
@@ -337,7 +311,17 @@ export function ChatGoalControl({
             </div>
           )}
 
-          {!workflow ? (
+          {refusal ? (
+            <div className="chat-goal-unavailable">
+              <p role="status">{refusal}</p>
+              {onStartNewChat && (
+                <button ref={firstActionRef} type="button" onClick={onStartNewChat}>
+                  <Flag size={13} aria-hidden="true" />
+                  New chat
+                </button>
+              )}
+            </div>
+          ) : !workflow ? (
             <div className="chat-goal-unavailable">
               <p role={error ? "alert" : "status"}>
                 {error ?? (loading
@@ -433,7 +417,7 @@ export function ChatGoalControl({
                 </section>
               )}
               <footer className="chat-goal-actions">
-                {nextActions(goal, executionStatus).map((action, index) => (
+                {nextGoalActions(goal, executionStatus).map((action, index) => (
                   <button
                     ref={index === 0 ? firstActionRef : undefined}
                     key={action.status}
@@ -441,7 +425,7 @@ export function ChatGoalControl({
                     disabled={controlsBusy || submitting}
                     onClick={() => void updateStatus(action.status)}
                   >
-                    {action.icon}
+                    {actionIcons[action.icon]}
                     {action.label}
                   </button>
                 ))}
@@ -508,8 +492,8 @@ export function ChatGoalControl({
                     ? "This becomes the native goal for this Codex thread."
                     : "This stays in Inertia and is never injected into provider context. Inertia does not measure or enforce the local token target."}
                 </small>
-                {workflow.goalCapability.kind === "inertia-local" && (
-                  <p>{workflow.goalCapability.reason}</p>
+                {capability?.kind === "inertia-local" && (
+                  <p>{capability.reason}</p>
                 )}
               </div>
               <button

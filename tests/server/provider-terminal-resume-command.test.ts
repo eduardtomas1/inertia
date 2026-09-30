@@ -157,6 +157,7 @@ describe("terminal.provider.resume command", () => {
 
     expect(fixture.workspacePath).toHaveBeenCalledWith(projectId, conversationId);
     expect(fixture.terminalResumeLaunch).toHaveBeenCalledWith(
+      conversationId,
       "codex",
       sessionId,
       "/workspace/.inertia/worktrees/owned",

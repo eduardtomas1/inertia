@@ -19,6 +19,8 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
+import type { RetainedDiffLock } from "../utils/retainedDiffLock";
+import { scopedReviewDispatch } from "../utils/scopedReviewDispatch";
 
 export type DiffSelection = {
   fingerprint: string;
@@ -53,6 +55,8 @@ export type ChangesPanelProps = {
   diffEmptyState?: { title: string; detail: string };
   capabilities?: { persistentReview?: boolean; agentRevision?: boolean; selectiveRevert?: boolean };
   repositoryPath?: string;
+  reviewScope?: string;
+  reviewLock?: RetainedDiffLock;
   onSelectFile: (path: string) => void;
   onOpenFile?: (path: string) => void;
   onRefresh?: () => void;
@@ -76,13 +80,13 @@ const loadReviewNoteDialog = createSurfaceLoader(() => import("./ReviewNoteDialo
 type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
 
-function pathParts(path: string): { name: string; parent: string } {
+export function changedFilePathParts(path: string): { name: string; parent: string } {
   // Git's wire paths use "/" on every platform. A backslash can be a literal
   // filename character on POSIX and must remain part of the visible basename.
   const parts = path.split("/");
   return { name: parts.at(-1) ?? path, parent: parts.slice(0, -1).join("/") };
 }
-function statusLabel(file: ChangedFile): string {
+export function changedFileStatusLabel(file: ChangedFile): string {
   const status = file.status.trim().toLowerCase();
   if (file.untracked || status === "??" || status === "untracked") return "Untracked";
   if (status === "a" || status === "added") return "Added";
@@ -95,8 +99,8 @@ function statusLabel(file: ChangedFile): string {
   return "Modified";
 }
 
-function statusCode(file: ChangedFile): string {
-  const label = statusLabel(file);
+export function changedFileStatusCode(file: ChangedFile): string {
+  const label = changedFileStatusLabel(file);
   if (label === "Untracked") return "U";
   if (label === "Conflict") return "!";
   if (label === "Type changed") return "T";
@@ -104,11 +108,33 @@ function statusCode(file: ChangedFile): string {
   return label.charAt(0);
 }
 
+export function changedFileWorkingState(file: ChangedFile): string {
+  if (file.untracked) return "untracked";
+  if (file.staged && file.unstaged) return "staged + unstaged";
+  if (file.staged) return "staged";
+  return "unstaged";
+}
+
 function actionLabel(action: ReviewAction): string {
   if (action === "ask") return "Ask agent";
   if (action === "revise") return "Request revision";
   if (action === "note") return "Save local note";
   return "Revert selected lines";
+}
+
+const reviewLockMessages = {
+  refreshing: "Refreshing this diff. Review actions resume when it is current.",
+  failed: "This diff could not be refreshed. Review actions stay paused until it is current.",
+  stale: "This diff may be out of date. Refresh changes to resume review actions.",
+};
+
+function hunkNoteKind(note: DiffReviewNote): string {
+  return note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "hunk note";
+}
+
+function noteControlLabel(action: "Edit" | "Delete", kind: string, note: DiffReviewNote): string {
+  const body = note.body.trim().replace(/\s+/gu, " ");
+  return `${action} ${kind}: ${body.length > 60 ? `${body.slice(0, 59)}…` : body}`;
 }
 
 const classificationLabels: Record<DiffReviewClassificationHint["classification"], string> = {
@@ -155,6 +181,8 @@ export function ChangesPanel({
   diffEmptyState,
   capabilities,
   repositoryPath = ".",
+  reviewScope,
+  reviewLock,
   onSelectFile,
   onOpenFile,
   onRefresh,
@@ -186,6 +214,8 @@ export function ChangesPanel({
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
   const toolbarRef = useRef<HTMLElement>(null);
   const restoreQuestionFocusRef = useRef(false);
+  const draftRef = useRef({ selection, reviewAction, comment });
+  draftRef.current = { selection, reviewAction, comment };
   const questionStopVisible = questionRunning
     || (reviewAction === "ask" && submitting);
   const persistentReview = capabilities?.persistentReview ?? true;
@@ -197,6 +227,26 @@ export function ChangesPanel({
     error: diffParsingError,
   } = useParsedUnifiedDiff(diff?.patch ?? "", diff);
   const diffBusy = loading || diffParsing;
+  const reviewLockReason = diffParsing
+    ? "refreshing"
+    : reviewLock === undefined ? loading ? "refreshing" : null : reviewLock;
+  const reviewLocked = reviewLockReason !== null;
+  const reviewLockedRef = useRef(reviewLocked);
+  reviewLockedRef.current = reviewLocked;
+  const scope = reviewScope ?? JSON.stringify([selectedPath]);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const scopeGenerationRef = useRef(0);
+  const dispatch = scopedReviewDispatch({
+    onAsk,
+    onRequestRevision,
+    onRevert,
+    onSetReviewState,
+    onCreateNote,
+    onUpdateNote,
+    onDeleteNote,
+    onAddToPrompt,
+  }, scope, () => scopeRef.current);
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
     : structured.files[0] ?? null;
@@ -211,12 +261,20 @@ export function ChangesPanel({
   const toolbarFiles = headerMetrics?.files ?? files.length;
   const toolbarInsertions = headerMetrics?.insertions ?? totals.insertions;
   const toolbarDeletions = headerMetrics?.deletions ?? totals.deletions;
+  const fingerprints = useMemo(() => ({
+    files: new Map<DiffFile, string>(structured.files.map((file) => [file, diffFileFingerprint(file)])),
+    hunks: new Map<DiffHunk, string>(structured.files.flatMap((file) => file.hunks.map((hunk) => [hunk, diffHunkFingerprint(file, hunk)]))),
+  }), [structured.files]);
+  const fingerprintsRef = useRef(fingerprints);
+  fingerprintsRef.current = fingerprints;
+  const hunkFingerprint =(file: DiffFile, hunk: DiffHunk): string => fingerprints.hunks.get(hunk) ?? diffHunkFingerprint(file, hunk);
+  const fileFingerprint = (file: DiffFile): string => fingerprints.files.get(file) ?? diffFileFingerprint(file);
   const hunkReviewed = (file: DiffFile, hunk: DiffHunk): boolean => {
-    const fingerprint = diffHunkFingerprint(file, hunk);
+    const fingerprint = hunkFingerprint(file, hunk);
     return reviewStates.some((state) => state.scope === "hunk" && state.path === file.path && state.hunkId === hunk.id && state.targetFingerprint === fingerprint && state.reviewed && !state.stale);
   };
   const fileReviewed = (file: DiffFile): boolean => {
-    const fingerprint = diffFileFingerprint(file);
+    const fingerprint = fileFingerprint(file);
     return reviewStates.some((state) => state.scope === "file" && state.path === file.path && state.targetFingerprint === fingerprint && state.reviewed && !state.stale);
   };
   const effectivelyReviewed = (file: DiffFile, hunk: DiffHunk): boolean => fileReviewed(file) || hunkReviewed(file, hunk);
@@ -233,13 +291,23 @@ export function ChangesPanel({
   };
 
   useEffect(() => {
+    scopeGenerationRef.current += 1;
+    setNoteDraft(null);
     setSelection(null);
     setReviewAction(null);
     setComment("");
+    setSubmitting(false);
     setSelectionError(null);
     setActiveHunkId(null);
     setStoppingAsk(false);
-  }, [structured.fingerprint, selectedPath]);
+    restoreQuestionFocusRef.current = false;
+  }, [scope]);
+
+  useEffect(() => {
+    setSelection(null);
+    setReviewAction(null);
+    setActiveHunkId(null);
+  }, [structured.fingerprint]);
 
   useEffect(() => {
     if (!questionRunning) setStoppingAsk(false);
@@ -266,6 +334,7 @@ export function ChangesPanel({
     setSelectionError(null);
     setStoppingAsk(true);
     void onCancelAsk().catch((error) => {
+      if (scopeRef.current !== scope) return;
       restoreQuestionFocusRef.current = false;
       setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
       setStoppingAsk(false);
@@ -279,6 +348,7 @@ export function ChangesPanel({
     stopActiveQuestion();
   };
   const chooseLine = (hunk: DiffHunk, index: number, extend: boolean) => {
+    if (reviewLocked) return;
     const start = extend && selection?.hunkId === hunk.id ? Math.min(selection.anchor, index) : index;
     const end = extend && selection?.hunkId === hunk.id ? Math.max(selection.anchor, index) : index;
     const lineIds = hunk.lines.slice(start, end + 1).filter((line) => line.kind !== "meta").map((line) => line.id);
@@ -290,7 +360,10 @@ export function ChangesPanel({
     setActiveHunkId(hunk.id);
     setSelectionError(null);
     setReviewAction(null);
-    setComment("");
+    if (selection && !(extend && selection.hunkId === hunk.id)) setComment("");
+  };
+  const chooseAction = (action: ReviewAction) => {
+    if (!reviewLocked) setReviewAction(action);
   };
   const reviewSelection = (file: DiffFile, hunk: DiffHunk): DiffSelection | null => {
     if (!selection || selection.hunkId !== hunk.id || selection.lineIds.length === 0) return null;
@@ -305,13 +378,17 @@ export function ChangesPanel({
   };
   const submit = async (file: DiffFile, hunk: DiffHunk) => {
     const selected = reviewSelection(file, hunk);
-    if (!selected || !reviewAction || submitting) return;
+    if (!selected || !reviewAction || submitting || reviewLocked) return;
+    const submitted = draftRef.current;
+    const generation = scopeGenerationRef.current;
+    const current = () => scopeRef.current === scope && scopeGenerationRef.current === generation;
     setSubmitting(true);
+    setSelectionError(null);
     try {
-      if (reviewAction === "ask") await onAsk(selected, comment);
-      if (reviewAction === "revise") await onRequestRevision(selected, comment);
-      if (reviewAction === "revert") await onRevert(selected, comment);
-      if (reviewAction === "note") await onCreateNote({
+      if (reviewAction === "ask") await dispatch.onAsk(selected, comment);
+      if (reviewAction === "revise") await dispatch.onRequestRevision(selected, comment);
+      if (reviewAction === "revert") await dispatch.onRevert(selected, comment);
+      if (reviewAction === "note") await dispatch.onCreateNote({
         repositoryPath,
         path: file.path,
         hunkId: hunk.id,
@@ -319,50 +396,76 @@ export function ChangesPanel({
         targetFingerprint: selectedLineFingerprint(file, hunk, selected.lineIds),
         body: comment,
       });
-      clearSelection();
+      if (!current()) return;
+      const draft = draftRef.current;
+      if (draft.comment !== submitted.comment) return;
+      if (
+        draft.selection === submitted.selection
+        && draft.reviewAction === submitted.reviewAction
+      ) clearSelection();
+      else setComment("");
+    } catch (error) {
+      if (!current()) return;
+      setSelectionError(error instanceof Error ? error.message : `${actionLabel(reviewAction)} failed.`);
     } finally {
-      setSubmitting(false);
+      if (current()) setSubmitting(false);
     }
   };
   const addSelectionToPrompt = (file: DiffFile, hunk: DiffHunk, selected: DiffSelection) => {
+    if (reviewLocked) return;
     try {
       const reference = buildDiffContext(file, hunk, selected.lineIds, { purpose: "prompt" }).text;
-      onAddToPrompt({ ...selected, reference });
+      dispatch.onAddToPrompt({ ...selected, reference });
       clearSelection();
     } catch (error) {
       setSelectionError(error instanceof Error ? error.message : "This selection cannot be added safely.");
     }
   };
   const toggleState = async (file: DiffFile, hunk?: DiffHunk) => {
+    if (reviewLocked) return;
     const currentReviewed = hunk ? hunkReviewed(file, hunk) : fileReviewed(file);
-    await onSetReviewState({
-      repositoryPath,
-      scope: hunk ? "hunk" : "file",
-      path: file.path,
-      hunkId: hunk?.id ?? null,
-      targetFingerprint: hunk ? diffHunkFingerprint(file, hunk) : diffFileFingerprint(file),
-      reviewed: !currentReviewed,
-    });
+    try {
+      await dispatch.onSetReviewState({
+        repositoryPath,
+        scope: hunk ? "hunk" : "file",
+        path: file.path,
+        hunkId: hunk?.id ?? null,
+        targetFingerprint: hunk ? hunkFingerprint(file, hunk) : fileFingerprint(file),
+        reviewed: !currentReviewed,
+      });
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The review mark could not be saved.");
+    }
   };
   const createScopedNote = (file: DiffFile, hunk?: DiffHunk) => {
+    if (reviewLocked) return;
+    const targetFingerprint = hunk ? hunkFingerprint(file, hunk) : fileFingerprint(file);
+    const targetCurrent = () => hunk
+      ? [...fingerprintsRef.current.hunks].some(([current, fingerprint]) => current.id === hunk.id && fingerprint === targetFingerprint)
+      : [...fingerprintsRef.current.files.values()].includes(targetFingerprint);
     setNoteDraft({
       title: `Add note for ${hunk ? "this hunk" : file.path}`,
       body: "",
-      save: (body) => onCreateNote({
-        repositoryPath,
-        path: file.path,
-        hunkId: hunk?.id ?? null,
-        lineIds: [],
-        targetFingerprint: hunk ? diffHunkFingerprint(file, hunk) : diffFileFingerprint(file),
-        body,
-      }),
+      save: async (body) => {
+        if (reviewLockedRef.current) throw new Error("The diff is refreshing.");
+        if (!targetCurrent()) throw new Error("The diff changed while this note was open.");
+        await dispatch.onCreateNote({
+          repositoryPath,
+          path: file.path,
+          hunkId: hunk?.id ?? null,
+          lineIds: [],
+          targetFingerprint,
+          body,
+        });
+      },
     });
   };
   const editNote = (note: DiffReviewNote) => {
     setNoteDraft({
       title: "Edit review note",
       body: note.body,
-      save: async (body) => { if (body !== note.body) await onUpdateNote(note.id, body); },
+      save: async (body) => { if (body !== note.body) await dispatch.onUpdateNote(note.id, body); },
     });
   };
   const notePromptText = (note: DiffReviewNote) => [
@@ -370,15 +473,38 @@ export function ChangesPanel({
     note.body,
   ].join("\n");
   const requestNoteRevision = async (note: DiffReviewNote, file: DiffFile, hunk: DiffHunk) => {
+    if (reviewLocked) return;
     const lineIds = note.lineIds.length > 0 ? note.lineIds : hunk.lines.filter((line) => line.kind !== "meta").map((line) => line.id);
-    await onRequestRevision({
-      fingerprint: structured.fingerprint,
-      file,
-      hunk,
-      lineIds,
-      reference: "",
-      repositoryPath,
-    }, note.body);
+    try {
+      await dispatch.onRequestRevision({
+        fingerprint: structured.fingerprint,
+        file,
+        hunk,
+        lineIds,
+        reference: "",
+        repositoryPath,
+      }, note.body);
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The revision could not be requested.");
+    }
+  };
+  const deleteNote = async (note: DiffReviewNote) => {
+    if (!window.confirm("Delete this local review note?")) return;
+    try {
+      await dispatch.onDeleteNote(note.id);
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The review note could not be deleted.");
+    }
+  };
+  const undoReversal = async () => {
+    try {
+      await onUndoReversal?.();
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      setSelectionError(error instanceof Error ? error.message : "The revert could not be undone.");
+    }
   };
   const navigateHunk = (direction: -1 | 1) => {
     const all = visibleFiles.flatMap((file) => file.hunks
@@ -405,7 +531,7 @@ export function ChangesPanel({
         <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>
           <span className="stat-additions">+{toolbarInsertions}</span><span className="stat-deletions">−{toolbarDeletions}</span>
           {lastReversal && onUndoReversal && (
-            <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void onUndoReversal()}>
+            <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void undoReversal()}>
               <RotateCcw size={13} />Undo revert
             </button>
           )}
@@ -463,17 +589,17 @@ export function ChangesPanel({
         <div className="panel-empty changes-empty"><GitCompareArrows size={22} /><h3>{emptyState?.title ?? "No local changes"}</h3><p>{emptyState?.detail ?? "Edits made in this workspace will appear here."}</p></div>
       ) : (
         <div className="changes-layout">
-          {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{statusCode(file)} · {file.path}</option>)}</select></div>}
+          {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
           {fileNavigator ?? <nav className="changes-file-list" aria-label="Changed files">
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
-              const parts = pathParts(file.path);
+              const parts = changedFilePathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
               const language = sourceLanguageForFile(file.path);
               return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={15} /><span className="change-file-status" title={statusLabel(file)}>{statusCode(file)}</span></span>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={15} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
-                  <span>{file.staged ? "staged" : ""}{file.staged && file.unstaged ? " + " : ""}{file.unstaged ? "unstaged" : ""}</span>
+                  <span>{changedFileWorkingState(file)}</span>
                   <span><span className="file-insertions">+{file.insertions}</span> <span className="file-deletions">−{file.deletions}</span></span>
                   {diffFile && fileReviewed(diffFile) && <Check size={11} aria-label="File reviewed" />}
                 </span>
@@ -491,26 +617,28 @@ export function ChangesPanel({
                 <div className="diff-file-review-heading">
                   <span><strong>{selectedFile.path}</strong>{fileSummary && <small>{fileSummary.summary}</small>}<ClassificationHints hints={fileSummary?.classifications} /></span>
                   {onOpenFile && <button type="button" onClick={() => onOpenFile(selectedFile.path)}><ExternalLink size={12} />Open file</button>}
-                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
-                  {persistentReview && <button type="button" onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
+                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
+                  {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
                 </div>
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId === null).map((note) => (
                   <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
                     <span><StickyNote size={12} /><strong>File note{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                    <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Edit", "file note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId !== null && note.stale && !selectedFile.hunks.some((hunk) => hunk.id === note.hunkId)).map((note) => (
                   <div className="diff-review-note is-stale" key={note.id}>
                     <span><StickyNote size={12} /><strong>Stale note · target changed</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                    <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Edit", "stale note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
-                <p className="diff-selection-help">Select a line, then Shift-click another to review a range.</p>
+                <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
+                {reviewLockReason && <p className="panel-notice diff-review-paused" role="status">{reviewLockMessages[reviewLockReason]}</p>}
+                {!selection && comment && <p className="panel-notice diff-review-held" role="status">The diff changed while it refreshed. Select lines again to continue your draft.</p>}
                 {selectedFile.hunks.map((hunk) => {
                   const shown = hunkMatchesFilter(selectedFile, hunk);
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);
@@ -530,8 +658,8 @@ export function ChangesPanel({
                     <div className="diff-hunk-header">
                       <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">
-                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
-                        {persistentReview && <button type="button" onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
+                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
+                        {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
                       </span>
                     </div>
                     {hunkAnswer && <SelectionReviewAnswerCard answer={hunkAnswer} onDismiss={onDismissSelectionAnswer} />}
@@ -539,9 +667,9 @@ export function ChangesPanel({
                       <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
                         <span><StickyNote size={12} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                         <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                        {agentRevision && <button type="button" disabled={note.stale} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
-                        <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                        <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                        {agentRevision && <button type="button" disabled={note.stale} aria-disabled={reviewLocked || undefined} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
+                        <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
+                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                       </div>
                     ))}
                     {hunk.lines.map((line, index) => <div key={line.id}>
@@ -549,18 +677,24 @@ export function ChangesPanel({
                         type="button"
                         className={clsx("diff-line", `is-${line.kind}`, selected?.lineIds.includes(line.id) && "is-selected")}
                         onClick={(event) => chooseLine(hunk, index, event.shiftKey)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || !event.shiftKey) return;
+                          event.preventDefault();
+                          chooseLine(hunk, index, true);
+                        }}
                         disabled={line.kind === "meta"}
+                        aria-disabled={reviewLocked || undefined}
                       >
                         <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span><span className="diff-line-content">{line.content || " "}</span>
                       </button>
                       {selected && line.id === lastSelectedId && (
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
-                            <button type="button" disabled={questionRunning} onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
-                            {agentRevision && <button type="button" onClick={() => setReviewAction("revise")}><WandSparkles size={13} />Request revision</button>}
-                            {selectiveRevert && <button type="button" onClick={() => setReviewAction("revert")} disabled={!changedSelection || diff?.truncated}><RotateCcw size={13} />Revert</button>}
-                            {persistentReview && <button type="button" onClick={() => setReviewAction("note")}><StickyNote size={13} />Note</button>}
-                            <button type="button" onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={13} />Add to prompt</button>
+                            <button type="button" disabled={questionRunning} aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("ask")}><CircleHelp size={13} />Ask about</button>
+                            {agentRevision && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("revise")}><WandSparkles size={13} />Request revision</button>}
+                            {selectiveRevert && <button type="button" onClick={() => chooseAction("revert")} disabled={!changedSelection || diff?.truncated} aria-disabled={reviewLocked || undefined}><RotateCcw size={13} />Revert</button>}
+                            {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("note")}><StickyNote size={13} />Note</button>}
+                            <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={13} />Add to prompt</button>
                             <IconButton label="Clear selection" onClick={clearSelection}><X size={13} /></IconButton>
                           </div>
                           {reviewAction && (
@@ -595,7 +729,7 @@ export function ChangesPanel({
                                     {stoppingAsk ? "Stopping…" : "Stop asking"}
                                   </button>
                                 ) : (
-                                  <button type="submit" className="primary-button" disabled={submitting || (reviewAction === "note" && !comment.trim())}>{submitting ? <LoadingMark label={actionLabel(reviewAction)} /> : actionLabel(reviewAction)}</button>
+                                  <button type="submit" className="primary-button" disabled={submitting || reviewLocked || (reviewAction === "note" && !comment.trim())}>{submitting ? <LoadingMark label={actionLabel(reviewAction)} /> : actionLabel(reviewAction)}</button>
                                 )}
                               </div>
                             </form>

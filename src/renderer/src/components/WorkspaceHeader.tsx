@@ -44,6 +44,7 @@ const WorkspaceHeaderActions = lazy(async () => ({
 }));
 
 export const HEADER_ACTIONS_COLLAPSE_WIDTH = 520;
+const HEADER_OVERFLOW_MENU_ID = "workspace-header-overflow-menu";
 
 export function headerActionsCollapsed(input: {
   containerWidth: number;
@@ -274,6 +275,7 @@ export function WorkspaceHeader({
       <WorkspaceHeaderActions
         key={`${project.id}:${conversation?.id ?? "draft"}`}
         presentation={presentation}
+        focusMenuId={collapsed && menu === "overflow" ? HEADER_OVERFLOW_MENU_ID : null}
         projectId={project.id}
         projectName={project.name}
         actions={actions}
@@ -396,24 +398,26 @@ export function WorkspaceHeader({
                 className="header-overflow-button"
                 aria-haspopup="menu"
                 aria-expanded={menu === "overflow"}
-                aria-controls="workspace-header-overflow-menu"
+                aria-controls={HEADER_OVERFLOW_MENU_ID}
                 onClick={() => toggleMenu("overflow")}
               >
                 <Ellipsis size={16} />
               </IconButton>
               <div
                 ref={(node) => setMenuPopover("overflow", node)}
-                id="workspace-header-overflow-menu"
+                id={HEADER_OVERFLOW_MENU_ID}
                 className="header-popover header-overflow-popover"
                 role="menu"
                 aria-label="Header actions"
                 hidden={!collapsed || menu !== "overflow"}
-                onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]')}
+                onKeyDown={(event) => {
+                  if (collapsed) navigateMenuItems(event, '[role="menuitem"]');
+                }}
               >
                 <div ref={mountMenuActions} className="header-actions-menu-host" />
+                {createPortal(headerActions, actionsContainer)}
               </div>
             </div>
-            {createPortal(headerActions, actionsContainer)}
           </>
         )}
         {showGit && menu === "branches" && project && (

@@ -101,6 +101,7 @@ export function useInertiaConnection(): InertiaConnection {
         }
 
         const runtimeConnection = await window.inertia.getRuntimeConnection();
+        if (disposed) return;
         if ("unavailable" in runtimeConnection) {
           setStatus("offline");
           setError(runtimeConnection.message);
@@ -113,7 +114,6 @@ export function useInertiaConnection(): InertiaConnection {
         }
         const { websocketUrl, databaseRecoveryNotice: startupNotice } =
           runtimeConnection;
-        if (disposed) return;
         if (startupNotice) setDatabaseRecoveryNotice(startupNotice);
 
         const projection = projectionRef.current.current();

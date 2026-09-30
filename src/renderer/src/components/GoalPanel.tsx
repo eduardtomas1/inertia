@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { useId, useMemo, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Check,
@@ -47,6 +47,11 @@ import {
   parseGoalTokenBudget,
 } from "../utils/goalBudget";
 import {
+  goalStatusLabel,
+  nextGoalActions,
+  type GoalActionIcon,
+} from "../utils/goalActions";
+import {
   goalExecutionStatus,
   type GoalExecutionStatus,
 } from "../utils/goalExecution";
@@ -72,17 +77,13 @@ export interface GoalPanelProps {
   onClearGoal?: (goal: AgentGoal) => void | Promise<void>;
   onInsertSkill?: (skill: AgentSkillSummary) => void;
   onRefreshSkills?: () => void;
+  continuationRefusal?: string | null;
+  onStartNewChat?: () => void;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onOpenSubagent?: (trace: SubagentTrace) => void;
   canStopSubagent?: (trace: SubagentTrace) => boolean;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
-}
-
-function goalStatusLabel(status: AgentGoalStatus): string {
-  if (status === "usageLimited") return "Usage limited";
-  if (status === "budgetLimited") return "Budget limited";
-  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function sourceLabel(source: AgentGoalSource): string {
@@ -102,51 +103,12 @@ function goalProgress(goal: AgentGoal): number | null {
   )));
 }
 
-function nextGoalActions(
-  goal: AgentGoal,
-  executionStatus: GoalExecutionStatus,
-): Array<{
-  label: string;
-  status: AgentGoalStatus;
-  icon: React.JSX.Element;
-}> {
-  if (goal.status === "budgetLimited") return [];
-  if (
-    goal.status === "active"
-    && goal.source === "codex-native"
-    && executionStatus === "idle"
-  ) {
-    return [{
-      label: "Resume goal",
-      status: "active",
-      icon: <Play size={11} aria-hidden="true" />,
-    }];
-  }
-  if (goal.status === "active") {
-    return [
-      {
-        label: "Pause",
-        status: "paused",
-        icon: <CirclePause size={12} aria-hidden="true" />,
-      },
-      {
-        label: "Block",
-        status: "blocked",
-        icon: <Square size={10} aria-hidden="true" />,
-      },
-      {
-        label: "Complete",
-        status: "complete",
-        icon: <Check size={12} aria-hidden="true" />,
-      },
-    ];
-  }
-  return [{
-    label: goal.status === "complete" ? "Reopen goal" : "Mark active",
-    status: "active",
-    icon: <Play size={11} aria-hidden="true" />,
-  }];
-}
+const actionIcons: Record<GoalActionIcon, React.JSX.Element> = {
+  play: <Play size={11} aria-hidden="true" />,
+  pause: <CirclePause size={12} aria-hidden="true" />,
+  block: <Square size={10} aria-hidden="true" />,
+  complete: <Check size={12} aria-hidden="true" />,
+};
 
 function GoalCard({
   goal,
@@ -338,7 +300,7 @@ function GoalCard({
                 void updateGoalStatus(action.status);
               }}
             >
-              {action.icon}
+              {actionIcons[action.icon]}
               {action.label}
             </button>
           ))}
@@ -811,6 +773,8 @@ export function GoalPanel({
   onClearGoal,
   onInsertSkill,
   onRefreshSkills,
+  continuationRefusal = null,
+  onStartNewChat,
   canFollowUpSubagent,
   onFollowUpSubagent,
   onOpenSubagent,
@@ -826,22 +790,37 @@ export function GoalPanel({
   const skillsHeadingId = `${panelId}-skills`;
   const subagentsHeadingId = `${panelId}-subagents`;
   const subagentsListId = `${panelId}-subagent-list`;
-  const capabilitySource = workflow?.goalCapability.kind ?? null;
+  const capability = workflow?.goalCapability;
+  const refusal = continuationRefusal
+    ?? (capability?.kind === "unavailable" ? capability.reason : null);
+  const capabilitySource = !refusal && capability?.available ? capability.kind : null;
   const primaryGoals = workflow?.goals.filter(
-    ({ source }) => source === capabilitySource,
+    ({ source }) => refusal !== null || source === capabilitySource,
   ) ?? [];
-  const localTrackingGoals = workflow?.goals.filter(
+  const localTrackingGoals = refusal ? [] : workflow?.goals.filter(
     ({ source }) => source !== capabilitySource,
   ) ?? [];
   const hasEditableGoal = workflow?.goals.some(
     ({ source }) => source === capabilitySource,
   ) ?? false;
   const controlsBusy = busy || executionStatus === "starting";
+  const panelHadFocus = useRef(false);
+  const newChatRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!refusal || !panelHadFocus.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    newChatRef.current?.focus();
+  }, [refusal]);
   return (
     <section
       className="goal-panel"
       aria-label="Goals and agent workflows"
       data-goal-source={capabilitySource ?? "unavailable"}
+      onFocusCapture={() => { panelHadFocus.current = true; }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) panelHadFocus.current = false;
+      }}
     >
       <header className="panel-toolbar goal-panel-toolbar">
         <div className="panel-heading">
@@ -879,6 +858,21 @@ export function GoalPanel({
             {workflow.goalRefreshWarning}
           </p>
         )}
+        {refusal && (
+          <div className="goal-panel-capability-note goal-panel-refusal" role="status">
+            <span>{refusal}</span>
+            {onStartNewChat && (
+              <button
+                ref={newChatRef}
+                type="button"
+                className="goal-panel-text-button"
+                onClick={onStartNewChat}
+              >
+                New chat
+              </button>
+            )}
+          </div>
+        )}
         <section className="goal-panel-section" aria-labelledby={currentHeadingId}>
           <header className="goal-panel-section-heading">
             <div>
@@ -907,7 +901,7 @@ export function GoalPanel({
                 <GoalCard
                   key={goal.source}
                   goal={goal}
-                  editable={goal.source === capabilitySource}
+                  editable={!refusal && goal.source === capabilitySource}
                   busy={controlsBusy}
                   executionStatus={goal.source === "codex-native"
                     ? executionStatus
@@ -916,9 +910,9 @@ export function GoalPanel({
                   onClearGoal={onClearGoal}
                 />
               ))}
-              {!hasEditableGoal && onSetGoal && (
+              {!hasEditableGoal && onSetGoal && capabilitySource && (
                 <GoalComposer
-                  source={workflow.goalCapability.kind}
+                  source={capabilitySource}
                   sourceName={workflow.goalCapability.label}
                   busy={controlsBusy}
                   onSetGoal={onSetGoal}

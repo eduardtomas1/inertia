@@ -248,7 +248,9 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await page.getByLabel("Display name", { exact: true }).nth(1).fill(
     "Visual secondary model with a very long readable name",
   );
-  await page.getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByRole("radiogroup", { name: "Model mapping" })
+    .getByRole("radio", { name: "Advanced", exact: true })
+    .click();
   await page.locator(".backend-tier-grid:not(.backend-primary-model) select")
     .first()
     .selectOption(

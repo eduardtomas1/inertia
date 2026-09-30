@@ -305,6 +305,78 @@ describe("composer detachment ownership", () => {
     expect(onReleaseAttachment).not.toHaveBeenCalled();
   });
 
+  it("keeps failed attachments sendable when the draft changed during the send", async () => {
+    const current = conversation("prefill-during-failed-send");
+    const image = attachment("retained");
+    let fail!: () => void;
+    const onSend = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+        fail = () => reject(new Error("The runtime rejected the turn."));
+      }))
+      .mockResolvedValue(undefined);
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      onSend, onReleaseAttachment,
+      onChooseAttachments: async () => attachmentLease([image]),
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" }));
+    await screen.findByText(image.name);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Original request" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    act(() => requestComposerPrefill({ conversationId: current.id, text: "New context" }));
+    await act(async () => fail());
+
+    expect(screen.getByText(image.name)).toBeInTheDocument();
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
+    expect(prepareComposerDetachment(current.id)).toMatchObject({ status: "blocked", blocker: "attachments" });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1]![1]).toEqual([image]);
+  });
+
+  it("keeps failed attachments sendable after a newer follow-up claimed the send", async () => {
+    const current = conversation("follow-up-during-failed-send");
+    const image = attachment("retained-after-follow-up");
+    let fail!: () => void;
+    const onSend = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+        fail = () => reject(new Error("The runtime rejected the turn."));
+      }))
+      .mockResolvedValue(undefined);
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const props = composerProps(current, {
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "codex-app-server",
+      },
+      onSend, onReleaseAttachment,
+      onChooseAttachments: async () => attachmentLease([image]),
+    });
+    const view = render(<Composer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" }));
+    await screen.findByText(image.name);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Original request" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    view.rerender(<Composer {...props} running />);
+    fireEvent.change(input, { target: { value: "Follow-up" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1]![1]).toEqual([]);
+    await act(async () => fail());
+
+    expect(screen.getByText(image.name)).toBeInTheDocument();
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
+    view.rerender(<Composer {...props} />);
+    view.rerender(<Composer {...props} running />);
+    fireEvent.change(input, { target: { value: "Retry" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(3));
+    expect(onSend.mock.calls[2]![1]).toEqual([image]);
+  });
+
   it("reports context blockers for the owning conversation", () => {
     const diffOwner = conversation("diff-owner");
     const previewOwner = conversation("preview-owner");
@@ -816,24 +888,19 @@ describe("composer detachment ownership", () => {
       }],
       metadataState: { models: catalogState, rateLimits: catalogState },
     };
-    const claudeProvider: ProviderInfo = {
-      ...codexProvider,
-      id: "claude",
-      label: "Claude",
-      models: [{
-        ...codexProvider.models[0]!,
-        id: "claude-route",
-        label: "Claude Route",
-        description: "Destination route",
-      }],
-    };
+    codexProvider.models.push({
+      ...codexProvider.models[0]!,
+      id: "codex-next",
+      label: "Codex Next",
+      isDefault: false,
+    });
     let finishUpdate!: () => void;
     const update = new Promise<void>((resolve) => {
       finishUpdate = resolve;
     });
     const onUpdateConversation = vi.fn(() => update);
     render(<Composer {...composerProps(current, {
-      providers: [codexProvider, claudeProvider],
+      providers: [codexProvider],
       onUpdateConversation,
       latestTurnSummary: {
         id: "turn-source",
@@ -855,8 +922,8 @@ describe("composer detachment ownership", () => {
     })} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(await screen.findByRole("button", { name: "Claude, 2 models" }));
-    const destination = screen.getByTitle("Claude Route").closest("button");
+    fireEvent.click(await screen.findByRole("button", { name: "Codex, 3 models" }));
+    const destination = screen.getByTitle("Codex Next").closest("button");
     if (!destination) throw new Error("Expected the destination model route.");
     fireEvent.click(destination);
     await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());

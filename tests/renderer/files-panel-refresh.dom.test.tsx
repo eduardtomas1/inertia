@@ -467,8 +467,8 @@ describe("FilesPanel root refresh", () => {
     expect(screen.getByRole("treeitem", { name: "components" }))
       .toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("More files.")).toBeInTheDocument();
-    expect(screen.getByText("More in components."))
-      .toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "components" }))
+      .toHaveAccessibleDescription("More in components.");
 
     view.rerender(
       <FilesPanel

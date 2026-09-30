@@ -3,6 +3,8 @@ import { ShieldCheck } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import type { PendingModelRoute } from "./types";
 
+const accessLabels = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" } as const;
+
 export interface RouteChangeConfirmationProps {
   pendingRoute: PendingModelRoute;
   creating: boolean;
@@ -43,7 +45,10 @@ export function RouteChangeConfirmation({
         <strong id="route-confirmation-title">
           Open a new chat for {pendingRoute.label}?
         </strong>
-        <small id="route-confirmation-reason">{pendingRoute.reason}</small>
+        <small id="route-confirmation-reason">
+          {pendingRoute.reason} New chat settings: {accessLabels[pendingRoute.configuration.accessMode]}
+          {" · "}{pendingRoute.configuration.interactionMode === "plan" ? "Plan" : "Build"}.
+        </small>
         {blockedReason && <small role="alert">{blockedReason}</small>}
       </span>
       <button
@@ -58,8 +63,9 @@ export function RouteChangeConfirmation({
       <button
         type="button"
         className="primary-button"
-        disabled={!canCreate || creating}
-        onClick={onCreate}
+        disabled={!canCreate}
+        aria-disabled={creating || undefined}
+        onClick={() => { if (!creating) onCreate(); }}
       >
         {creating ? "Creating…" : "New chat"}
       </button>

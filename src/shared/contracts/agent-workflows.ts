@@ -63,6 +63,12 @@ export type AgentWorkflowGoalCapability =
       available: true;
       label: "Inertia local goal";
       reason: string;
+    }
+  | {
+      kind: "unavailable";
+      available: false;
+      label: "Goals unavailable";
+      reason: string;
     };
 
 export type AgentWorkflowSkillsCapability =

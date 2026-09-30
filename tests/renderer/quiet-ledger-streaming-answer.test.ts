@@ -170,17 +170,16 @@ function authoritativeTurn(
 
 describe("Quiet Ledger streaming answer handoff", () => {
   it("keeps active prose in the work transcript and waits for the authoritative terminal message", () => {
-    const draft = "Draft answer\n\n```ts\nconst stable = true;";
     const streaming = resolveFinalAnswerPresentation({
       isActive: true,
       terminalAssistantMessage: null,
-    }, draft, "");
+    });
     expect(streaming).toBeNull();
 
     const settling = resolveFinalAnswerPresentation({
       isActive: false,
       terminalAssistantMessage: null,
-    }, "", draft);
+    });
     expect(settling).toBeNull();
   });
 

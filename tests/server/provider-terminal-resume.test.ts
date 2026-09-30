@@ -334,6 +334,7 @@ describe("ProviderManager terminal resume launch", () => {
     });
 
     await expect(manager.terminalResumeLaunch(
+      "owning-chat",
       "claude",
       sessionIds.claude,
       "/workspace/owning chat",
@@ -361,6 +362,7 @@ describe("ProviderManager terminal resume launch", () => {
       statusMessage: "Connected",
     });
     await expect(manager.terminalResumeLaunch(
+      "owning-chat",
       "cursor",
       sessionIds.cursor,
       "/workspace/cursor",

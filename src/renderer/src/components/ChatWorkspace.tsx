@@ -39,7 +39,6 @@ import type {
   Conversation,
   ConversationContextPacketSummary,
   ModelBackendProfileView,
-  ModelSelection,
   Project,
   ProjectAction,
   ProviderId,
@@ -55,6 +54,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { ReplacementChatRequest } from "../lib/newConversation";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
@@ -222,10 +222,7 @@ type ChatWorkspaceProps = {
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
-  onCreateConversationForSelection?: (
-    selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
-  ) => Promise<void>;
+  onCreateConversationForSelection?: (request: ReplacementChatRequest) => Promise<void>;
   onChooseAttachments: (
     mode?: import("@shared/desktop").AttachmentPickerMode,
   ) => Promise<ComposerAttachmentImportLease | null>;
@@ -542,9 +539,12 @@ export function ChatWorkspace({
   const agentContextRequest = [...ownedInputRequests].reverse().find(
     (request) => request.conversationContextRequest !== undefined,
   )?.conversationContextRequest ?? null;
-  const visibleInputRequests = ownedInputRequests.filter(
+  const visibleInputRequests = useMemo(() => ownedInputRequests.filter(
     (request) => request.conversationContextRequest === undefined,
-  );
+  ), [ownedInputRequests]);
+  const timelineLatestTurnSummary = useMemo(() => latestTurnSummary && conversationId
+    ? { conversationId, turn: latestTurnSummary }
+    : null, [conversationId, latestTurnSummary]);
   const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
   const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
@@ -994,10 +994,7 @@ export function ChatWorkspace({
               projectRoot={projectRoot}
               projectId={project.id}
               conversationId={conversation.id}
-              latestTurnSummary={latestTurnSummary ? {
-                conversationId: conversation.id,
-                turn: latestTurnSummary,
-              } : null}
+              latestTurnSummary={timelineLatestTurnSummary}
               streaming={detailLoading
                 ? EMPTY_STREAMING_AGENT_SOURCE
                 : streaming}

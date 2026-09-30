@@ -68,6 +68,7 @@ import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageV
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
+import { SidebarHelpButton } from "./sidebar/SidebarHelpButton";
 import "./sidebar/workspace-navigation.css";
 import type { SidebarProps } from "./sidebar/SidebarProps";
 import {
@@ -144,6 +145,7 @@ function SidebarView({
   onOpenConversationInWindow,
   onCloseConversationSplit,
   onCreateConversation,
+  onChooseNewChatProject,
   onOpenMultiSpawn,
   onOpenDailyWork,
   dailyWorkOpen,
@@ -921,7 +923,8 @@ function SidebarView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
             {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
           </div>
-          <IconButton label="New chat" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onClick={() => {
+          <IconButton label="New chat" aria-haspopup={(snapshot?.projects.length ?? 0) > 1 ? "dialog" : undefined} disabled={connectionStatus !== "online" || !snapshot?.projects.length} onClick={(event) => {
+            if ((snapshot?.projects.length ?? 0) > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
             const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
             if (target) onCreateConversation(target);
           }}><SquarePen size={17} /></IconButton>
@@ -1012,6 +1015,7 @@ function SidebarView({
           <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
+          <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
             <SidebarUpdateControl controller={appUpdate} />
           </Suspense>}

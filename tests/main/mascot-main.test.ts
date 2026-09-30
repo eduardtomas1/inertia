@@ -5,10 +5,18 @@ import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent, Rectangle } f
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
-import { emptyMascotStatus, MASCOT_IPC, type MascotSnapshot } from "../../src/shared/mascot";
+import { MASCOT_PIN_TIMEOUT_MS } from "../../src/main/mascot-pin";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_IPC, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
+import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
+import type { ConversationShell } from "../../src/shared/contracts/app";
+import { agentTurnStatusForRunState, type AgentRunState } from "../../src/shared/run-state";
 import type { MascotSpriteImport, MascotSprites } from "../../src/shared/mascot-sprites";
 import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
+
+function immediatePublisher(...args: Partial<ConstructorParameters<typeof MascotStatusPublisher>>): MascotStatusPublisher {
+  return new MascotStatusPublisher(args[0], args[1], args[2], (task) => task());
+}
 
 const harness = vi.hoisted(() => ({
   options: [] as BrowserWindowConstructorOptions[],
@@ -17,6 +25,7 @@ const harness = vi.hoisted(() => ({
   displays: [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }],
   cursor: { x: 1296, y: 820 },
   displayListeners: new Map<string, () => void>(),
+  menus: [] as unknown[][],
   openDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePaths: string[] }>>(async () => ({ canceled: true, filePaths: [] })),
   saveDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePath?: string }>>(async () => ({ canceled: true })),
 }));
@@ -60,7 +69,7 @@ vi.mock("electron", async () => {
     ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => harness.handlers.set(channel, listener) },
     screen: { getAllDisplays: () => harness.displays, getCursorScreenPoint: () => harness.cursor,
       on: (event: string, listener: () => void) => harness.displayListeners.set(event, listener) },
-    Menu: { buildFromTemplate: () => ({ popup: vi.fn() }) },
+    Menu: { buildFromTemplate: (template: unknown[]) => { harness.menus.push(template); return { popup: vi.fn() }; } },
   };
 });
 
@@ -84,7 +93,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.useRealTimers(); harness.windows.length = 0; harness.options.length = 0; harness.handlers.clear();
   harness.displays = [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }];
-  harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); vi.unstubAllGlobals();
+  harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); harness.menus.length = 0; vi.unstubAllGlobals();
   harness.openDialog.mockReset().mockResolvedValue({ canceled: true, filePaths: [] });
   harness.saveDialog.mockReset().mockResolvedValue({ canceled: true });
 });
@@ -93,10 +102,11 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   const main = new BrowserWindow({});
   await main.loadURL("inertia://bundle/index.html");
   const openChat = vi.fn(async () => undefined);
+  const focusChat = vi.fn();
   const unregister = vi.fn();
   const mascot = new MascotMain({
     mainWindow: () => main, rendererUrl: "inertia://bundle/index.html", userDataDirectory: directory,
-    registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat,
+    registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat, focusChat,
     spriteOrigin: "inertia://bundle/",
   });
   mascot.attach();
@@ -107,8 +117,256 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
   const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
-  return { mascot, main, invoke, openChat, unregister, directory, gesture };
+  return { mascot, main, invoke, openChat, focusChat, unregister, directory, gesture };
 }
+
+describe("mascot chat selection", () => {
+  const chat = (id: string, phase: MascotStatus["phase"]): MascotStatus => ({
+    ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
+    activeCount: 1, chatTitle: `Chat ${id}`,
+  });
+
+  it("pins a listed chat through validated IPC and opens exactly that chat", async () => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const urgent = chat("urgent", "waiting-for-input");
+    const quiet = chat("quiet", "running");
+    app.mascot.observe(urgent, [urgent, quiet], null);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null, chats: [urgent, quiet] });
+    expect(app.mascot.snapshot()).not.toHaveProperty("counts");
+    app.mascot.observe(urgent, [urgent, quiet], null, { chats: 20, attention: 14 });
+    expect(app.mascot.snapshot()).toMatchObject({ counts: { chats: 20, attention: 14 } });
+    await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
+    expect(app.focusChat).toHaveBeenLastCalledWith("quiet", 1);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
+    expect(overlay.webContents.send).toHaveBeenLastCalledWith(MASCOT_IPC.changed, expect.objectContaining({ pinned: "quiet" }));
+    await app.invoke(MASCOT_IPC.action, ["open-chat", app.mascot.snapshot().status], overlay);
+    expect(app.openChat).toHaveBeenLastCalledWith("quiet");
+    await expect(app.invoke(MASCOT_IPC.action, ["open-chat", urgent], overlay)).rejects.toThrow("changed");
+    await expect(app.invoke(MASCOT_IPC.action, ["pin", "missing"], overlay)).rejects.toThrow("changed");
+    await expect(app.invoke(MASCOT_IPC.action, ["pin", 7], overlay)).rejects.toThrow("Invalid");
+    await expect(app.invoke(MASCOT_IPC.action, ["pin"], overlay)).rejects.toThrow("untrusted");
+    expect(app.focusChat).toHaveBeenCalledTimes(1);
+    await app.invoke(MASCOT_IPC.action, ["pin", null], overlay);
+    expect(app.focusChat).toHaveBeenLastCalledWith(null, 2);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
+  });
+
+  it("keeps a runtime-ranked pin below the list cap and clears it only when the chat is archived or deleted", async () => {
+    const app = await fixture();
+    const publisher = immediatePublisher((status, chats, focus, counts, request) => app.mascot.observe(status, chats, focus, counts, request));
+    app.focusChat.mockImplementation((conversationId: string | null, request: number) => publisher.focus(conversationId, request));
+    const shell = (id: string, state: AgentRunState, extra: Partial<ConversationShell> = {}): ConversationShell => ({
+      id, projectId: "project", title: `Chat ${id}`, status: "idle", archivedAt: null, lastViewedAt: "2026-09-06T11:00:00.000Z",
+      latestTurn: {
+        id: `${id}-turn`, runId: `${id}-run`, status: agentTurnStatusForRunState(state), runState: { state, revision: 1 },
+        completedAt: "2026-09-06T10:00:00.000Z", requestedAt: "2026-09-06T09:00:00.000Z", updatedAt: "2026-09-06T10:00:00.000Z",
+      },
+      ...extra,
+    }) as ConversationShell;
+    const listed = () => app.mascot.snapshot().chats!.map(({ conversationId }) => conversationId);
+    const pinned = shell("pinned", "completed");
+    const busy = Array.from({ length: 2 * MASCOT_CHAT_LIMIT }, (_, index) => shell(`busy-${String(index).padStart(2, "0")}`, "running"));
+    publisher.replace([pinned, ...busy.slice(0, 2)], [{ id: "project", name: "Inertia" }]);
+    await app.invoke(MASCOT_IPC.action, ["pin", "pinned"]);
+    expect(app.focusChat).toHaveBeenLastCalledWith("pinned", expect.any(Number));
+    publisher.replace([pinned, ...busy], [{ id: "project", name: "Inertia" }]);
+    expect(listed()).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(listed()).toContain("pinned");
+    expect(listed().filter((id) => id !== "pinned")).toEqual(busy.slice(0, MASCOT_CHAT_LIMIT - 1).map(({ id }) => id));
+    expect(app.mascot.snapshot()).toMatchObject({
+      pinned: "pinned",
+      status: { conversationId: "pinned", phase: "completed", projectName: "Inertia", turnId: "pinned-turn" },
+    });
+    publisher.replace([pinned, ...busy.slice(0, 2)], [{ id: "project", name: "Inertia" }]);
+    expect(listed()).toEqual(["busy-00", "busy-01", "pinned"]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: "pinned", status: { conversationId: "pinned" } });
+    publisher.replace([{ ...pinned, archivedAt: "2026-09-06T12:00:00.000Z" }, ...busy], [{ id: "project", name: "Inertia" }]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null, status: { conversationId: "busy-00" } });
+    expect(app.focusChat).toHaveBeenCalledTimes(1);
+    publisher.replace([pinned, ...busy.slice(0, 2)], [{ id: "project", name: "Inertia" }]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null });
+    expect(listed()).toContain("pinned");
+    await app.invoke(MASCOT_IPC.action, ["pin", "pinned"]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: "pinned" });
+    publisher.replace(busy, [{ id: "project", name: "Inertia" }]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null, status: { conversationId: "busy-00" } });
+    expect(listed()).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(app.focusChat).toHaveBeenCalledTimes(2);
+  });
+
+  it("labels each native Show chat item with its project and an age ordinal for exact twins", async () => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const named = (id: string, phase: MascotStatus["phase"], context: Partial<MascotStatus>): MascotStatus => ({ ...chat(id, phase), ...context });
+    const project = "P".repeat(64);
+    const chats = [
+      named("newer", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:05:00.000Z" }),
+      named("beta", "running", { chatTitle: "Fix login", projectName: "Beta" }),
+      named("older", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:00:00.000Z" }),
+      named("loose", "running", { chatTitle: "Fix login", projectName: null }),
+      named("long", "completed", { chatTitle: null, projectName: project }),
+    ];
+    app.mascot.observe(chats[0]!, chats, null);
+    overlay.webContents.emit("context-menu");
+    const menu = harness.menus.at(-1) as Array<{ label?: string; submenu?: Array<{ label?: string; type?: string }> }>;
+    const items = menu.find(({ label }) => label === "Show chat")!.submenu!.filter(({ type }) => type === "radio").slice(1);
+    expect(items.map(({ label }) => label)).toEqual([
+      "Fix login (2) — Alpha — Working",
+      "Fix login — Beta — Working",
+      "Fix login (1) — Alpha — Working",
+      "Fix login — Working",
+      `Untitled chat — ${project} — Work complete`,
+    ]);
+  });
+});
+
+describe("mascot pin state machine", () => {
+  const chat = (id: string, phase: MascotStatus["phase"] = "running"): MascotStatus => ({
+    ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
+    activeCount: 1, chatTitle: `Chat ${id}`,
+  });
+  const a = chat("a");
+  const b = chat("b");
+  async function pinFixture() {
+    const app = await fixture();
+    app.mascot.runtimePhase("ready");
+    const told = (): string | null | undefined => ((app.main as unknown as WindowDouble).webContents.send.mock.lastCall?.[1] as MascotSnapshot | undefined)?.pinned;
+    const answer = (focus: string | null, request?: number | null, chats: MascotStatus[] = [a, b]): void => {
+      app.mascot.observe(chats[0] ?? emptyMascotStatus(), chats, focus, null, request);
+    };
+    answer(null, null);
+    const pin = async (id: string | null): Promise<void> => { await app.invoke(MASCOT_IPC.action, ["pin", id]); };
+    return { ...app, told, answer, pin };
+  }
+
+  it("confirms a selection from the answer to its own request and clears it when the chat is gone, without re-pinning on restore", async () => {
+    const app = await pinFixture();
+    await app.pin("b");
+    expect(app.focusChat).toHaveBeenLastCalledWith("b", 1);
+    expect(app.told()).toBe("b");
+    app.answer(null, null);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    app.answer("b", 1);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    app.answer(null, 1, [a]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null, status: { conversationId: "a" } });
+    app.answer(null, 1);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.told()).toBeNull();
+    app.mascot.runtimePhase("stopped");
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a selection the runtime rejects and never resends it", async () => {
+    const app = await pinFixture();
+    await app.pin("b");
+    app.answer(null, 1, [a]);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    app.answer(null, 1);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.told()).toBeNull();
+    app.mascot.runtimePhase("restarting");
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores every answer to a superseded selection, in any order", async () => {
+    const app = await pinFixture();
+    await app.pin("a");
+    await app.pin("b");
+    expect(app.focusChat).toHaveBeenLastCalledWith("b", 2);
+    app.answer("a", 1);
+    app.answer(null, 1);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    app.answer("b", 2);
+    app.answer("a", 1);
+    app.answer(null, 1);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    expect(app.told()).toBe("b");
+  });
+
+  it("returns to Auto while pending or confirmed and ignores the late confirmation", async () => {
+    const app = await pinFixture();
+    await app.pin("a");
+    await app.pin(null);
+    expect(app.focusChat).toHaveBeenLastCalledWith(null, 2);
+    app.answer("a", 1);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    await app.pin("a");
+    app.answer("a", 3);
+    await app.pin(null);
+    app.answer("a", 3);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.told()).toBeNull();
+    app.mascot.runtimePhase("stopped");
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenCalledTimes(4);
+  });
+
+  it("re-requests a pending or confirmed pin with a new token after a runtime restart", async () => {
+    const app = await pinFixture();
+    await app.pin("b");
+    app.mascot.runtimePhase("stopped");
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.focusChat).toHaveBeenCalledTimes(1);
+    app.mascot.runtimePhase("starting");
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenLastCalledWith("b", 2);
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenCalledTimes(2);
+    app.answer("b", 1);
+    app.answer(null, 1);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    app.answer("b", 2);
+    app.mascot.runtimePhase("stopped");
+    app.answer(null, null, [a]);
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenLastCalledWith("b", 3);
+    app.answer(null, 3, [a]);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.told()).toBeNull();
+  });
+
+  it("gives up on a selection the runtime never answers after the bounded wait", async () => {
+    const app = await pinFixture();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await app.pin("b");
+    vi.advanceTimersByTime(MASCOT_PIN_TIMEOUT_MS - 1);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    vi.advanceTimersByTime(1);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.focusChat).toHaveBeenLastCalledWith(null, 2);
+    expect(app.told()).toBeNull();
+    app.answer("b", 1);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    await app.pin("a");
+    app.answer("a", 3);
+    vi.advanceTimersByTime(MASCOT_PIN_TIMEOUT_MS * 2);
+    expect(app.mascot.snapshot().pinned).toBe("a");
+  });
+
+  it("accepts answers without a token from an older runtime only when they match or end a confirmed pin", async () => {
+    const app = await pinFixture();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await app.pin("b");
+    app.answer(null);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    app.answer("b");
+    vi.advanceTimersByTime(MASCOT_PIN_TIMEOUT_MS);
+    expect(app.mascot.snapshot().pinned).toBe("b");
+    app.answer(null, undefined, [a]);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    await app.pin("a");
+    app.answer(null);
+    vi.advanceTimersByTime(MASCOT_PIN_TIMEOUT_MS);
+    expect(app.mascot.snapshot().pinned).toBeNull();
+    expect(app.focusChat).toHaveBeenLastCalledWith(null, 3);
+  });
+});
 
 describe("mascot window ownership", () => {
   it("allocates nothing while disabled, creates an isolated non-focusing overlay, and destroys it on disable", async () => {

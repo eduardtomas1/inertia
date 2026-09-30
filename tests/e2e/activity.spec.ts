@@ -265,6 +265,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
   const conversation = store.createConversation(
     snapshot.activeProjectId,
     "Delegated agent trace fixture",
+    { providerId: "claude" },
   );
   const selection = providerNativeModelSelection({
     providerId: "claude",

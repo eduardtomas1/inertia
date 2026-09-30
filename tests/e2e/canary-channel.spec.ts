@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 
 import { INERTIA_VERSION } from "../../src/shared/version";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { formatElectronConsoleError } from "./support/electron-app-lifecycle";
 
 let stable!: AppFixture;
 let canary!: AppFixture;
@@ -135,7 +136,7 @@ test("reopens Canary on macOS without registering its persistent protocol twice"
   const reopened = await reopenedWindow;
   const rendererErrors: string[] = [];
   reopened.on("console", (message) => {
-    if (message.type() === "error") rendererErrors.push(message.text());
+    if (message.type() === "error") rendererErrors.push(formatElectronConsoleError(message));
   });
   reopened.on("pageerror", (error) => rendererErrors.push(error.message));
   await reopened.locator('.app-shell[data-connection-status="online"]').waitFor();

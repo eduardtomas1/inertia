@@ -65,6 +65,7 @@ import {
 } from "../working-indicator/orbMotion";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
+import { stabilizeTurnExecutionStream } from "./execution-stream";
 import {
   advanceThinkingLine,
   IDLE_THINKING_LINE,
@@ -155,6 +156,22 @@ export function LiveElapsed({
 
 export const MAX_ANIMATED_STREAM_WORDS = 96;
 
+function animatedStreamStart(content: string): number {
+  for (let size = 4_096; ; size *= 8) {
+    const from = Math.max(0, content.length - size);
+    const tokens = content.slice(from).split(/(\s+)/u).filter(Boolean);
+    let words = 0;
+    let start = content.length;
+    for (let index = tokens.length - 1; index >= (from > 0 ? 1 : 0); index -= 1) {
+      start -= tokens[index]!.length;
+      if (!/\S/u.test(tokens[index]!)) continue;
+      words += 1;
+      if (words === MAX_ANIMATED_STREAM_WORDS) return start;
+    }
+    if (from === 0) return 0;
+  }
+}
+
 /**
  * Keeps the live fast path as escaped plain text while giving newly appended
  * words stable keyed spans. Only the recent tail gets nodes, which bounds DOM
@@ -165,26 +182,17 @@ export function StreamingPlainText({
 }: {
   content: string;
 }): React.JSX.Element {
-  const tokens = content.split(/(\s+)/u).filter(Boolean);
-  let words = 0;
-  let animatedStart = 0;
-  for (let index = tokens.length - 1; index >= 0; index -= 1) {
-    if (!/\S/u.test(tokens[index]!)) continue;
-    words += 1;
-    if (words === MAX_ANIMATED_STREAM_WORDS) {
-      animatedStart = index;
-      break;
-    }
-  }
-  const prefix = tokens.slice(0, animatedStart).join("");
+  const animatedStart = animatedStreamStart(content);
+  let offset = animatedStart;
   return (
     <p>
-      {prefix}
-      {tokens.slice(animatedStart).map((token, offset) => {
-        const index = animatedStart + offset;
+      {content.slice(0, animatedStart)}
+      {content.slice(animatedStart).split(/(\s+)/u).filter(Boolean).map((token) => {
+        const start = offset;
+        offset += token.length;
         return /\S/u.test(token)
           ? (
-              <span className="response-stream-word" key={`stream-word-${index}`}>
+              <span className="response-stream-word" key={`stream-word-${start}`}>
                 {token}
               </span>
             )
@@ -940,17 +948,15 @@ export function WorkLog({
   }, [autoCollapse, turn.agentTurn.status, turn.isActive]);
 
   const includesReasoning = showThinking && Boolean(reasoningContent);
-  // Provider lifecycle pings ("thinking", "turn completed", heartbeats) are
-  // durable diagnostics, not useful transcript rows. Plans and reasoning have
-  // dedicated presentations; warnings are already part of the work stream.
-  const supplementalActivities: AgentActivity[] = [];
-  const durableStream = useMemo(
-    () => buildTurnExecutionStream(turn, {
+  const previousDurableStream = useRef<TurnExecutionStreamEntry[]>([]);
+  const durableStream = useMemo(() => {
+    const next = stabilizeTurnExecutionStream(buildTurnExecutionStream(turn, {
       includeImportantActivities: turn.isActive,
       includeCompactions: turn.isActive,
-    }),
-    [turn],
-  );
+    }), previousDurableStream.current);
+    previousDurableStream.current = next;
+    return next;
+  }, [turn]);
   // Transient text is always the final visible execution entry. Appending that
   // one row keeps settled commentary and activity-group identities stable
   // instead of sorting the complete workstream for every provider token. A
@@ -977,8 +983,7 @@ export function WorkLog({
     turn.id,
     turn.isActive,
   ]);
-  const supplementalCount = supplementalActivities.length
-    + turn.plans.length
+  const supplementalCount = turn.plans.length
     + (includesReasoning ? 1 : 0);
   const planStepCount = turn.plans.reduce(
     (total, plan) => total + plan.steps.length,
@@ -1077,9 +1082,6 @@ export function WorkLog({
                 </div>
               )}
               {expanded && turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-              {expanded && supplementalActivities.map((activity) => (
-                <ActivityRow activity={activity} visibility="details" key={activity.id} />
-              ))}
             </div>
           </details>
         )}

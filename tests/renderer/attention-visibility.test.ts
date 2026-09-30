@@ -83,6 +83,7 @@ describe("active transcript attention visibility", () => {
       authProviderOpen: false,
       multiSpawnOpen: false,
       mobileSidebarOpen: false,
+      helpOpen: false,
     };
     expect(workspaceAttentionObstructed(unobstructed)).toBe(false);
     expect(workspaceAttentionObstructed({

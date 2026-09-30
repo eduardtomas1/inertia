@@ -94,12 +94,15 @@ export function useWorkspaceGit({
   const [workspaceGitStatus, setWorkspaceGitStatus] =
     useState<WorkspaceGitSnapshot | null>(null);
   const [workspaceGitOwner, setWorkspaceGitOwner] = useState<string | null>(null);
+  const [workspaceGitStale, setWorkspaceGitStale] = useState(false);
+  const invalidationRef = useRef(0);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const branchRequestRef = useRef(0);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
   const [changesRequest, setChangesRequest] =
     useState<WorkspaceChangesRequest | null>(null);
   const changesRequestRevisionRef = useRef(0);
@@ -135,10 +138,12 @@ export function useWorkspaceGit({
       requestGenerationRef.current += 1;
       setLoading(true);
       setLoadError(null);
+      if (scope !== "status") setWorkspaceLoadError(null);
     }
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const identity = `${owner}:${ignoreWhitespace ? "ignore" : "exact"}`;
     const generation = requestGenerationRef.current;
+    const invalidation = invalidationRef.current;
     const active = loadGitInFlightRef.current;
     if (active?.identity === identity) {
       if (
@@ -187,6 +192,7 @@ export function useWorkspaceGit({
       authorityRef.current === owner
       && requestGenerationRef.current === generation
     );
+    let workspaceRefreshed = false;
     let promise: Promise<void>;
     promise = (async () => {
       const statusRequest = request({
@@ -227,8 +233,11 @@ export function useWorkspaceGit({
         throw new Error("Unexpected workspace Git response.");
       }
       if (!ownsResponse()) return;
+      workspaceRefreshed = true;
       setWorkspaceGitStatus(workspaceEvent.result.status);
       setWorkspaceGitOwner(`${owner}:${projectRefreshIdentity}`);
+      setWorkspaceLoadError(null);
+      if (invalidationRef.current === invalidation) setWorkspaceGitStale(false);
       if (scope === "workspace-status") return;
       if (!status.isRepository) return;
       if (!status.authorityRef) {
@@ -248,7 +257,9 @@ export function useWorkspaceGit({
       }
     })().catch((error: unknown) => {
       if (ownsResponse()) {
-        setLoadError(gitErrorMessage(error, "Git changes could not be loaded."));
+        const message = gitErrorMessage(error, "Git changes could not be loaded.");
+        setLoadError(message);
+        if (scope !== "status" && !workspaceRefreshed) setWorkspaceLoadError(message);
       }
       throw error;
     }).finally(() => {
@@ -283,12 +294,14 @@ export function useWorkspaceGit({
     setGitDiff(null);
     commitReviewRef.current = null;
     setWorkspaceGitStatus(null);
+    setWorkspaceGitStale(false);
     setBranches([]);
     branchRequestRef.current += 1;
     setBranchesLoading(false);
     setBranchesError(null);
     setLoading(false);
     setLoadError(null);
+    setWorkspaceLoadError(null);
     setChangesRequest(null);
   }, [authority, enabled, projectRefreshIdentity]);
 
@@ -382,7 +395,7 @@ export function useWorkspaceGit({
         ignoreWhitespace,
         ...(commitReview ? { commitReview: true } : {}),
       },
-    }));
+    }, { passive: !commitReview }));
     if (event.result.kind !== "git.workspace.diff") {
       throw new Error("Unexpected workspace diff response.");
     }
@@ -475,12 +488,13 @@ export function useWorkspaceGit({
   useEffect(() => subscribe((event) => {
     if (
       event.type !== "workspace.git.invalidated"
-      || !enabled
-      || !online
       || !project?.id
       || event.projectId !== project.id
       || event.conversationId !== (conversation?.id ?? null)
     ) return;
+    invalidationRef.current += 1;
+    setWorkspaceGitStale(true);
+    if (!enabled || !online) return;
     commitReviewRef.current = null;
     setCommitReviewRevision((current) => current + 1);
     setLoading(true);
@@ -633,11 +647,13 @@ export function useWorkspaceGit({
     gitDiff,
     setGitDiff,
     workspaceGitStatus: workspaceGitOwner === `${authority}:${projectRefreshIdentity}` ? workspaceGitStatus : null,
+    workspaceGitStale,
     branches,
     branchesLoading,
     branchesError,
     loading,
     loadError,
+    workspaceLoadError,
     loadGit,
     loadWorkspaceRepositoryDiff,
     loadCommitReview,

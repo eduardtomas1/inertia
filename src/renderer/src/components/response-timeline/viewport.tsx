@@ -1,4 +1,4 @@
-import { readTranscriptPosition, rememberTranscriptPosition, type TranscriptPosition } from "../../utils/transcriptPosition";
+import { readTranscriptPosition, rememberTranscriptPosition } from "../../utils/transcriptPosition";
 import {
   memo,
   useCallback,
@@ -29,7 +29,6 @@ import {
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
   shouldConsolidateSettledWorkIntoRunDetails,
-  shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
@@ -52,6 +51,13 @@ import {
   TimelineMinimap,
   type TimelineMarker,
 } from "./minimap";
+import {
+  captureTranscriptPosition,
+  findResponseRow,
+  findTurnElement,
+  firstVisibleResponseRow,
+  responseRows,
+} from "./row-lookup";
 import { startTimelineItemFocus } from "./timeline-item-focus";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
@@ -59,15 +65,6 @@ import type { ResponseTimelineProps } from "./types";
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
 
 type TimelineJumpTarget = "turn" | "request" | "final" | "artifact" | { messageId: string; turnId?: string };
-
-function findTurnElement(
-  root: HTMLElement | null | undefined,
-  turnId: string,
-): HTMLElement | null {
-  if (!root) return null;
-  return [...root.querySelectorAll<HTMLElement>("[data-turn-id]")]
-    .find((element) => element.dataset.turnId === turnId) ?? null;
-}
 
 function latestTurnCompletion(
   timeline: ResponseTimelineItem[],
@@ -101,9 +98,7 @@ function currentPlainTimelineIndex(
   timeline: ResponseTimelineItem[],
 ): number {
   if (!root || !scrollElement || timeline.length === 0) return 0;
-  const scrollTop = scrollElement.getBoundingClientRect().top;
-  const visible = [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
-    .find((element) => element.getBoundingClientRect().bottom > scrollTop + 8);
+  const visible = firstVisibleResponseRow(root, scrollElement.getBoundingClientRect().top);
   const index = visible
     ? timeline.findIndex(({ id }) => id === visible.dataset.responseRowId)
     : -1;
@@ -862,11 +857,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         finishRestoration();
         return;
       }
-      if (!anchorRow?.isConnected && rowId) {
-        anchorRow = [...root.querySelectorAll<HTMLElement>(
-          "[data-response-row-id]",
-        )].find((element) => element.dataset.responseRowId === rowId) ?? null;
-      }
+      if (!anchorRow?.isConnected && rowId) anchorRow = findResponseRow(root, rowId);
       const row = anchorRow;
       if (!row) {
         if (virtualized && anchorIndex >= 0 && attempts % 4 === 0) {
@@ -958,7 +949,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     if (!scrollElement || !root) return;
     const viewport = scrollElement.getBoundingClientRect();
     const viewportTop = viewport.top;
-    const rows = [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")];
+    const rows = responseRows(root);
     const sourceIndex = rows.findIndex((row) => row.dataset.responseRowId === sourceTurnId);
     const rowsAfterSource = sourceIndex >= 0 ? rows.slice(sourceIndex + 1) : rows;
     const visible = (row: HTMLElement): boolean => {
@@ -997,7 +988,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     activeAnchorRestorations.current.set(sourceTurnId, anchor.sequence);
     let sourceHeight = anchor.sourceHeight;
     const adjustToAnchor = (): number | null => {
-      const rows = [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")];
+      const rows = responseRows(root);
       const source = rows.find((element) => element.dataset.responseRowId === sourceTurnId);
       const row = rows
         .find((element) => element.dataset.responseRowId === anchor.rowId);
@@ -1107,9 +1098,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       resolveTarget: (root) => {
         const row = item.kind === "turn"
           ? findTurnElement(root, item.turn.id)
-          : root.querySelector<HTMLElement>(
-              `[data-response-row-id="${CSS.escape(item.id)}"]`,
-            );
+          : findResponseRow(root, item.id);
         if (!row) return null;
         const destination = typeof target === "object"
           ? resolveMessageSearchDestination(row, target.messageId, target.turnId)
@@ -1134,8 +1123,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     virtualizer,
   ]);
 
+  const captureLayoutAnchor = useCallback(() => captureLayoutAnchorRef.current(), []);
+  const restoreLayoutAnchor = useCallback(() => restoreLayoutAnchorRef.current(), []);
   useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem,
-    () => captureLayoutAnchorRef.current(), () => restoreLayoutAnchorRef.current());
+    captureLayoutAnchor, restoreLayoutAnchor);
 
 
   const navigateTimelineFromKeyboard = useEffectEvent((
@@ -1234,16 +1225,3 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
 
 export const ResponseTimeline = memo(ResponseTimelineView);
 ResponseTimeline.displayName = "ResponseTimeline";
-
-function captureTranscriptPosition(root: HTMLElement, scroll: HTMLElement): TranscriptPosition {
-  const wasFollowing = shouldFollowTimeline(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
-  const top = scroll.getBoundingClientRect().top;
-  const row = wasFollowing ? undefined : [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
-    .find((element) => element.getBoundingClientRect().bottom > top + 8);
-  return {
-    rowId: row?.dataset.responseRowId ?? null,
-    viewportOffset: row ? row.getBoundingClientRect().top - top : 0,
-    scrollTop: scroll.scrollTop,
-    wasFollowing,
-  };
-}

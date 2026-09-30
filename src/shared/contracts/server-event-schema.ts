@@ -21,7 +21,7 @@ import { COLOR_THEME_IDS } from "./app";
 import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
-import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator";
+import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator"; import { isCompletionSoundSettings } from "../completion-sound";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
@@ -213,7 +213,9 @@ function conversation(value: unknown): value is UnknownRecord {
     && nullableStringField(value, "settledAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "lastViewedAt")
-    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key));
+    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key))
+    && optionalBooleanField(value, "hasHistory")
+    && optionalBooleanField(value, "mixedProviderHistory");
 }
 
 function conversationShell(value: unknown): boolean {
@@ -354,7 +356,8 @@ function appSettings(value: unknown): boolean {
     ))
     && appKeybindings(value.keybindings)
     && validAttachmentStorageSettings(value)
-    && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator));
+    && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
+    && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound));
 }
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
@@ -549,11 +552,12 @@ function agentSkill(value: unknown): boolean {
 }
 
 function workflowGoalCapability(value: unknown): boolean {
-  if (!recordWithStrings(value, "kind", "label") || value.available !== true) {
-    return false;
+  if (!recordWithStrings(value, "kind", "label")) return false;
+  if (value.kind === "unavailable") {
+    return value.available === false && stringField(value, "reason");
   }
-  return value.kind === "codex-native"
-    || (value.kind === "inertia-local" && stringField(value, "reason"));
+  return value.available === true && (value.kind === "codex-native"
+    || (value.kind === "inertia-local" && stringField(value, "reason")));
 }
 
 function workflowSkillsCapability(value: unknown): boolean {

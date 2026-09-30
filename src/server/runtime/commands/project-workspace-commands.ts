@@ -613,6 +613,7 @@ export function createProjectWorkspaceCommandHandler(
         let installationUse: ProviderInstallationUseTransfer | undefined;
         try {
           const launch = await dependencies.providers.terminalResumeLaunch(
+            conversation.id,
             conversation.providerId,
             conversation.providerSessionId,
             cwd,

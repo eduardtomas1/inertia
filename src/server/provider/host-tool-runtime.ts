@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../../shared/agent-browser";
 import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
-import type {
-  ProviderHostToolApprovalRequest,
-  ProviderHostToolBridge,
-  ProviderHostToolResult,
+import {
+  providerHostToolAccepted,
+  type ProviderHostToolApprovalRequest,
+  type ProviderHostToolBridge,
+  type ProviderHostToolResult,
 } from "./contracts";
 import type {
   AgentApprovalDecision,
@@ -120,7 +121,7 @@ export class ProviderHostToolRuntime {
     if (
       !validIdentity(input.callId, 512)
       || !validIdentity(input.tool, 128)
-      || !this.options.bridge.definitions.some(({ name }) => name === input.tool)
+      || !providerHostToolAccepted(this.options.bridge, input.tool)
     ) {
       return Promise.resolve(failure("The provider sent an invalid or unauthorised Inertia tool call."));
     }
@@ -130,11 +131,15 @@ export class ProviderHostToolRuntime {
       // reconnect or replay cannot repeat a previously admitted mutation.
       return Promise.resolve(failure("The provider reused an Inertia tool-call identity."));
     }
-    if (
-      this.seenCallIds.size >= MAX_HOST_TOOL_CALLS
-      || this.pendingCalls.size >= MAX_PENDING_HOST_TOOL_CALLS
-    ) {
-      return Promise.resolve(failure("The bounded Inertia chat-tool call budget was exhausted."));
+    if (this.seenCallIds.size >= MAX_HOST_TOOL_CALLS) {
+      return Promise.resolve(failure(
+        `This turn already made ${MAX_HOST_TOOL_CALLS} Inertia tool calls, which is the limit for one turn. Finish the turn; the next turn starts a new allowance.`,
+      ));
+    }
+    if (this.pendingCalls.size >= MAX_PENDING_HOST_TOOL_CALLS) {
+      return Promise.resolve(failure(
+        `${MAX_PENDING_HOST_TOOL_CALLS} Inertia tool calls are already running. Wait for one to finish, then try again.`,
+      ));
     }
     this.seenCallIds.add(input.callId);
     const controller = new AbortController();

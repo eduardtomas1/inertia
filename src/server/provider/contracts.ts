@@ -434,7 +434,16 @@ export interface ProviderHostToolResult {
 /** Owned by one exact active Inertia run; never persisted or provider-authored. */
 export interface ProviderHostToolBridge {
   readonly definitions: readonly ProviderHostToolDefinition[];
+  readonly retiredToolNames?: ReadonlySet<string>;
   invoke(call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
+}
+
+export function providerHostToolAccepted(
+  bridge: ProviderHostToolBridge,
+  tool: string,
+): boolean {
+  return bridge.definitions.some(({ name }) => name === tool)
+    || bridge.retiredToolNames?.has(tool) === true;
 }
 
 export type ProviderTerminalOutcome =

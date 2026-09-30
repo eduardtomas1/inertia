@@ -3,6 +3,7 @@ import type {
 } from "../provider/contracts";
 import {
   AGENT_BROWSER_TOOL_DEFINITIONS,
+  RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "./agent-browser-host-tools";
 import {
   HarnessCapabilityRegistry,
@@ -24,7 +25,9 @@ const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
 const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
   label: "inertia-frontend-workbench",
   text: [
-    "When frontend work has a live Inertia Browser, use its semantic snapshot before and after meaningful UI changes.",
+    "This chat has its own Inertia Browser for local development pages, and it works whether or not its panel is showing. Open a page with inertia_browser_navigate before anything else, because a new tab is blank; then read it with inertia_browser_snapshot and act through the other inertia_browser tools in this session instead of launching Playwright or another browser.",
+    "Element refs belong to the latest snapshot, so take a new snapshot after the page changes. When a Browser tool fails, its message says what to do next; follow it before giving up on the Browser.",
+    "For frontend work, take a snapshot before and after meaningful UI changes.",
     "The snapshot includes an Inertia audit for stable control names, clipped controls, overlapping controls, and small targets in the current viewport; treat these as deterministic signals, not a complete visual judgment.",
     "Exercise the real interaction path when useful, repeat checks after the user or layout changes the viewport, and report which evidence was actually observed.",
     "The local screenshot tool records pixels for the user but does not show those pixels to you, so never claim visual parity from that capture alone.",
@@ -62,11 +65,15 @@ export function createInertiaHarnessCapabilities(
   }];
   if (input.browserEnabled) packs.push({
     id: "inertia.frontend-workbench",
-    revision: 1,
+    revision: 2,
     title: "Inertia frontend workbench",
     summary: "Visible local-page interaction with bounded semantic inspection and deterministic frontend audit evidence.",
     instructions: [FRONTEND_INSTRUCTION],
     tools: AGENT_BROWSER_TOOL_DEFINITIONS.map((definition) => ({
+      definition,
+      invoke: input.invoke,
+    })),
+    retiredTools: RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS.map((definition) => ({
       definition,
       invoke: input.invoke,
     })),

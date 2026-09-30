@@ -62,6 +62,7 @@ export interface HarnessCapabilityPack {
   summary: string;
   instructions: readonly HiddenProviderInstruction[];
   tools: readonly HarnessCapabilityTool[];
+  retiredTools?: readonly HarnessCapabilityTool[];
   evaluation: HarnessCapabilityEvaluation;
 }
 
@@ -226,6 +227,7 @@ function failure(message: string): ProviderHostToolResult {
 export class HarnessCapabilityRegistry {
   readonly #packs: readonly HarnessCapabilityPack[];
   readonly #tools: ReadonlyMap<string, HarnessCapabilityTool>;
+  readonly #retiredToolNames: ReadonlySet<string>;
   readonly #definitions: readonly ProviderHostToolDefinition[];
   readonly #instructions: readonly HiddenProviderInstruction[];
   readonly #manifest: HarnessCapabilityManifest;
@@ -267,8 +269,7 @@ export class HarnessCapabilityRegistry {
         instructionBytes += utf8Bytes(instruction.text);
         validatedInstructions.push(Object.freeze({ ...instruction }));
       }
-      const validatedTools: HarnessCapabilityTool[] = [];
-      for (const tool of pack.tools) {
+      const validateTool = (tool: HarnessCapabilityTool): HarnessCapabilityTool => {
         const { definition } = tool;
         if (
           !TOOL_NAME.test(definition.name)
@@ -302,8 +303,10 @@ export class HarnessCapabilityRegistry {
           ) => invoke(context, call),
         });
         tools.set(definition.name, validatedTool);
-        validatedTools.push(validatedTool);
-      }
+        return validatedTool;
+      };
+      const validatedTools = pack.tools.map(validateTool);
+      const validatedRetiredTools = (pack.retiredTools ?? []).map(validateTool);
       const evaluation = Object.freeze({
         tags: safeMetadataList(pack.evaluation.tags, "Capability evaluation tag"),
         evidenceKinds: safeEvidenceKinds(pack.evaluation.evidenceKinds),
@@ -318,6 +321,7 @@ export class HarnessCapabilityRegistry {
         summary,
         instructions: Object.freeze(validatedInstructions),
         tools: Object.freeze(validatedTools),
+        retiredTools: Object.freeze(validatedRetiredTools),
         evaluation,
       });
     }).sort((left, right) => left.id.localeCompare(right.id, "en"));
@@ -329,8 +333,12 @@ export class HarnessCapabilityRegistry {
 
     this.#packs = Object.freeze(validated);
     const orderedTools = this.#packs.flatMap((pack) => pack.tools);
+    const retiredTools = this.#packs.flatMap((pack) => pack.retiredTools ?? []);
     this.#tools = new Map(
-      orderedTools.map((tool) => [tool.definition.name, tool]),
+      [...orderedTools, ...retiredTools].map((tool) => [tool.definition.name, tool]),
+    );
+    this.#retiredToolNames = new Set(
+      retiredTools.map(({ definition }) => definition.name),
     );
     this.#definitions = Object.freeze(
       orderedTools.map(({ definition }) => Object.freeze({ ...definition })),
@@ -382,6 +390,7 @@ export class HarnessCapabilityRegistry {
   bridgeFor(context: HarnessCapabilityContext): ProviderHostToolBridge {
     return {
       definitions: this.#definitions,
+      retiredToolNames: this.#retiredToolNames,
       invoke: async (call) => {
         const tool = this.#tools.get(call.tool);
         if (!tool) return failure("That Inertia capability tool is unavailable.");

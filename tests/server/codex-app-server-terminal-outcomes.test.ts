@@ -398,7 +398,8 @@ describe("Codex App Server terminal outcomes", () => {
   it("defers a Guardian stop until a pending goal mutation settles", async () => {
     const app = fixture(false, ["thread/goal/set"]);
     await vi.advanceTimersByTimeAsync(0);
-    const goal = app.run.setGoal({ status: "active", objective: "Finish the guarded goal" });
+    const run = app.run as ReturnType<typeof startCodexAppServerRun>;
+    const goal = run.setGoal({ status: "active", objective: "Finish the guarded goal" });
     await vi.advanceTimersByTimeAsync(0);
     app.terminal("interrupted", GUARDIAN_ERROR);
     await vi.advanceTimersByTimeAsync(0);

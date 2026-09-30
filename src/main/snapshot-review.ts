@@ -11,6 +11,8 @@ const MAX_PREVIEW_BYTES = 4 * 1024 * 1024;
 const REVIEW_TIMEOUT = 180_000;
 const MAX_EDGE = 2048;
 
+class ReviewRejection extends Error {}
+
 function screenCaptureSize(displayId: string): Size {
   const display = screen.getAllDisplays().find((candidate) => String(candidate.id) === displayId);
   if (!display) return { width: MAX_EDGE, height: MAX_EDGE };
@@ -22,7 +24,7 @@ function screenCaptureSize(displayId: string): Size {
 
 export function editReviewedImage(image: NativeImage, operation: "crop" | "mask", area: SnapshotReviewArea): NativeImage {
   const { width, height } = image.getSize();
-  if (area.x + area.width > width || area.y + area.height > height) throw new Error("Choose an area inside the image.");
+  if (area.x + area.width > width || area.y + area.height > height) throw new ReviewRejection("Choose an area inside the image.");
   if (operation === "crop") return image.crop(area);
   const bitmap = image.toBitmap();
   if (bitmap.length !== width * height * 4) throw new Error("This image could not be edited.");
@@ -109,9 +111,9 @@ export class SnapshotReviewService {
         if (!source) throw new Error("The selected window closed. Start a new screenshot.");
         this.setImage(review, source.thumbnail);
       } else {
-        if (!review.image || request.revision !== review.revision) throw new Error("Review the current image before attaching it.");
+        if (!review.image || request.revision !== review.revision) throw new ReviewRejection("Review the current image before attaching it.");
         if (request.type === "review-edit") {
-          if (review.revision >= 50) throw new Error("Start a new screenshot to make more edits.");
+          if (review.revision >= 50) throw new ReviewRejection("Start a new screenshot to make more edits.");
           this.setImage(review, editReviewedImage(review.image, request.operation, request.area));
         } else {
           const png = review.image.toPNG();
@@ -128,7 +130,8 @@ export class SnapshotReviewService {
           this.release(review);
         }
       }
-    } catch {
+    } catch (cause) {
+      if (cause instanceof ReviewRejection) throw cause;
       if (this.live(review)) {
         this.options.onFailure?.();
         this.send(review, { reviewId: review.id, stage: "closed", message: "Screenshot could not be prepared. Start a new screenshot and try again." });

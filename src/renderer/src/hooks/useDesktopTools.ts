@@ -65,7 +65,7 @@ export function preflightComposerAttachmentFiles(
 
 // Electron rethrows main-process IPC errors as
 // "Error invoking remote method '<channel>': Error: <message>".
-const ELECTRON_IPC_ERROR_PREFIX =
+export const ELECTRON_IPC_ERROR_PREFIX =
   /^Error invoking remote method '[^']+': (?:[A-Za-z]*Error: )?/u;
 
 /** Shows an attachment import failure without Electron's IPC wrapper text. */

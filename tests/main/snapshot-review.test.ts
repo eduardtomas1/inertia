@@ -141,8 +141,33 @@ describe("reviewed screenshot ownership", () => {
     native.sources.mockResolvedValue([source()]); const f = fixture(); await f.start(); await f.select();
     await f.service.request(f.owner, { type: "review-edit", reviewId: f.reviewId, revision: 1, operation: "crop", area: { x: 2, y: 2, width: 4, height: 4 } });
     expect(f.last()).toMatchObject({ stage: "image", revision: 2, width: 4, height: 4 });
-    await f.service.request(f.owner, { type: "review-approve", reviewId: f.reviewId, revision: 1 });
+    await expect(f.service.request(f.owner, { type: "review-approve", reviewId: f.reviewId, revision: 1 })).rejects.toThrow("Review the current image before attaching it.");
     expect(f.imports.begin).not.toHaveBeenCalled();
+  });
+
+  it("rejects the 50th edit with its message and keeps the review open", async () => {
+    native.bitmap.mockImplementation((_bitmap: Buffer, size: { width: number; height: number }) => image(size.width, size.height));
+    native.sources.mockResolvedValue([source()]); const f = fixture(); await f.start(); await f.select();
+    const mask = (revision: number) => f.service.request(f.owner, { type: "review-edit", reviewId: f.reviewId, revision, operation: "mask", area: { x: 0, y: 0, width: 1, height: 1 } });
+    for (let revision = 1; revision < 50; revision += 1) await mask(revision);
+    expect(f.last()).toMatchObject({ stage: "image", revision: 50 });
+    await expect(mask(50)).rejects.toThrow("Start a new screenshot to make more edits.");
+    expect(f.last()).toMatchObject({ stage: "image", revision: 50 });
+    expect(f.onFailure).not.toHaveBeenCalled();
+    await f.service.request(f.owner, { type: "review-approve", reviewId: f.reviewId, revision: 50 });
+    expect(f.registry.import).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["an area outside the image", 1, { x: 5, y: 5, width: 6, height: 1 }, "Choose an area inside the image."],
+    ["a stale revision", 0, { x: 0, y: 0, width: 1, height: 1 }, "Review the current image before attaching it."],
+  ])("rejects an edit with %s and keeps the review open", async (_name, revision, area, message) => {
+    native.sources.mockResolvedValue([source()]); const f = fixture(); await f.start(); await f.select();
+    await expect(f.service.request(f.owner, { type: "review-edit", reviewId: f.reviewId, revision, operation: "crop", area })).rejects.toThrow(message);
+    expect(f.last()).toMatchObject({ stage: "image", revision: 1 });
+    expect(f.onFailure).not.toHaveBeenCalled();
+    await f.service.request(f.owner, { type: "review-approve", reviewId: f.reviewId, revision: 1 });
+    expect(f.registry.import).toHaveBeenCalledOnce();
   });
 
   it("re-captures only the chosen window, bounded to 2048 px", async () => {

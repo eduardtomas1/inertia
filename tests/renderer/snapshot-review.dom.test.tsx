@@ -58,6 +58,16 @@ it("supports keyboard crop and masking with another review before approval", asy
   expect(snapshot).toHaveBeenLastCalledWith({ type: "review-edit", reviewId: id, revision: 2, operation: "crop", area: { x: 0, y: 0, width: 100, height: 30 } });
 });
 
+it("shows a rejected edit's message without Electron's wrapper and keeps the image open", async () => {
+  render(<ReviewedScreenshotControl conversationId={chat} />);
+  const id = await start(); await deliver(preview(id));
+  snapshot.mockRejectedValueOnce(new Error("Error invoking remote method 'inertia:snapshot': Error: Start a new screenshot to make more edits."));
+  fireEvent.click(screen.getByRole("button", { name: "Mask area" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(/^Start a new screenshot to make more edits\.$/u);
+  expect(screen.getByRole("img", { name: "Screenshot to review before attaching" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Attach reviewed image" })).toBeEnabled();
+});
+
 it.each(["escape", "unmount", "chat-change"])("cancels the exact review on %s and ignores late pixels", async (action) => {
   const view = render(<ReviewedScreenshotControl conversationId={chat} />);
   const id = await start();

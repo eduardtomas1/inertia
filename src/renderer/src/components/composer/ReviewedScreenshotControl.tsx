@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Camera, X } from "lucide-react";
 import type { SnapshotDelivery } from "@shared/snapshots";
 import type { SnapshotReview, SnapshotReviewArea, SnapshotReviewRequest } from "@shared/snapshot-review";
+import { ELECTRON_IPC_ERROR_PREFIX } from "../../hooks/useDesktopTools";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import { IconButton } from "../ui";
@@ -68,7 +69,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
     setPending(true); setError(null);
     try { await window.inertia.snapshot(input); }
     catch (cause) {
-      if (id.current === requested) setError(cause instanceof Error ? cause.message : "Screenshot is unavailable.");
+      if (id.current === requested) setError(cause instanceof Error ? cause.message.replace(ELECTRON_IPC_ERROR_PREFIX, "") : "Screenshot is unavailable.");
     } finally { if (id.current === requested) setPending(false); }
   };
   const close = (): void => {

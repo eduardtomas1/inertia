@@ -17,10 +17,16 @@ const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentTraceStatus>([
 // deterministic scrubber at this persistence boundary without retaining the
 // raw payload. This is defense in depth; provider adapters should emit concise
 // summaries, not command/environment dumps.
-const SECRET_PATTERNS: readonly RegExp[] = [
-  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]{8,}={0,2}\b/giu,
-  /\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu,
-  /\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|AUTH_TOKEN)\s*[:=]\s*[^\s,;]+/giu,
+const SECRET_PATTERNS: readonly (readonly [RegExp, string])[] = [
+  [/-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----(?:[^-]|-(?!----)){0,65536}(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY-----)?/gu, "[redacted]"],
+  [/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]{8,}={0,2}\b/giu, "[redacted]"],
+  [/\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu, "[redacted]"],
+  [/\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gu, "[redacted]"],
+  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/gu, "[redacted]"],
+  [/\bxox[abeoprs]-[A-Za-z0-9-]{10,255}/gu, "[redacted]"],
+  [/\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|AUTH_TOKEN|aws_secret_access_key|aws_session_token)\s*[:=]\s*[^\s,;]+/giu, "[redacted]"],
+  [/("(?:[A-Za-z0-9_-]{0,40}[_-])?(?:api[_-]?key|token|secret|password|passwd)"\s{0,8}:\s{0,8})"[^"\n]{0,4096}"/giu, "$1\"[redacted]\""],
+  [/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s:@/]{1,256}:)[^\s@/]{1,256}@/giu, "$1[redacted]@"],
 ];
 
 export function isTerminalSubagentStatus(status: SubagentTraceStatus): boolean {
@@ -34,8 +40,8 @@ export function boundedSubagentText(
   if (typeof value !== "string") return null;
   let text = value.replace(/\0/gu, "").trim();
   if (!text) return null;
-  for (const pattern of SECRET_PATTERNS) {
-    text = text.replace(pattern, "[redacted]");
+  for (const [pattern, replacement] of SECRET_PATTERNS) {
+    text = text.replace(pattern, replacement);
   }
   return text.slice(0, maxChars);
 }

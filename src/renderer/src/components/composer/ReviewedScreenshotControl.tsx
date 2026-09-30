@@ -82,7 +82,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
     void request({ type: "review-start", reviewId: id.current, conversationId });
   };
   const edit = (operation: "crop" | "mask"): void => {
-    if (image) void request({ type: "review-edit", reviewId: image.reviewId, revision: image.revision, operation, area });
+    if (image && !pending) void request({ type: "review-edit", reviewId: image.reviewId, revision: image.revision, operation, area });
   };
   const validArea = image && area.x >= 0 && area.y >= 0 && area.width > 0 && area.height > 0
     && area.x + area.width <= image.width && area.y + area.height <= image.height;
@@ -123,7 +123,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
             <img src={image.preview} alt="Screenshot to review before attaching" draggable={false} />
             {validArea && <span className="screenshot-area" style={{ left: `${area.x / image.width * 100}%`, top: `${area.y / image.height * 100}%`, width: `${area.width / image.width * 100}%`, height: `${area.height / image.height * 100}%` }} />}
           </div>
-          <fieldset disabled={pending} className="screenshot-edit"><legend>Drag an area on the image or enter its pixel coordinates</legend>
+          <fieldset aria-disabled={pending} className="screenshot-edit"><legend>Drag an area on the image or enter its pixel coordinates</legend>
             {(["x", "y", "width", "height"] as const).map((key) => <label key={key}>{({ x: "Left", y: "Top", width: "Width", height: "Height" })[key]}
               <input type="number" min={key === "x" || key === "y" ? 0 : 1} max={key === "x" || key === "width" ? image.width : image.height}
                 value={area[key]} onChange={(event) => setArea({ ...area, [key]: Math.floor(Number(event.target.value)) })} />

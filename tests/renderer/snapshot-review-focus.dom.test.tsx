@@ -14,6 +14,7 @@ const chat = "11111111-1111-4111-8111-111111111111";
 beforeEach(() => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
   window.inertia = { ...original, snapshot };
+  snapshot.mockImplementation(async () => state);
   HTMLElement.prototype.focus = function focus(this: HTMLElement, options?: FocusOptions) {
     if (this.hasAttribute("disabled") || this.closest("fieldset[disabled]")) return;
     originalFocus.call(this, options);
@@ -60,4 +61,19 @@ it("returns focus to Take reviewed screenshot after the dialog closes", async ()
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByRole("button", { name: "Take reviewed screenshot" })).toHaveFocus();
+});
+
+it.each([["Mask area", 100], ["Crop to area", 40]])("keeps keyboard focus on %s while the edit is pending and after the edited image arrives", async (name, width) => {
+  snapshot.mockImplementation(async (request) => request.type === "review-edit" ? await new Promise<never>(() => undefined) : state);
+  render(<ReviewedScreenshotControl conversationId={chat} />);
+  const id = await start(); await deliver(preview(id));
+  const control = screen.getByRole("button", { name });
+  control.focus(); fireEvent.click(control);
+  expect(control).toHaveFocus();
+  expect(screen.getByRole("group", { name: /Drag an area/u })).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(control);
+  expect(snapshot.mock.calls.filter(([request]) => request.type === "review-edit")).toHaveLength(1);
+  await deliver({ ...preview(id, 2), width });
+  expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+  expect(screen.getByRole("button", { name })).toHaveFocus();
 });

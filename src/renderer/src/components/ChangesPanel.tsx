@@ -393,11 +393,12 @@ export function ChangesPanel({
       });
       if (!current()) return;
       const draft = draftRef.current;
+      if (draft.comment !== submitted.comment) return;
       if (
         draft.selection === submitted.selection
         && draft.reviewAction === submitted.reviewAction
-        && draft.comment === submitted.comment
       ) clearSelection();
+      else setComment("");
     } catch (error) {
       if (!current()) return;
       setSelectionError(error instanceof Error ? error.message : `${actionLabel(reviewAction)} failed.`);

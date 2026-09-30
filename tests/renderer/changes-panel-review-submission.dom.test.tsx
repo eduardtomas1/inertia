@@ -83,6 +83,56 @@ const panelProps = () => ({
 });
 
 describe("changes panel review submission", () => {
+  it("clears a submitted draft even when the diff changed while the action was running", async () => {
+    let finishRevision!: () => void;
+    const onRequestRevision = vi.fn(() => new Promise<void>((resolve) => { finishRevision = resolve; }));
+    const base = { ...panelProps(), onRequestRevision };
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<WorkspaceChangesPanel {...base} />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
+    fireEvent.change(screen.getByPlaceholderText("Describe the revision you want…"), {
+      target: { value: "Rename this" },
+    });
+    fireEvent.submit(document.querySelector(".diff-selection-popover form")!);
+    expect(onRequestRevision).toHaveBeenCalledOnce();
+
+    const edited = patchFor("README.md").replace("+after", "+after edited");
+    await act(async () => {
+      view.rerender(<WorkspaceChangesPanel
+        {...base}
+        snapshot={structuredClone(snapshot)}
+        onLoadRepositoryDiff={vi.fn(async () => ({ repositoryPath: ".", patch: edited, truncated: false, files: [changedFile("README.md")] }))}
+      />);
+    });
+    await screen.findByRole("button", { name: "+ after edited" });
+    await act(async () => finishRevision());
+
+    expect(screen.queryByText(/The diff changed while it refreshed/u)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "+ after edited" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("");
+  });
+
+  it("keeps a draft the user edited while the submission was running", async () => {
+    let finishRevision!: () => void;
+    const onRequestRevision = vi.fn(() => new Promise<void>((resolve) => { finishRevision = resolve; }));
+    await act(async () => {
+      render(<WorkspaceChangesPanel {...panelProps()} onRequestRevision={onRequestRevision} />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Request revision" }));
+    const textarea = screen.getByPlaceholderText("Describe the revision you want…");
+    fireEvent.change(textarea, { target: { value: "Rename this" } });
+    fireEvent.submit(document.querySelector(".diff-selection-popover form")!);
+    fireEvent.change(textarea, { target: { value: "Rename this and that" } });
+    await act(async () => finishRevision());
+
+    expect(screen.getByPlaceholderText("Describe the revision you want…")).toHaveValue("Rename this and that");
+  });
+
   it("does not re-enable submit for a second in-flight question after an A-B-A scope round trip", async () => {
     const settles: Array<() => void> = [];
     const onAsk = vi.fn(() => new Promise<void>((resolve) => { settles.push(resolve); }));

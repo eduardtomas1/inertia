@@ -360,6 +360,9 @@ export function ChangesPanel({
     setReviewAction(null);
     if (selection && !(extend && selection.hunkId === hunk.id)) setComment("");
   };
+  const chooseAction = (action: ReviewAction) => {
+    if (!reviewLocked) setReviewAction(action);
+  };
   const reviewSelection = (file: DiffFile, hunk: DiffHunk): DiffSelection | null => {
     if (!selection || selection.hunkId !== hunk.id || selection.lineIds.length === 0) return null;
     return {
@@ -607,8 +610,8 @@ export function ChangesPanel({
                 <div className="diff-file-review-heading">
                   <span><strong>{selectedFile.path}</strong>{fileSummary && <small>{fileSummary.summary}</small>}<ClassificationHints hints={fileSummary?.classifications} /></span>
                   {onOpenFile && <button type="button" onClick={() => onOpenFile(selectedFile.path)}><ExternalLink size={12} />Open file</button>}
-                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} disabled={reviewLocked} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
-                  {persistentReview && <button type="button" disabled={reviewLocked} onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
+                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
+                  {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
                 </div>
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId === null).map((note) => (
                   <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
@@ -648,8 +651,8 @@ export function ChangesPanel({
                     <div className="diff-hunk-header">
                       <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">
-                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} disabled={reviewLocked} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
-                        {persistentReview && <button type="button" disabled={reviewLocked} onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
+                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
+                        {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
                       </span>
                     </div>
                     {hunkAnswer && <SelectionReviewAnswerCard answer={hunkAnswer} onDismiss={onDismissSelectionAnswer} />}
@@ -657,7 +660,7 @@ export function ChangesPanel({
                       <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
                         <span><StickyNote size={12} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                         <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                        {agentRevision && <button type="button" disabled={note.stale || reviewLocked} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
+                        {agentRevision && <button type="button" disabled={note.stale} aria-disabled={reviewLocked || undefined} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
                         <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
                         <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
                       </div>
@@ -680,11 +683,11 @@ export function ChangesPanel({
                       {selected && line.id === lastSelectedId && (
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
-                            <button type="button" disabled={questionRunning || reviewLocked} onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
-                            {agentRevision && <button type="button" disabled={reviewLocked} onClick={() => setReviewAction("revise")}><WandSparkles size={13} />Request revision</button>}
-                            {selectiveRevert && <button type="button" onClick={() => setReviewAction("revert")} disabled={!changedSelection || diff?.truncated || reviewLocked}><RotateCcw size={13} />Revert</button>}
-                            {persistentReview && <button type="button" disabled={reviewLocked} onClick={() => setReviewAction("note")}><StickyNote size={13} />Note</button>}
-                            <button type="button" disabled={reviewLocked} onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={13} />Add to prompt</button>
+                            <button type="button" disabled={questionRunning} aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("ask")}><CircleHelp size={13} />Ask about</button>
+                            {agentRevision && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("revise")}><WandSparkles size={13} />Request revision</button>}
+                            {selectiveRevert && <button type="button" onClick={() => chooseAction("revert")} disabled={!changedSelection || diff?.truncated} aria-disabled={reviewLocked || undefined}><RotateCcw size={13} />Revert</button>}
+                            {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("note")}><StickyNote size={13} />Note</button>}
+                            <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={13} />Add to prompt</button>
                             <IconButton label="Clear selection" onClick={clearSelection}><X size={13} /></IconButton>
                           </div>
                           {reviewAction && (

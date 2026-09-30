@@ -817,13 +817,13 @@ describe("WorkspaceChangesPanel repository scope", () => {
       const popover = document.querySelector<HTMLElement>(".diff-selection-popover")!;
       for (const name of ["Ask about", "Request revision", "Revert", "Note", "Add to prompt"]) {
         const button = within(popover).queryByRole("button", { name });
-        if (button) expect(button).toBeDisabled();
+        if (button) expect(button).toHaveAttribute("aria-disabled", "true");
       }
       expect(within(popover).getByRole("button", { name: "Ask agent" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Mark file reviewed" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mark file reviewed" })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByRole("button", { name: "Mark reviewed" })).toHaveAttribute("aria-disabled", "true");
       for (const note of screen.getAllByRole("button", { name: "Note" })) {
-        expect(note).toBeDisabled();
+        expect(note).toHaveAttribute("aria-disabled", "true");
       }
       const line = screen.getByRole("button", { name: "− before" });
       expect(line).toHaveAttribute("aria-disabled", "true");
@@ -835,6 +835,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
       }
       fireEvent.click(screen.getByRole("button", { name: "Mark file reviewed" }));
       expect(screen.getByText("1 selected lines")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("What would you like to know?")).toBeInTheDocument();
       for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
     }
 
@@ -930,13 +931,14 @@ describe("WorkspaceChangesPanel repository scope", () => {
 
     function expectLocked(handlers: Record<string, ReturnType<typeof vi.fn>>, message: string): void {
       expect(screen.getByText(message)).toHaveAttribute("role", "status");
-      expect(screen.getByRole("button", { name: "Add to prompt" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Add to prompt" })).toHaveAttribute("aria-disabled", "true");
       expect(screen.getByRole("button", { name: "Ask agent" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Mark file reviewed" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mark file reviewed" })).toHaveAttribute("aria-disabled", "true");
       expect(screen.getByRole("button", { name: "− before" })).toHaveAttribute("aria-disabled", "true");
       expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
       fireEvent.submit(document.querySelector(".diff-selection-popover form")!);
       fireEvent.click(screen.getByRole("button", { name: "Add to prompt" }));
+      fireEvent.click(screen.getByRole("button", { name: "Mark file reviewed" }));
       fireEvent.click(screen.getByRole("button", { name: "− before" }));
       for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
     }
@@ -944,6 +946,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     function expectUnlocked(): void {
       expect(screen.queryByText(/Review actions (resume|stay paused)|may be out of date/u)).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Add to prompt" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Add to prompt" })).not.toHaveAttribute("aria-disabled");
       expect(screen.getByRole("button", { name: "Ask agent" })).toBeEnabled();
       expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
     }
@@ -964,7 +967,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
       await update({ loading: true });
       await update({ loading: false, statusError: "Git inspection timed out." });
 
-      expect(screen.getByRole("button", { name: "Add to prompt" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Add to prompt" })).toHaveAttribute("aria-disabled", "true");
       expectLocked(handlers, "This diff could not be refreshed. Review actions stay paused until it is current.");
       expect(screen.getByRole("alert")).toHaveTextContent("Git status could not be refreshed. Git inspection timed out.");
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));

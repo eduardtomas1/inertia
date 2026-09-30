@@ -7739,6 +7739,7 @@ button.header-breadcrumb-project:hover {
 .diff-selection-actions > button { display: inline-flex; min-height: 27px; align-items: center; gap: 4px; padding: 0 7px; border-radius: 7px; color: var(--text-soft); background: transparent; font-size: 7.5px; white-space: nowrap; }
 .diff-selection-actions > button:hover { color: var(--text); background: var(--surface-hover); }
 .diff-selection-actions > button:disabled { opacity: var(--disabled-opacity); }
+.diff-file-review-heading button[aria-disabled="true"], .diff-hunk-actions button[aria-disabled="true"], .diff-review-note > button[aria-disabled="true"], .diff-selection-actions > button[aria-disabled="true"], .workspace-repository-notice > button[aria-disabled="true"] { cursor: not-allowed; opacity: var(--disabled-opacity); }
 .diff-selection-actions .icon-button { width: 27px; height: 27px; margin-left: auto; }
 .diff-selection-popover form { display: grid; gap: 6px; margin-top: 5px; padding: 7px; border-top: 1px solid var(--border); }
 .diff-selection-popover textarea { width: 100%; min-height: 58px; resize: vertical; padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; outline: 0; color: var(--text); background: var(--surface-strong); font: 8.5px/1.45 var(--font-sans); }

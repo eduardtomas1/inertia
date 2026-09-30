@@ -891,7 +891,7 @@ export function WorkspaceChangesPanel({
       {statusError && (
         <div className="panel-notice workspace-repository-notice is-error" role="alert">
           <AlertTriangle size={14} /><span><strong>Git status could not be refreshed.</strong> {statusError}</span>
-          <button type="button" className="subtle-button" disabled={loading} onClick={onRefresh}>Retry</button>
+          <button type="button" className="subtle-button" aria-disabled={loading || undefined} onClick={() => { if (!loading) onRefresh(); }}>Retry</button>
         </div>
       )}
     </>

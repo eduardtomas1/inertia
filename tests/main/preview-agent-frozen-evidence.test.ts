@@ -10,7 +10,7 @@ import {
   semanticPageSnapshot,
 } from "../../src/main/preview-agent-page";
 
-const WORLD_UNAVAILABLE = "The Browser privacy world is unavailable for this page.";
+const WORLD_UNAVAILABLE = "Inertia could not confirm its private inspection context for this page. Navigate to the page again to reload it, then continue.";
 const pageUrl = "http://127.0.0.1:8091/";
 const privacyWorld = {
   id: 7,

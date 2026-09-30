@@ -20,7 +20,10 @@ A compiled capability pack contains:
 
 - a stable identifier and positive revision;
 - bounded private provider instructions;
-- provider-neutral host tools with process-local runtime validators; and
+- provider-neutral host tools with process-local runtime validators;
+- optional retired tools, which stay callable for provider sessions that
+  registered them earlier but are neither advertised nor part of the
+  definition digest; and
 - evaluation tags, evidence kinds, and scenario identifiers.
 
 The registry rejects duplicate pack, instruction, or tool identities before a
@@ -46,7 +49,11 @@ delegation, inspection of the terminal result, and deference to Inertia for
 approval. Starting a child chat is explicitly not treated as evidence that its
 work completed.
 
-`inertia.frontend-workbench` composes the existing visible Browser tools. A
+`inertia.frontend-workbench` composes the Browser tools described in
+`docs/AGENT_BROWSER.md`. Its guidance tells every provider that the chat has
+its own Browser whether or not the panel is showing, to navigate before
+anything else because a new tab is blank, and to follow the next step a
+failed tool names before giving up on the Browser. A
 successful semantic snapshot gains a bounded `inertiaAudit` object with stable
 issue codes for controls without stable labels or semantic names, clipped
 controls, overlapping controls, and targets smaller than 24 by 24 CSS pixels

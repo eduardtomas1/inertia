@@ -133,7 +133,7 @@ test("recovers capture and fresh tabs after a frozen privacy response times out"
     };
   }, url);
   const failed = await command({ action: "snapshot" });
-  expect(failed).toMatchObject({ ok: false, code: "unavailable" });
+  expect(failed).toMatchObject({ ok: false, code: "timeout" });
   if (!failed.ok) expect(failed.message).toContain("the page privacy check within 15 seconds");
   expect(await command({ action: "snapshot" })).toMatchObject({ ok: true });
   await showBrowserAndWaitForFrame(url);

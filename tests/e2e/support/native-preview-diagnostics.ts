@@ -37,7 +37,9 @@ export async function readNativePreviewSnapshot(
         attachedUrls,
         bounds,
         exactUrlAttached: preview !== undefined,
-        visible: Boolean(bounds && bounds.width > 0 && bounds.height > 0),
+        visible: Boolean(
+          preview?.getVisible() && bounds && bounds.width > 0 && bounds.height > 0,
+        ),
       };
     },
     url,

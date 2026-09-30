@@ -1,6 +1,6 @@
 import { strictCodexProviderIdentifier } from "./app-server-subagents";
 import { type JsonObject, type RpcId } from "./protocol";
-import type { ProviderHostToolResult } from "../provider/contracts";
+import { providerHostToolAccepted, type ProviderHostToolResult } from "../provider/contracts";
 import type { AgentApprovalDecision } from "../provider/interactions";
 import { ProviderHostToolRuntime } from "../provider/host-tool-runtime";
 import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
@@ -95,7 +95,7 @@ export class CodexHostToolRuntime {
       || providerTurnId !== this.host.activeTurnId()
       || !toolCallId
       || !tool
-      || !bridge.definitions.some((definition) => definition.name === tool)
+      || !providerHostToolAccepted(bridge, tool)
     ) {
       this.writeOrCancel({
         id,

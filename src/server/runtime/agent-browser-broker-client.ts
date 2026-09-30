@@ -1,16 +1,17 @@
 import type { AgentBrowserRequest } from "../../shared/agent-browser-approval.js";
 import { randomUUID } from "node:crypto";
 
-import type {
-  AgentBrowserResult,
-  AgentBrowserRunIdentity,
+import {
+  AGENT_BROWSER_RUNTIME_BACKSTOP_MS,
+  type AgentBrowserResult,
+  type AgentBrowserRunIdentity,
 } from "../../shared/agent-browser.js";
 import type {
   RuntimeWorkerEvent,
 } from "../../node/runtime-process-protocol.js";
 import type { RuntimeAgentBrowserResult } from "../../node/runtime-agent-browser-protocol.js";
 
-const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_TIMEOUT_MS = AGENT_BROWSER_RUNTIME_BACKSTOP_MS;
 const MAX_PENDING_REQUESTS = 16;
 
 interface PendingRequest {
@@ -43,7 +44,7 @@ implements RuntimeAgentBrowserBroker {
     private readonly post: (event: RuntimeWorkerEvent) => void,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   ) {
-    this.timeoutMs = Math.max(1, Math.min(Math.trunc(timeoutMs), 30_000));
+    this.timeoutMs = Math.max(1, Math.min(Math.trunc(timeoutMs), AGENT_BROWSER_RUNTIME_BACKSTOP_MS));
   }
 
   perform(
@@ -62,7 +63,7 @@ implements RuntimeAgentBrowserBroker {
       });
     }
     if (this.pending.size >= MAX_PENDING_REQUESTS) {
-      return Promise.resolve(unavailable("Too many browser actions are active."));
+      return Promise.resolve(unavailable("Too many browser actions are running at once. Wait for one to finish, then try again."));
     }
     const requestId = randomUUID();
     return new Promise<AgentBrowserResult>((resolve) => {
@@ -79,7 +80,11 @@ implements RuntimeAgentBrowserBroker {
           requestId,
           identity,
         });
-        settle(unavailable("The browser action timed out."));
+        settle({
+          ok: false,
+          code: "timeout",
+          message: "Inertia Browser did not answer in time, so the outcome of this action is unknown. Take a snapshot to see the current page before repeating an action that changes it.",
+        });
       }, this.timeoutMs);
       const onAbort = signal
         ? () => {

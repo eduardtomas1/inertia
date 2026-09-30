@@ -3,6 +3,17 @@ import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "./provider-host-tools";
 export const MAX_AGENT_BROWSER_TEXT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
 export const MAX_AGENT_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
+export const MAX_AGENT_BROWSER_WAIT_TEXT_CHARS = 200;
+export const MIN_AGENT_BROWSER_WAIT_MS = 250;
+export const MAX_AGENT_BROWSER_WAIT_MS = 30_000;
+export const DEFAULT_AGENT_BROWSER_WAIT_MS = 10_000;
+export const AGENT_BROWSER_QUEUE_WAIT_MS = 30_000;
+export const AGENT_BROWSER_INSPECT_BUDGET_MS = 20_000;
+export const AGENT_BROWSER_INPUT_BUDGET_MS = 40_000;
+export const AGENT_BROWSER_NAVIGATION_BUDGET_MS = 45_000;
+export const AGENT_BROWSER_RUNTIME_BACKSTOP_MS = AGENT_BROWSER_QUEUE_WAIT_MS
+  + AGENT_BROWSER_NAVIGATION_BUDGET_MS
+  + 15_000;
 
 /** Trusted Inertia ownership captured before a provider host-tool call runs. */
 export interface AgentBrowserRunIdentity {
@@ -53,6 +64,7 @@ export type AgentBrowserCommand =
   | { action: "type"; ref: string; text: string; replace: boolean }
   | { action: "press"; key: AgentBrowserKey }
   | { action: "scroll"; deltaY: number }
+  | { action: "wait"; text?: string; state: "present" | "absent"; timeoutMs: number }
   | { action: "tabs" }
   | { action: "tab-open"; url?: string }
   | { action: "tab-activate"; tabId: string }
@@ -81,9 +93,21 @@ export type AgentBrowserResult =
     }
   | {
       ok: false;
-      code: "cancelled" | "invalid" | "not-found" | "too-large" | "unavailable";
+      code: AgentBrowserFailureCode;
       message: string;
     };
+
+export const AGENT_BROWSER_FAILURE_CODES = [
+  "cancelled",
+  "invalid",
+  "not-found",
+  "sensitive",
+  "timeout",
+  "too-large",
+  "unavailable",
+] as const;
+
+export type AgentBrowserFailureCode = (typeof AGENT_BROWSER_FAILURE_CODES)[number];
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -172,6 +196,22 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
         && value.deltaY !== 0
         ? { action: "scroll", deltaY: value.deltaY }
         : null;
+    case "wait":
+      return exactKeys(value, ["action", "state", "timeoutMs"], ["text"])
+        && (value.state === "present" || value.state === "absent")
+        && typeof value.timeoutMs === "number"
+        && Number.isSafeInteger(value.timeoutMs)
+        && value.timeoutMs >= MIN_AGENT_BROWSER_WAIT_MS
+        && value.timeoutMs <= MAX_AGENT_BROWSER_WAIT_MS
+        && (value.text === undefined
+          || (safeText(value.text, MAX_AGENT_BROWSER_WAIT_TEXT_CHARS) && value.text.trim().length > 0))
+        ? {
+            action: "wait",
+            ...(typeof value.text === "string" ? { text: value.text } : {}),
+            state: value.state,
+            timeoutMs: value.timeoutMs,
+          }
+        : null;
     case "tab-open":
       return exactKeys(value, ["action"], ["url"])
         && (value.url === undefined || safeUrl(value.url))
@@ -254,15 +294,10 @@ export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | nu
   if (!plainObject(value) || typeof value.ok !== "boolean") return null;
   if (!value.ok) {
     return exactKeys(value, ["ok", "code", "message"])
-      && (
-        value.code === "cancelled"
-        || value.code === "invalid"
-        || value.code === "not-found"
-        || value.code === "too-large"
-        || value.code === "unavailable"
-      )
+      && typeof value.code === "string"
+      && (AGENT_BROWSER_FAILURE_CODES as readonly string[]).includes(value.code)
       && safeText(value.message, 1_000, true)
-      ? { ok: false, code: value.code, message: value.message }
+      ? { ok: false, code: value.code as AgentBrowserFailureCode, message: value.message }
       : null;
   }
   if (

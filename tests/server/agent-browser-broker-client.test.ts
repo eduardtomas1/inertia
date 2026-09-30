@@ -52,7 +52,11 @@ describe("runtime agent browser broker client", () => {
       const client = new RuntimeAgentBrowserBrokerClient((event) => events.push(event), 20);
       const timedOut = client.perform(identity, { action: "snapshot" });
       await vi.advanceTimersByTimeAsync(20);
-      await expect(timedOut).resolves.toMatchObject({ ok: false, code: "unavailable" });
+      await expect(timedOut).resolves.toMatchObject({
+        ok: false,
+        code: "timeout",
+        message: expect.stringContaining("outcome of this action is unknown"),
+      });
       expect(events.at(-1)).toMatchObject({
         type: "runtime.agent-browser-cancel",
         requestId: (events[0] as { requestId: string }).requestId,

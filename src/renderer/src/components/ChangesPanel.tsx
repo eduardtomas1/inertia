@@ -265,7 +265,9 @@ export function ChangesPanel({
     files: new Map<DiffFile, string>(structured.files.map((file) => [file, diffFileFingerprint(file)])),
     hunks: new Map<DiffHunk, string>(structured.files.flatMap((file) => file.hunks.map((hunk) => [hunk, diffHunkFingerprint(file, hunk)]))),
   }), [structured.files]);
-  const hunkFingerprint = (file: DiffFile, hunk: DiffHunk): string => fingerprints.hunks.get(hunk) ?? diffHunkFingerprint(file, hunk);
+  const fingerprintsRef = useRef(fingerprints);
+  fingerprintsRef.current = fingerprints;
+  const hunkFingerprint =(file: DiffFile, hunk: DiffHunk): string => fingerprints.hunks.get(hunk) ?? diffHunkFingerprint(file, hunk);
   const fileFingerprint = (file: DiffFile): string => fingerprints.files.get(file) ?? diffFileFingerprint(file);
   const hunkReviewed = (file: DiffFile, hunk: DiffHunk): boolean => {
     const fingerprint = hunkFingerprint(file, hunk);
@@ -438,17 +440,22 @@ export function ChangesPanel({
   };
   const createScopedNote = (file: DiffFile, hunk?: DiffHunk) => {
     if (reviewLocked) return;
+    const targetFingerprint = hunk ? hunkFingerprint(file, hunk) : fileFingerprint(file);
+    const targetCurrent = () => hunk
+      ? [...fingerprintsRef.current.hunks].some(([current, fingerprint]) => current.id === hunk.id && fingerprint === targetFingerprint)
+      : [...fingerprintsRef.current.files.values()].includes(targetFingerprint);
     setNoteDraft({
       title: `Add note for ${hunk ? "this hunk" : file.path}`,
       body: "",
       save: async (body) => {
         if (reviewLockedRef.current) throw new Error("The diff is refreshing.");
+        if (!targetCurrent()) throw new Error("The diff changed while this note was open.");
         await dispatch.onCreateNote({
           repositoryPath,
           path: file.path,
           hunkId: hunk?.id ?? null,
           lineIds: [],
-          targetFingerprint: hunk ? hunkFingerprint(file, hunk) : fileFingerprint(file),
+          targetFingerprint,
           body,
         });
       },

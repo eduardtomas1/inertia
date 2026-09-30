@@ -25,6 +25,7 @@ const OMITTED_RENDERER_DIAGNOSTICS =
 const RUNTIME_WEBSOCKET_URL = /^ws:\/\/127\.0\.0\.1:\d+\/runtime\//u;
 const RUNTIME_WEBSOCKET_BUFFER_SPACE_FAILURE =
   /^WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/runtime\/[^']*' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE$/u;
+const RUNTIME_CAPABILITY_PATH = /(:\/\/[^/\s'"]+\/runtime\/)[^'"\s?#:]+/gu;
 export function fixtureElectronGracefulTimeoutMs(
   platform: NodeJS.Platform = process.platform,
 ): number {
@@ -202,9 +203,10 @@ export function observeElectronPage(
 }
 
 function boundedRendererDiagnostic(value: string): string {
-  return value.length <= MAX_RENDERER_DIAGNOSTIC_CHARACTERS
-    ? value
-    : `${value.slice(0, MAX_RENDERER_DIAGNOSTIC_CHARACTERS - 1)}…`;
+  const redacted = value.replace(RUNTIME_CAPABILITY_PATH, "$1redacted");
+  return redacted.length <= MAX_RENDERER_DIAGNOSTIC_CHARACTERS
+    ? redacted
+    : `${redacted.slice(0, MAX_RENDERER_DIAGNOSTIC_CHARACTERS - 1)}…`;
 }
 
 function appendElectronRendererDiagnostic(

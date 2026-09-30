@@ -102,7 +102,7 @@ jobs:
             platform: macos-arm64
             arch: arm64
             package_script: package:release:mac
-            timeout_minutes: 50
+            timeout_minutes: 75
             app_path: release/mac-arm64/Inertia.app
           - label: Windows x64
             runner: windows-2025

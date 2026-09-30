@@ -10,6 +10,19 @@ import type {
   TurnProviderRuntime,
 } from "./turn-controller-types";
 
+function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<void> {
+  if (!signal) return active.runState.providerTurnStarted();
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const settle = (): void => {
+      signal.removeEventListener("abort", settle);
+      resolve();
+    };
+    signal.addEventListener("abort", settle, { once: true });
+    void active.runState.providerTurnStarted().then(settle);
+  });
+}
+
 interface TurnFollowUpCoordinatorOptions {
   store: RuntimeStore;
   providers: TurnProviderRuntime;
@@ -78,6 +91,7 @@ export class TurnFollowUpCoordinator {
   ): Promise<ChatMessage | null> {
     await lease.ready;
     const active = this.owners.get(lease);
+    if (active?.runState.awaitingProviderTurn()) await providerTurnStarted(active, signal);
     const current = this.options.activeForConversation(lease.conversationId);
     const followUp = input.content.trim();
     if (

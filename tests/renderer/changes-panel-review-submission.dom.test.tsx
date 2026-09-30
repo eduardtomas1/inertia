@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ChangesPanel, type ChangesPanelProps } from "../../src/renderer/src/components/ChangesPanel";
 import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
-import type { ChangedFile, WorkspaceGitSnapshot } from "../../src/shared/contracts";
+import type { ChangedFile, DiffReviewNote, WorkspaceGitSnapshot } from "../../src/shared/contracts";
+import { parseUnifiedDiff } from "../../src/shared/diff-review";
 
 function changedFile(path: string): ChangedFile {
   return {
@@ -200,5 +202,117 @@ describe("changes panel review submission", () => {
 
     await act(async () => settles[1]!());
     expect(screen.queryByRole("button", { name: "Ask agent" })).not.toBeInTheDocument();
+  });
+});
+
+describe("changes panel review action failures", () => {
+  const patch = patchFor("README.md");
+  const hunkId = parseUnifiedDiff(patch).files[0]!.hunks[0]!.id;
+  const note = (overrides: Partial<DiffReviewNote>): DiffReviewNote => ({
+    id: "note-file",
+    conversationId: "11111111-1111-4111-8111-111111111111",
+    repositoryPath: ".",
+    path: "README.md",
+    hunkId: null,
+    lineIds: [],
+    targetFingerprint: "a".repeat(64),
+    body: "Explain",
+    stale: false,
+    createdAt: "2026-09-27T12:00:00.000Z",
+    updatedAt: "2026-09-27T12:00:00.000Z",
+    ...overrides,
+  });
+
+  const renderPanel = (props: Partial<ChangesPanelProps>) => render(<ChangesPanel
+    {...handlers()}
+    files={[changedFile("README.md")]}
+    diff={{ patch, truncated: false, files: [changedFile("README.md")] }}
+    selectedPath="README.md"
+    summary={null}
+    onSelectFile={vi.fn()}
+    {...props}
+  />);
+
+  const withoutUnhandledRejections = async (run: () => void) => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => { unhandled.push(reason); };
+    process.on("unhandledRejection", listener);
+    try {
+      run();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a note deletion failure instead of rejecting unhandled", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const onDeleteNote = vi.fn(async () => {
+      throw new Error("The note could not be deleted.");
+    });
+    await withoutUnhandledRejections(() => {
+      renderPanel({ onDeleteNote, notes: [note({})] });
+      fireEvent.click(screen.getByRole("button", { name: "Delete file note: Explain" }));
+      expect(onDeleteNote).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The note could not be deleted."));
+  });
+
+  it("shows a hunk note deletion failure", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const onDeleteNote = vi.fn(async () => {
+      throw new Error("The hunk note could not be deleted.");
+    });
+    await withoutUnhandledRejections(() => {
+      renderPanel({ onDeleteNote, notes: [note({ id: "note-hunk", hunkId })] });
+      fireEvent.click(screen.getByRole("button", { name: "Delete hunk note: Explain" }));
+    });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The hunk note could not be deleted."));
+  });
+
+  it("does not delete a note the user did not confirm", () => {
+    vi.stubGlobal("confirm", () => false);
+    const onDeleteNote = vi.fn(async () => undefined);
+    renderPanel({ onDeleteNote, notes: [note({})] });
+    fireEvent.click(screen.getByRole("button", { name: "Delete file note: Explain" }));
+    expect(onDeleteNote).not.toHaveBeenCalled();
+  });
+
+  it("shows a note revision failure", async () => {
+    const onRequestRevision = vi.fn(async () => {
+      throw new Error("The revision could not be requested.");
+    });
+    await withoutUnhandledRejections(() => {
+      renderPanel({ onRequestRevision, notes: [note({ id: "note-hunk", hunkId })] });
+      fireEvent.click(screen.getByRole("button", { name: "Revise" }));
+      expect(onRequestRevision).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The revision could not be requested."));
+  });
+
+  it("shows an undo revert failure", async () => {
+    const onUndoReversal = vi.fn(async () => {
+      throw new Error("The reversal could not be undone.");
+    });
+    await withoutUnhandledRejections(() => {
+      renderPanel({
+        onUndoReversal,
+        lastReversal: {
+          id: "reversal-1",
+          filePath: "README.md",
+          selectedLineCount: 1,
+          affectedLayers: ["worktree"],
+          createdAt: "2026-09-27T12:00:00.000Z",
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Undo revert" }));
+      expect(onUndoReversal).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The reversal could not be undone."));
   });
 });

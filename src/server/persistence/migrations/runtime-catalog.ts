@@ -28,11 +28,11 @@ import { persistSuspendAwareTurnTiming } from "./system-suspend-timing";
 import { persistTurnContinuationEvidence } from "./turn-continuation-evidence";
 import { nativeGeminiProviderMigration } from "./native-gemini-provider"; import { issueReportsMigration } from "./issue-reports"; import { contextCompactionMigration } from "./context-compaction";
 import { projectPreferencesMigration } from "./project-preferences";
-import { customAppearanceColorsMigration } from "./custom-appearance-colors"; import { appearanceThemePairMigration } from "./appearance-theme-pair";
+import { appearanceThemePairMigration } from "./appearance-theme-pair";
 import { providerUsageLimitsMigration } from "./provider-usage-limits";
 import { messageChronologyMigration, privateConnectMessageOriginMigration } from "./message-metadata";
-import { nativeAntigravityProviderMigration } from "./native-antigravity-provider"; import { conversationContextWholeChatMigration } from "./conversation-context-whole-chat"; import { workingIndicatorMigration } from "./working-indicator"; import { conversationContextDeliveriesMigration } from "./conversation-context-deliveries"; import { attachmentStorageSettingsMigration } from "./attachment-storage-settings";
-import { queuedMessagesMigration } from "./queued-messages"; import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership"; import { completionSoundMigration } from "./completion-sound"; import { turnSessionRecoveryMigration } from "./turn-session-recovery"; const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
+import { recentMigrationDefinitions } from "./recent-migrations";
+const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
       (sql, index) => {
@@ -1238,7 +1238,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       appearanceThemePairMigration,
       providerUsageLimitsMigration,
       privateConnectMessageOriginMigration,
-      nativeAntigravityProviderMigration, conversationContextWholeChatMigration, workingIndicatorMigration, conversationContextDeliveriesMigration, attachmentStorageSettingsMigration, queuedMessagesMigration, agentThreadTargetOwnershipMigration, completionSoundMigration, turnSessionRecoveryMigration, customAppearanceColorsMigration,
+      ...recentMigrationDefinitions,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

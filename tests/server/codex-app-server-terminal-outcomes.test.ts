@@ -22,9 +22,10 @@ import { startCodexAppServerRun } from "../../src/server/codex/app-server-run";
 import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-function fixture(throughHarness = false) {
-  const observed = { onActivity: vi.fn(), onText: vi.fn(), onStatus: vi.fn(), onRateLimits: vi.fn() };
+function fixture(throughHarness = false, heldMethods: readonly string[] = []) {
+  const observed = { onActivity: vi.fn(), onText: vi.fn(), onStatus: vi.fn(), onRateLimits: vi.fn(), onSubagent: vi.fn() };
   const writes: unknown[] = [];
+  const held = new Map<string, number>();
   const child = new EventEmitter() as ChildProcessWithoutNullStreams;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -32,7 +33,9 @@ function fixture(throughHarness = false) {
     write(chunk, _encoding, callback) {
       const message = JSON.parse(String(chunk)) as { id?: number; method?: string };
       writes.push(message);
-      if (message.id !== undefined && message.method) {
+      if (message.id !== undefined && message.method && heldMethods.includes(message.method)) {
+        held.set(message.method, message.id);
+      } else if (message.id !== undefined && message.method) {
         const result = message.method === "thread/start"
           ? { thread: { id: "thread-test" } }
           : message.method === "turn/start" ? { turn: { id: "turn-test" } } : {};
@@ -69,6 +72,26 @@ function fixture(throughHarness = false) {
     run, terminateProcessTree, finishCleanup, observed, writes,
     notification(method: string, params: Record<string, unknown>) {
       stdout.write(`${JSON.stringify({ method, params })}\n`);
+    },
+    respond(method: string, result: Record<string, unknown>) {
+      stdout.write(`${JSON.stringify({ id: held.get(method), result })}\n`);
+    },
+    spawnLiveChild() {
+      stdout.write(`${JSON.stringify({
+        method: "item/started",
+        params: {
+          threadId: "thread-test", turnId: "turn-test",
+          item: {
+            id: "spawn-child", type: "collabAgentToolCall", tool: "spawnAgent", status: "inProgress",
+            senderThreadId: "thread-test", receiverThreadIds: ["child-thread"], prompt: "Verify the result",
+            agentsStates: { "child-thread": { status: "running", message: "Still verifying" } },
+          },
+        },
+      })}\n`);
+      stdout.write(`${JSON.stringify({
+        method: "turn/started",
+        params: { threadId: "child-thread", turn: { id: "child-turn", status: "inProgress", items: [], error: null } },
+      })}\n`);
     },
     serverRequest(method: string, params: Record<string, unknown>) {
       stdout.write(`${JSON.stringify({ id: "review-request", method, params })}\n`);
@@ -121,22 +144,289 @@ function fixture(throughHarness = false) {
         },
       })}\n`);
     },
-    terminal(status: string) {
+    terminal(status: string, error: unknown = null, threadId = "thread-test", turnId = "turn-test") {
       stdout.write(`${JSON.stringify({
         method: "turn/completed",
         params: {
-          threadId: "thread-test",
-          turn: { id: "turn-test", status, items: [], error: null },
+          threadId,
+          turn: { id: turnId, status, items: [], error },
         },
       })}\n`);
     },
   };
 }
 
+const GUARDIAN_MESSAGE = "Codex stopped the turn after repeated approval denials.";
+const GUARDIAN_ERROR = {
+  message: "Guardian interrupted the turn after 3 consecutive approval denials.",
+  codexErrorInfo: "tooManyDenials",
+  additionalDetails: null,
+};
+
+function activeGoal(updatedAt: number) {
+  return {
+    threadId: "thread-test", objective: "Finish the guarded goal", status: "active",
+    tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1_800_000_000, updatedAt,
+  };
+}
+
+async function expectGuardianFailure(app: ReturnType<typeof fixture>) {
+  const result = await app.run.result;
+  expect(result).toMatchObject({
+    status: "failed", cleanupConfirmed: true,
+    failure: { reason: "codex-error", message: GUARDIAN_MESSAGE, terminalEvent: "turn/completed" },
+  });
+  expect(result.failure?.technicalDetail).toContain("Codex error: tooManyDenials");
+  expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+  return result;
+}
+
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("Codex App Server terminal outcomes", () => {
+  it.each([false, true])("reports a Guardian circuit-breaker interruption as failure through the public harness: %s", async (throughHarness) => {
+    const app = fixture(throughHarness);
+    await vi.advanceTimersByTimeAsync(0);
+    // Codex 0.159 carries this error only on turn/completed, with no error notification.
+    app.terminal("interrupted", GUARDIAN_ERROR);
+    app.finishCleanup(true);
+
+    await expectGuardianFailure(app);
+    if (!throughHarness) expect(app.observed.onActivity).toHaveBeenCalledWith(
+      "turn", "failed", "Turn interrupted by Codex", expect.any(Object),
+    );
+  });
+
+  it("names the Guardian cause without an error message", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", { message: null, codexErrorInfo: "tooManyDenials" });
+    app.finishCleanup(true);
+
+    await expectGuardianFailure(app);
+  });
+
+  it("reports the Guardian provider message once in the technical detail", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", GUARDIAN_ERROR);
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result.failure?.technicalDetail?.split(GUARDIAN_ERROR.message)).toHaveLength(2);
+    await expectGuardianFailure(app);
+  });
+
+  it.each([
+    { message: "A provider policy interrupted this turn." },
+    { message: { invalid: true }, additionalDetails: { private: "UNEXPECTED_PAYLOAD" } },
+    {},
+    { unexpected: "UNEXPECTED_PAYLOAD", nested: { private: "UNEXPECTED_PAYLOAD" } },
+  ])("safely fails an interrupted turn with an explicit provider error object: %j", async (error) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", error);
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, failure: { reason: "codex-error" } });
+    expect(result.failure?.message).toBe("Codex interrupted the turn before completion.");
+    expect(JSON.stringify(result)).not.toContain("UNEXPECTED_PAYLOAD");
+    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([[[]], [["UNEXPECTED_PAYLOAD"]], ["UNEXPECTED_PAYLOAD"], [42]])(
+    "keeps an interrupted turn with a non-object error %j cancelled",
+    async (error) => {
+      const app = fixture();
+      await vi.advanceTimersByTimeAsync(0);
+      app.terminal("interrupted", error);
+      app.finishCleanup(true);
+
+      const result = await app.run.result;
+      expect(result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+      expect(result.failure).toBeUndefined();
+      expect(JSON.stringify(result)).not.toContain("UNEXPECTED_PAYLOAD");
+      expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([
+    ["contextWindowExceeded", "contextWindowExceeded"],
+    [{ httpConnectionFailed: { httpStatusCode: 502 } }, "httpConnectionFailed"],
+  ] as const)("keeps the sanitised Codex error %j for another interruption cause", async (codexErrorInfo, name) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", { message: "Codex interrupted the turn.", codexErrorInfo });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.message).toBe("Codex interrupted the turn before completion.");
+    expect(result.failure?.technicalDetail).toContain(`Codex error: ${name}`);
+    expect(result.failure?.technicalDetail).not.toContain("502");
+    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    "UNEXPECTED PAYLOAD with spaces",
+    { first: {}, second: {} },
+    { "not an identifier": {} },
+    `x${"y".repeat(64)}`,
+  ])("drops an unrecognised Codex error shape %j from the technical detail", async (codexErrorInfo) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", { message: "Codex interrupted the turn.", codexErrorInfo });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.technicalDetail).not.toContain("Codex error:");
+    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+  });
+
+  it("bounds and scrubs the provider interruption diagnostic", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", {
+      message: `\0Guardian interrupted the turn. token=PRIVATE_DIAGNOSTIC_TOKEN ${"x".repeat(5_000)} OVER_LIMIT`,
+      codexErrorInfo: "tooManyDenials",
+      additionalDetails: "UNEXPECTED_PAYLOAD",
+    });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.technicalDetail).toContain("Guardian interrupted the turn.");
+    expect(result.failure?.technicalDetail).toContain("tooManyDenials");
+    expect(result.failure?.technicalDetail).not.toMatch(/PRIVATE_DIAGNOSTIC_TOKEN|OVER_LIMIT|UNEXPECTED_PAYLOAD|\0/u);
+    expect(result).toHaveProperty("diagnostic", expect.any(String));
+    expect("diagnostic" in result ? result.diagnostic?.length : undefined).toBeLessThanOrEqual(4_000);
+  });
+
+  it("keeps a plain interrupted turn cancelled after an earlier retryable provider error", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.notification("error", {
+      threadId: "thread-test", turnId: "turn-test", willRetry: true,
+      error: { message: "A transient provider failure is being retried." },
+    });
+    app.terminal("interrupted");
+    app.finishCleanup(true);
+
+    expect(await app.run.result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    expect((await app.run.result).failure).toBeUndefined();
+  });
+
+  it.each(["before", "after"] as const)("preserves cancellation order when user cancellation arrives %s a Guardian interruption", async (when) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    if (when === "before") app.run.cancel(false);
+    app.terminal("interrupted", {
+      message: "Guardian interrupted the turn after too many approval denials.",
+      codexErrorInfo: "tooManyDenials",
+    });
+    if (when === "after") app.run.cancel(false);
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result.status).toBe(when === "before" ? "cancelled" : "failed");
+    if (when === "before") expect(result.failure).toBeUndefined();
+    else expect(result.failure?.reason).toBe("codex-error");
+  });
+
+  it.each([
+    { threadId: "foreign-thread", turnId: "turn-test" },
+    { threadId: "thread-test", turnId: "foreign-turn" },
+  ])("ignores another turn's provider interruption: %j", async ({ threadId, turnId }) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.notification("turn/completed", {
+      threadId,
+      turn: { id: turnId, status: "interrupted", items: [], error: { message: "FOREIGN_DIAGNOSTIC", codexErrorInfo: "tooManyDenials" } },
+    });
+    expect(app.terminateProcessTree).not.toHaveBeenCalled();
+    app.terminal("completed");
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result.status).toBe("completed");
+    expect(result.failure).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("FOREIGN_DIAGNOSTIC");
+  });
+
+  it("fails a Guardian stop while delegated work is still running", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.spawnLiveChild();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.observed.onSubagent).toHaveBeenLastCalledWith(expect.objectContaining({
+      providerAgentId: "child-thread", status: "running", isLive: true,
+    }));
+    app.terminal("interrupted", GUARDIAN_ERROR);
+    app.finishCleanup(true);
+
+    await expectGuardianFailure(app);
+    expect(app.observed.onStatus).not.toHaveBeenCalledWith("delegated", expect.anything());
+  });
+
+  it("fails a delegated child stopped by Guardian and keeps the parent outcome", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.spawnLiveChild();
+    app.terminal("interrupted", GUARDIAN_ERROR, "child-thread", "child-turn");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.observed.onSubagent).toHaveBeenLastCalledWith(expect.objectContaining({
+      providerAgentId: "child-thread", status: "failed", providerStatus: "interrupted", isLive: false,
+      result: `${GUARDIAN_MESSAGE}\n${GUARDIAN_ERROR.message}`,
+    }));
+    expect(app.terminateProcessTree).not.toHaveBeenCalled();
+    app.terminal("completed");
+    app.finishCleanup(true);
+
+    await expect(app.run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
+    expect((await app.run.result).failure).toBeUndefined();
+    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("defers a Guardian stop until a pending goal mutation settles", async () => {
+    const app = fixture(false, ["thread/goal/set"]);
+    await vi.advanceTimersByTimeAsync(0);
+    const run = app.run as ReturnType<typeof startCodexAppServerRun>;
+    const goal = run.setGoal({ status: "active", objective: "Finish the guarded goal" });
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", GUARDIAN_ERROR);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.terminateProcessTree).not.toHaveBeenCalled();
+    app.respond("thread/goal/set", { goal: activeGoal(1_800_000_010) });
+    await expect(goal).resolves.toMatchObject({ status: "active" });
+    app.finishCleanup(true);
+
+    await expectGuardianFailure(app);
+  });
+
+  it("fails a Guardian stop on a goal continuation turn", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.notification("thread/goal/updated", { threadId: "thread-test", turnId: "turn-test", goal: activeGoal(1_800_000_010) });
+    app.terminal("completed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
+    app.notification("turn/started", {
+      threadId: "thread-test", turn: { id: "turn-continuation", status: "inProgress", items: [], error: null },
+    });
+    app.terminal("interrupted", GUARDIAN_ERROR, "thread-test", "turn-continuation");
+    app.finishCleanup(true);
+
+    await expectGuardianFailure(app);
+  });
+
   it.each(["notReady", "started", "succeeded", "failed"])("ignores gateway OAuth %s without projecting auth handoffs or changing the active turn", async (status) => {
     const app = fixture();
     await vi.advanceTimersByTimeAsync(0);

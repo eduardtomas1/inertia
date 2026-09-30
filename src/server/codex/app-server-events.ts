@@ -51,6 +51,7 @@ import {
 } from "./app-server-item-events";
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
+import { codexTurnInterruptionFailure } from "./app-server-status";
 import {
   MAX_PRE_RESPONSE_TURN_NOTIFICATIONS,
   PreResponseTurnNotifications,
@@ -175,6 +176,7 @@ export class CodexAppServerEvents {
     this.subagents = new CodexSubagentLifecycle({
       rootThreadId: host.providerThreadId,
       rootTurnId: host.activeTurnId,
+      cancelRequested: host.cancelRequested,
       emitSubagent: (update, authority, isLive) => {
         this.emitSubagent(update, authority, isLive);
       },
@@ -896,6 +898,10 @@ export class CodexAppServerEvents {
       const turn = objectValue(params.turn);
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);
+      const interruptionFailure = codexTurnInterruptionFailure(
+        status, turnError, this.host.cancelRequested(),
+      );
+      const providerInterrupted = interruptionFailure !== undefined;
       const lastError =
         boundedText(turnError?.message, 4_000) ?? this.host.lastError();
       if (lastError) this.host.setLastError(lastError);
@@ -903,7 +909,7 @@ export class CodexAppServerEvents {
       const hasLiveDelegatedWork = this.liveSubagentIds.size > 0;
       const activityPhase = status === "completed"
         ? hasLiveDelegatedWork ? "info" : "completed"
-        : status === "failed"
+        : status === "failed" || providerInterrupted
           ? "failed"
           : "info";
       const activityLabel = status === "completed"
@@ -913,7 +919,7 @@ export class CodexAppServerEvents {
         : status === "failed"
           ? "Turn failed"
           : status === "interrupted"
-            ? "Turn interrupted"
+            ? providerInterrupted ? "Turn interrupted by Codex" : "Turn interrupted"
             : "Turn ended with an unknown status";
       this.emitActivity(
         "turn",
@@ -923,13 +929,13 @@ export class CodexAppServerEvents {
           activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
         },
       );
-      if (this.host.cancelRequested() || status === "interrupted") {
+      if (this.host.cancelRequested() || (status === "interrupted" && !providerInterrupted)) {
         this.completeParentTurn("cancelled", null);
-      } else if (status === "failed") {
+      } else if (status === "failed" || providerInterrupted) {
         this.host.rememberFailure(
           "codex-error",
-          "Codex could not complete the turn.",
-          lastError,
+          interruptionFailure?.message ?? "Codex could not complete the turn.",
+          interruptionFailure ? interruptionFailure.technicalDetail : lastError,
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {

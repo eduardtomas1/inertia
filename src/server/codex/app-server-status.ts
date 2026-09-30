@@ -1,4 +1,5 @@
-import type { ProviderActivityPhase } from "../provider/contracts";
+import type { ProviderActivityPhase, ProviderRunFailure } from "../provider/contracts";
+import { objectValue, type JsonObject } from "./protocol";
 
 export type CodexCommandOrPatchStatus =
   | "inProgress"
@@ -55,6 +56,30 @@ export function codexHookActivityPhase(
   return status === undefined || status === null
     ? method === "hook/started" ? "started" : "completed"
     : "failed";
+}
+
+export function codexTurnInterruptionFailure(
+  status: string | undefined,
+  turnError: JsonObject | undefined,
+  cancelRequested: boolean,
+): Pick<ProviderRunFailure, "message" | "technicalDetail"> | undefined {
+  // Guardian's strict circuit breaker carries its error on the interrupted
+  // turn without a separate error notification. Earlier retry errors alone
+  // do not turn a plain interruption into a provider failure.
+  if (status !== "interrupted" || !turnError || cancelRequested) return undefined;
+  const errorInfo = codexErrorInfoName(turnError.codexErrorInfo);
+  return {
+    message: errorInfo === "tooManyDenials"
+      ? "Codex stopped the turn after repeated approval denials."
+      : "Codex interrupted the turn before completion.",
+    ...(errorInfo ? { technicalDetail: `Codex error: ${errorInfo}` } : {}),
+  };
+}
+
+function codexErrorInfoName(value: unknown): string | undefined {
+  const keys = Object.keys(objectValue(value) ?? {});
+  const name = typeof value === "string" ? value : keys.length === 1 ? keys[0] : undefined;
+  return name && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(name) ? name : undefined;
 }
 
 function isRecordKey<T extends object>(

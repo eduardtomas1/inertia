@@ -122,6 +122,9 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32001, message: "thread not found" } });
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: -32600, message: "no rollout found for thread id " + message.params.threadId } });
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "mismatched-resume" && message.method === "thread/resume") {
     return send({ id: message.id, result: { thread: { id: "thread-unrelated" }, cwd: process.cwd(), model: "fake", serviceTier: null } });
   }
@@ -266,6 +269,15 @@ if (message.method === "thread/goal/clear") {
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" || process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume") {
+    send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "fresh-message", delta: "Answered from a fresh thread" } },
+      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-turn-before-response") {
     sendBatch([
       { method: "turn/started", params: { threadId, turn: { id: "stale-turn", status: "inProgress", items: [], error: null } } },

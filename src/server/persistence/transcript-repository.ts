@@ -46,9 +46,19 @@ function projectAttachments(
 export class TranscriptRepository {
   constructor(private readonly context: TranscriptPersistenceContext) {}
 
-  continuationHistory(conversationId: string): ReturnType<typeof readContinuationHistory> {
-    this.context.requireConversation(conversationId);
-    return readContinuationHistory(this.context.database, conversationId);
+  continuationHistory(
+    conversationId: string,
+    capacityBytes: number,
+    capturedAt: string,
+    excludedMessageId?: string,
+  ): ReturnType<typeof readContinuationHistory> {
+    return readContinuationHistory(
+      this.context.database,
+      conversationId,
+      capacityBytes,
+      capturedAt,
+      excludedMessageId,
+    );
   }
 
   createMessage(

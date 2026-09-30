@@ -1,4 +1,4 @@
-import { providerIdForHarness } from "./model-routing";
+import { providerIdForHarness, providerNativeBackendProfile } from "./model-routing";
 import type { ProviderId } from "./provider";
 
 import type {
@@ -10,7 +10,9 @@ import type { ContinuationReasonCode } from "./continuation-reason-codes";
 export {
   CONTINUATION_REASON_CODES,
   isContinuationReasonCode,
+  isTurnSessionRecovery,
   type ContinuationReasonCode,
+  type TurnSessionRecovery,
 } from "./continuation-reason-codes";
 
 type ModelSwitchCompatibility = Pick<
@@ -125,6 +127,14 @@ export function staleProviderSessionDecision(): ContinuationDecision {
       "The saved provider session is no longer available.",
     ),
   };
+}
+
+export function resumesAcrossProviderInstallation(
+  identity: Pick<ContinuationIdentity, "harnessId" | "backendProfileId">,
+): boolean {
+  const providerId = providerIdForHarness(identity.harnessId);
+  return providerId !== null
+    && identity.backendProfileId === providerNativeBackendProfile(providerId).id;
 }
 
 function identityChangeKind(
@@ -288,7 +298,9 @@ export function resolveContinuationDecision(
     input.previousIdentity,
     input.nextIdentity,
   );
-  if (boundaryChange !== "none") {
+  const installationChanged = boundaryChange === "provider-installation"
+    && resumesAcrossProviderInstallation(input.nextIdentity);
+  if (boundaryChange !== "none" && !installationChanged) {
     return startSessionDecision(
       boundaryChange,
       establishedConversation,
@@ -334,6 +346,13 @@ export function resolveContinuationDecision(
             changeKind: "performance-mode",
             reasonCode: "supported-performance-mode-switch",
             reason: "Response speed can change in this session.",
+          }
+      : installationChanged
+        ? {
+            action: "resume-session",
+            changeKind: "provider-installation",
+            reasonCode: "same-continuation",
+            reason: "The provider installation changed and its saved session is still in use.",
           }
       : {
           action: "resume-session",

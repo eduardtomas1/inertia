@@ -1164,7 +1164,7 @@ describe("TurnController authoritative lifecycle", () => {
       attachments: [attachment],
     });
     expect(continuationState(runtime.store, runtime.conversationId))
-      .toEqual({ providerSessionId: null, continuationIdentity: null });
+      .toMatchObject({ providerSessionId: "stale-session-before-launch" });
 
     expect(runtime.controller.start(queued.turn.id)).toBe(false);
     await flushPromises();
@@ -1181,7 +1181,7 @@ describe("TurnController authoritative lifecycle", () => {
       recoverInterruptedRuns: false,
     });
     expect(continuationState(reopened, runtime.conversationId))
-      .toEqual({ providerSessionId: null, continuationIdentity: null });
+      .toMatchObject({ providerSessionId: "stale-session-before-launch" });
     reopened.close();
   });
 
@@ -1610,10 +1610,10 @@ describe("TurnController authoritative lifecycle", () => {
     expect(queued.turn).toMatchObject({
       status: "queued",
       userMessageId: queued.message.id,
-      // A legacy session without an exact installation/capability identity is
-      // preserved as history but never resumed across an unverified boundary.
-      providerSessionBefore: null,
-      continuationReasonCode: "provider-installation-unverified",
+      // A native session saved before installation identities existed is
+      // still resumed; only the provider itself can reject it.
+      providerSessionBefore: "session-before",
+      continuationReasonCode: "same-continuation",
       harnessId: "codex-app-server",
       model: "gpt-test",
       reasoningEffort: "high",
@@ -1671,7 +1671,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(turn).toMatchObject({
       status: "completed",
       terminalReason: "provider-completed",
-      providerSessionBefore: null,
+      providerSessionBefore: "session-before",
       providerSessionAfter: "session-after",
       checkpointId: checkpoint.id,
       model: "gpt-test",

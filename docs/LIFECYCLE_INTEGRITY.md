@@ -65,7 +65,7 @@ lease; it does not mean an in-memory absence proves cleanup.
 | Runtime worker | Supervisor; generation identity + native process creation identity | `RuntimeProcessRecord.child` / containment and owned-process records | Supervisor after exact `runtime.stopped`, child close, and generation cleanup | Supervisor joins one bounded shutdown/force path. Late worker messages are ignored. Startup recovery reconciles the prior record before spawn. |
 | Runtime HTTP/WebSocket server | Worker runtime; runtime generation + loopback server instance | Runtime server/socket registries / covered by runtime lease | Runtime shutdown coordinator | Listener close and all socket/operation drains must finish before the worker can report stopped. The supervisor remains the outer cleanup authority. |
 | Provider run | Turn controller and `ProviderManager`; exact provider, conversation, run, turn, harness, and backend tuple | controller/manager active maps / `provider_run_ownership` row | Server run-state engine selects the root outcome | The manager first validates the exact terminal-result tuple and `cleanupConfirmed: true`; the turn owner clears durable ownership and releases attachments only after exact `stopOwned(...) === "settled"` proof. Missing, mismatched, detached, thrown, or false cleanup evidence retains ownership, quarantines admission, and leaves startup recovery to reconcile the durable row. |
-| Provider session/thread | Exact provider adapter; native ID bound to continuation identity | adapter session / conversation and turn session snapshots | Server decides whether the native ID is eligible for reuse | Adapter closes protocol resources; continuation requires an exact compatibility token. Unknown or changed compatibility preserves history but starts a fresh provider session. |
+| Provider session/thread | Exact provider adapter; native ID bound to continuation identity | adapter session / conversation and turn session snapshots | Server decides whether the native ID is eligible for reuse | Adapter closes protocol resources. A native provider keeps its saved session across an installation change and the provider decides whether it can still be resumed; a custom backend requires an exact compatibility token. A rejected or ineligible session starts a fresh one in the same chat with the earlier visible messages restored. |
 | Provider-owned server | OpenCode SDK harness; provider run tuple + server process identity | harness-owned server/client / owned-process evidence under the runtime generation | Harness only after protocol terminal and server cleanup | SSE/client settlement alone is insufficient. Process-tree/server shutdown failure poisons cleanup and keeps replacement admission closed. |
 | Provider metadata/model/auth probe | Provider manager metadata scope; provider + installation/configuration + exact model identity + probe operation | discovery/metadata operations / a bounded versioned per-model evidence envelope | Probe owner | Exact child-tree cleanup and bounded parser completion. An immediate database transaction rejects older same-model completions and configuration drift while preserving independent models. Maintenance and shutdown wait for probes; installation/capability changes invalidate cached evidence. |
 | Provider maintenance/update | Runtime preparation gate and maintenance controller; operation ID + installation identity | reservations/active operation / integrity-checked maintenance journal while replacement may survive a crash | Maintenance controller after post-action re-resolution and verification | Admission requires an active, exact-installation capability attestation. Owned action cleanup is followed by provider detect/auth/metadata/capability verification, version re-read, and cache invalidation. Active runs, probes, recovery, shutdown, or another lease block admission. This does not claim a real production turn is run as a post-update probe. |
@@ -189,8 +189,12 @@ legacy CLI route, and a sunset test pins that boundary.
 
 ## Session-continuation compatibility
 
-A reusable native session is identified by the existing route identity plus a
-checked compatibility token covering:
+A saved provider session is identified by the existing route identity: harness,
+backend profile, backend configuration revision, opaque endpoint identity,
+model identity where the transport cannot switch safely, and relevant
+performance mode. A change in any of those starts a fresh session.
+
+Each identity also records a checked compatibility token covering:
 
 - canonical provider executable path/package and exact executable or SDK
   version;
@@ -201,14 +205,38 @@ checked compatibility token covering:
 - model identity where the transport cannot switch safely; and
 - relevant performance mode.
 
-Historical identities without the token are incompatible by construction.
-Custom routes without positive session-continuation evidence do not receive a
-compatibility token, even when their text probe succeeds. They therefore start
-a fresh provider session instead of attempting a resume that would fail later.
-The safe migration is to retain the conversation, transcript, attachments,
-and native ID for audit, record a bounded reason code, clear it from admission
-authority, and start a fresh provider session. Missing compatibility must not
-break startup and must never silently force continuation.
+The token attests capabilities and installation leases. It gates session reuse
+only for custom backends: a custom route without positive
+session-continuation evidence receives no token, and a missing or changed
+token starts a fresh provider session there.
+
+A native provider keeps its sessions in its own store, independent of the
+executable that created them, so a native route resumes its saved session when
+only the token changed or could not be verified. Provider updates therefore do
+not reset a chat. The provider remains the authority on whether the session
+still exists: when it rejects the resume before any output, the same turn
+restarts once on a fresh session. Every harness reports that rejection as an
+unavailable session, the turn ledger clears the dead native ID and records
+`stale-provider-session`, and no later turn retries it.
+
+A rejection the harness does not recognise cannot strand the chat. A saved
+session whose last two resumes both failed before the provider did anything
+(no answer and no activity other than the error) is retired, and the next turn
+starts fresh.
+
+The token no longer retires native sessions, so a harness change that makes
+previously saved sessions unusable must retire them explicitly with a
+migration, as schema 65 did for Codex.
+
+A fresh session in an established chat never starts blank. The request carries
+the chat's earlier visible messages, selected by the same packer as an explicit
+reference to this chat: the opening request first, then the newest turns,
+bounded by the room left beside the selected context and, on a custom backend,
+by a smaller fixed share. Attachments, tool output and hidden provider state
+are not included, and known secret patterns are redacted. The turn records how
+many messages were restored and omitted, and the conversation shows that a new
+provider session started. An explicit reference to this chat in the same
+message is not duplicated.
 
 ## Cross-version application handoff
 
@@ -340,8 +368,10 @@ observed after measurement.
   Schema 68 adds continuation evidence after that rebuild, preserving upgrades
   from both pre-Gemini databases and existing schema-67 installations.
 - Existing provider continuation records without the full compatibility token
-  are readable but cannot authorize resume. They fall back to a fresh session
-  without deleting conversation data.
+  stay readable. Native routes resume them; custom backends fall back to a
+  fresh session without deleting conversation data.
+- Schema 84 appends a nullable, bounded session-recovery column to agent
+  turns. Existing turns read as not recovered.
 - Existing single-result backend probe JSON remains readable. The next
   successful probe writes a versioned, bounded collection with at most one
   monotonic result per configured model; incompatible profile revisions still

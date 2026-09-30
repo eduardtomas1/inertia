@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
-import { CLAUDE_PROTOCOL_SESSION_ID, fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
+import { claudeSessionUnavailable } from "../../src/server/provider/claude-startup-failure";
+import { startHarnessWithFreshSessionFallback } from "../../src/server/provider/fresh-session-fallback";
+import {
+  CLAUDE_PROTOCOL_SESSION_ID,
+  claudeSuccessResult,
+  claudeSystem,
+  fixtureClaudeQuery,
+} from "../helpers/claude-agent-sdk-protocol";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
@@ -68,5 +75,128 @@ describe("Claude startup failures", () => {
       CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1",
       HTTPS_PROXY: "invalid",
     });
+  });
+
+  const savedSessionId = "3f0c7d52-1111-4222-8333-444455556666";
+  function failedResult(fields: Record<string, unknown>): SDKMessage {
+    return {
+      type: "result",
+      subtype: "error_during_execution",
+      uuid: "resume-failure",
+      session_id: savedSessionId,
+      duration_ms: 0,
+      duration_api_ms: 0,
+      is_error: true,
+      num_turns: 0,
+      stop_reason: null,
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      modelUsage: {},
+      permission_denials: [],
+      errors: [],
+      ...fields,
+    } as unknown as SDKMessage;
+  }
+  const missingSession = failedResult({
+    errors: [`No conversation found with session ID: ${savedSessionId}`],
+  });
+
+  it("recognises the results Claude Code returns when it cannot resume a session", () => {
+    expect(claudeSessionUnavailable(missingSession)).toBe(true);
+    expect(claudeSessionUnavailable(failedResult({ startup_failure_reason: "worktree_resume_refused" }))).toBe(true);
+    expect(claudeSessionUnavailable(failedResult({ errors: ["Rate limit reached"] }))).toBe(false);
+    expect(claudeSessionUnavailable(failedResult({
+      num_turns: 3,
+      errors: [`No conversation found with session ID: ${savedSessionId}`],
+    }))).toBe(false);
+    expect(claudeSessionUnavailable(failedResult({ startup_failure_reason: "proxy_invalid" }))).toBe(false);
+    expect(claudeSessionUnavailable(claudeSuccessResult("Done"))).toBe(false);
+    expect(claudeSessionUnavailable(claudeSystem("init"))).toBe(false);
+  });
+
+  it.each([
+    [savedSessionId, true],
+    [undefined, false],
+  ] as const)("marks a missing conversation as an unavailable session only when resuming (%s)", async (sessionId, unavailable) => {
+    const root = portableFixtureRoot("Claude missing session");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+        yield missingSession;
+      })()),
+    });
+    const result = await harness.start({
+      input: nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-missing-session",
+        cwd: root,
+        prompt: "Continue",
+        interactionMode: "build",
+        access: "supervised",
+        ...(sessionId ? { sessionId } : {}),
+      }),
+      executable: process.execPath,
+      environment: {},
+      providerNativeToolsAvailable: true,
+    }).result;
+    expect(result).toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      failure: { terminalEvent: "result/error_during_execution" },
+    });
+    expect(result.failure?.sessionUnavailable).toBe(unavailable ? true : undefined);
+  });
+
+  it("answers from a fresh Claude session after the saved one is missing", async () => {
+    const root = portableFixtureRoot("Claude session fallback");
+    roots.push(root);
+    const launches: Array<Options | undefined> = [];
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        launches.push(options);
+        const resumed = options?.resume !== undefined;
+        return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          if (resumed) {
+            yield missingSession;
+            return;
+          }
+          yield claudeSystem("init");
+          yield claudeSuccessResult("Answered from a fresh session");
+        })());
+      },
+    });
+    const statuses: string[] = [];
+    const fallback = () => ({ prompt: "Continue with the restored history." });
+    const run = startHarnessWithFreshSessionFallback(harness, {
+      input: nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-session-fallback",
+        cwd: root,
+        prompt: "Continue",
+        interactionMode: "build",
+        access: "supervised",
+        sessionId: savedSessionId,
+      }),
+      executable: process.execPath,
+      environment: {},
+      providerNativeToolsAvailable: true,
+      callbacks: {
+        onEvent: (event) => {
+          if (event.type === "status") statuses.push(event.status);
+        },
+      },
+    }, fallback);
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "completed",
+      sessionId: CLAUDE_PROTOCOL_SESSION_ID,
+      text: "Answered from a fresh session",
+    });
+    expect(launches).toHaveLength(2);
+    expect(launches[0]?.resume).toBe(savedSessionId);
+    expect(launches[1]?.resume).toBeUndefined();
+    expect(statuses).not.toContain("failed");
+    expect(statuses.filter((status) => status === "starting")).toHaveLength(1);
+    expect(statuses.at(-1)).toBe("completed");
   });
 });

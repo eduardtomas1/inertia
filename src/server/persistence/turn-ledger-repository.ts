@@ -15,7 +15,11 @@ import {
   modelSelectionSchema,
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
-import { isContinuationReasonCode } from "../../shared/continuation-policy";
+import {
+  isContinuationReasonCode,
+  isTurnSessionRecovery,
+  type TurnSessionRecovery,
+} from "../../shared/continuation-policy";
 import {
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
@@ -135,6 +139,10 @@ export class TurnLedgerRepository {
     ) {
       throw new Error("The turn continuation reason code is invalid.");
     }
+    const sessionRecovery = input.sessionRecovery ?? null;
+    if (sessionRecovery !== null && !isTurnSessionRecovery(sessionRecovery)) {
+      throw new Error("The turn session recovery is invalid.");
+    }
     if (new TextEncoder().encode(modelSelectionJson).byteLength > 65_536) {
       throw new Error("Turn model selection is too large.");
     }
@@ -161,6 +169,7 @@ export class TurnLedgerRepository {
       modelSelection,
       continuationIdentity,
       continuationReasonCode,
+      sessionRecovery,
       harnessId: modelSelection.harnessId,
       backendProfileId: modelSelection.backendProfileId,
       model: modelSelection.modelId,
@@ -202,7 +211,7 @@ export class TurnLedgerRepository {
       INSERT INTO agent_turns (
         id, conversation_id, run_id, user_message_id, terminal_assistant_message_id,
         provider_id, model_selection_json, continuation_identity_json,
-        continuation_reason_code,
+        continuation_reason_code, session_recovery_json,
         harness_id, backend_profile_id, model, model_alias, reasoning_effort,
         interaction_mode, access_mode, provider_session_before, provider_session_after,
         requested_at, started_at, completed_at, status, run_state,
@@ -212,7 +221,7 @@ export class TurnLedgerRepository {
       ) VALUES (
         @id, @conversationId, @runId, @userMessageId, @terminalAssistantMessageId,
         @providerId, @modelSelectionJson, @continuationIdentityJson,
-        @continuationReasonCode,
+        @continuationReasonCode, @sessionRecoveryJson,
         @harnessId, @backendProfileId, @model, @modelAlias, @reasoningEffort,
         @interactionMode, @accessMode, @providerSessionBefore, @providerSessionAfter,
         @requestedAt, @startedAt, @completedAt, @status, @runStateValue,
@@ -226,6 +235,7 @@ export class TurnLedgerRepository {
         usageStartJson,
         modelSelectionJson,
         continuationIdentityJson,
+        sessionRecoveryJson: sessionRecovery ? JSON.stringify(sessionRecovery) : null,
         runStateValue: turn.runState?.state ?? turn.status,
         providerState: turn.runState?.providerState ?? null,
         runStateRevision: turn.runState?.revision ?? 0,
@@ -309,6 +319,86 @@ export class TurnLedgerRepository {
         });
       }
       return { message, turn };
+    })();
+  }
+
+  savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {
+    const attempts = this.context.database.prepare(`
+      SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
+        turn.terminal_assistant_message_id,
+        EXISTS(
+          SELECT 1 FROM activities
+          WHERE activities.turn_id = turn.id AND activities.kind <> 'error'
+        ) AS progressed
+      FROM agent_turns AS turn
+      WHERE turn.conversation_id = ?
+      ORDER BY turn.requested_at DESC, turn.id DESC
+      LIMIT 2
+    `).all(conversationId) as Array<{
+      status: string;
+      terminal_reason: string | null;
+      provider_session_before: string | null;
+      terminal_assistant_message_id: string | null;
+      progressed: 0 | 1;
+    }>;
+    return attempts.length === 2 && attempts.every((attempt) =>
+      attempt.status === "failed"
+      && attempt.provider_session_before === sessionId
+      && attempt.terminal_assistant_message_id === null
+      && attempt.progressed === 0
+      && (attempt.terminal_reason === "provider-error"
+        || attempt.terminal_reason === "provider-process-exit"
+        || attempt.terminal_reason === "provider-process-crash"));
+  }
+
+  restartOnFreshSession(turnId: string, input: {
+    expectedSessionId: string;
+    executionContext: PersistedTurnExecutionContext;
+    sessionRecovery: TurnSessionRecovery | null;
+    restartedAt: string;
+  }): AgentTurn {
+    if (input.sessionRecovery !== null && !isTurnSessionRecovery(input.sessionRecovery)) {
+      throw new Error("The turn session recovery is invalid.");
+    }
+    return this.context.database.transaction(() => {
+      const current = this.get(turnId);
+      if (
+        isAgentTurnTerminalStatus(current.status)
+        || current.providerSessionBefore !== input.expectedSessionId
+      ) {
+        throw new Error("The turn can no longer restart on a fresh provider session.");
+      }
+      const cleared = this.context.database.prepare(`
+        UPDATE conversations
+        SET provider_session_id = NULL, continuation_identity_json = NULL
+        WHERE id = ? AND provider_session_id = ?
+      `).run(current.conversationId, input.expectedSessionId);
+      if (cleared.changes !== 1) {
+        throw new Error("The provider session changed before the turn could restart.");
+      }
+      const restarted = this.context.database.prepare(`
+        UPDATE agent_turns
+        SET provider_session_before = NULL,
+          usage_start_json = NULL,
+          continuation_reason_code = 'stale-provider-session',
+          session_recovery_json = ?
+        WHERE id = ?
+          AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+      `).run(
+        input.sessionRecovery ? JSON.stringify(input.sessionRecovery) : null,
+        turnId,
+      );
+      if (restarted.changes !== 1) {
+        throw new Error("The turn settled before it could restart on a fresh provider session.");
+      }
+      this.context.database.prepare(
+        "DELETE FROM turn_execution_context_refs WHERE turn_id = ?",
+      ).run(turnId);
+      this.context.database.prepare(
+        "DELETE FROM turn_execution_manifests WHERE turn_id = ?",
+      ).run(turnId);
+      this.persistExecutionContext(turnId, input.executionContext, input.restartedAt);
+      return this.get(turnId);
     })();
   }
 

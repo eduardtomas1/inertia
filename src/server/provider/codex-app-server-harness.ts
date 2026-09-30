@@ -266,9 +266,14 @@ function startCodexRun(
                     : runtimeFailure?.reason === "transport-closed"
                       ? "The Codex App Server connection closed before the turn completed."
                       : providerMessage;
-      const failure = runtimeFailure
-        ? { ...runtimeFailure, message }
-        : { reason: "codex-error" as const, message };
+      const failure = {
+        ...(runtimeFailure
+          ? { ...runtimeFailure, message }
+          : { reason: "codex-error" as const, message }),
+        ...(continuationError === "stale-provider-session"
+          ? { sessionUnavailable: true as const }
+          : {}),
+      };
       emitter.status("failed", message);
       return {
         ...publicRuntimeResult,

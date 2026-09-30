@@ -109,6 +109,7 @@ export class TurnFollowUpCoordinator {
     if (Buffer.byteLength(snapshotContext, "utf8") > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
       throw new Error("Snapshot accessibility context exceeds the follow-up attachment limit.");
     }
+    active.freshSessionRequest = null;
     let accepted: boolean;
     try {
       accepted = await this.options.providers.steer(

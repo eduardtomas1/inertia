@@ -36,6 +36,7 @@ import {
 } from "../../shared/attachments";
 import {
   isContinuationReasonCode,
+  isTurnSessionRecovery,
   officiallyAllowsModelSwitchWithinSession,
 } from "../../shared/continuation-policy";
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
@@ -518,6 +519,17 @@ function persistedContinuationReasonCode(
   throw new Error("The persisted turn continuation reason is invalid.");
 }
 
+function persistedSessionRecovery(value: string | null): AgentTurn["sessionRecovery"] {
+  if (typeof value !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  return isTurnSessionRecovery(parsed) ? parsed : null;
+}
+
 export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
@@ -546,6 +558,7 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     continuationReasonCode: persistedContinuationReasonCode(
       row.continuation_reason_code,
     ),
+    sessionRecovery: persistedSessionRecovery(row.session_recovery_json),
     harnessId: modelSelection.harnessId,
     backendProfileId: modelSelection.backendProfileId,
     model: modelSelection.modelId,

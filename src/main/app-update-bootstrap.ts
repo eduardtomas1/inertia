@@ -1069,7 +1069,7 @@ export async function launchRestrictedAppUpdateCandidate(options: {
     // silently extend the update handoff by starting a fresh ACK timeout.
     const acknowledgementBudgetMs = Math.min(
       MAX_BOOTSTRAP_WAIT_MS,
-      Math.max(1, options.timeoutMs ?? 15_000),
+      Math.max(1, options.timeoutMs ?? 30_000),
       Math.max(1, deadlineAt - Date.now()),
     );
     const ackValue = await readAppUpdateBootstrapPacket(

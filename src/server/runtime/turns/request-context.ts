@@ -13,6 +13,7 @@ import type {
   InteractionMode,
   MaterializedConversationContext,
   TurnRequestContext,
+  TurnSessionRecovery,
 } from "../../../shared/contracts";
 import { chatAttachmentKind } from "../../../shared/attachments";
 import { readContainedFileSync } from "../../contained-file-read";
@@ -30,7 +31,6 @@ import {
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
 export const MAX_EXECUTION_PAYLOAD_BYTES = 240 * 1024;
-export const RECOVERED_PROVIDER_HISTORY_LABEL = "Visible history recovered after provider update";
 export const MAX_EXECUTION_CONTEXT_BLOB_BYTES = 64 * 1024;
 
 const MAX_VISIBLE_MESSAGE_BYTES = 64 * 1024;
@@ -110,6 +110,13 @@ export interface AssembledTurnRequest {
   imagePaths: string[];
   persistence: PersistedTurnExecutionContext;
   conversationContextDeliveries: ConversationContextDelivery[];
+  sessionRecovery: TurnSessionRecovery | null;
+}
+
+export interface RestoredChatHistory {
+  blocks: readonly { label: string; content: string }[];
+  messageCount: number;
+  omittedMessageCount: number;
 }
 
 export interface ConversationContextMaterialization {
@@ -132,8 +139,7 @@ export interface AssembleTurnRequestInput {
   context?: TurnRequestContext;
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   internalInstructions?: readonly HiddenProviderInstruction[];
-  /** Privileged same-chat recovery after a verified native provider update. */
-  continuationHistory?: { content: string; truncated: boolean };
+  restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
 }
 
 interface MaterializedContext {
@@ -727,27 +733,42 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     );
   }
 
-  // Automatic recovery must not displace selected context or reject a valid
-  // turn. Include it only when the complete serialized reference fits, keeping
-  // its historical-source disclaimer and JSON intact if capacity is tight.
-  if (input.continuationHistory
-    && providerContexts.length < MAX_EXECUTION_CONTEXT_REFERENCES
-    && executionSegmentCount < MAX_EXECUTION_MESSAGE_SEGMENTS) {
-    const content = boundedText(input.continuationHistory.content, "Continuation history", MAX_EXECUTION_CONTEXT_BLOB_BYTES);
-    const recovered = {
-      kind: "attachment" as const,
-      label: RECOVERED_PROVIDER_HISTORY_LABEL,
-      reference: referenceFor(content),
-      truncated: input.continuationHistory.truncated,
-      content,
-    };
-    const candidate = buildPrompt([...providerContexts, recovered]);
-    const candidateBytes = byteLength(candidate) + imageReferenceBytes;
-    if (candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES) {
-      providerContexts.push(recovered);
-      executionPrompt = candidate;
-      assembledPayloadBytes = candidateBytes;
-      executionSegmentCount += 1;
+  let sessionRecovery: TurnSessionRecovery | null = null;
+  if (input.restoredHistory) {
+    const history = input.restoredHistory(Math.min(
+      MAX_CONVERSATION_CONTEXT_TURN_BYTES,
+      MAX_EXECUTION_PAYLOAD_BYTES - assembledPayloadBytes
+        - (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
+        - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
+    ));
+    if (history) {
+      const restored = history.blocks.map((block) => providerContext({
+        kind: "attachment",
+        label: boundedLabel(block.label, "Restored history label"),
+        content: boundedText(block.content, "Restored history", MAX_EXECUTION_CONTEXT_BLOB_BYTES),
+        truncated: history.omittedMessageCount > 0,
+      }));
+      const candidate = buildPrompt([...providerContexts, ...restored]);
+      const candidateBytes = byteLength(candidate) + imageReferenceBytes;
+      const fits = restored.length > 0
+        && providerContexts.length + restored.length <= MAX_EXECUTION_CONTEXT_REFERENCES
+        && executionSegmentCount + restored.length <= MAX_EXECUTION_MESSAGE_SEGMENTS
+        && candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES;
+      if (fits) {
+        providerContexts.push(...restored);
+        executionPrompt = candidate;
+        assembledPayloadBytes = candidateBytes;
+        executionSegmentCount += restored.length;
+      }
+      sessionRecovery = fits
+        ? {
+            restoredMessageCount: history.messageCount,
+            omittedMessageCount: history.omittedMessageCount,
+          }
+        : {
+            restoredMessageCount: 0,
+            omittedMessageCount: history.messageCount + history.omittedMessageCount,
+          };
     }
   }
 
@@ -775,6 +796,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     executionPrompt,
     imagePaths,
     conversationContextDeliveries,
+    sessionRecovery,
     persistence: {
       manifest: {
         version: 1,

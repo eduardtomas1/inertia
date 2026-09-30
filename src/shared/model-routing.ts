@@ -239,9 +239,9 @@ export interface ContinuationIdentity {
   endpointIdentity: string | null;
   /**
    * Opaque server-generated digest binding the provider executable/version,
-   * protocol revision, harness implementation and capability manifest. A
-   * missing historical value is deliberately unverified and cannot authorize
-   * reuse of provider-owned session state.
+   * protocol revision, harness implementation and capability manifest. Custom
+   * backends reuse provider-owned session state only while it is present and
+   * unchanged; native providers keep their saved session across a change.
    */
   providerCompatibilityToken?: string | null;
   /** Missing historical values are equivalent to Standard provider speed. */

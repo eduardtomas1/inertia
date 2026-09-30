@@ -2141,6 +2141,7 @@ describe("runtime migration catalog", () => {
       { version: 81 },
       { version: 82 },
       { version: 83 },
+      { version: 84 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2157,6 +2158,9 @@ describe("runtime migration catalog", () => {
     expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
       name: string;
     }>).some(({ name }) => name === "suspended_duration_ms")).toBe(true);
+    expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
+      name: string;
+    }>).some(({ name }) => name === "session_recovery_json")).toBe(true);
     const appStateColumns = new Set((migrated.prepare(
       "PRAGMA table_info(app_state)",
     ).all() as Array<{ name: string }>).map(({ name }) => name));

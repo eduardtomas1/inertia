@@ -6,6 +6,7 @@ import type {
 import { lazy, memo, Suspense, useEffect, useState } from "react";
 import type {
   AppSettings,
+  AppSnapshot,
   Conversation,
   GitBranchInfo,
   GitDiffSnapshot,
@@ -219,6 +220,14 @@ export function formatAppShortcutLabel(
   key: string,
 ): string {
   return `${platform === "darwin" ? "⌘" : "Ctrl+"}${key.toUpperCase()}`;
+}
+
+export function paletteCurrentProjectId(
+  snapshot: AppSnapshot | null,
+  projectScopeId: string | null,
+): string | null {
+  const scoped = projectScopeId && snapshot?.projects.some(({ id }) => id === projectScopeId) ? projectScopeId : null;
+  return scoped ?? snapshot?.activeProjectId ?? null;
 }
 
 export function activeConversationIsVisible(input: {
@@ -873,7 +882,7 @@ export const AppLayout = memo(function AppLayout({
         snapshot={connection.snapshot}
         paletteOpen={paletteOpen}
         paletteView={paletteView}
-        currentProjectId={projectScopeId ?? connection.snapshot?.activeProjectId ?? null}
+        currentProjectId={paletteCurrentProjectId(connection.snapshot, projectScopeId)}
         newThreadShortcut={formatAppShortcutLabel(
           platform,
           settings.keybindings["new-chat"],

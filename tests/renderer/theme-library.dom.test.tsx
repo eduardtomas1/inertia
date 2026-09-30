@@ -93,4 +93,33 @@ describe("Theme library", () => {
     expect(screen.queryByRole("textbox", { name: "Light hex color" })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Dark hex color" })).toBeNull();
   });
+
+  it("reports an invalid hex color only after a failed commit", () => {
+    const onUpdate = vi.fn();
+    render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia" }} disabled={false} onUpdate={onUpdate} />);
+    const hex = screen.getByRole("textbox", { name: "Light color" });
+    for (const typed of ["#", "#3", "#3a", "#3a8", "#3a86", "#3a86f"]) {
+      fireEvent.change(hex, { target: { value: typed } });
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(hex).toHaveAttribute("aria-invalid", "false");
+    }
+    fireEvent.keyDown(hex, { key: "Enter" });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(hex).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    fireEvent.change(hex, { target: { value: "#3a86ff" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(hex).toHaveAttribute("aria-invalid", "false");
+    fireEvent.change(hex, { target: { value: "#3a86f" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.blur(hex);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    fireEvent.keyDown(hex, { key: "Escape" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.change(hex, { target: { value: "#3a86ff" } });
+    fireEvent.keyDown(hex, { key: "Enter" });
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ lightCustomColor: "#3a86ff" });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

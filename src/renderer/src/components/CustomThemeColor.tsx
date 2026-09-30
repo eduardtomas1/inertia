@@ -11,6 +11,7 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
 }): React.JSX.Element {
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
+  const [rejected, setRejected] = useState(false);
   const color = value ?? (mode === "light" ? "#4e30c5" : "#a3a3fa");
   const label = mode === "light" ? "Light" : "Dark";
   const colorInput = useRef<HTMLInputElement>(null);
@@ -29,7 +30,7 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
     return () => input.removeEventListener("change", commitColor);
   }, []);
   const validDraft = draft === null ? color : normalizeProjectHexColor(draft);
-  const invalid = draft !== null && !validDraft;
+  const invalid = rejected && draft !== null;
   const swatchStyle = useMemo(() => {
     const tokens = Object.fromEntries(buildCustomPaletteTokens(color, mode));
     return {
@@ -42,7 +43,8 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
     } as CSSProperties;
   }, [color, mode]);
   const commit = (): void => {
-    if (draft === null || !validDraft || disabled) return;
+    if (draft === null || disabled) return;
+    if (!validDraft) { setRejected(true); return; }
     onChange(validDraft);
     setDraft(null);
   };
@@ -64,7 +66,7 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
           <input id={`${id}-hex`} type="text" value={draft ?? color}
             maxLength={7} spellCheck={false} autoComplete="off" disabled={disabled}
             aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined}
-            onChange={(event) => setDraft(event.target.value)} onBlur={commit}
+            onChange={(event) => { setDraft(event.target.value); setRejected(false); }} onBlur={commit}
             onKeyDown={(event) => {
               if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); commit(); }
               if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDraft(null); }

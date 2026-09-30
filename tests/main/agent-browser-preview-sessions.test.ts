@@ -206,6 +206,47 @@ describe("conversation-owned Browser sessions", () => {
     }
   });
 
+  it("returns to four hidden Browsers once the agents that kept a fifth open finish", async () => {
+    let now = 1_000;
+    const window = harness().window;
+    const broker = new PreviewBroker({
+      getWindow: () => window as never,
+      openExternal: vi.fn(async () => undefined),
+      stateChannel: "preview-state",
+      now: () => now,
+    });
+    const contentsOffset = electronState.contents.length;
+    const finishLoads: Array<() => void> = [];
+    const navigations = [1, 2, 3, 4].map((index) => {
+      now += 1_000;
+      electronState.loadOverrides.push(async () => {
+        await new Promise<void>((resolve) => { finishLoads.push(resolve); });
+      });
+      return broker.perform({
+        ...runIdentity,
+        conversationId: `8888888${index}-8888-4888-8888-888888888888`,
+      }, { action: "navigate", url: "http://127.0.0.1:3000/busy" });
+    });
+    await vi.waitFor(() => expect(finishLoads).toHaveLength(4));
+    now += 1_000;
+    await expect(broker.perform({
+      ...runIdentity,
+      conversationId: "88888885-8888-4888-8888-888888888888",
+    }, { action: "tabs" })).resolves.toMatchObject({ ok: true });
+    const created = electronState.contents.slice(contentsOffset);
+    expect(created.map((contents) => contents.isDestroyed()))
+      .toEqual([false, false, false, false, false]);
+
+    now += 1_000;
+    for (const finish of finishLoads) finish();
+    await expect(Promise.all(navigations)).resolves.toMatchObject([
+      { ok: true }, { ok: true }, { ok: true }, { ok: true },
+    ]);
+    expect(created.map((contents) => contents.isDestroyed()))
+      .toEqual([false, false, false, false, true]);
+    broker.close();
+  });
+
   it("answers a snapshot of a blank tab with the next step instead of an error", async () => {
     const { broker } = harness();
     const snapshot = await broker.perform(runIdentity, { action: "snapshot" });

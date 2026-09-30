@@ -340,6 +340,7 @@ export class PreviewBroker {
       } finally {
         session.busy -= 1;
         session.lastUsedAt = this.#now();
+        if (session.surface === null) this.#evictParked(session);
       }
     } catch (error) {
       return agentOperationFailure(error, scope);

@@ -172,7 +172,19 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     await dialog.getByRole("spinbutton", { name: "Top", exact: true }).fill(String(Math.floor(captured.height / 4)));
     await dialog.getByRole("spinbutton", { name: "Width", exact: true }).fill(String(crop.width));
     await dialog.getByRole("spinbutton", { name: "Height", exact: true }).fill(String(Math.floor(captured.height / 10)));
+    const masked = { x: 0, y: Math.floor(captured.height / 4), width: crop.width, height: Math.floor(captured.height / 10) };
+    const maskedPixels = () => preview.evaluate((element, area) => {
+      const image = element as HTMLImageElement; const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d")!; context.drawImage(image, 0, 0);
+      const data = context.getImageData(area.x, area.y, area.width, area.height).data;
+      let count = 0;
+      for (let offset = 0; offset < data.length; offset += 4) if (data[offset] === 36 && data[offset + 1] === 36 && data[offset + 2] === 36 && data[offset + 3] === 255) count += 1;
+      return { masked: count, total: data.length / 4 };
+    }, masked);
+    expect((await maskedPixels()).masked).toBeLessThan(masked.width * masked.height);
     await dialog.getByRole("button", { name: "Mask area", exact: true }).click();
+    await expect.poll(maskedPixels).toEqual({ masked: masked.width * masked.height, total: masked.width * masked.height });
     await expect(dialog.getByRole("button", { name: "Attach reviewed image" })).toBeEnabled();
     await dialog.getByRole("spinbutton", { name: "Width", exact: true }).fill(String(crop.width));
     await dialog.getByRole("spinbutton", { name: "Height", exact: true }).fill(String(crop.height));

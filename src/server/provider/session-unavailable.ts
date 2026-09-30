@@ -8,8 +8,12 @@ export function namesUnrelatedMissingResource(detail: string): boolean {
   return UNRELATED_MISSING.test(detail) || NAMED_PATH.test(detail);
 }
 
+export function acpResumeStep(terminalEvent: string): boolean {
+  return ACP_RESUME_STEPS.has(terminalEvent);
+}
+
 export function acpSessionUnavailable(terminalEvent: string, detail: string): boolean {
-  return ACP_RESUME_STEPS.has(terminalEvent)
+  return acpResumeStep(terminalEvent)
     && !namesUnrelatedMissingResource(detail)
     && (RESUME_UNSUPPORTED.test(detail) || MISSING_SESSION.test(detail));
 }
@@ -25,4 +29,14 @@ export function openCodeSessionUnavailable(error: unknown): boolean {
   if (messages.some(namesUnrelatedMissingResource)) return false;
   return record.name === "NotFoundError"
     || messages.some((message) => /\bsession not found\b/iu.test(message));
+}
+
+export function openCodeRequestRejected(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return typeof error === "string" || (typeof error === "object" && error !== null);
+  }
+  const cause = error.cause;
+  return typeof cause === "object"
+    && cause !== null
+    && typeof (cause as Record<string, unknown>).status === "number";
 }

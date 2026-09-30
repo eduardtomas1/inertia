@@ -123,7 +123,7 @@ export interface CodexAppServerResult {
   diagnostic?: string;
   failure?: ProviderRunFailure;
   compatibilityError?: "full-access-unsupported" | "fast-mode-unsupported";
-  continuationError?: "stale-provider-session";
+  continuationError?: "stale-provider-session" | "resume-rejected";
   cleanupConfirmed: boolean;
 }
 

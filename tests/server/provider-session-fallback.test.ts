@@ -343,6 +343,30 @@ describe("unavailable session classification", () => {
     })).not.toHaveProperty("sessionUnavailable");
   });
 
+  it("marks every provider error at the Cursor or Kimi resume step as a rejected resume", () => {
+    const child = { exitCode: null, signalCode: null } as never;
+    expect(cursorRuntimeFailure("Internal error", child, "session", "session/load"))
+      .toMatchObject({ resumeRejected: true });
+    expect(cursorRuntimeFailure("Internal error", child, "session", "session/load"))
+      .not.toHaveProperty("sessionUnavailable");
+    expect(cursorRuntimeFailure("Internal error", child, "turn", "session/prompt"))
+      .not.toHaveProperty("resumeRejected");
+    expect(cursorRuntimeFailure("session/load timed out", child, "session", "session/load"))
+      .not.toHaveProperty("resumeRejected");
+    expect(cursorRuntimeFailure("Internal error", { exitCode: 1, signalCode: null } as never, "session", "session/load"))
+      .not.toHaveProperty("resumeRejected");
+
+    const context = { child, phase: "session", workspaceRoot: process.cwd(), diagnostic: "" };
+    expect(kimiRuntimeFailure(new Error("Internal error"), { ...context, terminalEvent: "session/resume" }))
+      .toMatchObject({ resumeRejected: true });
+    expect(kimiRuntimeFailure(new Error("Internal error"), { ...context, terminalEvent: "session/prompt" }))
+      .not.toHaveProperty("resumeRejected");
+    expect(kimiRuntimeFailure(new Error("Kimi ACP stream closed"), { ...context, terminalEvent: "session/resume" }))
+      .not.toHaveProperty("resumeRejected");
+    expect(kimiRuntimeFailure(new Error("auth_required"), { ...context, terminalEvent: "session/load" }))
+      .not.toHaveProperty("resumeRejected");
+  });
+
   it("recognises OpenCode's missing-session response", () => {
     expect(openCodeSessionUnavailable({
       name: "NotFoundError",
@@ -433,6 +457,25 @@ describe("Codex App Server session fallback", { concurrent: false }, () => {
     expect(manager.isRunning(runInput.conversationId)).toBe(false);
   });
 
+  it("reports any other refused resume as rejected but not as an unavailable session", async () => {
+    const { fake, manager, runInput } = fixture("rejected-resume");
+    const result = await manager.run(runInput, { freshSessionFallback: () => ({ prompt: "unused" }) });
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, failure: { resumeRejected: true } });
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
+    expect(captured(fake.capturePath).some(({ method }) => method === "thread/start")).toBe(false);
+  });
+
+  it("does not report an incompatible access policy at resume as a rejected resume", async () => {
+    const { manager, runInput } = fixture("incompatible-full-access");
+    const result = await manager.run({ ...runInput, access: "full" });
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "This Codex App Server version does not support Full Access. Update Codex CLI and try again.",
+    });
+    expect(result.failure).not.toHaveProperty("resumeRejected");
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
+  });
+
   it("keeps the failed resume when the turn declines the fallback", async () => {
     const { fake, manager, runInput } = fixture("missing-rollout-resume");
     const result = await manager.run(runInput, { freshSessionFallback: () => null });
@@ -481,7 +524,7 @@ describe("OpenCode session fallback", { concurrent: false }, () => {
     await expect(manager.run(runInput)).resolves.toMatchObject({
       status: "failed",
       cleanupConfirmed: true,
-      failure: { sessionUnavailable: true },
+      failure: { sessionUnavailable: true, resumeRejected: true },
     });
     expect(requests().some(({ method, path }) => method === "GET" && path === "/session/opencode-missing-session")).toBe(true);
     expect(requests().some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);

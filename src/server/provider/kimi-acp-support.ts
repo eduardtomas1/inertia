@@ -9,7 +9,7 @@ import {
 } from "./activity-detail";
 import type { ProviderRunFailure } from "./contracts";
 import type { ProviderRunEventBudget } from "./io";
-import { acpSessionUnavailable } from "./session-unavailable";
+import { acpResumeStep, acpSessionUnavailable } from "./session-unavailable";
 
 const MAX_ERROR_DETAIL_CHARS = 1024 * 1024;
 const MAX_TECHNICAL_DETAIL_CHARS = 16 * 1024;
@@ -229,6 +229,9 @@ export function kimiRuntimeFailure(
       : {}),
     ...(!isAuth && acpSessionUnavailable(context.terminalEvent, kimiErrorDetail(error, ""))
       ? { sessionUnavailable: true as const }
+      : {}),
+    ...(!isAuth && reason === "provider-error" && acpResumeStep(context.terminalEvent)
+      ? { resumeRejected: true as const }
       : {}),
   };
 }

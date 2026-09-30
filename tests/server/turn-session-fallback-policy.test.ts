@@ -211,3 +211,167 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
     }
   });
 });
+
+describe("retiring a saved session after repeated rejected resumes", () => {
+  type Runtime = Awaited<ReturnType<typeof establishedChat>>["runtime"];
+
+  async function failTurn(
+    runtime: Runtime,
+    content: string,
+    failure: NonNullable<ProviderRunResult["failure"]>,
+    options: { sessionId?: string; exitCode?: number } = {},
+  ) {
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content });
+    runtime.controller.start(queued.turn.id);
+    if (options.sessionId) {
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: options.sessionId });
+    }
+    runtime.provider.resolve({
+      status: "failed",
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options.exitCode !== undefined ? { exitCode: options.exitCode } : {}),
+      error: failure.message,
+      failure,
+    });
+    await flushTurnControllerTestPromises();
+    return runtime.store.agentTurn(queued.turn.id);
+  }
+
+  async function completeTurn(runtime: Runtime, content: string, sessionId: string) {
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId });
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Done." });
+    runtime.provider.resolve({ status: "completed", sessionId, text: "Done." });
+    await flushTurnControllerTestPromises();
+    return runtime.store.agentTurn(queued.turn.id);
+  }
+
+  const rejected = {
+    reason: "provider-error",
+    message: "The provider refused to load the saved session.",
+    resumeRejected: true,
+  } as const;
+  const outage = { reason: "provider-error", message: "Network unreachable." } as const;
+
+  it("keeps a valid session after two usage-limit failures", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      for (const attempt of [1, 2]) {
+        const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: `Attempt ${attempt}.` });
+        expect(queued.turn.providerSessionBefore).toBe("saved-session");
+        runtime.controller.start(queued.turn.id);
+        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+        runtime.provider.resolve({
+          status: "failed",
+          sessionId: "saved-session",
+          error: "You've hit your usage limit. Try again later.",
+          failure: { reason: "codex-error", message: "You've hit your usage limit. Try again later." },
+        });
+        await flushTurnControllerTestPromises();
+        expect(runtime.store.agentTurn(queued.turn.id).status).toBe("failed");
+      }
+      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Attempt 3." });
+      expect(third.turn).toMatchObject({ providerSessionBefore: "saved-session", continuationReasonCode: "same-continuation" });
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps a valid session after two provider process exits", async () => {
+    const { runtime } = await establishedChat("claude");
+    try {
+      for (const attempt of [1, 2]) {
+        const turn = await failTurn(runtime, `Attempt ${attempt}.`, {
+          reason: "process-exit",
+          message: "Claude Code exited before the turn completed.",
+        }, { exitCode: 1 });
+        expect(turn).toMatchObject({ status: "failed", terminalReason: "provider-process-exit" });
+      }
+      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Attempt 3." });
+      expect(third.turn).toMatchObject({ providerSessionBefore: "saved-session", continuationReasonCode: "same-continuation" });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("starts fresh after two rejected resumes of the same session", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      expect(await failTurn(runtime, "1", rejected)).toMatchObject({
+        providerSessionBefore: "saved-session",
+        sessionRecovery: null,
+      });
+      expect((await failTurn(runtime, "2", rejected)).providerSessionBefore).toBe("saved-session");
+      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "3" });
+      expect(third.turn).toMatchObject({ providerSessionBefore: null, continuationReasonCode: "stale-provider-session" });
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("does not count a rejected resume followed by an ordinary failure", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      await failTurn(runtime, "1", rejected);
+      await failTurn(runtime, "2", outage);
+      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "3" });
+      expect(third.turn.providerSessionBefore).toBe("saved-session");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps resuming the saved session while an outage lasts", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      for (const content of ["1", "2", "3", "4"]) {
+        expect((await failTurn(runtime, content, outage)).providerSessionBefore).toBe("saved-session");
+      }
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("does not retire a session it started until that session completes a turn", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      await failTurn(runtime, "1", rejected);
+      await failTurn(runtime, "2", rejected);
+      const fresh = await failTurn(runtime, "3", outage, { sessionId: "second-session" });
+      expect(fresh).toMatchObject({ providerSessionBefore: null, continuationReasonCode: "stale-provider-session" });
+      expect((await failTurn(runtime, "4", rejected)).providerSessionBefore).toBe("second-session");
+      expect((await failTurn(runtime, "5", rejected)).providerSessionBefore).toBe("second-session");
+      const sixth = runtime.controller.queue({ conversationId: runtime.conversationId, content: "6" });
+      expect(sixth.turn.providerSessionBefore).toBe("second-session");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("retires a session it started once that session has completed a turn", async () => {
+    const { runtime } = await establishedChat();
+    try {
+      await failTurn(runtime, "1", rejected);
+      await failTurn(runtime, "2", rejected);
+      const fresh = await completeTurn(runtime, "3", "second-session");
+      expect(fresh).toMatchObject({ status: "completed", providerSessionBefore: null });
+      await failTurn(runtime, "4", rejected);
+      await failTurn(runtime, "5", rejected);
+      const sixth = runtime.controller.queue({ conversationId: runtime.conversationId, content: "6" });
+      expect(sixth.turn).toMatchObject({ providerSessionBefore: null, continuationReasonCode: "stale-provider-session" });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+});

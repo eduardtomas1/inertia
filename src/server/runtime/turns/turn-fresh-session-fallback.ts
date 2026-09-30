@@ -10,6 +10,19 @@ export function providerSessionUnavailable(result: ProviderRunResult): boolean {
   return result.status === "failed" && result.failure?.sessionUnavailable === true;
 }
 
+export function recordRejectedProviderResume(
+  store: RuntimeStore,
+  active: ActiveTurn,
+  result: ProviderRunResult,
+): void {
+  const sessionId = active.providerInput.sessionId;
+  if (
+    sessionId
+    && result.status === "failed"
+    && (result.failure?.sessionUnavailable === true || result.failure?.resumeRejected === true)
+  ) store.turnLedgerRepository.recordRejectedResume(active.turn.id, sessionId);
+}
+
 export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,

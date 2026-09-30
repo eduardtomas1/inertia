@@ -37,7 +37,7 @@ export function applyFreshSessionFallback(
     || active.latestAssistantMessageId !== null
   ) return null;
   const request = active.freshSessionRequest(active.turn.userMessageId);
-  active.turn = store.restartAgentTurnOnFreshSession(active.turn.id, {
+  active.turn = store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {
     expectedSessionId,
     executionContext: request.persistence,
     sessionRecovery: request.sessionRecovery,

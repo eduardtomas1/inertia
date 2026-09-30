@@ -205,7 +205,7 @@ export function resolveTurnRequest(
   }
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
-    && dependencies.store.savedSessionKeepsFailing(
+    && dependencies.store.turnLedgerRepository.savedSessionKeepsFailing(
       conversation.id,
       conversation.providerSessionId!,
     )

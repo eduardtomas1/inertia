@@ -206,7 +206,7 @@ describe("provider session continuity", () => {
     expect(fresh.executionPrompt.split("Continue the export.")).toHaveLength(2);
     expect(fresh.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
 
-    const restarted = f.store.restartAgentTurnOnFreshSession(queued.turn.id, {
+    const restarted = f.store.turnLedgerRepository.restartOnFreshSession(queued.turn.id, {
       expectedSessionId: "before-update",
       executionContext: fresh.persistence,
       sessionRecovery: fresh.sessionRecovery,
@@ -223,7 +223,7 @@ describe("provider session continuity", () => {
       continuationIdentity: null,
     });
     expect(f.restoredReferences(queued.turn.id)).toHaveLength(1);
-    expect(() => f.store.restartAgentTurnOnFreshSession(queued.turn.id, {
+    expect(() => f.store.turnLedgerRepository.restartOnFreshSession(queued.turn.id, {
       expectedSessionId: "before-update",
       executionContext: fresh.persistence,
       sessionRecovery: fresh.sessionRecovery,
@@ -237,7 +237,7 @@ describe("provider session continuity", () => {
     const resolved = f.resolve();
     const queued = f.store.beginAgentTurn(resolved.input);
     const fresh = resolved.adopt(queued).active.freshSessionRequest!(queued.message.id);
-    const restart = () => f.store.restartAgentTurnOnFreshSession(queued.turn.id, {
+    const restart = () => f.store.turnLedgerRepository.restartOnFreshSession(queued.turn.id, {
       expectedSessionId: "before-update",
       executionContext: fresh.persistence,
       sessionRecovery: fresh.sessionRecovery,
@@ -294,7 +294,7 @@ describe("a saved session that keeps failing to open", () => {
 
   it("starts fresh with the chat's history after two resumes fail before the provider does anything", async () => {
     const f = await failedResumes(2);
-    expect(f.store.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
+    expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
     const resolved = f.resolve(f.store, { content: "Third attempt." });
     const queued = f.store.beginAgentTurn(resolved.input);
     const input = resolved.adopt(queued).active.providerInput;
@@ -315,7 +315,7 @@ describe("a saved session that keeps failing to open", () => {
     ["the turn never reached the provider", 2, { terminalReason: "turn-start-failed" }],
   ] as const)("keeps resuming when %s", async (_label, count, outcome) => {
     const f = await failedResumes(count, outcome);
-    expect(f.store.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(false);
+    expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(false);
     const resolved = f.resolve(f.store, { content: "Next attempt." });
     const queued = f.store.beginAgentTurn(resolved.input);
     expect(resolved.adopt(queued).active.providerInput.sessionId).toBe("before-update");
@@ -324,7 +324,7 @@ describe("a saved session that keeps failing to open", () => {
 
   it("does not count failures that belonged to a different session", async () => {
     const f = await failedResumes(2);
-    expect(f.store.savedSessionKeepsFailing(f.conversation.id, "another-session")).toBe(false);
+    expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "another-session")).toBe(false);
   });
 });
 

@@ -102,6 +102,7 @@ describe("Claude in-process Inertia chat tools", () => {
       tools: [{
         name: "inertia_create_conversation",
         annotations: { readOnlyHint: false },
+        _meta: { "anthropic/alwaysLoad": true },
       }],
     });
     const call = client.callTool({

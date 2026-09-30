@@ -169,13 +169,13 @@ describe("every schema-valid browser input is accepted by the runtime and by mai
 
   it("Claude SDK tools/list override", async () => {
     const tools = createClaudeHostTools(fixture());
-    const client = new Client({ name: "review", version: "1.0.0" });
+    const client = new Client({ name: "inertia-test", version: "1.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     try {
       await tools.config.instance.connect(serverTransport);
       await client.connect(clientTransport);
       const listed = await client.listTools();
-      for (const tool of listed.tools) expect(tool._meta).toBeUndefined();
+      for (const tool of listed.tools) expect(tool._meta).toEqual({ "anthropic/alwaysLoad": true });
       const found = divergences(new Map(listed.tools.map((tool) => [tool.name, tool.inputSchema as Schema])));
       expect(found.filter((entry) => !KNOWN.has(entry))).toEqual([]);
     } finally {

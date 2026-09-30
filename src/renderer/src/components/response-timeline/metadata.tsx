@@ -35,13 +35,14 @@ export function CopyAnswerButton({
 }): React.JSX.Element {
   const { copied, error, copy } = useCopiedState();
   const copiedAriaLabel = `${ariaLabel.replace(/^Copy\s+/u, "")} copied`;
+  const label = error ? `${ariaLabel} failed` : ariaLabel;
   return (
     <>
       <button
         type="button"
         className="turn-action"
-        title={copied ? "Answer copied" : ariaLabel}
-        aria-label={copied ? copiedAriaLabel : ariaLabel}
+        title={copied ? "Answer copied" : label}
+        aria-label={copied ? copiedAriaLabel : label}
         onClick={() => void copy(content)}
       >
         <InertiaMorphIcon

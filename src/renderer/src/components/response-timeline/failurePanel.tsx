@@ -92,8 +92,8 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
           <button
             type="button"
             className="turn-failure-action"
-            aria-label={copied ? "Diagnostics copied" : "Copy diagnostics"}
-            title={copied ? "Diagnostics copied" : "Copy scrubbed diagnostics"}
+            aria-label={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy diagnostics"}
+            title={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy scrubbed diagnostics"}
             onClick={() => void copy(presentation.copyText)}
           >
             {copied

@@ -291,6 +291,7 @@ describe("turn failure diagnostics", () => {
     await waitFor(() => expect(screen.getByRole("alert"))
       .toHaveTextContent("Couldn't copy. Try again or select the text manually."));
     expect(copy).toHaveTextContent("Copy failed");
+    expect(screen.getByRole("button", { name: "Copy diagnostics failed" })).toBe(copy);
     expect(screen.queryByRole("button", { name: "Diagnostics copied" })).toBeNull();
   });
 

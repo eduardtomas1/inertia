@@ -18,7 +18,6 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
   const [area, setArea] = useState<SnapshotReviewArea>({ x: 0, y: 0, width: 1, height: 1 });
   const id = useRef<string | null>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLElement>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const image = review?.stage === "image" ? review : null;
   useNativePreviewSuspension(open);
@@ -61,7 +60,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
   }, [open]);
 
   useEffect(() => {
-    if (open && !dialog.current?.contains(document.activeElement)) closeButton.current?.focus();
+    if (open && document.activeElement === document.body) closeButton.current?.focus();
   }, [open, review?.stage, error]);
 
   const request = async (input: SnapshotReviewRequest): Promise<void> => {
@@ -91,7 +90,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
   return <>
     <IconButton label="Take reviewed screenshot" disabled={disabled || open} onClick={start}><Camera size={16} /></IconButton>
     {open && createPortal(<div className="snapshot-backdrop" role="presentation">
-      <section ref={dialog} className="snapshot-dialog screenshot-review" role="dialog" aria-modal="true" aria-labelledby="screenshot-review-title"
+      <section className="snapshot-dialog screenshot-review" role="dialog" aria-modal="true" aria-labelledby="screenshot-review-title"
         onKeyDown={(event) => {
           if (event.key === "Escape") { event.stopPropagation(); close(); }
           else trapModalFocus(event, event.currentTarget);

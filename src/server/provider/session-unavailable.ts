@@ -1,8 +1,10 @@
-const MISSING_SESSION = /\b(?:not found|no such|unknown session|does not exist|invalid session)\b/iu;
+const MISSING_SESSION = /\b(?:session|conversation|resource)\b[^.\n]{0,80}\b(?:not found|does not exist|no longer exists)\b|\b(?:no such|unknown|invalid) session\b/iu;
+const RESUME_UNSUPPORTED = /does not advertise session resume support/iu;
 
 export function acpSessionUnavailable(terminalEvent: string, detail: string): boolean {
-  return (terminalEvent === "session/load" || terminalEvent === "session/resume")
-    && MISSING_SESSION.test(detail);
+  return RESUME_UNSUPPORTED.test(detail)
+    || ((terminalEvent === "session/load" || terminalEvent === "session/resume")
+      && MISSING_SESSION.test(detail));
 }
 
 export function openCodeSessionUnavailable(error: unknown): boolean {

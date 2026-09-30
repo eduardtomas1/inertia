@@ -84,6 +84,7 @@ export function startHarnessWithFreshSessionFallback(
       });
       settleFirstAttempt(false);
       current = next;
+      if (cancelled) next.cancel(false);
       return next.result;
     } catch {
       return keep();

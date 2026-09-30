@@ -3,6 +3,7 @@ import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
+  staleProviderSessionDecision,
 } from "../../../shared/continuation-policy";
 import {
   modelSelectionHasVerifiedProbeCapability,
@@ -32,6 +33,8 @@ import type {
   TurnControllerHooks,
   TurnProviderRuntime,
 } from "./turn-controller-types";
+
+const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
 
 export type PreparedActiveTurn = Omit<
   ActiveTurn,
@@ -184,7 +187,7 @@ export function resolveTurnRequest(
         ? latestTurn.modelSelection.modelId
         : routeSelection.modelId
     : null;
-  const continuation = resolveContinuationDecision({
+  const resolvedContinuation = resolveContinuationDecision({
     previousIdentity: previousContinuationIdentity,
     nextIdentity: route.continuationIdentity,
     previousModelId: previousContinuationModelId,
@@ -197,9 +200,17 @@ export function resolveTurnRequest(
       officiallyAllowsFastModeSwitchWithinSession(route.compatibility)
       && supportedFastMode !== null,
   });
-  if (continuation.action === "new-conversation-required") {
-    throw new Error(continuation.reason);
+  if (resolvedContinuation.action === "new-conversation-required") {
+    throw new Error(resolvedContinuation.reason);
   }
+  const continuation = resolvedContinuation.action === "resume-session"
+    && latestTurn?.status === "failed"
+    && dependencies.store.savedSessionKeepsFailing(
+      conversation.id,
+      conversation.providerSessionId!,
+    )
+    ? staleProviderSessionDecision()
+    : resolvedContinuation;
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
@@ -232,7 +243,9 @@ export function resolveTurnRequest(
         ? {
             restoredHistory: (capacityBytes: number) => dependencies.store.continuationHistory(
               conversation.id,
-              capacityBytes,
+              usesNativeCatalog
+                ? capacityBytes
+                : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES),
               requestedAt,
               excludedMessageId,
             ),

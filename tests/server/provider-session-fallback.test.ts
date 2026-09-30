@@ -204,6 +204,28 @@ describe("fresh provider session fallback", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
+  it("stops a fresh attempt that was cancelled while it was starting", async () => {
+    const { harness, attempts } = scriptedHarness();
+    const original = harness.start;
+    let run: ReturnType<typeof startHarnessWithFreshSessionFallback> | undefined;
+    harness.start = (options) => {
+      const started = original(options);
+      if (attempts.length === 2) run!.cancel(false);
+      return started;
+    };
+    run = startHarnessWithFreshSessionFallback(harness, {
+      input: input(),
+      executable: "provider",
+      environment: {},
+      providerNativeToolsAvailable: true,
+    }, () => ({ prompt: "Replacement" }));
+    attempts[0]!.finish({ status: "failed", failure: unavailable });
+    await vi.waitFor(() => expect(attempts).toHaveLength(2));
+    expect(attempts[1]!.cancelled).toEqual([false]);
+    attempts[1]!.finish({ status: "cancelled" });
+    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
+  });
+
   it("forwards cancellation to the attempt that is running", async () => {
     const { run, attempts } = start(() => ({ prompt: "Replacement" }));
     attempts[0]!.finish({ status: "failed", failure: unavailable });
@@ -273,6 +295,11 @@ describe("unavailable session classification", () => {
     expect(acpSessionUnavailable("session/resume", "Resource not found")).toBe(true);
     expect(acpSessionUnavailable("session/load", "unknown session abc")).toBe(true);
     expect(acpSessionUnavailable("session/load", "Authentication required")).toBe(false);
+    expect(acpSessionUnavailable("session/load", "Workspace not found")).toBe(false);
+    expect(acpSessionUnavailable("session/load", "cwd does not exist")).toBe(false);
+    expect(acpSessionUnavailable("session/load", "command not found")).toBe(false);
+    expect(acpSessionUnavailable("session/load", "This Cursor ACP server does not advertise session resume support.")).toBe(true);
+    expect(acpSessionUnavailable("initialize", "This Kimi ACP server does not advertise session resume support.")).toBe(true);
     expect(acpSessionUnavailable("session/new", "Session not found")).toBe(false);
     expect(acpSessionUnavailable("session/prompt", "File not found")).toBe(false);
   });
@@ -457,6 +484,37 @@ describe("OpenCode session fallback", { concurrent: false }, () => {
     });
     expect(requests().some(({ method, path }) => method === "GET" && path === "/session/opencode-missing-session")).toBe(true);
     expect(requests().some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
+  });
+
+  it("reports a server that answers with a different session as unavailable", async () => {
+    const root = portableFixtureRoot("OpenCode mismatched session");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(
+      root,
+      join(root, "capture.json"),
+      "resume",
+      0,
+      "opencode-other-session",
+    ));
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    managers.push(manager);
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-mismatched-session",
+      cwd: root,
+      prompt: "Continue.",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      failure: { sessionUnavailable: true },
+    });
   });
 
   it("answers from a new session when the saved one is missing", async () => {

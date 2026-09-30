@@ -322,6 +322,35 @@ export class TurnLedgerRepository {
     })();
   }
 
+  savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {
+    const attempts = this.context.database.prepare(`
+      SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
+        turn.terminal_assistant_message_id,
+        EXISTS(
+          SELECT 1 FROM activities
+          WHERE activities.turn_id = turn.id AND activities.kind <> 'error'
+        ) AS progressed
+      FROM agent_turns AS turn
+      WHERE turn.conversation_id = ?
+      ORDER BY turn.requested_at DESC, turn.id DESC
+      LIMIT 2
+    `).all(conversationId) as Array<{
+      status: string;
+      terminal_reason: string | null;
+      provider_session_before: string | null;
+      terminal_assistant_message_id: string | null;
+      progressed: 0 | 1;
+    }>;
+    return attempts.length === 2 && attempts.every((attempt) =>
+      attempt.status === "failed"
+      && attempt.provider_session_before === sessionId
+      && attempt.terminal_assistant_message_id === null
+      && attempt.progressed === 0
+      && (attempt.terminal_reason === "provider-error"
+        || attempt.terminal_reason === "provider-process-exit"
+        || attempt.terminal_reason === "provider-process-crash"));
+  }
+
   restartOnFreshSession(turnId: string, input: {
     expectedSessionId: string;
     executionContext: PersistedTurnExecutionContext;

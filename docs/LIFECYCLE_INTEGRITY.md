@@ -219,14 +219,24 @@ restarts once on a fresh session. Every harness reports that rejection as an
 unavailable session, the turn ledger clears the dead native ID and records
 `stale-provider-session`, and no later turn retries it.
 
+A rejection the harness does not recognise cannot strand the chat. A saved
+session whose last two resumes both failed before the provider did anything
+(no answer and no activity other than the error) is retired, and the next turn
+starts fresh.
+
+The token no longer retires native sessions, so a harness change that makes
+previously saved sessions unusable must retire them explicitly with a
+migration, as schema 65 did for Codex.
+
 A fresh session in an established chat never starts blank. The request carries
 the chat's earlier visible messages, selected by the same packer as an explicit
 reference to this chat: the opening request first, then the newest turns,
-bounded by the room left beside the selected context. Attachments, tool
-output and hidden provider state are not included, and known secret patterns
-are redacted. The turn records how many messages were restored and omitted,
-and the conversation shows that a new provider session started. An explicit
-reference to this chat in the same message is not duplicated.
+bounded by the room left beside the selected context and, on a custom backend,
+by a smaller fixed share. Attachments, tool output and hidden provider state
+are not included, and known secret patterns are redacted. The turn records how
+many messages were restored and omitted, and the conversation shows that a new
+provider session started. An explicit reference to this chat in the same
+message is not duplicated.
 
 ## Cross-version application handoff
 

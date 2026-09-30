@@ -256,6 +256,120 @@ describe("provider session continuity", () => {
   });
 });
 
+describe("a saved session that keeps failing to open", () => {
+  async function failedResumes(
+    count: number,
+    outcome: { terminalReason?: string; activityKind?: "status" | "error"; answered?: boolean } = {},
+  ) {
+    const f = await fixture("codex");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: f.previous });
+    for (let attempt = 0; attempt < count; attempt += 1) {
+      const resolved = f.resolve(f.store, { content: `Attempt ${attempt + 1}.` });
+      const queued = f.store.beginAgentTurn(resolved.input);
+      resolved.adopt(queued);
+      expect(queued.turn.providerSessionBefore).toBe("before-update");
+      f.store.addActivity({
+        conversationId: f.conversation.id,
+        runId: queued.turn.runId,
+        turnId: queued.turn.id,
+        kind: outcome.activityKind ?? "error",
+        title: "Codex could not complete the request.",
+        detail: null,
+        status: "failed",
+      });
+      const answer = outcome.answered
+        ? f.store.createMessage(f.conversation.id, "Partial answer", "assistant", [], queued.turn.id)
+        : null;
+      f.store.settleAgentTurn(queued.turn.id, {
+        status: "failed",
+        terminalReason: outcome.terminalReason ?? "provider-error",
+        providerSessionAfter: "before-update",
+        ...(answer ? { terminalAssistantMessageId: answer.id } : {}),
+        startedAt: queued.turn.requestedAt, completedAt: queued.turn.requestedAt,
+        updatedAt: queued.turn.requestedAt,
+      });
+    }
+    return f;
+  }
+
+  it("starts fresh with the chat's history after two resumes fail before the provider does anything", async () => {
+    const f = await failedResumes(2);
+    expect(f.store.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
+    const resolved = f.resolve(f.store, { content: "Third attempt." });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const input = resolved.adopt(queued).active.providerInput;
+    expect(input.sessionId).toBeUndefined();
+    expect(input.prompt).toContain("The export must preserve accented names.");
+    expect(queued.turn).toMatchObject({
+      providerSessionBefore: null,
+      continuationReasonCode: "stale-provider-session",
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
+    });
+    expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
+  });
+
+  it.each([
+    ["only one resume has failed", 1, {}],
+    ["the provider made progress before failing", 2, { activityKind: "status" }],
+    ["the provider had started answering", 2, { answered: true }],
+    ["the turn never reached the provider", 2, { terminalReason: "turn-start-failed" }],
+  ] as const)("keeps resuming when %s", async (_label, count, outcome) => {
+    const f = await failedResumes(count, outcome);
+    expect(f.store.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(false);
+    const resolved = f.resolve(f.store, { content: "Next attempt." });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    expect(resolved.adopt(queued).active.providerInput.sessionId).toBe("before-update");
+    expect(queued.turn.continuationReasonCode).toBe("same-continuation");
+  });
+
+  it("does not count failures that belonged to a different session", async () => {
+    const f = await failedResumes(2);
+    expect(f.store.savedSessionKeepsFailing(f.conversation.id, "another-session")).toBe(false);
+  });
+});
+
+describe("restored history on a custom backend", () => {
+  it("restores a bounded share of a long chat instead of the full budget", async () => {
+    const f = await fixture();
+    for (let i = 0; i < 40; i += 1) {
+      f.store.createMessage(f.conversation.id, `message-${i}: ${"x".repeat(4_000)}`, i % 2 === 0 ? "user" : "assistant", [], null, new Date(Date.UTC(2030, 0, 2, 0, 0, i)).toISOString());
+    }
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "before-update",
+      continuationIdentity: { ...f.previous, endpointIdentity: "different-account-endpoint" },
+    });
+    const restoredBytes = (custom: boolean) => {
+      const resolved = resolveTurnRequest({
+        store: f.store,
+        providers: {
+          resolveModelRoute: () => custom
+            ? { ...f.route, backendProfile: { ...f.route.backendProfile, source: "custom" } }
+            : f.route,
+          harnessIdFor: () => f.route.harnessId,
+        } as unknown as TurnProviderRuntime,
+        hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
+        id: () => `bounded-${custom}`,
+        now: () => capturedAt,
+        clock: () => new Date(capturedAt),
+      }, { conversationId: f.conversation.id, content: "Continue the export." });
+      return {
+        bytes: resolved.input.executionContext!.manifest.references
+          .filter(({ label }) => label.startsWith(RESTORED_CHAT_HISTORY_LABEL))
+          .reduce((total, { byteSize }) => total + byteSize, 0),
+        recovery: resolved.input.sessionRecovery,
+      };
+    };
+    const native = restoredBytes(false);
+    const custom = restoredBytes(true);
+    expect(native.recovery).toEqual({ restoredMessageCount: 42, omittedMessageCount: 0 });
+    expect(native.bytes).toBeGreaterThan(150 * 1_024);
+    expect(custom.bytes).toBeGreaterThan(0);
+    expect(custom.bytes).toBeLessThanOrEqual(48 * 1_024);
+    expect(custom.recovery!.restoredMessageCount).toBeGreaterThan(0);
+    expect(custom.recovery!.restoredMessageCount + custom.recovery!.omittedMessageCount).toBe(42);
+  });
+});
+
 describe("restored chat history", () => {
   it("recovers text after NULs in stored and streamed messages", async () => {
     const f = await fixture();

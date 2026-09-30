@@ -520,6 +520,7 @@ function startOpenCodeRun(
           throw error;
         });
         if (resumed.data.id !== sessionId) {
+          sessionUnavailable = true;
           throw new Error("OpenCode did not confirm the exact session selected for this run.");
         }
         await initialize(

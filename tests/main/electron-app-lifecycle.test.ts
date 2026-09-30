@@ -197,9 +197,9 @@ describe("Electron E2E application lifecycle", () => {
     unrelated.emit("framereceived", { payload: "preview" });
 
     expect(rendererErrors).toEqual([
-      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED (inertia://bundle/assets/runtime.js:2:1)",
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/redacted' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED (inertia://bundle/assets/runtime.js:2:1)",
       "WebSocket connection to 'ws://127.0.0.1:41000/preview' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
-      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/redacted' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
     ]);
   });
 

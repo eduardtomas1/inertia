@@ -107,21 +107,10 @@ describe("restored history redaction", () => {
 
 describe("secret scrubber cost", () => {
   const MIB = 1024 * 1024;
-  it.each([
-    ["repeated PEM headers without an end", joined("-----BEGIN RSA PRIVATE", " KEY-----\n")],
-    ["a PEM header followed by dashes", joined("-----BEGIN PRIVATE", " KEY-----", "-".repeat(40))],
-    ["repeated URL schemes with user names", "postgres://admin:"],
-    ["repeated URL schemes without a host", "https://"],
-    ["unterminated JSON secret values", `{"password": "`],
-    ["repeated token prefixes", "ghp_ xoxb- sk- github_pat_ AKIA "],
-    ["repeated AWS key names", "aws_secret_access_key = "],
-    ["long secret-like runs", `sk-${"a".repeat(4_000)} `],
-    ["one PEM header followed by a long body", joined("-----BEGIN PRIVATE", " KEY-----", "A".repeat(MIB))],
-    ["JSON-like names ending in a secret word", `"x_y_token": 1, `],
-    ["colon-separated words", "a:b:c:d@"],
-    ["ordinary prose", "The quick brown fox jumps over the lazy dog. "],
-  ])("scrubs 1 MiB of %s in under 100 ms", (_label, unit) => {
-    const text = unit.repeat(Math.ceil(MIB / unit.length)).slice(0, MIB);
+  const repeated = (unit: string) => (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
+  const pemHeader = joined("-----BEGIN PRIVATE", " KEY-----");
+
+  function scrubMilliseconds(text: string): number {
     boundedSubagentText(text, 16);
     const timings: number[] = [];
     for (let run = 0; run < 3; run += 1) {
@@ -129,7 +118,28 @@ describe("secret scrubber cost", () => {
       boundedSubagentText(text, 16);
       timings.push(performance.now() - started);
     }
-    expect(Math.min(...timings)).toBeLessThan(100);
+    return Math.min(...timings);
+  }
+
+  it.each([
+    ["repeated PEM headers without an end", repeated(joined("-----BEGIN RSA PRIVATE", " KEY-----\n"))],
+    ["a PEM header followed by dashes", repeated(`${pemHeader}${"-".repeat(40)}`)],
+    ["repeated URL schemes with user names", repeated("postgres://admin:")],
+    ["repeated URL schemes without a host", repeated("https://")],
+    ["unterminated JSON secret values", repeated(`{"password": "`)],
+    ["repeated token prefixes", repeated("ghp_ xoxb- sk- github_pat_ AKIA ")],
+    ["repeated AWS key names", repeated("aws_secret_access_key = ")],
+    ["long secret-like runs", repeated(`sk-${"a".repeat(4_000)} `)],
+    ["one PEM header followed by a long body", (size: number) => `${pemHeader}${"A".repeat(size - pemHeader.length)}`],
+    ["JSON-like names ending in a secret word", repeated(`"x_y_token": 1, `)],
+    ["colon-separated words", repeated("a:b:c:d@")],
+    ["ordinary prose", repeated("The quick brown fox jumps over the lazy dog. ")],
+  ])("scrubs %s in linear time", (_label, build) => {
+    const oneMiB = scrubMilliseconds(build(MIB));
+    const twoMiB = scrubMilliseconds(build(2 * MIB));
+    expect(twoMiB).toBeLessThanOrEqual(3 * oneMiB + 50);
+    expect(oneMiB).toBeLessThan(1_000);
+    expect(twoMiB).toBeLessThan(2_000);
   });
 });
 

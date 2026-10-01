@@ -47,7 +47,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("issues reads for newly visible tiles after two earlier reads are hidden before settling", () => {
+it("admits newly visible tiles within 15 seconds when two hidden reads never settle", () => {
+  vi.useFakeTimers();
   const view = render(<SentMessageAttachmentList attachments={attachments} />);
   act(() => { setVisible(view.container, 0, true); setVisible(view.container, 1, true); });
   expect(readIssued(0)).toBe(true);
@@ -58,9 +59,11 @@ it("issues reads for newly visible tiles after two earlier reads are hidden befo
     setVisible(view.container, 2, true);
     setVisible(view.container, 3, true);
   });
+  expect([2, 3].filter(readIssued)).toEqual([]);
+  act(() => { vi.advanceTimersByTime(15_000); });
   expect([2, 3].filter(readIssued)).toEqual([2, 3]);
-  expect(created[0]!).toHaveAttribute("src", "");
-  expect(created[1]!).toHaveAttribute("src", "");
+  expect(created[0]).toHaveAttribute("src", "");
+  expect(created[1]).toHaveAttribute("src", "");
 });
 
 it("shows an image or a placeholder when a loaded tile re-enters the viewport behind busy slots", () => {
@@ -78,12 +81,15 @@ it("shows an image or a placeholder when a loaded tile re-enters the viewport be
   expect(reentered.querySelector("img") !== null || reentered.querySelector("svg") !== null).toBe(true);
 });
 
-it("loads another conversation's thumbnails after the previous list unmounts with two unsettled reads", () => {
+it("loads another conversation's thumbnails within 15 seconds after the previous list unmounts with two hung reads", () => {
+  vi.useFakeTimers();
   const first = render(<SentMessageAttachmentList attachments={attachments.slice(0, 2)} />);
   act(() => { setVisible(first.container, 0, true); setVisible(first.container, 1, true); });
   first.unmount();
   const second = render(<SentMessageAttachmentList attachments={attachments.slice(4, 6)} />);
   act(() => { setVisible(second.container, 0, true); setVisible(second.container, 1, true); });
+  expect([4, 5].filter(readIssued)).toEqual([]);
+  act(() => { vi.advanceTimersByTime(15_000); });
   expect([4, 5].filter(readIssued)).toEqual([4, 5]);
 });
 
@@ -98,7 +104,7 @@ it("frees a slot after a visible read stalls for 15 seconds and keeps the tile r
   expect(readIssued(2)).toBe(false);
   act(() => { vi.advanceTimersByTime(14_999); });
   expect(readIssued(2)).toBe(false);
-  act(() => { vi.advanceTimersByTime(2); });
+  act(() => { vi.advanceTimersByTime(1); });
   expect(readIssued(2)).toBe(true);
   expect(readIssued(0)).toBe(false);
   expect(tile(view.container, 0)).toHaveAttribute("data-thumbnail-state", "loading");

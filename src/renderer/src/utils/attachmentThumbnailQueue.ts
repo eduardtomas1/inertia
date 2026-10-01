@@ -10,7 +10,7 @@ interface Thumbnail {
 
 const THUMBNAIL_READ_TIMEOUT_MS = 15_000;
 const pending = new Set<Thumbnail>();
-const loading = new Map<HTMLImageElement, () => void>();
+const loading = new Set<HTMLImageElement>();
 
 function pump(): void {
   while (loading.size < 2 && pending.size) {
@@ -19,22 +19,22 @@ function pump(): void {
     pending.delete(next);
     const image = next.image = new Image();
     image.alt = "";
+    loading.add(image);
     const settle = (failed?: boolean): void => {
       if (!loading.delete(image)) return;
       clearTimeout(timer);
       image.onload = image.onerror = null;
+      if (failed === undefined) {
+        image.src = "";
+        image.remove();
+      }
       if (next.image === image) {
         if (next.visible && failed !== undefined) next.update(failed ? "unavailable" : "ready");
         else next.image = undefined;
       }
-      if (failed === undefined) {
-        image.src = "";
-        image.remove();
-        setTimeout(pump);
-      } else pump();
+      pump();
     };
     const timer = setTimeout(settle, THUMBNAIL_READ_TIMEOUT_MS);
-    loading.set(image, settle);
     image.onload = () => settle(false);
     image.onerror = () => settle(true);
     image.src = next.source;
@@ -52,10 +52,8 @@ export function observeAttachmentThumbnail(
   const hide = (): void => {
     entry.visible = false;
     pending.delete(entry);
-    const image = entry.image;
-    entry.image = undefined;
-    image?.remove();
-    if (image) loading.get(image)?.();
+    entry.image?.remove();
+    if (entry.image && !loading.has(entry.image)) entry.image = undefined;
   };
   const observer = new IntersectionObserver(([observation]) => {
     if (disposed) return;
@@ -73,5 +71,6 @@ export function observeAttachmentThumbnail(
     disposed = true;
     observer.disconnect();
     hide();
+    entry.image = undefined;
   };
 }

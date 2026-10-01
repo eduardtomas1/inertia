@@ -591,6 +591,7 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await expect(working.locator(".background-task-live")).toHaveText("2 agents working");
     await expect(page.locator(".turn-agents-danger")).toHaveCount(0);
     await expect(page.locator(".turn-agents-line")).toHaveCount(1);
+    const workingHeight = await working.evaluate((element) => element.getBoundingClientRect().height);
     await capture(page, info, "after-chat-agents-line-dark");
 
     await working.focus();
@@ -609,6 +610,7 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await app.resizeWindow(1000, 800);
     await expect(working).toBeVisible();
+    expect(await working.evaluate((element) => element.getBoundingClientRect().height)).toBe(workingHeight);
     await app.expectNoViewportOverflow();
     await capture(page, info, "after-chat-agents-line-narrow-light");
     await setAppearanceInPlace(app, "dark");
@@ -647,6 +649,7 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await expect(finished).toHaveText("4 agents finished · 1 failed");
     await expect(finished.locator(".background-task-live")).toHaveCount(0);
     await expect(finished.locator(".turn-agents-danger")).toHaveText("1 failed");
+    expect(await finished.evaluate((element) => element.getBoundingClientRect().height)).toBe(workingHeight);
     await capture(page, info, "after-chat-agents-finished-dark");
     await finished.focus();
     await page.keyboard.press("Space");

@@ -74,6 +74,7 @@ import {
   type OpenCodeInteractionReplies,
 } from "./opencode-interaction-replies";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
+import { OpenCodeSubagentProjection } from "./opencode-subagent-projection";
 import { openCodeRequestRejected, openCodeSessionUnavailable } from "./session-unavailable";
 import { openCodeModels } from "./opencode-sdk-metadata";
 import {
@@ -260,6 +261,7 @@ function startOpenCodeRun(
   let terminalError: string | undefined;
   let launchCredentials: string[] = [];
   let cancelOwnedRun: (force: boolean) => void = () => {};
+  let subagents: OpenCodeSubagentProjection | undefined;
   let activeV2Operations = 0;
   const usesV2PrimaryOperation = options.input.operation?.kind === "compact";
   let hasAdmittedV2Work = usesV2PrimaryOperation;
@@ -604,7 +606,19 @@ function startOpenCodeRun(
       };
       let sessionIdleObserved = false;
       let awaitingParentContinuation = false;
+      const projection = new OpenCodeSubagentProjection({
+        rootSessionId: sessionId,
+        emit: emitter.subagent,
+        contextLimit: (providerId, modelId) => finite(
+          findOpenCodeModel(providerId, modelId, providerData.data.all)?.limit.context,
+        ),
+        redact: (value) => hostTools?.redactPayload(value) ?? value,
+      });
+      subagents = projection;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
+        onOwnedEvent: (event, scope, active) => {
+          projection.observe(event, scope, active);
+        },
         onDescendantLive: () => {
           awaitingParentContinuation = true;
         },
@@ -894,6 +908,7 @@ function startOpenCodeRun(
     failure?: ProviderRunFailure,
     cleanupConfirmed = true,
   ): ProviderRunResult {
+    subagents?.seal();
     const canonical = openCodeCanonicalResult(emittedParts, eventState);
     if (promptLifecycle.workingActivityStarted) {
       emitter.activity(
@@ -933,6 +948,7 @@ function startOpenCodeRun(
     acceptingFollowUps = false;
     clearDeadlineTimers();
     emitter.status("cancelling");
+    subagents?.cancelLive();
     rejectPending();
     if (!force && client && sessionId) {
       cancelForceTimer ??= setTimeout(() => {

@@ -5,13 +5,21 @@ import {
   PROVIDER_RUN_BUDGET_BURSTS,
 } from "./io";
 import { openCodeEventRequiresPromptAdmission } from "./opencode-sdk-events";
-import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
+import {
+  OpenCodeSessionOwnership,
+  type OpenCodeEventSessionScope,
+} from "./opencode-session-ownership";
 
 export const MAX_OPENCODE_EVENT_BYTES = 1024 * 1024;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 
 export interface OpenCodeEventPumpHandlers {
+  onOwnedEvent: (
+    event: Event,
+    scope: Exclude<OpenCodeEventSessionScope, "unrelated">,
+    active: boolean,
+  ) => void;
   onDescendantLive: () => void;
   onDescendantActivity: () => void;
   onDescendantInteraction: (event: Event) => void | Promise<void>;
@@ -52,6 +60,7 @@ export async function pumpOpenCodeEvents(
       novelRootActivity,
     } = sessionOwnership.observe(event);
     if (scope === "unrelated") continue;
+    handlers.onOwnedEvent(event, scope, active);
     if (scope === "descendant") {
       if (sessionOwnership.hasLiveDescendants()) handlers.onDescendantLive();
       if (active || lifecycleProgress) handlers.onDescendantActivity();

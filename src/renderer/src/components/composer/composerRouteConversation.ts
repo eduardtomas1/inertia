@@ -16,6 +16,7 @@ interface ComposerRouteConversationOptions {
   setPendingRoute: Dispatch<SetStateAction<PendingModelRoute | null>>;
   setRouteCreationError: Dispatch<SetStateAction<string | null>>;
   setCreatingRouteConversation: Dispatch<SetStateAction<boolean>>;
+  continuation?: { sourceMessageIds: string[]; instruction: string };
 }
 
 export function useComposerRouteConversation(): (
@@ -38,16 +39,25 @@ export function useComposerRouteConversation(): (
     setPendingRoute,
     setRouteCreationError,
     setCreatingRouteConversation,
+    continuation,
   }: ComposerRouteConversationOptions): void => {
     if (!onCreateConversationForSelection || !pendingRoute) return;
     setRouteCreationError(null);
     setCreatingRouteConversation(true);
     const sourceEditorRevision = editorRevisionsRef.current.get(conversationId) ?? 0;
-    const prefillText = message.trim() ? message : undefined;
+    const prefillText = [message, continuation?.instruction].filter((text) => text?.trim()).join("\n\n") || undefined;
     let createdConversationId: string | null = null;
     void onCreateConversationForSelection({
       selection: pendingRoute.selection,
       configuration: pendingRoute.configuration,
+      ...(continuation && pendingRoute.sourceUpdatedAt && pendingRoute.continuationConversationId ? {
+        continuation: {
+          sourceConversationId: pendingRoute.sourceConversationId,
+          expectedUpdatedAt: pendingRoute.sourceUpdatedAt,
+          targetConversationId: pendingRoute.continuationConversationId,
+          sourceMessageIds: continuation.sourceMessageIds,
+        },
+      } : {}),
       ...(prefillText ? { prefillText } : {}),
       onCreated: (createdId) => { createdConversationId = createdId; },
     }).then(
@@ -63,7 +73,7 @@ export function useComposerRouteConversation(): (
         if (!prefillText) return;
         if ((editorRevisionsRef.current.get(conversationId) ?? 0) !== sourceEditorRevision) return;
         if (mountedRef.current && conversationIdRef.current === conversationId) clearMessage();
-        else clearPersistedComposerDraft(conversationId, prefillText);
+        else clearPersistedComposerDraft(conversationId, message);
       },
       (error) => {
         if (!mountedRef.current) return;

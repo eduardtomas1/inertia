@@ -15,6 +15,7 @@ import {
 import type { ProviderManager } from "../providers";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
+import { createProviderContinuation } from "./provider-continuation";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import type { WorkspaceRunController } from "./workspace-run-controller";
 import {
@@ -84,6 +85,9 @@ export class ConversationCreationService {
     payload: ConversationCreatePayload,
     requestId: string,
   ): Promise<Conversation> {
+    if (payload.continuation) {
+      return createProviderContinuation(this.dependencies.store, payload, this.canonicalSelection(payload));
+    }
     if (payload.useWorktree === undefined && !payload.worktreePath && !payload.branch) {
       const preference = this.dependencies.store.project(payload.projectId).preferences?.workspace;
       if (preference !== undefined && preference !== null) {

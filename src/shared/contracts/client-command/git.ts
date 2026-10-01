@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_PR_FEEDBACK_THREADS } from "../../pr-feedback";
 
 import {
   diffReviewSelectionSchema,
@@ -334,7 +335,12 @@ export const gitCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("git.pr.confidence"),
-      payload: z.object(projectWithOptionalConversationAndRepository)
+      payload: z.object({
+        ...projectWithOptionalConversationAndRepository,
+        reviewThreadIds: z.array(z.string().min(1).max(256))
+          .min(1).max(MAX_PR_FEEDBACK_THREADS)
+          .refine((ids) => new Set(ids).size === ids.length).optional(),
+      })
         .strict()
         .superRefine(requireRepositoryAuthority),
     })

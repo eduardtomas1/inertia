@@ -922,11 +922,20 @@ export class ConversationContextPacketRepository {
     }
   }
 
+  matchesDraftSelection(packetId: string, targetId: string, sourceId: string, sourceMessageIds: readonly string[]): boolean {
+    const packet = this.get(packetId, targetId);
+    if (packet.consumedMessageId !== null || packet.sourceConversationId !== sourceId) return false;
+    const collected = collectConversationContextExcerpts(this.context.database, sourceId, sourceMessageIds);
+    return collected !== null && collected.droppedMessageCount === packet.droppedMessageCount
+      && JSON.stringify(collected.excerpts) === JSON.stringify(packet.excerpts);
+  }
+
   sourceTranscript(
     sourceConversationId: string,
     targetConversationId: string,
+    forContinuation = false,
   ): ConversationContextSourceTranscript {
-    if (sourceConversationId === targetConversationId) {
+    if (sourceConversationId === targetConversationId && !forContinuation) {
       throw new Error("Choose another chat as the context source.");
     }
     const source = this.context.requireConversation(sourceConversationId);

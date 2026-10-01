@@ -173,4 +173,8 @@ export interface PendingModelRoute {
   sourceLatestTurnId: string | null;
   sourceLatestTurnKey: string;
   destinationRevision: number;
+  sourceUpdatedAt?: string;
+  sourceTitle?: string;
+  sourceWorkspaceLabel?: string;
+  continuationConversationId?: string;
 }

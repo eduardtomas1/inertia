@@ -1,7 +1,9 @@
-import type { RefObject } from "react";
+import { lazy, Suspense, useState, type RefObject } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import type { PendingModelRoute } from "./types";
+import type { ConversationContextCommandRunner } from "../conversation-context/types";
+const ProviderContinuationDialog = lazy(() => import("./ProviderContinuationDialog"));
 
 const accessLabels = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" } as const;
 
@@ -12,7 +14,8 @@ export interface RouteChangeConfirmationProps {
   canCreate: boolean;
   blockedReason?: string | null;
   onDismiss: () => void;
-  onCreate: () => void;
+  onCreate: (continuation?: { sourceMessageIds: string[]; instruction: string }) => void;
+  onContextCommand?: ConversationContextCommandRunner;
 }
 
 export function RouteChangeConfirmation({
@@ -23,10 +26,12 @@ export function RouteChangeConfirmation({
   blockedReason = null,
   onDismiss,
   onCreate,
+  onContextCommand,
 }: RouteChangeConfirmationProps): React.JSX.Element {
+  const [continuing, setContinuing] = useState(false);
   useNativePreviewSuspension(true);
   return (
-    <div
+    <><div
       className="composer-route-confirmation"
       role="alertdialog"
       aria-modal="false"
@@ -51,6 +56,10 @@ export function RouteChangeConfirmation({
         </small>
         {blockedReason && <small role="alert">{blockedReason}</small>}
       </span>
+      {onContextCommand && pendingRoute.sourceUpdatedAt && pendingRoute.continuationConversationId && <button
+        type="button" className="primary-button" disabled={!canCreate || creating}
+        onClick={() => setContinuing(true)}
+      >Continue with context</button>}
       <button
         ref={cancelRef}
         type="button"
@@ -70,5 +79,11 @@ export function RouteChangeConfirmation({
         {creating ? "Creating…" : "New chat"}
       </button>
     </div>
+      {continuing && onContextCommand && <Suspense fallback={null}>
+        <ProviderContinuationDialog pendingRoute={pendingRoute} busy={creating}
+          disabled={!canCreate} error={blockedReason} onCommand={onContextCommand}
+          onClose={() => setContinuing(false)} onContinue={onCreate} />
+      </Suspense>}
+    </>
   );
 }

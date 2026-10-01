@@ -17,6 +17,7 @@ import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
 import { WorkspacePathAuthority } from "../workspace-path-authority";
+import type { ConversationContextPacketRepository } from "./conversation-context-packet-repository";
 
 type ConversationPersistenceContext = Pick<
   PersistenceContext,
@@ -33,6 +34,29 @@ export class ConversationRepository {
 
   constructor(private readonly context: ConversationPersistenceContext) {
     this.pathAuthority = new WorkspacePathAuthority(context.database);
+  }
+
+  /** The destination and its source context become visible together, or neither does. */
+  createContinuation(
+    contextPackets: ConversationContextPacketRepository,
+    sourceId: string,
+    title: string,
+    options: NewConversationOptions,
+    sourceMessageIds: readonly string[],
+  ): Conversation {
+    return this.context.database.transaction(() => {
+      const source = this.get(sourceId);
+      const conversation = this.create(source.projectId, title, {
+        ...options, activate: false, branch: source.branch, worktreePath: source.worktreePath,
+      });
+      contextPackets.create({
+        sourceConversationId: source.id,
+        targetConversationId: conversation.id,
+        sourceMessageIds,
+        acknowledgedWorkspaceDifference: false,
+      });
+      return conversation;
+    })();
   }
 
   create(

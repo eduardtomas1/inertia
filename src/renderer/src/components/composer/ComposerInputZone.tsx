@@ -17,7 +17,7 @@ import type {
   InteractionMode,
   WorkspaceEntry,
 } from "@shared/contracts";
-import type { ConversationContextSourceOption } from "../conversation-context/types";
+import type { ConversationContextSourceOption, ConversationContextCommandRunner } from "../conversation-context/types";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
@@ -74,7 +74,8 @@ export interface ComposerInputZoneProps {
   canCreateRouteConversation: boolean;
   routeCreationBlockedReason?: string | null;
   onDismissPendingRoute: () => void;
-  onCreateRouteConversation: () => void;
+  onCreateRouteConversation: (continuation?: { sourceMessageIds: string[]; instruction: string }) => void;
+  onConversationContextCommand?: ConversationContextCommandRunner;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   message: string;
   onMessageChange: (message: string) => void;
@@ -146,6 +147,7 @@ export function ComposerInputZone({
   routeCreationBlockedReason = null,
   onDismissPendingRoute,
   onCreateRouteConversation,
+  onConversationContextCommand,
   textareaRef,
   message,
   onMessageChange,
@@ -452,6 +454,7 @@ export function ComposerInputZone({
             blockedReason={routeCreationBlockedReason}
             onDismiss={onDismissPendingRoute}
             onCreate={onCreateRouteConversation}
+            onContextCommand={onConversationContextCommand}
           />
         )}
         {compactNotice && (

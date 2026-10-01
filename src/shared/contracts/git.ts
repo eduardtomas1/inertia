@@ -63,6 +63,11 @@ export interface GitPreMergeReviewThread {
   url: string | null;
   codex: boolean;
   outdated: boolean;
+  /** Loaded on demand for a feedback draft; the summary body is not a discussion. */
+  discussion?: {
+    comments: { author: string; body: string; url: string | null }[];
+    truncated: boolean;
+  };
 }
 
 export interface GitPreMergeFile {

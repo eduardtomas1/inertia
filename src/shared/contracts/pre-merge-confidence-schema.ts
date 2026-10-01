@@ -58,7 +58,13 @@ function reviewThread(value: unknown): boolean {
     && (value.line === null || typeof value.line === "number" && Number.isFinite(value.line))
     && nullableString(value, "url")
     && typeof value.codex === "boolean"
-    && typeof value.outdated === "boolean";
+    && typeof value.outdated === "boolean"
+    && (value.discussion === undefined || record(value.discussion)
+      && typeof value.discussion.truncated === "boolean"
+      && Array.isArray(value.discussion.comments)
+      && value.discussion.comments.length <= 20
+      && value.discussion.comments.every((comment) => strings(comment, "author", "body")
+        && nullableString(comment, "url")));
 }
 
 function file(value: unknown): boolean {

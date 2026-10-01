@@ -92,6 +92,15 @@ const nodes = attention ? [{
     url: "${pullRequestUrl}#discussion_r1"
   }] }
 }] : [];
+const request = JSON.parse(readFileSync(0, "utf8"));
+if (request.variables.ids) {
+  process.stdout.write(JSON.stringify({ data: { nodes: nodes.map((node) => ({
+    ...node,
+    pullRequest: { number: 160, url: "${pullRequestUrl}", headRefOid: head, updatedAt: "2026-08-22T16:00:00.000Z" },
+    comments: { nodes: [...node.comments.nodes, { author: { login: "reviewer" }, body: "Also cover a resolved thread and a moved head in the regression tests.", url: "${pullRequestUrl}#discussion_r2" }], pageInfo: { hasNextPage: false } }
+  })) } }));
+  process.exit(0);
+}
 process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: {
   number: 160,
   headRefOid: head,
@@ -135,6 +144,7 @@ test.afterAll(async () => {
 
 test("keeps exact-head green and blocking evidence legible across real Electron layouts", async ({ browserName: _browserName }, testInfo) => {
   await app.resizeWindow(1440, 920);
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("Preserve the existing changes.");
   await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
   await page.getByRole("button", { name: "Confidence", exact: true }).click();
   const dialog = page.locator(".pre-merge-dialog");
@@ -225,5 +235,23 @@ test("keeps exact-head green and blocking evidence legible across real Electron 
     path: narrowScreenshot,
     contentType: "image/png",
   });
+  await app.resizeWindow(1440, 920);
+  await dialog.getByRole("checkbox", { name: "Select all review feedback" }).check();
+  await dialog.getByRole("button", { name: "Address selected feedback" }).scrollIntoViewIfNeeded();
+  const selectedScreenshot = testInfo.outputPath("pr-feedback-selected.png");
+  await page.screenshot({ animations: "disabled", path: selectedScreenshot });
+  await testInfo.attach("pr-feedback-selected", { path: selectedScreenshot, contentType: "image/png" });
+  await dialog.getByRole("button", { name: "Address selected feedback" }).click();
+  await expect(dialog).toBeHidden();
+  const composer = page.getByRole("textbox", { name: "Message", exact: true });
+  await expect(composer).toHaveValue(/Preserve the existing changes\.[\s\S]*Address the selected review feedback/u);
+  await expect(composer).toHaveValue(/Also cover a resolved thread and a moved head/u);
+  await expect(composer).toBeFocused();
+  const draft = await composer.inputValue();
+  const draftScreenshot = testInfo.outputPath("pr-feedback-draft.png");
+  await page.screenshot({ animations: "disabled", path: draftScreenshot });
+  await testInfo.attach("pr-feedback-draft", { path: draftScreenshot, contentType: "image/png" });
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(draft);
   expect(app.rendererErrors).toEqual([]);
 });

@@ -88,10 +88,12 @@ export class ConversationContextService {
   sourceTranscript(
     sourceConversationId: string,
     targetConversationId: string,
+    forContinuation = false,
   ): ConversationContextSourceTranscript {
     return this.store.contextPackets.sourceTranscript(
       sourceConversationId,
       targetConversationId,
+      forContinuation,
     );
   }
 

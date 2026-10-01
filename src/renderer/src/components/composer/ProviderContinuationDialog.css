@@ -1,0 +1,25 @@
+.provider-continuation-backdrop { position: fixed; inset: 0; z-index: 1500; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 50%); }
+.provider-continuation-dialog { width: min(680px, 100%); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: 0 24px 80px rgb(0 0 0 / 30%); font-size: var(--ui-font-secondary); }
+.provider-continuation-dialog header, .provider-continuation-dialog header > div, .provider-continuation-dialog footer, .provider-continuation-route { display: flex; align-items: center; gap: 10px; }
+.provider-continuation-dialog header { justify-content: space-between; margin-bottom: 18px; }
+.provider-continuation-dialog h2 { margin: 0; font-size: 17px; }
+.provider-continuation-dialog header button { border: 0; background: transparent; color: var(--text-muted); padding: 6px; }
+.provider-continuation-route { flex-wrap: wrap; border-radius: 8px; padding: 12px; background: var(--surface-hover); }
+.provider-continuation-route strong { overflow-wrap: anywhere; }
+.provider-continuation-dialog p { line-height: 1.6; }
+.provider-continuation-detail, .provider-continuation-dialog small { color: var(--text-muted); }
+.provider-continuation-select-all { display: flex; gap: 8px; padding: 8px 0; }
+.provider-continuation-messages { max-height: 280px; overflow: auto; border: 1px solid var(--border); border-radius: 9px; }
+.provider-continuation-messages > label { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); }
+.provider-continuation-messages > label:last-child { border-bottom: 0; }
+.provider-continuation-messages input { flex-shrink: 0; margin-top: 3px; }
+.provider-continuation-messages span { min-width: 0; }
+.provider-continuation-messages p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
+.provider-continuation-dialog input { accent-color: var(--accent); }
+.provider-continuation-instruction { display: grid; gap: 8px; margin: 16px 0; }
+.provider-continuation-instruction textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); resize: vertical; }
+.provider-continuation-dialog footer { justify-content: flex-end; flex-wrap: wrap; }
+.provider-continuation-dialog footer > span { margin-right: auto; color: var(--text-muted); }
+.provider-continuation-dialog [role="alert"] { color: var(--danger); }
+.composer-route-confirmation { flex-wrap: wrap; }
+@media (max-width: 600px) { .provider-continuation-backdrop { padding: 10px; } .provider-continuation-dialog { padding: 16px; max-height: calc(100dvh - 20px); } }

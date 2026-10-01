@@ -417,15 +417,15 @@ export class RuntimeStore {
     this.projectRepository.remove(projectId);
   }
 
-  selectProject(projectId: string): void {
-    this.projectRepository.select(projectId);
-  }
+  selectProject(projectId: string): void { this.projectRepository.select(projectId); }
 
   markConversationUnread(conversationId: string): void { this.conversationRepository.markUnread(conversationId); }
   regenerateConversationTitle(conversationId: string): void { this.conversationRepository.regenerateTitle(conversationId); }
 
-  createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation {
-    return this.conversationRepository.create(projectId, title, options);
+  createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
+
+  createContinuationConversation(sourceId: string, title: string, options: NewConversationOptions, sourceMessageIds: readonly string[]): Conversation {
+    return this.conversationRepository.createContinuation(this.contextPackets, sourceId, title, options, sourceMessageIds);
   }
 
   createPairedConversations(

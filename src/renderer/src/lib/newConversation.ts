@@ -118,6 +118,7 @@ export interface ReplacementChatRequest {
   selection: ModelSelection;
   configuration: ChatConfiguration;
   prefillText?: string;
+  continuation?: NonNullable<NewConversationPayload["continuation"]> & { targetConversationId: string };
   onCreated?: (conversationId: string) => void;
 }
 
@@ -126,6 +127,14 @@ export function replacementConversationPayload(
   settings: AppSettings,
   request: ReplacementChatRequest,
 ): NewConversationPayload {
+  if (request.continuation) {
+    const { targetConversationId, ...continuation } = request.continuation;
+    return {
+      ...withNewConversationModelSelection({ projectId: project.id, title: "Continued conversation" }, request.selection),
+      ...request.configuration, activate: false,
+      draftConversationId: targetConversationId, continuation,
+    };
+  }
   return {
     ...withNewConversationModelSelection(buildNewConversationPayload(project, settings), request.selection),
     ...request.configuration,

@@ -1,4 +1,5 @@
 import {
+  File,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
@@ -126,7 +127,9 @@ export function SentMessageAttachmentList({
                     >
                       {previewKind === "spreadsheet"
                         ? <FileSpreadsheet size={18} />
-                        : <FileText size={18} />}
+                        : previewKind === "file"
+                          ? <File size={18} />
+                          : <FileText size={18} />}
                     </span>
                   )}
               <span className="sent-attachment-copy">

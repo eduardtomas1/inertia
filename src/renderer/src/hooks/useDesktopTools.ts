@@ -56,7 +56,7 @@ export function preflightComposerAttachmentFiles(
       || file.size > MAX_ATTACHMENT_BYTES
     ) {
       throw new Error(
-        "An attachment is empty or exceeds the 50 MiB file limit.",
+        "An attachment is empty or larger than the 50 MiB file limit. No files were attached.",
       );
     }
     totalBytes += file.size;

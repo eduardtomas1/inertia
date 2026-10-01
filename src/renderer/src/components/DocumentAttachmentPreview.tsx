@@ -1,6 +1,7 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   ExternalLink,
+  File,
   FileSpreadsheet,
   FileText,
   LoaderCircle,
@@ -18,6 +19,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import "./DocumentAttachmentPreview.css";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFPageProxy } from "pdfjs-dist";
 
@@ -137,12 +139,16 @@ function columnName(column: number): string {
   return output;
 }
 
+const TRUNCATED_PREVIEW_NOTICE = "Showing the first 1 MiB. The complete file is saved and available to the agent.";
+
 function SpreadsheetPreview({
   title,
   workbook,
+  sourceTruncated,
 }: {
   title: string;
   workbook: SpreadsheetPreviewWorkbook;
+  sourceTruncated: boolean;
 }): React.JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0);
   const activeSheet = workbook.sheets[activeIndex] ?? workbook.sheets[0];
@@ -235,11 +241,13 @@ function SpreadsheetPreview({
               </table>
             )}
       </div>
-      {(truncated || workbook.sheetsTruncated) && (
-        <p className="spreadsheet-attachment-limit-note">
-          Preview is bounded for responsiveness. The original workbook remains attached.
-        </p>
-      )}
+      {sourceTruncated
+        ? <p className="spreadsheet-attachment-limit-note" role="status">{TRUNCATED_PREVIEW_NOTICE}</p>
+        : (truncated || workbook.sheetsTruncated) && (
+            <p className="spreadsheet-attachment-limit-note">
+              Preview is bounded for responsiveness. The original workbook remains attached.
+            </p>
+          )}
     </div>
   );
 }
@@ -325,21 +333,26 @@ export function DocumentAttachmentPreview({
       </div>
     );
   }
-  const preview = content.kind === "spreadsheet"
-    ? <SpreadsheetPreview title={title} workbook={content.workbook} />
-    : (
-        <pre
-          className="text-attachment-preview"
-          tabIndex={0}
-          aria-label={`Text preview of ${title}`}
-        >
-          {content.text}
-        </pre>
-      );
-  return <>
-    {truncated && <p role="status">Showing the first 1 MiB. The complete file is saved and available to the agent.</p>}
-    {preview}
-  </>;
+  if (content.kind === "spreadsheet") {
+    return <SpreadsheetPreview title={title} workbook={content.workbook} sourceTruncated={truncated} />;
+  }
+  const preview = (
+    <pre
+      className="text-attachment-preview"
+      tabIndex={0}
+      aria-label={`Text preview of ${title}`}
+    >
+      {content.text}
+    </pre>
+  );
+  return truncated
+    ? (
+        <div className="text-attachment-preview-frame">
+          {preview}
+          <p className="text-attachment-preview-notice" role="status">{TRUNCATED_PREVIEW_NOTICE}</p>
+        </div>
+      )
+    : preview;
 }
 
 type AttachmentPreviewDialogProps = {
@@ -403,9 +416,11 @@ export function AttachmentPreviewDialog({
           <span className="attachment-preview-identity">
             {previewKind === "spreadsheet"
               ? <FileSpreadsheet size={16} aria-hidden="true" />
-              : previewKind !== "image"
-                ? <FileText size={16} aria-hidden="true" />
-                : null}
+              : previewKind === "file"
+                ? <File size={16} aria-hidden="true" />
+                : previewKind !== "image"
+                  ? <FileText size={16} aria-hidden="true" />
+                  : null}
             <span>
               <strong id={titleId}>{attachment.name}</strong>
               <small id={descriptionId}>
@@ -438,7 +453,13 @@ export function AttachmentPreviewDialog({
                 </div>
               )
             : previewKind === "file"
-              ? <p>This file is stored in full. The agent can read or search it with file tools.</p>
+              ? (
+                  <div className="attachment-preview-unavailable">
+                    <File size={28} aria-hidden="true" />
+                    <strong>No preview for this file type</strong>
+                    <span>The complete file is saved. The agent can read or search it with file tools.</span>
+                  </div>
+                )
               : previewKind === "image"
               ? (
                   <ZoomableAttachmentImage

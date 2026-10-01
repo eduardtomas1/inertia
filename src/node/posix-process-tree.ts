@@ -158,7 +158,7 @@ export function forceKillPosixProcessTreeWithStatus(
       if ((table.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
         snapshotTimeouts += 1;
       }
-      if (table.status === 0 && typeof table.stdout === "string") {
+      if (!table.error && table.status === 0 && typeof table.stdout === "string") {
         snapshotRead = true;
         processTable = table.stdout;
         descendants = posixDescendantPids(rootPid, table.stdout);

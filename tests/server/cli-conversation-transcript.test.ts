@@ -49,6 +49,12 @@ describe("native CLI transcript projection", () => {
     expect(JSON.stringify(result)).not.toContain(credential);
     expect(result.title).toContain("redacted");
   });
+  it.each(['"Bearer', "'Basic"])("redacts an unterminated quoted authorization header (%s)", (scheme) => {
+    const credential = "cHJpdmF0ZS1pbXBvcnQtY3JlZGVudGlhbA==";
+    const result = parseCliTranscript(lines(meta, codex("user", `Inspect Authorization: ${scheme} ${credential}`)), "codex", date);
+    expect(JSON.stringify(result)).not.toContain(credential);
+    expect(result.title).toContain("redacted");
+  });
   it("bounds retained text, keeps recent messages and reports omissions", () => {
     const result = parseCliTranscript(lines(meta, ...Array.from({ length: 205 }, (_, index) => codex("user", `Message ${index}`))), "codex", date);
     expect(result.messages).toHaveLength(200);

@@ -1,0 +1,26 @@
+.scope-review { border-bottom: 1px solid var(--border); padding: 14px; max-height: 58vh; overflow: auto; font-size: 12px; container-type: inline-size; }
+.scope-review header { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+.scope-review header span, .scope-review small, .scope-review-caveat { color: var(--text-muted); }
+.scope-review h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; }
+.scope-review h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
+.scope-review p { line-height: 1.55; margin: 6px 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scope-review-columns { display: grid; grid-template-columns: minmax(180px, .85fr) minmax(240px, 1.3fr); gap: 18px; }
+.scope-review-brief, .scope-review-findings { min-width: 0; }
+.scope-review label { display: block; margin: 8px 0 5px; }
+.scope-review textarea, .scope-review select { display: block; width: 100%; min-width: 0; resize: vertical; padding: 8px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+.scope-review button { border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; font: inherit; color: var(--text); background: var(--surface); cursor: pointer; }
+.scope-review button:disabled { opacity: .5; cursor: default; }
+.scope-review button:focus-visible, .scope-review textarea:focus-visible, .scope-review select:focus-visible, .scope-review summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scope-review ol { padding-left: 20px; margin: 0 0 12px; }
+.scope-review li { margin-bottom: 8px; overflow-wrap: anywhere; }
+.scope-review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.scope-review-source { border-top: 1px solid var(--border); padding: 8px 0; overflow-wrap: anywhere; }
+.scope-review-source summary { cursor: pointer; }
+.scope-review-requirement { margin-bottom: 14px; }
+.scope-review-evidence { border-left: 2px solid var(--accent); margin: 8px 0; padding-left: 10px; }
+.scope-review small { display: block; margin-top: 4px; }
+.scope-review .scope-review-path { text-align: left; overflow-wrap: anywhere; max-width: 100%; }
+.scope-review-missing { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border: 1px dashed var(--border); border-radius: 6px; }
+.scope-review-unexplained article { border-left: 3px solid var(--warning); background: color-mix(in srgb, var(--warning) 8%, transparent); border-radius: 6px; padding: 10px; margin: 8px 0; }
+.scope-review-draft { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 6px; }
+@container (max-width: 520px) { .scope-review-columns { grid-template-columns: minmax(0, 1fr); } }

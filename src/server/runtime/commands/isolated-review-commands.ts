@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 
 import type {
+  RuntimeMutationEvent,
   ProviderInfo,
   ServerEvent,
 } from "../../../shared/contracts";
@@ -57,6 +58,7 @@ export interface IsolatedReviewCommandDependencies {
   reviewSummaryTimeoutMs?: number;
   providerInfo(): readonly ProviderInfo[];
   publicError(error: unknown): string;
+  broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -72,6 +74,7 @@ export function createIsolatedReviewCommandHandler(
     "review.selection.ask",
     "review.selection.revise",
     "review.selection.cancel",
+    "review.brief.save",
     "review.summary.generate",
     "review.summary.cancel",
   ], async (socket, command) => {
@@ -375,6 +378,14 @@ export function createIsolatedReviewCommandHandler(
           dependencies.store.conversationWork.release(conversation.id);
         }
       }
+      case "review.brief.save": {
+        dependencies.store.saveReviewBrief(command.payload.conversationId,
+          command.payload.expectedRevision, command.payload.brief);
+        dependencies.broadcast({ type: "conversation.detail.invalidated", conversationId: command.payload.conversationId });
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, { type: "request.ok", requestId: command.requestId });
+        return "handled";
+      }
       case "review.summary.generate": {
         if (!dependencies.enableProviders) {
           throw new RuntimeRequestError(
@@ -431,9 +442,15 @@ export function createIsolatedReviewCommandHandler(
               "There are no changes to summarize.",
             );
           }
+          const brief = dependencies.store.reviewBrief(conversation.id);
+          const briefRevision = brief?.revision ?? 0;
+          if ((command.payload.briefRevision ?? 0) !== briefRevision) {
+            throw new RuntimeRequestError("The review brief changed. Reopen it before reviewing.");
+          }
           const prompt = buildReviewSummaryPrompt(
             diff.text,
             structured.files,
+            brief,
           );
           const selectedReviewModel = conversation.model
             ? provider.models.find(
@@ -480,6 +497,8 @@ export function createIsolatedReviewCommandHandler(
                 structured.fingerprint,
                 structured.files,
                 output.text,
+                undefined,
+                brief,
               );
               const current = await getUnifiedDiff(
                 dependencies.store.conversationPath(conversation.id),
@@ -493,7 +512,11 @@ export function createIsolatedReviewCommandHandler(
                 current.truncated,
               );
               assertActive();
+              if ((dependencies.store.reviewBrief(conversation.id)?.revision ?? 0) !== briefRevision) {
+                throw new RuntimeRequestError("The review brief changed during analysis. The stale review was discarded.");
+              }
               dependencies.store.upsertReviewSummary(summary);
+              dependencies.broadcast({ type: "conversation.detail.invalidated", conversationId: conversation.id });
               return summary;
             },
           });

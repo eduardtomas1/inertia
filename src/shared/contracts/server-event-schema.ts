@@ -1,3 +1,4 @@
+import { reviewBriefSchema, scopeReviewSchema } from "../review-brief";
 import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
@@ -836,14 +837,9 @@ function reviewClassification(value: unknown): boolean {
 }
 
 function reviewSummary(value: unknown): boolean {
-  return recordWithStrings(
-    value,
-    "conversationId",
-    "fingerprint",
-    "providerId",
-    "overall",
-    "generatedAt",
-  )
+  return recordWithStrings(value, "conversationId", "fingerprint", "providerId", "overall", "generatedAt")
+    && (value.scopeReview === undefined || (scopeReviewSchema.safeParse(value.scopeReview).success
+      && (value.scopeReview as { brief: { conversationId: string } }).brief.conversationId === value.conversationId))
     && providerId(value, "providerId")
     && nullableStringField(value, "harnessId")
     && nullableStringField(value, "backendProfileId")
@@ -1020,6 +1016,8 @@ function conversationDetail(
     && arrayOf(value.plans, agentPlan)
     && arrayOf(value.goals, agentGoal)
     && arrayOf(value.checkpoints, checkpoint)
+    && (value.reviewBrief === undefined || value.reviewBrief === null || (reviewBriefSchema.safeParse(value.reviewBrief).success
+      && (value.reviewBrief as { conversationId: string }).conversationId === conversationId))
     && arrayOf(value.reviewSummaries, reviewSummary)
     && arrayOf(value.reviewStates, reviewState)
     && arrayOf(value.reviewNotes, reviewNote)

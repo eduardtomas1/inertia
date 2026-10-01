@@ -1,3 +1,4 @@
+import { reviewBriefInputSchema } from "../../review-brief";
 import { z } from "zod";
 
 import {
@@ -223,11 +224,21 @@ export const gitCommandSchemas = [
       }).strict(),
     })
     .strict(),
+  z.object({
+      ...requestBase,
+      type: z.literal("review.brief.save"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+        brief: reviewBriefInputSchema,
+      }).strict(),
+    }).strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("review.summary.generate"),
       payload: z.object({
+        briefRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
         projectId: z.string().uuid(),
         conversationId: z.string().uuid(),
         fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),

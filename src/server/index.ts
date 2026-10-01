@@ -754,7 +754,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         reviewSummaryTimeoutMs: options.reviewSummaryTimeoutMs,
         providerInfo: () => providerInfo,
         publicError,
-        broadcastSnapshot,
+        broadcastSnapshot, broadcast,
         send,
       }),
       createSettingsBackendCommandHandler({

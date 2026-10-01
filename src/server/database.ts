@@ -1064,13 +1064,13 @@ export class RuntimeStore {
     );
   }
 
-  upsertReviewSummary(summary: DiffReviewSummary): DiffReviewSummary {
-    return this.reviewRepository.upsertSummary(summary);
-  }
+  reviewBrief(conversationId: string) { return this.reviewRepository.brief(conversationId); }
 
-  setReviewState(input: Omit<DiffReviewState, "stale" | "updatedAt">): DiffReviewState {
-    return this.reviewRepository.setState(input);
-  }
+  saveReviewBrief(conversationId: string, expectedRevision: number, brief: import("../shared/review-brief").ReviewBriefInput) { return this.reviewRepository.saveBrief(conversationId, expectedRevision, brief); }
+
+  upsertReviewSummary(summary: DiffReviewSummary): DiffReviewSummary { return this.reviewRepository.upsertSummary(summary); }
+
+  setReviewState(input: Omit<DiffReviewState, "stale" | "updatedAt">): DiffReviewState { return this.reviewRepository.setState(input); }
 
   createReviewNote(input: Omit<DiffReviewNote, "id" | "stale" | "createdAt" | "updatedAt">): DiffReviewNote {
     return this.reviewRepository.createNote(input);

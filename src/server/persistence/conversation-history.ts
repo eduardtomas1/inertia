@@ -61,7 +61,7 @@ export function selectConversationHistory(
 const HISTORY_TABLES = ["agent_turns", "turn_git_artifacts", "messages", "activities",
   "subagent_traces", "agent_reasonings", "agent_plans", "checkpoints", "conversation_context_packets"] as const;
 type HistoryTable = typeof HISTORY_TABLES[number];
-const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries",
+const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries", "review_briefs",
   "diff_review_states", "diff_review_notes"] as const;
 
 export function historyPredicate(

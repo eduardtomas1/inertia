@@ -1,3 +1,4 @@
+import { readReviewBrief } from "./review-repository";
 import type {
   AppSnapshot,
   ConversationShell,
@@ -70,7 +71,7 @@ import {
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type ConversationDetailRow = ConversationShellRow & { mixed_provider_history: number };
-type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
+type ConversationRecords = Pick<ConversationDetail, "reviewBrief" | "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
 const EMPTY_HISTORY_RECORDS: HistoryPageRecords = { agentTurns: [], turnGitArtifacts: [], messages: [], activities: [],
@@ -327,6 +328,7 @@ export class SnapshotRepository {
   private conversationRecords(conversationId: string): ConversationRecords {
     const all = <T>(sql: string) => this.context.database.prepare(sql).all(conversationId) as T[];
     return {
+      reviewBrief: readReviewBrief(this.context.database, conversationId),
       usage: all<ThreadUsageRow>("SELECT * FROM thread_usage WHERE conversation_id = ? ORDER BY updated_at ASC").map(usageFromRow),
       goals: all<AgentGoalRow>("SELECT * FROM agent_goals WHERE conversation_id = ? ORDER BY updated_at ASC, source ASC").map(agentGoalFromRow),
       reviewSummaries: all<DiffReviewSummaryRow>("SELECT * FROM diff_review_summaries WHERE conversation_id = ? ORDER BY generated_at ASC")

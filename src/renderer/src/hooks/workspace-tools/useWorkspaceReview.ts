@@ -1,3 +1,4 @@
+import type { ReviewBriefInput } from "@shared/review-brief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Conversation,
@@ -104,8 +105,9 @@ export function useWorkspaceReview({
     () => detail?.reviewSummaries.find((summary) => (
       summary.conversationId === conversation?.id
       && summary.fingerprint === structuredDiff.fingerprint
+      && (!summary.scopeReview || summary.scopeReview.brief.revision === detail?.reviewBrief?.revision)
     )) ?? null,
-    [conversation?.id, detail?.reviewSummaries, structuredDiff.fingerprint],
+    [conversation?.id, detail?.reviewSummaries, detail?.reviewBrief?.revision, structuredDiff.fingerprint],
   );
   const reviewStates = useMemo(
     () => detail?.reviewStates ?? [],
@@ -391,6 +393,14 @@ export function useWorkspaceReview({
     setGitDiff,
   ]);
 
+  const saveReviewBrief = useCallback(async (expectedRevision: number, brief: ReviewBriefInput) => {
+    if (!conversation) return;
+    await run("review.brief.save", { type: "review.brief.save",
+      payload: { conversationId: conversation.id, expectedRevision, brief } });
+  }, [conversation, run]);
+  const reviewBriefSources = useMemo(() => detail?.messages.filter((message) => message.role === "user")
+    .slice(-30).map(({ id, content }) => ({ id, content: content.slice(0, 4_000) })) ?? [], [detail?.messages]);
+
   const generateReviewSummary = useCallback(async () => {
     if (!project || !conversation) return;
     if (structuredDiffParsing) {
@@ -403,6 +413,7 @@ export function useWorkspaceReview({
     await run("review.summary.generate", {
       type: "review.summary.generate",
       payload: {
+        briefRevision: detail?.reviewBrief?.revision ?? 0,
         projectId: project.id,
         conversationId: conversation.id,
         fingerprint: structuredDiff.fingerprint,
@@ -417,6 +428,7 @@ export function useWorkspaceReview({
     structuredDiff,
     structuredDiffError,
     structuredDiffParsing,
+    detail?.reviewBrief?.revision,
   ]);
 
   const cancelReviewSummary = useCallback(async () => {
@@ -437,6 +449,9 @@ export function useWorkspaceReview({
     structuredDiffParsing,
     structuredDiffError,
     reviewSummary,
+    reviewBrief: detail?.reviewBrief ?? null,
+    reviewBriefSources,
+    saveReviewBrief,
     reviewStates,
     reviewNotes,
     selectionQuestionRunning:

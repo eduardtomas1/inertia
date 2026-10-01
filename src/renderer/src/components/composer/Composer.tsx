@@ -60,6 +60,7 @@ import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } 
  * out of first paint.
  */
 const ChatResumeControl = lazy(async () => ({ default: (await import("../ChatResumeControl")).ChatResumeControl }));
+const LimitResetBanner = lazy(async () => ({ default: (await import("./LimitResetBanner")).LimitResetBanner }));
 const ChatGoalControl = lazy(async () => ({ default: (await import("../ChatGoalControl")).ChatGoalControl }));
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // The first non-empty edit is synchronous. During uninterrupted typing, a
@@ -96,6 +97,7 @@ export const Composer = memo(function Composer({
   contextSources = [], contextPackets = [], hasVisibleHistory = false,
   agentContextRequest = null, onConversationContextCommand,
   onQueueCommand,
+  onLimitResetCommand,
   previewContextUrl,
   providerIdentityLabels,
   goal,
@@ -945,6 +947,11 @@ export const Composer = memo(function Composer({
   };
   return (
     <div className="composer-shell">
+      {onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
+        <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
+          snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
+          onCommand={onLimitResetCommand} />
+      </Suspense>}
       <section
         ref={composerRef}
         className={clsx(

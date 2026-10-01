@@ -81,6 +81,19 @@ export class UsageLimitsService {
       return this.snapshot();
     });
   }
+  async nativeAccount(providerId: ProviderInfo["id"], force = false): Promise<UsageAccount | null> {
+    const id = `native:${providerId}`;
+    const cached = this.snapshot().accounts.find((account) => account.id === id);
+    if (!force && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) return cached;
+    return this.serial(async () => {
+      const info = this.dependencies.providers().find((provider) => provider.id === providerId);
+      if (!info || !this.dependencies.enabled) return null;
+      const account = await this.dependencies.native.read(info).catch(() => null);
+      if (!account) return null;
+      this.accounts = [...this.accounts.filter((entry) => entry.id !== id), account];
+      return account;
+    });
+  }
   private async read(): Promise<UsageLimitsSnapshot> {
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
     const next: UsageAccount[] = [];

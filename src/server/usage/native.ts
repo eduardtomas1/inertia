@@ -60,10 +60,10 @@ export class NativeUsageReader {
     if (info.id !== "codex" && info.id !== "claude") return { ...base, windows: [], status: "unsupported", detail: "This provider does not expose a supported subscription quota API." };
     if (info.id === "claude") {
       const result = await this.providers.claudeUsage(this.cwd);
-      const parsed = z.object({ email: z.string().max(256).optional(), subscriptionType: z.string().max(200).optional(), apiProvider: z.string().max(50).optional() }).safeParse(result.account);
+      const parsed = z.object({ email: z.string().max(256).optional(), organization: z.string().max(256).optional(), subscriptionType: z.string().max(200).optional(), apiProvider: z.string().max(50).optional() }).safeParse(result.account);
       const account = parsed.success ? parsed.data : null;
       if (account?.apiProvider && account.apiProvider !== "firstParty") return { ...base, windows: [], status: "unsupported", detail: "This Claude API backend does not report subscription limits." };
-      return { ...base, email: account?.email ?? null, plan: account?.subscriptionType ?? null,
+      return { ...base, email: account?.email ?? null, organization: account?.organization ?? null, plan: account?.subscriptionType ?? null,
         windows: usageWindows(result.rateLimits ?? []), updatedAt: result.rateLimits ? base.checkedAt : null,
         status: result.rateLimitsUnavailable ? "unsupported" : result.rateLimits?.length ? "ready" : "unavailable",
         detail: result.rateLimitsUnavailable ? "This Claude route does not report subscription limits." : result.rateLimits?.length ? null : "Claude did not report quota windows." };

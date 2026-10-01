@@ -1,0 +1,25 @@
+.limit-reset-banner {
+  width: calc(min(100%, var(--composer-max-width)) - 24px);
+  margin: 0 auto -1px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--status-approval) 30%, var(--border));
+  border-radius: 12px 12px 0 0;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--status-approval) 7%, var(--surface));
+  font-size: 11px;
+}
+.limit-reset-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.limit-reset-row > svg { color: var(--status-approval); flex-shrink: 0; }
+.limit-reset-label { font-weight: 600; }
+.limit-reset-row > time { color: var(--text-muted); }
+.limit-reset-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.limit-reset-actions > button { border-radius: 4px; padding: 2px 4px; color: inherit; font-size: inherit; }
+.limit-reset-actions > button:hover:not(:disabled) { background: var(--surface-hover); }
+.limit-reset-actions > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.limit-reset-actions > button:disabled { opacity: .5; cursor: default; }
+.limit-reset-banner > p { margin: 6px 0 0; color: var(--text-muted); }

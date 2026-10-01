@@ -188,6 +188,8 @@ export interface TurnControllerHooks {
 
 export interface QueueTurnRequest {
   queuedMessageId?: string;
+  /** Server-owned plan claimed atomically with the accepted turn. */
+  limitResetPlanId?: string;
   conversationId: string;
   /** Authenticated Private Connect origin, supplied only by the privileged gateway. */
   privateConnectDeviceId?: string;

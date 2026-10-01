@@ -3,7 +3,7 @@ export const SECRET_PATTERNS = [
   /\b(?:gh[opusr]|github_pat|glpat|npm|pypi|hf|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu,
   /\bAIza[A-Za-z0-9_-]{20,}\b/gu,
-  /(?<![A-Za-z0-9])(?:api[-_ ]?key|access[-_ ]?key|password|passwd|pwd|secret|token|authorization)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
+  /(?<![A-Za-z0-9])(?:api[-_ ]?key|access[-_ ]?key|password|passwd|pwd|secret|token|authorization)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|(?:Bearer|Basic)\s+[^\s,;]+|[^\s,;]+)/giu,
   /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|$)/gu,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu,
   /\b(Bearer|Basic)\s+\S+/giu,

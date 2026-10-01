@@ -23,6 +23,12 @@ describe("native CLI transcript projection", () => {
       { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } }, codex("user", "Replacement")), "codex", date);
     expect(result.messages.map(({ content }) => content)).toEqual(["Keep", "Kept", "Replacement"]);
   });
+  it("counts omitted image-only Codex requests when rolling back turns", () => {
+    const imageRequest = { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,ignored" }] } };
+    const result = parseCliTranscript(lines(meta, codex("user", "Keep"), codex("assistant", "Kept"), imageRequest, codex("assistant", "Image analysis"),
+      { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } }, codex("user", "Replacement")), "codex", date);
+    expect(result.messages.map(({ content }) => content)).toEqual(["Keep", "Kept", "Replacement"]);
+  });
   it("follows Claude's latest parent chain, deduplicates streamed messages, and omits sidechains, thinking and tools", () => {
     const result = parseCliTranscript(lines(claude("u1", null, "user", "Plan the import"), claude("a1", "u1", "assistant", [{ type: "text", text: "First" }]),
       claude("a1", "u1", "assistant", [{ type: "thinking", thinking: "private" }, { type: "text", text: "Final" }, { type: "tool_use", name: "Read" }]),
@@ -36,6 +42,12 @@ describe("native CLI transcript projection", () => {
     const serialized = JSON.stringify(result);
     for (const secret of [token, "local-secret", "password"]) expect(serialized).not.toContain(secret);
     expect(serialized).toContain("redacted");
+  });
+  it.each(["Bearer", "Basic"])("redacts the complete %s authorization header before import", (scheme) => {
+    const credential = "cHJpdmF0ZS1pbXBvcnQtY3JlZGVudGlhbA==";
+    const result = parseCliTranscript(lines(meta, codex("user", `Inspect Authorization: ${scheme} ${credential}`)), "codex", date);
+    expect(JSON.stringify(result)).not.toContain(credential);
+    expect(result.title).toContain("redacted");
   });
   it("bounds retained text, keeps recent messages and reports omissions", () => {
     const result = parseCliTranscript(lines(meta, ...Array.from({ length: 205 }, (_, index) => codex("user", `Message ${index}`))), "codex", date);

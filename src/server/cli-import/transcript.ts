@@ -36,6 +36,7 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
   let sessionId = "";
   let cwd = "";
   const messages: Array<CliMessage & { id?: string }> = [];
+  const codexTurnStarts: number[] = [];
   const messageIndexes = new Map<string, number>();
   const parents = new Map<string, string | null>();
   let lastId: string | null = null;
@@ -65,13 +66,19 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
       if (item.type === "event_msg" && payload.type === "thread_rolled_back") {
         let remaining = typeof payload.num_turns === "number" ? payload.num_turns : 0;
         if (!Number.isSafeInteger(remaining) || remaining < 0) throw new Error("Invalid CLI rollback record.");
-        while (messages.length && remaining > 0) if (messages.pop()?.role === "user") remaining -= 1;
+        while (codexTurnStarts.length && remaining > 0) {
+          messages.length = codexTurnStarts.pop()!;
+          remaining -= 1;
+        }
+        if (remaining > 0) messages.length = 0;
       }
       // event_msg mirrors response_item; selecting one prevents duplicate messages.
       if (item.type !== "response_item" || payload.type !== "message") continue;
       role = payload.role;
       content = textContent(payload.content);
       if (role === "user" && /^(?:# AGENTS\.md instructions|<environment_context>)/u.test(content.trim())) continue;
+      // Image-only requests still define turns even though their media is omitted.
+      if (role === "user") codexTurnStarts.push(messages.length);
     } else {
       if (item.isSidechain === true) continue;
       if (typeof item.sessionId === "string") {

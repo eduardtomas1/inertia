@@ -81,6 +81,11 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
     ({ page } = await app.restart());
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
+    // Observe dispatch after the fixture's actual reset time, then provider
+    // completion. The test's overall 120-second deadline still bounds both.
+    const { resetsAt } = JSON.parse(await readFile(statePath, "utf8")) as { resetsAt: number };
+    const untilReset = Math.max(0, resetsAt * 1000 - Date.now());
+    await expect(page.getByText("Continue from where you stopped.", { exact: true })).toBeVisible({ timeout: untilReset + 60_000 });
     await expect(page.getByText("Resumed after the subscription quota reset.", { exact: true })).toBeVisible({ timeout: 60_000 });
     expect(JSON.parse(await readFile(statePath, "utf8")).turns).toBe(1);
     ({ page } = await app.restart());

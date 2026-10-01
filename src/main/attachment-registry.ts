@@ -1,5 +1,6 @@
+import { readAttachment } from "../node/read-attachment.js";
 import { snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import {
   type FileHandle,
@@ -9,6 +10,7 @@ import {
   open,
   readdir,
   realpath,
+  rename,
   rmdir,
   stat,
   unlink,
@@ -27,10 +29,7 @@ import {
   FILE_OPEN_DIRECTORY,
   FILE_OPEN_NO_FOLLOW,
 } from "../node/platform-file-open-flags.js";
-import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
-} from "../shared/attachments.js";
+import { MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "../shared/attachments.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments.js";
 import {
@@ -39,6 +38,7 @@ import {
   type PreparedAttachmentImport,
   type PreparedAttachmentMetadata,
 } from "./attachment-import.js";
+import { attachmentPreviewLimit, assertAttachmentImportReceipt } from "./attachment-registry-file-verification.js";
 import { isStablePrivateAttachment, verifyPinnedAttachmentDirectory,
   verifyStoredAttachmentAfterValidation } from "./attachment-registry-file-verification.js";
 import {
@@ -50,11 +50,11 @@ import {
 import { RendererAttachmentImportHolds } from "./attachment-import-holds.js";
 
 const MAX_SESSION_ATTACHMENT_RECORDS = 1_024;
-const MAX_SESSION_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
+const MAX_SESSION_ATTACHMENT_BYTES = 16 * 1024 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
 const ATTACHMENT_HANDOFF_TIMEOUT_MS = 210_000;
-const MAX_PENDING_IMPORT_BYTES = MAX_CHAT_ATTACHMENT_TOTAL_BYTES;
+const MAX_PENDING_IMPORT_BYTES = MAX_ATTACHMENT_TOTAL_BYTES;
 const ATTACHMENT_SESSION_PREFIX = "session-";
 const ATTACHMENT_SESSION_DIRECTORY =
   /^session-[A-Za-z0-9_-]{6}$/u;
@@ -65,7 +65,7 @@ const TRANSIENT_UNLINK_CODES = new Set([
   "ETXTBSY",
 ]);
 const OWNED_ATTACHMENT_FILE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls)$/iu;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls|bin)$/iu;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -401,8 +401,8 @@ function validateSelectedImportCount(count: number): void {
   if (
     !Number.isSafeInteger(count)
     || count < 0
-    || count > MAX_CHAT_ATTACHMENTS
-  ) throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+    || count > MAX_ATTACHMENT_COUNT
+  ) throw new Error(`Select at most ${MAX_ATTACHMENT_COUNT} attachments.`);
 }
 
 function boundedLimit(value: number | undefined, maximum: number): number {
@@ -534,7 +534,7 @@ export class AttachmentRegistry {
       this.disposed
       || !UUID_PATTERN.test(handoffId)
       || attachmentIds.length < 1
-      || attachmentIds.length > MAX_CHAT_ATTACHMENTS
+      || attachmentIds.length > MAX_ATTACHMENT_COUNT
       || new Set(attachmentIds).size !== attachmentIds.length
       || attachmentIds.some((id) => !UUID_PATTERN.test(id))
     ) {
@@ -655,8 +655,8 @@ export class AttachmentRegistry {
     if (
       !Number.isSafeInteger(pendingBytes)
       || pendingBytes < 1
-      || pendingBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
-    ) throw new Error("Attachments exceed the 20 MB turn limit.");
+      || pendingBytes > MAX_ATTACHMENT_TOTAL_BYTES
+    ) throw new Error("Attachments exceed the maximum message size.");
     if (this.pendingImportBytes + pendingBytes > MAX_PENDING_IMPORT_BYTES) {
       throw new Error("Attachment import is busy. Try again in a moment.");
     }
@@ -722,9 +722,9 @@ export class AttachmentRegistry {
         }
         digests.add(attachment.digest);
         totalBytes += attachment.size;
-        if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+        if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
           await this.rollbackRecord(attachment);
-          throw new Error("Attachments exceed the 20 MB turn limit.");
+          throw new Error("Attachments exceed the maximum message size.");
         }
         registered.push(attachment);
       }
@@ -765,11 +765,8 @@ export class AttachmentRegistry {
     }
   }
 
-  async preview(
-    id: string,
-    signal?: AbortSignal,
-  ): Promise<ValidatedAttachmentPreview | null> {
-    const validated = await this.readValidated(id, signal);
+  async preview(id: string, signal?: AbortSignal): Promise<ValidatedAttachmentPreview | null> {
+    const validated = await this.readValidated(id, signal, attachmentPreviewLimit(this.records.get(id)?.mimeType));
     return validated
       ? {
           bytes: validated.bytes,
@@ -785,7 +782,6 @@ export class AttachmentRegistry {
   ): Promise<TrustedRuntimeAttachment | null> {
     return (await this.readValidated(id, signal))?.attachment ?? null;
   }
-
   /**
    * Claims a capability for exactly one renderer-prepared message send. The
    * send request UUID binds the cross-IPC handoff, so an unrelated runtime
@@ -804,6 +800,7 @@ export class AttachmentRegistry {
   private async readValidated(
     id: string,
     signal?: AbortSignal,
+    captureBytes = 0,
   ): Promise<ValidatedAttachmentRead | null> {
     assertNotAborted(signal);
     if (
@@ -874,7 +871,7 @@ export class AttachmentRegistry {
         throw new Error("The registered attachment changed after import.");
       }
       assertNotAborted(operationSignal);
-      const bytes = await file.readFile();
+      const { bytes, digest } = await readAttachment(file, record.size, captureBytes, operationSignal);
       const after = await file.stat();
       assertNotAborted(operationSignal);
       if (
@@ -885,7 +882,7 @@ export class AttachmentRegistry {
         throw new Error("The registered attachment changed while it was read.");
       }
       if (
-        createHash("sha256").update(bytes).digest("hex") !== record.digest
+        digest !== record.digest
       ) {
         throw new Error("The registered attachment metadata no longer matches its content.");
       }
@@ -1117,7 +1114,7 @@ export class AttachmentRegistry {
   ): Promise<AttachmentRegistryRecord> {
     await this.verifiedDirectory();
     const id = randomUUID();
-    const path = join(this.directory, `${id}.${attachment.extension}`);
+    let path = join(this.directory, `${id}.${attachment.extension}`);
     const file = await open(
       path,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
@@ -1138,17 +1135,16 @@ export class AttachmentRegistry {
         signal,
         true,
       );
-      if (
-        receipt.displayName !== attachment.displayName
-        || receipt.mimeType !== attachment.mimeType
-        || receipt.extension !== attachment.extension
-        || receipt.size !== attachment.size
-      ) {
-        throw new Error(
-          "Temporary attachment storage could not be verified safely.",
-        );
-      }
+      assertAttachmentImportReceipt(attachment, receipt);
       signal.throwIfAborted();
+      if (receipt.extension !== attachment.extension) {
+        const target = join(this.directory, `${id}.${receipt.extension}`);
+        await this.verifiedDirectory();
+        await rename(path, target);
+        this.pendingPaths.delete(path);
+        path = target;
+        this.pendingPaths.set(path, receipt.size);
+      }
       const record: AttachmentRegistryRecord = {
         id,
         name: receipt.displayName,
@@ -1208,6 +1204,7 @@ export class AttachmentRegistry {
       name: attachment.displayName,
       mimeType: attachment.mimeType,
       size: attachment.size,
+      normalizeImage: allowTestDelay,
       stallBeforeValidationMs: allowTestDelay
         ? this.validationDelayMs
         : 0,
@@ -1228,7 +1225,8 @@ export class AttachmentRegistry {
     await verifyStoredAttachmentAfterValidation({
       before,
       expectedRoot: root,
-      expectedSize: attachment.size,
+      expectedSize: receipt.size,
+      normalized: receipt.normalized === true && allowTestDelay && attachment.mimeType.startsWith("image/") && receipt.mimeType === "image/jpeg" && receipt.size <= 10 * 1024 * 1024,
       path,
       receipt,
       resolveVerifiedRoot: async () =>

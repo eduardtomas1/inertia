@@ -13,7 +13,7 @@ import type {
 } from "../../../node/runtime-process-protocol.js";
 
 const REQUEST_TIMEOUT_MS = 36_000;
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const MAX_METADATA_BYTES = 4 * 1024;
 
 type StoreOperation = ConversationAttachmentStoreOperation
@@ -64,8 +64,7 @@ function parseReceipt(
   ) return null;
   const bytes = Buffer.from(receipt.bytesBase64, "base64");
   if (
-    bytes.length < 1
-    || bytes.length > MAX_ATTACHMENT_BYTES
+    bytes.length > MAX_ATTACHMENT_BYTES
     || bytes.toString("base64") !== receipt.bytesBase64
   ) return null;
   return {

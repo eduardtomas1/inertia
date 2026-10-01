@@ -10,6 +10,7 @@ export const SPREADSHEET_ATTACHMENT_MIME_TYPES = [
   "application/vnd.ms-excel",
 ] as const;
 
+// Released migration 56 pins these declarations. Keep its policy byte-identical.
 export const DOCUMENT_ATTACHMENT_MIME_TYPES = [
   "application/pdf",
   "text/plain",
@@ -24,17 +25,58 @@ export const CHAT_ATTACHMENT_MIME_TYPES = [
   ...DOCUMENT_ATTACHMENT_MIME_TYPES,
 ] as const;
 
-export type ImageAttachmentMimeType = (typeof IMAGE_ATTACHMENT_MIME_TYPES)[number];
-export type SpreadsheetAttachmentMimeType =
-  (typeof SPREADSHEET_ATTACHMENT_MIME_TYPES)[number];
-export type DocumentAttachmentMimeType = (typeof DOCUMENT_ATTACHMENT_MIME_TYPES)[number];
-export type ChatAttachmentMimeType = (typeof CHAT_ATTACHMENT_MIME_TYPES)[number];
-export type ChatAttachmentKind = "image" | "document";
-
 export const MAX_CHAT_ATTACHMENTS = 8;
 export const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
-export const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+
+export const ACCEPTED_DOCUMENT_MIME_TYPES = [
+  "application/octet-stream",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+  ...SPREADSHEET_ATTACHMENT_MIME_TYPES,
+] as const;
+
+export const ACCEPTED_ATTACHMENT_MIME_TYPES = [
+  ...IMAGE_ATTACHMENT_MIME_TYPES,
+  ...ACCEPTED_DOCUMENT_MIME_TYPES,
+] as const;
+
+export type ImageAttachmentMimeType = (typeof IMAGE_ATTACHMENT_MIME_TYPES)[number];
+export type SpreadsheetAttachmentMimeType =
+  (typeof SPREADSHEET_ATTACHMENT_MIME_TYPES)[number];
+export type DocumentAttachmentMimeType = (typeof ACCEPTED_DOCUMENT_MIME_TYPES)[number];
+export type ChatAttachmentMimeType = (typeof ACCEPTED_ATTACHMENT_MIME_TYPES)[number];
+export type ChatAttachmentKind = "image" | "document";
+
+// File storage and model image input have independent budgets.
+export const MAX_ATTACHMENT_COUNT = 100;
+export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+export const MAX_IMAGE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_IMAGE_ATTACHMENT_TOTAL_BYTES = 80 * 1024 * 1024;
+export const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
+// Absolute protocol envelope, derived from the count and per-file limits.
+export const MAX_ATTACHMENT_TOTAL_BYTES = MAX_ATTACHMENT_COUNT * MAX_ATTACHMENT_BYTES;
+export const MAX_TEXT_ATTACHMENT_BYTES = MAX_ATTACHMENT_BYTES;
+export const ATTACHMENT_PREVIEW_BYTES = 1024 * 1024;
+export const PASTED_TEXT_ATTACHMENT_BYTES = 32 * 1024;
+export const ATTACHMENT_UPLOAD_CHUNK_BYTES = 256 * 1024;
+
+export function attachmentLimitError(attachments: readonly { mimeType: string; size: number }[]): string | null {
+  if (attachments.length > MAX_ATTACHMENT_COUNT) return `Attach at most ${MAX_ATTACHMENT_COUNT} files.`;
+  let imageBytes = 0;
+  for (const attachment of attachments) {
+    const image = attachment.mimeType.startsWith("image/");
+    if (!Number.isSafeInteger(attachment.size) || attachment.size < 1
+      || attachment.size > (image ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES)) {
+      return image ? "Images must fit within 10 MiB after resizing." : "Files must be nonempty and at most 50 MiB.";
+    }
+    if (image) imageBytes += attachment.size;
+  }
+  return imageBytes > MAX_IMAGE_ATTACHMENT_TOTAL_BYTES ? "Images exceed the 80 MiB message limit." : null;
+}
 export const MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES = 64 * 1024 * 1024;
 
 const attachmentMimeByExtension: Readonly<Record<string, ChatAttachmentMimeType>> = {
@@ -103,6 +145,7 @@ const attachmentDeclaredMimeAliases: Readonly<
 };
 
 const attachmentTypeLabels: Readonly<Record<ChatAttachmentMimeType, string>> = {
+  "application/octet-stream": "File",
   "image/png": "PNG image",
   "image/jpeg": "JPEG image",
   "image/webp": "WebP image",
@@ -120,6 +163,7 @@ const attachmentTypeLabels: Readonly<Record<ChatAttachmentMimeType, string>> = {
 const attachmentStorageExtension: Readonly<
   Record<ChatAttachmentMimeType, string>
 > = {
+  "application/octet-stream": "bin",
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
@@ -153,9 +197,8 @@ export function chatAttachmentMimeTypeForName(
  * import boundary accepts as text/plain. The set is additive to the lookup
  * migration 56 pins: rows written with these names are read by the live
  * stored-attachment codec, and the frozen migration parser stays unchanged.
- * Deliberately absent: SVG (an image format that can carry script), .env and
- * key or certificate files (credentials), and every binary container. The
- * import still validates bounded Unicode text before accepting them.
+ * Other names are opaque files: stored for agent tools, never rendered as
+ * active content. Text previews independently validate a bounded prefix.
  */
 const PLAIN_TEXT_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set((
   "log text rst tex tsv jsonl ndjson jsonc json5 ipynb mdx "
@@ -202,7 +245,7 @@ export function chatAttachmentPickerExtensions(mode: "images" | "all"): string[]
     return pinned.filter((extension) =>
       chatAttachmentKind(attachmentMimeByExtension[extension]!) === "image");
   }
-  return [...pinned, ...PLAIN_TEXT_ATTACHMENT_EXTENSIONS];
+  return ["*"];
 }
 
 function isPlainTextAttachmentName(name: string): boolean {
@@ -226,7 +269,7 @@ export function safeChatAttachmentMimeTypeForName(
     return attachmentMimeByExtension[extension]!;
   }
   return PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension)
-    || PLAIN_TEXT_ATTACHMENT_NAMES.has(leaf) ? "text/plain" : null;
+    || PLAIN_TEXT_ATTACHMENT_NAMES.has(leaf) ? "text/plain" : "application/octet-stream";
 }
 
 export function isPotentialChatAttachment(
@@ -235,6 +278,7 @@ export function isPotentialChatAttachment(
 ): boolean {
   const inferred = safeChatAttachmentMimeTypeForName(name);
   if (!inferred) return false;
+  if (inferred === "application/octet-stream") return true;
   const declared = declaredMimeType.split(";", 1)[0]!
     .trim()
     .toLocaleLowerCase("en-US");

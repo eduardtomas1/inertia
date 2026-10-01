@@ -1,43 +1,49 @@
-# Attachment formats
+# Attachments
 
-Use the attachment button, drop files on the composer, or paste clipboard files.
-Pasting ordinary text still inserts it into the message. OS clipboard support
-for copying files varies; the file must be present in the clipboard file list.
-In the picker, choose **All files** for extensionless names such as `Dockerfile`.
-The import validates file content even when the OS supplies no MIME type or a
-generic binary type.
+Attach files with the paperclip, drag and drop, or paste clipboard files. Each
+message accepts up to **100 attachments**, **50 MiB per file**. Regular files have
+no additional combined size limit. Attachment storage settings still control
+retained disk usage.
 
-| Format | Preview | Delivered to the provider |
+Uploads are written to private staging in acknowledged chunks. Completed files
+are validated and hashed before adoption. Cancelled uploads, closed composers,
+and interrupted sends reclaim their temporary files. Sent and queued attachments
+are copied into durable conversation storage without buffering the entire batch.
+
+Agents receive the saved paths of documents and other files, with their names
+and sizes. They can read or search what they need using file tools. File contents
+are not automatically extracted into the prompt. This includes PDFs and
+spreadsheets; their interpretation depends on the selected agent's tools.
+Images continue to use the provider's image input.
+
+Pasted text becomes a `.txt` attachment at **32 KiB of UTF-8**, or when inserting
+it would exceed the message limit. **Shift-paste** keeps text inline. If importing
+the paste fails, the text is restored to the draft. During an active turn,
+follow-ups still accept images only; text pastes stay inline.
+
+| Format | Preview | Provider input |
 | --- | --- | --- |
-| PNG, JPEG, WebP, GIF | Image with zoom | Image input, when the selected model supports images |
-| PDF | Page viewer | Bounded selectable text; pages with graphics or sparse text become images, requiring image support |
-| TXT, TEXT, LOG, Markdown, RST, TeX | Inert text | Bounded text |
-| CSV | Table | Bounded raw CSV text |
-| XLSX, XLS | Worksheet tables | Bounded worksheet text; macros are rejected |
-| JSON | Formatted text; valid JSON required | Bounded raw JSON text |
-| JSONC, JSON5, JSONL, NDJSON, IPYNB, TSV | Inert text | Bounded raw text, including notebook JSON; no notebook execution or output rendering |
-| YAML, TOML, INI, CFG, CONF, properties, XML, HTML, CSS, SCSS, LESS | Inert text | Bounded text; markup and scripts are not executed |
-| JS/TS/JSX/TSX, Vue, Svelte, MDX, Python, Ruby, Go, Rust, Java/Kotlin/Scala, C/C++/C#, Swift, PHP, Lua, Dart, R, Perl, Elixir, Erlang, Haskell, Clojure | Inert text | Bounded source text |
-| Shell, Bash, Zsh, PowerShell, BAT/CMD, SQL, GraphQL, Proto, diff/patch | Inert text | Bounded text |
-| Dockerfile, Containerfile, Makefile, GNUmakefile, Justfile, README, LICENSE, .gitignore, .gitattributes, .dockerignore, .editorconfig | Inert text | Bounded text |
+| PNG, JPEG, WebP, GIF | Image with zoom | Image input when the model supports it |
+| PDF | Page viewer | Saved file path |
+| Text, logs, Markdown, JSON, source and configuration files | Inert text, first 1 MiB | Saved file path, complete original bytes |
+| CSV, XLSX, XLS | Bounded table / worksheet view | Saved file path |
+| Other files, including archives | File information; no active content | Saved file path |
 
-Text accepts UTF-8 (with or without a BOM) and UTF-16 LE/BE with a BOM. Original
-bytes, filename and content digest are retained. ANSI color/style sequences are
-removed from the preview and provider text; terminal control commands and binary
-data are rejected. Convert legacy code pages or UTF-16 without a BOM to UTF-8.
-Text files must be nonempty and at most 2 MiB in their original encoding.
+Text accepts UTF-8 or BOM-marked UTF-16 LE/BE. ANSI color sequences are stripped
+from previews; binary data and terminal control commands in text formats are
+rejected. Preview truncation never changes the stored file. JSON prefixes that
+are not complete JSON are shown as raw text. PDF and spreadsheet previews keep
+their structural validation, including rejection of spreadsheet macros.
 
-Provider text is bounded to 64 KiB per document and 96 KiB total before prompt
-metadata, including JSON escaping. Truncation is identified in provider context;
-the preview can show more than the provider receives. Large logs should be
-reduced to a relevant excerpt. Document attachments can be sent in a new turn;
-follow-ups during a running turn currently support images only.
+Images accept source files up to **50 MiB**. The import utility compresses or
+resizes oversized images to **10 MiB each**, with an **80 MiB combined image
+budget**. Images needing conversion become JPEGs (transparency uses a white
+background and animations become a still frame). Decoding remains bounded to
+40 megapixels across animation frames, with at most 256 frames. Processed images
+have at most 8,192 pixels per side. Providers may enforce additional limits.
 
-ZIP/TAR and other archives, executables, media, Word/PowerPoint documents, SVG,
-`.env`, and key/certificate files are not supported attachments. Extract archives
-and attach supported files, or export documents to PDF or text. Renaming a binary
-file does not make it supported.
+Sent files can be reopened from a message or **Open a surface → Attachments**,
+including after restart while the retained copy remains available. Removing a
+stored copy frees disk space; re-add the original if it is needed again.
 
-Sent files can be reopened from the message or **Open a surface → Attachments**,
-including after restart, while their validated retained copy remains available.
-If a copy is removed or changed, re-add the original file.
+This storage and context model follows [T3 Code's composer](https://github.com/pingdotgg/t3code/blob/5cc99e1c23980d7995a13c47f969b47cb68ed1be/docs/user/composer.md).

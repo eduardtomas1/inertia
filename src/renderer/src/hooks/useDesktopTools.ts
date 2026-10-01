@@ -3,8 +3,10 @@ import type { ChatAttachment } from "@shared/contracts";
 import type { PreviewBounds, PreviewState, PreviewStateUpdate } from "@shared/desktop";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import {
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  ATTACHMENT_UPLOAD_CHUNK_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
 } from "@shared/attachments";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
@@ -45,20 +47,21 @@ export function mergePreviewStateUpdate(
 export function preflightComposerAttachmentFiles(
   files: readonly File[],
 ): void {
+  if (files.length > MAX_ATTACHMENT_COUNT) throw new Error(`Select at most ${MAX_ATTACHMENT_COUNT} attachments.`);
   let totalBytes = 0;
   for (const file of files) {
     if (
       !Number.isSafeInteger(file.size)
       || file.size < 1
-      || file.size > MAX_CHAT_ATTACHMENT_BYTES
+      || file.size > MAX_ATTACHMENT_BYTES
     ) {
       throw new Error(
-        "An attachment is empty or exceeds the 10 MB file limit.",
+        "An attachment is empty or exceeds the 50 MiB file limit.",
       );
     }
     totalBytes += file.size;
-    if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
-      throw new Error("Attachments exceed the 20 MB turn limit.");
+    if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+      throw new Error("Attachments exceed the maximum message size.");
     }
   }
 }
@@ -80,7 +83,7 @@ export interface ComposerAttachmentImportBatch {
   begin(): Promise<string>;
   importOne(
     batchId: string,
-    value: { name: string; mimeType: string; data: ArrayBuffer },
+    value: import("@shared/desktop").AttachmentImport,
   ): Promise<ChatAttachment[]>;
   cancel(batchId: string): Promise<void>;
 }
@@ -96,31 +99,22 @@ export async function importComposerAttachmentFilesSequentially(
 ): Promise<PreparedComposerAttachmentImport> {
   preflightComposerAttachmentFiles(files);
   const batchId = await batch.begin();
-  const digests = new Set<string>();
   const imported: ChatAttachment[] = [];
   try {
     for (const file of files) {
-      const data = await file.arrayBuffer();
-      if (data.byteLength !== file.size) {
-        throw new Error("An attachment changed while it was being imported.");
+      let current: ChatAttachment[] = [];
+      for (let offset = 0; offset < file.size; offset += ATTACHMENT_UPLOAD_CHUNK_BYTES) {
+        const end = Math.min(file.size, offset + ATTACHMENT_UPLOAD_CHUNK_BYTES);
+        const data = await file.slice(offset, end).arrayBuffer();
+        if (data.byteLength !== end - offset) throw new Error("An attachment changed while it was being imported.");
+        current = await batch.importOne(batchId, {
+          name: file.name, mimeType: file.type, data,
+          stream: { size: file.size, offset, final: end === file.size },
+        });
+        if (end < file.size && current.length !== 0) throw new Error("Invalid attachment upload acknowledgement.");
       }
-      const digestBytes = new Uint8Array(
-        await globalThis.crypto.subtle.digest("SHA-256", data),
-      );
-      const digest = Array.from(
-        digestBytes,
-        (byte) => byte.toString(16).padStart(2, "0"),
-      ).join("");
-      if (digests.has(digest)) continue;
-      const current = await batch.importOne(batchId, {
-        name: file.name,
-        mimeType: file.type,
-        data,
-      });
-      if (current.length !== 1) {
-        throw new Error("Attachment import did not complete.");
-      }
-      digests.add(digest);
+      if (current.length === 0) continue; // The privileged importer deduplicates by streamed digest.
+      if (current.length !== 1) throw new Error("Attachment import did not complete.");
       imported.push(current[0]!);
     }
     return { batchId, attachments: imported };

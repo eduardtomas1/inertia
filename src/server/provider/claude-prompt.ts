@@ -5,7 +5,7 @@ import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderSteerInput } from "./contracts";
 import { readBoundedProviderImage, throwIfProviderImageAborted } from "./provider-image-read";
 
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+import { MAX_IMAGE_ATTACHMENT_TOTAL_BYTES as MAX_IMAGE_BYTES } from "../../shared/attachments";
 const PROMPT_RESERVATION_OVERHEAD_BYTES = 4 * 1024;
 
 export async function claudePrompt(

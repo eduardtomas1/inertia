@@ -22,8 +22,8 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 import {
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_TEXT_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  ATTACHMENT_PREVIEW_BYTES as MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentTypeLabel,
   isSpreadsheetAttachmentMimeType,
   type ChatAttachmentMimeType,
@@ -104,6 +104,15 @@ type PreviewContent =
 function isSpreadsheetPreview(mimeType: ChatAttachmentMimeType): boolean {
   return mimeType === "text/csv"
     || isSpreadsheetAttachmentMimeType(mimeType);
+}
+
+// A prefix may end inside a UTF-8 sequence or a UTF-16 code unit.
+function trimIncompleteText(bytes: Uint8Array): Uint8Array {
+  for (let omitted = 0; omitted <= 4; omitted += 1) {
+    const prefix = bytes.subarray(0, bytes.length - omitted);
+    try { decodeTextAttachment(prefix); return prefix; } catch { /* try the preceding code point */ }
+  }
+  return bytes;
 }
 
 function boundedPrettyJson(text: string): string {
@@ -241,11 +250,13 @@ export function DocumentAttachmentPreview({
   mimeType,
   onFailure,
 }: DocumentAttachmentPreviewProps): React.JSX.Element {
+  const [truncated, setTruncated] = useState(false);
   const [content, setContent] = useState<PreviewContent | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     setContent(null);
+    setTruncated(false);
     void fetch(source, {
       cache: "no-store",
       signal: controller.signal,
@@ -259,7 +270,7 @@ export function DocumentAttachmentPreview({
         throw new Error("Attachment preview type does not match the attachment.");
       }
       const maximumBytes = isSpreadsheetPreview(mimeType)
-        ? MAX_CHAT_ATTACHMENT_BYTES
+        ? MAX_ATTACHMENT_BYTES
         : MAX_TEXT_ATTACHMENT_BYTES;
       const contentLength = response.headers.get("content-length");
       const declaredBytes = contentLength === null ? null : Number(contentLength);
@@ -275,19 +286,22 @@ export function DocumentAttachmentPreview({
       if (bytes.byteLength < 1 || bytes.byteLength > maximumBytes) {
         throw new Error("Attachment preview exceeds the safe size limit.");
       }
+      const truncated = response.headers.get("x-attachment-truncated") === "true";
+      setTruncated(truncated);
+      const previewBytes = truncated ? trimIncompleteText(bytes) : bytes;
       const next: PreviewContent = isSpreadsheetPreview(mimeType)
         ? {
             kind: "spreadsheet",
             workbook: await readSpreadsheetWorkbook(
               mimeType === "text/csv"
-                ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(bytes)}`)
+                ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(previewBytes)}`)
                 : bytes,
               SPREADSHEET_PREVIEW_LIMITS,
             ),
           }
         : {
             kind: "text",
-            text: decodeTextAttachment(bytes),
+            text: decodeTextAttachment(previewBytes),
           };
       if (controller.signal.aborted) return;
       startTransition(() => setContent(next.kind === "text" && mimeType === "application/json"
@@ -311,7 +325,7 @@ export function DocumentAttachmentPreview({
       </div>
     );
   }
-  return content.kind === "spreadsheet"
+  const preview = content.kind === "spreadsheet"
     ? <SpreadsheetPreview title={title} workbook={content.workbook} />
     : (
         <pre
@@ -322,6 +336,10 @@ export function DocumentAttachmentPreview({
           {content.text}
         </pre>
       );
+  return <>
+    {truncated && <p role="status">Showing the first 1 MiB. The complete file is saved and available to the agent.</p>}
+    {preview}
+  </>;
 }
 
 type AttachmentPreviewDialogProps = {
@@ -415,13 +433,13 @@ export function AttachmentPreviewDialog({
                   <FileText size={28} aria-hidden="true" />
                   <strong>Preview unavailable</strong>
                   <span>
-                    This attachment is no longer stored: it was removed to free
-                    space, or its file changed after upload. Re-add the file to
-                    send it again.
+                    This file could not be previewed. It may use an unsupported format, have changed, or have been removed from storage.
                   </span>
                 </div>
               )
-            : previewKind === "image"
+            : previewKind === "file"
+              ? <p>This file is stored in full. The agent can read or search it with file tools.</p>
+              : previewKind === "image"
               ? (
                   <ZoomableAttachmentImage
                     source={previewUrl}

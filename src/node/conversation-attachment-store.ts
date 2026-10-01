@@ -30,8 +30,8 @@ import {
   FILE_OPEN_NO_FOLLOW,
 } from "./platform-file-open-flags.js";
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentStorageExtension,
   type ChatAttachmentMimeType,
 } from "../shared/attachments.js";
@@ -70,11 +70,15 @@ export class ConversationAttachmentStoreReconcilingError extends Error {
 export interface ConversationAttachmentPayload {
   readonly attachment: ChatAttachment;
   readonly bytes: Uint8Array;
+  /** Verified on-disk source; bytes is empty for file-backed sends. */
+  readonly source?: import("./read-attachment.js").AttachmentFileSource;
 }
 
 export interface ConversationAttachmentPreview {
   readonly attachment: ChatAttachment;
   readonly bytes: Buffer;
+  /** Verified on-disk source; bytes is empty for file-backed sends. */
+  readonly source?: import("./read-attachment.js").AttachmentFileSource;
 }
 
 export interface ConversationAttachmentValidationResult {
@@ -339,14 +343,14 @@ export class ConversationAttachmentStore {
         }
         unique.set(payload.attachment.id, payload);
       }
-      if (unique.size > MAX_CHAT_ATTACHMENTS) {
+      if (unique.size > MAX_ATTACHMENT_COUNT) {
         throw new Error("Too many conversation attachments were retained.");
       }
       const batchBytes = [...unique.values()].reduce(
-        (total, { bytes }) => total + bytes.byteLength,
+        (total, { attachment }) => total + attachment.size,
         0,
       );
-      if (batchBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+      if (batchBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
         throw new Error("Conversation attachments exceed the turn limit.");
       }
       if ([...unique.keys()].some((id) => this.pendingRecordBytes.has(id))) {
@@ -370,12 +374,12 @@ export class ConversationAttachmentStore {
           current.attachment.name !== expected.name
           || current.attachment.mimeType !== expected.mimeType
           || current.attachment.size !== expected.size
-          || createHash("sha256").update(current.bytes).digest("hex")
+          || (current.source?.digest ?? createHash("sha256").update(current.bytes).digest("hex"))
             !== expected.digest
         ) throw new Error("Conversation attachment identity was reused.");
       }
       const newBytes = newPayloads.reduce(
-        (total, { bytes }) => total + bytes.byteLength,
+        (total, { attachment }) => total + attachment.size,
         0,
       );
       if (newBytes > 0) {
@@ -446,9 +450,14 @@ export class ConversationAttachmentStore {
     });
   }
 
-  async preview(id: string, signal?: AbortSignal): Promise<ConversationAttachmentPreview | null> {
+  async resolve(id: string, signal?: AbortSignal): Promise<ConversationAttachmentPreview | null> {
     this.assertOpen();
     return await this.inspect(id, signal);
+  }
+
+  async preview(id: string, signal?: AbortSignal): Promise<ConversationAttachmentPreview | null> {
+    this.assertOpen();
+    return await this.inspect(id, signal, true);
   }
 
   acceptRetention(retentionId: string): void {
@@ -831,6 +840,7 @@ export class ConversationAttachmentStore {
   private async inspect(
     id: string,
     signal?: AbortSignal,
+    preview = false,
   ): Promise<ConversationAttachmentPreview | null> {
     if (!UUID_PATTERN.test(id)) return null;
     const configuredReadStall = process.env.NODE_ENV === "test"
@@ -839,6 +849,8 @@ export class ConversationAttachmentStore {
       : 0;
     const reading = this.trackOperation(this.readOperationRunner({
       operation: "read",
+      metadataOnly: !preview,
+      preview,
       root: this.directory,
       rootDev: this.directoryAuthority.dev,
       rootIno: this.directoryAuthority.ino,
@@ -869,11 +881,14 @@ export class ConversationAttachmentStore {
     }
     if (!metadata || metadata.id !== id) return null;
     const bytes = Buffer.from(receipt.bytes);
+    const expectedBytes = preview
+      ? Math.min(metadata.size, metadata.mimeType.startsWith("text/") || metadata.mimeType === "application/json" ? 1024 * 1024 : metadata.size)
+      : 0;
     if (
-      bytes.length !== metadata.size
-      || createHash("sha256").update(bytes).digest("hex") !== metadata.digest
+      (bytes.length !== expectedBytes && bytes.length !== metadata.size)
+      || bytes.length === metadata.size && createHash("sha256").update(bytes).digest("hex") !== metadata.digest
     ) throw new Error("Conversation attachment content changed.");
-    if (this.validate) {
+    if (this.validate && bytes.length === metadata.size) {
       const validated = this.validate({
         name: metadata.name,
         mimeType: metadata.mimeType,
@@ -895,6 +910,7 @@ export class ConversationAttachmentStore {
         size: metadata.size,
       },
       bytes,
+      source: { path: join(this.directory, id, `${id}.${metadata.extension}`), digest: metadata.digest },
     };
   }
 
@@ -937,6 +953,7 @@ export class ConversationAttachmentStore {
         stagingName,
         extension: metadata.extension,
         bytes: payload.bytes,
+        ...(payload.source ? { source: payload.source } : {}),
         metadata: JSON.stringify(metadata),
         stallBeforePublishMs: Math.max(
           0,

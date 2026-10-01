@@ -89,12 +89,12 @@ describe("targeted attachment reference lookup", () => {
         JSON.stringify([attachment(escaped)]).replaceAll(escaped, escapedId),
         `${JSON.stringify([attachment(deeplyNested)]).slice(0, -2)},"extra":${"[".repeat(depth)}${"]".repeat(depth)}}]`,
         JSON.stringify([
-          ...Array.from({ length: 8 }, () => attachment(id())),
+          ...Array.from({ length: 100 }, () => attachment(id())),
           attachment(overCount),
         ]),
         JSON.stringify([
-          ...Array.from({ length: 6 }, () => attachment(id(), { size: 3 * 1024 * 1024 })),
-          attachment(overBytes, { size: 3 * 1024 * 1024 }),
+          ...Array.from({ length: 8 }, () => attachment(id(), { size: 10 * 1024 * 1024 })),
+          attachment(overBytes, { size: 10 * 1024 * 1024 }),
         ]),
         JSON.stringify([attachment(id(), { note: nonIdMember })]),
         JSON.stringify([attachment(differentCase.toUpperCase())]),

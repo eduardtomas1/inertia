@@ -1,3 +1,5 @@
+import { AttachmentUploadStream } from "./attachment-upload-stream.js";
+import { prepareAttachmentImportMetadata } from "./attachment-import.js";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -9,7 +11,7 @@ import type {
 } from "electron";
 
 import type { ChatAttachment } from "../shared/contracts.js";
-import { MAX_CHAT_ATTACHMENTS } from "../shared/attachments.js";
+import { MAX_ATTACHMENT_COUNT } from "../shared/attachments.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 
 const MAX_ACTIVE_RENDERER_IMPORT_BATCHES = 16;
@@ -57,6 +59,7 @@ export interface AttachmentImportDocument {
 
 interface AttachmentImportBatchRegistry {
   readonly import: AttachmentRegistry["import"];
+  readonly importFromWriter?: AttachmentRegistry["importFromWriter"];
   readonly rollback: AttachmentRegistry["rollback"];
   readonly rendererImports: {
     hold(batchId: string, attachmentIds: readonly string[]): void;
@@ -77,10 +80,12 @@ interface RendererAttachmentImportBatch {
   readonly document: AttachmentImportDocument;
   readonly registry: AttachmentImportBatchRegistry;
   readonly attachmentIds: Set<string>;
+  readonly digests: Set<string>;
   readonly controller: AbortController;
   readonly timer: ReturnType<typeof setTimeout>;
   state: "open" | "cancelled" | "committed";
   inFlight: Promise<ChatAttachment[]> | null;
+  upload?: { stream: AttachmentUploadStream; result: Promise<ChatAttachment[]>; name: string; mimeType: string };
   cleanup: Promise<void> | null;
 }
 
@@ -121,7 +126,7 @@ function assertAdoptedAttachmentIds(
   if (
     !Array.isArray(value)
     || value.length === 0
-    || value.length > MAX_CHAT_ATTACHMENTS
+    || value.length > MAX_ATTACHMENT_COUNT
     || new Set(value).size !== value.length
     || value.some((id) => typeof id !== "string" || !UUID_PATTERN.test(id))
   ) {
@@ -197,6 +202,7 @@ export class RendererAttachmentImportCoordinator {
       document,
       registry: this.registry(),
       attachmentIds: new Set(),
+      digests: new Set(),
       controller: new AbortController(),
       timer: setTimeout(() => {
         void this.cancelBatch(batch);
@@ -219,11 +225,54 @@ export class RendererAttachmentImportCoordinator {
     values: readonly unknown[],
   ): Promise<ChatAttachment[]> {
     const batch = this.openOwnedBatch(document, batchId);
+    const value = values[0];
+    if (values.length === 1 && typeof value === "object" && value !== null && "stream" in value) {
+      return await this.importChunk(batch, value as Record<string, unknown>);
+    }
     if (batch.inFlight || values.length !== 1) {
       throw new Error("Invalid attachments.");
     }
     return await this.importIntoBatch(batch, async (signal) =>
       await batch.registry.import(values, signal));
+  }
+
+  private async importChunk(batch: RendererAttachmentImportBatch, value: Record<string, unknown>): Promise<ChatAttachment[]> {
+    try {
+      const chunk = value.stream as { size?: unknown; offset?: unknown; final?: unknown } | null;
+      if (!chunk || typeof chunk !== "object" || Object.keys(chunk).length !== 3
+        || typeof chunk.size !== "number" || typeof chunk.offset !== "number"
+        || !Number.isSafeInteger(chunk.offset) || typeof chunk.final !== "boolean") {
+        throw new Error("Invalid attachment upload chunk.");
+      }
+      const metadata = prepareAttachmentImportMetadata({ ...value, size: chunk.size });
+      if (!batch.upload) {
+        if (batch.inFlight || chunk.offset !== 0 || !batch.registry.importFromWriter) {
+          throw new Error("Invalid attachment upload chunk.");
+        }
+        const stream = new AttachmentUploadStream(metadata.size, batch.controller.signal);
+        const result = this.importIntoBatch(batch, async (signal) => {
+          const attachment = await batch.registry.importFromWriter!({
+            name: metadata.displayName, mimeType: metadata.mimeType, size: metadata.size,
+            write: async (destination) => await stream.write(destination),
+          }, signal, batch.digests);
+          return attachment ? [attachment] : [];
+        });
+        void result.catch((error: unknown) => stream.cancel(error));
+        batch.upload = { stream, result, name: metadata.displayName, mimeType: metadata.mimeType };
+      }
+      const upload = batch.upload;
+      if (upload.stream.size !== metadata.size || upload.name !== metadata.displayName
+        || upload.mimeType !== metadata.mimeType) throw new Error("Attachment upload changed.");
+      await upload.stream.chunk(value.data, chunk.offset, chunk.final);
+      if (!chunk.final) return [];
+      const result = await upload.result;
+      delete batch.upload;
+      return result;
+    } catch (error) {
+      batch.upload?.stream.cancel(error);
+      await this.cancelBatch(batch);
+      throw error;
+    }
   }
 
   async importSelection(

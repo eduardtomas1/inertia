@@ -20,7 +20,6 @@ import type {
   PromptPreset,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../../src/shared/attachments";
 import {
   versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
@@ -1941,8 +1940,8 @@ describe("composer asynchronous ownership", () => {
   });
 
   it("reports count-limited drops and byte-limited picker adoption", async () => {
-    const full = ["first", "second"].map((id) => ({
-      ...attachment(id), size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+    const full = ["first", "second", ...Array.from({ length: 6 }, (_, index) => `extra-${index}`)].map((id) => ({
+      ...attachment(id), size: 10 * 1024 * 1024,
     }));
     const commit = vi.fn(async () => undefined);
     const cancel = vi.fn(async () => undefined);
@@ -1959,13 +1958,13 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(picker);
     await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
     expect(commit).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("up to 8 attachments totaling 20.0 MB");
+    expect(screen.getByRole("alert")).toHaveTextContent("up to 100 files");
     expect(screen.queryByText("too-large.png")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove attachment first.png" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    const files = Array.from({ length: 8 }, (_, index) => new File(["image"], `${index}.png`, { type: "image/png" }));
+    const files = Array.from({ length: 100 }, (_, index) => new File(["image"], `${index}.png`, { type: "image/png" }));
     fireEvent.drop(screen.getByLabelText("Message composer"), { dataTransfer: { files, types: ["Files"] } });
-    await waitFor(() => expect(importFiles).toHaveBeenCalledWith(files.slice(0, 7)));
+    await waitFor(() => expect(importFiles).toHaveBeenCalledWith(files.slice(0, 93)));
     expect(screen.getByRole("alert")).toHaveTextContent("Some files were not attached.");
   });
 

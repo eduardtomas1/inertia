@@ -24,6 +24,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   }
   if (message.method !== "turn/start") return;
   fs.writeFileSync("received-text-input.json", JSON.stringify(message.params.input));
+  const prompt = message.params.input.map(item => item.text || "").join("\\n");
+  const references = JSON.parse(prompt.split("\\n").find(line => line.startsWith('[{"name":')));
+  fs.writeFileSync("received-file-contents.json", JSON.stringify(references.map(file => ({ name: file.name, data: fs.readFileSync(file.path).toString("base64") }))));
   const turnId = "text-attachment-turn";
   const turn = { id: turnId, status: "inProgress", items: [], error: null };
   send({ id: message.id, result: { turn } });
@@ -61,7 +64,7 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
   await expect(attachments.getByRole("button", { name: "Preview attachment notes.txt" })).toBeVisible();
   const filters = await app.electronApp.evaluate(() =>
     Reflect.get(globalThis, "textAttachmentPickerFilters") as { extensions: string[] }[]);
-  expect(filters[0]!.extensions).toEqual(expect.arrayContaining(["txt", "log", "jsonc"]));
+  expect(filters[0]!.extensions).toEqual(["*"]);
   expect(filters[1]!.extensions).toEqual(["*"]);
 
   await expect(app.page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
@@ -72,8 +75,7 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
     element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
   }, [...files[2]!.bytes]);
   await expect(attachments.getByRole("button", { name: "Preview attachment color.log" })).toBeVisible();
-  await expect(app.page.getByText(/Unsupported file type: archive.zip/u)).toBeVisible();
-  await expect(attachments.getByText("archive.zip", { exact: true })).toHaveCount(0);
+  await expect(attachments.getByText("archive.zip", { exact: true })).toBeVisible();
 
   await expect(app.page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
   await app.page.getByRole("textbox", { name: "Message" }).evaluate((element, data) => {
@@ -100,9 +102,12 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
   const prompt = input.map(({ text }) => text ?? "").join("\n");
   for (const { name, text } of files) {
     expect(prompt).toContain(name);
-    expect(prompt).toContain(JSON.stringify(text));
+    expect(prompt).not.toContain(JSON.stringify(text));
   }
   expect(prompt).not.toContain("\x1b");
+  const received = JSON.parse(await readFile(join(app.workspaceDirectory, "received-file-contents.json"), "utf8")) as { name: string; data: string }[];
+  for (const file of files) expect(received.find(({ name }) => name === file.name)?.data).toBe(file.bytes.toString("base64"));
+  expect(received.find(({ name }) => name === "archive.zip")?.data).toBe(Buffer.from("PK").toString("base64"));
 
   await app.restart();
   await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Attachments");
@@ -113,9 +118,11 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
     await app.page.keyboard.press("Escape");
   }
   const retainedRoot = join(app.testDirectory, "data", "conversation-attachments");
-  const retained = await Promise.all((await readdir(retainedRoot)).map(async (id) =>
-    await readFile(join(retainedRoot, id, `${id}.txt`))));
-  expect(retained).toHaveLength(files.length);
+  const retained = await Promise.all((await readdir(retainedRoot)).map(async (id) => {
+    const metadata = JSON.parse(await readFile(join(retainedRoot, id, "metadata.json"), "utf8")) as { extension: string };
+    return await readFile(join(retainedRoot, id, `${id}.${metadata.extension}`));
+  }));
+  expect(retained).toHaveLength(files.length + 1);
   for (const file of files) expect(retained.some((bytes) => bytes.equals(file.bytes))).toBe(true);
   expect(app.rendererErrors).toEqual([]);
 });

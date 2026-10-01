@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_CHAT_ATTACHMENTS,
+  MAX_ATTACHMENT_COUNT,
   chatAttachmentKind,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentTypeLabel,
@@ -11,16 +11,16 @@ import {
 
 describe("chat attachment contract", () => {
   it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])(
-    "rejects inherited MIME lookup key %s", (key) => {
-      expect(chatAttachmentMimeTypeForName(`file.${key}`)).toBeNull();
-      expect(isPotentialChatAttachment(`file.${key}`, "application/octet-stream")).toBe(false);
+    "treats prototype property names as opaque files: %s", (key) => {
+      expect(chatAttachmentMimeTypeForName(`file.${key}`)).toBe("application/octet-stream");
+      expect(isPotentialChatAttachment(`file.${key}`, "application/octet-stream")).toBe(true);
     },
   );
-  it("classifies only the bounded image and safe-document allowlist", () => {
+  it("classifies preview formats and keeps other files opaque", () => {
     expect(chatAttachmentMimeTypeForName("photo.JPEG")).toBe("image/jpeg");
     expect(chatAttachmentMimeTypeForName("readme.markdown")).toBe("text/markdown");
-    expect(chatAttachmentMimeTypeForName("payload.svg")).toBeNull();
-    expect(chatAttachmentMimeTypeForName("archive.zip")).toBeNull();
+    expect(chatAttachmentMimeTypeForName("payload.svg")).toBe("application/octet-stream");
+    expect(chatAttachmentMimeTypeForName("archive.zip")).toBe("application/octet-stream");
     expect(chatAttachmentKind("image/webp")).toBe("image");
     expect(chatAttachmentKind("application/pdf")).toBe("document");
     expect(chatAttachmentTypeLabel("application/json")).toBe("JSON document");
@@ -40,9 +40,9 @@ describe("chat attachment contract", () => {
     // The lookup migration 56 pins is unchanged; the names it knows keep their own type.
     expect(chatAttachmentMimeTypeForName("notes.txt")).toBe("text/plain");
     expect(chatAttachmentMimeTypeForName("data.json")).toBe("application/json");
-    // Credentials, scriptable images and binary containers stay out.
+    // Other user-selected files are stored as opaque bytes, without an active preview.
     for (const name of ["secrets.env", "server.pem", "id.key", "logo.svg", "app.exe", "archive.tar", "config.yaml."]) {
-      expect(chatAttachmentMimeTypeForName(name), name).toBeNull();
+      expect(chatAttachmentMimeTypeForName(name), name).toBe("application/octet-stream");
     }
     // Platforms declare these files with their own types, or none at all.
     expect(isPotentialChatAttachment("config.yaml", "application/x-yaml")).toBe(true);
@@ -98,7 +98,7 @@ describe("chat attachment contract", () => {
       ...command,
       payload: {
         ...command.payload,
-        attachments: Array.from({ length: MAX_CHAT_ATTACHMENTS + 1 }, () => attachment),
+        attachments: Array.from({ length: MAX_ATTACHMENT_COUNT + 1 }, () => attachment),
       },
     }).success).toBe(false);
   });

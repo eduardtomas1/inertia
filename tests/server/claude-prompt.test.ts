@@ -1,11 +1,12 @@
 // @inertia-test-suite portable
+import { ClaudePromptChannel } from "../../src/server/provider/claude-prompt-channel";
 import * as fs from "node:fs/promises";
 import { mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claudePrompt } from "../../src/server/provider/claude-prompt";
-import { MAX_CHAT_ATTACHMENT_BYTES } from "../../src/shared/attachments";
+import { claudePrompt, claudePromptReservationBytes } from "../../src/server/provider/claude-prompt";
+import { MAX_IMAGE_ATTACHMENT_BYTES } from "../../src/shared/attachments";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs/promises")>();
@@ -25,6 +26,15 @@ afterEach(async () => {
 });
 
 describe("Claude bounded image prompt preparation", () => {
+  it("reserves enough queue capacity for the full image budget", () => {
+    const reservationBytes = claudePromptReservationBytes("Describe", true);
+    expect(reservationBytes).toBeGreaterThan(80 * 1024 * 1024 * 4 / 3);
+    const channel = new ClaudePromptChannel();
+    const reservation = channel.reserve(reservationBytes);
+    expect(reservation).not.toBeNull();
+    if (reservation) channel.release(reservation);
+  });
+
   it("preserves image order, bytes, and the user prompt", async () => {
     const path = await imagePath();
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -38,7 +48,7 @@ describe("Claude bounded image prompt preparation", () => {
   it("rejects a file grown beyond the retained bound before allocating its bytes", async () => {
     const path = await imagePath();
     await writeFile(path, "retained bytes");
-    await truncate(path, MAX_CHAT_ATTACHMENT_BYTES + 1);
+    await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES + 1);
     await expect(claudePrompt("Describe", [path]).then(() => undefined))
       .rejects.toThrow("10 MB safety limit");
   });
@@ -46,9 +56,9 @@ describe("Claude bounded image prompt preparation", () => {
   it("keeps the aggregate image-byte limit", async () => {
     const path = await imagePath();
     await writeFile(path, "retained bytes");
-    await truncate(path, MAX_CHAT_ATTACHMENT_BYTES);
-    await expect(claudePrompt("Describe", [path, path, path]).then(() => undefined))
-      .rejects.toThrow("20 MB safety limit");
+    await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES);
+    await expect(claudePrompt("Describe", Array.from({ length: 9 }, () => path)).then(() => undefined))
+      .rejects.toThrow("80 MiB safety limit");
   });
 
   it.skipIf(process.platform === "win32")("refuses a replaced image symlink", async () => {

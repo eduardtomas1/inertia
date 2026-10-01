@@ -421,7 +421,7 @@ export function createTurnInteractionCommandHandler(
         if (dependencies.queuedMessage) {
           for (const attachment of dependencies.queuedMessage.attachments) {
             const preview = await awaitMessageSendPreparation(
-              dependencies.conversationAttachments.preview(attachment.id), preparationDeadlineAt,
+              dependencies.conversationAttachments.resolve(attachment.id), preparationDeadlineAt,
             );
             if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
             resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });

@@ -2,12 +2,11 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { ChatAttachment } from "@shared/contracts";
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
   chatAttachmentKind,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
-import { formatAttachmentSize, mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
+import { mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 import type { ComposerProps } from "./types";
 
 interface ComposerAttachmentActionOptions {
@@ -46,7 +45,7 @@ export const DOCUMENT_FOLLOW_UP_UNSUPPORTED =
 export interface ComposerAttachmentActions {
   adoptAttachments(lease: ComposerAttachmentImportLease): Promise<ComposerAttachmentAdoptionResult>;
   chooseAttachments(): Promise<void>;
-  importAttachments(files: File[]): Promise<void>;
+  importAttachments(files: File[]): Promise<boolean>;
   removeAttachment(attachment: ChatAttachment): void;
 }
 
@@ -73,7 +72,7 @@ export function composerAttachmentActions({
   submittingRef,
 }: ComposerAttachmentActionOptions): ComposerAttachmentActions {
   const reportAttachmentLimit = (): void => setAttachmentError(
-    `Some files were not attached. A message supports up to ${MAX_CHAT_ATTACHMENTS} attachments totaling ${formatAttachmentSize(MAX_CHAT_ATTACHMENT_TOTAL_BYTES)}.`,
+    `Some files were not attached. A message supports up to ${MAX_ATTACHMENT_COUNT} files (50 MiB each), with 80 MiB of images (10 MiB each after resizing).`,
   );
   const permitsKind = (mimeType: Parameters<typeof chatAttachmentKind>[0] | null): boolean => {
     const image = mimeType !== null && chatAttachmentKind(mimeType) === "image";
@@ -229,11 +228,11 @@ export function composerAttachmentActions({
       }
     },
     async importAttachments(files) {
-      if (actionBlocked()) return;
+      if (actionBlocked()) return false;
       const authority = attachmentAuthorityKey;
       const remaining = Math.max(
         0,
-        MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length,
+        MAX_ATTACHMENT_COUNT - attachmentsRef.current.length,
       );
       const mimeTypes = files.map((file) => chatAttachmentMimeTypeForName(file.name));
       const supported = files.filter((_file, index) => mimeTypes[index] !== null);
@@ -251,14 +250,14 @@ export function composerAttachmentActions({
       const candidates = eligible.slice(0, remaining);
       if (candidates.length === 0) {
         reportSkippedFiles();
-        return;
+        return false;
       }
       const importSequence = beginImport();
       reportSkippedFiles();
       try {
         const lease = await onImportAttachments(candidates);
-        if (!lease) return;
-        await adoptPrivilegedLease(lease, authority);
+        if (!lease) return false;
+        return await adoptPrivilegedLease(lease, authority) === "adopted";
       } finally {
         finishImport(importSequence);
       }

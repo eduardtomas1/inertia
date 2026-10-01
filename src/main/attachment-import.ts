@@ -4,9 +4,9 @@ import { inflateRawSync } from "node:zlib";
 import * as XLSX from "xlsx";
 
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentKind,
@@ -76,8 +76,8 @@ export function attachmentPickerConfiguration(mode: AttachmentPickerMode): {
         extensions: chatAttachmentPickerExtensions("images"),
       }
     : {
-        title: "Attach images, documents, spreadsheets, or text files",
-        filterName: "Images, documents, spreadsheets, and text files",
+        title: "Attach files",
+        filterName: "All files",
         extensions: chatAttachmentPickerExtensions("all"),
       };
 }
@@ -169,9 +169,9 @@ export function validateSelectedAttachmentCount(count: number): void {
   if (
     !Number.isSafeInteger(count)
     || count < 0
-    || count > MAX_CHAT_ATTACHMENTS
+    || count > MAX_ATTACHMENT_COUNT
   ) {
-    throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+    throw new Error(`Select at most ${MAX_ATTACHMENT_COUNT} attachments.`);
   }
 }
 
@@ -184,12 +184,12 @@ export function validateSelectedAttachmentStats(
     if (!file.isFile || file.isSymbolicLink) {
       throw new Error("The selected attachment is not a safe regular file.");
     }
-    if (file.size < 1 || file.size > MAX_CHAT_ATTACHMENT_BYTES) {
-      throw new Error("A selected attachment is empty or exceeds the 10 MB file limit.");
+    if (file.size < 1 || file.size > MAX_ATTACHMENT_BYTES) {
+      throw new Error("A selected attachment is empty or exceeds the 50 MiB file limit.");
     }
     selectedBytes += file.size;
-    if (selectedBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
-      throw new Error("Selected attachments exceed the 20 MB turn limit.");
+    if (selectedBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+      throw new Error("Selected attachments exceed the maximum message size.");
     }
   }
 }
@@ -583,6 +583,7 @@ function hasExpectedDocumentSignature(
   bytes: Buffer,
   mimeType: DocumentAttachmentMimeType,
 ): boolean {
+  if (mimeType === "application/octet-stream") return true;
   if (mimeType === "application/pdf") {
     return hasSafePdfAttachment(bytes);
   }
@@ -675,6 +676,7 @@ export function prepareAttachmentImportMetadata(
   };
   const declaredMimeType = typeof item.mimeType === "string" ? item.mimeType : "";
   const suppliedName = typeof item.name === "string" ? item.name : "";
+  if (!suppliedName.trim()) throw new Error("Invalid attachment.");
   const mimeType = chatAttachmentMimeTypeForName(suppliedName);
   if (!mimeType) throw new Error(UNSUPPORTED_ATTACHMENT_TYPE_ERROR);
   if (!isPotentialChatAttachment(suppliedName, declaredMimeType)) {
@@ -684,8 +686,8 @@ export function prepareAttachmentImportMetadata(
     typeof item.size !== "number"
     || !Number.isSafeInteger(item.size)
     || item.size < 1
-    || item.size > MAX_CHAT_ATTACHMENT_BYTES
-  ) throw new Error("Invalid attachment.");
+    || item.size > MAX_ATTACHMENT_BYTES
+  ) throw new Error("Files must be nonempty and at most 50 MiB.");
   return {
     displayName: safeDisplayName(item.name, mimeType),
     mimeType,

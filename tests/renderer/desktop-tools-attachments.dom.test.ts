@@ -8,8 +8,8 @@ import {
   preflightComposerAttachmentFiles,
 } from "../../src/renderer/src/hooks/useDesktopTools";
 import {
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  ATTACHMENT_UPLOAD_CHUNK_BYTES,
 } from "../../src/shared/attachments";
 
 function fakeFile(name: string, size: number) {
@@ -62,34 +62,39 @@ describe("attachment import error display", () => {
 });
 
 describe("desktop attachment preflight", () => {
+  it("sends acknowledged bounded chunks without reading the whole File", async () => {
+    const file = new File([new Uint8Array(ATTACHMENT_UPLOAD_CHUNK_BYTES * 2 + 7)], "large.txt", { type: "text/plain" });
+    const wholeRead = vi.spyOn(file, "arrayBuffer").mockRejectedValue(new Error("whole-file read"));
+    const chunks: number[] = [];
+    let offset = 0;
+    const batch = importBatch(async (_id, input) => {
+      expect(input.stream?.offset).toBe(offset);
+      offset += input.data.byteLength;
+      chunks.push(input.data.byteLength);
+      return input.stream?.final ? [{ id: batchId, path: batchId, name: input.name, mimeType: "text/plain", size: file.size }] : [];
+    });
+    const result = await importComposerAttachmentFilesSequentially([file], batch);
+    expect(chunks).toEqual([ATTACHMENT_UPLOAD_CHUNK_BYTES, ATTACHMENT_UPLOAD_CHUNK_BYTES, 7]);
+    expect(result.attachments).toHaveLength(1);
+    expect(wholeRead).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized file before reading any renderer bytes", async () => {
     const safe = fakeFile("safe.pdf", 1);
     const oversized = fakeFile(
       "oversized.pdf",
-      MAX_CHAT_ATTACHMENT_BYTES + 1,
+      MAX_ATTACHMENT_BYTES + 1,
     );
 
     expect(() => preflightComposerAttachmentFiles([safe, oversized]))
-      .toThrow("10 MB file limit");
+      .toThrow("50 MiB file limit");
     expect(safe.arrayBuffer).not.toHaveBeenCalled();
     expect(oversized.arrayBuffer).not.toHaveBeenCalled();
   });
 
-  it("rejects an oversized aggregate before reading files in parallel", async () => {
-    const first = fakeFile("first.pdf", MAX_CHAT_ATTACHMENT_BYTES);
-    const second = fakeFile("second.pdf", MAX_CHAT_ATTACHMENT_BYTES);
-    const final = fakeFile(
-      "final.pdf",
-      MAX_CHAT_ATTACHMENT_TOTAL_BYTES
-        - (2 * MAX_CHAT_ATTACHMENT_BYTES)
-        + 1,
-    );
-
-    expect(() => preflightComposerAttachmentFiles([first, second, final]))
-      .toThrow("20 MB turn limit");
-    expect(first.arrayBuffer).not.toHaveBeenCalled();
-    expect(second.arrayBuffer).not.toHaveBeenCalled();
-    expect(final.arrayBuffer).not.toHaveBeenCalled();
+  it("accepts multiple 50 MiB files without an extra aggregate file cap", () => {
+    expect(() => preflightComposerAttachmentFiles(Array.from({ length: 100 }, () => fakeFile("file.pdf", MAX_ATTACHMENT_BYTES)))).not.toThrow();
+    expect(() => preflightComposerAttachmentFiles(Array.from({ length: 101 }, () => fakeFile("file.pdf", 1)))).toThrow("100 attachments");
   });
 
   it("accepts a bounded selection without reading renderer bytes", () => {
@@ -112,6 +117,7 @@ describe("desktop attachment preflight", () => {
         events.push(`read:${name}`);
         return Uint8Array.of(index).buffer;
       }),
+      slice() { return this; },
     } as unknown as File));
     let activeImports = 0;
     let maximumImports = 0;
@@ -149,14 +155,15 @@ describe("desktop attachment preflight", () => {
     ]);
   });
 
-  it("deduplicates byte-identical renderer files without retaining the batch", async () => {
+  it("accepts privileged digest deduplication without retaining file bytes", async () => {
     const files = ["first.pdf", "renamed.pdf"].map((name) => ({
       name,
       size: 1,
       type: "application/pdf",
       arrayBuffer: vi.fn(async () => Uint8Array.of(7).buffer),
+      slice() { return this; },
     } as unknown as File & { arrayBuffer: ReturnType<typeof vi.fn> }));
-    const importOne = vi.fn(async (_batchId: string, { name }: { name: string }) => [{
+    const importOne = vi.fn(async (_batchId: string, { name }: { name: string }) => name === "renamed.pdf" ? [] : [{
       id: "11111111-1111-4111-8111-111111111111",
       name,
       path: "opaque",
@@ -169,7 +176,7 @@ describe("desktop attachment preflight", () => {
 
     expect(imported.attachments).toHaveLength(1);
     expect(imported.attachments[0]?.name).toBe("first.pdf");
-    expect(importOne).toHaveBeenCalledTimes(1);
+    expect(importOne).toHaveBeenCalledTimes(2);
     expect(files[0].arrayBuffer).toHaveBeenCalledOnce();
     expect(files[1].arrayBuffer).toHaveBeenCalledOnce();
   });
@@ -180,6 +187,7 @@ describe("desktop attachment preflight", () => {
       size: 1,
       type: "application/pdf",
       arrayBuffer: vi.fn(async () => Uint8Array.of(index).buffer),
+      slice() { return this; },
     } as unknown as File));
     const batch = importBatch(async (_batchId, { name }) => {
       if (name === "unsafe.pdf") throw new Error("unsafe fixture");
@@ -206,6 +214,7 @@ describe("desktop attachment preflight", () => {
       size: 1,
       type: "application/pdf",
       arrayBuffer: vi.fn(async () => new ArrayBuffer(2)),
+      slice() { return this; },
     } as unknown as File;
     const importOne = vi.fn();
     const batch = importBatch(importOne);

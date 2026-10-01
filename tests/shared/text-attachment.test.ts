@@ -40,6 +40,6 @@ describe("text attachment decoding", () => {
 
   it("enforces the original encoded byte limit before decoding", () => {
     expect(() => decodeTextAttachment(new Uint8Array(MAX_TEXT_ATTACHMENT_BYTES + 1)))
-      .toThrow(/2 MB text limit/u);
+      .toThrow(/50 MiB text limit/u);
   });
 });

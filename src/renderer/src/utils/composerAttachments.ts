@@ -2,8 +2,9 @@ import type {
   ChatAttachment,
 } from "@shared/contracts";
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  attachmentLimitError,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
   isSpreadsheetAttachmentMimeType,
 } from "@shared/attachments";
@@ -34,8 +35,9 @@ export function mergeComposerAttachments(
 
   for (const attachment of incoming) {
     if (
-      attachments.length >= MAX_CHAT_ATTACHMENTS
-      || totalBytes + attachment.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+      attachmentLimitError([...attachments, attachment]) !== null
+      || attachments.length >= MAX_ATTACHMENT_COUNT
+      || totalBytes + attachment.size > MAX_ATTACHMENT_TOTAL_BYTES
       || ids.has(attachment.id)
     ) {
       rejected.push(attachment);
@@ -57,6 +59,7 @@ export function formatAttachmentSize(bytes: number): string {
 }
 
 export type AttachmentPreviewKind =
+  | "file"
   | "image"
   | "pdf"
   | "spreadsheet"
@@ -65,6 +68,7 @@ export type AttachmentPreviewKind =
 export function attachmentPreviewKind(
   attachment: Pick<ChatAttachment, "mimeType">,
 ): AttachmentPreviewKind {
+  if (attachment.mimeType === "application/octet-stream") return "file";
   if (chatAttachmentKind(attachment.mimeType) === "image") return "image";
   if (attachment.mimeType === "application/pdf") return "pdf";
   if (

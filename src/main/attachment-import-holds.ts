@@ -1,6 +1,6 @@
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_TOTAL_BYTES,
 } from "../shared/attachments.js";
 
 const UUID_PATTERN =
@@ -34,9 +34,9 @@ export class RendererAttachmentImportHolds {
       0,
     );
     if (
-      held.size >= MAX_CHAT_ATTACHMENTS
+      held.size >= MAX_ATTACHMENT_COUNT
       || size === null
-      || heldBytes + size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+      || heldBytes + size > MAX_ATTACHMENT_TOTAL_BYTES
       || held.has(attachmentId)
       || this.attachmentBatches.has(attachmentId)
       || this.unavailable(attachmentId)
@@ -100,7 +100,7 @@ export class RendererAttachmentImportHolds {
   ): void {
     if (
       !UUID_PATTERN.test(batchId)
-      || adoptedAttachmentIds.length > MAX_CHAT_ATTACHMENTS
+      || adoptedAttachmentIds.length > MAX_ATTACHMENT_COUNT
       || new Set(adoptedAttachmentIds).size !== adoptedAttachmentIds.length
       || adoptedAttachmentIds.some((id) => !UUID_PATTERN.test(id))
     ) throw new Error("Invalid attachment import batch.");

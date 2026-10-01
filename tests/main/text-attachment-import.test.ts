@@ -25,11 +25,9 @@ describe("text attachment formats", () => {
 
   it.each([
     ["notes.txt", "image/png", Buffer.from("text"), /reported type/u],
-    ["archive.zip", "application/zip", Buffer.from("PK\x03\x04"), /Extract archives/u],
-    ["report.docx", "", Buffer.from("PK\x03\x04"), /convert other binary documents/u],
     ["notes.txt", "", Buffer.from("caf\xe9", "latin1"), /Convert the file to UTF-8/u],
     ["app.log", "", Buffer.from("\x1b]52;c;private\x07"), /terminal control commands/u],
-    ["app.log", "", Buffer.alloc(MAX_TEXT_ATTACHMENT_BYTES + 1, 0x61), /2 MB text limit/u],
+    ["app.log", "", Buffer.alloc(MAX_TEXT_ATTACHMENT_BYTES + 1, 0x61), /50 MiB/u],
   ])("explains why %s cannot be consumed without leaking content", (name, mimeType, data, message) => {
     try {
       validateAttachmentImport({ name, mimeType, data });

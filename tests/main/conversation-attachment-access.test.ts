@@ -7,7 +7,7 @@ vi.mock("electron", () => ({
 import type { AttachmentRegistry } from "../../src/main/attachment-registry";
 import { resolveAttachmentPreviewResponse } from "../../src/main/conversation-attachment-access";
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
   type ChatAttachmentMimeType,
 } from "../../src/shared/attachments";
 
@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 describe("opaque conversation attachment preview responses", () => {
-  it.each(CHAT_ATTACHMENT_MIME_TYPES)(
+  it.each(ACCEPTED_ATTACHMENT_MIME_TYPES)(
     "serves a revalidated %s attachment through the private preview route",
     async (mimeType) => {
       const response = await resolveAttachmentPreviewResponse(

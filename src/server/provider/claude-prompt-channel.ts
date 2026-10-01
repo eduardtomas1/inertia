@@ -1,7 +1,7 @@
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 export const CLAUDE_PROMPT_MAX_QUEUED_MESSAGES = 16;
-export const CLAUDE_PROMPT_MAX_QUEUED_BYTES = 32 * 1024 * 1024;
+export const CLAUDE_PROMPT_MAX_QUEUED_BYTES = 128 * 1024 * 1024;
 
 export interface ClaudePromptReservation {
   readonly token: symbol;

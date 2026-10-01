@@ -4,7 +4,7 @@ import { mkdtemp, rename, rm, symlink, truncate, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MAX_CHAT_ATTACHMENT_BYTES } from "../../src/shared/attachments";
+import { MAX_IMAGE_ATTACHMENT_BYTES } from "../../src/shared/attachments";
 import { kimiPrompt } from "../../src/server/provider/kimi-acp-session";
 import { cursorPrompt } from "../../src/server/provider/cursor-acp-harness";
 
@@ -51,7 +51,7 @@ describe.each([
     const root = await fixtureRoot();
     const path = join(root, "grown.png");
     await writeFile(path, "retained bytes");
-    await truncate(path, MAX_CHAT_ATTACHMENT_BYTES + 1);
+    await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES + 1);
     await expect(prompt("Describe", [path], initialized).then(() => undefined))
       .rejects.toThrow("10 MB safety limit");
   });
@@ -60,9 +60,9 @@ describe.each([
     const root = await fixtureRoot();
     const path = join(root, "bounded.png");
     await writeFile(path, "");
-    await truncate(path, MAX_CHAT_ATTACHMENT_BYTES);
-    await expect(prompt("Describe", [path, path, path], initialized).then(() => undefined))
-      .rejects.toThrow("20 MB safety limit");
+    await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES);
+    await expect(prompt("Describe", Array.from({ length: 9 }, () => path), initialized).then(() => undefined))
+      .rejects.toThrow("80 MiB safety limit");
   });
 
   it("rejects a different regular file substituted between stat and open", async () => {

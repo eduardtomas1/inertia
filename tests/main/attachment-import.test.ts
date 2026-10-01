@@ -14,9 +14,9 @@ import {
   validateAttachmentPickerName,
 } from "../../src/main/attachment-import";
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
 } from "../../src/shared/attachments";
 
@@ -203,17 +203,11 @@ describe("privileged attachment import validation", () => {
       .not.toThrow();
     const all = attachmentPickerConfiguration("all");
     expect(all).toMatchObject({
-      title: "Attach images, documents, spreadsheets, or text files",
-      filterName: "Images, documents, spreadsheets, and text files",
+      title: "Attach files",
+      filterName: "All files",
     });
-    // The picker filter follows the live import allowlist: every pinned name
-    // plus the plain-text set, so a file the import accepts is selectable.
-    expect(all.extensions.slice(0, 13)).toEqual([
-      "png", "jpg", "jpeg", "webp", "gif",
-      "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
-    ]);
+    expect(all.extensions).toEqual(["*"]);
     for (const extension of ["ts", "py", "yaml", "toml", "sql", "log"]) {
-      expect(all.extensions, extension).toContain(extension);
       expect(attachmentPickerConfiguration("images").extensions, extension).not.toContain(extension);
       expect(() => validateAttachmentPickerName("images", `file.${extension}`))
         .toThrow("Follow-up attachments must be images.");
@@ -224,9 +218,9 @@ describe("privileged attachment import validation", () => {
     expect(new Set(all.extensions).size).toBe(all.extensions.length);
   });
   it("rejects an oversized selection instead of silently truncating it", () => {
-    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))
-      .toThrow(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
-    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS))
+    expect(() => validateSelectedAttachmentCount(MAX_ATTACHMENT_COUNT + 1))
+      .toThrow(`Select at most ${MAX_ATTACHMENT_COUNT} attachments.`);
+    expect(() => validateSelectedAttachmentCount(MAX_ATTACHMENT_COUNT))
       .not.toThrow();
   });
 
@@ -237,18 +231,18 @@ describe("privileged attachment import validation", () => {
       isSymbolicLink: true,
     }])).toThrow(/safe regular file/u);
     expect(() => validateSelectedAttachmentStats([{
-      size: MAX_CHAT_ATTACHMENT_BYTES + 1,
+      size: MAX_ATTACHMENT_BYTES + 1,
       isFile: true,
       isSymbolicLink: false,
-    }])).toThrow(/10 MB file limit/u);
+    }])).toThrow(/50 MiB file limit/u);
     expect(() => validateSelectedAttachmentStats([
       {
-        size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+        size: MAX_ATTACHMENT_TOTAL_BYTES / 2,
         isFile: true,
         isSymbolicLink: false,
       },
       {
-        size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+        size: MAX_ATTACHMENT_TOTAL_BYTES / 2,
         isFile: true,
         isSymbolicLink: false,
       },
@@ -257,7 +251,7 @@ describe("privileged attachment import validation", () => {
         isFile: true,
         isSymbolicLink: false,
       },
-    ])).toThrow(/20 MB turn limit/u);
+    ])).toThrow(/50 MiB file limit/u);
     expect(() => validateSelectedAttachmentStats([{
       size: 128,
       isFile: true,
@@ -579,9 +573,14 @@ describe("privileged attachment import validation", () => {
     { name: "script.svg", mimeType: "image/svg+xml", data: Buffer.from("<svg/>") },
     { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
     { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
+    { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
+  ])("stores unknown formats as opaque files: $name", (candidate) => {
+    expect(validateAttachmentImport(candidate)).toMatchObject({ mimeType: "application/octet-stream", extension: "bin" });
+  });
+
+  it.each([
     { name: "config.yaml", mimeType: "application/pdf", data: Buffer.from("safe: true\n") },
     { name: "binary.yaml", mimeType: "application/x-yaml", data: Buffer.from([0x73, 0x00, 0x61]) },
-    { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
     { name: "preview.png", mimeType: "application/pdf", data: png },
     { name: "notes.pdf", mimeType: "application/pdf", data: png },
     { name: "notes.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.7\n") },
@@ -606,7 +605,7 @@ describe("privileged attachment import validation", () => {
     {
       name: "large.png",
       mimeType: "image/png",
-      data: Buffer.alloc(MAX_CHAT_ATTACHMENT_BYTES + 1),
+      data: Buffer.alloc(MAX_ATTACHMENT_BYTES + 1),
     },
   ])("rejects malformed or unsupported imports %#", (candidate) => {
     expect(() => validateAttachmentImport(candidate)).toThrow();

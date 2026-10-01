@@ -2,8 +2,8 @@ import { constants as fsConstants, type BigIntStats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import {
-  MAX_CHAT_ATTACHMENT_BYTES as MAX_IMAGE_FILE_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES as MAX_IMAGE_BYTES,
+  MAX_IMAGE_ATTACHMENT_BYTES as MAX_IMAGE_FILE_BYTES,
+  MAX_IMAGE_ATTACHMENT_TOTAL_BYTES as MAX_IMAGE_BYTES,
 } from "../../shared/attachments";
 
 const IMAGE_READ_CHUNK_BYTES = 64 * 1024;
@@ -40,7 +40,7 @@ export async function readBoundedProviderImage(
       throw new Error(`A ${providerName} image attachment exceeds the 10 MB safety limit.`);
     }
     if (initial.size > BigInt(MAX_IMAGE_BYTES - accumulatedBytes)) {
-      throw new Error(`${providerName} image attachments exceed the 20 MB safety limit.`);
+      throw new Error(`${providerName} image attachments exceed the 80 MiB safety limit.`);
     }
 
     // Allocate only after fstat proves both per-file and aggregate bounds. Read

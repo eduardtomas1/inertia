@@ -72,9 +72,15 @@ export function backgroundTaskTitle(trace: SubagentTrace): string {
   return subagentMissionSummary(trace) ?? subagentTraceLabel(trace);
 }
 
+export function backgroundTaskCurrentActivity(trace: SubagentTrace): string | null {
+  return isLiveSubagentTrace(trace) && (trace.status === "running" || trace.status === "spawned")
+    ? trace.activity
+    : null;
+}
+
 export function backgroundTaskDoingNow(trace: SubagentTrace): string | null {
   return isLiveSubagentTrace(trace)
-    ? trace.activity ?? trace.progress
+    ? backgroundTaskCurrentActivity(trace) ?? trace.progress
     : trace.result;
 }
 

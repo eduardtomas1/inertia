@@ -238,6 +238,29 @@ describe("Background tasks surface", () => {
       .toHaveTextContent(/^Cursor does not report tokens for delegated tasks$/u);
   });
 
+  it("shows a waiting task's provider state instead of its last tool", async () => {
+    const user = userEvent.setup();
+    const waiting = taskTrace({
+      id: "opencode-waiting",
+      turnId: "turn-opencode",
+      providerId: "opencode",
+      providerName: "Fixture writer",
+      status: "waiting",
+      providerStatus: "idle",
+      activity: "Edit tests/fixture.ts",
+      progress: null,
+    });
+    render(surface({ subagents: [waiting] }));
+    const item = row(/^Fixture writer/u);
+    expect(within(item).getByText("Waiting (idle)", { selector: ".background-task-status" })).toBeVisible();
+    expect(within(item).queryByText("Edit tests/fixture.ts")).toBeNull();
+    const details = within(item).getByRole("button", { name: "Details for Fixture writer" });
+    await user.click(details);
+    const list = document.getElementById(details.getAttribute("aria-controls")!)!;
+    expect(detail(list, "Doing now")).toBeNull();
+    expect(detail(list, "Provider state")).toHaveTextContent(/^idle$/u);
+  });
+
   it("keeps the existing agent actions and offers Stop only where the harness supports it", async () => {
     const user = userEvent.setup();
     const onOpenSubagent = vi.fn();

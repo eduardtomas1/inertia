@@ -6,6 +6,7 @@ import {
   backgroundCommandElapsedMs,
   backgroundCommandStatusLabel,
   backgroundTaskContextUsage,
+  backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
   backgroundTaskEmptyNote,
@@ -66,6 +67,21 @@ describe("background task rows", () => {
       result: "Found 3 call sites",
     }))).toBe("Found 3 call sites");
     expect(backgroundTaskDoingNow(taskTrace({ status: "completed", result: null }))).toBeNull();
+  });
+
+  it("never shows a stale tool label while a live task waits or is queued", () => {
+    for (const status of ["waiting", "queued"] as const) {
+      expect(backgroundTaskDoingNow(taskTrace({ status, activity: "Edit fixture.ts", progress: null })))
+        .toBeNull();
+      expect(backgroundTaskDoingNow(taskTrace({ status, activity: "Edit fixture.ts", progress: "Waiting for review" })))
+        .toBe("Waiting for review");
+    }
+    expect(backgroundTaskDoingNow(taskTrace({ status: "spawned", activity: "Read" }))).toBe("Read");
+    expect(backgroundTaskCurrentActivity(taskTrace({ status: "waiting", activity: "Edit fixture.ts" }))).toBeNull();
+    expect(backgroundTaskCurrentActivity(taskTrace({ status: "running", activity: "Edit fixture.ts" })))
+      .toBe("Edit fixture.ts");
+    expect(backgroundTaskCurrentActivity(taskTrace({ status: "completed", activity: "Edit fixture.ts" })))
+      .toBeNull();
   });
 
   it("prefers the provider-reported runtime once a task settles", () => {

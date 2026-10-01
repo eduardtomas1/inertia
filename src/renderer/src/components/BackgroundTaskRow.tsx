@@ -5,6 +5,7 @@ import type { AgentTurn, SubagentTrace } from "@shared/contracts";
 import { formatCount } from "../lib/usageFormat";
 import {
   backgroundTaskContextUsage,
+  backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
   backgroundTaskLatestStep,
@@ -83,7 +84,7 @@ function TaskDetails({
   const runtime = live ? null : backgroundTaskElapsedMs(trace, now ?? Date.now());
   const rows: [string, React.ReactNode][] = [
     ["Task", trace.description],
-    ["Doing now", live ? trace.activity : null],
+    ["Doing now", backgroundTaskCurrentActivity(trace)],
     ["Progress", trace.progress],
     ["Outcome", trace.result],
     ["Model", trace.model],
@@ -184,7 +185,7 @@ export const BackgroundTaskRow = memo(function BackgroundTaskRow({
           />
           {trace.model && <span className="background-task-model">{trace.model}</span>}
           <span className="background-task-status">
-            {subagentStatusLabel({ ...trace, providerStatus: null })}
+            {subagentStatusLabel(trace)}
           </span>
         </div>
         {doing && <p className="background-task-doing">{doing}</p>}

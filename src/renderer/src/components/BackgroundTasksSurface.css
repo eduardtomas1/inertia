@@ -458,7 +458,7 @@
     row-gap: 1px;
   }
 
-  .background-task-details dd + dt {
+  .background-task-details > div + div > dt {
     margin-top: 5px;
   }
 }

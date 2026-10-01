@@ -431,7 +431,7 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     const writerLeft = await writer.evaluate((element) => element.getBoundingClientRect().left);
     expect(writerLeft).toBeGreaterThan(explorerLeft);
     const verifier = row(region, "Build verifier");
-    await expect(verifier.locator(".background-task-status")).toHaveText("Failed");
+    await expect(verifier.locator(".background-task-status")).toHaveText("Failed (errored)");
     await expect(verifier.getByText("42s", { exact: true })).toBeVisible();
     await expect(region.getByRole("list", { name: "Finished" }).getByRole("listitem")).toHaveCount(1);
 

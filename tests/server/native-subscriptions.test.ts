@@ -127,6 +127,9 @@ describe("provider quota attribution", () => {
     expect(() => cursorSubscriptionWindows({ planUsage: { totalPercentUsed: -1 } })).toThrow();
     expect(() => openCodeSubscriptionWindows({ usage: { ...go.usage, rolling: { percent: -1, resetsAt: reset } } })).toThrow();
   });
+  it.each([101, "101"])("rejects a Kimi remaining count above its limit: %s", (remaining) => {
+    expect(() => kimiSubscriptionWindows({ usage: { limit: 100, remaining, resetAt: reset } }, Date.now())).toThrow();
+  });
   it("rejects symlink credential files instead of following another account", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-credential-fixture-"));
     try {

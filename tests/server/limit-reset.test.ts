@@ -107,13 +107,14 @@ describe("quota reset actions", () => {
     await scheduler.tick(); expect(dependencies.dispatch).toHaveBeenCalledOnce();
   });
 
-  it.each(["cancel", "route", "archive", "new-turn"] as const)("rejects %s during asynchronous dispatch preparation", async (change) => {
+  it.each(["cancel", "route", "archive", "settle", "new-turn"] as const)("rejects %s during asynchronous dispatch preparation", async (change) => {
     await schedule();
     vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
     dependencies.dispatch = vi.fn(async (plan, guard) => {
       if (change === "cancel") scheduler.cancel(conversationId, plan.id);
       if (change === "route") store.updateConversation(conversationId, { accessMode: "full" });
       if (change === "archive") store.archiveConversation(conversationId, true);
+      if (change === "settle") store.settleConversation(conversationId, true);
       if (change === "new-turn") begin();
       guard(); begin(plan.id);
     });
@@ -121,6 +122,14 @@ describe("quota reset actions", () => {
     expect(store.limitResets.get(conversationId)?.state).toBe(change === "cancel" ? "cancelled" : "blocked");
     expect(store.limitResets.get(conversationId)?.turnId).toBeNull();
     if (change !== "new-turn") expect(store.latestAgentTurnForConversation(conversationId)?.id).toBe(failedTurnId);
+  });
+
+  it("does not offer or schedule continuation after a failed chat is marked Done", async () => {
+    store.settleConversation(conversationId, true);
+    expect((await scheduler.get(conversationId)).offer).toBeNull();
+    await expect(schedule()).rejects.toThrow("limit changed");
+    expect(store.limitResets.get(conversationId)).toBeNull();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 
   it("rolls back the message and turn when cancellation wins the persistence race", async () => {

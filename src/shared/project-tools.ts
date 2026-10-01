@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hasProjectToolEnvironmentTemplate } from "./project-tool-values";
 
 export const MAX_PROJECT_TOOLS = 12;
 export const projectToolProviderSchema = z.enum(["claude", "codex"]);
@@ -7,7 +8,7 @@ export type ProjectToolProvider = z.infer<typeof projectToolProviderSchema>;
 export function isProjectToolUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return !url.username && !url.password && !url.search && !url.hash
+    return !hasProjectToolEnvironmentTemplate(value) && !url.username && !url.password && !url.search && !url.hash
       && (url.protocol === "https:" || (url.protocol === "http:"
         && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)));
   } catch { return false; }
@@ -16,7 +17,7 @@ export function isProjectToolUrl(value: string): boolean {
 export const projectToolDraftSchema = z.strictObject({
   name: z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N} ._()-]+$/u),
   url: z.string().trim().max(2048).refine(isProjectToolUrl,
-    "Use HTTPS or loopback HTTP, without credentials, query parameters or fragments."),
+    "Use HTTPS or loopback HTTP, without credentials, queries, fragments or environment templates."),
   bearerTokenEnv: z.string().regex(/^INERTIA_MCP_[A-Z0-9_]{1,96}$/u).nullable(),
   providers: z.array(projectToolProviderSchema).min(1).max(2)
     .refine((items) => new Set(items).size === items.length),

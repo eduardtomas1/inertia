@@ -96,12 +96,13 @@ describe("project tool configuration and exact-run evidence", () => {
   });
 
   it("rejects embedded secrets, unsupported transports, invalid provider sets and raw authentication fields", () => {
-    for (const url of ["stdio://node", "http://remote.example/mcp", "https://user:password@example.com/mcp", "https://example.com/mcp?token=value", "https://example.com/mcp#secret"]) {
+    for (const url of ["stdio://node", "http://remote.example/mcp", "https://user:password@example.com/mcp", "https://example.com/mcp?token=value", "https://example.com/mcp#secret", "https://example.com/${ANTHROPIC_API_KEY}/mcp", "https://example.com/$OPENAI_API_KEY/mcp"]) {
       expect(projectToolDraftSchema.safeParse({ ...draft, url }).success).toBe(false);
     }
     for (const extra of [{ headers: { Authorization: "synthetic" } }, { bearerTokenEnv: "ANTHROPIC_API_KEY" }, { providers: ["cursor"] }, { providers: [] }, { providers: ["codex", "codex"] }]) {
       expect(projectToolDraftSchema.safeParse({ ...draft, ...extra }).success).toBe(false);
     }
     expect(projectToolDraftSchema.safeParse({ ...draft, url: "http://[::1]:3333/mcp", bearerTokenEnv: "INERTIA_MCP_DOCS" }).success).toBe(true);
+    expect(projectToolDraftSchema.safeParse({ ...draft, url: "https://example.com/%24%7Bliteral%7D/mcp" }).success).toBe(true);
   });
 });

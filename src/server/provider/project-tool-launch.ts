@@ -1,5 +1,6 @@
 import type { McpServerConfig, Query } from "@anthropic-ai/claude-agent-sdk";
 import { projectToolServerName } from "../../shared/project-tools";
+import { isProjectToolBearerToken } from "../../shared/project-tool-values";
 import { observeClaudeProjectTools, projectToolsUnverified, type ProjectToolRun } from "./project-tools";
 import { CLAUDE_ISOLATED_SKILL_SETTINGS } from "./claude-skill-plugin";
 
@@ -11,7 +12,7 @@ export async function prepareProjectToolLaunch(run: ProjectToolRun | undefined, 
     let token: string | null = null;
     try { token = await run.resolveToken?.(connection.bearerTokenEnv, signal) ?? null; } catch { /* Broker failures never expose raw errors. */ }
     if (signal.aborted) return [];
-    if (!token || token.length < 8 || token.length > 8192 || /[\r\n\x00]/u.test(token)) {
+    if (!isProjectToolBearerToken(token)) {
       run.report({ id: connection.id, state: "needs-auth", toolNames: [],
         reason: "The bearer-token environment variable is missing or invalid. Set it in Inertia's launch environment, restart Inertia, and send another message." });
       return [];

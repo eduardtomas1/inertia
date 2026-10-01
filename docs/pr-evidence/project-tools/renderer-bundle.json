@@ -12,15 +12,15 @@
     "entryJavaScript": 222475,
     "mainWorkbenchFirstLoadJavaScript": 854156,
     "detachedChatFirstLoadJavaScript": 660174,
-    "coreJavaScript": 2228606,
-    "deferredProjectToolsJavaScript": 8442
+    "coreJavaScript": 2228669,
+    "deferredProjectToolsJavaScript": 8465
   },
   "deltaBytes": {
     "entryJavaScript": 0,
     "mainWorkbenchFirstLoadJavaScript": 614,
     "detachedChatFirstLoadJavaScript": 102,
-    "coreJavaScript": 2561,
-    "deferredProjectToolsJavaScript": 8442
+    "coreJavaScript": 2624,
+    "deferredProjectToolsJavaScript": 8465
   },
   "notes": [
     "ProjectToolsPanel is lazy-loaded and individually capped at 8704 bytes.",

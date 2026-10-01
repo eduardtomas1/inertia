@@ -130,6 +130,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.messages.search": shortRetrySafe,
   "conversation.messages.search.cancel": shortRetrySafe,
   "conversation.message.reveal": shortRetrySafe,
+  "conversation.notes.get": shortRetrySafe,
+  "conversation.notes.update": shortMutation,
   "conversation.select": shortMutation,
   "conversation.settle": shortMutation,
   "conversation.unarchive": shortMutation,

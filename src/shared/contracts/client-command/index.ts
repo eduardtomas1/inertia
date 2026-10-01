@@ -9,6 +9,7 @@ import {
 import { gitCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
 import { promptPresetCommandSchema } from "./prompt-presets";
+import { conversationNotesCommandSchemas } from "../../conversation-notes";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
@@ -16,6 +17,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...agentCommandSchemas,
   ...configurationCommandSchemas,
   ...promptPresetCommandSchema.options,
+  ...conversationNotesCommandSchemas,
   ...gitCommandSchemas,
   ...workspaceCommandSchemas,
 ]);

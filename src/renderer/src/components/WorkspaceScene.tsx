@@ -37,6 +37,7 @@ import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadConversationSplitView,
+  loadConversationNotes,
   loadAgentsSurface,
   loadAttachmentsSurface,
   loadFilesPanel,
@@ -87,6 +88,7 @@ const HistoricalDiffPanel = lazySurface(
 );
 const GoalPanel = lazySurface(loadGoalPanel, (module) => module.GoalPanel);
 const PlanPanel = lazySurface(loadPlanPanel, (module) => module.PlanPanel);
+const ConversationNotes = lazySurface(loadConversationNotes, (module) => module.ConversationNotes);
 const PreviewPanel = lazySurface(
   loadPreviewPanel,
   (module) => module.PreviewPanel,
@@ -114,6 +116,7 @@ export interface WorkspaceToolScene {
   usage: UsageSurfaceProps;
   agents: AgentsSurfaceProps;
   attachments: AttachmentsSurfaceProps;
+  notes?: ComponentProps<typeof ConversationNotes>;
   runs: WorkspaceRunsModel;
   gitNotice: string | null;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
@@ -214,6 +217,7 @@ function WorkspaceToolSurface({
               )}
               {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
               {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
+              {tools.activeTool === "notes" && tools.notes && <ConversationNotes {...tools.notes} />}
               {tools.activeTool === "preview" && (
                 <PreviewPanel owner={owner} {...tools.preview} />
               )}

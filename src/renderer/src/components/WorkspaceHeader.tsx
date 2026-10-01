@@ -230,7 +230,7 @@ export function WorkspaceHeader({
       ? "Settings"
       : view === "usage"
         ? "Usage"
-        : conversation?.title ?? project?.name ?? "Workspace";
+        : view === "board" ? "Task board" : conversation?.title ?? project?.name ?? "Workspace";
   const showProjectCrumb = view === "workspace" && project !== null && conversation !== null;
   const titleMenuAvailable = view === "workspace"
     && conversation !== null

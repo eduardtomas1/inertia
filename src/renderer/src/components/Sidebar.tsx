@@ -22,6 +22,7 @@ import {
   RefreshCw,
   GitBranch,
   Layers3,
+  LayoutGrid,
   Pencil,
   Search,
   Settings,
@@ -64,7 +65,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadTaskBoard, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
@@ -1009,6 +1010,7 @@ function SidebarView({
           <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-label="Daily work" title="Daily work" aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
             <DailyWorkMark size={16} /><span>Daily work</span>
           </button>
+          <button type="button" className={clsx("sidebar-destination", view === "board" && "is-active")} aria-label="Task board" title="Task board" aria-current={view === "board" ? "page" : undefined} onFocus={() => void loadTaskBoard()} onPointerEnter={() => void loadTaskBoard()} onClick={() => navigate("board")}><LayoutGrid size={16} /><span>Task board</span></button>
           <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-label="Usage" title="Usage" aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
             <BarChart3 size={16} /><span>Usage</span>
           </button>

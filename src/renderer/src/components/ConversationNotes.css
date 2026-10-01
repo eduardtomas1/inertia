@@ -1,0 +1,16 @@
+.conversation-notes { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 260px; min-width: 0; padding-bottom: 16px; }
+.conversation-notes .panel-heading-copy { min-width: 0; }
+.conversation-notes .panel-heading-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-notes-hint { margin: 0 18px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.conversation-notes > textarea { flex: 1; min-height: 140px; margin: 0 18px; padding: 14px; resize: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; line-height: 1.7; }
+.conversation-notes > textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conversation-notes > footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 18px; font-size: 11px; color: var(--text-muted); }
+.conversation-notes > footer [role="status"] { display: inline-flex; align-items: center; gap: 4px; }
+.conversation-notes-count { margin-left: auto; }
+.conversation-notes > footer button { display: inline-flex; gap: 6px; align-items: center; }
+.conversation-notes-error, .conversation-notes-conflict { margin: 0 18px; font-size: 12px; line-height: 1.6; }
+.conversation-notes-error { color: var(--danger); }
+.conversation-notes-conflict { padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.conversation-notes-conflict p { margin: 6px 0; }
+.conversation-notes-conflict pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-notes-conflict > div { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }

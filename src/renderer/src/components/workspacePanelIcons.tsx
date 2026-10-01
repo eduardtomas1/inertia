@@ -8,6 +8,7 @@ import {
   GitCompareArrows,
   Globe2,
   ListChecks,
+  StickyNote,
 } from "lucide-react";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 
@@ -21,4 +22,5 @@ export const surfaceIcons: Record<WorkspacePanelTab, React.JSX.Element> = {
   usage: <Gauge size={14} aria-hidden="true" />,
   goal: <Flag size={14} aria-hidden="true" />,
   plan: <ListChecks size={14} aria-hidden="true" />,
+  notes: <StickyNote size={14} aria-hidden="true" />,
 };

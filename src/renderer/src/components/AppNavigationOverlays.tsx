@@ -37,6 +37,7 @@ interface AppNavigationOverlaysProps {
   createConversationIn: (project: Project) => void;
   importProject: () => Promise<void>;
   openSettings: () => void;
+  openTaskBoard?: () => void;
 }
 
 export function AppNavigationOverlays({
@@ -55,6 +56,7 @@ export function AppNavigationOverlays({
   createConversationIn,
   importProject,
   openSettings,
+  openTaskBoard,
 }: AppNavigationOverlaysProps): React.JSX.Element {
   // Suspend the native preview from the always-loaded shell. Waiting for the
   // palette's lazy chunk to mount would briefly place untrusted native content
@@ -89,6 +91,7 @@ export function AppNavigationOverlays({
             onNewThreadIn={createConversationIn}
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
+            onOpenTaskBoard={openTaskBoard}
           />
         ) : <PaletteLoadingShell />
       )}

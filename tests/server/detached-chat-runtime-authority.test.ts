@@ -485,3 +485,14 @@ describe("global message search authority", () => {
     }
   });
 });
+
+describe("detached chat notes authority", () => {
+  it.each(["conversation.notes.get", "conversation.notes.update"] as const)("scopes %s to the window's existing chat", (type) => {
+    const command = (conversationId: string): ClientCommand => type === "conversation.notes.get"
+      ? { type, requestId: REQUEST, payload: { conversationId } }
+      : { type, requestId: REQUEST, payload: { conversationId, content: "Notes", expectedRevision: 0 } };
+    expect(detachedChatCommandRejection(authority, command(CONVERSATION), resources())).toBeNull();
+    expect(detachedChatCommandRejection(authority, command(OTHER_CONVERSATION), resources())).not.toBeNull();
+    expect(detachedChatCommandRejection(authority, command(CONVERSATION), { ...resources(), snapshot: () => ({ ...snapshot(), conversations: [] }) })).not.toBeNull();
+  });
+});

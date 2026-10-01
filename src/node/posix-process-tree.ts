@@ -12,6 +12,7 @@ export interface PosixProcessTreeDependencies {
   rootProcessGroup: boolean;
   deadlineAt: number;
   now: () => number;
+  pause: (ms: number) => void;
 }
 
 export type PosixRootStopResult = "sent" | "absent" | "denied" | "failed";
@@ -27,6 +28,10 @@ export interface PosixProcessTreeKillResult {
   rootRunningObserved: boolean;
   snapshotReads: number;
   snapshotTimeouts: number;
+}
+
+function pauseSynchronously(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)), 0, 0, ms);
 }
 
 export function posixDescendantPids(
@@ -104,6 +109,7 @@ export function forceKillPosixProcessTreeWithStatus(
   const rootProcessGroup = dependencies.rootProcessGroup === true;
   const deadlineAt = dependencies.deadlineAt ?? Number.POSITIVE_INFINITY;
   const now = dependencies.now ?? Date.now;
+  const pause = dependencies.pause ?? pauseSynchronously;
 
   const sendStop = (target: number): void => {
     try {
@@ -177,9 +183,11 @@ export function forceKillPosixProcessTreeWithStatus(
         && rootState === "running"
         && stopObservationReads < MAX_STOP_OBSERVATION_READS
       ) {
-        stopObservationReads += 1;
         if (rootProcessGroup) sendStop(-rootPid);
         sendStop(rootPid);
+        const pauseMs = Math.min(2 ** stopObservationReads, deadlineAt - now());
+        if (pauseMs > 0) pause(pauseMs);
+        stopObservationReads += 1;
         pass -= 1;
         continue;
       }

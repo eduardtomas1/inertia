@@ -99,10 +99,12 @@ describe("POSIX process tree root observation", () => {
 
   it("stays unconfirmed when a sent stop is never observed within the bounded re-reads", () => {
     const spawnProcessSync = tables("4242 1 R+\n");
+    const pause = vi.fn();
     const result = forceKillPosixProcessTreeWithStatus(4_242, {
       kill: vi.fn(() => true) as never,
       spawnProcessSync: spawnProcessSync as never,
       rootProcessGroup: true,
+      pause,
     });
     expect(result).toMatchObject({
       rootStop: "sent",
@@ -110,6 +112,52 @@ describe("POSIX process tree root observation", () => {
       scanStabilized: false,
     });
     expect(spawnProcessSync).toHaveBeenCalledTimes(9);
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 16, 32, 64, 128]);
+  });
+
+  it("confirms a root that acts on its stop only after nine back-to-back reads", () => {
+    let clock = 0;
+    const spawnProcessSync = vi.fn(() => {
+      clock += 2;
+      return { status: 0, stdout: clock >= 100 ? "4242 1 Tl\n" : "4242 1 Rl\n" };
+    });
+    const pause = vi.fn((ms: number) => { clock += ms; });
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: spawnProcessSync as never,
+      rootProcessGroup: true,
+      deadlineAt: 2_000,
+      now: () => clock,
+      pause,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "stopped",
+      rootRunningObserved: true,
+      scanStabilized: true,
+      snapshotConfirmed: true,
+    });
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 16, 32, 64]);
+    expect(spawnProcessSync).toHaveBeenCalledTimes(8);
+  });
+
+  it("pauses between stop observations only within the deadline", () => {
+    let clock = 0;
+    const spawnProcessSync = vi.fn(() => {
+      clock += 2;
+      return { status: 0, stdout: "4242 1 R\n" };
+    });
+    const pause = vi.fn((ms: number) => { clock += ms; });
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: spawnProcessSync as never,
+      deadlineAt: 40,
+      now: () => clock,
+      pause,
+    });
+    expect(result).toMatchObject({ rootState: "running", scanStabilized: false });
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 15]);
+    expect(clock).toBe(40);
   });
 
   it.each([

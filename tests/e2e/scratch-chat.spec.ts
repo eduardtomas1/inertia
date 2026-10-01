@@ -23,7 +23,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   if (message.method === "thread/goal/get") send({ id: message.id, result: { goal: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") {
     fs.writeFileSync("scratch-proof.json", JSON.stringify({ processCwd: process.cwd(), requestedCwd: message.params.cwd }));
-    send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
+    send({ id: message.id, result: { thread: { id: threadId }, model: "fixture", serviceTier: message.params.serviceTier ?? null } });
   }
   if (message.method !== "turn/start") return;
   const turn = { id: "scratch-turn", status: "inProgress", items: [], error: null };
@@ -36,10 +36,13 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
 
 test("starts without a project, runs in separate folders, and restores after restart", async () => {
   const info = test.info();
+  const environment: Record<string, string> = {};
   const app = await createAppFixture({ name: "scratch-chat", initialState: "empty", initialNewThreadMode: "worktree",
+    additionalEnvironment: environment,
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const bin = join(testDirectory, "provider-bin");
       const command = writeNodeFlagExecutable(bin, "codex", provider);
+      environment.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED = command;
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
       try { store.updateSettings({ codexBinaryPath: command, theme: "light" }); } finally { store.close(); }
     },

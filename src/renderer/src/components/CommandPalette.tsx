@@ -130,11 +130,16 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   }, [search.result, conversations, projects, onSelectMessage]);
   const projectChoices = useMemo<PaletteItem[]>(() => {
     const current = projects.find(({ id }) => id === currentProjectId);
-    return [...(onNewThreadWithoutProject ? [{ id: "new-thread-in:none", group: "Projects" as const, label: "No project", detail: "Start in a separate local folder", icon: <MessageSquare size={15} />, run: onNewThreadWithoutProject }] : []), ...(current ? [current, ...projects.filter((project) => project !== current)] : projects).filter((project) => project.workspaceKind !== "scratch").map((project) => ({
+    const choices: PaletteItem[] = (current ? [current, ...projects.filter((project) => project !== current)] : projects).filter((project) => project.workspaceKind !== "scratch").map((project) => ({
       id: `new-thread-in:${project.id}`, group: "Projects" as const, label: project.name, detail: project.path,
       icon: <ProjectIcon project={project} size={15} />, shortcut: project === current ? "Current" : undefined,
       run: () => onNewThreadIn(project),
-    }))];
+    }));
+    if (onNewThreadWithoutProject) choices.splice(current && current.workspaceKind !== "scratch" ? 1 : 0, 0, {
+      id: "new-thread-in:none", group: "Projects", label: "No project", detail: "Start in a separate local folder",
+      icon: <MessageSquare size={15} />, run: onNewThreadWithoutProject,
+    });
+    return choices;
   }, [currentProjectId, onNewThreadIn, onNewThreadWithoutProject, projects]);
   const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : filterItems(allItems, value);
   const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...filterItems(allItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query]);

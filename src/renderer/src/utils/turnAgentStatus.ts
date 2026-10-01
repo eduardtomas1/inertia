@@ -22,7 +22,8 @@ function agents(count: number): string {
 }
 
 export function turnAgentStatusText(status: TurnAgentStatus): { text: string; failed: string | null } {
-  return status.live > 0
-    ? { text: `${agents(status.live)} working`, failed: null }
-    : { text: `${agents(status.total)} finished`, failed: status.failed > 0 ? `${status.failed} failed` : null };
+  return {
+    text: status.live > 0 ? `${agents(status.live)} working` : `${agents(status.total)} finished`,
+    failed: status.failed > 0 ? `${status.failed} failed` : null,
+  };
 }

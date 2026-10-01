@@ -229,7 +229,7 @@ export const AgentCard = memo(function AgentCard({
   const total = trace.usage?.totalTokens ?? null;
   const facts = trace.model !== null || total !== null || trace.toolUseCount !== null;
   return (
-    <li className="background-task-card" data-focus-row={`agent:${trace.id}`}>
+    <li className="background-task-card" data-focus-row={`agent:${trace.id}`} data-reveal-turn={trace.turnId}>
       <div className="background-task-body">
         <span className="background-task-title">{title}</span>
         <KindLine

@@ -27,8 +27,9 @@ describe("turn agent status", () => {
     ])).toEqual({ live: 0, total: 5, failed: 3 });
   });
 
-  it("says how many agents are working, or how many finished and failed", () => {
-    expect(turnAgentStatusText({ live: 1, total: 3, failed: 1 })).toEqual({ text: "1 agent working", failed: null });
+  it("says how many agents are working or finished, and how many failed", () => {
+    expect(turnAgentStatusText({ live: 1, total: 3, failed: 1 })).toEqual({ text: "1 agent working", failed: "1 failed" });
+    expect(turnAgentStatusText({ live: 2, total: 5, failed: 2 })).toEqual({ text: "2 agents working", failed: "2 failed" });
     expect(turnAgentStatusText({ live: 2, total: 2, failed: 0 })).toEqual({ text: "2 agents working", failed: null });
     expect(turnAgentStatusText({ live: 0, total: 1, failed: 0 })).toEqual({ text: "1 agent finished", failed: null });
     expect(turnAgentStatusText({ live: 0, total: 4, failed: 1 })).toEqual({ text: "4 agents finished", failed: "1 failed" });

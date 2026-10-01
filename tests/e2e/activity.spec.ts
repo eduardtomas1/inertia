@@ -486,11 +486,11 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       level: 1,
     })).toBeVisible();
     const agentsLine = page.locator(`[data-turn-id="${turn.id}"]`).getByRole("button", {
-      name: "Open Background tasks, 1 agent working",
+      name: "Open Background tasks, 1 agent working · 1 failed",
     });
-    await expect(agentsLine).toHaveText("1 agent working");
+    await expect(agentsLine).toHaveText("1 agent working · 1 failed");
     await expect(agentsLine.locator(".background-task-live")).toHaveCount(1);
-    await expect(page.locator(".turn-agents-danger")).toHaveCount(0);
+    await expect(agentsLine.locator(".turn-agents-danger")).toHaveText("1 failed");
     await agentsLine.click();
     const agentsTab = page.locator('[data-workspace-tab="agents"]');
     await expect(agentsTab).toHaveAttribute("aria-selected", "true");
@@ -503,7 +503,8 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
     })).toBeVisible();
     await expect(backgroundTasks.getByRole("button", { name: /^Stop /u }))
       .toHaveCount(1);
-    await backgroundTasks.getByRole("button", { name: /^Finished/u }).click();
+    await expect(backgroundTasks.getByRole("button", { name: /^Finished/u }))
+      .toHaveAttribute("aria-expanded", "true");
     await expect(backgroundTasks.getByText("Policy Reader", { exact: true }))
       .toBeVisible();
     await expect(backgroundTasks.getByText("Build Verifier", { exact: true }))

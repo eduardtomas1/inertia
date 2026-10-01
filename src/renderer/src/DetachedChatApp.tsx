@@ -650,8 +650,6 @@ export default function DetachedChatApp({
             onResumeConversation={dockInMain}
             onUsageDisplayModeChange={changeUsageDisplayMode}
             onStop={stopAgent}
-            onOpenSurface={dockInMain}
-            opensSurfaceInMainWindow
             onRevertCheckpoint={revertCheckpoint}
             onOpenTurnDiff={dockInMain}
             onCompareTurnArtifacts={dockInMain}

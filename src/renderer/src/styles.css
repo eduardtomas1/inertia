@@ -4925,18 +4925,23 @@ button.header-breadcrumb-project:hover {
 }
 
 .turn-agents-line {
+  --turn-agents-column: max(0px, calc((100% - var(--answer-max-width)) / 2));
   display: block;
   width: fit-content;
   max-width: 100%;
-  margin: 7px 0 3px;
-  padding: 2px 0;
+  margin: 7px 0 3px var(--turn-agents-column);
+  padding: 2px 5px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 8px;
   color: var(--text-muted);
   background: none;
   font: inherit;
   font-size: var(--metadata-font-size);
   text-align: start;
+}
+
+.turn-execution-rail.is-live ~ .turn-agents-line {
+  margin-left: calc(var(--turn-agents-column) + 2px);
 }
 
 button.turn-agents-line {
@@ -4945,6 +4950,7 @@ button.turn-agents-line {
 
 button.turn-agents-line:hover {
   color: var(--text-soft);
+  background: var(--surface-hover);
 }
 
 button.turn-agents-line:focus-visible {

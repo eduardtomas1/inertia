@@ -248,7 +248,6 @@ type ChatWorkspaceProps = {
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => Promise<void>;
   onOpenSurface?: (surface: WorkspacePanelTab) => void;
-  opensSurfaceInMainWindow?: boolean;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
@@ -347,7 +346,6 @@ export function ChatWorkspace({
   onUsageDisplayModeChange,
   onStop,
   onOpenSurface,
-  opensSurfaceInMainWindow,
   onRevertCheckpoint,
   onOpenTurnDiff,
   onCompareTurnArtifacts,
@@ -1032,7 +1030,6 @@ export function ChatWorkspace({
               onOpenTurnFile={onOpenTurnFile}
               onStop={stopTimeline}
               onOpenSurface={onOpenSurface}
-              opensSurfaceInMainWindow={opensSurfaceInMainWindow}
             />
           </Suspense>
         </div>

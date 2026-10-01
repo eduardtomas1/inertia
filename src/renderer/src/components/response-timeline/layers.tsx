@@ -309,9 +309,10 @@ export function AgentExecutionLayer({
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
       <TurnAgentsLine
+        conversationId={props.conversationId}
+        turnId={turn.id}
         subagents={subagents}
         onOpenSurface={props.onOpenSurface}
-        opensInMainWindow={props.opensSurfaceInMainWindow}
       />
       <span
         className="visually-hidden"

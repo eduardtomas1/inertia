@@ -5,6 +5,10 @@ import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 import { backgroundCommandRuns } from "../utils/backgroundTaskRuns";
 import {
+  subscribeBackgroundTaskReveal,
+  takeBackgroundTaskReveal,
+} from "../utils/backgroundTaskReveal";
+import {
   backgroundTaskItems,
   backgroundTaskTitle,
   type BackgroundTaskItem,
@@ -87,6 +91,38 @@ function useFocusContinuity(): {
   };
 }
 
+function useTurnReveal(
+  conversationId: string | null,
+  regionRef: React.RefObject<HTMLElement | null>,
+  finished: readonly BackgroundTaskItem[],
+  finishedOpen: boolean,
+  showAllFinished: boolean,
+  openFinished: (showAll: boolean) => void,
+): void {
+  const [turnId, setTurnId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!conversationId) return;
+    const take = (): void => {
+      const requested = takeBackgroundTaskReveal(conversationId);
+      if (requested) setTurnId(requested);
+    };
+    take();
+    return subscribeBackgroundTaskReveal(take);
+  }, [conversationId]);
+  useLayoutEffect(() => {
+    if (!turnId) return;
+    const index = finished.findIndex((item) => item.type === "agent" && item.trace.turnId === turnId);
+    const showAll = index >= MAX_COMPACT_FINISHED;
+    if (index >= 0 && (!finishedOpen || (showAll && !showAllFinished))) {
+      openFinished(showAll);
+      return;
+    }
+    const rows = regionRef.current?.querySelectorAll<HTMLElement>("[data-reveal-turn]") ?? [];
+    [...rows].find((row) => row.dataset.revealTurn === turnId)?.scrollIntoView({ block: "nearest" });
+    setTurnId(null);
+  }, [finished, finishedOpen, openFinished, regionRef, showAllFinished, turnId]);
+}
+
 function toggled(current: ReadonlySet<string>, id: string, on?: boolean): ReadonlySet<string> {
   const next = new Set(current);
   if (on ?? !next.has(id)) next.add(id);
@@ -120,6 +156,11 @@ export function BackgroundTasksSurface({
     [conversationId, runs, turns],
   );
   const items = useMemo(() => backgroundTaskItems(subagents, commands), [commands, subagents]);
+  const openFinished = useCallback((showAll: boolean) => {
+    setFinishedOpen(true);
+    if (showAll) setShowAllFinished(true);
+  }, []);
+  useTurnReveal(conversationId, focus.regionRef, items.finished, finishedOpen, showAllFinished, openFinished);
   const latest = useRef({ subagents, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent });
   useLayoutEffect(() => {
     latest.current = { subagents, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent };

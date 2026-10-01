@@ -82,7 +82,6 @@ export interface ResponseTimelineProps {
   ) => void;
   onStop: () => void;
   onOpenSurface?: (surface: WorkspacePanelTab) => void;
-  opensSurfaceInMainWindow?: boolean;
 }
 
 export type FinalAnswerAutoScrollEvent = {

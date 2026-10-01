@@ -401,6 +401,21 @@ async function expectLayoutHolds(app: AppFixture, region: Locator): Promise<void
   expect(layout.truncatedTitles).toBe(0);
 }
 
+async function expectInStatusColumn(line: Locator): Promise<void> {
+  const edges = await line.evaluate((element) => {
+    const turn = element.closest("[data-turn-id]");
+    const left = (selector: string): number | null =>
+      turn?.querySelector(selector)?.getBoundingClientRect().left ?? null;
+    return {
+      line: element.getBoundingClientRect().left,
+      row: left(".turn-working-status, .turn-settled-summary"),
+      rail: left(".turn-execution-rail"),
+    };
+  });
+  expect(edges.row, JSON.stringify(edges)).not.toBeNull();
+  expect(Math.abs(edges.line - (edges.row ?? 0)), JSON.stringify(edges)).toBeLessThanOrEqual(0.5);
+}
+
 let app!: AppFixture;
 let seed!: Seed;
 
@@ -586,11 +601,12 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     const page = app.page;
     await showChat(app, seed.codex);
     await closeWorkspaceTools(page);
-    const working = page.getByRole("button", { name: "Open Background tasks, 2 agents working" });
-    await expect(working).toHaveText("2 agents working");
+    const working = page.getByRole("button", { name: "Open Background tasks, 2 agents working · 1 failed" });
+    await expect(working).toHaveText("2 agents working · 1 failed");
     await expect(working.locator(".background-task-live")).toHaveText("2 agents working");
-    await expect(page.locator(".turn-agents-danger")).toHaveCount(0);
+    await expect(working.locator(".turn-agents-danger")).toHaveText("1 failed");
     await expect(page.locator(".turn-agents-line")).toHaveCount(1);
+    await expectInStatusColumn(working);
     const workingHeight = await working.evaluate((element) => element.getBoundingClientRect().height);
     await capture(page, info, "after-chat-agents-line-dark");
 
@@ -611,10 +627,14 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await app.resizeWindow(1000, 800);
     await expect(working).toBeVisible();
     expect(await working.evaluate((element) => element.getBoundingClientRect().height)).toBe(workingHeight);
+    await expectInStatusColumn(working);
     await app.expectNoViewportOverflow();
     await capture(page, info, "after-chat-agents-line-narrow-light");
     await setAppearanceInPlace(app, "dark");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await app.resizeWindow(760, 800);
+    await expect(working).toBeVisible();
+    await expectInStatusColumn(working);
     await app.resizeWindow(1440, 1100);
 
     const store = openStore(app);
@@ -650,12 +670,15 @@ test("shows each turn's agents as one line that opens Background tasks", async (
     await expect(finished.locator(".background-task-live")).toHaveCount(0);
     await expect(finished.locator(".turn-agents-danger")).toHaveText("1 failed");
     expect(await finished.evaluate((element) => element.getBoundingClientRect().height)).toBe(workingHeight);
+    await expectInStatusColumn(finished);
     await capture(page, info, "after-chat-agents-finished-dark");
     await finished.focus();
     await page.keyboard.press("Space");
     await expect(agentsTab).toBeFocused();
-    await openFinished(region);
+    await expect(region.getByRole("button", { name: /^Finished/u })).toHaveAttribute("aria-expanded", "true");
+    await expect(card(region, "Contract reader")).toBeInViewport();
     await expect(card(region, "Migration verifier")).toContainText("Agent · Failed");
+    await capture(page, info, "after-chat-agents-finished-opened-dark");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);

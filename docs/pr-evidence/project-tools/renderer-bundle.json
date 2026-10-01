@@ -22,6 +22,16 @@
     "coreJavaScript": 2624,
     "deferredProjectToolsJavaScript": 8465
   },
+  "uiPolish": {
+    "environment": "macOS 27.0.1 arm64, Node 22.23.2, identical package-lock.json and node_modules",
+    "command": "npm run build:bundle",
+    "beforeCommit": "ff7f09a32537802867dd4c22f298176f67431419",
+    "beforeBytes": { "deferredProjectToolsJavaScript": 8465, "mainWorkbenchFirstLoadJavaScript": 854156, "coreJavaScript": 2228669, "entryCss": 354742 },
+    "afterBytes": { "deferredProjectToolsJavaScript": 9906, "mainWorkbenchFirstLoadJavaScript": 854185, "coreJavaScript": 2228693, "entryCss": 354742 },
+    "deltaBytes": { "deferredProjectToolsJavaScript": 1441, "mainWorkbenchFirstLoadJavaScript": 29, "coreJavaScript": 24, "entryCss": 0 },
+    "cap": "deferredProjectToolsJavaScript rises from 8704 by exactly 1441 to 10145 bytes; the other closures stay under their existing caps.",
+    "reason": "Labelled fields with linked help, busy controls that keep focus, in-place save label, errors placed in the form or card, and status icons. The panel styles stay in its deferred stylesheet."
+  },
   "notes": [
     "ProjectToolsPanel is lazy-loaded and individually capped at 8704 bytes.",
     "Both startup closures are checked to exclude ProjectToolsPanel.",

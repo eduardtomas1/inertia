@@ -208,6 +208,7 @@ function ProjectToolsContent({ projectId, projectName, conversationId, connected
               <span aria-hidden="true">·</span>
               <span className="project-tool-url" title={connection.url}>{connection.url}</span>
             </p>
+            {connection.bearerTokenEnv && <p className="project-tool-auth">Token from <code>{connection.bearerTokenEnv}</code></p>}
             <p className="project-tool-reason">{connection.reason}</p>
             {connection.toolNames.length > 0 && <details open className="project-tool-names">
               <summary>
@@ -216,7 +217,6 @@ function ProjectToolsContent({ projectId, projectName, conversationId, connected
               </summary>
               <ul>{connection.toolNames.map((name) => <li key={name}><code>{name}</code></li>)}</ul>
             </details>}
-            {connection.bearerTokenEnv && <p className="project-tool-auth">Token from <code>{connection.bearerTokenEnv}</code></p>}
             {errorPlacement === connection.id && errorNode}
             <div className="project-tool-actions">
               <button type="button" className="project-tool-link" aria-disabled={rowUnavailable} onClick={() => {

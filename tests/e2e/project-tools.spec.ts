@@ -93,6 +93,7 @@ async function expectLayoutHolds(app: AppFixture, region: Locator): Promise<void
   const layout = await region.evaluate((element) => {
     const scrollers = [element, ...element.querySelectorAll<HTMLElement>("*")]
       .filter((node) => !node.classList.contains("sr-only")
+        && !(getComputedStyle(node).textOverflow === "ellipsis" && node.title === node.textContent)
         && node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX !== "visible");
     return {
       horizontal: scrollers.map((node) => `${node.tagName}.${node.className}`),
@@ -218,6 +219,10 @@ test("project tools surface holds its layout in every state, theme and width", a
 
     await docs.getByRole("button", { name: "Edit Project documentation" }).click();
     await tools.getByRole("textbox", { name: "Server URL" }).fill("https://docs.example.test/v2/mcp");
+    await expect(tools.getByRole("form", { name: "Edit connection" })).toBeVisible();
+    await blurFocus(page);
+    await expectLayoutHolds(app, tools);
+    await capture(page, info, "tools-edit-dark-wide");
     await tools.getByRole("button", { name: "Save connection" }).click();
     await expect(docs.getByText("Needs restart", { exact: true })).toBeVisible();
     await blurFocus(page);

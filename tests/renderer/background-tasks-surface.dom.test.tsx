@@ -399,7 +399,7 @@ describe("Background tasks surface", () => {
 
 describe("Background tasks stylesheets", () => {
   const css = readFileSync("src/renderer/src/components/BackgroundTasksSurface.css", "utf8");
-  const shared = readFileSync("src/renderer/src/styles.css", "utf8");
+  const shared = readFileSync("src/renderer/src/styles.css", "utf8").replaceAll("\r\n", "\n");
 
   it("uses semantic colour tokens only so preset and custom themes apply", () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/iu);

@@ -29,6 +29,12 @@ const compileStoreOperation = new Function(
 const performStoreOperation = compileStoreOperation(createRequire(import.meta.url));
 const parentPort = process.parentPort;
 
+function contentValidated(operation: unknown): boolean {
+  return typeof operation !== "object"
+    || operation === null
+    || Reflect.get(operation, "validateContent") !== false;
+}
+
 if (parentPort) {
   parentPort.once("message", (event) => {
     const request = parseConversationAttachmentStoreWorkerRequest(event.data);
@@ -65,7 +71,7 @@ if (parentPort) {
         operationId: request.operationId,
       } satisfies ConversationAttachmentStoreWorkerEvent);
     }).then(async (receipt) => {
-      if (receipt && !receipt.missing) {
+      if (receipt && !receipt.missing && contentValidated(operation)) {
         const metadata = metadataFromUnknown(JSON.parse(receipt.metadata));
         if (!metadata) return { missing: true };
         const { validateAttachmentImport } = await import("./attachment-import.js");

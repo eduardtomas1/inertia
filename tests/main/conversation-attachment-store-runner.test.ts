@@ -54,6 +54,7 @@ describe("conversation attachment store utility runner", () => {
       rootUid: operation.rootUid,
       id: operation.name,
       stallBeforeRecordRevalidateMs: 0,
+      validateContent: true,
     });
     const result = vi.fn();
     const stopped = vi.fn();

@@ -45,7 +45,7 @@ function receiptFor(
   };
 }
 
-async function perform(receipt?: unknown) {
+async function perform(receipt?: unknown, operation: Record<string, unknown> = {}) {
   let resolvePosted!: () => void;
   const posted = new Promise<void>((resolve) => { resolvePosted = resolve; });
   const parentPort = Object.assign(new EventEmitter(), { postMessage: vi.fn(resolvePosted) });
@@ -57,7 +57,7 @@ async function perform(receipt?: unknown) {
   parentPort.emit("message", { data: {
     type: "conversation-attachment-store.perform",
     operationId,
-    encodedOperation: JSON.stringify({ receipt }),
+    encodedOperation: JSON.stringify({ ...operation, receipt }),
   } });
   await posted;
   expect(parentPort.postMessage).toHaveBeenCalledOnce();
@@ -180,6 +180,25 @@ describe("retained attachment utility validation", () => {
       ok: true,
       receipt: { missing: true },
     });
+  });
+
+  it("returns a stored record without parsing its content for maintenance reads", async () => {
+    const loadParser = vi.fn(async () =>
+      await vi.importActual("../../src/main/attachment-import.js"));
+    vi.doMock("../../src/main/attachment-import.js", loadParser);
+    try {
+      const receipt = receiptFor(pngWithoutPalette(), "missing-palette.png");
+      const parentPort = await perform(receipt, { validateContent: false });
+      expect(parentPort.postMessage).toHaveBeenCalledWith({
+        type: "conversation-attachment-store.result",
+        operationId,
+        ok: true,
+        receipt,
+      });
+      expect(loadParser).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("../../src/main/attachment-import.js");
+    }
   });
 
   it.each([undefined, { missing: true }])("preserves non-content receipts (%j)", async (receipt) => {

@@ -58,6 +58,7 @@ import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { trackTurnSettlementTask } from "./turn-settlement-tasks";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
+import { stopActiveSubagent } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
 import { quarantineActiveDuoTurn } from "../duo/duo-active-turn-quarantine";
@@ -955,72 +956,18 @@ export class TurnController {
     );
   }
 
-  async stopSubagent(
+  stopSubagent(
     conversationId: string,
     traceId: string,
   ): Promise<boolean> {
-    const active = this.activeByConversation.get(conversationId);
-    if (
-      !active
-      || !active.runState.acceptsProviderEvents()
-      || !this.providers.stopSubagent
-    ) return false;
-    let trace: SubagentTrace;
-    try {
-      trace = this.store.subagentTrace(traceId);
-    } catch {
-      return false;
-    }
-    if (
-      trace.conversationId !== conversationId
-      || trace.runId !== active.turn.runId
-      || trace.turnId !== active.turn.id
-      || trace.providerId !== "claude"
-      || !trace.providerTaskId
-      || !trace.isLive
-    ) return false;
-    let accepted = false;
-    try {
-      accepted = await this.providers.stopSubagent(
-        conversationId,
-        trace.providerTaskId,
-        { runId: active.turn.runId, turnId: active.turn.id },
-      );
-    } catch {
-      // The provider event stream may still have proved the exact stop.
-    }
-    let currentTrace: SubagentTrace;
-    try {
-      currentTrace = this.store.subagentTrace(traceId);
-    } catch {
-      return false;
-    }
-    if (
-      currentTrace.conversationId !== trace.conversationId
-      || currentTrace.runId !== trace.runId
-      || currentTrace.turnId !== trace.turnId
-      || currentTrace.providerId !== trace.providerId
-      || currentTrace.providerTaskId !== trace.providerTaskId
-    ) return false;
-    if (!currentTrace.isLive) return currentTrace.status === "cancelled";
-    if (!accepted) return false;
-    const currentActive = this.activeByConversation.get(conversationId);
-    if (
-      currentActive !== active
-      || !currentActive.runState.acceptsProviderEvents()
-      || currentActive.turn.runId !== trace.runId
-      || currentActive.turn.id !== trace.turnId
-    ) return false;
-    const stopped = this.store.acknowledgeSubagentStop(traceId, this.now());
-    if (!stopped) return false;
-    if (stopped?.changed) {
-      this.hooks.broadcast({
-        type: "agent.subagent.updated",
-        trace: stopped.trace,
-      });
-      this.observeSubagent(currentActive, stopped.trace);
-    }
-    return true;
+    return stopActiveSubagent({
+      store: this.store,
+      providers: this.providers,
+      hooks: this.hooks,
+      activeForConversation: (id) => this.activeByConversation.get(id),
+      now: () => this.now(),
+      observeSubagent: (active, trace) => this.observeSubagent(active, trace),
+    }, conversationId, traceId);
   }
 
   respondToApproval(

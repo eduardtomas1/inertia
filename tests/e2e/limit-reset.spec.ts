@@ -76,6 +76,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     await page.getByRole("button", { name: "Snooze until reset", exact: true }).click();
     await expect(page.getByRole("button", { name: "Snoozed until reset", exact: true })).toBeDisabled();
     await page.getByRole("button", { name: "Resume at reset", exact: true }).click();
+    // Schedule refreshes quota asynchronously. Restart only after the runtime
+    // confirms that the new plan was persisted, not merely after the click.
+    await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
     ({ page } = await app.restart());
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
     await expect(page.getByText("Resumed after the subscription quota reset.", { exact: true })).toBeVisible({ timeout: 60_000 });

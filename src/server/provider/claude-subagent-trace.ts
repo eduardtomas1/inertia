@@ -4,14 +4,24 @@ import type {
   AgentHarnessEmitter,
 } from "./agent-harness";
 import {
+  boundedSubagentCount,
   boundedSubagentIdentifier,
   boundedSubagentText,
   MAX_SUBAGENT_DESCRIPTION_CHARS,
+  MAX_SUBAGENT_DURATION_MS,
   MAX_SUBAGENT_PROGRESS_CHARS,
   MAX_SUBAGENT_RESULT_CHARS,
+  MAX_SUBAGENT_TOOL_USE_COUNT,
 } from "./subagent-trace";
+import { validateSubagentTaskUsage } from "./usage-values";
 
 type SubagentUpdate = Parameters<AgentHarnessEmitter["subagent"]>[0];
+type ClaudeTaskTelemetry = Pick<
+  SubagentUpdate,
+  "activity" | "usage" | "toolUseCount" | "durationMs"
+>;
+
+const MAX_SUBAGENT_LABEL_CHARS = 200;
 
 interface ClaudeAgentTool {
   toolUseId: string;
@@ -19,6 +29,7 @@ interface ClaudeAgentTool {
   role: string | null;
   name: string | null;
   description: string | null;
+  model: string | null;
 }
 
 interface ClaudeTaskState extends ClaudeAgentTool {
@@ -160,6 +171,7 @@ export class ClaudeSubagentTraceTracker {
           input.description ?? input.prompt,
           MAX_SUBAGENT_DESCRIPTION_CHARS,
         ),
+        model: boundedSubagentText(input.model, MAX_SUBAGENT_LABEL_CHARS),
       });
     }
   }
@@ -212,6 +224,7 @@ export class ClaudeSubagentTraceTracker {
         record.description ?? record.prompt,
         MAX_SUBAGENT_DESCRIPTION_CHARS,
       ) ?? pending?.description ?? metadata?.description ?? null,
+      model: pending?.model ?? metadata?.model ?? null,
       agentId: pending?.agentId ?? null,
       live: true,
       terminal: false,
@@ -250,6 +263,7 @@ export class ClaudeSubagentTraceTracker {
           record.description,
           MAX_SUBAGENT_DESCRIPTION_CHARS,
         ) ?? pending?.description ?? metadata?.description ?? null,
+        model: pending?.model ?? metadata?.model ?? null,
         agentId: pending?.agentId ?? null,
         live: true,
         terminal: false,
@@ -270,12 +284,18 @@ export class ClaudeSubagentTraceTracker {
       state,
       "running",
       boundedSubagentText(
-        progressWithUsage(
-          record.summary ?? record.last_tool_name,
-          record.usage,
-        ),
+        record.summary ?? record.last_tool_name,
         MAX_SUBAGENT_PROGRESS_CHARS,
       ),
+      null,
+      null,
+      {
+        ...taskUsageTelemetry(record.usage),
+        ...optionalText(
+          "activity",
+          boundedSubagentText(record.last_tool_name, MAX_SUBAGENT_LABEL_CHARS),
+        ),
+      },
     );
   }
 
@@ -311,6 +331,12 @@ export class ClaudeSubagentTraceTracker {
       state,
       "running",
       boundedSubagentText(progress, MAX_SUBAGENT_PROGRESS_CHARS),
+      null,
+      null,
+      optionalText(
+        "activity",
+        boundedSubagentText(record.tool_name, MAX_SUBAGENT_LABEL_CHARS),
+      ),
     );
   }
 
@@ -399,6 +425,7 @@ export class ClaudeSubagentTraceTracker {
       null,
       boundedSubagentText(record.summary, MAX_SUBAGENT_RESULT_CHARS),
       providerStatus,
+      taskUsageTelemetry(record.usage),
     );
   }
 
@@ -436,6 +463,7 @@ export class ClaudeSubagentTraceTracker {
           output.description,
           MAX_SUBAGENT_DESCRIPTION_CHARS,
         ) ?? metadata?.description ?? null,
+        model: metadata?.model ?? null,
         agentId,
         live: output.status === "async_launched",
         terminal: output.status === "completed",
@@ -485,6 +513,7 @@ export class ClaudeSubagentTraceTracker {
     progress: string | null = null,
     result: string | null = null,
     providerStatus: string | null = null,
+    telemetry: ClaudeTaskTelemetry = {},
   ): void {
     this.sequence += 1;
     this.emit({
@@ -502,6 +531,8 @@ export class ClaudeSubagentTraceTracker {
       description: state.description,
       progress,
       result,
+      ...optionalText("model", state.model),
+      ...telemetry,
     });
   }
 
@@ -580,19 +611,30 @@ function positiveInteger(value: unknown): number | null {
     : null;
 }
 
-function progressWithUsage(progress: unknown, usageValue: unknown): unknown {
-  const text = boundedSubagentText(progress, MAX_SUBAGENT_PROGRESS_CHARS);
-  const usage = objectValue(usageValue);
-  if (!usage) return text;
-  const totalTokens = nonNegativeNumber(usage.total_tokens);
-  const toolUses = nonNegativeNumber(usage.tool_uses);
-  const durationMs = nonNegativeNumber(usage.duration_ms);
-  const details = [
-    totalTokens !== null ? `${totalTokens} tokens` : null,
-    toolUses !== null ? `${toolUses} tool ${toolUses === 1 ? "use" : "uses"}` : null,
-    durationMs !== null ? `${durationMs} ms` : null,
-  ].filter((value): value is string => Boolean(value));
-  return [text, details.join(" · ")].filter(Boolean).join(" · ");
+function optionalText<Key extends "activity" | "model">(
+  key: Key,
+  value: string | null,
+): Partial<Record<Key, string>> {
+  return value === null ? {} : { [key]: value } as Record<Key, string>;
+}
+
+function taskUsageTelemetry(value: unknown): ClaudeTaskTelemetry {
+  const usage = objectValue(value);
+  if (!usage) return {};
+  const totals = validateSubagentTaskUsage({ totalTokens: usage.total_tokens });
+  const toolUseCount = boundedSubagentCount(
+    usage.tool_uses,
+    MAX_SUBAGENT_TOOL_USE_COUNT,
+  );
+  const durationMs = boundedSubagentCount(
+    usage.duration_ms,
+    MAX_SUBAGENT_DURATION_MS,
+  );
+  return {
+    ...(totals ? { usage: totals } : {}),
+    ...(toolUseCount !== null ? { toolUseCount } : {}),
+    ...(durationMs !== null ? { durationMs } : {}),
+  };
 }
 
 function terminalTaskStatus(value: unknown): boolean {

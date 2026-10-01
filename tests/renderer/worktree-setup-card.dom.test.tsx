@@ -49,3 +49,53 @@ describe("worktree setup recovery", () => {
     view.unmount();
   });
 });
+
+describe("worktree setup card presentation", () => {
+  const checkout = { ...conversation("setup"), worktreePath: "/checkout" };
+
+  it("names the output disclosure by its visible label and links it to the output", async () => {
+    const request = vi.fn<WorktreeSetupCommandRunner>().mockResolvedValue(result("failed"));
+    render(<WorktreeSetupCard conversation={checkout} request={request} />);
+    const toggle = await screen.findByRole("button", { name: "Output" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Setup output")).toHaveAttribute("id", toggle.getAttribute("aria-controls"));
+  });
+
+  it("keeps a busy action focusable and moves focus to the next action after retrying", async () => {
+    let finishRetry!: (event: ServerEvent) => void;
+    const request = vi.fn<WorktreeSetupCommandRunner>()
+      .mockResolvedValueOnce(result("failed"))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishRetry = resolve; }))
+      .mockResolvedValue(result("running"));
+    render(<WorktreeSetupCard conversation={checkout} request={request} />);
+    const retry = await screen.findByRole("button", { name: "Retry setup" });
+    retry.focus();
+    fireEvent.click(retry);
+    expect(retry).toHaveFocus();
+    expect(retry).toBeEnabled();
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(retry);
+    expect(request.mock.calls.filter(([, command]) => command.type === "worktree.setup.retry")).toHaveLength(1);
+    await act(async () => { finishRetry(result("running")); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop setup" })).toHaveFocus());
+  });
+
+  it("moves focus to Retry setup after stopping and to the output after continuing", async () => {
+    const request = vi.fn<WorktreeSetupCommandRunner>()
+      .mockResolvedValueOnce(result("running"))
+      .mockResolvedValueOnce(result("cancelled"))
+      .mockResolvedValueOnce(result("cancelled"))
+      .mockResolvedValue(result("skipped"));
+    render(<WorktreeSetupCard conversation={checkout} request={request} />);
+    const stop = await screen.findByRole("button", { name: "Stop setup" });
+    stop.focus();
+    fireEvent.click(stop);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry setup" })).toHaveFocus());
+    const skip = screen.getByRole("button", { name: "Continue without setup" });
+    skip.focus();
+    fireEvent.click(skip);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Output" })).toHaveFocus());
+  });
+});

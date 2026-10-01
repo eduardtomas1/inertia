@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, ChevronDown, LoaderCircle, Terminal, TriangleAlert } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { CheckCircle2, ChevronDown, CircleMinus, TriangleAlert } from "lucide-react";
 import type { Conversation, ServerEvent } from "@shared/contracts";
 import type { WorktreeSetupSummary } from "@shared/worktree-setup";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
@@ -17,8 +17,27 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
   const [refresh, setRefresh] = useState(0);
   const requestRef = useRef(request);
   requestRef.current = request;
+  const outputId = useId();
+  const cardRef = useRef<HTMLElement>(null);
+  const outputRef = useRef<HTMLPreElement>(null);
+  const focusRef = useRef<{ status: string | undefined; inside: boolean }>({ status: undefined, inside: false });
   const active = summary?.status === "pending" || summary?.status === "running";
-  const ready = summary?.status === "succeeded" || summary?.status === "skipped";
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card) return;
+    const previous = focusRef.current;
+    const focused = document.activeElement;
+    if (previous.inside && previous.status !== summary?.status && (!focused || focused === document.body || !focused.isConnected)) {
+      (card.querySelector<HTMLElement>(".worktree-setup-actions button") ?? card.querySelector<HTMLElement>(".worktree-setup-toggle"))?.focus();
+    }
+    focusRef.current = { status: summary?.status, inside: card.contains(document.activeElement) };
+  });
+
+  useLayoutEffect(() => {
+    const element = outputRef.current;
+    if (expanded && element) element.scrollTop = element.scrollHeight;
+  }, [expanded, output]);
 
   useEffect(() => {
     let disposed = false;
@@ -54,17 +73,25 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
   }
 
   if (!summary) return null;
-  const title = active ? "Setting up worktree" : summary.status === "succeeded" ? "Worktree ready" : summary.status === "skipped" ? "Setup skipped" : "Worktree setup needs attention";
-  return <section className="worktree-setup-card" data-state={active ? "running" : ready ? "ready" : "attention"} aria-label="Worktree setup">
-    <div className="worktree-setup-heading">
-      {active ? <LoaderCircle className="worktree-setup-spinner" size={18} aria-hidden="true" /> : ready ? <CheckCircle2 size={18} aria-hidden="true" /> : <TriangleAlert size={18} aria-hidden="true" />}
-      <div role="status"><strong>{title}</strong><span>{summary.actionName}{summary.attempt > 1 ? ` · Attempt ${summary.attempt}` : ""}</span></div>
-      <button type="button" className="subtle-button" aria-label={expanded ? "Hide setup output" : "Show setup output"} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}><Terminal size={14} /><span>Output</span><ChevronDown size={13} /></button>
+  const state = active ? "running" : summary.status === "succeeded" ? "ready" : summary.status === "skipped" ? "skipped" : "attention";
+  const title = active ? "Setting up worktree" : state === "ready" ? "Worktree ready" : state === "skipped" ? "Setup skipped" : "Worktree setup needs attention";
+  const run = (operation: Operation): void => { if (!busy) void act(operation); };
+  return <section ref={cardRef} className="worktree-setup-card" data-state={state} aria-label="Worktree setup">
+    <span className="worktree-setup-icon" aria-hidden="true">
+      {active ? <span className="loading-mark" /> : state === "ready" ? <CheckCircle2 size={16} /> : state === "skipped" ? <CircleMinus size={16} /> : <TriangleAlert size={16} />}
+    </span>
+    <div className="worktree-setup-body">
+      <p className="worktree-setup-title" role="status">{title}</p>
+      <p className="worktree-setup-meta">{summary.actionName}{summary.attempt > 1 ? ` · Attempt ${summary.attempt}` : ""}</p>
+      <p className="worktree-setup-detail">{summary.detail}</p>
     </div>
-    <p>{summary.detail}</p>
-    {expanded && <pre tabIndex={0} aria-label="Setup output">{output || (active ? "The command is running. Output is available when it finishes." : "No output was recorded.")}</pre>}
-    {active && <div className="worktree-setup-actions"><button type="button" disabled={busy} onClick={() => { void act("cancel"); }}>Stop setup</button><span>Your first prompt will wait.</span></div>}
-    {!active && !ready && <div className="worktree-setup-actions"><button type="button" disabled={busy} onClick={() => { void act("retry"); }}>Retry setup</button><button type="button" className="subtle-button" disabled={busy} onClick={() => { void act("skip"); }}>Continue without setup</button></div>}
-    {error && <p role="alert">{error}</p>}
+    <button type="button" className="worktree-setup-toggle" aria-expanded={expanded} aria-controls={outputId} onClick={() => setExpanded(!expanded)}>Output<ChevronDown size={13} aria-hidden="true" /></button>
+    {expanded && <pre ref={outputRef} id={outputId} className="worktree-setup-output" tabIndex={0} aria-label="Setup output">{output || (active ? "The command is running. Output is available when it finishes." : "No output was recorded.")}</pre>}
+    {active && <div className="worktree-setup-actions"><button type="button" className="worktree-setup-button" aria-disabled={busy || undefined} onClick={() => run("cancel")}>Stop setup</button></div>}
+    {state === "attention" && <div className="worktree-setup-actions">
+      <button type="button" className="worktree-setup-button" aria-disabled={busy || undefined} onClick={() => run("retry")}>Retry setup</button>
+      <button type="button" className="worktree-setup-link" aria-disabled={busy || undefined} onClick={() => run("skip")}>Continue without setup</button>
+    </div>}
+    {error && <p className="worktree-setup-error" role="alert">{error}</p>}
   </section>;
 }

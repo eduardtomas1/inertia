@@ -169,12 +169,11 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
     </section>
     <h2 className="project-settings-group-title">Worktree setup</h2>
     <section className="project-settings-card" aria-label="Worktree setup settings">
-      <Row title="Run when creating a worktree" description="Prepare each new isolated checkout before its first prompt, for example install dependencies. Existing checkouts and snapshots are unchanged.">
+      <Row title="Run when creating a worktree" description="Runs a saved action in each new isolated checkout, including each new Duo checkout, before its first prompt. Existing checkouts and snapshots are unchanged.">
         <ProjectSelect label="Worktree setup action" value={preferences.worktreeSetupActionId ?? ""} disabled={blocked}
           options={{ "": "Off", ...Object.fromEntries(preferences.actions.map((action) => [action.id, action.name])) }}
           onChange={(value) => setPreference("worktreeSetupActionId", value || null)} />
       </Row>
-      <p className="project-actions-empty">Choose a saved action above. Runs in the new worktree, including each new Duo checkout. If setup fails, inspect its output, retry, or continue without setup.</p>
     </section>
     <h2 className="project-settings-group-title">Danger zone</h2>
     <section className="project-settings-card"><Row title="Remove project" description="Remove this project and its threads from Inertia. Files on disk are not touched.">

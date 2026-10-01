@@ -96,7 +96,7 @@ const budgets = {
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 952,
   // Optional setup controls stay deferred; 3,033 emitted bytes, <0.3 KiB headroom.
-  deferredWorktreeSetupJavaScript: 3.25 * kibibyte,
+  deferredWorktreeSetupJavaScript: 3.25 * kibibyte + 863,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 234,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,

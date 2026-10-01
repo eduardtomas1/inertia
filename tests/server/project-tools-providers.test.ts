@@ -6,7 +6,7 @@ import type { Options, Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
-import { checkClaudeProjectTools, prepareProjectToolLaunch } from "../../src/server/provider/project-tool-launch";
+import { checkClaudeProjectTools, claudeProjectToolOptions, prepareProjectToolLaunch } from "../../src/server/provider/project-tool-launch";
 import { observeClaudeProjectTools, observeCodexProjectTool } from "../../src/server/provider/project-tools";
 import { projectToolServerName, type ProjectTool } from "../../src/shared/project-tools";
 import { launchCredentialValues } from "../../src/server/provider/activity-detail";
@@ -45,6 +45,11 @@ describe("project tools provider authority", () => {
     expect(launch.environment[key]).toBe("synthetic-test-value");
     expect(launchCredentialValues(launch.environment)).toContain("synthetic-test-value");
     expect(JSON.stringify(launch.projectTools)).not.toContain("synthetic-test-value");
+    const claudeOptions = claudeProjectToolOptions(launch.projectTools);
+    expect(JSON.stringify(claudeOptions)).not.toContain("synthetic-test-value");
+    expect(claudeOptions.servers[projectToolServerName(connection.id)]).toMatchObject({
+      headers: { Authorization: "Bearer ${" + key + "}" },
+    });
     const missing = await prepareProjectToolLaunch({ ...run, resolveToken: async () => null }, {}, signal);
     expect(missing.projectTools?.connections).toEqual([]);
     expect(run.report).toHaveBeenLastCalledWith(expect.objectContaining({ state: "needs-auth" }));

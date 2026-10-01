@@ -25,12 +25,14 @@ export async function prepareProjectToolLaunch(run: ProjectToolRun | undefined, 
   return { environment: nextEnvironment, projectTools: { ...run, connections } };
 }
 
-export function claudeProjectToolOptions(run: ProjectToolRun | undefined, environment: NodeJS.ProcessEnv) {
+export function claudeProjectToolOptions(run: ProjectToolRun | undefined) {
   const servers: Record<string, McpServerConfig> = {};
   for (const connection of run?.connections ?? []) {
     servers[projectToolServerName(connection.id)] = {
       type: "http", url: connection.url, alwaysLoad: true, timeout: 60_000,
-      ...(connection.bearerTokenEnv ? { headers: { Authorization: `Bearer ${environment[connection.bearerTokenEnv]}` } } : {}),
+      // The SDK serializes MCP configuration into argv. Let Claude expand the
+      // reference inside its process so token values never enter those arguments.
+      ...(connection.bearerTokenEnv ? { headers: { Authorization: "Bearer ${" + connection.bearerTokenEnv + "}" } } : {}),
     };
   }
   return {

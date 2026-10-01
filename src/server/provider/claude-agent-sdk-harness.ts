@@ -190,7 +190,7 @@ function startClaudeRun(
   skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
 ): AgentHarnessRun {
   const projectToolRun = options.input.toolRestriction === "none" || !options.providerNativeToolsAvailable ? undefined : options.projectTools;
-  const projectTools = claudeProjectToolOptions(projectToolRun, options.environment);
+  const projectTools = claudeProjectToolOptions(projectToolRun);
   const toolStatusAbort = new AbortController();
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(

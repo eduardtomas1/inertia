@@ -188,6 +188,7 @@ export default defineConfig({
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
               "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
               "WelcomeGuide", "SnapshotSettings", "SnapshotControl", "AttachmentStorageSettings", "WorkspaceHeaderActions", "OrbCanvas", "ProjectCustomizePanel", "project-color-contrast",
+              "TaskBoard", "ConversationNotes",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

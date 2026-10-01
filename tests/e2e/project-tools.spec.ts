@@ -93,7 +93,7 @@ async function expectLayoutHolds(app: AppFixture, region: Locator): Promise<void
   const layout = await region.evaluate((element) => {
     const scrollers = [element, ...element.querySelectorAll<HTMLElement>("*")]
       .filter((node) => !node.classList.contains("sr-only")
-        && !(getComputedStyle(node).textOverflow === "ellipsis" && node.title === node.textContent)
+        && !(getComputedStyle(node).textOverflow === "ellipsis" && node.getAttribute("title") === node.textContent)
         && node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).overflowX !== "visible");
     return {
       horizontal: scrollers.map((node) => `${node.tagName}.${node.className}`),

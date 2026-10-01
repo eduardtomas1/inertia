@@ -186,7 +186,7 @@ export default defineConfig({
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
-              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
+              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog", "ScopeReviewPanel",
               "WelcomeGuide", "SnapshotSettings", "SnapshotControl", "AttachmentStorageSettings", "WorkspaceHeaderActions", "OrbCanvas", "ProjectCustomizePanel", "project-color-contrast",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);

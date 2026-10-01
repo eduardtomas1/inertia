@@ -1,3 +1,4 @@
+import type { ReviewBrief, ReviewBriefInput } from "@shared/review-brief";
 import type { ReviewNoteDraft } from "./ReviewNoteDialog";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
@@ -32,6 +33,10 @@ export type DiffSelection = {
 };
 
 export type ChangesPanelProps = {
+  reviewBrief?: ReviewBrief | null;
+  reviewBriefSources?: Array<{ id: string; content: string }>;
+  reviewConversationId?: string;
+  onSaveBrief?: (revision: number, brief: ReviewBriefInput) => Promise<void>;
   files: ChangedFile[];
   diff: GitDiffSnapshot | null;
   selectedPath: string | null;
@@ -76,6 +81,7 @@ export type ChangesPanelProps = {
   onAddToPrompt: (selection: DiffSelection) => void;
 };
 
+const loadScopeReview = createSurfaceLoader(() => import("./ScopeReviewPanel"));
 const loadReviewNoteDialog = createSurfaceLoader(() => import("./ReviewNoteDialog"));
 type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
@@ -164,6 +170,7 @@ export function ChangesPanel({
   selectedPath,
   summary,
   summaryFingerprint,
+  reviewBrief, reviewBriefSources, reviewConversationId, onSaveBrief,
   selectionAnswer = null,
   reviewStates = [],
   notes = [],
@@ -250,6 +257,8 @@ export function ChangesPanel({
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
     : structured.files[0] ?? null;
+  const [scopeReviewOpen, setScopeReviewOpen] = useState(false);
+  const ScopeReviewPanel = useLoadedSurface(loadScopeReview, scopeReviewOpen);
   const activeSummary = summary?.fingerprint === (summaryFingerprint ?? structured.fingerprint)
     ? summary
     : null;
@@ -564,6 +573,14 @@ export function ChangesPanel({
 
       {notice}
       {scopeNavigator}
+      {onSaveBrief && onGenerateSummary && reviewConversationId && <>
+        <button type="button" className="subtle-button" aria-expanded={scopeReviewOpen}
+          onClick={() => setScopeReviewOpen((open) => !open)}>Review against request</button>
+        {scopeReviewOpen && ScopeReviewPanel && <ScopeReviewPanel key={reviewConversationId}
+          brief={reviewBrief ?? null} sources={reviewBriefSources ?? []} review={activeSummary?.scopeReview} fingerprint={activeSummary?.fingerprint}
+          loading={Boolean(summaryLoading)} locked={reviewLocked || Boolean(diffParsingError) || diffBusy}
+          onSave={onSaveBrief} onReview={onGenerateSummary} onSelectFile={onSelectFile} onAddTextToPrompt={onAddTextToPrompt} />}
+      </>}
       {activeSummary && <div className="diff-overall-summary"><Sparkles size={14} /><span><strong>Change summary</strong>{activeSummary.overall}<ClassificationHints hints={activeSummary.classifications} /></span></div>}
       {totalHunks > 0 && persistentReview && (
         <div className="diff-review-toolbar">

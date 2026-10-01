@@ -1,3 +1,5 @@
+import { scopeReviewResultSchema, scopeReviewSchema, type ReviewBrief } from "../shared/review-brief";
+import { scopeReviewInstructions, validatedScopeReview } from "./scope-review";
 import { z } from "zod";
 
 import type {
@@ -46,6 +48,7 @@ const fileSummarySchema = z.object({
 }).strict();
 
 const reviewSummarySchema = z.object({
+  scopeReview: scopeReviewResultSchema.optional(),
   overall: z.string().trim().min(1).max(2_000),
   classifications: z.array(classificationSchema).max(DIFF_REVIEW_CLASSIFICATIONS.length),
   files: z.array(fileSummarySchema).min(1).max(100),
@@ -85,6 +88,7 @@ const persistedFileSummarySchema = z.object({
 }).strict();
 
 const persistedReviewSummarySchema = z.object({
+  scopeReview: scopeReviewSchema.optional(),
   conversationId: exactNonBlankString(200),
   fingerprint: z.string().regex(/^(?:[0-9a-f]{8}|[0-9a-f]{64})$/u),
   providerId: z.enum(PROVIDER_IDS),
@@ -168,6 +172,14 @@ export function validatePersistedReviewSummary(value: unknown): DiffReviewSummar
   if (!result.success || serializedLength(result.data) > MAX_PERSISTED_REVIEW_SUMMARY_CHARS) {
     throw new ReviewSummaryError("The review summary is not valid bounded data.");
   }
+  if (result.data.scopeReview) {
+    const scope = result.data.scopeReview;
+    if (scope.brief.conversationId !== result.data.conversationId) throw new ReviewSummaryError("Invalid review brief owner.");
+    const { brief, ...review } = scope;
+    validatedScopeReview(review, brief, result.data.files.map((file) => ({
+      path: file.path, hunks: file.hunks.map((hunk) => ({ id: hunk.hunkId })),
+    })));
+  }
   return result.data;
 }
 
@@ -196,7 +208,7 @@ export function upgradeLegacyPersistedReviewSummary(value: unknown): DiffReviewS
   }
 }
 
-export function buildReviewSummaryPrompt(patch: string, files: readonly DiffFile[]): string {
+export function buildReviewSummaryPrompt(patch: string, files: readonly DiffFile[], brief?: ReviewBrief | null): string {
   if (patch.length > MAX_REVIEW_PATCH_CHARS) {
     throw new ReviewSummaryError("This diff is too large for a concise review. Review or commit it in smaller parts.");
   }
@@ -212,6 +224,7 @@ export function buildReviewSummaryPrompt(patch: string, files: readonly DiffFile
     "Classifications are compact review hints, not established facts. Include one only when concrete evidence is visible in the diff; otherwise use an empty array. Never repeat a classification within one target.",
     "Every required file and hunk must appear exactly once. Do not add unknown paths, hunk IDs, fields, or entries.",
     `Required inventory: ${JSON.stringify(inventory)}`,
+    ...(brief?.requirements.length ? [scopeReviewInstructions(brief)] : []),
     "Complete diff:",
     patch,
   ].join("\n\n");
@@ -228,12 +241,18 @@ export function parseReviewSummaryResult(
   expectedFiles: readonly DiffFile[],
   text: string,
   generatedAt = new Date().toISOString(),
+  brief?: ReviewBrief | null,
 ): DiffReviewSummary {
   const result = reviewSummarySchema.safeParse(parsedJson(text));
   if (!result.success) {
     throw new ReviewSummaryError("The review agent returned an invalid structured result. No summary was saved.");
   }
 
+  if (Boolean(brief?.requirements.length) !== Boolean(result.data.scopeReview)) {
+    throw new ReviewSummaryError("The review agent returned a missing or unexpected scope review. No summary was saved.");
+  }
+  const scopeReview = brief?.requirements.length
+    ? validatedScopeReview(result.data.scopeReview, brief, expectedFiles) : undefined;
   const expectedPaths = new Set(expectedFiles.map(({ path }) => path));
   const fileCandidates = new Map<string, (typeof result.data.files)[number]>();
   for (const candidate of result.data.files) {
@@ -286,6 +305,7 @@ export function parseReviewSummaryResult(
   }
 
   return validatePersistedReviewSummary({
+    ...(scopeReview ? { scopeReview } : {}),
     conversationId,
     fingerprint,
     ...attribution,

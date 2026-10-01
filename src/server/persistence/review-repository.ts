@@ -1,3 +1,4 @@
+import { reviewBriefInputSchema, reviewBriefSchema, type ReviewBrief, type ReviewBriefInput } from "../../shared/review-brief";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -16,8 +17,45 @@ import type {
 
 type ReviewPersistenceContext = Pick<PersistenceContext, "database" | "requireConversation">;
 
+export function readReviewBrief(database: ReviewPersistenceContext["database"], conversationId: string): ReviewBrief | null {
+    const row = database.prepare("SELECT brief_json FROM review_briefs WHERE conversation_id = ?")
+      .get(conversationId) as { brief_json: string } | undefined;
+    if (!row) return null;
+    const brief = reviewBriefSchema.parse(JSON.parse(row.brief_json));
+    if (brief.conversationId !== conversationId) throw new Error("Invalid review brief owner.");
+    return brief;
+  }
+
+
 export class ReviewRepository {
   constructor(private readonly context: ReviewPersistenceContext) {}
+
+  brief(conversationId: string): ReviewBrief | null {
+    return readReviewBrief(this.context.database, conversationId);
+  }
+
+  saveBrief(conversationId: string, expectedRevision: number, input: ReviewBriefInput): ReviewBrief {
+    this.context.requireConversation(conversationId);
+    const validated = reviewBriefInputSchema.parse(input);
+    return this.context.database.transaction(() => {
+      const previous = this.brief(conversationId);
+      if ((previous?.revision ?? 0) !== expectedRevision) {
+        throw new Error("The review brief changed in another window. Reopen the brief before saving.");
+      }
+      const sources = validated.sourceMessageIds.map((id) => {
+        const row = this.context.database.prepare("SELECT content FROM messages WHERE id = ? AND conversation_id = ? AND role = 'user'")
+          .get(id, conversationId) as { content: string } | undefined;
+        if (!row) throw new Error("A linked user message is no longer available in this chat.");
+        return { messageId: id, excerpt: row.content.slice(0, 4_000) };
+      });
+      const brief = reviewBriefSchema.parse({ conversationId, revision: expectedRevision + 1,
+        requirements: validated.requirements, sources });
+      this.context.database.prepare(`INSERT INTO review_briefs (conversation_id, brief_json) VALUES (?, ?)
+        ON CONFLICT(conversation_id) DO UPDATE SET brief_json = excluded.brief_json`)
+        .run(conversationId, JSON.stringify(brief));
+      return brief;
+    })();
+  }
 
   upsertSummary(summary: DiffReviewSummary): DiffReviewSummary {
     const validated = validatePersistedReviewSummary(summary);

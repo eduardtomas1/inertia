@@ -1,3 +1,4 @@
+import type { ScopeReview } from "../review-brief";
 import type { ModelSelection } from "../model-routing";
 import type { ProviderId } from "./app";
 
@@ -355,6 +356,7 @@ export interface DiffReversalOperation {
 }
 
 export interface DiffReviewSummary {
+  scopeReview?: ScopeReview;
   conversationId: string;
   fingerprint: string;
   providerId: ProviderId;

@@ -1,3 +1,4 @@
+import type { ReviewBrief } from "../review-brief";
 import type {
   AgentGoal,
 } from "./agent-workflows";
@@ -30,6 +31,7 @@ import type { ConversationAttachmentGalleryItem } from "../conversation-attachme
  * app shell so transcript growth does not inflate navigation snapshots.
  */
 export interface ConversationDetail {
+  reviewBrief?: ReviewBrief | null;
   history?: ConversationHistoryPage;
   attachmentGallery?: ConversationAttachmentGalleryItem[];
   conversation: Conversation;

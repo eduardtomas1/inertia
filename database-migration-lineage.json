@@ -682,6 +682,11 @@
       "version": 85,
       "name": "CustomAppearanceColors",
       "digest": "c7e987dedea9feb72677ef2498ac2407e5b9b9287b02a0eb2496523f244a60bb"
+    },
+    {
+      "version": 86,
+      "name": "PersistReviewBrief",
+      "digest": "d3acbff6b91a66f8c92f0c1947883f2e802f128566677ccdc83ccecb73677fce"
     }
   ]
 }

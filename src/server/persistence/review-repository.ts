@@ -18,13 +18,13 @@ import type {
 type ReviewPersistenceContext = Pick<PersistenceContext, "database" | "requireConversation">;
 
 export function readReviewBrief(database: ReviewPersistenceContext["database"], conversationId: string): ReviewBrief | null {
-    const row = database.prepare("SELECT brief_json FROM review_briefs WHERE conversation_id = ?")
-      .get(conversationId) as { brief_json: string } | undefined;
-    if (!row) return null;
-    const brief = reviewBriefSchema.parse(JSON.parse(row.brief_json));
-    if (brief.conversationId !== conversationId) throw new Error("Invalid review brief owner.");
-    return brief;
-  }
+  const row = database.prepare("SELECT brief_json FROM review_briefs WHERE conversation_id = ?")
+    .get(conversationId) as { brief_json: string } | undefined;
+  if (!row) return null;
+  const brief = reviewBriefSchema.parse(JSON.parse(row.brief_json));
+  if (brief.conversationId !== conversationId) throw new Error("Invalid review brief owner.");
+  return brief;
+}
 
 
 export class ReviewRepository {
@@ -50,9 +50,11 @@ export class ReviewRepository {
       });
       const brief = reviewBriefSchema.parse({ conversationId, revision: expectedRevision + 1,
         requirements: validated.requirements, sources });
+      const serialized = JSON.stringify(brief);
+      if (serialized.length > 65_536) throw new Error("The linked review brief is too large. Shorten it or unlink a message.");
       this.context.database.prepare(`INSERT INTO review_briefs (conversation_id, brief_json) VALUES (?, ?)
         ON CONFLICT(conversation_id) DO UPDATE SET brief_json = excluded.brief_json`)
-        .run(conversationId, JSON.stringify(brief));
+        .run(conversationId, serialized);
       return brief;
     })();
   }

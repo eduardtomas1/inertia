@@ -17,6 +17,7 @@ describe("review brief generation ownership", () => {
     const brief: ReviewBrief = { conversationId, revision: 1, requirements: ["Retry three times"], sources: [] };
     const currentBrief = vi.fn(() => brief);
     const persist = vi.fn();
+    const broadcast = vi.fn();
     git.getUnifiedDiff.mockReset().mockResolvedValue({ text: patch, truncated: false });
     type RunOptions = { request: { executionPrompt: string }; toolPolicy: string; interactionPolicy: string;
       onResult: (output: { text: string; harnessId: string; backendProfileId: string; model: null }, context: { assertActive: () => void }) => Promise<unknown> };
@@ -34,13 +35,13 @@ describe("review brief generation ownership", () => {
     const dependencies = { store: { conversation: () => ({ id: conversationId, projectId, providerId: "codex", model: null, modelSelection: nativeModelSelection({ providerId: "codex" }) }),
       conversationPath: () => "/fixture", reviewBrief: currentBrief, upsertReviewSummary: persist },
     turns: { isActive: () => false }, isolatedRuns: { has: () => false, run }, secureFiles: {}, enableProviders: true,
-    providerInfo: () => [{ id: "codex", canRun: true, models: [] }], send: vi.fn() } as unknown as IsolatedReviewCommandDependencies;
+    providerInfo: () => [{ id: "codex", canRun: true, models: [] }], broadcast, send: vi.fn() } as unknown as IsolatedReviewCommandDependencies;
     const pending = createIsolatedReviewCommandHandler(dependencies)({} as WebSocket, {
       type: "review.summary.generate", requestId: randomUUID(), payload: { conversationId,
         projectId: scenario === "wrong project" ? randomUUID() : projectId,
         fingerprint: parsed.fingerprint, briefRevision: scenario === "brief changed before" ? 0 : 1 },
     });
-    if (scenario === "success") { await pending; expect(persist).toHaveBeenCalledOnce(); }
+    if (scenario === "success") { await pending; expect(persist).toHaveBeenCalledOnce(); expect(broadcast).toHaveBeenCalledWith({ type: "conversation.detail.invalidated", conversationId }); }
     else { await expect(pending).rejects.toThrow(/brief changed|stale summary|belong/); expect(persist).not.toHaveBeenCalled(); }
     if (scenario === "wrong project" || scenario === "brief changed before") expect(run).not.toHaveBeenCalled();
   });

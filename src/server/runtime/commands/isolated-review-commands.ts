@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 
 import type {
+  RuntimeMutationEvent,
   ProviderInfo,
   ServerEvent,
 } from "../../../shared/contracts";
@@ -57,6 +58,7 @@ export interface IsolatedReviewCommandDependencies {
   reviewSummaryTimeoutMs?: number;
   providerInfo(): readonly ProviderInfo[];
   publicError(error: unknown): string;
+  broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -379,6 +381,7 @@ export function createIsolatedReviewCommandHandler(
       case "review.brief.save": {
         dependencies.store.saveReviewBrief(command.payload.conversationId,
           command.payload.expectedRevision, command.payload.brief);
+        dependencies.broadcast({ type: "conversation.detail.invalidated", conversationId: command.payload.conversationId });
         dependencies.broadcastSnapshot();
         dependencies.send(socket, { type: "request.ok", requestId: command.requestId });
         return "handled";
@@ -513,6 +516,7 @@ export function createIsolatedReviewCommandHandler(
                 throw new RuntimeRequestError("The review brief changed during analysis. The stale review was discarded.");
               }
               dependencies.store.upsertReviewSummary(summary);
+              dependencies.broadcast({ type: "conversation.detail.invalidated", conversationId: conversation.id });
               return summary;
             },
           });

@@ -38,12 +38,16 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 let app: AppFixture | undefined;
 let historyRoot: string | undefined;
 test.afterEach(async ({ browserName: _browserName }, info) => {
-  if (app && info.status !== info.expectedStatus) {
-    await info.attach("runtime-state", { body: JSON.stringify(await app.runtimeSnapshot()), contentType: "application/json" });
-    await info.attach("import-dialog-state", { body: await app.page.locator("body").ariaSnapshot(), contentType: "text/plain" });
-    await capture(info, "import-failure");
+  try {
+    if (app && info.status !== info.expectedStatus) {
+      await info.attach("runtime-state", { body: JSON.stringify(await app.runtimeSnapshot()), contentType: "application/json" });
+      await info.attach("import-dialog-state", { body: await app.page.locator("body").ariaSnapshot(), contentType: "text/plain" });
+      await info.attach("import-failure", { body: await app.page.screenshot(), contentType: "image/png" });
+    }
+  } finally {
+    await app?.close();
+    if (historyRoot) await rm(historyRoot, { recursive: true, force: true });
   }
-  await app?.close(); if (historyRoot) await rm(historyRoot, { recursive: true, force: true });
 });
 async function openImporter(page: Page): Promise<void> {
   await page.getByRole("complementary", { name: "Project navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
@@ -55,6 +59,7 @@ async function openImporter(page: Page): Promise<void> {
 }
 async function capture(info: TestInfo, name: string): Promise<void> {
   const path = info.outputPath(`${name}.png`);
+  await expect(app!.page.getByRole("dialog", { name: "Import CLI conversations" })).toBeInViewport({ ratio: 1 });
   await app!.page.screenshot({ path, animations: "disabled" });
   await info.attach(name, { path, contentType: "image/png" });
   await app!.expectNoViewportOverflow();

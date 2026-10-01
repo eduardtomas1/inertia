@@ -1,0 +1,40 @@
+{
+  "baseline": "2364d768a71214bfbff7481bb5545cf19906a78f",
+  "environment": "Linux x64, Node 22.23.3, identical installed dependencies",
+  "measurements": {
+    "entryJavaScript": {
+      "before": 222475,
+      "after": 222475,
+      "delta": 0
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "before": 853542,
+      "after": 853628,
+      "delta": 86
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "before": 660072,
+      "after": 660158,
+      "delta": 86
+    },
+    "deferredProjectSettingsJavaScript": {
+      "before": 13271,
+      "after": 14325,
+      "delta": 1054
+    },
+    "deferredCliConversationImportJavaScript": {
+      "before": 0,
+      "after": 7781,
+      "delta": 7781
+    },
+    "coreJavaScript": {
+      "before": 2226045,
+      "after": 2226775,
+      "delta": 730
+    }
+  },
+  "notes": [
+    "The importer is a separately budgeted deferred chunk. The bundle gate rejects loading it in either initial chat route.",
+    "Screenshots render the actual React component and production styles in Electron with fixture request responses. Native end-to-end verification remains pending CI; the cloud kernel lacks the child-process listing required by Inertia\u2019s Linux supervisor."
+  ]
+}

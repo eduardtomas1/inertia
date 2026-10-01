@@ -83,7 +83,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
   };
   const candidates = (scan?.candidates ?? []).filter((item) => (provider === "all" || item.providerId === provider)
     && `${item.title} ${providerLabel(item.providerId)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-  return <div className="palette-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !importing.current) onClose(); }}>
+  return <div className="palette-backdrop cli-import-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !importing.current) onClose(); }}>
     <section ref={root} className="cli-import-dialog" role="dialog" aria-modal="true" aria-label="Import CLI conversations" tabIndex={-1}
       onKeyDown={(event) => { trapModalFocus(event, event.currentTarget); if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (!importing.current) onClose(); } }}>
       <header className="cli-import-header"><span className="cli-import-icon"><TerminalSquare size={22} /></span><div><h2>Bring your conversations along</h2><p>Import Codex and Claude Code history into {project.name}.</p></div><IconButton label="Close CLI import" disabled={busy === "import"} onClick={onClose}><X size={18} /></IconButton></header>

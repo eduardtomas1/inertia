@@ -13,7 +13,7 @@ function fixture() {
   const window = { webContents: contents, isDestroyed: vi.fn(() => false) };
   registerEditContextMenu(window as unknown as BrowserWindow, (url) => url === rendererUrl);
   const params = {
-    frame: contents.mainFrame, pageURL: rendererUrl, isEditable: true, selectionText: "",
+    frame: contents.mainFrame, pageURL: rendererUrl, isEditable: true, selectionText: "", x: 41, y: 17,
     editFlags: {
       canUndo: false, canRedo: false, canCut: false, canCopy: false,
       canPaste: true, canDelete: false, canSelectAll: true, canEditRichly: false,
@@ -39,7 +39,13 @@ describe("native app editing menu", () => {
       { role: "copy", enabled: false },
       { role: "undo", enabled: false },
     ]));
-    expect(menu.popup).toHaveBeenCalledWith({ window });
+    expect(menu.popup).toHaveBeenCalledWith({ window, x: 41, y: 17 });
+  });
+
+  it("opens a keyboard-invoked menu at the editor instead of the mouse pointer", () => {
+    const { window, show } = fixture();
+    show({ x: 451, y: 393, menuSourceType: "keyboard" });
+    expect(menu.popup).toHaveBeenCalledExactlyOnceWith({ window, x: 451, y: 393 });
   });
 
   it("offers only Copy for selected read-only content", () => {

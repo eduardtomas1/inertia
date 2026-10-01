@@ -26,6 +26,6 @@ export function registerEditContextMenu(
           { role: "selectAll", enabled: flags.canSelectAll },
         ]
       : [{ role: "copy", enabled: flags.canCopy }];
-    Menu.buildFromTemplate(items).popup({ window });
+    Menu.buildFromTemplate(items).popup({ window, x: params.x, y: params.y });
   });
 }

@@ -15,6 +15,7 @@ for (const detached of [false, true]) test(`offers working native edit commands 
       Menu.prototype.popup = function (options) {
         (Reflect.get(globalThis, "editContextMenus") as Electron.Menu[]).push(this);
         Reflect.set(globalThis, "editContextWindow", options?.window);
+        Reflect.set(globalThis, "editContextPosition", { x: options?.x, y: options?.y });
       };
       return clipboard.writeText("Pasted through the native menu");
     });
@@ -50,6 +51,17 @@ for (const detached of [false, true]) test(`offers working native edit commands 
       { role: "paste", enabled: true },
       { role: "selectall", enabled: false },
     ]));
+
+    const keyboardMenus = await menuCount();
+    await page.keyboard.press("ContextMenu");
+    await expect.poll(menuCount).toBe(keyboardMenus + 1);
+    const position = await app.electronApp.evaluate(() =>
+      Reflect.get(globalThis, "editContextPosition") as { x?: number; y?: number });
+    const box = (await input.boundingBox())!;
+    expect(position.x).toBeGreaterThanOrEqual(Math.floor(box.x));
+    expect(position.x).toBeLessThanOrEqual(Math.ceil(box.x + box.width));
+    expect(position.y).toBeGreaterThanOrEqual(Math.floor(box.y));
+    expect(position.y).toBeLessThanOrEqual(Math.ceil(box.y + box.height));
 
     const selectItem = async (role: string) => {
       await app.electronApp.evaluate((_electron, selectedRole) => {

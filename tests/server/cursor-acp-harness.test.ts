@@ -1643,6 +1643,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const terminateProcessTree = vi.fn(async (child, force: boolean) =>
       await terminateProcessTreeAndWait(child, force, {
         spawnProcessSync: vi.fn(() => ({ status: 0, stdout: `${child.pid} 1 Ss\n` })) as never,
+        pauseSync: () => undefined,
       }));
     const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },

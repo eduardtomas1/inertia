@@ -909,8 +909,7 @@ describe("agent loading and trace DOM", () => {
       terminalProjections={{
         [owner]: { owner, status: "completed", terminalReason: null },
       }}
-      onFollowUpSubagent={vi.fn()}
-      onStopSubagent={vi.fn(async () => undefined)}
+      onOpenSurface={vi.fn()}
     />);
 
     expect(container.querySelector(

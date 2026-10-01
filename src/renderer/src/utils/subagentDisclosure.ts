@@ -110,13 +110,6 @@ export function subagentTraceLabel(trace: SubagentTrace): string {
   return `${subagentProviderLabel(trace)} delegated task`;
 }
 
-export function subagentRoleLabel(trace: SubagentTrace): string | null {
-  const role = trace.providerRole;
-  return role && role !== trace.providerName
-    ? humanizeSubagentIdentifier(role)
-    : null;
-}
-
 export function subagentMissionSummary(trace: SubagentTrace): string | null {
   const mission = trace.description?.trim();
   if (!mission) return null;
@@ -312,15 +305,4 @@ export function subagentStatsLabel(stats: SubagentDisclosureStats): string {
   const settled = stats.completed + stats.stopped;
   if (settled > 0) labels.push(`${settled} settled`);
   return labels.join(" · ");
-}
-
-export function subagentDisclosureSummary(
-  traces: readonly SubagentTrace[],
-): string {
-  const stats = subagentDisclosureStats(traces);
-  const noun = traces.length === 1 ? "delegated task" : "delegated tasks";
-  const state = subagentStatsLabel(stats);
-  return state
-    ? `${traces.length} ${noun} · ${state}`
-    : `${traces.length} ${noun}`;
 }

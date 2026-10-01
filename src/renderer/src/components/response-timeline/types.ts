@@ -15,6 +15,7 @@ import type {
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type {
   StreamingAgentChannel,
   TurnGitArtifactSummary,
@@ -80,8 +81,8 @@ export interface ResponseTimelineProps {
     headingId?: string,
   ) => void;
   onStop: () => void;
-  onFollowUpSubagent?: (trace: SubagentTrace) => void;
-  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
+  onOpenSurface?: (surface: WorkspacePanelTab) => void;
+  opensSurfaceInMainWindow?: boolean;
 }
 
 export type FinalAnswerAutoScrollEvent = {

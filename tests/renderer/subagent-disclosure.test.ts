@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -11,18 +9,12 @@ import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
   subagentDisclosureRows,
-  subagentDisclosureSummary,
   subagentDisclosureStats,
   subagentRelationshipLabel,
   subagentRouteLabel,
   subagentStatusLabel,
   subagentTraceSummary,
 } from "../../src/renderer/src/utils/subagentDisclosure";
-
-const styles = readFileSync(
-  new URL("../../src/renderer/src/styles.css", import.meta.url),
-  "utf8",
-);
 
 function trace(
   update: Partial<SubagentTrace> = {},
@@ -132,9 +124,6 @@ describe("inline delegated-agent disclosure", () => {
       { trace: { id: "trace-parent" }, depth: 0, canStop: true },
       { trace: { id: "trace-child" }, depth: 1, canStop: true },
     ]);
-    expect(subagentDisclosureSummary([parent, child])).toBe(
-      "2 delegated tasks · 2 working",
-    );
   });
 
   it("derives Stop only from the current persisted Claude SDK route", () => {
@@ -218,13 +207,6 @@ describe("inline delegated-agent disclosure", () => {
       }),
       [turn()],
     )).toBe(true);
-    expect(subagentDisclosureSummary([
-      trace({
-        providerStatus: "futureState",
-        status: "unknown",
-        isLive: true,
-      }),
-    ])).toBe("1 delegated task · 1 working");
   });
 
   it("summarizes outcomes and keeps every urgent branch in a bounded roster", () => {
@@ -253,9 +235,6 @@ describe("inline delegated-agent disclosure", () => {
       stopped: 1,
       needsReview: 2,
     });
-    expect(subagentDisclosureSummary(traces)).toBe(
-      "7 delegated tasks · 2 working · 2 needs review · 3 settled",
-    );
   });
 
   it("deduplicates urgent branch endpoints through settled intermediaries", () => {
@@ -304,34 +283,5 @@ describe("inline delegated-agent disclosure", () => {
     expect(subagentTraceSummary(completed)).toHaveLength(280);
     expect(subagentTraceSummary(completed)).toMatch(/…$/u);
     expect(completed.result).toBe(result);
-  });
-
-  it("keeps one intentional danger hover and adjacent focus treatment for Stop", () => {
-    const hoverRules = [...styles.matchAll(
-      /\.subagent-stop-button:hover:not\(:disabled\)\s*\{(?<body>[^}]*)\}/gu,
-    )];
-    const focusRules = [...styles.matchAll(
-      /\.subagent-row-actions button:focus-visible\s*\{(?<body>[^}]*)\}/gu,
-    )];
-    expect(hoverRules).toHaveLength(1);
-    expect(hoverRules[0]?.groups?.body).toContain("color: var(--danger)");
-    expect(hoverRules[0]?.groups?.body).toContain("var(--danger-soft)");
-    expect(focusRules).toHaveLength(1);
-    expect(focusRules[0]?.groups?.body).toContain("var(--focus-ring)");
-
-    const componentRule = styles.indexOf(".subagent-row-actions button {");
-    const hoverRule = styles.indexOf(
-      ".subagent-stop-button:hover:not(:disabled) {",
-    );
-    const focusRule = styles.indexOf(
-      ".subagent-row-actions button:focus-visible {",
-    );
-    const usagePopover = styles.indexOf(".usage-popover {");
-    expect(componentRule).toBeLessThan(focusRule);
-    expect(focusRule).toBeLessThan(hoverRule);
-    expect(focusRule).toBeLessThan(usagePopover);
-    expect(styles).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.subagent-details-button svg,[\s\S]*?transition: none;/u,
-    );
   });
 });

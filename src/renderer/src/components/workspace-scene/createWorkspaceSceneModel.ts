@@ -791,8 +791,7 @@ export function createWorkspaceSceneModel({
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
       onRevertCheckpoint: actions.revertCheckpoint,
-      onFollowUpSubagent: actions.followUpSubagent,
-      onStopSubagent: actions.stopSubagent,
+      onOpenSurface: project && !globalChatActive ? layout.openSurface : undefined,
       onStop: actions.stopAgent,
     },
     checkoutBranch: project && !globalChatActive ? {

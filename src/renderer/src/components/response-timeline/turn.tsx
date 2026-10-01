@@ -202,8 +202,8 @@ export function sameTurnTimelineProps(
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
-    && left.onFollowUpSubagent === right.onFollowUpSubagent
-    && left.onStopSubagent === right.onStopSubagent
+    && left.onOpenSurface === right.onOpenSurface
+    && left.opensSurfaceInMainWindow === right.opensSurfaceInMainWindow
     && left.turns === right.turns
     && left.contextPackets === right.contextPackets
     && left.omittedTurnIds === right.omittedTurnIds

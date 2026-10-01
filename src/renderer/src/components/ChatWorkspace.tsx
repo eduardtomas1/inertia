@@ -84,6 +84,7 @@ import {
 import { Composer } from "./Composer";
 import type { QueueCommandRunner } from "./composer/runtimeQueueClient";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
+import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import type {
   NewChatProjectPicker,
   PromptPresetCommandRunner,
@@ -246,8 +247,8 @@ type ChatWorkspaceProps = {
   onResumeConversation?: (conversationId: string) => void;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => Promise<void>;
-  onFollowUpSubagent?: (trace: SubagentTrace) => void;
-  onStopSubagent: (trace: SubagentTrace) => Promise<void>;
+  onOpenSurface?: (surface: WorkspacePanelTab) => void;
+  opensSurfaceInMainWindow?: boolean;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
@@ -345,8 +346,8 @@ export function ChatWorkspace({
   onResumeConversation,
   onUsageDisplayModeChange,
   onStop,
-  onFollowUpSubagent,
-  onStopSubagent,
+  onOpenSurface,
+  opensSurfaceInMainWindow,
   onRevertCheckpoint,
   onOpenTurnDiff,
   onCompareTurnArtifacts,
@@ -1030,8 +1031,8 @@ export function ChatWorkspace({
               onCompareTurnArtifacts={onCompareTurnArtifacts}
               onOpenTurnFile={onOpenTurnFile}
               onStop={stopTimeline}
-              onFollowUpSubagent={onFollowUpSubagent}
-              onStopSubagent={onStopSubagent}
+              onOpenSurface={onOpenSurface}
+              opensSurfaceInMainWindow={opensSurfaceInMainWindow}
             />
           </Suspense>
         </div>

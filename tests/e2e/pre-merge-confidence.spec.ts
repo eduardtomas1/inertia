@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -111,6 +111,40 @@ process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: {
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
+
+async function capture(target: Page, info: TestInfo, name: string): Promise<void> {
+  const path = info.outputPath(`${name}.png`);
+  await target.mouse.move(0, 0);
+  await target.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await target.screenshot({ path, animations: "disabled" });
+  await info.attach(name, { path, contentType: "image/png" });
+}
+
+async function setTheme(target: Page, theme: "light" | "dark"): Promise<void> {
+  await target.evaluate((value) => {
+    document.documentElement.dataset.theme = value;
+    document.documentElement.style.colorScheme = value;
+  }, theme);
+}
+
+async function expectFeedbackLayoutHolds(dialog: Locator): Promise<void> {
+  await app.expectNoViewportOverflow();
+  const section = dialog.getByRole("region", { name: "Actionable review threads" });
+  await section.scrollIntoViewIfNeeded();
+  const layout = await section.evaluate((element) => {
+    const action = element.querySelector<HTMLElement>(".pr-feedback-actions button")!.getBoundingClientRect();
+    const label = element.querySelector<HTMLElement>(".pr-feedback-actions label")!.getBoundingClientRect();
+    return {
+      overflow: element.scrollWidth - element.clientWidth,
+      nested: [...element.querySelectorAll("button")].filter((button) => button.parentElement?.closest("button")).length,
+      sameRow: label.top < action.bottom && action.top < label.bottom,
+      centred: Math.abs((label.top + label.bottom) / 2 - (action.top + action.bottom) / 2),
+    };
+  });
+  expect(layout.overflow).toBeLessThanOrEqual(1);
+  expect(layout.nested).toBe(0);
+  if (layout.sameRow) expect(layout.centred).toBeLessThanOrEqual(1);
+}
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -236,11 +270,27 @@ test("keeps exact-head green and blocking evidence legible across real Electron 
     contentType: "image/png",
   });
   await app.resizeWindow(1440, 920);
+  const feedback = dialog.getByRole("region", { name: "Actionable review threads" });
+  await setTheme(page, "dark");
+  await expectFeedbackLayoutHolds(dialog);
+  await capture(page, testInfo, "pr-feedback-threads-dark-wide");
   await dialog.getByRole("checkbox", { name: "Select all review feedback" }).check();
+  await expect(feedback.getByText("1 selected", { exact: true })).toBeVisible();
+  await expectFeedbackLayoutHolds(dialog);
+  await capture(page, testInfo, "pr-feedback-selected-dark-wide");
+  await setTheme(page, "light");
+  await capture(page, testInfo, "pr-feedback-selected");
+  await app.resizeWindow(1000, 800);
+  await expectFeedbackLayoutHolds(dialog);
+  await capture(page, testInfo, "pr-feedback-selected-light-narrow");
+  await setTheme(page, "dark");
+  await capture(page, testInfo, "pr-feedback-selected-dark-narrow");
+  await app.resizeWindow(760, 600);
+  await expectFeedbackLayoutHolds(dialog);
+  await capture(page, testInfo, "pr-feedback-selected-dark-760x600");
+  await setTheme(page, "light");
+  await app.resizeWindow(1440, 920);
   await dialog.getByRole("button", { name: "Address selected feedback" }).scrollIntoViewIfNeeded();
-  const selectedScreenshot = testInfo.outputPath("pr-feedback-selected.png");
-  await page.screenshot({ animations: "disabled", path: selectedScreenshot });
-  await testInfo.attach("pr-feedback-selected", { path: selectedScreenshot, contentType: "image/png" });
   await dialog.getByRole("button", { name: "Address selected feedback" }).click();
   await expect(dialog).toBeHidden();
   const composer = page.getByRole("textbox", { name: "Message", exact: true });

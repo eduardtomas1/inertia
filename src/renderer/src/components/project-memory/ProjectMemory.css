@@ -269,7 +269,7 @@
   color: var(--text);
 }
 
-.project-memory-reason > span {
+.project-memory-reason-label {
   color: var(--text-muted);
   font-weight: 500;
 }

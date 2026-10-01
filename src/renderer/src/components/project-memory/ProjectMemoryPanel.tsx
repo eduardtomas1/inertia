@@ -184,7 +184,7 @@ export function ProjectMemoryPanel({ projectId, conversationId, request, disable
               : <span>Added to project</span>}
           </p>
           <p className="project-memory-text">{entry.text}</p>
-          <p className="project-memory-reason"><span>Why</span> {entry.reason}</p>
+          <p className="project-memory-reason"><span className="project-memory-reason-label">Why</span> <span>{entry.reason}</span></p>
           {source?.id === entry.id && <div className="project-memory-source-preview">
             <strong>Source message · {source.role === "user" ? "You" : "Assistant"}</strong>
             <p>{source.content}</p>

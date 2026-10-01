@@ -275,6 +275,21 @@ describe("OpenCode delegated-agent projection", () => {
     expect(latest(CHILD)?.result).toBe(`Updated ${"a".repeat(127)}`);
   });
 
+  it("retains later-part text when a full-length earlier snapshot is corrected", () => {
+    const { projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      assistant(CHILD, "final-assistant"),
+      part(CHILD, { id: "first-text", messageID: "final-assistant", type: "text", text: "a".repeat(16_000) }),
+      part(CHILD, { id: "second-text", messageID: "final-assistant", type: "text", text: "Second finding." }),
+      part(CHILD, { id: "first-text", messageID: "final-assistant", type: "text", text: "Corrected first finding.\n\n" }),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)?.result).toBe("Corrected first finding.\n\nSecond finding.");
+  });
+
   it("reports a child session error as a failed task with bounded error text", () => {
     const { observe, latest } = harness();
     observe(

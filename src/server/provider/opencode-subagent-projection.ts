@@ -274,13 +274,15 @@ export class OpenCodeSubagentProjection {
     ) {
       if (!child.textParts.has(partId) && child.textParts.size >= MAX_CHILD_RESULT_PARTS) return;
       child.textParts.set(partId, part.text.slice(0, MAX_SUBAGENT_RESULT_CHARS));
-      let remaining = MAX_SUBAGENT_RESULT_CHARS;
-      for (const [id, snapshot] of child.textParts) {
-        const retained = snapshot.slice(0, remaining);
-        child.textParts.set(id, retained);
-        remaining -= retained.length;
+      // Keep each bounded snapshot so shortening an earlier part can reveal
+      // later text again, without requiring the provider to resend that part.
+      let text = "";
+      for (const snapshot of child.textParts.values()) {
+        const remaining = MAX_SUBAGENT_RESULT_CHARS - text.length;
+        if (remaining === 0) break;
+        text += snapshot.slice(0, remaining);
       }
-      child.text = [...child.textParts.values()].join("") || null;
+      child.text = text || null;
     }
   }
 

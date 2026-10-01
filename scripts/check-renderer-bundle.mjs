@@ -122,7 +122,7 @@ const budgets = {
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
-  deferredProviderContinuationJavaScript: 5 * kibibyte,
+  deferredProviderContinuationJavaScript: 5 * kibibyte + 597,
   deferredComposerQueueJavaScript: 8 * kibibyte + 4_995,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
   // Account only this new module here; all existing ceilings remain unchanged.

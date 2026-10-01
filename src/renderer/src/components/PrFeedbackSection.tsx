@@ -1,4 +1,4 @@
-import { FileCheck2, MessageSquarePlus } from "lucide-react";
+import { ExternalLink, FileCheck2, MessageSquarePlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { GitPreMergeConfidence, ServerEvent } from "@shared/contracts";
 import { buildPrFeedbackTask, MAX_PR_FEEDBACK_THREADS } from "@shared/pr-feedback";
@@ -79,17 +79,22 @@ export function PrFeedbackSection({ confidence, projectId, conversationId, repos
       </div>
       <p className="pr-feedback-hint">{!conversationId ? "Open a chat to prepare a feedback task." : "Adds the selected discussions to your draft. Review the task before sending."}</p>
       {error && <p role="alert" className="pr-feedback-error">{error}</p>}
-      <ul className="pre-merge-thread-list">
-        {threads.map((thread) => <li key={thread.id}>
-          <div><input type="checkbox" aria-label={`Select feedback on ${thread.path}${thread.line ? `:${thread.line}` : ""}`}
-            checked={selected.includes(thread.id)} disabled={!canDraft || !selected.includes(thread.id) && selected.length >= MAX_PR_FEEDBACK_THREADS}
-            onChange={(event) => setSelected((current) => event.target.checked ? [...current, thread.id] : current.filter((id) => id !== thread.id))} />
-            <strong>{thread.codex ? "Codex" : thread.author}</strong>
-            <code>{thread.path}{thread.line ? `:${thread.line}` : ""}</code>
-            {thread.outdated && <em>Outdated position</em>}</div>
-          <p>{thread.body}</p>
-          {thread.url && <button type="button" onClick={() => onOpenUrl(thread.url!)}>Open thread</button>}
-        </li>)}
+      <ul className="pre-merge-thread-list pr-feedback-threads">
+        {threads.map((thread) => {
+          const location = `${thread.path}${thread.line ? `:${thread.line}` : ""}`;
+          return <li key={thread.id}>
+            <input type="checkbox" aria-label={`Select feedback on ${location}`}
+              checked={selected.includes(thread.id)} disabled={!canDraft || !selected.includes(thread.id) && selected.length >= MAX_PR_FEEDBACK_THREADS}
+              onChange={(event) => setSelected((current) => event.target.checked ? [...current, thread.id] : current.filter((id) => id !== thread.id))} />
+            <div>
+              <div><strong>{thread.codex ? "Codex" : thread.author}</strong>
+                <code title={location}>{location}</code>
+                {thread.outdated && <em>Outdated position</em>}</div>
+              <p>{thread.body}</p>
+              {thread.url && <button type="button" onClick={() => onOpenUrl(thread.url!)}><ExternalLink size={11} aria-hidden="true" />Open thread</button>}
+            </div>
+          </li>;
+        })}
       </ul>
     </>}
     {confidence.reviewThreadsTruncated && <p className="pre-merge-caution">More than 100 review threads exist; this view is incomplete and cannot be green.</p>}

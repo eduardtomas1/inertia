@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import type { PendingModelRoute } from "./types";
 import type { ConversationContextCommandRunner } from "../conversation-context/types";
+import "./RouteChangeConfirmation.css";
 const ProviderContinuationDialog = lazy(() => import("./ProviderContinuationDialog"));
 
 const accessLabels = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" } as const;
@@ -56,10 +57,6 @@ export function RouteChangeConfirmation({
         </small>
         {blockedReason && <small role="alert">{blockedReason}</small>}
       </span>
-      {onContextCommand && pendingRoute.sourceUpdatedAt && pendingRoute.continuationConversationId && <button
-        type="button" className="primary-button" disabled={!canCreate || creating}
-        onClick={() => setContinuing(true)}
-      >Continue with context</button>}
       <button
         ref={cancelRef}
         type="button"
@@ -69,6 +66,10 @@ export function RouteChangeConfirmation({
       >
         Cancel
       </button>
+      {onContextCommand && pendingRoute.sourceUpdatedAt && pendingRoute.continuationConversationId && <button
+        type="button" className="secondary-button" disabled={!canCreate || creating}
+        onClick={() => setContinuing(true)}
+      >Continue with context…</button>}
       <button
         type="button"
         className="primary-button"

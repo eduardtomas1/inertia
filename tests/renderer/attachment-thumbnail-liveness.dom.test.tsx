@@ -114,3 +114,71 @@ it("frees a slot after a visible read stalls for 15 seconds and keeps the tile r
   act(() => { setVisible(view.container, 0, false); setVisible(view.container, 0, true); });
   expect(readIssued(0)).toBe(true);
 });
+
+it("retries a stalled read while its tile stays visible, with backoff and a bounded number of attempts", () => {
+  vi.useFakeTimers();
+  const view = render(<SentMessageAttachmentList attachments={attachments.slice(0, 1)} />);
+  const reads = () => created.filter((image) => image.getAttribute("src") === "inertia://bundle/attachment-preview/image-0").length;
+  act(() => setVisible(view.container, 0, true));
+  expect(reads()).toBe(1);
+  act(() => { vi.advanceTimersByTime(15_000); });
+  expect(reads()).toBe(0);
+  act(() => { vi.advanceTimersByTime(1_000); });
+  expect(reads()).toBe(1);
+  act(() => { vi.advanceTimersByTime(15_000); });
+  act(() => { vi.advanceTimersByTime(2_000); });
+  expect(reads()).toBe(1);
+  fireEvent.load(created.at(-1)!);
+  expect(tile(view.container, 0)).toHaveAttribute("data-thumbnail-state", "ready");
+  expect(created).toHaveLength(3);
+});
+
+it("stops retrying a visible tile after three stalled reads until it becomes visible again", () => {
+  vi.useFakeTimers();
+  const view = render(<SentMessageAttachmentList attachments={attachments.slice(0, 1)} />);
+  act(() => setVisible(view.container, 0, true));
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    act(() => { vi.advanceTimersByTime(20_000); });
+  }
+  expect(created).toHaveLength(3);
+  expect(tile(view.container, 0)).toHaveAttribute("data-thumbnail-state", "loading");
+  act(() => { setVisible(view.container, 0, false); setVisible(view.container, 0, true); });
+  expect(created).toHaveLength(4);
+});
+
+it("admits waiting tiles in document order whatever order their visibility callbacks arrive in", () => {
+  const view = render(<SentMessageAttachmentList attachments={attachments} />);
+  act(() => { setVisible(view.container, 7, true); setVisible(view.container, 6, true); });
+  act(() => { for (let index = 5; index >= 0; index -= 1) setVisible(view.container, index, true); });
+  expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([]);
+  fireEvent.load(created[0]!);
+  expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([0]);
+  fireEvent.load(created[1]!);
+  expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([0, 1]);
+});
+
+it("lets never-tried tiles ahead of retried stalled tiles so healthy thumbnails keep main's schedule", () => {
+  vi.useFakeTimers();
+  const view = render(<SentMessageAttachmentList attachments={attachments} />);
+  const startedAt = new Map<HTMLImageElement, number>();
+  const firstRead = new Map<number, number>();
+  const readyAt = new Map<number, number>();
+  act(() => { for (let index = 0; index < 8; index += 1) setVisible(view.container, index, true); });
+  for (let now = 0; now <= 60_000; now += 500) {
+    for (const image of created.slice()) {
+      const source = image.getAttribute("src");
+      if (!source || !image.onload) continue;
+      if (!startedAt.has(image)) startedAt.set(image, now);
+      const index = Number(source.at(-1));
+      if (!firstRead.has(index)) firstRead.set(index, now);
+      if (index >= 2 && now - startedAt.get(image)! >= 3_000) {
+        fireEvent.load(image);
+        readyAt.set(index, now);
+      }
+    }
+    act(() => { vi.advanceTimersByTime(500); });
+  }
+  expect([...readyAt.keys()].sort()).toEqual([2, 3, 4, 5, 6, 7]);
+  expect(Math.max(firstRead.get(4)!, firstRead.get(5)!)).toBeLessThanOrEqual(18_500);
+  expect(Math.max(firstRead.get(6)!, firstRead.get(7)!)).toBeLessThanOrEqual(22_000);
+});

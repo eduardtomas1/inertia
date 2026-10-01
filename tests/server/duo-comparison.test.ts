@@ -397,6 +397,29 @@ afterEach(async () => {
 });
 
 describe("Duo third-model comparison", () => {
+  it.each(["left", "right", "judge"] as const)("rejects a managed scratch %s before creating shared-root chats", async (target) => {
+    const runtime = await createRuntime();
+    try {
+      const scratchPath = join(runtime.workspace, "scratch");
+      await mkdir(scratchPath);
+      const scratch = runtime.store.createProject("No project", scratchPath, {
+        workspaceKind: "scratch", activate: false,
+      });
+      const payload = comparisonPreparePayload(runtime);
+      if (target === "judge") payload.comparison!.projectId = scratch.id;
+      else payload.sides[target === "left" ? 0 : 1].projectId = scratch.id;
+
+      await expect(comparisonCoordinator(runtime).prepare(payload)).rejects.toThrow(
+        "Choose a project for each Duo chat and comparison.",
+      );
+      expect(runtime.store.shellSnapshot().conversations).toEqual([]);
+      expect(runtime.store.findPairedLaunch(payload.launchId)).toBeNull();
+      expect(runtime.provider.completions).toEqual([]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it.each(["throw", "reject"])("dispatches the durable judge once despite a sibling owner's %s", async (mode) => {
     let launches!: DuoLaunchCoordinator;
     const sourceOwner = vi.fn(() => {

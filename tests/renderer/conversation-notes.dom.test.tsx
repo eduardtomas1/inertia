@@ -44,7 +44,7 @@ describe("chat notes editor", () => {
     view.rerender(<ConversationNotes conversationId={second} online sendCommand={send} />);
     expect(screen.getByRole("textbox")).toHaveValue("");
     view.rerender(<ConversationNotes conversationId={first} online sendCommand={send} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save notes" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save notes" })).not.toHaveAttribute("aria-disabled"));
     await act(async () => { pending.resolve(result(second, "Other chat", 1)); });
     expect(screen.getByRole("textbox")).toHaveValue("Keep this draft");
     expect(screen.getByRole("status")).toHaveTextContent("Unsaved changes");
@@ -61,7 +61,7 @@ describe("chat notes editor", () => {
     edit("My draft"); fireEvent.click(screen.getByRole("button", { name: "Save notes" }));
     await screen.findByText("Notes changed in another window.");
     expect(screen.getByRole("textbox")).toHaveValue("My draft");
-    expect(screen.getByRole("button", { name: "Save notes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save notes" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: "Replace with my draft" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
     expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ payload: { conversationId, content: "My draft", expectedRevision: 2 } }));
@@ -76,7 +76,7 @@ describe("chat notes editor", () => {
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Original"));
     view.rerender(<ConversationNotes conversationId={conversationId} online={false} sendCommand={send} />);
     edit("Offline work");
-    expect(screen.getByRole("button", { name: "Save notes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save notes" })).toHaveAttribute("aria-disabled", "true");
     view.rerender(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
     await screen.findByText("Notes changed in another window.");
     expect(screen.getByRole("textbox")).toHaveValue("Offline work");
@@ -98,7 +98,7 @@ describe("chat notes editor", () => {
       edit("Newest draft");
       first.unmount();
       render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
-      await waitFor(() => expect(screen.getByRole("button", { name: "Save notes" })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole("button", { name: "Save notes" })).not.toHaveAttribute("aria-disabled"));
       expect(screen.getByRole("textbox")).toHaveValue("Newest draft");
     } finally { storage.mockRestore(); }
   });
@@ -123,6 +123,44 @@ describe("chat notes editor", () => {
       await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Updated elsewhere"));
       expect(screen.queryByText("Notes changed in another window.")).not.toBeInTheDocument();
     } finally { storage.mockRestore(); }
+  });
+
+  it("keeps Save notes focusable while it saves and once the note is saved", async () => {
+    const conversationId = id(); const pending = deferred();
+    const send = vi.fn<(command: ClientCommand) => Promise<ServerEvent>>()
+      .mockResolvedValueOnce(result(conversationId)).mockReturnValueOnce(pending.promise);
+    render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled());
+    const button = screen.getByRole("button", { name: "Save notes" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    edit("Draft");
+    expect(button).not.toHaveAttribute("aria-disabled");
+    button.focus(); fireEvent.click(button);
+    expect(screen.getByRole("status")).toHaveTextContent("Syncing…");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(button);
+    expect(send).toHaveBeenCalledTimes(2);
+    await act(async () => { pending.resolve(result(conversationId, "Draft", 1, "saved")); });
+    expect(screen.getByRole("status")).toHaveTextContent("Saved");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveFocus();
+  });
+
+  it("labels the refresh control and bounds the saved copy in a conflict", async () => {
+    const conversationId = id();
+    const send = vi.fn<(command: ClientCommand) => Promise<ServerEvent>>()
+      .mockResolvedValueOnce(result(conversationId, "Original", 1))
+      .mockResolvedValueOnce(result(conversationId, "Other window", 2, "conflict"));
+    render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
+    expect(screen.getByRole("button", { name: "Refresh notes" })).toHaveAttribute("title", "Refresh notes");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat notes" })).toHaveValue("Original"));
+    edit("My draft"); fireEvent.click(screen.getByRole("button", { name: "Save notes" }));
+    await screen.findByText("Notes changed in another window.");
+    const copy = screen.getByRole("region", { name: "Saved notes" });
+    expect(copy).toHaveTextContent("Other window");
+    expect(copy).toHaveAttribute("tabindex", "0");
   });
 
 });

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Check, RefreshCw, Save, StickyNote } from "lucide-react";
+import { Check, ChevronRight, RefreshCw, Save, StickyNote, TriangleAlert } from "lucide-react";
 import type { ClientCommand, ServerEvent } from "@shared/contracts";
 import {
   MAX_CONVERSATION_NOTE_CHARS,
   conversationNotesResultSchema,
   type ConversationNote,
 } from "@shared/conversation-notes";
-import { LoadingMark } from "./ui";
+import { IconButton } from "./ui";
 import "./ConversationNotes.css";
 
 export interface ConversationNotesProps {
@@ -14,6 +14,7 @@ export interface ConversationNotesProps {
   title?: string;
   online: boolean;
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
+  actions?: React.ReactNode;
 }
 
 interface NoteDraft { content: string; revision: number }
@@ -48,7 +49,7 @@ export function ConversationNotes(props: ConversationNotesProps): React.JSX.Elem
   return <NotesEditor key={props.conversationId} {...props} />;
 }
 
-function NotesEditor({ conversationId, title, online, sendCommand }: ConversationNotesProps): React.JSX.Element {
+function NotesEditor({ conversationId, title, online, sendCommand, actions }: ConversationNotesProps): React.JSX.Element {
   const labelId = useId();
   const [saved, setSaved] = useState<ConversationNote | null>(null);
   const [draft, setDraft] = useState<NoteDraft | null>(() => readDraft(conversationId));
@@ -126,41 +127,49 @@ function NotesEditor({ conversationId, title, online, sendCommand }: Conversatio
     }
   };
 
-  const useSaved = (): void => {
+  const keepSaved = (): void => {
     draftRef.current = null; setDraft(null); retainDraft(conversationId, null); setConflict(false); setError(null);
   };
+  const canSave = online && Boolean(saved) && dirty && !busy && !conflict;
 
   return <section className="conversation-notes" aria-labelledby={labelId}>
     <header className="panel-toolbar">
       <div className="panel-heading"><StickyNote size={17} aria-hidden="true" /><div className="panel-heading-copy">
-        <h2 id={labelId}>Notes</h2><span>{title ?? "For this chat"}</span>
+        <h2 id={labelId}>Notes</h2><span title={title}>{title ?? "For this chat"}</span>
       </div></div>
-      <button type="button" className="icon-button" aria-label="Refresh notes" disabled={!online || busy} onClick={() => { void load(); }}><RefreshCw size={15} /></button>
+      <div className="conversation-notes-actions">
+        <IconButton label="Refresh notes" aria-disabled={!online || busy || undefined} onClick={() => { void load(); }}><RefreshCw size={15} aria-hidden="true" /></IconButton>
+        {actions}
+      </div>
     </header>
-    <p className="conversation-notes-hint">Keep decisions, reminders, and next steps here. Notes are not sent to the agent.</p>
-    {error && <p className="conversation-notes-error" role="alert">{error}</p>}
-    {!saved && busy && <LoadingMark label="Loading notes" />}
-    <textarea aria-label="Chat notes" placeholder="What do you want to remember?" maxLength={MAX_CONVERSATION_NOTE_CHARS}
-      value={content} disabled={!saved && !draft} spellCheck
-      onChange={(event) => {
-        const next = { content: event.target.value, revision: draftRef.current?.revision ?? saved?.revision ?? 0 };
-        draftRef.current = next; setDraft(next); retainDraft(conversationId, next);
-      }}
-      onKeyDown={(event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-          event.preventDefault(); event.stopPropagation(); void save();
-        }
-      }} />
-    {conflict && <div className="conversation-notes-conflict" role="alert">
-      <strong>Notes changed in another window.</strong><p>Your draft is preserved. Compare it with the saved version before choosing which to keep.</p>
-      <details><summary>Show saved notes</summary><pre>{saved?.content || "The saved note is empty."}</pre></details>
-      <div><button type="button" className="secondary-button" disabled={busy} onClick={useSaved}>Use saved notes</button>
-        <button type="button" className="secondary-button" disabled={!online || busy} onClick={() => { void save(true); }}>Replace with my draft</button></div>
-    </div>}
-    <footer>
-      <span role="status">{!online ? "Offline · draft kept in this window" : busy ? "Saving or loading…" : dirty ? "Unsaved changes" : saved ? <><Check size={13} aria-hidden="true" />Saved</> : "Notes unavailable"}</span>
-      <span className="conversation-notes-count">{content.length.toLocaleString()} / 20,000</span>
-      <button type="button" className="primary-button" disabled={!online || !saved || !dirty || busy || conflict} onClick={() => { void save(); }}><Save size={14} aria-hidden="true" />Save notes</button>
-    </footer>
+    <div className="conversation-notes-body">
+      <p className="conversation-notes-hint">Keep decisions, reminders, and next steps here. Notes are not sent to the agent.</p>
+      {error && <p className="conversation-notes-error" role="alert">{error}</p>}
+      <textarea aria-label="Chat notes" placeholder="What do you want to remember?" maxLength={MAX_CONVERSATION_NOTE_CHARS}
+        value={content} disabled={!saved && !draft} spellCheck
+        onChange={(event) => {
+          const next = { content: event.target.value, revision: draftRef.current?.revision ?? saved?.revision ?? 0 };
+          draftRef.current = next; setDraft(next); retainDraft(conversationId, next);
+        }}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+            event.preventDefault(); event.stopPropagation(); void save();
+          }
+        }} />
+      {conflict && <div className="conversation-notes-conflict" role="alert">
+        <TriangleAlert size={14} aria-hidden="true" />
+        <div>
+          <strong>Notes changed in another window.</strong><p>Your draft is preserved. Compare it with the saved version before choosing which to keep.</p>
+          <details><summary>Show saved notes<ChevronRight size={13} aria-hidden="true" /></summary><pre tabIndex={0} role="region" aria-label="Saved notes">{saved?.content || "The saved note is empty."}</pre></details>
+          <div><button type="button" className="secondary-button" disabled={busy} onClick={keepSaved}>Use saved notes</button>
+            <button type="button" className="secondary-button" disabled={!online || busy} onClick={() => { void save(true); }}>Replace with my draft</button></div>
+        </div>
+      </div>}
+      <footer>
+        <span role="status">{!online ? "Offline · draft kept in this window" : busy ? "Syncing…" : dirty ? "Unsaved changes" : saved ? <><Check size={13} aria-hidden="true" />Saved</> : "Notes unavailable"}</span>
+        <span className="conversation-notes-count">{content.length.toLocaleString()} / 20,000</span>
+        <button type="button" className="primary-button" aria-disabled={!canSave || undefined} onClick={() => { if (canSave) void save(); }}><Save size={14} aria-hidden="true" />Save notes</button>
+      </footer>
+    </div>
   </section>;
 }

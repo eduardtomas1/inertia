@@ -37,10 +37,55 @@ describe("task board interactions", () => {
     expect(within(screen.getByRole("region", { name: "Done" })).getByRole("button", { name: "Ship notes" })).toBeVisible();
   });
 
+  it("keeps a settle control focused while its command is pending and after it fails", async () => {
+    const callbacks = props();
+    let fail!: (error: Error) => void;
+    callbacks.run.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+    render(<TaskBoard {...callbacks} />);
+    const settle = screen.getByRole("button", { name: "Settle Plan retries" });
+    settle.focus(); fireEvent.click(settle);
+    expect(settle).not.toBeDisabled();
+    expect(settle).toHaveAttribute("aria-disabled", "true");
+    expect(settle).toHaveTextContent("Saving…");
+    fireEvent.click(settle);
+    expect(callbacks.run).toHaveBeenCalledTimes(1);
+    fail(new Error("The task could not be updated."));
+    await screen.findByText("The task could not be updated.");
+    expect(settle).toHaveFocus();
+    expect(settle).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("keeps the title field focused while a task is created", async () => {
+    const callbacks = props();
+    let fail!: (error: Error) => void;
+    callbacks.run.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+    render(<TaskBoard {...callbacks} />);
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    const title = screen.getByRole("textbox", { name: "Task title" });
+    expect(title).toHaveAccessibleDescription("Create a chat to plan your work. The agent starts when you send a message.");
+    fireEvent.change(title, { target: { value: "Check cancellation" } });
+    fireEvent.submit(title);
+    expect(title).not.toBeDisabled();
+    expect(title).toHaveAttribute("readonly");
+    fail(new Error("The task could not be created."));
+    await screen.findByText("The task could not be created.");
+    expect(title).toHaveFocus();
+    expect(title).not.toHaveAttribute("readonly");
+  });
+
+  it("names empty columns in one quiet sentence", () => {
+    render(<TaskBoard {...props()} />);
+    expect(within(screen.getByRole("region", { name: "Working" })).getByText("No agents working.")).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Needs attention" })).getByText("Nothing needs your attention.")).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), { target: { value: "quarterly" } });
+    expect(screen.getAllByText("No matching tasks.")).toHaveLength(4);
+    expect(screen.getByText("No tasks match. Try another search or project.")).toBeVisible();
+  });
+
   it("filters cards and disables mutations offline", () => {
     render(<TaskBoard {...props()} online={false} />);
     expect(screen.getByRole("button", { name: "New task" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Settle Plan retries" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Settle Plan retries" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), { target: { value: "Ship" } });
     expect(screen.queryByRole("button", { name: "Plan retries" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ship notes" })).toBeVisible();

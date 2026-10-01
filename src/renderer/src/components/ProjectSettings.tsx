@@ -148,11 +148,11 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </Row>
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>
-    <section className="project-settings-card" aria-label="CLI conversation history"><Row title="CLI conversations" description="Bring existing Codex and Claude Code conversations into this project.">
-      <button type="button" disabled={blocked} onClick={() => setCliImportOpen(true)}>Import conversations…</button>
-    </Row></section>
-    {cliImportOpen && request && <Suspense fallback={<p role="status">Opening conversation importer…</p>}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} /></Suspense>}
+    {cliImportOpen && request && <Suspense fallback={null}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} /></Suspense>}
     <section className="project-settings-card" aria-label="Checkout settings">
+      <Row title="CLI conversations" description="Import Codex and Claude Code conversations started in this checkout. The original files are not changed.">
+        <button type="button" disabled={blocked} onClick={() => setCliImportOpen(true)}>Import conversations…</button>
+      </Row>
       <Row title="Project grouping" description="How this checkout joins project groups in navigation.">
         <ProjectSelect label="Project grouping" value={project.groupingMode ?? ""} disabled={blocked}
           options={{ "": `Use global (${settings.projectGrouping})`, repository: "Group by repository", "repository-path": "Group by repository and folder", separate: "Keep separate" }}

@@ -94,7 +94,7 @@ const budgets = {
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   // CLI import adds its launch control here; its preview stays separately deferred.
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 1_024,
-  deferredCliConversationImportJavaScript: 8 * kibibyte,
+  deferredCliConversationImportJavaScript: 8 * kibibyte + 718,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,

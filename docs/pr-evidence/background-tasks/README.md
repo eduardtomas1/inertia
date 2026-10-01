@@ -101,4 +101,6 @@ See [renderer-bundle.json](renderer-bundle.json) for every closure measured
 against `origin/main` (`2364d768`). The workbench first load grows by 1,036
 bytes, the detached chat first load by 263 bytes and shared core by 1,002
 bytes; each of those caps is main's cap plus exactly that growth. The
-Background tasks surface itself (12,085 bytes) loads on demand.
+Background tasks surface itself (12,590 bytes) loads on demand, and the
+running-card sweep adds 128 bytes to the entry stylesheet within its existing
+cap.

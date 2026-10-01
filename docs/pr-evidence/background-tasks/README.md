@@ -103,7 +103,7 @@ animated working indicator and composer stop control are canvas drawings that
 - Live telemetry from real providers; all data is seeded.
 
 See [renderer-bundle.json](renderer-bundle.json) for every closure measured
-against `origin/main` (`2364d768`). The workbench first load grows by 1,036
+against `origin/main` (`fd02e238`). The workbench first load grows by 1,036
 bytes, the detached chat first load by 263 bytes and shared core by 1,002
 bytes; each of those caps is main's cap plus exactly that growth. The
 Background tasks surface itself (12,590 bytes) loads on demand, and the

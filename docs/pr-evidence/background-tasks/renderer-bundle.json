@@ -1,6 +1,6 @@
 {
-  "baseline": "2364d768a71214bfbff7481bb5545cf19906a78f",
-  "after": "941c7ab4",
+  "baseline": "fd02e238356c617410081c9addbe5e106eb3dd90",
+  "after": "b7fcc064",
   "platform": "macOS 27.0.1 arm64, Node 22.23.2, same package-lock.json",
   "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of origin/main and the branch. The Background tasks surface is its own lazy chunk (tasks-*.js) with a lazily loaded stylesheet; its 12.5 KiB cap leaves 210 bytes of headroom. mainWorkbenchFirstLoadJavaScript, detachedChatFirstLoadJavaScript and coreJavaScript exceeded main's caps, so each cap is main's cap plus the exact measured growth. Every other cap is unchanged.",
   "measurements": {
@@ -185,9 +185,9 @@
       "withinCap": true
     },
     "mainWorkbenchFirstLoadJavaScript": {
-      "mainBytes": 853542,
+      "mainBytes": 853545,
       "mainCapBytes": 853557,
-      "afterBytes": 854578,
+      "afterBytes": 854581,
       "deltaFromMainBytes": 1036,
       "capBytes": 854593,
       "capChangeBytes": 1036,
@@ -203,9 +203,9 @@
       "withinCap": true
     },
     "entryCss": {
-      "mainBytes": 354742,
+      "mainBytes": 354815,
       "mainCapBytes": 355064,
-      "afterBytes": 354870,
+      "afterBytes": 354943,
       "deltaFromMainBytes": 128,
       "capBytes": 355064,
       "capChangeBytes": 0,
@@ -257,9 +257,9 @@
       "withinCap": true
     },
     "transcriptJavaScript": {
-      "mainBytes": 552627,
+      "mainBytes": 552665,
       "mainCapBytes": 614400,
-      "afterBytes": 552806,
+      "afterBytes": 552844,
       "deltaFromMainBytes": 179,
       "capBytes": 614400,
       "capChangeBytes": 0,
@@ -374,9 +374,9 @@
       "withinCap": true
     },
     "deferredTerminalJavaScript": {
-      "mainBytes": 26775,
+      "mainBytes": 26789,
       "mainCapBytes": 26871,
-      "afterBytes": 26775,
+      "afterBytes": 26789,
       "deltaFromMainBytes": 0,
       "capBytes": 26871,
       "capChangeBytes": 0,
@@ -437,11 +437,11 @@
       "withinCap": true
     },
     "coreJavaScript": {
-      "mainBytes": 2226045,
-      "mainCapBytes": 2226119,
-      "afterBytes": 2227047,
+      "mainBytes": 2226151,
+      "mainCapBytes": 2226225,
+      "afterBytes": 2227153,
       "deltaFromMainBytes": 1002,
-      "capBytes": 2227121,
+      "capBytes": 2227227,
       "capChangeBytes": 1002,
       "withinCap": true
     },

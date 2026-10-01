@@ -1,13 +1,16 @@
 Project Tools desktop evidence
 
-- `configure.png`: native Electron configuration panel captured from commit
-  `ca4861b2a3198d4e6d0639057c77fecdb9536489` at 1440 × 1000.
-- `live-preview.png` and `restart-preview.png`: the production ProjectToolsPanel
-  and production theme CSS rendered in Electron 44.4.5 with deterministic state
-  fixtures, at 530 × 1024. These show renderer presentation for the available,
-  missing-authentication and changed-configuration states. Provider execution is
-  covered separately by the protocol checks and native Electron scenario below.
-  Preview source: commit `ca4861b2a3198d4e6d0639057c77fecdb9536489`.
+- `configure.png`, `live.png` and `restart.png`: full native Electron captures
+  from the successful Linux ARM64 CI job, at 1440 × 1000.
+  Source: `ca4861b2a3198d4e6d0639057c77fecdb9536489`.
+  Workflow run: https://github.com/eduardtomas1/inertia/actions/runs/36853147739
+  Job: https://github.com/eduardtomas1/inertia/actions/runs/36853147739/job/110345655373
+  Artifact: `project-tools-screenshots-linux-arm64` (ID `11159731034`).
+  Archive SHA-256: `cee89c658fa9d78bc8890517f8d4da05f332f97267b9eedd7e3bc80f1f64eea5`.
+  The provider is a deterministic Codex app-server protocol fixture; the app,
+  IPC, persistence, credential lookup and run lifecycle are real.
+- The older `live-preview.png` and `restart-preview.png` are renderer-only
+  previews retained for provenance; the PR now uses the full native captures.
 - The feature-owned Electron scenario is `tests/e2e/project-tools.spec.ts`.
   It exercises the real renderer, IPC, database, credential broker and run lifecycle
   with a deterministic Codex app-server fixture, and attaches configuration,
@@ -22,6 +25,6 @@ Project Tools desktop evidence
   The connection validator and privileged token resolver reject these templates
   before launch; percent-encoded literal URL characters remain supported.
 
-The initial local screenshot comes from Linux. The cloud kernel lacks
+The local cloud kernel lacks
 `/proc/<pid>/task/<pid>/children`, so Inertia's existing process guardian correctly
-refuses native agent admission there. Native CI supplies the run-state evidence.
+refuses native agent admission there. The successful native Linux ARM64 CI job supplies the run-state evidence above.

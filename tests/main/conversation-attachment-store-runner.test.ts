@@ -41,6 +41,50 @@ function reportResult(child: FakeUtilityProcess, ok = true): void {
 }
 
 describe("conversation attachment store utility runner", () => {
+  it("retains ownership after a failed read validation until the utility exits", async () => {
+    const child = new FakeUtilityProcess();
+    const nextChild = new FakeUtilityProcess();
+    const spawn = vi.fn().mockReturnValueOnce(utility(child)).mockReturnValueOnce(utility(nextChild));
+    const runner = createConversationAttachmentStoreUtilityRunner({ spawn, maxActiveOperations: 1 });
+    const running = runner({
+      operation: "read",
+      root: operation.root,
+      rootDev: operation.rootDev,
+      rootIno: operation.rootIno,
+      rootUid: operation.rootUid,
+      id: operation.name,
+      stallBeforeRecordRevalidateMs: 0,
+    });
+    const result = vi.fn();
+    const stopped = vi.fn();
+    const terminated = vi.fn();
+    void running.result.catch(result);
+    void running.stopped.then(stopped);
+    void running.termination?.then(terminated);
+    const queued = runner(operation);
+    child.emit("spawn");
+    reportResult(child, false);
+    await Promise.resolve();
+    expect(child.postMessage).toHaveBeenLastCalledWith({
+      type: "conversation-attachment-store.result-ack",
+      operationId: operationId(child),
+    });
+    expect(result).not.toHaveBeenCalled();
+    expect(stopped).not.toHaveBeenCalled();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledOnce();
+
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow("read failed");
+    await expect(running.stopped).resolves.toBeUndefined();
+    await expect(running.termination).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
+    nextChild.emit("spawn");
+    reportResult(nextChild);
+    nextChild.emit("exit", 0);
+    await expect(queued.result).resolves.toBeUndefined();
+  });
+
   it("waits for exit after a valid result", async () => {
     const child = new FakeUtilityProcess();
     const runner = createConversationAttachmentStoreUtilityRunner({

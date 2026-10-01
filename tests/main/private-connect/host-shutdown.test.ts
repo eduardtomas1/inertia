@@ -29,6 +29,7 @@ import { PrivateConnectHost } from "../../../src/main/private-connect/host";
 const roots: string[] = [];
 
 afterEach(async () => {
+  serviceCreation.pending = null;
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
@@ -63,5 +64,41 @@ describe("Private Connect host shutdown evidence", () => {
     finishServiceShutdown();
     await shutdown;
     expect(host.shutdownStep()).toBe("stopped");
+  });
+
+  it("preserves cleanup failure when quitting during service creation", async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), "inertia-private-connect-host-"));
+    roots.push(userDataDirectory);
+    const host = PrivateConnectHost.create({
+      userDataDirectory,
+      staticRoot: userDataDirectory,
+      buildVersion: "test",
+      runtime: {} as never,
+      window: () => null,
+      assertTrusted: () => undefined,
+    });
+    await vi.waitFor(() => expect(serviceCreation.pending).not.toBeNull());
+
+    const failure = new Error("Tailscale Serve cleanup failed");
+    const cleanup = Promise.reject(failure);
+    // The real service retains its shutdown result for subsequent callers.
+    void cleanup.catch(() => undefined);
+    const service = {
+      shutdownStep: () => "disabling-serve",
+      shutdown: vi.fn(() => cleanup),
+      setPrivacyLocked: vi.fn(),
+      startIfEnabled: vi.fn(),
+    };
+    const shutdown = host.shutdown();
+    const rejected = expect(shutdown).rejects.toBe(failure);
+    serviceCreation.pending!(service);
+
+    await rejected;
+    expect(service.shutdown).toHaveBeenCalledOnce();
+    expect(host.shutdownStep()).toBe("disabling-serve");
+    expect(service.setPrivacyLocked).not.toHaveBeenCalled();
+    expect(service.startIfEnabled).not.toHaveBeenCalled();
+    await expect(host.shutdown()).rejects.toBe(failure);
+    expect(host.shutdownStep()).toBe("disabling-serve");
   });
 });

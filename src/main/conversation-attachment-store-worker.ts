@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import {
   CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE,
 } from "../node/conversation-attachment-store-child.js";
+import { metadataFromUnknown } from "../node/conversation-attachment-store-metadata.js";
 import {
   parseConversationAttachmentStoreWorkerRequest,
   type ConversationAttachmentStoreWorkerEvent,
@@ -11,7 +12,11 @@ import {
 type StoreOperationExecutor = (
   operation: unknown,
   onReadReady?: () => void,
-) => Promise<unknown>;
+) => Promise<undefined | { readonly missing: true } | {
+  readonly missing: false;
+  readonly metadata: string;
+  readonly bytesBase64: string;
+}>;
 
 // This compiles only the checked-in static source shared with the standalone
 // Node helper. No message or filesystem content can contribute executable
@@ -59,6 +64,29 @@ if (parentPort) {
         type: "conversation-attachment-store.ready",
         operationId: request.operationId,
       } satisfies ConversationAttachmentStoreWorkerEvent);
+    }).then(async (receipt) => {
+      if (receipt && !receipt.missing) {
+        // The shared operation has already bounded and securely read these
+        // bytes. Keep decompression and structural parsing in this killable
+        // utility, before a successful receipt can reach the main process.
+        const metadata = metadataFromUnknown(JSON.parse(receipt.metadata));
+        // Preserve inspect's missing-record result for invalid metadata so a
+        // later retention can replace the record using validated source bytes.
+        if (!metadata) return { missing: true };
+        const { validateAttachmentImport } = await import("./attachment-import.js");
+        const validated = validateAttachmentImport({
+          name: metadata.name,
+          mimeType: metadata.mimeType,
+          data: Buffer.from(receipt.bytesBase64, "base64"),
+        });
+        if (
+          validated.displayName !== metadata.name
+          || validated.mimeType !== metadata.mimeType
+          || validated.size !== metadata.size
+          || validated.digest !== metadata.digest
+        ) throw new Error("Invalid attachment content.");
+      }
+      return receipt;
     }).then(
       (receipt) => {
         finish({

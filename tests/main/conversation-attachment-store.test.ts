@@ -24,6 +24,7 @@ import {
 } from "../../src/node/conversation-attachment-store";
 import { runConversationAttachmentStoreChild } from
   "../../src/node/conversation-attachment-store-child";
+import { metadataFor } from "../../src/node/conversation-attachment-store-metadata";
 
 const roots: string[] = [];
 const png = Buffer.from(
@@ -1101,7 +1102,7 @@ describe("durable conversation attachment storage", () => {
       .rejects.toThrow();
   });
 
-  it("keeps referenced records with invalid metadata until a retry repairs them", async () => {
+  it.each(["empty", "invalid version"])("keeps referenced records with %s metadata until a retry repairs them", async (invalidMetadata) => {
     const dataDirectory = await root();
     const reads: string[] = [];
     const store = await openTestStore(dataDirectory, {
@@ -1119,7 +1120,10 @@ describe("durable conversation attachment storage", () => {
       await writeFile(join(interruptedDirectory, `${attachment.id}.png`), png, {
         mode: 0o600,
       });
-      await writeFile(join(interruptedDirectory, "metadata.json"), "", {
+      const metadata = invalidMetadata === "empty"
+        ? ""
+        : JSON.stringify({ ...metadataFor({ attachment, bytes: png }), version: 2 });
+      await writeFile(join(interruptedDirectory, "metadata.json"), metadata, {
         mode: 0o600,
       });
     }

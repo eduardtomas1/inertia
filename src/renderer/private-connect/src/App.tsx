@@ -27,6 +27,11 @@ type PairState =
   | { kind: "waiting"; requestId: string; comparisonCode: string; error: string | null }
   | { kind: "ready"; csrf: string; error: string | null };
 
+interface PromptDraft {
+  content: string;
+  pendingDelivery?: { content: string; deliveryId: string };
+}
+
 export default function App({
   initialPairingFragment,
   initialConversationId = null,
@@ -40,17 +45,14 @@ export default function App({
   const [shell, setShell] = useState<Shell | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("");
+  const [promptDrafts, setPromptDrafts] = useState<Record<string, PromptDraft>>({});
+  const promptDraft = selectedConversation ? promptDrafts[selectedConversation] : undefined;
+  const prompt = promptDraft?.content ?? "";
   const [busy, setBusy] = useState(false);
   const [socket, setSocket] = useState<PrivateConnectSocket | null>(null);
   const [hostUnavailable, setHostUnavailable] = useState(() => navigator.onLine === false);
   const [pairRetry, setPairRetry] = useState(0);
   const [requestedConversationId, setRequestedConversationId] = useState(initialConversationId);
-  const [pendingPromptDelivery, setPendingPromptDelivery] = useState<{
-    conversationId: string;
-    content: string;
-    deliveryId: string;
-  } | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(true);
   const stateValidatorRef = useRef<string | null>(null);
@@ -61,8 +63,7 @@ export default function App({
   const clearWorkspace = useCallback((): void => {
     setShell(null);
     setDetail(null);
-    setPrompt("");
-    setPendingPromptDelivery(null);
+    setPromptDrafts({});
     setSelectedConversation(null);
     selectedConversationRef.current = null;
     stateValidatorRef.current = null;
@@ -119,13 +120,15 @@ export default function App({
       result.state.conversations.map(({ id }) => id),
     );
     authorizedConversationIdsRef.current = authorizedConversationIds;
+    setPromptDrafts((current) => {
+      const retained = Object.entries(current).filter(([id]) => authorizedConversationIds.has(id));
+      return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained);
+    });
     const selected = selectedConversationRef.current;
     if (selected && !authorizedConversationIds.has(selected)) {
       selectedConversationRef.current = null;
       conversationValidatorsRef.current.delete(selected);
       setDetail(null);
-      setPrompt("");
-      setPendingPromptDelivery(null);
       followLatestRef.current = true;
       setSelectedConversation(null);
     }
@@ -386,19 +389,27 @@ export default function App({
     }
     setBusy(true);
     try {
-      const deliveryId = pendingPromptDelivery?.conversationId === selectedConversation
-        && pendingPromptDelivery.content === content
-        ? pendingPromptDelivery.deliveryId
+      const deliveryId = promptDraft?.pendingDelivery?.content === content
+        ? promptDraft.pendingDelivery.deliveryId
         : crypto.randomUUID();
-      setPendingPromptDelivery({ conversationId: selectedConversation, content, deliveryId });
+      setPromptDrafts((current) => ({
+        ...current,
+        [selectedConversation]: { content: prompt, pendingDelivery: { content, deliveryId } },
+      }));
       const response = await request({ protocolVersion: 1, type: "prompt.send", requestId: crypto.randomUUID(), deliveryId, conversationId: selectedConversation, content }, pair.csrf);
       if (!response.ok) {
         throw new Error(response.code === "uncertain"
           ? `${response.message} Sending again will safely check the same delivery.`
           : response.message);
       }
-      setPendingPromptDelivery(null);
-      setPrompt("");
+      setPromptDrafts((current) => {
+        const draft = current[selectedConversation];
+        if (draft?.pendingDelivery?.deliveryId !== deliveryId) return current;
+        const next = { ...current };
+        if (draft.content === prompt) delete next[selectedConversation];
+        else next[selectedConversation] = { content: draft.content };
+        return next;
+      });
     } catch (error) {
       setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "The prompt was not accepted." } : current);
     } finally { setBusy(false); }
@@ -464,7 +475,13 @@ export default function App({
         followLatestRef.current = true;
       }}
       onScrollIntent={(followLatest) => { followLatestRef.current = followLatest; }}
-      onPromptChange={setPrompt}
+      onPromptChange={(content) => {
+        if (!selectedConversation) return;
+        setPromptDrafts((current) => ({
+          ...current,
+          [selectedConversation]: { ...current[selectedConversation], content },
+        }));
+      }}
       onSendPrompt={() => void sendPrompt()}
       onAnswer={(answers) => void answerQuestions(answers)}
       onStopRun={() => void stopRun()}

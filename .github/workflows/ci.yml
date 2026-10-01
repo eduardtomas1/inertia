@@ -367,10 +367,6 @@ jobs:
         id: electron_test_binary
         run: node -e "console.log(require('electron'))"
 
-      - name: Verify worktree setup and capture its screenshots
-        if: runner.os == 'Linux' && matrix.arch == 'x64'
-        run: xvfb-run --auto-servernum npm exec -- playwright test tests/e2e/worktree-setup.spec.ts --project=isolated --output=test-results/worktree-setup
-
       - name: Run destructive runtime-recovery Electron sentinels
         run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
@@ -866,6 +862,10 @@ jobs:
       - name: Prepare Electron end-to-end binary
         id: electron_test_binary
         run: node -e "console.log(require('electron'))"
+
+      - name: Verify worktree setup and capture its screenshots
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
+        run: xvfb-run --auto-servernum npm exec -- playwright test tests/e2e/worktree-setup.spec.ts --project=isolated --output=test-results/worktree-setup
 
       - name: Run display-sensitive Electron end-to-end tests
         if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')

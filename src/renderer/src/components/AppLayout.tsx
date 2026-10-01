@@ -101,6 +101,7 @@ interface AppLayoutActions {
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
   openGlobalChat: () => void;
+  openNoProjectChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
@@ -895,6 +896,7 @@ export const AppLayout = memo(function AppLayout({
         sendCommand={connection.sendCommand}
         createConversation={() => actions.createConversation()}
         createConversationIn={(project) => actions.createConversation(project)}
+        openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}
       />

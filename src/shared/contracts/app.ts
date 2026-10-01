@@ -226,6 +226,8 @@ export type AppSettingsUpdate = Omit<Partial<AppSettings>, "workingIndicator" | 
 };
 
 export interface Project {
+  /** Runtime-owned container for chats started without a user project. */
+  workspaceKind?: "scratch";
   /** Optional only for snapshots created before project defaults shipped. */
   preferences?: import("../project-preferences").ProjectPreferences;
   id: string;

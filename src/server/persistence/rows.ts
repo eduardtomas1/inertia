@@ -32,6 +32,7 @@ import type { ContinuationReasonCode } from "../../shared/continuation-policy";
 import type { PersistedProviderMetadata } from "../provider/metadata";
 
 export interface ProjectRow {
+  workspace_kind?: "scratch" | null;
   preferences_json?: string | null;
   id: string;
   name: string;

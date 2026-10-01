@@ -1,4 +1,4 @@
-import { Check, Folders, Palette, Pin, Search, Settings, X } from "lucide-react";
+import { Check, Folders, MessageSquareDashed, Palette, Pin, Search, Settings, X } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Project } from "@shared/contracts";
@@ -15,7 +15,7 @@ function pinnedFirst<T extends { preferences?: Project["preferences"] }>(project
   return [...projects.filter((project) => project.preferences?.pinned), ...projects.filter((project) => !project.preferences?.pinned)];
 }
 
-export function ProjectSearchDialog({ projects, selectedId, includeAll = false, label, trigger, onClose, onSelect, onManage, onCustomize, onOpenSettings }: {
+export function ProjectSearchDialog({ projects, selectedId, includeAll = false, label, trigger, onClose, onSelect, onSelectNoProject, onManage, onCustomize, onOpenSettings }: {
   projects: readonly Project[];
   selectedId: string | null;
   includeAll?: boolean;
@@ -23,6 +23,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   trigger: HTMLButtonElement | null;
   onClose: () => void;
   onSelect: (id: string | null) => void;
+  onSelectNoProject?: () => void;
   onManage?: (project: Project) => void;
   onCustomize?: ProjectAppearanceUpdate;
   onOpenSettings?: (project: Project) => void;
@@ -38,12 +39,14 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   const restoreFocus = useRef(true);
   const id = useId();
   const needle = query.trim().toLocaleLowerCase();
+  const selection = onSelectNoProject && projects.some((project) => project.id === selectedId && project.workspaceKind === "scratch") ? "no-project" : selectedId;
   const items = [
     ...(includeAll ? [{ id: null, name: "All projects", path: "" }] : []),
-    ...pinnedFirst(projects),
+    ...(onSelectNoProject ? [{ id: "no-project", name: "No project", path: "" }] : []),
+    ...pinnedFirst(projects.filter((project) => !onSelectNoProject || project.workspaceKind !== "scratch")),
   ].filter((project) => `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle));
   const active = activeId === undefined ? items[0] : items.find((project) => project.id === activeId)
-    ?? items.find((project) => project.id === selectedId) ?? items[0];
+    ?? items.find((project) => project.id === selection) ?? items[0];
   const activeIndex = items.indexOf(active!);
   useNativePreviewSuspension(true);
   useLayoutEffect(() => {
@@ -85,6 +88,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   }, [customizing, customizingId]);
   const choose = (projectId: string | null): void => {
     onClose();
+    if (projectId === "no-project" && onSelectNoProject) { onSelectNoProject(); return; }
     onSelect(projectId);
   };
 
@@ -139,17 +143,17 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
                 <button type="button" id={`${id}-${index}`} role="option"
                   aria-label={"color" in project && project.preferences?.pinned ? `${project.name}, pinned` : project.name}
                   aria-describedby={project.path ? `${id}-${index}-path` : undefined}
-                  aria-selected={project.id === selectedId} className={index === activeIndex ? "is-active" : undefined}
+                  aria-selected={project.id === selection} className={index === activeIndex ? "is-active" : undefined}
                   onPointerMove={() => setActiveId(project.id)} onClick={() => choose(project.id)}>
-                  {"color" in project ? <ProjectIcon project={project} size={15} /> : <Folders size={15} aria-hidden="true" className="project-all-icon" />}
+                  {"color" in project ? <ProjectIcon project={project} size={15} /> : project.id === "no-project" ? <MessageSquareDashed size={15} aria-hidden="true" /> : <Folders size={15} aria-hidden="true" className="project-all-icon" />}
                   <span><strong><ProjectName project={"color" in project ? project : undefined}>{project.name}</ProjectName></strong>{project.path && <small id={`${id}-${index}-path`}>{project.path}</small>}</span>
                   {"color" in project && project.preferences?.pinned && <Pin size={11} aria-hidden="true" className="project-search-pin" />}
-                  {project.id === selectedId && <Check size={13} aria-hidden="true" />}
+                  {project.id === selection && <Check size={13} aria-hidden="true" />}
                 </button>
-                {project.id && onCustomize && <IconButton label={`Customise ${project.name}`} data-customize-project-id={project.id}
+                {project.id && "color" in project && !project.workspaceKind && onCustomize && <IconButton label={`Customise ${project.name}`} data-customize-project-id={project.id}
                   onPointerEnter={() => void loadProjectCustomizePanel()} onFocus={() => void loadProjectCustomizePanel()}
                   onClick={() => setCustomizingId(project.id)}><Palette size={13} /></IconButton>}
-                {project.id && onManage && <IconButton label={`Project actions for ${project.name}`} onClick={() => {
+                {project.id && "color" in project && !project.workspaceKind && onManage && <IconButton label={`Project actions for ${project.name}`} onClick={() => {
                   const candidate = projects.find((item) => item.id === project.id);
                   if (!candidate) return;
                   restoreFocus.current = false;

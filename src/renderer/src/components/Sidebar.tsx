@@ -923,10 +923,10 @@ function SidebarView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
             {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
           </div>
-          <IconButton label="New chat" aria-haspopup={(snapshot?.projects.length ?? 0) > 1 ? "dialog" : undefined} disabled={connectionStatus !== "online" || !snapshot?.projects.length} onClick={(event) => {
+          <IconButton label="New chat" aria-haspopup={(snapshot?.projects.length ?? 0) !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
             if ((snapshot?.projects.length ?? 0) > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
             const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
-            if (target) onCreateConversation(target);
+            if (target) onCreateConversation(target); else onChooseNewChatProject();
           }}><SquarePen size={17} /></IconButton>
           <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>

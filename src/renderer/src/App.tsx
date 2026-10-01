@@ -335,6 +335,7 @@ export default function App(): React.JSX.Element {
     importProject: confirmProjectImport,
     navigateToView,
     openGlobalChat,
+    openNoProjectChat,
     selectGlobalChatProject,
     selectProject,
     sendMessage,
@@ -348,6 +349,7 @@ export default function App(): React.JSX.Element {
     updateSplitConversationId,
     setSidebarOpen,
     setView,
+    setActionError,
   });
   const composerProject = connection.snapshot?.projects.find(
     ({ id }) => id === draftConversation.conversation?.projectId,
@@ -651,7 +653,7 @@ export default function App(): React.JSX.Element {
     targetProject: Project | null = composerProject,
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
-    if (!targetProject) return;
+    if (!targetProject) { openNoProjectChat(); return; }
     if (!connection.snapshot) return;
     deactivateGlobalChat();
     const payload = defaultConversationPayloadForProject(
@@ -1004,6 +1006,7 @@ export default function App(): React.JSX.Element {
     run: runUserCommand,
     importProject,
     openGlobalChat,
+    openNoProjectChat,
     selectProject,
     selectConversation,
     selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) =>

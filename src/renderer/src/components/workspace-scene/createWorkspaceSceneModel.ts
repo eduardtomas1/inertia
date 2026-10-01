@@ -201,7 +201,7 @@ export function visibleConversationLatestTurnSummary(
 
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
-  selectGlobalChatProject?: (project: Project) => void;
+  selectGlobalChatProject?: (project: Project | null) => void;
   createConversation: (
     targetProject?: Project | null,
     location?: NewConversationLocation,

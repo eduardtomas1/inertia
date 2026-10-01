@@ -32,6 +32,24 @@ const projects = [
 afterEach(() => vi.restoreAllMocks());
 
 describe("ProjectPicker", () => {
+  it("offers No project once and selects it without changing the saved project list", () => {
+    const { search, onChange } = mount();
+    fireEvent.change(search, { target: { value: "no project" } });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("shows the managed container as a selected No project choice without its filesystem path", () => {
+    const managed: Project = { ...projects[0]!, id: "scratch", name: "No project", workspaceKind: "scratch", path: "/private/data/scratch" };
+    const { onChange } = mount(managed, [...projects, managed]);
+    expect(screen.getAllByRole("option", { name: "No project" })).toHaveLength(1);
+    expect(screen.getByRole("option", { name: "No project" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByText(managed.path)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "No project" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   function mount(selectedProject = projects[0]!, choices = projects) {
     const onChange = vi.fn();
     const props = { projects: choices, selectedProject, disabled: false, onChange };
@@ -77,7 +95,7 @@ describe("ProjectPicker", () => {
     fireEvent.keyDown(search, { key: "End" });
     expect(scroll.mock.instances.at(-1)).toBe(screen.getByRole("option", { name: "Project 19" }));
     fireEvent.keyDown(search, { key: "Home" });
-    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Project 0" }).id);
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "No project" }).id);
   });
 
   it("preserves text editing and does not select while an IME composition is committing", () => {

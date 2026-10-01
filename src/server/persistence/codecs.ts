@@ -76,6 +76,7 @@ import type { StoredConversationWorktreeOwnership } from "./types";
 
 export function projectFromRow(row: ProjectRow): Project {
   return {
+    ...(row.workspace_kind === "scratch" ? { workspaceKind: "scratch" as const } : {}),
     preferences: parseProjectPreferences(row.preferences_json),
     id: row.id,
     name: row.name,

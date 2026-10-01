@@ -2724,6 +2724,8 @@ button.header-breadcrumb-project:hover {
   box-shadow: var(--shadow);
 }
 
+.welcome-scratch-button { margin-top: 10px; }
+
 .welcome-mark img {
   width: 50px;
   height: 50px;

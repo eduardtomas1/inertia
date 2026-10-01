@@ -10,6 +10,7 @@ import type { PersistenceContext } from "./context";
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
 
 type ProjectPersistenceContext = Pick<PersistenceContext, "database" | "requireProject">;
+export type NewProjectOptions = Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "workspaceKind">> & { activate?: boolean };
 
 export class ProjectRepository {
   private readonly pathAuthority: WorkspacePathAuthority;
@@ -21,13 +22,14 @@ export class ProjectRepository {
   create(
     name: string,
     projectPath: string,
-    identity: Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">> = {},
+    identity: NewProjectOptions = {},
   ): Project {
     const id = randomUUID();
     const now = new Date().toISOString();
     const projectCount = (this.context.database.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number }).count;
     const path = resolve(projectPath);
     const project: Project = {
+      ...(identity.workspaceKind ? { workspaceKind: identity.workspaceKind } : {}),
       id,
       name,
       path,
@@ -48,14 +50,14 @@ export class ProjectRepository {
         INSERT INTO projects (
           id, name, path, normalized_path, repository_identity, repository_root,
           repository_relative_path, grouping_mode, git_repository_limit,
-          color, status, created_at, updated_at
+          color, status, created_at, updated_at, workspace_kind
         ) VALUES (
           @id, @name, @path, @normalizedPath, @repositoryIdentity, @repositoryRoot,
           @repositoryRelativePath, @groupingMode, @gitRepositoryLimit,
-          @color, @status, @createdAt, @updatedAt
+          @color, @status, @createdAt, @updatedAt, @workspaceKind
         )
-      `).run(project);
-      this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
+      `).run({ ...project, workspaceKind: project.workspaceKind ?? null });
+      if (identity.activate !== false) this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
       this.pathAuthority.enrollProject(
         project.id,
         project.path,

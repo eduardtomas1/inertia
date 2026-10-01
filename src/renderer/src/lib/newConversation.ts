@@ -63,7 +63,8 @@ export function buildNewConversationPayload(
   if (location.kind === "defaults") {
     return {
       ...base,
-      useWorktree: (typeof projectId === "string" ? settings.newThreadMode : projectId.preferences?.workspace ?? settings.newThreadMode) === "worktree",
+      useWorktree: typeof projectId !== "string" && projectId.workspaceKind === "scratch" ? false
+        : (typeof projectId === "string" ? settings.newThreadMode : projectId.preferences?.workspace ?? settings.newThreadMode) === "worktree",
     };
   }
   if (location.kind === "isolated-worktree") {

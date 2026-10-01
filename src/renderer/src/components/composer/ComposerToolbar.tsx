@@ -131,6 +131,7 @@ export interface ComposerToolbarProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext: boolean;
+  scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   onUpdateConversation: (
     update: Partial<Pick<
@@ -209,6 +210,7 @@ export function ComposerToolbar({
   conversation,
   checkoutBranch,
   showCheckoutContext,
+  scratchWorkspace = false,
   newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
@@ -550,10 +552,10 @@ export function ComposerToolbar({
           ) : (
             <span className="composer-checkout-location">
               <FolderGit2 size={12} aria-hidden="true" />
-              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+              <span>{scratchWorkspace ? "Chat folder" : conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}
-          <CheckoutBranchSlot branch={visibleCheckoutBranch} />
+          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
         </div>
       )}
     </div>

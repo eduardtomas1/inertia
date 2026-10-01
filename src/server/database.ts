@@ -403,7 +403,7 @@ export class RuntimeStore {
   createProject(
     name: string,
     projectPath: string,
-    identity: Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">> = {},
+    identity: Parameters<ProjectRepository["create"]>[2] = {},
   ): Project {
     return this.projectRepository.create(name, projectPath, identity);
   }

@@ -37,6 +37,7 @@ export interface ComposerProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
+  scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   providers: ProviderInfo[];
   actions: ProjectAction[];
@@ -123,7 +124,7 @@ export interface NewChatProjectPicker {
   projects: readonly Project[];
   selectedProject: Project;
   disabled: boolean;
-  onChange: (project: Project) => void;
+  onChange: (project: Project | null) => void;
 }
 
 export interface ComposerQueuedPrompt {

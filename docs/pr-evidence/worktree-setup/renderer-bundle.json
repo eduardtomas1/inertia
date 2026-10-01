@@ -56,7 +56,8 @@
         "candidateBytes": 3928,
         "deltaBytes": 863,
         "previousCeilingBytes": 3328,
-        "newCeilingBytes": 4191
+        "newCeilingBytes": 4191,
+        "afterMergingReconnectGatingBytes": 3960
       },
       "deferredProjectSettingsJavaScript": {
         "baseBytes": 14223,

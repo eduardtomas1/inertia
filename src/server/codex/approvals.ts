@@ -526,3 +526,32 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   }
   return undefined;
 }
+
+export function codexApprovalResult(
+  protocol: ParsedCodexApprovalRequest["protocol"],
+  decision: AgentApprovalDecision,
+  requestedPermissions?: JsonObject,
+): JsonObject {
+  return protocol === "permissions"
+    ? {
+        permissions: decision === "approve"
+          ? requestedPermissions ?? {}
+          : {},
+        scope: "turn",
+      }
+    : protocol === "legacy-review"
+      ? {
+          decision: decision === "approve"
+            ? "approved"
+            : decision === "deny"
+              ? { denied: { rejection: "Denied by the user in Inertia." } }
+              : "abort",
+        }
+      : {
+        decision: decision === "approve"
+          ? "accept"
+          : decision === "deny"
+            ? "decline"
+            : "cancel",
+      };
+}

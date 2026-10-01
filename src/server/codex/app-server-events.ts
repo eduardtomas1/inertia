@@ -1,4 +1,5 @@
 import {
+  codexApprovalResult,
   isCodexApprovalRequestMethod,
   parseCodexApprovalRequest,
 } from "./approvals";
@@ -351,28 +352,7 @@ export class CodexAppServerEvents {
       this.host.options.onApprovalResolved?.(requestId, "cancelled");
       return true;
     }
-    const result: JsonObject = pending.protocol === "permissions"
-      ? {
-          permissions: decision === "approve"
-            ? pending.requestedPermissions ?? {}
-            : {},
-          scope: "turn",
-        }
-      : pending.protocol === "legacy-review"
-        ? {
-            decision: decision === "approve"
-              ? "approved"
-              : decision === "deny"
-                ? { denied: { rejection: "Denied by the user in Inertia." } }
-                : "abort",
-          }
-        : {
-          decision: decision === "approve"
-            ? "accept"
-            : decision === "deny"
-              ? "decline"
-              : "cancel",
-        };
+    const result = codexApprovalResult(pending.protocol, decision, pending.requestedPermissions);
     if (!this.host.writeMessage({ id: pending.rpcId, result })) return false;
     this.pendingApprovals.delete(requestId);
     this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));

@@ -203,6 +203,7 @@ export class CodexAppServerEvents {
       isSettled: host.isSettled,
       providerThreadId: host.providerThreadId,
       activeTurnId: host.activeTurnId,
+      isOwnedTurn: (providerThreadId, providerTurnId) => !host.cancelRequested() && this.approvalAuthority.owns({ providerThreadId, providerTurnId }),
       reserveServerRequest: (id) => this.reserveServerRequest(id),
       releaseServerRequest: (id) => {
         this.pendingServerRequestIds.delete(rpcRequestKey(id));
@@ -898,6 +899,7 @@ export class CodexAppServerEvents {
     if (method === "turn/completed") {
       if (!notificationTurnId) return;
       this.completedTurnIds.add(notificationTurnId);
+      this.hostTools.retireTurn(notificationTurnId);
       const turn = objectValue(params.turn);
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);
@@ -1244,5 +1246,4 @@ export class CodexAppServerEvents {
     items.add(itemId);
     return true;
   }
-
 }

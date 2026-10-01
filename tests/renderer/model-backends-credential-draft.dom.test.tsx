@@ -110,6 +110,43 @@ function credentialInput(container: HTMLElement): HTMLInputElement {
 }
 
 describe("backend credential draft identity", () => {
+  it.each(["save", "create"])("disables configuration edits while %s is pending but keeps cancellation available", async (operation) => {
+    const user = userEvent.setup();
+    const profileA = profile("custom:a", "Profile A", 1);
+    let finish!: (value: ModelBackendProfileDetail) => void;
+    const pending = new Promise<ModelBackendProfileDetail>((resolve) => { finish = resolve; });
+    const change = vi.fn(() => pending);
+    render(<ModelBackendsSettings
+      {...settingsProps([profileA], async () => profileA, vi.fn())}
+      onUpdate={change}
+      onCreate={change}
+    />);
+    if (operation === "save") {
+      await user.click(await screen.findByRole("button", { name: "Edit configuration" }));
+    } else {
+      await user.click(screen.getByRole("button", { name: "New profile" }));
+    }
+    const name = screen.getByRole("textbox", { name: "Name" });
+    const submittedName = (name as HTMLInputElement).value;
+    await user.click(screen.getByRole("button", {
+      name: operation === "save" ? "Save configuration" : "Create profile",
+    }));
+    expect(change).toHaveBeenCalledOnce();
+    expect(name).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Codex harness OpenAI Responses-compatible" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Primary model" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Advanced" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel profile editing" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    await user.type(name, "Unsaved newer name");
+    expect(name).toHaveValue(submittedName);
+
+    await act(async () => { finish(profileA); await pending; });
+
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New profile" })).toBeEnabled();
+  });
+
   it.each(["probe", "clear", "enable", "save", "create", "delete"])(
     "keeps the selected profile and its credential draft after a background %s completes",
     async (operation) => {

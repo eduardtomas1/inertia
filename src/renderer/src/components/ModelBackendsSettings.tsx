@@ -460,11 +460,9 @@ export function ModelBackendsSettings({
           className="secondary-button"
           disabled={disabled || Boolean(busy)}
           onClick={() => {
-            selectionEpochRef.current += 1;
+            cancelEditing();
             setCredentialDraft(null);
             setDraft(defaultDraft());
-            setOriginalDraft(null);
-            setEditingId(null);
             setDetail(null);
             setError(null);
           }}
@@ -518,68 +516,70 @@ export function ModelBackendsSettings({
                 <button type="button" className="icon-button" aria-label="Cancel profile editing" onClick={cancelEditing}><X size={15} /></button>
               </div>
 
-              <div className="backend-form-section">
-                <span className="backend-section-label">1 · Harness</span>
-                <div className="backend-choice-grid">
-                  <button type="button" disabled={editingBuiltIn} aria-pressed={draft.harnessId === "claude-agent-sdk"} className={clsx(draft.harnessId === "claude-agent-sdk" && "is-active")} onClick={() => setHarness("claude-agent-sdk")}><Bot size={16} /><span><strong>Claude harness</strong><small>Anthropic Messages-compatible</small></span>{draft.harnessId === "claude-agent-sdk" && <Check size={14} />}</button>
-                  <button type="button" disabled={editingBuiltIn} aria-pressed={draft.harnessId === "codex-app-server"} className={clsx(draft.harnessId === "codex-app-server" && "is-active")} onClick={() => setHarness("codex-app-server")}><CloudCog size={16} /><span><strong>Codex harness</strong><small>OpenAI Responses-compatible</small></span>{draft.harnessId === "codex-app-server" && <Check size={14} />}</button>
-                </div>
-              </div>
-
-              <div className="backend-form-section">
-                <span className="backend-section-label">2 · Backend profile</span>
-                <div className="settings-form-grid">
-                  <label><span>Name</span><input disabled={editingBuiltIn} value={draft.displayName} maxLength={200} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
-                  <label><span>Authentication</span><select disabled={editingBuiltIn} value={draft.authenticationMode} onChange={(event) => setDraft({ ...draft, authenticationMode: event.target.value as ModelBackendProfileDraft["authenticationMode"] })}><option value="api-key">API key</option><option value="bearer-token">Bearer token</option><option value="none">No credential</option></select></label>
-                  <label className="backend-base-url-field"><span>Base URL</span><input disabled={editingBuiltIn} value={draft.baseUrl} maxLength={2048} spellCheck={false} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label>
-                </div>
-                <label className="backend-inline-toggle"><Switch label="Allow localhost HTTP" checked={draft.allowInsecureLocalhost} disabled={editingBuiltIn} onChange={(allowInsecureLocalhost) => setDraft({ ...draft, allowInsecureLocalhost })} /><span><strong>Allow localhost HTTP</strong><small>{editingBuiltIn ? "Built-in connection settings are fixed; model mappings remain editable." : "Advanced local-development exception only. Other endpoints must use HTTPS."}</small></span></label>
-              </div>
-
-              <div className="backend-form-section">
-                <div className="backend-model-editor-heading">
-                  <span className="backend-section-label">3 · Models</span>
-                  <button type="button" className="secondary-button" disabled={editingBuiltIn} onClick={addDraftModel}><Plus size={13} />Add model</button>
-                </div>
-                <div className="backend-editable-models">
-                  {draft.models.map((model, index) => (
-                    <div className="backend-editable-model" key={index}>
-                      <label><span>Model ID</span><input disabled={editingBuiltIn} value={model.id} maxLength={500} spellCheck={false} onChange={(event) => updateDraftModel(index, "id", event.target.value)} /></label>
-                      <label><span>Display name</span><input disabled={editingBuiltIn} value={model.displayName} maxLength={200} onChange={(event) => updateDraftModel(index, "displayName", event.target.value)} /></label>
-                      <label><span>Context tokens</span><input disabled={editingBuiltIn} type="number" min={8192} max={100000000} value={model.contextWindowTokens ?? ""} placeholder="Unknown" onChange={(event) => updateDraftModel(index, "contextWindowTokens", event.target.value)} /></label>
-                      <button type="button" className="icon-button" aria-label={`Remove ${model.displayName}`} disabled={editingBuiltIn || draft.models.length <= 1} onClick={() => removeDraftModel(index)}><Trash2 size={14} /></button>
-                    </div>
-                  ))}
-                </div>
-                {draft.harnessId === "claude-agent-sdk" && (
-                  <div className="backend-routing-mode">
-                    <span><strong>Model mapping</strong><small>Simple routes every Claude tier and subagent to the primary model. Advanced mappings can choose any configured model.</small></span>
-                    <div role="radiogroup" aria-label="Model mapping" {...routingRadios.groupProps}>
-                      <button type="button" className={!advanced ? "is-active" : undefined} {...routingRadios.radioProps("simple")}>Simple</button>
-                      <button type="button" className={advanced ? "is-active" : undefined} {...routingRadios.radioProps("advanced")}>Advanced</button>
-                    </div>
+              <fieldset disabled={busy === "save" || busy === "create"}>
+                <div className="backend-form-section">
+                  <span className="backend-section-label">1 · Harness</span>
+                  <div className="backend-choice-grid">
+                    <button type="button" disabled={editingBuiltIn} aria-pressed={draft.harnessId === "claude-agent-sdk"} className={clsx(draft.harnessId === "claude-agent-sdk" && "is-active")} onClick={() => setHarness("claude-agent-sdk")}><Bot size={16} /><span><strong>Claude harness</strong><small>Anthropic Messages-compatible</small></span>{draft.harnessId === "claude-agent-sdk" && <Check size={14} />}</button>
+                    <button type="button" disabled={editingBuiltIn} aria-pressed={draft.harnessId === "codex-app-server"} className={clsx(draft.harnessId === "codex-app-server" && "is-active")} onClick={() => setHarness("codex-app-server")}><CloudCog size={16} /><span><strong>Codex harness</strong><small>OpenAI Responses-compatible</small></span>{draft.harnessId === "codex-app-server" && <Check size={14} />}</button>
                   </div>
-                )}
-                <div className="backend-tier-grid backend-primary-model">
-                  <label><span>Primary model</span><select value={draft.routing.primaryModelId} onChange={(event) => setDraft({ ...draft, routing: { ...draft.routing, primaryModelId: event.target.value } })}>{draft.models.map((model) => <option value={model.id} key={model.id}>{model.displayName} · {model.id}</option>)}</select></label>
                 </div>
-                {draft.routing.mode === "advanced" && (
-                  <div className="backend-tier-grid">
-                    {(["fable", "opus", "sonnet", "haiku"] as const).map((tier) => (
-                      <label key={tier}><span>{tier[0].toUpperCase() + tier.slice(1)}</span><select value={draft.routing.mode === "advanced" ? draft.routing.tierModels[tier] : ""} onChange={(event) => {
-                        if (draft.routing.mode !== "advanced") return;
-                        setDraft({ ...draft, routing: { ...draft.routing, tierModels: { ...draft.routing.tierModels, [tier]: event.target.value } } });
-                      }}>{draft.models.map((model) => <option value={model.id} key={model.id}>{model.displayName} · {model.id}</option>)}</select></label>
+
+                <div className="backend-form-section">
+                  <span className="backend-section-label">2 · Backend profile</span>
+                  <div className="settings-form-grid">
+                    <label><span>Name</span><input disabled={editingBuiltIn} value={draft.displayName} maxLength={200} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
+                    <label><span>Authentication</span><select disabled={editingBuiltIn} value={draft.authenticationMode} onChange={(event) => setDraft({ ...draft, authenticationMode: event.target.value as ModelBackendProfileDraft["authenticationMode"] })}><option value="api-key">API key</option><option value="bearer-token">Bearer token</option><option value="none">No credential</option></select></label>
+                    <label className="backend-base-url-field"><span>Base URL</span><input disabled={editingBuiltIn} value={draft.baseUrl} maxLength={2048} spellCheck={false} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label>
+                  </div>
+                  <label className="backend-inline-toggle"><Switch label="Allow localhost HTTP" checked={draft.allowInsecureLocalhost} disabled={editingBuiltIn} onChange={(allowInsecureLocalhost) => setDraft({ ...draft, allowInsecureLocalhost })} /><span><strong>Allow localhost HTTP</strong><small>{editingBuiltIn ? "Built-in connection settings are fixed; model mappings remain editable." : "Advanced local-development exception only. Other endpoints must use HTTPS."}</small></span></label>
+                </div>
+
+                <div className="backend-form-section">
+                  <div className="backend-model-editor-heading">
+                    <span className="backend-section-label">3 · Models</span>
+                    <button type="button" className="secondary-button" disabled={editingBuiltIn} onClick={addDraftModel}><Plus size={13} />Add model</button>
+                  </div>
+                  <div className="backend-editable-models">
+                    {draft.models.map((model, index) => (
+                      <div className="backend-editable-model" key={index}>
+                        <label><span>Model ID</span><input disabled={editingBuiltIn} value={model.id} maxLength={500} spellCheck={false} onChange={(event) => updateDraftModel(index, "id", event.target.value)} /></label>
+                        <label><span>Display name</span><input disabled={editingBuiltIn} value={model.displayName} maxLength={200} onChange={(event) => updateDraftModel(index, "displayName", event.target.value)} /></label>
+                        <label><span>Context tokens</span><input disabled={editingBuiltIn} type="number" min={8192} max={100000000} value={model.contextWindowTokens ?? ""} placeholder="Unknown" onChange={(event) => updateDraftModel(index, "contextWindowTokens", event.target.value)} /></label>
+                        <button type="button" className="icon-button" aria-label={`Remove ${model.displayName}`} disabled={editingBuiltIn || draft.models.length <= 1} onClick={() => removeDraftModel(index)}><Trash2 size={14} /></button>
+                      </div>
                     ))}
-                    <label><span>Subagents</span><select value={draft.routing.subagentModelId} onChange={(event) => {
-                      if (draft.routing.mode !== "advanced") return;
-                      setDraft({ ...draft, routing: { ...draft.routing, subagentModelId: event.target.value } });
-                    }}>{draft.models.map((model) => <option value={model.id} key={model.id}>{model.displayName} · {model.id}</option>)}</select></label>
-                    <label><span>Compaction</span><select value="unavailable" disabled><option value="unavailable">Unavailable in Claude harness override</option></select></label>
                   </div>
-                )}
-              </div>
+                  {draft.harnessId === "claude-agent-sdk" && (
+                    <div className="backend-routing-mode">
+                      <span><strong>Model mapping</strong><small>Simple routes every Claude tier and subagent to the primary model. Advanced mappings can choose any configured model.</small></span>
+                      <div role="radiogroup" aria-label="Model mapping" {...routingRadios.groupProps}>
+                        <button type="button" className={!advanced ? "is-active" : undefined} {...routingRadios.radioProps("simple")}>Simple</button>
+                        <button type="button" className={advanced ? "is-active" : undefined} {...routingRadios.radioProps("advanced")}>Advanced</button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="backend-tier-grid backend-primary-model">
+                    <label><span>Primary model</span><select value={draft.routing.primaryModelId} onChange={(event) => setDraft({ ...draft, routing: { ...draft.routing, primaryModelId: event.target.value } })}>{draft.models.map((model) => <option value={model.id} key={model.id}>{model.displayName} · {model.id}</option>)}</select></label>
+                  </div>
+                  {draft.routing.mode === "advanced" && (
+                    <div className="backend-tier-grid">
+                      {(["fable", "opus", "sonnet", "haiku"] as const).map((tier) => (
+                        <label key={tier}><span>{tier[0].toUpperCase() + tier.slice(1)}</span><select value={draft.routing.mode === "advanced" ? draft.routing.tierModels[tier] : ""} onChange={(event) => {
+                          if (draft.routing.mode !== "advanced") return;
+                          setDraft({ ...draft, routing: { ...draft.routing, tierModels: { ...draft.routing.tierModels, [tier]: event.target.value } } });
+                        }}>{draft.models.map((model) => <option value={model.id} key={model.id}>{model.displayName} · {model.id}</option>)}</select></label>
+                      ))}
+                      <label><span>Subagents</span><select value={draft.routing.subagentModelId} onChange={(event) => {
+                        if (draft.routing.mode !== "advanced") return;
+                        setDraft({ ...draft, routing: { ...draft.routing, subagentModelId: event.target.value } });
+                      }}>{draft.models.map((model) => <option value={model.id} key={model.id}>{model.displayName} · {model.id}</option>)}</select></label>
+                      <label><span>Compaction</span><select value="unavailable" disabled><option value="unavailable">Unavailable in Claude harness override</option></select></label>
+                    </div>
+                  )}
+                </div>
 
+              </fieldset>
               <div className="backend-editor-actions">
                 <button type="button" className="secondary-button" onClick={cancelEditing}>Cancel</button>
                 <button type="button" className="primary-button" disabled={disabled || Boolean(busy)} onClick={() => { void create(); }}>{busy === "create" ? "Creating…" : busy === "save" ? "Saving…" : editingId ? "Save configuration" : "Create profile"}</button>

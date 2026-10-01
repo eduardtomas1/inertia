@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -237,6 +238,47 @@ describe("Codex native approval turn authority", () => {
     } finally { h.events.dispose(); }
   });
 
+  it.each([
+    ["thread/closed", {}],
+    ["error", { willRetry: false, error: { message: "Child exited" } }],
+    ["thread/status/changed", { status: { type: "systemError" } }],
+  ] as const)("does not restore approval authority after a child %s", (method, params) => {
+    for (const delayedStart of [false, true]) {
+      const h = interactionHarness();
+      try {
+        registerChild(h);
+        const started = { threadId: "approval-child", turn: { id: "child-turn", status: "inProgress" } };
+        h.events.handleNotification("turn/started", started);
+        h.events.handleServerRequest("child-approval", "item/commandExecution/requestApproval", approvalParams("approval-child", "child-turn"));
+        expect(h.approvals).toHaveLength(1);
+        h.events.handleNotification(method, { ...params, threadId: "approval-child" });
+        if (delayedStart) h.events.handleNotification("turn/started", started);
+        expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(false);
+        expect(h.writes.some(({ result }) => (result as JsonObject)?.decision === "accept")).toBe(false);
+      } finally { h.events.dispose(); }
+    }
+  });
+
+  it.each([
+    ["thread/closed", {}],
+    ["error", { willRetry: false, error: { message: "Child exited" } }],
+    ["thread/status/changed", { status: { type: "systemError" } }],
+  ] as const)("allows a fresh child turn after %s while keeping its old turn retired", (method, params) => {
+    const h = interactionHarness();
+    try {
+      registerChild(h);
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "child-turn", status: "inProgress" } });
+      h.events.handleNotification(method, { ...params, threadId: "approval-child" });
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "resumed-turn", status: "inProgress" } });
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "child-turn", status: "inProgress" } });
+      h.events.handleServerRequest("fresh-approval", "item/commandExecution/requestApproval", approvalParams("approval-child", "resumed-turn"));
+      expect(h.approvals).toHaveLength(1);
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+      expect(h.writes).toEqual([{ id: "fresh-approval", result: { decision: "accept" } }]);
+      expect(h.cancel).not.toHaveBeenCalled();
+    } finally { h.events.dispose(); }
+  });
+
   it("rejects an approval for a completed child turn without waiting or resurfacing it", () => {
     const h = interactionHarness();
     try {
@@ -246,6 +288,30 @@ describe("Codex native approval turn authority", () => {
       expect(h.approvals).toEqual([]);
       expect(h.writes).toEqual([{ id: "child", error: expect.any(Object) }]);
       expect(h.cancel).toHaveBeenCalledOnce();
+    } finally { h.events.dispose(); }
+  });
+
+  it("fails closed at the child-turn history limit without reviving retired approvals", () => {
+    const h = interactionHarness();
+    try {
+      registerChild(h);
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "original-turn", status: "inProgress" } });
+      h.events.handleServerRequest("old-approval", "item/commandExecution/requestApproval", approvalParams("approval-child", "original-turn"));
+      h.events.handleNotification("thread/closed", { threadId: "approval-child" });
+      for (let index = 0; index < 1_023; index += 1) {
+        const turn = { id: `fresh-${index}`, status: "inProgress" };
+        h.events.handleNotification("turn/started", { threadId: "approval-child", turn });
+        h.events.handleNotification("turn/completed", { threadId: "approval-child", turn: { ...turn, status: "completed" } });
+      }
+      expect(h.cancel).not.toHaveBeenCalled();
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "history-overflow", status: "inProgress" } });
+      h.events.handleNotification("turn/completed", { threadId: "approval-child", turn: { id: "history-overflow", status: "completed" } });
+      expect(h.cancel).toHaveBeenCalledExactlyOnceWith("malformed-protocol");
+      expect(h.rememberFailure).toHaveBeenCalledWith(
+        "malformed-protocol", expect.any(String), expect.stringContaining("1024-turn delegated-agent history limit"),
+      );
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "original-turn", status: "inProgress" } });
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(false);
     } finally { h.events.dispose(); }
   });
 

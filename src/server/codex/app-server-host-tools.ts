@@ -8,6 +8,7 @@ import type { CodexAppServerOptions } from "./types";
 
 interface PendingHostToolCall {
   rpcId: RpcId;
+  providerTurnId: string;
   controller: AbortController;
 }
 
@@ -16,6 +17,7 @@ export interface CodexHostToolRuntimeHost {
   isSettled(): boolean;
   providerThreadId(): string | undefined;
   activeTurnId(): string | undefined;
+  isOwnedTurn(threadId: string, turnId: string): boolean;
   reserveServerRequest(id: RpcId): boolean;
   releaseServerRequest(id: RpcId): void;
   writeMessage(message: JsonObject): boolean;
@@ -93,6 +95,7 @@ export class CodexHostToolRuntime {
       || providerThreadId !== this.host.providerThreadId()
       || !providerTurnId
       || providerTurnId !== this.host.activeTurnId()
+      || !this.host.isOwnedTurn(providerThreadId, providerTurnId)
       || !toolCallId
       || !tool
       || !providerHostToolAccepted(bridge, tool)
@@ -119,7 +122,7 @@ export class CodexHostToolRuntime {
     this.seenCallIds.add(toolCallId);
     if (!this.host.reserveServerRequest(id)) return;
     const controller = new AbortController();
-    const pending = { rpcId: id, controller };
+    const pending = { rpcId: id, providerTurnId, controller };
     this.pendingCalls.set(toolCallId, pending);
     void this.runtime!.invoke({
       callId: toolCallId,
@@ -146,6 +149,12 @@ export class CodexHostToolRuntime {
       this.host.releaseServerRequest(pending.rpcId);
     }
     this.pendingCalls.clear();
+  }
+
+  retireTurn(providerTurnId: string): void {
+    for (const pending of this.pendingCalls.values()) {
+      if (pending.providerTurnId === providerTurnId) pending.controller.abort();
+    }
   }
 
   private respond(
@@ -176,7 +185,6 @@ export class CodexHostToolRuntime {
         success: result.success,
       },
     });
-    this.host.releaseServerRequest(pending.rpcId);
     if (!written) this.host.cancel();
   }
 
@@ -186,6 +194,7 @@ export class CodexHostToolRuntime {
   ): void {
     if (this.pendingCalls.get(toolCallId) === pendingCall) {
       this.pendingCalls.delete(toolCallId);
+      this.host.releaseServerRequest(pendingCall.rpcId);
     }
   }
 

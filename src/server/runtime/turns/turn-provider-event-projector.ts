@@ -5,7 +5,10 @@ import type {
   SubagentTrace,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
-import type { ProviderEvent } from "../../provider/contracts";
+import type {
+  ProviderEvent,
+  ProviderSubagentEvent,
+} from "../../provider/contracts";
 import {
   agentActivityKind,
   agentActivityStatus,
@@ -19,9 +22,11 @@ import {
 import type {
   ActiveTurn,
   TurnControllerHooks,
+  TurnTimerScheduler,
 } from "./turn-controller-types";
 import type { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import type { TurnStreamProjection } from "./turn-stream-projection";
+import { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 
 export interface TurnProviderEventProjectorOptions {
   store: RuntimeStore;
@@ -30,6 +35,7 @@ export interface TurnProviderEventProjectorOptions {
   streams: TurnStreamProjection;
   activities: TurnActivityProjection;
   interactions: TurnInteractionCoordinator;
+  scheduler: TurnTimerScheduler;
   now(): string;
   transition(
     active: ActiveTurn,
@@ -261,37 +267,56 @@ export class TurnProviderEventProjector {
         }
         broadcastTurnSnapshot(this.options.hooks);
         break;
-      case "subagent": {
-        const persisted = this.options.store.upsertSubagentTrace({
-          conversationId: active.conversation.id,
-          runId: active.turn.runId,
-          turnId: active.turn.id,
-          providerId: active.turn.providerId,
-          providerTaskId: event.providerTaskId,
-          providerAgentId: event.providerAgentId,
-          parentProviderAgentId: event.parentProviderAgentId,
-          parentProviderToolUseId: event.parentProviderToolUseId,
-          providerToolUseId: event.providerToolUseId,
-          providerRole: event.providerRole,
-          providerName: event.providerName,
-          providerStatus: event.providerStatus ?? null,
-          status: event.status,
-          isLive: event.isLive,
-          description: event.description,
-          progress: event.progress,
-          result: event.result,
-          sequence: event.sequence,
-          updatedAt: this.options.now(),
+      case "subagent":
+        active.subagentTelemetry ??= new TurnSubagentTelemetry({
+          scheduler: this.options.scheduler,
+          nowMs: () => Date.parse(this.options.now()),
+          write: (subagent, updatedAt) =>
+            this.persistSubagent(active, subagent, updatedAt),
         });
-        if (persisted?.changed) {
-          this.options.hooks.broadcast({
-            type: "agent.subagent.updated",
-            trace: persisted.trace,
-          });
-          this.options.observeSubagent(active, persisted.trace);
-        }
+        active.subagentTelemetry.project(event, this.options.now());
         break;
-      }
     }
+  }
+
+  private persistSubagent(
+    active: ActiveTurn,
+    event: ProviderSubagentEvent,
+    updatedAt: string,
+  ): ReturnType<RuntimeStore["upsertSubagentTrace"]> {
+    const persisted = this.options.store.upsertSubagentTrace({
+      conversationId: active.conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      providerId: active.turn.providerId,
+      providerTaskId: event.providerTaskId,
+      providerAgentId: event.providerAgentId,
+      parentProviderAgentId: event.parentProviderAgentId,
+      parentProviderToolUseId: event.parentProviderToolUseId,
+      providerToolUseId: event.providerToolUseId,
+      providerRole: event.providerRole,
+      providerName: event.providerName,
+      providerStatus: event.providerStatus ?? null,
+      status: event.status,
+      isLive: event.isLive,
+      description: event.description,
+      progress: event.progress,
+      result: event.result,
+      model: event.model ?? null,
+      activity: event.activity ?? null,
+      usage: event.usage ?? null,
+      toolUseCount: event.toolUseCount ?? null,
+      durationMs: event.durationMs ?? null,
+      sequence: event.sequence,
+      updatedAt,
+    });
+    if (persisted?.changed) {
+      this.options.hooks.broadcast({
+        type: "agent.subagent.updated",
+        trace: persisted.trace,
+      });
+      this.options.observeSubagent(active, persisted.trace);
+    }
+    return persisted;
   }
 }

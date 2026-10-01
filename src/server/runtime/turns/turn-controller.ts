@@ -263,6 +263,7 @@ export class TurnController {
       streams: this.streams,
       activities: this.activities,
       interactions: this.interactions,
+      scheduler: this.scheduler,
       now: () => this.now(),
       transition: (active, status, providerState) => this.transition(
         active,

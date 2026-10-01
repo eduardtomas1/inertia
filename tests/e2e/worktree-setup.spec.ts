@@ -62,12 +62,12 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
     await expect(card.getByText("Worktree setup needs attention", { exact: true })).toBeVisible();
     await expect(composer).toHaveValue(prompt);
     await card.getByRole("button", { name: "Show setup output", exact: true }).click();
-    await expect(card.getByLabel("Setup output")).toContainText("Dependency installation failed");
+    await expect(card.getByLabel("Setup output", { exact: true })).toContainText("Dependency installation failed");
     await capture("worktree-setup-recovery");
     expect(readChat()?.latestTurn).toBeNull();
     await card.getByRole("button", { name: "Retry setup", exact: true }).click();
     await expect(card.getByText("Worktree ready", { exact: true })).toBeVisible();
-    await expect(card.getByLabel("Setup output")).toContainText("Dependencies installed");
+    await expect(card.getByLabel("Setup output", { exact: true })).toContainText("Dependencies installed");
     expect(readChat()?.worktreePath).toBe(worktreePath);
     expect(readFileSync(join(worktreePath, "first-attempt"), "utf8")).toBe("kept");
     expect(readFileSync(join(worktreePath, "setup-ready"), "utf8")).toBe("ready");

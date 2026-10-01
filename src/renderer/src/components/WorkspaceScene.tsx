@@ -202,7 +202,7 @@ function WorkspaceToolSurface({
                 <UsageSurface {...tools.usage} />
               )}
               {tools.activeTool === "agents" && (
-                <BackgroundTasksSurface {...tools.agents} />
+                <BackgroundTasksSurface key={tools.agents.conversationId ?? ""} {...tools.agents} />
               )}
               {tools.activeTool === "changes" && (
                 tools.historicalDiff

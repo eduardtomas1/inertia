@@ -3,454 +3,219 @@
 }
 
 .background-tasks-surface .workspace-surface-scroll {
-  gap: 12px;
+  gap: 18px;
+  padding-top: 12px;
 }
 
-.background-tasks-header {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.background-tasks-header .workspace-surface-heading {
-  grid-template-columns: 16px minmax(0, 1fr);
-  color: var(--text-muted);
-}
-
-.background-tasks-summary,
-.background-tasks-tokens,
-.background-tasks-tokens-note {
-  margin: 0;
-  padding-left: 24px;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.background-tasks-summary {
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  font-weight: 560;
-}
-
-.background-tasks-tokens {
-  color: var(--text-soft);
-  font-size: var(--ui-font-micro);
-  font-weight: 560;
-}
-
-.background-tasks-tokens-note {
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.45;
-}
-
-.background-tasks-empty,
-.background-tasks-note {
-  margin: 0;
-  padding-left: 24px;
-  color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.5;
-}
-
-.background-tasks-empty {
-  color: var(--text-soft);
-}
-
-.background-tasks-section {
-  display: grid;
-  min-width: 0;
-  gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--workspace-tools-separator);
-}
-
-.background-tasks-section > h4 {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  font-weight: 640;
-}
-
-.background-tasks-group {
-  display: grid;
-  min-width: 0;
-  gap: 5px;
-}
-
-.background-tasks-group-label {
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-weight: 620;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
+.background-tasks-group,
 .background-tasks-list {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 8px;
+}
+
+.background-tasks-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.background-task-row {
-  position: relative;
+.background-tasks-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+}
+
+.background-task-card {
   display: grid;
   min-width: 0;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  column-gap: 9px;
-  row-gap: 2px;
-  margin-left: calc(var(--background-task-depth, 0) * 14px);
-  padding: 8px 10px 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 80%, transparent);
-  animation: beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1) both;
-  animation-delay: calc(var(--motion-index, 0) * 60ms);
-  transition: border-color 150ms ease, background-color 150ms ease;
+  column-gap: 10px;
+  row-gap: 3px;
+  padding: 11px 12px;
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.background-task-row:is(:hover, :focus-within, [data-expanded="true"]) {
-  border-color: color-mix(in srgb, var(--border-strong) 78%, transparent);
-  background: color-mix(in srgb, var(--surface-hover) 55%, var(--surface));
-}
-
-.background-task-row:not([data-depth="0"]):not(.is-command)::before {
-  position: absolute;
-  top: -6px;
-  left: -9px;
-  width: 8px;
-  height: 21px;
-  border-bottom: 1px solid var(--border-strong);
-  border-left: 1px solid var(--border-strong);
-  border-bottom-left-radius: 6px;
-  content: "";
-}
-
-.background-task-main {
+.background-task-toggle,
+.background-task-body {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
 }
 
-.background-task-heading {
+.background-task-toggle {
+  cursor: pointer;
+}
+
+.background-task-title {
+  color: var(--text);
+  font-size: calc(var(--ui-font-secondary) + 1px);
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.background-task-meta,
+.background-task-doing {
   display: flex;
   min-width: 0;
-  min-height: 22px;
-  align-items: center;
-  gap: 6px;
-}
-
-.background-task-heading > strong {
-  min-width: 4ch;
-  flex: 0 1 auto;
-  overflow-wrap: anywhere;
-  color: var(--text);
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  margin: 0;
+  color: var(--text-muted);
   font-size: var(--ui-font-secondary);
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.background-task-provider {
-  color: var(--text-muted);
-}
-
-.background-task-model {
-  overflow: hidden;
-  min-width: 0;
-  max-width: 42%;
-  flex-shrink: 100;
-  flex: 0 1 auto;
-  padding: 1px 5px;
-  border-radius: 5px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
-  font: var(--ui-font-micro) / 1.35 var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.background-task-status {
-  display: inline-flex;
-  min-height: 18px;
-  flex: 0 0 auto;
-  align-items: center;
-  margin-left: auto;
-  padding: 1px 7px;
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: var(--surface-muted);
-  font-size: var(--ui-font-micro);
-  font-weight: 620;
-  line-height: 1.3;
-  white-space: nowrap;
-}
-
-.background-task-row[data-live="true"] .background-task-status {
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-}
-
-.background-task-row:is([data-status="completed"], [data-status="succeeded"]) .background-task-status {
-  color: var(--success-state);
-  background: color-mix(in srgb, var(--success-state) 10%, var(--surface));
-}
-
-.background-task-row:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) .background-task-status {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-
-.background-task-row[data-status="unknown"] .background-task-status {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .background-task-doing {
-  overflow: hidden;
-  margin: 0;
+  grid-column: 1 / -1;
+}
+
+.background-task-value {
   color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.background-task-row[data-live="true"] .background-task-doing {
-  color: var(--text);
+.background-task-danger {
+  color: var(--danger);
 }
 
-.background-task-row.is-command .background-task-doing {
-  overflow: visible;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.background-task-note {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.background-task-actions {
-  display: flex;
-  min-width: 0;
-  grid-column: 2 / -1;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin: 1px 0 0 -6px;
-}
-
-.background-task-actions button {
-  display: inline-flex;
+.background-task-stop {
+  display: inline-grid;
+  width: 24px;
   height: 24px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 6px;
-  border-radius: 7px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-small);
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-weight: 560;
-  transition: color 120ms ease, background-color 120ms ease;
-}
-
-.background-task-actions button:hover:not(:disabled) {
-  color: var(--text);
   background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
-.background-task-actions button:focus-visible,
-.background-tasks-toggle:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
+.background-task-stop:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
 }
 
-.background-task-actions button:disabled {
+.background-task-stop:disabled {
   cursor: wait;
   opacity: var(--disabled-opacity);
 }
 
-.background-task-actions .background-task-stop:hover:not(:disabled) {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger-soft) 60%, transparent);
-}
-
-.background-task-details-toggle svg {
-  transition: transform var(--motion-fast) var(--motion-ease);
-}
-
-.background-task-details-toggle[aria-expanded="true"] svg {
-  transform: rotate(180deg);
-}
-
-.background-task-metrics {
-  display: grid;
-  min-width: 68px;
-  min-height: 22px;
-  justify-items: end;
-  align-content: start;
-  gap: 3px;
-  padding-top: 3px;
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.3;
-  white-space: nowrap;
-}
-
-.background-task-metrics .subagent-elapsed {
+.background-task-link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
   color: var(--text-soft);
-}
-
-.background-task-tokens {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-}
-
-.background-task-tokens > span[aria-hidden="true"] {
-  color: var(--text-soft);
-  font-weight: 600;
-}
-
-.background-task-tokens[data-reported="false"] > span[aria-hidden="true"] {
-  color: var(--text-muted);
-  font-weight: 400;
-  cursor: help;
-}
-
-.background-task-details-reveal {
-  min-width: 0;
-  grid-column: 2 / -1;
-}
-
-.background-task-details {
-  margin-top: 6px;
+  background: none;
+  font: inherit;
   font-size: var(--ui-font-secondary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.background-task-link:hover {
+  color: var(--text);
+}
+
+.background-task-toggle:focus-visible,
+.background-task-stop:focus-visible,
+.background-task-link:focus-visible,
+.background-tasks-finished-toggle:focus-visible {
+  border-radius: var(--radius-small);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.background-task-expanded {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding-top: 8px;
 }
 
 .background-task-details {
+  display: grid;
+  min-width: 0;
   grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 5px;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--ui-font-secondary);
+  line-height: 1.45;
 }
 
 .background-task-details > div {
   display: contents;
 }
 
+.background-task-details dt {
+  color: var(--text-muted);
+}
+
 .background-task-details dd {
+  margin: 0;
+  color: var(--text-soft);
   font-variant-numeric: tabular-nums;
-}
-
-.background-task-step {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 0.3em;
-}
-
-.background-task-step > span {
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .background-task-context {
   display: grid;
-  gap: 3px;
-  padding-top: 4px;
-  white-space: normal;
+  gap: 4px;
+  padding-top: 5px;
 }
 
 .background-task-context .usage-surface-track {
   height: 4px;
 }
 
-.background-task-context small {
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-}
-
-.background-command-mark {
-  display: inline-grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface-muted) 86%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, transparent);
-}
-
-.background-command-mark:is([data-status="running"], [data-status="waiting"]) {
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
-}
-
-.background-command-mark[data-status="succeeded"] {
-  color: var(--success-state);
-  background: color-mix(in srgb, var(--success-state) 10%, var(--surface));
-}
-
-.background-command-mark[data-status="failed"] {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger-soft) 46%, var(--surface));
-}
-
-.background-tasks-toggle {
-  display: inline-flex;
-  width: fit-content;
-  min-height: 26px;
+.background-tasks-finished {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  padding: 0 8px;
-  border-radius: 7px;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.background-tasks-finished-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  border: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-weight: 560;
+  background: none;
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
 
-.background-tasks-toggle:hover {
-  color: var(--text-soft);
-  background: var(--surface-hover);
+.background-tasks-finished-toggle svg {
+  transition: transform var(--motion-fast) var(--motion-ease);
 }
 
-@container background-tasks (max-width: 440px) {
-  .background-task-row {
-    margin-left: calc(var(--background-task-depth, 0) * 10px);
-    column-gap: 8px;
-  }
-
-  .background-task-model {
-    max-width: 34%;
-  }
-
-  .background-task-details {
-    column-gap: 10px;
-  }
+.background-tasks-finished-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
 }
 
 @container background-tasks (max-width: 360px) {
-  .background-task-row {
-    grid-template-columns: 24px minmax(0, 1fr);
-    margin-left: calc(var(--background-task-depth, 0) * 8px);
-  }
-
-  .background-task-metrics {
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-    grid-column: 2;
-    grid-row: 2;
-    justify-content: flex-start;
-    gap: 10px;
-    padding-top: 0;
-  }
-
-  .background-task-model {
-    display: none;
+  .background-task-card {
+    padding: 9px 10px;
   }
 
   .background-task-details {
@@ -464,28 +229,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .background-task-row,
-  .background-task-actions button,
-  .background-task-details-toggle svg {
-    animation: none;
+  .background-tasks-finished-toggle svg {
     transition: none;
   }
 }
 
-.app-shell[data-document-visible="false"] .background-task-row {
-  animation-play-state: paused;
-}
-
 @media (forced-colors: active) {
-  .background-task-row {
-    border-color: CanvasText;
-  }
-
-  .background-task-status,
-  .background-task-model,
-  .background-command-mark {
+  .background-task-card,
+  .background-task-stop {
     border: 1px solid CanvasText;
-    forced-color-adjust: auto;
   }
 
   .background-task-context .usage-surface-track {

@@ -4,67 +4,114 @@ import type {
   SubagentTrace,
   WorkspaceRun,
 } from "@shared/contracts";
-import { formatCompact } from "../lib/usageFormat";
+import { formatCompact } from "../lib/compactFormat";
 import {
   isLiveSubagentTrace,
   subagentElapsedMs,
   subagentMissionSummary,
-  subagentNeedsReview,
+  subagentStatusLabel,
   subagentTraceLabel,
-  type SubagentDisclosureRow,
 } from "./subagentDisclosure";
 import { backgroundCommandIsLive } from "./backgroundTaskRuns";
 
-interface HarnessTaskReporting {
-  provider: string;
-  agents: "native" | "completion-only" | "none";
-  tokens: boolean;
-}
-
-const HARNESS_TASK_REPORTING: Readonly<Record<string, HarnessTaskReporting>> = {
-  "codex-app-server": { provider: "Codex", agents: "native", tokens: true },
-  "claude-agent-sdk": { provider: "Claude", agents: "native", tokens: true },
-  "opencode-sdk": { provider: "OpenCode", agents: "native", tokens: true },
-  "cursor-acp": { provider: "Cursor", agents: "completion-only", tokens: false },
-  "kimi-acp": { provider: "Kimi Code", agents: "none", tokens: false },
-  "antigravity-cli": { provider: "Antigravity", agents: "none", tokens: false },
+const PROVIDERS_WITHOUT_TASK_TOKENS: Readonly<Record<string, string>> = {
+  "cursor-acp": "Cursor",
+  "kimi-acp": "Kimi Code",
+  "antigravity-cli": "Antigravity",
 };
-
-const COMMAND_STATUS_LABELS: Record<WorkspaceRun["status"], string> = {
-  running: "Running",
-  waiting: "Waiting",
-  succeeded: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
-
-export const BACKGROUND_TASK_TOKENS_NOTE =
-  "Sum of what the providers reported for these agents. This chat's own usage is in Usage.";
 
 const RECOVERED_COMMAND_DETAIL = "Interrupted when the local runtime stopped.";
 
-const MAX_TASK_DEPTH = 8;
-
-export interface BackgroundTaskTokens {
-  value: number | null;
-  text: string;
-  reason: string | null;
+export interface BackgroundTaskStateWord {
+  word: string;
+  danger: boolean;
 }
 
-export interface BackgroundTaskGroups {
-  active: SubagentDisclosureRow[];
-  finished: SubagentDisclosureRow[];
+const TASK_STATE_WORDS: Partial<Record<SubagentTrace["status"], BackgroundTaskStateWord>> = {
+  queued: { word: "Queued", danger: false },
+  spawned: { word: "Starting", danger: false },
+  waiting: { word: "Waiting", danger: false },
+  failed: { word: "Failed", danger: true },
+  cancelled: { word: "Stopped", danger: false },
+  interrupted: { word: "Interrupted", danger: true },
+  lost: { word: "Lost", danger: true },
+  unknown: { word: "Unknown", danger: false },
+};
+
+const COMMAND_STATE_WORDS: Partial<Record<WorkspaceRun["status"], BackgroundTaskStateWord>> = {
+  waiting: { word: "Waiting", danger: false },
+  failed: { word: "Failed", danger: true },
+  cancelled: { word: "Stopped", danger: false },
+};
+
+export type BackgroundTaskItem =
+  | { type: "agent"; key: string; startedAt: string; trace: SubagentTrace }
+  | { type: "command"; key: string; startedAt: string; run: WorkspaceRun };
+
+export interface BackgroundTaskItems {
+  active: BackgroundTaskItem[];
+  finished: BackgroundTaskItem[];
+  failed: number;
 }
 
-function harnessReporting(harnessId: string | null): HarnessTaskReporting | null {
-  return harnessId ? HARNESS_TASK_REPORTING[harnessId] ?? null : null;
+function compareItems(left: BackgroundTaskItem, right: BackgroundTaskItem): number {
+  return left.startedAt.localeCompare(right.startedAt, "en")
+    || left.key.localeCompare(right.key, "en");
 }
 
-export function backgroundTaskHarnessId(
+export function backgroundTaskItems(
+  subagents: readonly SubagentTrace[],
+  commands: readonly WorkspaceRun[],
+): BackgroundTaskItems {
+  const active: BackgroundTaskItem[] = [];
+  const finished: BackgroundTaskItem[] = [];
+  let failed = 0;
+  for (const trace of subagents) {
+    const item = { type: "agent", key: `agent:${trace.id}`, startedAt: trace.createdAt, trace } as const;
+    if (isLiveSubagentTrace(trace)) active.push(item);
+    else {
+      finished.push(item);
+      if (backgroundTaskStateWord(trace)?.danger) failed += 1;
+    }
+  }
+  for (const run of commands) {
+    const item = { type: "command", key: `command:${run.id}`, startedAt: run.startedAt, run } as const;
+    if (backgroundCommandIsLive(run)) active.push(item);
+    else {
+      finished.push(item);
+      if (run.status === "failed") failed += 1;
+    }
+  }
+  return {
+    active: active.sort(compareItems),
+    finished: finished.sort((left, right) => compareItems(right, left)),
+    failed,
+  };
+}
+
+export function backgroundTaskStateWord(trace: SubagentTrace): BackgroundTaskStateWord | null {
+  return TASK_STATE_WORDS[trace.status] ?? null;
+}
+
+export function backgroundCommandStateWord(run: WorkspaceRun): BackgroundTaskStateWord | null {
+  return COMMAND_STATE_WORDS[run.status] ?? null;
+}
+
+export function backgroundTaskProviderState(trace: SubagentTrace): string | null {
+  return trace.providerStatus
+    && subagentStatusLabel(trace) !== subagentStatusLabel({ ...trace, providerStatus: null })
+    ? trace.providerStatus
+    : null;
+}
+
+export function backgroundTaskTokensNotReported(
   trace: SubagentTrace,
   turns: readonly AgentTurn[],
 ): string | null {
-  return turns.find(({ id }) => id === trace.turnId)?.harnessId ?? null;
+  if (trace.usage?.totalTokens != null) return null;
+  const harnessId = turns.find(({ id }) => id === trace.turnId)?.harnessId;
+  const provider = harnessId ? PROVIDERS_WITHOUT_TASK_TOKENS[harnessId] : undefined;
+  return provider ? `Not reported by ${provider}` : null;
 }
 
 export function backgroundTaskTitle(trace: SubagentTrace): string {
@@ -99,23 +146,6 @@ export function backgroundCommandElapsedMs(run: WorkspaceRun, now: number): numb
   return Math.max(0, end - startedAt);
 }
 
-export function backgroundTaskTokens(
-  trace: SubagentTrace,
-  turns: readonly AgentTurn[],
-): BackgroundTaskTokens {
-  const total = trace.usage?.totalTokens ?? null;
-  if (total !== null) return { value: total, text: formatCompact(total), reason: null };
-  const reporting = harnessReporting(backgroundTaskHarnessId(trace, turns));
-  const reason = !reporting
-    ? "Not reported"
-    : !reporting.tokens
-      ? `${reporting.provider} does not report tokens for delegated tasks`
-      : isLiveSubagentTrace(trace)
-        ? "Not reported yet"
-        : "Not reported for this task";
-  return { value: null, text: "—", reason };
-}
-
 export function backgroundTaskLatestStep(
   usage: SubagentTaskUsage | null,
 ): string[] | null {
@@ -147,107 +177,4 @@ export function backgroundTaskContextUsage(
     remainingPercent,
     label: `${percent}% of ${formatCompact(usage.maxContextTokens)} remaining`,
   };
-}
-
-export function backgroundTaskSummaryLabel(
-  traces: readonly SubagentTrace[],
-  commands: readonly WorkspaceRun[],
-): string {
-  let active = 0;
-  let review = 0;
-  let finished = 0;
-  for (const trace of traces) {
-    if (isLiveSubagentTrace(trace)) active += 1;
-    else if (subagentNeedsReview(trace)) review += 1;
-    else finished += 1;
-  }
-  for (const run of commands) {
-    if (backgroundCommandIsLive(run)) active += 1;
-    else if (run.status === "failed") review += 1;
-    else finished += 1;
-  }
-  const parts: string[] = [];
-  if (active > 0) parts.push(`${active} active`);
-  if (review > 0) parts.push(`${review} ${review === 1 ? "needs" : "need"} review`);
-  if (finished > 0) parts.push(`${finished} finished`);
-  return parts.join(" · ");
-}
-
-export function backgroundTaskTokenTotalLabel(
-  traces: readonly SubagentTrace[],
-): string | null {
-  let total = 0;
-  let reporting = 0;
-  for (const trace of traces) {
-    const tokens = trace.usage?.totalTokens ?? null;
-    if (tokens === null) continue;
-    total += tokens;
-    reporting += 1;
-  }
-  if (reporting === 0) return null;
-  const label = `${formatCompact(total)} tokens reported`;
-  return reporting === traces.length
-    ? label
-    : `${label} by ${reporting} of ${traces.length} agents`;
-}
-
-function rowsWithin(
-  rows: readonly SubagentDisclosureRow[],
-  include: (trace: SubagentTrace) => boolean,
-): SubagentDisclosureRow[] {
-  const byId = new Map(rows.map((row) => [row.trace.id, row]));
-  const included = rows.filter(({ trace }) => include(trace));
-  const includedIds = new Set(included.map(({ trace }) => trace.id));
-  const depths = new Map<string, number>();
-  return included.map((row) => {
-    let parentId = row.trace.parentTraceId;
-    const seen = new Set<string>();
-    while (parentId && !includedIds.has(parentId) && !seen.has(parentId)) {
-      seen.add(parentId);
-      parentId = byId.get(parentId)?.trace.parentTraceId ?? null;
-    }
-    const parentDepth = parentId ? depths.get(parentId) : undefined;
-    const depth = parentDepth === undefined
-      ? 0
-      : Math.min(parentDepth + 1, MAX_TASK_DEPTH);
-    depths.set(row.trace.id, depth);
-    return { ...row, depth };
-  });
-}
-
-export function backgroundTaskGroups(
-  rows: readonly SubagentDisclosureRow[],
-): BackgroundTaskGroups {
-  return {
-    active: [
-      ...rowsWithin(rows, isLiveSubagentTrace),
-      ...rowsWithin(rows, subagentNeedsReview),
-    ],
-    finished: rowsWithin(rows, (trace) =>
-      !isLiveSubagentTrace(trace) && !subagentNeedsReview(trace)),
-  };
-}
-
-export function orderedBackgroundCommands(
-  commands: readonly WorkspaceRun[],
-): WorkspaceRun[] {
-  return [...commands].sort((left, right) =>
-    Number(backgroundCommandIsLive(right)) - Number(backgroundCommandIsLive(left))
-    || right.startedAt.localeCompare(left.startedAt, "en")
-    || right.id.localeCompare(left.id, "en"));
-}
-
-export function backgroundCommandStatusLabel(status: WorkspaceRun["status"]): string {
-  return COMMAND_STATUS_LABELS[status];
-}
-
-export function backgroundTaskEmptyNote(harnessId: string | null): string | null {
-  const reporting = harnessReporting(harnessId);
-  if (reporting?.agents === "none") {
-    return `${reporting.provider} does not report delegated agents. Commands it starts appear here.`;
-  }
-  if (reporting?.agents === "completion-only") {
-    return `${reporting.provider} reports a delegated task when it finishes.`;
-  }
-  return null;
 }

@@ -42,14 +42,22 @@ const codexTask = taskTrace({
     maxContextTokens: 200_000,
   }),
   toolUseCount: 14,
-  sequence: 1,
+});
+
+const childTask = taskTrace({
+  id: "opencode-child",
+  turnId: "turn-opencode",
+  runId: "run-opencode",
+  providerId: "opencode",
+  providerName: "Fixture writer",
+  parentTraceId: "codex-explorer",
+  activity: "Edit tests/fixture.ts",
 });
 
 const claudeTask = taskTrace({
   id: "claude-reviewer",
   turnId: "turn-claude",
   runId: "run-claude",
-  providerId: "claude",
   providerName: "Reviewer",
   model: "claude-sonnet-4-5",
   status: "completed",
@@ -57,20 +65,7 @@ const claudeTask = taskTrace({
   usage: taskUsage({ totalTokens: 9_000 }),
   toolUseCount: 3,
   durationMs: 83_000,
-  sequence: 2,
-});
-
-const opencodeChild = taskTrace({
-  id: "opencode-child",
-  turnId: "turn-opencode",
-  runId: "run-opencode",
-  providerId: "opencode",
-  providerName: "Fixture writer",
-  parentTraceId: "codex-explorer",
-  parentProviderAgentId: "agent-1",
-  model: "anthropic/claude-haiku-4-5",
-  activity: "Edit tests/fixture.ts",
-  sequence: 3,
+  createdAt: "2030-01-01T00:00:02.000Z",
 });
 
 const cursorTask = taskTrace({
@@ -85,7 +80,7 @@ const cursorTask = taskTrace({
   status: "completed",
   result: "Three threads remain open.",
   durationMs: 4_200,
-  sequence: 4,
+  createdAt: "2030-01-01T00:00:03.000Z",
 });
 
 const failedTask = taskTrace({
@@ -96,27 +91,26 @@ const failedTask = taskTrace({
   status: "failed",
   providerStatus: "error",
   result: "The optional check exited with code 1.",
-  sequence: 5,
+  createdAt: "2030-01-01T00:00:04.000Z",
 });
 
-function chat(harnessId: string): BackgroundTasksSurfaceProps["conversation"] {
-  return { id: "conversation-1", modelSelection: { harnessId } };
-}
-
-function surface(
-  overrides: Partial<BackgroundTasksSurfaceProps> = {},
-): React.JSX.Element {
+function surface(overrides: Partial<BackgroundTasksSurfaceProps> = {}): React.JSX.Element {
   return (
     <BackgroundTasksSurface
       runtimeStatus="online"
-      subagents={[codexTask, claudeTask, opencodeChild, cursorTask, failedTask]}
+      subagents={[codexTask, childTask, claudeTask, cursorTask, failedTask]}
       turns={turns}
       runs={[]}
-      conversation={chat("codex-app-server")}
+      conversationId="conversation-1"
       now={NOW}
+      onOpenSubagent={vi.fn()}
       {...overrides}
     />
   );
+}
+
+function card(title: string): HTMLElement {
+  return screen.getByRole("button", { name: new RegExp(`^${title}`, "u") }).closest("li")!;
 }
 
 function detail(list: HTMLElement, term: string): HTMLElement | null {
@@ -124,8 +118,16 @@ function detail(list: HTMLElement, term: string): HTMLElement | null {
   return label?.nextElementSibling instanceof HTMLElement ? label.nextElementSibling : null;
 }
 
-function row(name: RegExp | string): HTMLElement {
-  return screen.getByRole("listitem", { name });
+async function openDetails(title: string): Promise<HTMLElement> {
+  const toggle = screen.getByRole("button", { name: new RegExp(`^${title}`, "u") });
+  await userEvent.setup().click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  return document.getElementById(toggle.getAttribute("aria-controls")!)!;
+}
+
+async function openFinished(): Promise<HTMLElement> {
+  await userEvent.setup().click(screen.getByRole("button", { name: /^Finished/u }));
+  return screen.getByRole("list", { name: "Finished" });
 }
 
 beforeEach(() => {
@@ -147,241 +149,205 @@ afterEach(() => {
 });
 
 describe("Background tasks surface", () => {
-  it("summarizes every task and the tokens providers reported for some of them", () => {
+  it("lists running work as plain cards under one quiet label, without a summary header", () => {
     render(surface());
     const region = screen.getByRole("region", { name: "Background tasks" });
-    expect(within(region).getByRole("heading", { name: "Background tasks", level: 3 })).toBeVisible();
-    expect(within(region).getByText("2 active · 1 needs review · 2 finished")).toBeVisible();
-    expect(within(region).getByText("137.4K tokens reported by 2 of 5 agents")).toBeVisible();
-    expect(within(region).getByText(
-      "Sum of what the providers reported for these agents. This chat's own usage is in Usage.",
-    )).toBeVisible();
+    const running = within(region).getByRole("list", { name: "Running" });
+    expect(within(running).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(region).queryByRole("heading")).toBeNull();
+    expect(within(region).queryByText(/tokens reported/u)).toBeNull();
+    const explorer = card("Explorer");
+    expect(explorer).toHaveTextContent("Agent");
+    expect(within(explorer).getByText("1m")).toBeVisible();
+    expect(within(explorer).getByText("gpt-5.3-codex")).toBeVisible();
+    expect(explorer).toHaveTextContent("128.4K tokens");
+    expect(explorer).toHaveTextContent("14 tool uses");
+    expect(within(explorer).getByText("Running rg subagent")).toBeVisible();
+    expect(within(explorer).getByRole("button", { name: "View turn for Explorer" })).toBeVisible();
   });
 
-  it("groups live work first, then work needing review, and finished work separately", () => {
+  it("names a child agent's parent instead of indenting it", () => {
     render(surface());
-    const active = screen.getByRole("list", { name: "Active" });
-    expect(within(active).getAllByRole("listitem").map((item) => item.dataset.taskId))
-      .toEqual(["codex-explorer", "opencode-child", "claude-failed"]);
-    const finished = screen.getByRole("list", { name: "Finished" });
-    expect(within(finished).getAllByRole("listitem").map((item) => item.dataset.taskId))
-      .toEqual(["claude-reviewer", "cursor-task"]);
-    expect(row(/^Fixture writer/u)).toHaveAttribute("data-depth", "1");
-    expect(within(row(/^Fixture writer/u)).getByText("Child of Explorer")).toBeVisible();
+    const child = card("Fixture writer");
+    expect(child).toHaveTextContent("Agent · from Explorer");
+    expect(child).not.toHaveAttribute("data-depth");
+    expect(child.closest("ol")).toBe(card("Explorer").closest("ol"));
   });
 
-  it("shows a Codex task's status, model, current activity, elapsed time and tokens", () => {
+  it("collapses finished work into one row that counts failures in words", async () => {
     render(surface());
-    const codex = row(/^Explorer/u);
-    expect(within(codex).getByText("Running", { selector: ".background-task-status" })).toBeVisible();
-    expect(within(codex).getByRole("img", { name: "Codex" })).toBeVisible();
-    expect(within(codex).getByText("gpt-5.3-codex")).toBeVisible();
-    expect(within(codex).getByText("Running rg subagent")).toBeVisible();
-    expect(within(codex).getByText("1m")).toBeVisible();
-    expect(within(codex).getByText("128.4K")).toBeVisible();
+    const toggle = screen.getByRole("button", { name: "Finished 3 · 1 failed" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: "Finished" })).toBeNull();
+    const finished = await openFinished();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", finished.id);
+    expect(within(finished).getAllByRole("listitem").map((item) => item.dataset.focusRow))
+      .toEqual(["agent:claude-failed", "agent:cursor-task", "agent:claude-reviewer"]);
+    const failed = card("Build verifier");
+    expect(within(failed).getByText("Failed")).toHaveClass("background-task-danger");
+    expect(failed).toHaveTextContent("Agent · Failed");
   });
 
-  it("explains missing token counts with a readable reason instead of a bare dash", () => {
+  it("shows tokens on a card only when reported and explains Cursor only in Details", async () => {
     render(surface());
-    const cursor = row(/^Summarize the open review threads/u);
-    expect(within(cursor).getByText("Three threads remain open.")).toBeVisible();
-    expect(within(cursor).getByText("Tokens: Cursor does not report tokens for delegated tasks"))
-      .toHaveClass("visually-hidden");
-    expect(within(cursor).getByText("—")).toBeVisible();
-    expect(within(cursor).getByText("4s")).toBeVisible();
-    const live = row(/^Fixture writer/u);
-    expect(within(live).getByText("Tokens: Not reported yet")).toBeInTheDocument();
-    const failed = row(/^Build verifier/u);
-    expect(within(failed).getByText("Failed", { selector: ".background-task-status" }))
-      .toBeVisible();
-    expect(within(failed).getByText("Tokens: Not reported for this task")).toBeInTheDocument();
+    await openFinished();
+    const cursor = card("Summarize the open review threads");
+    expect(cursor).not.toHaveTextContent(/tokens/u);
+    expect(cursor).toHaveTextContent("gpt-5");
+    const details = await openDetails("Summarize the open review threads");
+    expect(detail(details, "Tokens")).toHaveTextContent(/^Not reported by Cursor$/u);
+    expect(detail(details, "Total tokens")).toBeNull();
   });
 
-  it("opens details with the cumulative total, the latest step, context and runtime", async () => {
-    const user = userEvent.setup();
+  it("expands a card in place into plain label and value rows", async () => {
     render(surface());
-    const codex = row(/^Explorer/u);
-    const details = within(codex).getByRole("button", { name: "Details for Explorer" });
-    expect(details).toHaveAttribute("aria-expanded", "false");
-    await user.click(details);
-    expect(details).toHaveAttribute("aria-expanded", "true");
-    const list = document.getElementById(details.getAttribute("aria-controls")!)!;
-    expect(detail(list, "Total tokens")).toHaveTextContent(/^128,400$/u);
-    expect(detail(list, "Latest step"))
+    const details = await openDetails("Explorer");
+    expect(detail(details, "Task")).toHaveTextContent("Inspect the provider lifecycle.");
+    expect(detail(details, "Progress")).toHaveTextContent(/^Searching the persistence layer$/u);
+    expect(detail(details, "Total tokens")).toHaveTextContent(/^128,400$/u);
+    expect(detail(details, "Latest step"))
       .toHaveTextContent(/^Input 120K · Cached 96K · Output 8K · Reasoning 400$/u);
-    const context = detail(list, "Context")!;
+    const context = detail(details, "Context")!;
     expect(within(context).getByRole("meter", { name: "Context window remaining" }))
       .toHaveAttribute("aria-valuenow", "75");
     expect(within(context).getByText("75% of 200K remaining")).toBeVisible();
-    expect(detail(list, "Tool uses")).toHaveTextContent(/^14$/u);
-    expect(detail(list, "Route")).toHaveTextContent("Codex · App Server");
-    expect(detail(list, "Model")).toHaveTextContent(/^gpt-5\.3-codex$/u);
-    expect(detail(list, "Doing now")).toHaveTextContent(/^Running rg subagent$/u);
-    expect(detail(list, "Progress")).toHaveTextContent(/^Searching the persistence layer$/u);
-    expect(detail(list, "Latest activity")).toBeNull();
-
-    const claude = row(/^Reviewer/u);
-    const claudeDetails = within(claude).getByRole("button", { name: "Details for Reviewer" });
-    await user.click(claudeDetails);
-    const claudeList = document.getElementById(claudeDetails.getAttribute("aria-controls")!)!;
-    expect(detail(claudeList, "Total tokens")).toHaveTextContent(/^9,000$/u);
-    expect(detail(claudeList, "Latest step")).toBeNull();
-    expect(detail(claudeList, "Context")).toBeNull();
-    expect(detail(claudeList, "Runtime")).toHaveTextContent(/^1m 23s$/u);
-    expect(detail(claudeList, "Doing now")).toBeNull();
-
-    const cursor = row(/^Summarize the open review threads/u);
-    const cursorDetails = within(cursor).getByRole("button", { name: /^Details for/u });
-    await user.click(cursorDetails);
-    const cursorList = document.getElementById(cursorDetails.getAttribute("aria-controls")!)!;
-    expect(detail(cursorList, "Total tokens"))
-      .toHaveTextContent(/^Cursor does not report tokens for delegated tasks$/u);
+    expect(detail(details, "Tool uses")).toHaveTextContent(/^14$/u);
+    expect(detail(details, "Route")).toHaveTextContent("Codex · App Server");
+    expect(detail(details, "Provider state")).toBeNull();
+    expect(detail(details, "Runtime")).toBeNull();
   });
 
-  it("shows a waiting task's provider state instead of its last tool", async () => {
-    const user = userEvent.setup();
+  it("shows a waiting task's state and provider state instead of its last tool", async () => {
     const waiting = taskTrace({
-      id: "opencode-waiting",
+      id: "waiting",
       turnId: "turn-opencode",
       providerId: "opencode",
-      providerName: "Fixture writer",
+      providerName: "Schema checker",
       status: "waiting",
       providerStatus: "idle",
       activity: "Edit tests/fixture.ts",
       progress: null,
     });
     render(surface({ subagents: [waiting] }));
-    const item = row(/^Fixture writer/u);
-    expect(within(item).getByText("Waiting (idle)", { selector: ".background-task-status" })).toBeVisible();
-    expect(within(item).queryByText("Edit tests/fixture.ts")).toBeNull();
-    const details = within(item).getByRole("button", { name: "Details for Fixture writer" });
-    await user.click(details);
-    const list = document.getElementById(details.getAttribute("aria-controls")!)!;
-    expect(detail(list, "Doing now")).toBeNull();
-    expect(detail(list, "Provider state")).toHaveTextContent(/^idle$/u);
+    const item = card("Schema checker");
+    expect(item).toHaveTextContent("Agent · Waiting");
+    expect(item).not.toHaveTextContent("Edit tests/fixture.ts");
+    const details = await openDetails("Schema checker");
+    expect(detail(details, "Provider state")).toHaveTextContent(/^idle$/u);
   });
 
-  it("keeps the existing agent actions and offers Stop only where the harness supports it", async () => {
+  it("omits the runtime of a lost task instead of counting the downtime", async () => {
+    const lost = taskTrace({
+      id: "lost",
+      providerName: "Recovered",
+      status: "lost",
+      isLive: false,
+      updatedAt: "2030-01-04T00:00:00.000Z",
+    });
+    render(surface({ subagents: [lost], now: Date.parse("2030-01-05T00:00:00.000Z") }));
+    await openFinished();
+    const item = card("Recovered");
+    expect(item).toHaveTextContent("Agent · Lost");
+    expect(item.querySelector(".subagent-elapsed")).toBeNull();
+    const details = await openDetails("Recovered");
+    expect(detail(details, "Runtime")).toHaveTextContent(/^Not reported$/u);
+  });
+
+  it("wires View turn, Guide parent and Stop without toggling the card", async () => {
     const user = userEvent.setup();
     const onOpenSubagent = vi.fn();
     const onFollowUpSubagent = vi.fn();
     let resolveStop!: () => void;
     const onStopSubagent = vi.fn(() => new Promise<void>((resolve) => { resolveStop = resolve; }));
+    const helper = taskTrace({ id: "claude-live", turnId: "turn-claude", providerName: "Claude helper" });
     render(surface({
+      subagents: [codexTask, helper],
       onOpenSubagent,
       onFollowUpSubagent,
-      canFollowUpSubagent: (trace) => trace.id === "opencode-child",
+      canFollowUpSubagent: (trace) => trace.id === "claude-live",
       onStopSubagent,
       canStopSubagent: () => true,
-      subagents: [
-        codexTask,
-        opencodeChild,
-        taskTrace({
-          id: "claude-live",
-          turnId: "turn-claude",
-          runId: "run-claude",
-          providerName: "Claude helper",
-          sequence: 9,
-        }),
-      ],
     }));
-    expect(within(row(/^Explorer/u)).queryByRole("button", { name: /^Stop/u })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "View parent turn for Explorer" }));
+    expect(screen.queryByRole("button", { name: "Stop Explorer" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "View turn for Explorer" }));
     expect(onOpenSubagent).toHaveBeenCalledWith(codexTask);
-    await user.click(screen.getByRole("button", { name: "Guide parent about Fixture writer" }));
-    expect(onFollowUpSubagent).toHaveBeenCalledWith(opencodeChild);
-    const stop = screen.getByRole("button", { name: "Stop Claude helper" });
-    await user.click(stop);
+    expect(screen.getByRole("button", { name: /^Explorer/u })).toHaveAttribute("aria-expanded", "false");
+    await openDetails("Claude helper");
+    await user.click(screen.getByRole("button", { name: "Guide parent about Claude helper" }));
+    expect(onFollowUpSubagent).toHaveBeenCalledWith(helper);
+    const toggle = screen.getByRole("button", { name: /^Claude helper/u });
+    await user.click(screen.getByRole("button", { name: "Stop Claude helper" }));
     expect(onStopSubagent).toHaveBeenCalledOnce();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Stopping Claude helper" })).toBeDisabled();
     resolveStop();
     expect(await screen.findByRole("button", { name: "Stop Claude helper" })).toBeEnabled();
   });
 
-  it("compacts finished tasks beyond five and reveals them on request", async () => {
-    const user = userEvent.setup();
-    const finished = Array.from({ length: 8 }, (_, index) => taskTrace({
-      id: `done-${index}`,
-      providerName: `Done ${index}`,
-      status: "completed",
-      sequence: index + 1,
-    }));
-    render(surface({ subagents: finished, turns: [taskTurn()] }));
-    const list = screen.getByRole("list", { name: "Finished" });
-    expect(within(list).getAllByRole("listitem")).toHaveLength(5);
-    const toggle = screen.getByRole("button", { name: "Show 3 more finished tasks" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveAttribute("aria-controls", list.id);
-    await user.click(toggle);
-    expect(within(list).getAllByRole("listitem")).toHaveLength(8);
-    expect(screen.getByRole("button", { name: "Show fewer finished tasks" }))
-      .toHaveAttribute("aria-expanded", "true");
-  });
-
-  it("lists this chat's commands with their state and the existing Stop and Dismiss commands", async () => {
+  it("shows commands as short cards and dismisses finished ones from the Finished row", async () => {
     const user = userEvent.setup();
     const onStopCommand = vi.fn();
     const onDismissCommand = vi.fn();
-    const live = workspaceRun({ id: "dev", kind: "service", label: "npm run dev", detail: "http://localhost:5173", port: 5173 });
-    const failed = workspaceRun({
+    const dev = workspaceRun({ id: "dev", kind: "service", label: "npm run dev", detail: "http://localhost:5173", port: 5173 });
+    const lint = workspaceRun({
       id: "lint",
       label: "npm run lint",
-      detail: "2 problems",
       status: "failed",
       attentionState: "unseen",
       canStop: false,
       startedAt: "2030-01-01T00:00:20.000Z",
       finishedAt: "2030-01-01T00:00:50.000Z",
     });
-    render(surface({
-      subagents: [],
-      runs: [live, failed],
+    const build = workspaceRun({
+      id: "build",
+      label: "npm run build",
+      status: "succeeded",
+      canStop: false,
+      startedAt: "2030-01-01T00:00:30.000Z",
+      finishedAt: "2030-01-01T00:00:40.000Z",
+    });
+    const view = render(surface({ subagents: [], runs: [dev, lint, build], onStopCommand, onDismissCommand }));
+    const devCard = screen.getByText("npm run dev").closest("li")!;
+    expect(devCard).toHaveTextContent("Command");
+    expect(within(devCard).getByText("50s")).toBeVisible();
+    expect(within(devCard).getByText("http://localhost:5173")).toBeVisible();
+    expect(devCard).not.toHaveTextContent(/tokens/u);
+    await user.click(within(devCard).getByRole("button", { name: "Stop npm run dev" }));
+    expect(onStopCommand).toHaveBeenCalledWith(dev);
+    expect(screen.getByRole("button", { name: "Finished 2 · 1 failed" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Dismiss finished commands" }));
+    expect(onDismissCommand.mock.calls.map(([run]) => run.id)).toEqual(["build", "lint"]);
+    view.rerender(surface({
+      subagents: [claudeTask],
+      runs: [dev],
       onStopCommand,
       onDismissCommand,
     }));
-    expect(screen.getByText("1 active · 1 needs review")).toBeVisible();
-    const commands = screen.getByRole("list", { name: "Commands" });
-    const devRow = within(commands).getByRole("listitem", { name: /^npm run dev/u });
-    expect(within(devRow).getByText("http://localhost:5173")).toBeVisible();
-    expect(within(devRow).getByText("Running")).toBeVisible();
-    expect(within(devRow).getByText("50s")).toBeVisible();
-    expect(within(devRow).queryByText(/tokens/iu)).toBeNull();
-    expect(within(devRow).queryByRole("button", { name: /Dismiss/u })).toBeNull();
-    await user.click(within(devRow).getByRole("button", { name: "Stop npm run dev" }));
-    expect(onStopCommand).toHaveBeenCalledWith(live);
-    const lintRow = within(commands).getByRole("listitem", { name: /^npm run lint/u });
-    expect(within(lintRow).getByText("Failed", { selector: ".background-task-status" })).toBeVisible();
-    expect(within(lintRow).getByText("30s")).toBeVisible();
-    expect(within(lintRow).queryByRole("button", { name: /^Stop/u })).toBeNull();
-    await user.click(within(lintRow).getByRole("button", { name: "Dismiss npm run lint" }));
-    expect(onDismissCommand).toHaveBeenCalledWith(failed);
-    expect(screen.queryByRole("list", { name: "Active" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss finished commands" })).toBeNull();
   });
 
-  it.each([
-    ["kimi-acp", "Kimi Code does not report delegated agents. Commands it starts appear here."],
-    ["antigravity-cli", "Antigravity does not report delegated agents. Commands it starts appear here."],
-    ["cursor-acp", "Cursor reports a delegated task when it finishes."],
-  ])("explains the empty state for %s", (harnessId, note) => {
-    render(surface({ subagents: [], runs: [], turns: [], conversation: chat(harnessId) }));
-    expect(screen.getByText("No background tasks in this chat.")).toBeVisible();
-    expect(screen.getByText(note)).toBeVisible();
-    expect(screen.queryByText(/tokens reported/u)).toBeNull();
-  });
-
-  it("keeps the empty state plain for harnesses that report agents", () => {
-    const view = render(surface({ subagents: [], runs: [], turns: [], conversation: chat("codex-app-server") }));
-    expect(screen.getByText("No background tasks in this chat.")).toBeVisible();
-    expect(view.container.querySelector(".background-tasks-note")).toBeNull();
-    view.rerender(surface({
-      subagents: [],
-      runs: [workspaceRun()],
-      turns: [],
-      conversation: chat("kimi-acp"),
+  it("compacts open finished work to twenty cards and reveals the rest on request", async () => {
+    const user = userEvent.setup();
+    const finished = Array.from({ length: 24 }, (_, index) => taskTrace({
+      id: `done-${String(index).padStart(2, "0")}`,
+      providerName: `Done ${index}`,
+      status: "completed",
+      createdAt: `2030-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
     }));
-    expect(screen.queryByText("No background tasks in this chat.")).toBeNull();
-    expect(screen.getByText("Kimi Code does not report delegated agents. Commands it starts appear here."))
-      .toBeVisible();
+    render(surface({ subagents: finished }));
+    const list = await openFinished();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(20);
+    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("Done 23");
+    await user.click(screen.getByRole("button", { name: "Show 4 more finished tasks" }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(24);
+  });
+
+  it("says only that there are no background tasks when the chat has none", () => {
+    render(surface({ subagents: [], runs: [], turns: [taskTurn({ providerId: "kimi" })] }));
+    expect(screen.getByText("No background tasks.")).toBeVisible();
+    expect(screen.queryByText(/Kimi/u)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("promotes runtime status only when attention is required", () => {
@@ -393,22 +359,20 @@ describe("Background tasks surface", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Workspace runtime unavailable");
   });
 
-  it("keeps labelling unique across split surfaces and labels every button", () => {
+  it("never nests a control inside another and labels every control", async () => {
     const view = render(<>{surface({ runs: [workspaceRun()] })}{surface({ runs: [workspaceRun()] })}</>);
-    const references = [...view.container.querySelectorAll<HTMLElement>("[aria-labelledby], [aria-controls]")]
-      .flatMap((element) => [
-        element.getAttribute("aria-labelledby"),
-        element.getAttribute("aria-controls"),
-      ])
-      .filter((value): value is string => value !== null);
-    expect(references.length).toBeGreaterThan(4);
-    for (const id of references) expect(document.getElementById(id)).not.toBeNull();
-    const labelled = [...view.container.querySelectorAll<HTMLElement>("[aria-labelledby]")]
-      .map((element) => element.getAttribute("aria-labelledby"));
-    expect(new Set(labelled).size).toBe(labelled.length);
+    for (const toggle of screen.getAllByRole("button", { name: /^Explorer/u })) {
+      await userEvent.setup().click(toggle);
+    }
     for (const button of screen.getAllByRole("button")) {
       expect(button).toHaveAccessibleName();
+      expect(button.parentElement?.closest("button, a, [role='button']")).toBeNull();
     }
+    const references = [...view.container.querySelectorAll<HTMLElement>("[aria-labelledby], [aria-controls]")]
+      .flatMap((element) => [element.getAttribute("aria-labelledby"), element.getAttribute("aria-controls")])
+      .filter((value): value is string => value !== null);
+    expect(new Set(references).size).toBe(references.length);
+    for (const id of references) expect(document.getElementById(id)).not.toBeNull();
   });
 });
 
@@ -420,11 +384,13 @@ describe("Background tasks stylesheet", () => {
     expect(css).not.toMatch(/\b(?:rgb|rgba|hsl|hsla|oklch)\(/u);
   });
 
-  it("adapts to narrow containers, reduced motion, forced colours and hidden documents", () => {
-    expect(css).toMatch(/@container background-tasks \(max-width: 440px\)/u);
+  it("stays plain: no shadows, uppercase labels or pill shapes", () => {
+    expect(css).not.toMatch(/box-shadow|text-transform|999px/u);
+  });
+
+  it("adapts to narrow containers, reduced motion and forced colours", () => {
     expect(css).toMatch(/@container background-tasks \(max-width: 360px\)/u);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/u);
     expect(css).toMatch(/@media \(forced-colors: active\)/u);
-    expect(css).toMatch(/\[data-document-visible="false"\]/u);
   });
 });

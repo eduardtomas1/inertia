@@ -874,7 +874,7 @@ export function createWorkspaceSceneModel({
         subagents: projection.subagents,
         turns: projection.turns,
         runs: workspaceRuns,
-        conversation: persistedConversation,
+        conversationId: persistedConversation?.id ?? null,
         onStopCommand: activityActions.stopWorkspaceRun,
         onDismissCommand: activityActions.dismissActivity,
         canFollowUpSubagent: canGuideParent,

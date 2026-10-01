@@ -228,7 +228,7 @@ function backgroundTasksSurface(): React.JSX.Element {
       subagents={[]}
       turns={[]}
       runs={[]}
-      conversation={null}
+      conversationId={null}
     />
   );
 }
@@ -341,8 +341,7 @@ describe("Environment content in its workspace surfaces", () => {
   it("separates background tasks from the dedicated attachment browser", () => {
     render(<>{backgroundTasksSurface()}{attachmentsSurface()}</>);
     const tasks = screen.getByRole("region", { name: "Background tasks" });
-    expect(within(tasks).getByRole("heading", { name: "Background tasks" })).toBeVisible();
-    expect(within(tasks).getByText("No background tasks in this chat.")).toBeVisible();
+    expect(within(tasks).getByText("No background tasks.")).toBeVisible();
     expect(within(tasks).queryByRole("list", { name: "Chat attachments" })).toBeNull();
     const attachments = screen.getByRole("region", { name: "Attachments" });
     expect(within(attachments).getByText("reference.png")).toBeVisible();

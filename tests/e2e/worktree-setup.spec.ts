@@ -44,11 +44,14 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
   try {
     await app.resizeWindow(1400, 940);
     await app.page.getByRole("button", { name: "New chat", exact: true }).click();
+    const card = app.page.getByRole("region", { name: "Worktree setup", exact: true });
+    // New chat creates its checkout asynchronously; do not send into the
+    // previous chat while that navigation is still being applied.
+    await expect(card.getByText("Setting up worktree", { exact: true })).toBeVisible();
     const composer = app.page.getByRole("textbox", { name: "Message", exact: true });
     const prompt = "Review this isolated checkout once dependencies are ready.";
     await composer.fill(prompt);
     await app.page.getByRole("button", { name: "Send message", exact: true }).click();
-    const card = app.page.getByRole("region", { name: "Worktree setup", exact: true });
     await expect.poll(() => readChat()?.worktreeSetup?.status).toBe("running");
     await expect(card.getByText("Setting up worktree", { exact: true })).toBeVisible();
     expect(readChat()?.latestTurn).toBeNull();

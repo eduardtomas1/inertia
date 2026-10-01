@@ -19,7 +19,10 @@ const TOOLING_EXCLUDED_DIRECTORIES = new Set([
   "playwright-report", "blob-report", "test-results", "performance-results",
   ".nyc_output", ".vite", ".electron-vite", ".cache",
 ]);
-const TOOLING_EXCLUDED_PATHS = new Set(["resources/generated"]);
+const TOOLING_EXCLUDED_PATHS = new Set([
+  "resources/generated",
+  ".claude/worktrees",
+]);
 const portable = (path) => path.replaceAll("\\", "/");
 
 function walk(node, visit) {
@@ -152,7 +155,7 @@ export function sourceUsage(root) {
     buildInputs,
     productionRoots: productionRoots.map(path),
     toolingRoots: tools.map(path),
-    toolingPolicy: "Module files across the checkout outside src are conservative tool roots, including documentation tools, helpers and local untracked modules. Explicit build configs inside src are also tools. Generated/dependency directories are excluded; symlinks are not followed. No src glob is a root.",
+    toolingPolicy: "Module files across the checkout outside src are conservative tool roots, including documentation tools, helpers and local untracked modules. Explicit build configs inside src are also tools. Generated/dependency directories and .claude/worktrees are excluded; symlinks are not followed. No src glob is a root.",
     toolingExclusions: {
       directoryNames: [...TOOLING_EXCLUDED_DIRECTORIES],
       paths: [...TOOLING_EXCLUDED_PATHS],

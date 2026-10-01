@@ -143,14 +143,14 @@ export class ProviderHostToolRuntime {
     }
     this.seenCallIds.add(input.callId);
     const controller = new AbortController();
-    const abort = (): void => controller.abort();
-    if (input.signal?.aborted) abort();
-    else input.signal?.addEventListener("abort", abort, { once: true });
+    const abort = (): void => { this.cancelCall(input.callId); };
     const pending: PendingCall = {
       controller,
       detachSignal: () => input.signal?.removeEventListener("abort", abort),
     };
     this.pendingCalls.set(input.callId, pending);
+    if (input.signal?.aborted) abort();
+    else input.signal?.addEventListener("abort", abort, { once: true });
     const providerThreadId = typeof this.options.conversationId === "function"
       ? this.options.conversationId()
       : this.options.conversationId;
@@ -160,6 +160,10 @@ export class ProviderHostToolRuntime {
     if (!providerThreadId || !providerTurnId) {
       this.finishCall(input.callId, pending);
       return Promise.resolve(failure("The provider tool call has no active Inertia turn authority."));
+    }
+    if (controller.signal.aborted) {
+      this.finishCall(input.callId, pending);
+      return Promise.resolve(failure("The Inertia chat-tool call was cancelled."));
     }
     return this.options.bridge.invoke({
       providerThreadId,
@@ -204,7 +208,11 @@ export class ProviderHostToolRuntime {
     decision: AgentApprovalDecision,
   ): boolean {
     const pending = this.pendingApprovals.get(requestId);
-    if (!pending || this.settled) return false;
+    if (
+      !pending
+      || this.settled
+      || this.pendingCalls.get(pending.callId)?.controller.signal.aborted !== false
+    ) return false;
     clearTimeout(pending.timeout);
     this.pendingApprovals.delete(requestId);
     pending.resolve(decision);
@@ -240,9 +248,11 @@ export class ProviderHostToolRuntime {
     callId: string,
     request: ProviderHostToolApprovalRequest,
   ): Promise<AgentApprovalDecision> {
+    const call = this.pendingCalls.get(callId);
     if (
       this.settled
-      || !this.pendingCalls.has(callId)
+      || !call
+      || call.controller.signal.aborted
       || [...this.pendingApprovals.values()].some((pending) => pending.callId === callId)
     ) return Promise.resolve("cancel");
     const requestId = `${HOST_TOOL_APPROVAL_ID_PREFIX}${randomUUID()}`;

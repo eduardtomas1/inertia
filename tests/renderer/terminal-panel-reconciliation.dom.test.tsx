@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalPanel } from "../../src/renderer/src/components/TerminalPanel";
@@ -110,6 +111,53 @@ describe("TerminalPanel replacement reconciliation", () => {
       dispatchEvent: vi.fn(),
     }));
   });
+
+  it.each(["create", "attach", "settling attach"])(
+    "cancels a pending %s retry when its terminal tab closes",
+    async (mode) => {
+      const projectId = "11111111-1111-4111-8111-111111111111";
+      const conversationId = "22222222-2222-4222-8222-222222222222";
+      const terminalId = "60000000-0000-4000-8000-000000000001";
+      const operation = mode === "create" ? "terminal.create" : "terminal.attach";
+      if (mode !== "create") {
+        window.sessionStorage.setItem(
+          `inertia:terminal-sessions:v1:${projectId}:${conversationId}`,
+          JSON.stringify([terminalId]),
+        );
+      }
+      let attempts = 0;
+      const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+        if (sent.type === operation) {
+          attempts += 1;
+          if (attempts === 1) throw new RuntimeCommandError(
+            mode === "create"
+              ? "Unable to start a terminal for this project."
+              : mode === "attach" ? "Connection interrupted." : "Terminal is still stopping.",
+            mode === "attach" ? "not-sent" : "rejected",
+          );
+          return { type: "terminal.created", requestId: sent.requestId, terminalId };
+        }
+        return { type: "request.ok", requestId: sent.requestId };
+      });
+      const subscribe = () => () => undefined;
+      function Workspace(): React.JSX.Element {
+        const [visible, setVisible] = useState(true);
+        return <TerminalPanel projectId={projectId} conversationId={conversationId}
+          projectName="Inertia" status="online" fontSize={13} theme="dark"
+          sendCommand={sendCommand} subscribe={subscribe} visible={visible}
+          onClose={() => setVisible(false)} />;
+      }
+      render(<Workspace />);
+      await waitFor(() => expect(terminalState.writes.some((value) => value.includes("Retrying"))).toBe(true));
+
+      fireEvent.click(screen.getByRole("button", { name: "Close Terminal 1" }));
+      await waitFor(() => expect(screen.queryByRole("tab")).not.toBeInTheDocument());
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+
+      expect(attempts).toBe(1);
+      expect(sendCommand.mock.calls.filter(([sent]) => sent.type === operation)).toHaveLength(1);
+    },
+  );
 
   it("reconciles an ambiguously delivered action to its distinct Darwin terminal", async () => {
     const terminalId = "60000000-0000-4000-8000-000000000001";

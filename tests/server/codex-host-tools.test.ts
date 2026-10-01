@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -49,6 +50,7 @@ function eventHarness(input: {
   approvalTimeoutMs?: number;
 } = {}) {
   let phase: CodexRunPhase = "running";
+  let activeTurnId: string | undefined = TURN_ID;
   const writes: JsonObject[] = [];
   const approvals: AgentApprovalRequest[] = [];
   const resolved: Array<[string, string]> = [];
@@ -88,8 +90,8 @@ function eventHarness(input: {
       phase = value;
     },
     providerThreadId: () => THREAD_ID,
-    activeTurnId: () => TURN_ID,
-    setActiveTurnId: vi.fn(),
+    activeTurnId: () => activeTurnId,
+    setActiveTurnId: (value) => { activeTurnId = value; },
     cancelRequested: () => false,
     lastError: () => undefined,
     setLastError: vi.fn(),
@@ -111,6 +113,112 @@ function eventHarness(input: {
 }
 
 describe("Codex App Server host tools", () => {
+  it("retires a pending host-tool approval when its native goal turn completes", async () => {
+    const mutation = vi.fn();
+    const harness = eventHarness({ invoke: async (call) => {
+      const decision = await call.requestApproval({
+        title: "Create chat", detail: "Create a child chat.",
+        reason: "The provider requested it.", permissionRoots: [],
+      });
+      if (decision === "approve" && !call.signal.aborted) mutation();
+      return { success: decision === "approve", text: decision };
+    } });
+    try {
+      harness.events.projectGoalResponse(THREAD_ID, {
+        threadId: THREAD_ID, objective: "Continue work", status: "active",
+        tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0,
+        createdAt: 1_800_000_000, updatedAt: 1_800_000_000,
+      }, 0);
+      harness.events.handleServerRequest("rpc-approval", "item/tool/call", toolRequest());
+      expect(harness.approvals).toHaveLength(1);
+      harness.events.handleNotification("turn/completed", {
+        threadId: THREAD_ID, turn: { id: TURN_ID, status: "completed" },
+      });
+      const accepted = harness.events.respondToApproval(harness.approvals[0]!.requestId, "approve");
+      await flush();
+      expect({ accepted, mutations: mutation.mock.calls.length }).toEqual({ accepted: false, mutations: 0 });
+      harness.events.handleNotification("turn/started", {
+        threadId: THREAD_ID, turn: { id: "continued-turn", status: "inProgress" },
+      });
+      harness.events.handleServerRequest("rpc-approval", "item/tool/call", toolRequest({
+        turnId: "continued-turn", callId: "continued-call",
+      }));
+      expect(harness.approvals).toHaveLength(2);
+      expect(harness.events.respondToApproval(harness.approvals[1]!.requestId, "approve")).toBe(true);
+      await flush();
+      expect(mutation).toHaveBeenCalledOnce();
+      expect(harness.writes).toEqual([expect.objectContaining({ id: "rpc-approval", result: expect.objectContaining({ success: true }) })]);
+    } finally { harness.events.dispose(); }
+  });
+
+  it("retains cancelled native-turn tool slots until bridge cleanup completes", async () => {
+    const cleanup = deferred<void>();
+    const calls: ProviderHostToolCall[] = [];
+    const harness = eventHarness({ invoke: async (call) => {
+      calls.push(call);
+      await cleanup.promise;
+      return { success: true, text: "done" };
+    } });
+    try {
+      harness.events.projectGoalResponse(THREAD_ID, {
+        threadId: THREAD_ID, objective: "Continue work", status: "active",
+        tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0,
+        createdAt: 1_800_000_000, updatedAt: 1_800_000_000,
+      }, 0);
+      for (let index = 0; index < 8; index += 1) {
+        harness.events.handleServerRequest(`rpc-${index}`, "item/tool/call", toolRequest({ callId: `call-${index}` }));
+      }
+      harness.events.handleNotification("turn/completed", {
+        threadId: THREAD_ID, turn: { id: TURN_ID, status: "completed" },
+      });
+      expect(calls).toHaveLength(8);
+      expect(calls.every(({ signal }) => signal.aborted)).toBe(true);
+      harness.events.handleNotification("turn/started", {
+        threadId: THREAD_ID, turn: { id: "continued-turn", status: "inProgress" },
+      });
+      harness.events.handleServerRequest("rpc-busy", "item/tool/call", toolRequest({
+        turnId: "continued-turn", callId: "while-cleaning",
+      }));
+      await flush();
+      expect(calls).toHaveLength(8);
+      expect(harness.writes).toEqual([expect.objectContaining({
+        id: "rpc-busy", result: expect.objectContaining({ success: false, contentItems: [expect.objectContaining({
+          text: expect.stringContaining("8 Inertia tool calls are already running"),
+        })] }),
+      })]);
+      cleanup.resolve();
+      await flush();
+      harness.events.handleServerRequest("rpc-0", "item/tool/call", toolRequest({
+        turnId: "continued-turn", callId: "after-cleanup",
+      }));
+      await flush();
+      expect(calls).toHaveLength(9);
+      expect(calls[8]!.signal.aborted).toBe(false);
+      expect(harness.writes.at(-1)).toMatchObject({ id: "rpc-0", result: { success: true } });
+      expect(harness.cancel).not.toHaveBeenCalled();
+    } finally { cleanup.resolve(); harness.events.dispose(); await flush(); }
+  });
+
+  it("keeps a retired turn's RPC identity reserved while its tool is cleaning up", async () => {
+    const cleanup = deferred<void>();
+    const harness = eventHarness({ invoke: async () => {
+      await cleanup.promise;
+      return { success: true, text: "late" };
+    } });
+    try {
+      harness.events.beginGoalMutation(false);
+      harness.events.handleServerRequest("owned-rpc", "item/tool/call", toolRequest());
+      harness.events.handleNotification("turn/completed", {
+        threadId: THREAD_ID, turn: { id: TURN_ID, status: "completed" },
+      });
+      harness.events.handleServerRequest("after-completion", "item/tool/call", toolRequest({ callId: "stale-completed-turn" }));
+      expect(harness.writes).toEqual([expect.objectContaining({ id: "after-completion", error: { code: -32602, message: expect.any(String) } })]);
+      harness.events.handleServerRequest("owned-rpc", "item/tool/call", toolRequest({ callId: "reused-during-cleanup" }));
+      expect(harness.cancel).toHaveBeenCalledExactlyOnceWith("malformed-protocol");
+      expect(harness.writes).toHaveLength(1);
+    } finally { cleanup.resolve(); harness.events.dispose(); await flush(); }
+  });
+
   it("accepts the installed item/tool/call wire shape and returns one owned result", async () => {
     const harness = eventHarness();
     try {

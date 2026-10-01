@@ -65,6 +65,7 @@ import {
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
 import { MainWindowCreation } from "./main-window-creation.js";
+import { registerEditContextMenu } from "./edit-context-menu.js";
 import { validateDesktopAppUpdateCandidate } from "./app-update-candidate-viability.js";
 import { AppUpdateRuntimeReadiness } from "./app-update-runtime-readiness.js";
 import { startApplicationWithUpdateHandoff } from "./app-update-startup.js";
@@ -786,6 +787,7 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = window;
+  registerEditContextMenu(window, isTrustedRendererLocation);
   mascotMain ??= new MascotMain({
     mainWindow: () => mainWindow, rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
     registerProtocol: (session) => registerRendererProtocol(session.protocol),

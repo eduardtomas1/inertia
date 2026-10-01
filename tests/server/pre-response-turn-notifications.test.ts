@@ -32,4 +32,17 @@ describe("pre-response turn notifications", () => {
     expect(replayed).toHaveLength(MAX_PRE_RESPONSE_TURN_NOTIFICATIONS);
     expect(replayed[0]?.method).toBe("turn/started");
   });
+
+  it("removes only the resolved request's typed ID and preserves the remaining order", () => {
+    const held = new PreResponseTurnNotifications();
+    held.hold("approval", "turn-1", { command: "old" }, 1);
+    held.hold("turn/started", "turn-1", {});
+    held.hold("approval", "turn-1", { command: "string-id" }, "1");
+    held.removeRequest(1);
+    held.hold("approval", "turn-1", { command: "new" }, 1);
+
+    expect(held.take("turn-1").map(({ method, params }) => params.command ?? method)).toEqual([
+      "turn/started", "string-id", "new",
+    ]);
+  });
 });

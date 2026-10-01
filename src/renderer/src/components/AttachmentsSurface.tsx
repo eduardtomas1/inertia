@@ -23,7 +23,7 @@ export function AttachmentsSurface({ attachments }: AttachmentsSurfaceProps): Re
                 : `${attachments.length} attachment${attachments.length === 1 ? "" : "s"}`}</h3>
             </div>
             <div className="environment-attachments-gallery">
-              <SentMessageAttachmentList attachments={attachments} deferImages label="Chat attachments" />
+              <SentMessageAttachmentList attachments={attachments} label="Chat attachments" />
             </div>
           </section>
         )}

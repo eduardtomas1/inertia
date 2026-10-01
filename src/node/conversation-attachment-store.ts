@@ -88,7 +88,7 @@ export type ConversationAttachmentValidator = (value: {
   readonly name: string;
   readonly mimeType: ChatAttachmentMimeType;
   readonly data: Uint8Array;
-}) => ConversationAttachmentValidationResult;
+}) => ConversationAttachmentValidationResult | Promise<ConversationAttachmentValidationResult>;
 
 export interface ConversationAttachmentStoreOptions {
   readonly platform?: NodeJS.Platform;
@@ -356,7 +356,7 @@ export class ConversationAttachmentStore {
       signal?.throwIfAborted();
       const newPayloads: ConversationAttachmentPayload[] = [];
       for (const payload of unique.values()) {
-        const current = await this.inspect(payload.attachment.id, signal);
+        const current = await this.inspect(payload.attachment.id, signal, false);
         signal?.throwIfAborted();
         if (!current) {
           if (this.records?.has(payload.attachment.id)) await this.removeRecord(payload.attachment.id, signal);
@@ -448,7 +448,7 @@ export class ConversationAttachmentStore {
 
   async preview(id: string, signal?: AbortSignal): Promise<ConversationAttachmentPreview | null> {
     this.assertOpen();
-    return await this.inspect(id, signal);
+    return await this.inspect(id, signal, true);
   }
 
   acceptRetention(retentionId: string): void {
@@ -830,9 +830,11 @@ export class ConversationAttachmentStore {
 
   private async inspect(
     id: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    validateContent: boolean,
   ): Promise<ConversationAttachmentPreview | null> {
     if (!UUID_PATTERN.test(id)) return null;
+    const operationSignal = this.operationSignal(signal);
     const configuredReadStall = process.env.NODE_ENV === "test"
       && this.readFault?.attachmentId === id
       ? this.readFault.stallBeforeRecordRevalidateMs
@@ -848,7 +850,8 @@ export class ConversationAttachmentStore {
         0,
         Math.min(Math.trunc(configuredReadStall), 60_000),
       ),
-    }, this.operationSignal(signal)));
+      validateContent,
+    }, operationSignal));
     if (
       process.env.NODE_ENV === "test"
       && configuredReadStall > 0
@@ -873,12 +876,13 @@ export class ConversationAttachmentStore {
       bytes.length !== metadata.size
       || createHash("sha256").update(bytes).digest("hex") !== metadata.digest
     ) throw new Error("Conversation attachment content changed.");
-    if (this.validate) {
-      const validated = this.validate({
+    if (this.validate && validateContent) {
+      const validated = await this.validate({
         name: metadata.name,
         mimeType: metadata.mimeType,
         data: bytes,
       });
+      operationSignal.throwIfAborted();
       if (
         validated.displayName !== metadata.name
         || validated.mimeType !== metadata.mimeType
@@ -904,7 +908,7 @@ export class ConversationAttachmentStore {
   ): Promise<ConversationAttachmentPreview | null> {
     // Failed reads do not establish invalid content: helper startup, IPC, and
     // timeout failures can occur while a referenced record remains intact.
-    const current = await this.inspect(id, signal);
+    const current = await this.inspect(id, signal, false);
     if (!current) await this.removeRecord(id, signal);
     return current;
   }

@@ -275,9 +275,9 @@ test("captures linked pull requests, a detail, the stack menu and stack reviews"
     await expect(region.getByRole("button", { name: /Draft the stack troubleshooting guide/u })).toContainText("Draft");
     await expect(region.getByRole("button", { name: /Reconcile invoice exports/u })).toContainText("Sync unavailable");
     await expectLayoutHolds(app, region);
-    await capture(page, info, "pull-requests-list-dark-wide");
+    await capture(page, info, "pull-requests-dark");
     await theme(app, "light");
-    await capture(page, info, "pull-requests-list-light-wide");
+    await capture(page, info, "pull-requests-light");
     await app.resizeWindow(1000, 800);
     await expectLayoutHolds(app, region);
     await capture(page, info, "pull-requests-list-light-narrow");
@@ -302,9 +302,9 @@ test("captures linked pull requests, a detail, the stack menu and stack reviews"
     await capture(page, info, "pull-requests-detail-light-wide");
     await app.resizeWindow(1000, 800);
     await expectLayoutHolds(app, region);
-    await capture(page, info, "pull-requests-detail-light-narrow");
+    await capture(page, info, "pull-request-detail-light-narrow");
     await theme(app, "dark");
-    await capture(page, info, "pull-requests-detail-dark-narrow");
+    await capture(page, info, "pull-request-detail-dark-narrow");
     await app.resizeWindow(1440, 920);
 
     const trigger = region.getByRole("button", { name: "Stack #43 · layer 2 of 2" });
@@ -319,9 +319,9 @@ test("captures linked pull requests, a detail, the stack menu and stack reviews"
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(panel.x + panel.width);
     const title = (await region.getByRole("heading", { name: "Keep related pull requests together" }).boundingBox())!;
     expect(bounds.y).toBeGreaterThanOrEqual(title.y + title.height);
-    await capture(page, info, "pull-requests-stack-menu-dark-wide");
+    await capture(page, info, "native-stack-dark");
     await theme(app, "light");
-    await capture(page, info, "pull-requests-stack-menu-light-wide");
+    await capture(page, info, "native-stack-light");
     await page.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
 
@@ -440,6 +440,17 @@ test("captures in-progress, blocked, unknown and failed stack actions", async ({
     await page.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
     await expect(region.getByRole("button", { name: "Unlink from chat" })).toHaveAttribute("aria-disabled", "true");
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Ember theme", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ember");
+    await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    const palette = await openSurface(app);
+    await expect(palette.getByRole("list", { name: "Stack actions" })).toBeVisible();
+    await expectLayoutHolds(app, palette);
+    await blur(page);
+    await capture(page, info, "pull-requests-actions-ember-dark-wide");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

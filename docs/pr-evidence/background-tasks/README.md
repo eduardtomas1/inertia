@@ -85,4 +85,7 @@ that `animations: "disabled"` does not freeze).
 - Live telemetry from real providers; all data is seeded.
 
 See [renderer-bundle.json](renderer-bundle.json) for every closure measured
-against `origin/main` (`2364d768`) and the feature base (`70d3d0f8`).
+against `origin/main` (`2364d768`). The workbench first load grows by 1,067
+bytes, the detached chat first load by 272 bytes and shared core by 1,210
+bytes; each of those caps is main's cap plus exactly that growth. The
+Background tasks surface itself (17,142 bytes) loads on demand.

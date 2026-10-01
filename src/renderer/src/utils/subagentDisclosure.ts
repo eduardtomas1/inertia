@@ -1,7 +1,7 @@
 import { agentRunStateForTurn } from "@shared/run-state";
 import type { AgentTurn, SubagentTrace } from "@shared/contracts";
 import { supportsActiveParentFollowUp } from "./composerPrimaryAction";
-import { formatCompact } from "../lib/usageFormat";
+import { formatCompact } from "../lib/compactFormat";
 
 export interface SubagentDisclosureRow {
   trace: SubagentTrace;

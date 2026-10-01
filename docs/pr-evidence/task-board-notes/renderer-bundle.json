@@ -116,5 +116,38 @@
     "detachedChatFirstLoadJavaScript": 78,
     "filesFirstLoadJavaScript": 85,
     "coreJavaScript": 3462
+  },
+  "uiPolish": {
+    "platform": "macOS 27.0 arm64",
+    "node": "22.23.2",
+    "method": "npm run build:bundle on the branch head before the UI polish (15c7d062) and after it, with the same node_modules. Every budget is unchanged.",
+    "before": {
+      "deferredTaskBoardJavaScript": 9012,
+      "deferredConversationNotesJavaScript": 5309,
+      "mainWorkbenchFirstLoadJavaScript": 854819,
+      "detachedChatFirstLoadJavaScript": 660150,
+      "entryCss": 354742,
+      "coreJavaScript": 2229507
+    },
+    "after": {
+      "deferredTaskBoardJavaScript": 9162,
+      "deferredConversationNotesJavaScript": 5627,
+      "mainWorkbenchFirstLoadJavaScript": 854798,
+      "detachedChatFirstLoadJavaScript": 660150,
+      "entryCss": 354742,
+      "coreJavaScript": 2229383
+    },
+    "delta": {
+      "deferredTaskBoardJavaScript": 150,
+      "deferredConversationNotesJavaScript": 318,
+      "mainWorkbenchFirstLoadJavaScript": -21,
+      "detachedChatFirstLoadJavaScript": 0,
+      "entryCss": 0,
+      "coreJavaScript": -124
+    },
+    "deferredStylesheetsAfter": {
+      "TaskBoard.css": 7520,
+      "ConversationNotes.css": 4707
+    }
   }
 }

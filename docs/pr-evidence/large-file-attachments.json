@@ -9,5 +9,25 @@
     "deferredAttachmentPreviewJavaScript": 18149,
     "coreJavaScript": 2227484
   },
-  "notes": "Emitted byte counts for streamed attachment uploads, large-paste folding and recovery, generic files, bounded previews, and updated attachment help. These are bundle sizes, not runtime memory measurements."
+  "notes": "Emitted byte counts for streamed attachment uploads, large-paste folding and recovery, generic files, bounded previews, and updated attachment help. These are bundle sizes, not runtime memory measurements.",
+  "uiPolish": {
+    "environment": "macOS ARM64, Node 22.23.2, production electron-vite build",
+    "measurements": {
+      "mainWorkbenchFirstLoadJavaScript": 855327,
+      "detachedChatFirstLoadJavaScript": 661770,
+      "deferredAttachmentStorageSettingsJavaScript": 5341,
+      "deferredAttachmentPreviewJavaScript": 18608,
+      "coreJavaScript": 2227651,
+      "entryCss": 354742
+    },
+    "growth": {
+      "mainWorkbenchFirstLoadJavaScript": 351,
+      "detachedChatFirstLoadJavaScript": 351,
+      "deferredAttachmentPreviewJavaScript": 459,
+      "coreJavaScript": 167,
+      "deferredAttachmentStorageSettingsJavaScript": -22,
+      "entryCss": 0
+    },
+    "notes": "Generic file icon and full-name tooltip on attachment chips and sent tiles, a visible truncated-preview notice row in its own deferred stylesheet, and the opaque-file preview block. Caps grow by exactly the measured bytes; headroom is unchanged."
+  }
 }

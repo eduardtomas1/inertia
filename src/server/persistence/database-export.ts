@@ -29,6 +29,7 @@ const recoveryConversationFields = {
     "kimi",
     "opencode",
     "antigravity",
+    "gemini",
   ]),
   model: z.string().max(300),
   reasoningEffort: z.string().max(80),
@@ -36,11 +37,27 @@ const recoveryConversationFields = {
   accessMode: z.enum(["supervised", "auto-edit", "full"]),
 };
 
+function normalizeRecoveryConversation<T extends {
+  providerId: z.infer<typeof recoveryConversationFields.providerId>;
+  model: string;
+  reasoningEffort: string;
+}>(conversation: T) {
+  const { providerId, ...rest } = conversation;
+  // Released Gemini archives follow the same provider/model reset as the
+  // database migration that retired Gemini in favor of Antigravity.
+  return {
+    ...rest,
+    providerId: providerId === "gemini" ? "antigravity" as const : providerId,
+    model: providerId === "gemini" ? "" : conversation.model,
+    reasoningEffort: providerId === "gemini" ? "" : conversation.reasoningEffort,
+  };
+}
+
 const legacyRecoveryConversationSchema = z.object({
   ...recoveryConversationFields,
   messages: z.array(legacyRecoveryMessageSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
-}).strict();
+}).strict().transform(normalizeRecoveryConversation);
 
 const recoveryConversationSchema = z.object({
   ...recoveryConversationFields,
@@ -55,7 +72,7 @@ const recoveryConversationSchema = z.object({
       });
     }
   }
-});
+}).transform(normalizeRecoveryConversation);
 
 const recoveryProjectFields = {
   name: z.string().max(1_000),

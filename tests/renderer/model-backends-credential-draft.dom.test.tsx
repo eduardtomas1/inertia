@@ -110,6 +110,107 @@ function credentialInput(container: HTMLElement): HTMLInputElement {
 }
 
 describe("backend credential draft identity", () => {
+  it.each(["probe", "clear", "enable", "save", "create", "delete"])(
+    "keeps the selected profile and its credential draft after a background %s completes",
+    async (operation) => {
+      const user = userEvent.setup();
+      const profileA = { ...profile("custom:a", "Profile A", 1), authState: "configured" as const };
+      const profileB = profile("custom:b", "Profile B", 1);
+      const profileC = profile("custom:c", "Profile C", 1);
+      const details = new Map([profileA, profileB, profileC].map((value) => [value.id, value]));
+      let finish!: (value: ModelBackendProfileDetail) => void;
+      const pending = new Promise<ModelBackendProfileDetail>((resolve) => { finish = resolve; });
+      const change = vi.fn(() => pending);
+      const props = {
+        ...settingsProps([profileA, profileC, profileB], async (id) => details.get(id)!, vi.fn()),
+        onProbe: change,
+        onClearCredential: change,
+        onUpdate: change,
+        onCreate: change,
+        onDelete: async () => { await change(); },
+      };
+      const { container } = render(<ModelBackendsSettings {...props} />);
+      await screen.findByRole("button", { name: "Test connection" });
+      if (operation === "save") {
+        await user.click(screen.getByRole("button", { name: "Edit configuration" }));
+        await user.click(screen.getByRole("button", { name: "Save configuration" }));
+      } else if (operation === "create") {
+        await user.click(screen.getByRole("button", { name: "New profile" }));
+        await user.click(screen.getByRole("button", { name: "Create profile" }));
+      } else if (operation === "delete") {
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+      } else if (operation === "enable") {
+        await user.click(screen.getByRole("switch", { name: "Enable Profile A" }));
+      } else {
+        await user.click(screen.getByRole("button", {
+          name: operation === "probe" ? "Test connection" : "Clear backend credential",
+        }));
+      }
+      expect(change).toHaveBeenCalledOnce();
+      const rail = screen.getByRole("complementary", { name: "Backend profiles" });
+      const profileBButton = within(rail).getByTitle("Claude harness · Profile B");
+      await user.click(profileBButton);
+      await waitFor(() => expect(container.querySelector(".backend-identity-card"))
+        .toHaveTextContent("custom-b.example.test"));
+      await user.type(credentialInput(container), "profile-b-draft");
+
+      await act(async () => { finish(profileA); await pending; });
+
+      expect(profileBButton).toHaveAttribute("aria-current", "true");
+      expect(container.querySelector(".backend-identity-card"))
+        .toHaveTextContent("custom-b.example.test");
+      expect(credentialInput(container)).toHaveValue("profile-b-draft");
+      expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
+    },
+  );
+
+  it("does not present an old profile's probe failure after switching profiles", async () => {
+    const user = userEvent.setup();
+    const profileA = { ...profile("custom:a", "Profile A", 1), authState: "configured" as const };
+    const profileB = profile("custom:b", "Profile B", 1);
+    const details = new Map([profileA, profileB].map((value) => [value.id, value]));
+    let reject!: (error: Error) => void;
+    const onProbe = vi.fn(() => new Promise<ModelBackendProfileDetail>((_resolve, fail) => { reject = fail; }));
+    render(<ModelBackendsSettings {...settingsProps(
+      [profileA, profileB], async (id) => details.get(id)!, vi.fn(),
+    )} onProbe={onProbe} />);
+    await user.click(await screen.findByRole("button", { name: "Test connection" }));
+    await user.click(screen.getByTitle("Claude harness · Profile B"));
+
+    await act(async () => { reject(new Error("Profile A endpoint is unavailable")); });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New profile" })).toBeEnabled();
+  });
+
+  it("does not reopen a completed creation after the user cancels its editor", async () => {
+    const user = userEvent.setup();
+    const profileA = profile("custom:a", "Profile A", 1);
+    const created = profile("custom:new", "New profile", 1);
+    let finish!: (value: ModelBackendProfileDetail) => void;
+    const pending = new Promise<ModelBackendProfileDetail>((resolve) => { finish = resolve; });
+    const props = {
+      ...settingsProps([profileA], async (id) => id === profileA.id ? profileA : created, vi.fn()),
+      onCreate: vi.fn(() => pending),
+    };
+    const { container, rerender } = render(<ModelBackendsSettings {...props} />);
+    await user.click(screen.getByRole("button", { name: "New profile" }));
+    await user.click(screen.getByRole("button", { name: "Create profile" }));
+    await user.click(screen.getByRole("button", { name: "Cancel profile editing" }));
+    await waitFor(() => expect(container.querySelector(".backend-identity-card"))
+      .toHaveTextContent("custom-a.example.test"));
+    await user.type(credentialInput(container), "profile-a-draft");
+    // Runtime publication may add the profile before the create response arrives.
+    rerender(<ModelBackendsSettings {...props} profiles={[profileA, created]} />);
+    await act(async () => { finish(created); await pending; });
+
+    const rail = screen.getByRole("complementary", { name: "Backend profiles" });
+    expect(within(rail).getByTitle("Claude harness · Profile A"))
+      .toHaveAttribute("aria-current", "true");
+    expect(credentialInput(container)).toHaveValue("profile-a-draft");
+  });
+
   it("clears a draft on profile switches and never saves it to the new profile", async () => {
     const user = userEvent.setup();
     const profileA = profile("custom:a", "Profile A", 1);

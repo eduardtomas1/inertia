@@ -2150,6 +2150,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   it.each([
     ["turn-started-before-response", "Hello from Codex"],
     ["turn-completed-before-response", "Hello from Codex"],
+    ["approval-before-response", "Hello from Codex"],
   ])("keeps the requested turn's notifications that reach stdout before the turn/start response (%s)", async (scenario, text) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;

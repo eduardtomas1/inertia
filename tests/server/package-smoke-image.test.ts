@@ -1,14 +1,23 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, expect, it, vi } from "vitest";
 
+import { validateAttachmentImport } from "../../src/main/attachment-import";
 import { ConversationAttachmentStoreReconcilingError,
   type ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { runPackagedImageRetentionSmoke } from "../../src/server/runtime/attachments/package-smoke-image";
 
 const roots: string[] = [];
+const smokeImageModuleUrl = pathToFileURL(resolve("scripts/package-smoke-image.mjs")).href;
+async function smokeImageBytes(): Promise<Buffer> {
+  const { packageSmokeImageBytes } = await import(smokeImageModuleUrl) as {
+    packageSmokeImageBytes(): Buffer;
+  };
+  return packageSmokeImageBytes();
+}
 afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -18,7 +27,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "inertia-smoke-admission-")); roots.push(root);
   const input = join(root, "input.png");
   const result = join(root, "result.json");
-  const bytes = Buffer.from("exact smoke image bytes");
+  const bytes = await smokeImageBytes();
   await writeFile(input, bytes);
   const retain = vi.fn(async () => [{ id: "retained-image" }]);
   const preview = vi.fn(async (_id: string, _signal?: AbortSignal) => ({ bytes }));
@@ -26,6 +35,21 @@ async function fixture() {
   return { input, result, bytes, retain, preview, acceptRetention,
     store: { retain, preview, acceptRetention } as unknown as ConversationAttachmentStore };
 }
+
+it("uses a structurally valid PNG with different bytes on each packaged launch", async () => {
+  const first = await smokeImageBytes();
+  const second = await smokeImageBytes();
+  expect(first.equals(second)).toBe(false);
+  for (const bytes of [first, second]) {
+    const validated = validateAttachmentImport({
+      name: "package-smoke.png",
+      mimeType: "image/png",
+      data: bytes,
+    });
+    expect(validated.bytes).toEqual(bytes);
+    expect(validated.mimeType).toBe("image/png");
+  }
+});
 
 it("retries only typed pre-publication busy admission and performs one retained-byte proof", async () => {
   const f = await fixture();

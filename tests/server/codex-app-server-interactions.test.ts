@@ -6,7 +6,7 @@ import {
 } from "../../src/server/codex/app-server-events";
 import type { CodexRunPhase } from "../../src/server/codex/app-server-config";
 import { CappedTextBuffer, type JsonObject } from "../../src/server/codex/protocol";
-import type { AgentInputRequest } from "../../src/server/provider/interactions";
+import type { AgentApprovalRequest, AgentInputRequest } from "../../src/server/provider/interactions";
 
 const ROOT_THREAD_ID = "interaction-root";
 const ROOT_TURN_ID = "interaction-turn";
@@ -32,7 +32,10 @@ function inputParams(
 function interactionHarness() {
   let phase: CodexRunPhase = "running";
   let activeTurnId: string | undefined = ROOT_TURN_ID;
+  let requestedTurnId: string | null | undefined;
+  let cancelled = false;
   const inputs: AgentInputRequest[] = [];
+  const approvals: AgentApprovalRequest[] = [];
   const writes: JsonObject[] = [];
   const cancel = vi.fn();
   const rememberFailure = vi.fn();
@@ -45,6 +48,7 @@ function interactionHarness() {
       planMode: false,
       access: "full",
       onInputRequest: (request) => inputs.push(request),
+      onApproval: (request) => approvals.push(request),
     },
     resultText: new CappedTextBuffer(1_024),
     isSettled: () => phase === "settled",
@@ -54,10 +58,11 @@ function interactionHarness() {
     },
     providerThreadId: () => ROOT_THREAD_ID,
     activeTurnId: () => activeTurnId,
+    requestedTurnId: () => requestedTurnId,
     setActiveTurnId: (value) => {
       activeTurnId = value;
     },
-    cancelRequested: () => false,
+    cancelRequested: () => cancelled,
     lastError: () => undefined,
     setLastError: vi.fn(),
     setLastProtocolMethod: vi.fn(),
@@ -75,10 +80,212 @@ function interactionHarness() {
     cancel,
     events: new CodexAppServerEvents(host),
     inputs,
+    approvals,
     rememberFailure,
     writes,
+    awaitStartResponse: () => {
+      phase = "starting-turn";
+      activeTurnId = undefined;
+      requestedTurnId = null;
+    },
+    receiveStartResponse: (turnId: string) => { requestedTurnId = turnId; },
+    changeActiveTurn: (turnId: string) => { activeTurnId = turnId; },
+    cancelRun: () => { cancelled = true; },
   };
 }
+
+function approvalParams(threadId = ROOT_THREAD_ID, turnId = ROOT_TURN_ID): JsonObject {
+  return { threadId, turnId, itemId: "command-1", startedAtMs: 1, command: "npm test", cwd: "/workspace" };
+}
+
+function registerChild(harness: ReturnType<typeof interactionHarness>): void {
+  harness.events.handleNotification("item/completed", {
+    threadId: ROOT_THREAD_ID,
+    turnId: ROOT_TURN_ID,
+    item: {
+      type: "subAgentActivity", id: "child-call", kind: "started",
+      agentThreadId: "approval-child", agentPath: "/root/approval-child",
+    },
+  });
+}
+
+describe("Codex native approval turn authority", () => {
+  it.each([
+    ["item/commandExecution/requestApproval", { command: "npm test", cwd: "/workspace" }],
+    ["item/fileChange/requestApproval", { grantRoot: "/workspace" }],
+    ["item/permissions/requestApproval", { permissions: { network: { enabled: true } } }],
+  ] as const)("rejects stale and missing ownership for %s", (method, details) => {
+    for (const owner of [
+      { threadId: ROOT_THREAD_ID, turnId: "previous-turn" },
+      { threadId: "other-thread", turnId: ROOT_TURN_ID },
+      { threadId: ROOT_THREAD_ID },
+      { turnId: ROOT_TURN_ID },
+      { threadId: ROOT_THREAD_ID, turnId: null },
+      { threadId: ROOT_THREAD_ID, turnId: "bad\0turn" },
+    ]) {
+      const h = interactionHarness();
+      try {
+        h.events.handleServerRequest("approval", method, { ...owner, ...details });
+        expect(h.approvals).toEqual([]);
+        expect(h.writes).toContainEqual({ id: "approval", error: expect.objectContaining({ code: -32602 }) });
+        expect(h.cancel).toHaveBeenCalledOnce();
+      } finally { h.events.dispose(); }
+    }
+  });
+
+  it.each([ROOT_TURN_ID, "previous-turn"])("holds early approvals until the exact start response (%s)", (turnId) => {
+    const h = interactionHarness();
+    try {
+      h.awaitStartResponse();
+      h.events.handleNotification("turn/started", { threadId: ROOT_THREAD_ID, turn: { id: turnId, status: "inProgress" } });
+      h.events.handleServerRequest("early", "item/commandExecution/requestApproval", approvalParams(ROOT_THREAD_ID, turnId));
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([]);
+      h.receiveStartResponse(ROOT_TURN_ID);
+      h.events.replayPreResponseTurnNotifications(ROOT_TURN_ID);
+      if (turnId === ROOT_TURN_ID) {
+        expect(h.approvals).toHaveLength(1);
+        expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+        expect(h.writes).toEqual([{ id: "early", result: { decision: "accept" } }]);
+      } else {
+        expect(h.approvals).toEqual([]);
+        expect(h.writes).toContainEqual({ id: "early", error: expect.any(Object) });
+      }
+    } finally { h.events.dispose(); }
+  });
+
+  it("accepts a receipt-confirmed turn before its turn/started notification", () => {
+    const h = interactionHarness();
+    try {
+      h.awaitStartResponse();
+      h.events.handleServerRequest("early", "item/commandExecution/requestApproval", approvalParams());
+      h.receiveStartResponse(ROOT_TURN_ID);
+      h.events.replayPreResponseTurnNotifications(ROOT_TURN_ID);
+      expect(h.approvals).toHaveLength(1);
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+    } finally { h.events.dispose(); }
+  });
+
+  it.each(["cancel", "settle", "resolved"] as const)("retires buffered approvals on %s", (edge) => {
+    const h = interactionHarness();
+    try {
+      h.awaitStartResponse();
+      h.events.handleServerRequest("early", "item/commandExecution/requestApproval", approvalParams());
+      if (edge === "cancel") h.cancelRun();
+      if (edge === "cancel" || edge === "settle") h.events.settleInteractions();
+      else h.events.handleNotification("serverRequest/resolved", { requestId: "early" });
+      h.receiveStartResponse(ROOT_TURN_ID);
+      h.events.replayPreResponseTurnNotifications(ROOT_TURN_ID);
+      expect(h.approvals).toEqual([]);
+      expect(h.writes.some(({ result }) => (result as JsonObject)?.decision === "accept")).toBe(false);
+    } finally { h.events.dispose(); }
+  });
+
+  it("keeps buffered request IDs reserved across startup", () => {
+    const h = interactionHarness();
+    try {
+      h.awaitStartResponse();
+      h.events.handleServerRequest("same-id", "item/commandExecution/requestApproval", approvalParams());
+      h.events.handleServerRequest("same-id", "item/commandExecution/requestApproval", approvalParams(ROOT_THREAD_ID, "next-turn"));
+      expect(h.cancel).toHaveBeenCalledWith("malformed-protocol");
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([]);
+    } finally { h.events.dispose(); }
+  });
+
+  it("keeps a reused resolved request ID at its new position after turn completion", () => {
+    const h = interactionHarness();
+    try {
+      h.awaitStartResponse();
+      h.events.handleServerRequest("reused", "item/commandExecution/requestApproval", approvalParams());
+      h.events.handleNotification("serverRequest/resolved", { requestId: "reused" });
+      h.events.handleNotification("turn/started", {
+        threadId: ROOT_THREAD_ID, turn: { id: ROOT_TURN_ID, status: "inProgress" },
+      });
+      h.events.handleNotification("turn/completed", {
+        threadId: ROOT_THREAD_ID, turn: { id: ROOT_TURN_ID, status: "completed" },
+      });
+      h.events.handleServerRequest("reused", "item/commandExecution/requestApproval", approvalParams());
+      h.receiveStartResponse(ROOT_TURN_ID);
+      h.events.replayPreResponseTurnNotifications(ROOT_TURN_ID);
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([{ id: "reused", error: expect.any(Object) }]);
+    } finally { h.events.dispose(); }
+  });
+
+  it.each(["child-turn", "other-turn"])("waits for an owned child's turn identity (%s)", (turnId) => {
+    const h = interactionHarness();
+    try {
+      registerChild(h);
+      h.events.handleServerRequest("child", "item/commandExecution/requestApproval", approvalParams("approval-child", "child-turn"));
+      expect(h.approvals).toEqual([]);
+      h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: turnId, status: "inProgress" } });
+      expect(h.approvals).toHaveLength(turnId === "child-turn" ? 1 : 0);
+      if (turnId === "child-turn") {
+        expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+      } else expect(h.cancel).toHaveBeenCalledWith("malformed-protocol");
+    } finally { h.events.dispose(); }
+  });
+
+  it("refuses a previously displayed approval after its turn changes", () => {
+    const h = interactionHarness();
+    try {
+      h.events.handleServerRequest("approval", "item/commandExecution/requestApproval", approvalParams());
+      h.changeActiveTurn("next-turn");
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(false);
+      expect(h.writes).toEqual([{ id: "approval", error: expect.any(Object) }]);
+    } finally { h.events.dispose(); }
+  });
+
+  it("rejects an approval for a completed child turn without waiting or resurfacing it", () => {
+    const h = interactionHarness();
+    try {
+      registerChild(h);
+      h.events.handleNotification("turn/completed", { threadId: "approval-child", turn: { id: "child-turn", status: "completed" } });
+      h.events.handleServerRequest("child", "item/commandExecution/requestApproval", approvalParams("approval-child", "child-turn"));
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([{ id: "child", error: expect.any(Object) }]);
+      expect(h.cancel).toHaveBeenCalledOnce();
+    } finally { h.events.dispose(); }
+  });
+
+  it("counts deferred approvals toward the existing pending request limit", () => {
+    const h = interactionHarness();
+    try {
+      h.awaitStartResponse();
+      for (let index = 0; index < 33; index += 1) {
+        h.events.handleServerRequest(`approval-${index}`, "item/commandExecution/requestApproval", approvalParams());
+      }
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([{ id: "approval-32", error: expect.objectContaining({ code: -32600 }) }]);
+      expect(h.cancel).toHaveBeenCalledOnce();
+    } finally { h.events.dispose(); }
+  });
+
+  it("bounds the wait for a child's turn without granting an unknown owner", () => {
+    vi.useFakeTimers();
+    const h = interactionHarness();
+    try {
+      registerChild(h);
+      h.events.handleServerRequest("child", "item/commandExecution/requestApproval", approvalParams("approval-child", "child-turn"));
+      vi.advanceTimersByTime(30_000);
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([{ id: "child", error: expect.any(Object) }]);
+      expect(h.cancel).toHaveBeenCalledOnce();
+    } finally { h.events.dispose(); vi.useRealTimers(); }
+  });
+
+  it("preserves the legacy thread-only approval contract", () => {
+    const h = interactionHarness();
+    try {
+      h.events.handleServerRequest("legacy", "execCommandApproval", {
+        conversationId: ROOT_THREAD_ID, callId: "legacy-call", command: ["npm", "test"], cwd: "/workspace",
+      });
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+      expect(h.writes).toEqual([{ id: "legacy", result: { decision: "approved" } }]);
+    } finally { h.events.dispose(); }
+  });
+});
 
 describe("Codex App Server interaction ownership", () => {
   it("answers current-time reads only for an owned provider thread", () => {

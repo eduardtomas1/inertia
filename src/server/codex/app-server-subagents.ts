@@ -224,6 +224,13 @@ export class CodexSubagentLifecycle {
       && this.childActiveTurns.get(threadId) === turnId;
   }
 
+  isAwaitingChildTurn(threadId: string, turnId: string): boolean {
+    return threadId !== this.host.rootThreadId()
+      && this.isOwnedProviderThread(threadId)
+      && !this.childActiveTurns.has(threadId)
+      && !this.completedChildTurns.has(`${threadId}\0${turnId}`);
+  }
+
   interruptibleTurns(): CodexChildTurn[] {
     // App Server is spawned per Inertia run, so even pre-registration turns
     // come from this run's isolated provider process. They are safe to stop,

@@ -10,6 +10,7 @@ import {
 import { DetachedChatMain } from "./detached-chat-main.js";
 import type { DetachedChatDraftStoreDiagnostic } from "./detached-chat-draft-store.js";
 import { hardenDesktopSession } from "./preview-broker.js";
+import { registerEditContextMenu } from "./edit-context-menu.js";
 
 export interface DetachedChatBootstrapOptions {
   mainWindow(): BrowserWindow | null;
@@ -37,7 +38,11 @@ export function createDetachedChatMain(
   return new DetachedChatMain({
     ipcMain,
     mainWindow: options.mainWindow,
-    createBrowserWindow: (windowOptions) => new BrowserWindow(windowOptions),
+    createBrowserWindow: (windowOptions) => {
+      const window = new BrowserWindow(windowOptions);
+      registerEditContextMenu(window, (url) => url === options.rendererUrl);
+      return window;
+    },
     getDisplays: () => screen.getAllDisplays(),
     hardenSession: hardenDesktopSession,
     registerRendererProtocol: options.registerRendererProtocol,

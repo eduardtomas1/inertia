@@ -272,6 +272,14 @@ if (message.method === "thread/goal/clear") {
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress" } } },
+      { id: "approval-rpc", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } },
+      { id: message.id, result: { turn: { id: turnId, status: "inProgress" } } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" || process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     sendBatch([
@@ -627,6 +635,12 @@ if (message.method === "turn/start") {
       complete();
     }, 10);
     return;
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
+    params.turnId = "child-approval-turn";
+    send({ id: "approval-rpc", method: approvalMethod, params });
+    // The request may win the race with the delegated turn notification.
+    return send({ method: "turn/started", params: { threadId: approvalThreadId, turn: { id: "child-approval-turn", status: "inProgress" } } });
   }
   return send({ id: "approval-rpc", method: approvalMethod, params });
 }

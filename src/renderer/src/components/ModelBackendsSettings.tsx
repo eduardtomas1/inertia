@@ -265,20 +265,30 @@ export function ModelBackendsSettings({
 
   const run = async (
     key: string,
-    operation: () => Promise<ModelBackendProfileDetail | void>,
+    operation: (isCurrent: () => boolean) => Promise<ModelBackendProfileDetail | void>,
     isCurrent: () => boolean = () => true,
   ): Promise<void> => {
     if (busy) return;
+    const selectionEpoch = selectionEpochRef.current;
+    const ownsDraft = draft !== null;
+    const ownsResponse = (): boolean => (
+      isCurrent()
+      // New-chat defaults remain visible independently of the profile rail.
+      && (key === "default" || (
+        selectionEpochRef.current === selectionEpoch
+        && (ownsDraft || selectedAuthorityRef.current.profileId === selectedProfileId)
+      ))
+    );
     setBusy(key);
     setError(null);
     try {
-      const value = await operation();
-      if (value && isCurrent()) {
+      const value = await operation(ownsResponse);
+      if (value && ownsResponse()) {
         setDetail(value);
         setSelectedId(value.id);
       }
     } catch (reason) {
-      if (isCurrent()) {
+      if (ownsResponse()) {
         setError(reason instanceof Error ? reason.message : "The backend change could not be saved.");
       }
     } finally {
@@ -288,7 +298,7 @@ export function ModelBackendsSettings({
 
   const create = async (): Promise<void> => {
     if (!draft) return;
-    await run(editingId ? "save" : "create", async () => {
+    await run(editingId ? "save" : "create", async (isCurrent) => {
       const value = editingId
         ? await onUpdate(
             editingId,
@@ -297,15 +307,18 @@ export function ModelBackendsSettings({
               : draft,
           )
         : await onCreate(draft);
-      setDraft(null);
-      setOriginalDraft(null);
-      setEditingId(null);
+      if (isCurrent()) {
+        setDraft(null);
+        setOriginalDraft(null);
+        setEditingId(null);
+      }
       return value;
     });
   };
 
   const beginEdit = (profile: ModelBackendProfileDetail): void => {
     if (profile.preset === "native") return;
+    selectionEpochRef.current += 1;
     setCredentialDraft(null);
     setEditingId(profile.id);
     setAdvanced(profile.routing.mode === "advanced");
@@ -330,6 +343,13 @@ export function ModelBackendsSettings({
     setDraft(nextDraft);
     setOriginalDraft(structuredClone(nextDraft));
     setError(null);
+  };
+
+  const cancelEditing = (): void => {
+    selectionEpochRef.current += 1;
+    setDraft(null);
+    setOriginalDraft(null);
+    setEditingId(null);
   };
 
   const setHarness = (harness: "claude-agent-sdk" | "codex-app-server"): void => {
@@ -440,6 +460,7 @@ export function ModelBackendsSettings({
           className="secondary-button"
           disabled={disabled || Boolean(busy)}
           onClick={() => {
+            selectionEpochRef.current += 1;
             setCredentialDraft(null);
             setDraft(defaultDraft());
             setOriginalDraft(null);
@@ -463,11 +484,8 @@ export function ModelBackendsSettings({
               )}
               aria-current={!draft && selected?.id === profile.id ? "true" : undefined}
               onClick={() => {
-                selectionEpochRef.current += 1;
+                cancelEditing();
                 setCredentialDraft(null);
-                setDraft(null);
-                setOriginalDraft(null);
-                setEditingId(null);
                 setSelectedId(profile.id);
                 setError(null);
               }}
@@ -497,7 +515,7 @@ export function ModelBackendsSettings({
               <div className="backend-editor-heading">
                 <span className="backend-profile-icon"><Plus size={16} /></span>
                 <span><strong>{editingId ? "Edit backend configuration" : "Create a backend profile"}</strong><small>{editingId ? "Saving execution changes increments the profile revision and requires a fresh compatibility test." : "Custom endpoints stay isolated from native provider configuration."}</small></span>
-                <button type="button" className="icon-button" aria-label="Cancel profile editing" onClick={() => { setDraft(null); setOriginalDraft(null); setEditingId(null); }}><X size={15} /></button>
+                <button type="button" className="icon-button" aria-label="Cancel profile editing" onClick={cancelEditing}><X size={15} /></button>
               </div>
 
               <div className="backend-form-section">
@@ -563,7 +581,7 @@ export function ModelBackendsSettings({
               </div>
 
               <div className="backend-editor-actions">
-                <button type="button" className="secondary-button" onClick={() => { setDraft(null); setOriginalDraft(null); setEditingId(null); }}>Cancel</button>
+                <button type="button" className="secondary-button" onClick={cancelEditing}>Cancel</button>
                 <button type="button" className="primary-button" disabled={disabled || Boolean(busy)} onClick={() => { void create(); }}>{busy === "create" ? "Creating…" : busy === "save" ? "Saving…" : editingId ? "Save configuration" : "Create profile"}</button>
               </div>
             </>
@@ -619,16 +637,6 @@ export function ModelBackendsSettings({
                         setCredentialDraft(null);
                         return;
                       }
-                      const selectionEpoch = selectionEpochRef.current;
-                      const responseIsCurrent = (): boolean => {
-                        const authority = selectedAuthorityRef.current;
-                        return (
-                          selectionEpochRef.current === selectionEpoch
-                          && authority.profileId === pending.profileId
-                          && authority.configurationRevision
-                            === pending.configurationRevision
-                        );
-                      };
                       void run(
                         "credential",
                         async () => {
@@ -640,7 +648,8 @@ export function ModelBackendsSettings({
                             current === pending ? null : current);
                           return value;
                         },
-                        responseIsCurrent,
+                        () => selectedAuthorityRef.current.configurationRevision
+                          === pending.configurationRevision,
                       );
                     }}>{busy === "credential" ? "Saving…" : selected.authState === "configured" ? "Replace" : "Add"}</button>
                   )}
@@ -685,9 +694,10 @@ export function ModelBackendsSettings({
                 <div className="backend-danger-zone">
                   <span><strong>Delete profile</strong><small>Historical turns keep this profile’s safe display identity. Its credential is forgotten.</small></span>
                   {deleteConfirm ? (
-                    <span><button ref={deleteCancelRef} type="button" className="secondary-button" onClick={() => { restoreDeleteFocusRef.current = true; setDeleteConfirm(false); }}>Cancel</button><button type="button" className="danger-button" disabled={disabled || Boolean(busy)} onClick={() => { void run("delete", async () => {
+                    <span><button ref={deleteCancelRef} type="button" className="secondary-button" onClick={() => { restoreDeleteFocusRef.current = true; setDeleteConfirm(false); }}>Cancel</button><button type="button" className="danger-button" disabled={disabled || Boolean(busy)} onClick={() => { void run("delete", async (isCurrent) => {
                       setCredentialDraft(null);
                       await onDelete(selected.id);
+                      if (!isCurrent()) return;
                       setSelectedId(profiles.find(({ id }) => id !== selected.id)?.id ?? null);
                       setDetail(null);
                     }); }}>Delete permanently</button></span>

@@ -47,7 +47,9 @@ function receiptFor(
 }
 
 async function perform(receipt?: unknown) {
-  const parentPort = Object.assign(new EventEmitter(), { postMessage: vi.fn() });
+  let resolvePosted!: () => void;
+  const posted = new Promise<void>((resolve) => { resolvePosted = resolve; });
+  const parentPort = Object.assign(new EventEmitter(), { postMessage: vi.fn(resolvePosted) });
   Object.defineProperty(process, "parentPort", {
     configurable: true,
     value: parentPort,
@@ -58,7 +60,8 @@ async function perform(receipt?: unknown) {
     operationId,
     encodedOperation: JSON.stringify({ receipt }),
   } });
-  await vi.waitFor(() => expect(parentPort.postMessage).toHaveBeenCalledOnce());
+  await posted;
+  expect(parentPort.postMessage).toHaveBeenCalledOnce();
   return parentPort;
 }
 

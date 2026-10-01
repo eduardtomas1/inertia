@@ -101,14 +101,6 @@ function settingsProps(
   };
 }
 
-function credentialInput(container: HTMLElement): HTMLInputElement {
-  const input = container.querySelector<HTMLInputElement>(
-    'input[type="password"]',
-  );
-  if (!input) throw new Error("Credential input is unavailable");
-  return input;
-}
-
 describe("backend settings pending actions", () => {
   it("lands on a remaining profile when the snapshot drops a deleted profile before delete resolves", async () => {
     const user = userEvent.setup();

@@ -954,7 +954,7 @@ export function ChatWorkspace({
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
         <div ref={timelineRef} className="response-timeline">
-          {conversation?.worktreePath && onWorktreeSetupCommand && <Suspense fallback={null}><WorktreeSetupCard key={conversation.id} conversation={conversation} request={onWorktreeSetupCommand} /></Suspense>}
+          {conversation?.worktreePath && onWorktreeSetupCommand && <Suspense fallback={null}><WorktreeSetupCard key={conversation.id} conversation={conversation} request={onWorktreeSetupCommand} online={history?.online ?? true} /></Suspense>}
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
               {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"

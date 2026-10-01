@@ -161,7 +161,7 @@
 
 .worktree-setup-card [aria-disabled="true"] {
   opacity: var(--disabled-opacity);
-  cursor: wait;
+  cursor: default;
 }
 
 .worktree-setup-toggle:focus-visible,

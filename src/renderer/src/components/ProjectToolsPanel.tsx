@@ -117,6 +117,7 @@ function ProjectToolsContent({ projectId, projectName, conversationId, connected
   const addUnavailable = !connected || busy || !!editor || !view || view.connections.length >= MAX_PROJECT_TOOLS;
   const rowUnavailable = busy || !!editor;
   const count = view?.connections.length ?? 0;
+  const editorInList = connected && view?.connections.some(({ id }) => id === editor?.original?.id);
   const errorNode = error && <p className="project-tools-error" role={error === REFRESH_ERROR ? "status" : "alert"}>
     <AlertCircle size={14} aria-hidden="true" /><span>{error}</span>
   </p>;
@@ -192,7 +193,8 @@ function ProjectToolsContent({ projectId, projectName, conversationId, connected
       </div>
       {errorPlacement === "top" && errorNode}
       {connected && !view && !error && <p className="project-tools-empty" role="status">Loading connections…</p>}
-      {editor && !editor.original && editorForm}
+      {/* A missing row must not hide an unsaved edit or its Cancel control. */}
+      {editor && !editorInList && editorForm}
       {connected && view && view.connections.length === 0 && !editor && <p className="project-tools-empty">
         No connections. Add a Streamable HTTP MCP server to share its tools with this project’s chats.
       </p>}

@@ -107,6 +107,39 @@ describe("project tools panel", () => {
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Revised docs");
     expect(run).toHaveBeenCalledWith("project-tools-save", expect.objectContaining({ payload: expect.objectContaining({ id: saved.id, revision: 1 }) }), { passive: true, reportError: false });
   });
+  it.each(["removed", "refresh failed", "disconnected"])("keeps an edit recoverable when its row is %s", async (state) => {
+    vi.useFakeTimers();
+    let refreshed = false;
+    const run = vi.fn(async () => {
+      if (refreshed && state === "refresh failed") throw new Error("offline");
+      return result(refreshed && state === "removed" ? [] : [saved]);
+    });
+    const view = render(<ProjectToolsPanel {...props} run={run} />);
+    try {
+      await act(async () => {});
+      fireEvent.click(screen.getByRole("button", { name: "Edit Documentation" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Unsaved documentation" } });
+      refreshed = true;
+      if (state === "disconnected") view.rerender(<ProjectToolsPanel {...props} connected={false} run={run} />);
+      else await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+
+      expect(screen.getByRole("form", { name: "Edit connection" })).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Unsaved documentation");
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("form")).not.toBeInTheDocument();
+      refreshed = false;
+      if (state === "disconnected") view.rerender(<ProjectToolsPanel {...props} run={run} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      const add = screen.getByRole("button", { name: "Add connection" });
+      expect(add).toHaveAttribute("aria-disabled", "false");
+      expect(add).toHaveFocus();
+      fireEvent.click(add);
+      expect(screen.getByRole("form", { name: "New connection" })).toBeVisible();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("ignores a late response for a previous chat", async () => {
     let resolve!: (event: ServerEvent) => void;
     const run = vi.fn(() => new Promise<ServerEvent>((done) => { resolve = done; }));

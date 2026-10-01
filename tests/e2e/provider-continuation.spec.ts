@@ -13,6 +13,9 @@ import { closeWorkspaceTools } from "./support/workspace-tools";
 let app!: AppFixture;
 let sourceId = "";
 let sourceBranch = "";
+// Five source lines can wrap past the excerpt clamp without crossing either
+// threshold for a Show more control (280 characters / five source lines).
+const wrappedRequest = ["Keep retries idempotent and preserve the existing cursor format.", ...Array.from({ length: 4 }, () => "W".repeat(52))].join("\n");
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "provider-continuation", initialState: "conversation",
@@ -24,7 +27,7 @@ test.beforeAll(async () => {
         store.updateConversation(sourceId, { title: "Make retries safe", branch: sourceBranch, providerSessionId: "source-codex-session" });
         const turn = store.beginAgentTurn({
           id: randomUUID(), conversationId: sourceId, runId: randomUUID(),
-          content: "Keep retries idempotent and preserve the existing cursor format.",
+          content: wrappedRequest,
           providerId: "codex", harnessId: "codex-app-server", backendProfileId: "builtin:openai", model: "provider-default", reasoningEffort: "",
           interactionMode: "build", accessMode: "supervised", configurationRevision: 0, association: "authoritative", requestedAt: "2026-09-30T09:00:00.000Z",
         }).turn;
@@ -124,6 +127,10 @@ test("continues a provider-bound chat with selected context, retains drafts, and
   const dialog = page.getByRole("dialog", { name: /^Continue with/u });
   await expect(dialog.getByText("The retry state now persists", { exact: false })).toBeVisible();
   await expect(dialog.getByRole("checkbox", { name: "2 of 2 messages selected" })).toBeChecked();
+  const wrappedMessage = dialog.locator(".provider-continuation-messages > li").filter({ hasText: "Keep retries idempotent" });
+  const wrappedExcerpt = wrappedMessage.locator("p");
+  await expect(wrappedMessage.getByRole("button", { name: "Show more" })).toHaveCount(0);
+  await expect.poll(() => wrappedExcerpt.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
   await dialog.getByRole("textbox", { name: "Next instruction (optional)" }).fill("Review restart recovery and add the regression test.");
   await expectDialogLayoutHolds(page, dialog);
   await capture(page, testInfo, "provider-continuation-preview");

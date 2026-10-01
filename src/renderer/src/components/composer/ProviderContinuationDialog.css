@@ -154,7 +154,8 @@
   -webkit-line-clamp: 5;
 }
 
-.provider-continuation-messages p.is-expanded {
+.provider-continuation-messages p.is-expanded,
+.provider-continuation-messages li:not(:has(.provider-continuation-more)) p {
   display: block;
 }
 

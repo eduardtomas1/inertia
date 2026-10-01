@@ -1,3 +1,4 @@
+import type { PullRequestsResult, StackReviewResult } from "../pull-requests";
 import type { LimitResetResult } from "../limit-reset";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { MessageQueueResult } from "../queued-messages";
@@ -205,7 +206,7 @@ export type ServerEvent =
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance
         | MessageQueueResult
-        | LimitResetResult
+        | LimitResetResult | PullRequestsResult | StackReviewResult
         | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult
@@ -228,7 +229,7 @@ export type ServerEvent =
             skillDiscovery: AgentWorkflowState["skillDiscovery"];
           }
         | { kind: "git.action"; message: string }
-        | { kind: "external.url"; url: string; label: string }
+        | { kind: "external.url"; url: string; label: string; notice?: string }
         | ConversationDetailResult
         | MessageSearchResult;
     }

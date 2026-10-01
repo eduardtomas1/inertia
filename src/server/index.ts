@@ -1,3 +1,4 @@
+import { createPullRequestsRuntime } from "./runtime/pull-requests-runtime";
 import { createLimitResetRuntime } from "./runtime/limit-reset-runtime";
 import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
@@ -690,6 +691,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       queuedMessages.handler,
       usageLimits.handler,
       limitReset.handler,
+      createPullRequestsRuntime(store, dataDirectory, runtimeLifetimeAbort.signal, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,

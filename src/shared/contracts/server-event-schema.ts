@@ -3,7 +3,7 @@ import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../at
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
-import { usageResultValidators } from "./usage-results-schema";
+import { pullRequestResultValidators } from "./pull-request-results-schema"; import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
@@ -1126,7 +1126,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
-  ...usageResultValidators,
+  ...usageResultValidators, ...pullRequestResultValidators,
   "conversation.created": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),
@@ -1134,7 +1134,7 @@ const REQUEST_RESULT_VALIDATORS = {
     conversationContextSource(value.source),
   "project.created": (value) => stringField(value, "projectId"),
   "git.action": (value) => stringField(value, "message"),
-  "external.url": (value) => recordWithStrings(value, "url", "label"),
+  "external.url": (value) => recordWithStrings(value, "url", "label") && optionalStringField(value, "notice"),
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
   "git.pr.confidence": (value) => validatePreMergeConfidence(value.confidence),
   "workspace.entries": (value) => workspaceEntriesPage(value),

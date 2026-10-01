@@ -38,6 +38,7 @@ import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadConversationSplitView,
   loadAgentsSurface,
+  loadPullRequestsSurface,
   loadAttachmentsSurface,
   loadFilesPanel,
   loadGoalPanel,
@@ -71,6 +72,7 @@ const UsageSurface = lazySurface(
   loadUsageSurface,
   (module) => module.UsageSurface,
 );
+const PullRequestsSurface = lazySurface(loadPullRequestsSurface, (module) => module.PullRequestsSurface);
 const AttachmentsSurface = lazySurface(loadAttachmentsSurface, (module) => module.AttachmentsSurface);
 const AgentsSurface = lazySurface(
   loadAgentsSurface,
@@ -112,6 +114,7 @@ export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
   panel: Omit<WorkspacePanelProps, "children">;
   usage: UsageSurfaceProps;
+  pullRequests?: ComponentProps<typeof PullRequestsSurface>;
   agents: AgentsSurfaceProps;
   attachments: AttachmentsSurfaceProps;
   runs: WorkspaceRunsModel;
@@ -198,6 +201,7 @@ function WorkspaceToolSurface({
             <Suspense fallback={<WorkspaceToolFallback />}>
               {tools.activeTool === "terminal" && <div ref={terminalTarget} className="terminal-surface-slot" />}
               {tools.activeTool === "attachments" && <AttachmentsSurface {...tools.attachments} />}
+              {tools.activeTool === "pull-requests" && tools.pullRequests && <PullRequestsSurface key={tools.pullRequests.conversationId} {...tools.pullRequests} />}
               {tools.activeTool === "usage" && (
                 <UsageSurface {...tools.usage} />
               )}

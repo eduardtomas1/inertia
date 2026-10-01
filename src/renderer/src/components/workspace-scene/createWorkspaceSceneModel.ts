@@ -457,6 +457,7 @@ export function createWorkspaceSceneModel({
     }
   }
   if (!conversation) {
+    unavailableSurfaces["pull-requests"] = "Open a chat to link pull requests.";
     unavailableSurfaces.preview ??= "Open a chat to use the Browser.";
   }
   const effectiveActiveTool = activeTool && !unavailableSurfaces[activeTool]
@@ -858,6 +859,8 @@ export function createWorkspaceSceneModel({
         onCloseSurface: layout.closeSurface,
         onClosePanel: layout.toggleWorkspaceTools,
       },
+      pullRequests: conversation ? { conversationId: conversation.id, run: actions.run,
+        disabled: connection.status !== "online" || Boolean(conversation.archivedAt), active: toolsVisible } : undefined,
       usage: {
         usage: environmentSummary.usage,
         ...(usageProvider && usageQuotaSource === "selected-route"

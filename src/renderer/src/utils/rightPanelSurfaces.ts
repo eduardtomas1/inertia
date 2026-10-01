@@ -2,6 +2,7 @@ import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
 
 export const RIGHT_PANEL_SURFACES = [
   "changes",
+  "pull-requests",
   "files",
   "preview",
   "terminal",
@@ -17,6 +18,7 @@ export const RIGHT_PANEL_SURFACE_META: Record<
   { label: string; shortcut: string }
 > = {
   changes: { label: "Changes", shortcut: "D" },
+  "pull-requests": { label: "Pull requests", shortcut: "R" },
   files: { label: "Files", shortcut: "F" },
   preview: { label: "Browser", shortcut: "B" },
   terminal: { label: "Terminal", shortcut: "T" },

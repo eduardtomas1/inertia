@@ -30,6 +30,9 @@ Choose **No project** in a new chat’s project selector, or **Start without a p
 
 When a stopped chat has a reported subscription reset time, the composer offers **Resume at reset** and **Snooze until reset**. Resuming is an explicit, cancellable action that survives restarts and rechecks the account, chat route and available quota before continuing once. Inertia must be running to resume; snoozing alone never sends a message. Supported native accounts include Codex, Claude, Cursor, Kimi Code and OpenCode Go. Other OpenCode backends, custom routes and the current Antigravity CLI do not expose compatible reset data; Limits explains availability for each provider. Accounts without enough identity information still support snoozing but cannot schedule automatic resume.
 
+Open **Pull requests** from the right panel to keep multiple GitHub PRs with one chat, including PRs from different repositories. PRs created in Inertia link automatically. Native GitHub stacks show their ordered layers; **Merge stack** reviews the prefix through the selected PR, and **Rebase stack** updates the whole stack from its top layer. Both require a fresh review and explicit confirmation. Actions run on GitHub using the local GitHub CLI sign-in; the local checkout is unchanged. Pending or uncertain actions retain a receipt across restarts and cannot be submitted again until their outcome is known.
+
+
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 
 ## One workspace for the coding loop

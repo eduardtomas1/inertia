@@ -73,6 +73,12 @@ const duoCancellation = {
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "conversation.prs.get": shortRetrySafe,
+  "conversation.prs.refresh": { timeoutMs: LONG_MUTATION_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "conversation.prs.link": longMutation,
+  "conversation.prs.unlink": shortMutation,
+  "conversation.stack.prepare": { timeoutMs: LONG_MUTATION_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "conversation.stack.execute": longMutation,
   "conversation.limit-reset.get": { timeoutMs: 60000, timeoutDelivery: "rejected" },
   "conversation.limit-reset.schedule": longMutation,
   "conversation.limit-reset.cancel": shortMutation,

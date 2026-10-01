@@ -1,3 +1,4 @@
+import { PullRequestRepository } from "./persistence/pull-request-repository";
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -132,6 +133,7 @@ export class RuntimeStore {
   readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
   readonly limitResets: LimitResetRepository;
+  readonly pullRequests: PullRequestRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
@@ -182,6 +184,7 @@ export class RuntimeStore {
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.limitResets = new LimitResetRepository(this.database);
+    this.pullRequests = new PullRequestRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
     this.projectRepository = new ProjectRepository({
       database: this.database,
@@ -416,7 +419,7 @@ export class RuntimeStore {
   }
 
   removeProject(projectId: string): void {
-    this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
+    this.conversationWorktrees.assertProjectRemovalAllowed(projectId); this.pullRequests.assertDeletionAllowed(projectId, true);
     this.projectRepository.remove(projectId);
   }
 
@@ -855,7 +858,7 @@ export class RuntimeStore {
   }
 
   deleteConversation(conversationId: string): void {
-    this.conversationRepository.delete(conversationId);
+    this.pullRequests.assertDeletionAllowed(conversationId); this.conversationRepository.delete(conversationId);
   }
 
   createMessage(

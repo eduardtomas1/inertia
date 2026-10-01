@@ -1,3 +1,4 @@
+import { pullRequestsMigration } from "./pull-requests";
 import { limitResetMigration } from "./limit-reset";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
@@ -25,4 +26,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   customAppearanceColorsMigration,
   scratchProjectMigration,
   limitResetMigration,
+  pullRequestsMigration,
 ];

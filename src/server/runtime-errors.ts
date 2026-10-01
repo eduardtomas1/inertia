@@ -1,4 +1,5 @@
 import { CheckpointError } from "./checkpoints";
+import { PullRequestRepositoryError } from "./persistence/pull-request-repository";
 import { RecordNotFoundError } from "./database";
 import { ConversationHistoryTooLargeError, ConversationProviderChangeError } from "./persistence/errors";
 import { GitError } from "./git";
@@ -35,6 +36,7 @@ export function publicRuntimeError(error: unknown): string {
   }
   if (
     error instanceof RuntimeRequestError
+    || error instanceof PullRequestRepositoryError
     || error instanceof RecordNotFoundError
     || error instanceof ConversationHistoryTooLargeError
     || error instanceof ConversationProviderChangeError

@@ -1696,6 +1696,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       })]),
     );
 
+    const subagents: ProviderSubagentEvent[] = [];
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-inactive-descendant",
@@ -1703,13 +1704,21 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       prompt: "Ignore inactive child events",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    })).resolves.toMatchObject({
       status: "failed",
       failure: {
         reason: "rpc-timeout",
         terminalEvent: "event/inactivity-deadline",
       },
     });
+    expect(subagents.map(({ providerAgentId, status, providerStatus, isLive }) => ({
+      providerAgentId, status, providerStatus, isLive,
+    }))).toEqual([
+      { providerAgentId: "opencode-child-session", status: "spawned", providerStatus: undefined, isLive: true },
+      { providerAgentId: "opencode-child-session", status: "waiting", providerStatus: "idle", isLive: true },
+    ]);
     expect(manager.activeConversationIds()).toEqual([]);
   });
 

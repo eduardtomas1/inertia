@@ -908,7 +908,7 @@ function startOpenCodeRun(
     failure?: ProviderRunFailure,
     cleanupConfirmed = true,
   ): ProviderRunResult {
-    subagents?.seal();
+    subagents?.finish(status === "completed");
     const canonical = openCodeCanonicalResult(emittedParts, eventState);
     if (promptLifecycle.workingActivityStarted) {
       emitter.activity(

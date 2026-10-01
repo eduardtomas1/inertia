@@ -6,7 +6,6 @@ import {
   openCodeContextTokens,
   openCodeMessageUsage,
   openCodeToolPartLabel,
-  type OpenCodeMessageUsage,
 } from "./opencode-event-projection";
 import type { OpenCodeEventSessionScope } from "./opencode-session-ownership";
 import {
@@ -24,27 +23,34 @@ import {
 } from "./subagent-trace";
 
 const MAX_SUBAGENT_LABEL_CHARS = 200;
-const MAX_TRACKED_CHILD_MESSAGES = 2_048;
-const MAX_TRACKED_CHILD_TOOL_PARTS = 4_096;
+const MAX_CHILD_MESSAGES = 2_048;
+const MAX_CHILD_TOOL_PARTS = 4_096;
 const SESSION_ERROR_FALLBACK = "OpenCode reported an error for this delegated task.";
+const TASK_ERROR_FALLBACK = "OpenCode reported that this delegated task failed.";
 
 type OpenCodeSubagentUpdate = Parameters<AgentHarnessEmitter["subagent"]>[0];
+type OpenCodeSettledStatus = Extract<
+  SubagentTraceStatus,
+  "completed" | "failed" | "cancelled" | "lost"
+>;
 
 interface OpenCodeChildTrace {
   parentSessionId: string;
   name: string | null;
   description: string | null;
   status: SubagentTraceStatus;
+  providerStatus: "busy" | "idle" | null;
   model: string | null;
   maxContextTokens: number | null;
   activity: string | null;
-  messages: Map<string, OpenCodeMessageUsage | null>;
+  messageTotals: Map<string, number | null | undefined>;
+  uncountedMessages: boolean;
   totalTokens: number;
   unknownTotals: number;
-  lastUsage: OpenCodeMessageUsage | null;
+  lastAssistantId: string | null;
   usage: SubagentTaskUsage | null;
   toolParts: Set<string>;
-  toolUseCount: number;
+  uncountedToolParts: boolean;
   text: string | null;
   result: string | null;
   emitted: string | null;
@@ -59,8 +65,6 @@ export interface OpenCodeSubagentProjectionOptions {
 
 export class OpenCodeSubagentProjection {
   private readonly children = new Map<string, OpenCodeChildTrace>();
-  private trackedMessages = 0;
-  private trackedToolParts = 0;
   private sequence = 0;
   private sealed = false;
 
@@ -90,14 +94,14 @@ export class OpenCodeSubagentProjection {
     const child = this.children.get(sessionId);
     if (!child || isTerminalSubagentStatus(child.status)) return;
     const properties = event.properties as Record<string, unknown>;
-    if (
-      event.type === "session.idle"
-      || (
-        event.type === "session.status"
-        && objectValue(properties.status)?.type === "idle"
-      )
-    ) {
-      this.settle(sessionId, child, "completed", child.text);
+    const sessionStatus = event.type === "session.status"
+      ? objectValue(properties.status)?.type
+      : undefined;
+    if (event.type === "session.idle" || sessionStatus === "idle") {
+      child.status = "waiting";
+      child.providerStatus = "idle";
+      child.activity = null;
+      this.publish(sessionId, child);
       return;
     }
     if (event.type === "session.error") {
@@ -114,11 +118,12 @@ export class OpenCodeSubagentProjection {
       this.settle(sessionId, child, "lost", null);
       return;
     }
-    if (!active) return;
-    if (child.status === "spawned") child.status = "running";
-    if (event.type === "message.updated") {
+    if (!active && sessionStatus !== "busy" && sessionStatus !== "retry") return;
+    child.status = "running";
+    child.providerStatus = "busy";
+    if (active && event.type === "message.updated") {
       this.message(child, objectValue(this.options.redact(properties).info));
-    } else if (event.type === "message.part.updated") {
+    } else if (active && event.type === "message.part.updated") {
       this.part(sessionId, child, objectValue(this.options.redact(properties).part));
     }
     this.publish(sessionId, child);
@@ -134,7 +139,15 @@ export class OpenCodeSubagentProjection {
     this.sealed = true;
   }
 
-  seal(): void {
+  finish(completed: boolean): void {
+    if (this.sealed) return;
+    if (completed) {
+      for (const [sessionId, child] of this.children) {
+        if (child.status === "waiting") {
+          this.settle(sessionId, child, "completed", child.text);
+        }
+      }
+    }
     this.sealed = true;
   }
 
@@ -153,16 +166,18 @@ export class OpenCodeSubagentProjection {
       name: boundedSubagentText(info?.title, MAX_SUBAGENT_LABEL_CHARS),
       description: null,
       status: "spawned",
+      providerStatus: null,
       model: null,
       maxContextTokens: null,
       activity: null,
-      messages: new Map(),
+      messageTotals: new Map(),
+      uncountedMessages: false,
       totalTokens: 0,
       unknownTotals: 0,
-      lastUsage: null,
+      lastAssistantId: null,
       usage: null,
       toolParts: new Set(),
-      toolUseCount: 0,
+      uncountedToolParts: false,
       text: null,
       result: null,
       emitted: null,
@@ -177,13 +192,15 @@ export class OpenCodeSubagentProjection {
   ): void {
     const messageId = stringValue(info?.id);
     if (!info || !messageId || info.role !== "assistant") return;
-    if (!child.messages.has(messageId)) {
-      if (this.trackedMessages >= MAX_TRACKED_CHILD_MESSAGES) {
-        throw new Error("OpenCode exceeded the bounded delegated-agent message budget.");
+    if (!child.messageTotals.has(messageId)) {
+      child.lastAssistantId = messageId;
+      if (child.messageTotals.size < MAX_CHILD_MESSAGES) {
+        child.messageTotals.set(messageId, undefined);
+      } else {
+        child.uncountedMessages = true;
       }
-      this.trackedMessages += 1;
-      child.messages.set(messageId, null);
     }
+    const counted = child.messageTotals.has(messageId);
     const providerId = stringValue(info.providerID);
     const modelId = stringValue(info.modelID);
     child.model = boundedSubagentText(
@@ -196,15 +213,18 @@ export class OpenCodeSubagentProjection {
     const tokens = objectValue(info.tokens);
     if (!tokens) return;
     const usage = openCodeMessageUsage(tokens);
-    const previous = child.messages.get(messageId);
-    if (previous?.total === null) child.unknownTotals -= 1;
-    else if (previous) child.totalTokens -= previous.total;
-    if (usage.total === null) child.unknownTotals += 1;
-    else child.totalTokens += usage.total;
-    child.messages.set(messageId, usage);
-    child.lastUsage = usage;
+    if (counted) {
+      const previous = child.messageTotals.get(messageId);
+      if (previous === null) child.unknownTotals -= 1;
+      else if (previous !== undefined) child.totalTokens -= previous;
+      if (usage.total === null) child.unknownTotals += 1;
+      else child.totalTokens += usage.total;
+      child.messageTotals.set(messageId, usage.total);
+    }
     child.usage = {
-      totalTokens: child.unknownTotals === 0 ? child.totalTokens : null,
+      totalTokens: child.unknownTotals === 0 && !child.uncountedMessages
+        ? child.totalTokens
+        : null,
       inputTokens: usage.input,
       cachedInputTokens: usage.cachedRead,
       cacheWriteInputTokens: usage.cacheWrite,
@@ -224,12 +244,8 @@ export class OpenCodeSubagentProjection {
     if (!part || !partId) return;
     if (part.type === "tool") {
       if (!child.toolParts.has(partId)) {
-        if (this.trackedToolParts >= MAX_TRACKED_CHILD_TOOL_PARTS) {
-          throw new Error("OpenCode exceeded the bounded delegated-agent tool budget.");
-        }
-        this.trackedToolParts += 1;
-        child.toolParts.add(partId);
-        child.toolUseCount += 1;
+        if (child.toolParts.size < MAX_CHILD_TOOL_PARTS) child.toolParts.add(partId);
+        else child.uncountedToolParts = true;
       }
       const status = objectValue(part.state)?.status;
       if (status === "pending" || status === "running") {
@@ -248,7 +264,10 @@ export class OpenCodeSubagentProjection {
       && typeof part.text === "string"
       && part.text.trim()
       && messageId
-      && child.messages.has(messageId)
+      && (
+        child.messageTotals.has(messageId)
+        || messageId === child.lastAssistantId
+      )
     ) {
       child.text = part.text.slice(0, MAX_SUBAGENT_RESULT_CHARS);
     }
@@ -276,24 +295,34 @@ export class OpenCodeSubagentProjection {
       input?.description,
       MAX_SUBAGENT_DESCRIPTION_CHARS,
     ) ?? child.description;
-    this.publish(childId, child);
+    if (state?.status === "completed") {
+      this.settle(childId, child, "completed", child.text);
+    } else if (state?.status === "error") {
+      const error = objectValue(state.error);
+      this.settle(
+        childId,
+        child,
+        "failed",
+        error ? errorMessage(error) : stringValue(state.error) ?? TASK_ERROR_FALLBACK,
+      );
+    } else {
+      this.publish(childId, child);
+    }
   }
 
   private settle(
     sessionId: string,
     child: OpenCodeChildTrace,
-    status: Extract<SubagentTraceStatus, "completed" | "failed" | "cancelled" | "lost">,
+    status: OpenCodeSettledStatus,
     result: string | null,
   ): void {
     child.status = status;
     child.activity = null;
     child.result = boundedSubagentText(result, MAX_SUBAGENT_RESULT_CHARS);
     child.text = null;
-    this.trackedMessages -= child.messages.size;
-    this.trackedToolParts -= child.toolParts.size;
-    child.messages.clear();
-    child.toolParts.clear();
     this.publish(sessionId, child);
+    child.messageTotals.clear();
+    child.toolParts.clear();
   }
 
   private publish(sessionId: string, child: OpenCodeChildTrace): void {
@@ -308,6 +337,7 @@ export class OpenCodeSubagentProjection {
       providerToolUseId: null,
       providerRole: null,
       providerName: child.name,
+      ...(child.providerStatus ? { providerStatus: child.providerStatus } : {}),
       status: child.status,
       isLive: live,
       description: child.description,
@@ -316,7 +346,9 @@ export class OpenCodeSubagentProjection {
       ...(child.model ? { model: child.model } : {}),
       ...(live && child.activity ? { activity: child.activity } : {}),
       ...(child.usage ? { usage: child.usage } : {}),
-      ...(child.toolUseCount > 0 ? { toolUseCount: child.toolUseCount } : {}),
+      ...(child.toolParts.size > 0 && !child.uncountedToolParts
+        ? { toolUseCount: child.toolParts.size }
+        : {}),
     };
     const emitted = JSON.stringify(update);
     if (emitted === child.emitted) return;

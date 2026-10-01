@@ -43,6 +43,8 @@ type LifecycleScenario =
   | "descendant-cancel"
   | "subagent-traces"
   | "subagent-overflow"
+  | "subagent-long-child"
+  | "subagent-concurrent-children"
   | "slow"
   | "endless"
   | "server-exit"
@@ -124,6 +126,36 @@ const server = http.createServer((req, res) => {
             ? { type: "session.status", properties: { sessionID, status: { type: "idle" } } }
             : { type: "session.idle", properties: { sessionID } });
         }, 75);
+        return;
+      }
+      if (scenario === "subagent-long-child" || scenario === "subagent-concurrent-children") {
+        json(res, undefined, 204);
+        await eventsReady;
+        const children = scenario === "subagent-long-child" ? 1 : 9;
+        const steps = scenario === "subagent-long-child" ? 2_100 : 230;
+        const childID = (index) => "opencode-step-child-" + index;
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "root-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        for (let index = 0; index < children; index += 1) {
+          sendEvent({ type: "session.created", properties: { sessionID: childID(index), info: { ...session, id: childID(index), parentID: sessionID, title: "Step child " + index } } });
+        }
+        let step = 0;
+        const tick = () => {
+          for (let burst = 0; burst < 50 && step < steps; burst += 1, step += 1) {
+            for (let index = 0; index < children; index += 1) {
+              sendEvent({ type: "message.updated", properties: { sessionID: childID(index), info: { id: childID(index) + "-message-" + step, sessionID: childID(index), role: "assistant", providerID: "fake", modelID: "model-a", tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+            }
+          }
+          if (step < steps) return setTimeout(tick, 5);
+          for (let index = 0; index < children; index += 1) {
+            sendEvent({ type: "message.part.updated", properties: { sessionID: childID(index), part: { id: childID(index) + "-text", sessionID: childID(index), messageID: childID(index) + "-message-" + (steps - 1), type: "text", text: "Child " + index + " finished." } } });
+            sendEvent({ type: "session.idle", properties: { sessionID: childID(index) } });
+          }
+          setTimeout(() => {
+            sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "root-text", sessionID, messageID: "root-assistant", type: "text", text: "Parent finished after long delegated work" } } });
+            sendEvent({ type: "session.idle", properties: { sessionID } });
+          }, 20);
+        };
+        setTimeout(tick, 10);
         return;
       }
       if (scenario === "subagent-traces" || scenario === "subagent-overflow") {

@@ -91,7 +91,7 @@ function harness(options: {
 
 describe("OpenCode delegated-agent projection", () => {
   it("projects a child and a grandchild with parent links, telemetry and final results", () => {
-    const { updates, observe, latest } = harness({
+    const { updates, projection, observe, latest } = harness({
       limits: { "fake/model-b": 100_000, "fake/model-c": 50_000 },
     });
 
@@ -145,10 +145,17 @@ describe("OpenCode delegated-agent projection", () => {
       toolPart(GRANDCHILD, "grandchild-grep", "pending", "Search grammar"),
       part(GRANDCHILD, { id: "grandchild-text", messageID: "grandchild-assistant", type: "text", text: "Grammar is valid." }),
       idle(GRANDCHILD),
+      toolPart(CHILD, "child-task", "completed", "Check grammar", {
+        tool: "task",
+        input: { description: "Check grammar", prompt: "Validate the grammar file" },
+        metadata: { sessionId: GRANDCHILD },
+      }),
       assistant(CHILD, "child-assistant-2", { input: 30, output: 7, reasoning: 1, cache: { read: 4, write: 0 } }),
       part(CHILD, { id: "child-text", messageID: "child-assistant-2", type: "text", text: "Parser reviewed; grammar is valid." }),
       event({ type: "session.status", properties: { sessionID: CHILD, status: { type: "idle" } } }),
     );
+    expect(latest(CHILD)).toMatchObject({ status: "waiting", providerStatus: "idle", isLive: true, result: null });
+    projection.finish(true);
 
     expect(latest(GRANDCHILD)).toMatchObject({
       parentProviderAgentId: CHILD,
@@ -244,7 +251,7 @@ describe("OpenCode delegated-agent projection", () => {
     expect(updates).toHaveLength(settled);
   });
 
-  it("cancels live children once and emits nothing after settlement", () => {
+  it("cancels live and waiting children once and emits nothing after settlement", () => {
     const { updates, projection, observe, latest } = harness();
     observe(
       created(CHILD, ROOT),
@@ -262,17 +269,18 @@ describe("OpenCode delegated-agent projection", () => {
     );
 
     expect(latest(CHILD)).toMatchObject({ status: "cancelled", isLive: false });
-    expect(latest(GRANDCHILD)).toMatchObject({ status: "completed", isLive: false });
-    expect(updates.filter(({ status }) => status === "cancelled")).toHaveLength(1);
+    expect(latest(GRANDCHILD)).toMatchObject({ status: "cancelled", isLive: false });
+    expect(updates.filter(({ status }) => status === "cancelled")).toHaveLength(2);
     expect(updates).toHaveLength(settled);
   });
 
   it("emits nothing once sealed", () => {
     const { updates, projection, observe } = harness();
     observe(created(CHILD, ROOT));
-    projection.seal();
+    projection.finish(false);
     observe(assistant(CHILD, "child-assistant"), idle(CHILD));
     projection.cancelLive();
+    projection.finish(true);
 
     expect(updates.map(({ status }) => status)).toEqual(["spawned"]);
   });
@@ -322,7 +330,7 @@ describe("OpenCode delegated-agent projection", () => {
   });
 
   it("bounds titles, activity labels and result text before they leave the adapter", () => {
-    const { observe, latest } = harness();
+    const { projection, observe, latest } = harness();
     observe(
       created(CHILD, ROOT, `Title ${"t".repeat(400)}`),
       assistant(CHILD, "child-assistant"),
@@ -335,11 +343,12 @@ describe("OpenCode delegated-agent projection", () => {
       part(CHILD, { id: "child-text", messageID: "child-assistant", type: "text", text: `Result ${"r".repeat(40_000)}` }),
       idle(CHILD),
     );
+    projection.finish(true);
     expect(latest(CHILD)?.result).toHaveLength(16_000);
   });
 
   it("projects content only after redaction", () => {
-    const { observe, latest } = harness({
+    const { projection, observe, latest } = harness({
       redact: <T>(value: T): T => JSON.parse(
         JSON.stringify(value).replaceAll("bridge-secret", "[redacted]"),
       ) as T,
@@ -350,6 +359,7 @@ describe("OpenCode delegated-agent projection", () => {
       part(CHILD, { id: "child-text", messageID: "child-assistant", type: "text", text: "Saw bridge-secret" }),
       idle(CHILD),
     );
+    projection.finish(true);
 
     expect(latest(CHILD)).toMatchObject({
       providerName: "Use [redacted]",
@@ -368,37 +378,190 @@ describe("OpenCode delegated-agent projection", () => {
     expect(projected.has("child-128")).toBe(false);
   });
 
-  it("fails closed when live children exceed the bounded tool-part budget", () => {
-    const { observe } = harness();
+  it("stops counting tool parts beyond a child's budget without failing the run", () => {
+    const { projection, observe, latest } = harness();
     observe(created(CHILD, ROOT), assistant(CHILD, "child-assistant"));
     for (let index = 0; index < 4_096; index += 1) {
       observe(toolPart(CHILD, `tool-${index}`, "completed", "Read"));
     }
+    expect(latest(CHILD)?.toolUseCount).toBe(4_096);
 
-    expect(() => observe(toolPart(CHILD, "tool-overflow", "running", "Read")))
-      .toThrow("OpenCode exceeded the bounded delegated-agent tool budget.");
+    expect(() => observe(toolPart(CHILD, "tool-overflow", "running", "Read more")))
+      .not.toThrow();
+    expect(latest(CHILD)).not.toHaveProperty("toolUseCount");
+    expect(latest(CHILD)?.activity).toBe("Read more");
+    observe(idle(CHILD));
+    projection.finish(true);
+    expect(latest(CHILD)).toMatchObject({ status: "completed", isLive: false });
   });
 
-  it("fails closed when live children exceed the bounded message budget", () => {
-    const { observe } = harness();
+  it("stops reporting a child's usage total beyond its message budget without failing the run", () => {
+    const { projection, observe, latest } = harness({ limits: { "fake/model-b": 100_000 } });
     observe(created(CHILD, ROOT));
     for (let index = 0; index < 2_048; index += 1) {
-      observe(assistant(CHILD, `assistant-${index}`));
+      observe(assistant(CHILD, `assistant-${index}`, { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }));
     }
+    expect(latest(CHILD)?.usage?.totalTokens).toBe(2_048 * 11);
 
-    expect(() => observe(assistant(CHILD, "assistant-overflow")))
-      .toThrow("OpenCode exceeded the bounded delegated-agent message budget.");
+    expect(() => observe(assistant(CHILD, "assistant-overflow", { input: 20, output: 2, reasoning: 0, cache: { read: 5, write: 0 } })))
+      .not.toThrow();
+    expect(latest(CHILD)?.usage).toEqual({
+      totalTokens: null,
+      inputTokens: 20,
+      cachedInputTokens: 5,
+      cacheWriteInputTokens: 0,
+      outputTokens: 2,
+      reasoningOutputTokens: 0,
+      contextTokens: 25,
+      maxContextTokens: 100_000,
+    });
+    observe(
+      assistant(CHILD, "assistant-0", { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }),
+      part(CHILD, { id: "late-text", messageID: "assistant-overflow", type: "text", text: "Finished after many steps." }),
+      idle(CHILD),
+    );
+    expect(latest(CHILD)?.usage?.totalTokens).toBeNull();
+    projection.finish(true);
+    expect(latest(CHILD)).toMatchObject({
+      status: "completed",
+      result: "Finished after many steps.",
+    });
   });
 
-  it("releases a settled child's message and tool budget", () => {
+  it("keeps exact totals for many concurrent children within their own budgets", () => {
+    const { projection, observe, latest } = harness();
+    for (let child = 0; child < 9; child += 1) observe(created(`child-${child}`, ROOT));
+    for (let step = 0; step < 230; step += 1) {
+      for (let child = 0; child < 9; child += 1) {
+        observe(assistant(`child-${child}`, `child-${child}-${step}`, { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }));
+      }
+    }
+    for (let child = 0; child < 9; child += 1) observe(idle(`child-${child}`));
+    projection.finish(true);
+
+    for (let child = 0; child < 9; child += 1) {
+      expect(latest(`child-${child}`)).toMatchObject({
+        status: "completed",
+        usage: { totalTokens: 460 },
+      });
+    }
+  });
+
+  it("treats idle as waiting and resumes the same trace when the child works again", () => {
+    const { updates, projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      idle(CHILD),
+    );
+    expect(latest(CHILD)).toMatchObject({ status: "waiting", providerStatus: "idle", isLive: true });
+
+    observe(
+      event({ type: "session.status", properties: { sessionID: CHILD, status: { type: "busy" } } }),
+      assistant(CHILD, "first", { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }),
+      idle(CHILD),
+      event({ id: "resumed-busy", type: "session.status", properties: { sessionID: CHILD, status: { type: "busy" } } }),
+    );
+    expect(latest(CHILD)).toMatchObject({ status: "running", providerStatus: "busy", isLive: true });
+    observe(
+      assistant(CHILD, "second", { input: 400, output: 40, reasoning: 0, cache: { read: 0, write: 0 } }),
+      toolPart(CHILD, "second-tool", "running", "Edit src/app.ts"),
+    );
+    expect(latest(CHILD)).toMatchObject({
+      status: "running",
+      activity: "Edit src/app.ts",
+      usage: { totalTokens: 451 },
+    });
+
+    projection.finish(true);
+    expect(latest(CHILD)).toMatchObject({ status: "running", isLive: true });
+    expect(updates.some(({ status }) => status === "completed")).toBe(false);
+  });
+
+  it("completes a resumed child at normal run finish with its later usage", () => {
+    const { projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      idle(CHILD),
+      event({ type: "session.status", properties: { sessionID: CHILD, status: { type: "busy" } } }),
+      assistant(CHILD, "after-idle", { input: 7, output: 3, reasoning: 0, cache: { read: 0, write: 0 } }),
+      assistant(CHILD, "after-idle", { input: 9, output: 4, reasoning: 0, cache: { read: 0, write: 0 } }),
+      part(CHILD, { id: "after-idle-text", messageID: "after-idle", type: "text", text: "Resumed answer." }),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)).toMatchObject({
+      status: "completed",
+      isLive: false,
+      result: "Resumed answer.",
+      usage: { totalTokens: 13 },
+    });
+  });
+
+  it("fails a waiting child that later reports a session error", () => {
     const { observe, latest } = harness();
-    observe(created(CHILD, ROOT));
-    for (let index = 0; index < 2_048; index += 1) {
-      observe(assistant(CHILD, `assistant-${index}`));
-    }
-    observe(idle(CHILD), created(GRANDCHILD, ROOT));
+    observe(
+      created(CHILD, ROOT),
+      idle(CHILD),
+      event({ type: "session.error", properties: { sessionID: CHILD, error: { name: "UnknownError", data: { message: "Late failure" } } } }),
+    );
+    expect(latest(CHILD)).toMatchObject({ status: "failed", isLive: false, result: "Late failure" });
+  });
 
-    expect(() => observe(assistant(GRANDCHILD, "fresh-assistant"))).not.toThrow();
-    expect(latest(GRANDCHILD)).toMatchObject({ status: "running" });
+  it("completes or fails a child when the parent's task tool part settles", () => {
+    const { updates, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      created(GRANDCHILD, ROOT),
+      assistant(CHILD, "child-assistant"),
+      part(CHILD, { id: "child-text", messageID: "child-assistant", type: "text", text: "Child answer." }),
+      toolPart(ROOT, "root-task", "completed", "Inspect", {
+        tool: "task",
+        input: { prompt: "Inspect" },
+        metadata: { sessionId: CHILD },
+      }),
+      part(ROOT, {
+        id: "root-task-2",
+        messageID: "root-assistant",
+        type: "tool",
+        callID: "root-task-2-call",
+        tool: "task",
+        state: { status: "error", input: { prompt: "Review" }, error: "Delegated review failed.", metadata: { sessionId: GRANDCHILD } },
+      }),
+    );
+    const settled = updates.length;
+    observe(assistant(CHILD, "late", { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }));
+
+    expect(latest(CHILD)).toMatchObject({ status: "completed", isLive: false, result: "Child answer." });
+    expect(latest(GRANDCHILD)).toMatchObject({ status: "failed", isLive: false, result: "Delegated review failed." });
+    expect(updates).toHaveLength(settled);
+  });
+
+  it("completes only waiting children when the run finishes normally", () => {
+    const { projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      created(GRANDCHILD, ROOT),
+      created("busy-session", ROOT),
+      created("spawned-session", ROOT),
+      assistant(CHILD, "child-assistant"),
+      idle(CHILD),
+      idle(GRANDCHILD),
+      event({ type: "session.status", properties: { sessionID: "busy-session", status: { type: "busy" } } }),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)).toMatchObject({ status: "completed", isLive: false });
+    expect(latest(GRANDCHILD)).toMatchObject({ status: "completed", isLive: false });
+    expect(latest("busy-session")).toMatchObject({ status: "running", isLive: true });
+    expect(latest("spawned-session")).toMatchObject({ status: "spawned", isLive: true });
+  });
+
+  it("leaves waiting children live when the run does not finish normally", () => {
+    const { updates, projection, observe } = harness();
+    observe(created(CHILD, ROOT), idle(CHILD));
+    projection.finish(false);
+
+    expect(updates.map(({ status }) => status)).toEqual(["spawned", "waiting"]);
   });
 });

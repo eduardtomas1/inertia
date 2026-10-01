@@ -12,6 +12,7 @@ import { withCodexControlClient, type CodexControlClient } from "../codex/contro
 import { parseCodexRateLimits } from "../codex-metadata";
 import type { ProviderManager } from "../providers";
 import { nativeResetCredits, opaqueUsageIdentity, usageWindows } from "./cliproxy";
+import type { NativeUsageAccount } from "./subscription-io";
 
 /** Read only the provider-owned account identity. Tokens never leave this function. */
 async function codexAccountIdentity(environment: NodeJS.ProcessEnv): Promise<string | null> {
@@ -45,7 +46,7 @@ async function verifiedFileIdentity(client: CodexControlClient, environment: Nod
 const accountSchema = z.object({ type: z.string(), email: z.string().max(256).nullable().optional(), planType: z.string().max(200).nullable().optional() }).nullable();
 export class NativeUsageReader {
   constructor(private readonly providers: ProviderManager, private readonly cwd: string, private readonly signal: AbortSignal, private readonly subscriptions = new NativeSubscriptionReader({ openCodeAccount: (directory, model, signal) => providers.openCodeUsageAccount(directory, model, signal) })) {}
-  async read(info: ProviderInfo, model?: string, cwd = this.cwd): Promise<UsageAccount> {
+  async read(info: ProviderInfo, model?: string, cwd = this.cwd): Promise<NativeUsageAccount> {
     const base: UsageAccount = { id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
       email: null, plan: null, identityKey: null, sources: ["This computer"], status: "unavailable", detail: null,
       windows: usageWindows(info.rateLimits), updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(), credits: null, canReset: false };

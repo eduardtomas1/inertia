@@ -1,6 +1,6 @@
 import type { Conversation } from "../../shared/contracts";
 import type { LimitResetResult } from "../../shared/limit-reset";
-import type { UsageAccount } from "../../shared/provider-usage-limits";
+import type { NativeUsageAccount } from "./subscription-io";
 import type { RuntimeStore } from "../database";
 import { RuntimeRequestError, publicRuntimeError } from "../runtime-errors";
 import { publicLimitResetPlan, type StoredLimitResetPlan } from "../persistence/limit-reset-repository";
@@ -11,7 +11,7 @@ export interface LimitResetDependencies {
   store: RuntimeStore;
   signal: AbortSignal;
   enabled: boolean;
-  readAccount(providerId: Conversation["providerId"], force: boolean, model?: string, cwd?: string): Promise<UsageAccount | null>;
+  readAccount(providerId: Conversation["providerId"], force: boolean, model?: string, cwd?: string): Promise<NativeUsageAccount | null>;
   busy(conversationId: string): boolean;
   dispatch(plan: StoredLimitResetPlan, guard: () => void): Promise<void>;
   track<T>(operation: () => Promise<T>): Promise<T>;

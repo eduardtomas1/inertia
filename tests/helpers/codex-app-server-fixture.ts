@@ -37,6 +37,7 @@ const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-ch
   : "item/commandExecution/requestApproval";
 let threadId = "thread-new";
 let turnId = "turn-1";
+let heldInterruptId;
 const requestInput = () => send({
 id: "input-rpc",
 method: "item/tool/requestUserInput",
@@ -272,6 +273,14 @@ if (message.method === "thread/goal/clear") {
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress" } } },
+      { id: "approval-rpc", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } },
+      { id: message.id, result: { turn: { id: turnId, status: "inProgress" } } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" || process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     sendBatch([
@@ -562,6 +571,7 @@ if (message.method === "turn/start") {
   }
   if (
     process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
+    || process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only"
   ) return;
@@ -636,6 +646,11 @@ if (message.method === "turn/start") {
     }, 10);
     return;
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
+    params.turnId = "child-approval-turn";
+    send({ id: "approval-rpc", method: approvalMethod, params });
+    return send({ method: "turn/started", params: { threadId: approvalThreadId, turn: { id: "child-approval-turn", status: "inProgress" } } });
+  }
   return send({ id: "approval-rpc", method: approvalMethod, params });
 }
 if (message.id === "approval-rpc") {
@@ -675,7 +690,17 @@ if (message.method === "turn/steer") {
   ]);
   return;
 }
+if (message.id === "late-approval" && message.method === undefined) {
+  send({ id: heldInterruptId, result: {} });
+  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+  return;
+}
 if (message.method === "turn/interrupt") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt") {
+    heldInterruptId = message.id;
+    send({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-late", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } });
+    return;
+  }
   send({ id: message.id, result: {} });
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
 }

@@ -291,6 +291,28 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "status", "--porcelain")).toBe("");
   });
 
+  it.each([false, true])("preserves a UTF-8 BOM through selected reversal and Undo (staged: %s)", async (staged) => {
+    const original = Buffer.from("\uFEFFalpha\nbeta\n");
+    const edited = Buffer.from("\uFEFFalpha\nbeta\ndelta\n");
+    const root = repository(original.toString("utf8"));
+    writeFileSync(join(root, "example.txt"), edited);
+    if (staged) git(root, "add", "example.txt");
+    const originalIndex = git(root, "rev-parse", ":example.txt");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+
+    const { plan, result } = await apply(root, selection);
+
+    expect(plan.affectedLayers).toEqual(staged ? ["index", "worktree"] : ["worktree"]);
+    expect(readFileSync(join(root, "example.txt"))).toEqual(original);
+    expect(Buffer.from(git(root, "show", ":example.txt"))).toEqual(original);
+    expect(git(root, "status", "--porcelain")).toBe("");
+
+    await undoDiffSelection(root, result.operation.id);
+    expect(readFileSync(join(root, "example.txt"))).toEqual(edited);
+    expect(git(root, "rev-parse", ":example.txt")).toBe(originalIndex);
+    expect(Buffer.from(git(root, "show", ":example.txt"))).toEqual(staged ? edited : original);
+  });
+
   it("preserves unrelated unstaged work while removing selected staged changes in a mixed file", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nBETA\ngamma\n");

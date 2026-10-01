@@ -1334,6 +1334,42 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
+  it("ends as cancelled when Codex requests approval while the user's stop is in flight", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "approval-after-interrupt";
+    const manager = trackedManager(fake.command, 500);
+    const approvals: string[] = [];
+    const failedActivities: string[] = [];
+    let cancelled = false;
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-stop-approval",
+      cwd: fake.root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onApproval: (event) => approvals.push(event.request.requestId),
+      onActivity: (event) => { if (event.phase === "failed") failedActivities.push(event.label); },
+      onStatus: (event) => {
+        if (event.status !== "running" || cancelled) return;
+        cancelled = manager.cancel(event.conversationId);
+      },
+    });
+
+    const settled = await result;
+    expect(settled.status).toBe("cancelled");
+    expect(settled.failure).toBeUndefined();
+    expect(settled.error ?? "").not.toContain("approval");
+    expect(failedActivities).toEqual([]);
+    expect(approvals).toEqual([]);
+    const response = captured(fake.capturePath).find(({ id, method }) => id === "late-approval" && method === undefined);
+    expect(response?.result).toEqual({ decision: "cancel" });
+    await manager.disposeAll();
+  });
+
   it("steers the exact active parent turn and projects nested collab identities", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -2217,6 +2253,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   it.each([
     ["turn-started-before-response", "Hello from Codex"],
     ["turn-completed-before-response", "Hello from Codex"],
+    ["approval-before-response", "Hello from Codex"],
   ])("keeps the requested turn's notifications that reach stdout before the turn/start response (%s)", async (scenario, text) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;

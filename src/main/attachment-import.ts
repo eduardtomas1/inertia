@@ -614,10 +614,10 @@ function bytesFromUnknown(value: unknown): Buffer | null {
  * @throws ImageAttachmentTooLargeError for a well-formed image beyond the
  * decode budget; any other rejection uses the generic content-mismatch error.
  */
-export function validateAttachmentImport(value: unknown): ValidatedAttachmentImport {
+export async function validateAttachmentImport(value: unknown): Promise<ValidatedAttachmentImport> {
   const prepared = prepareAttachmentImport(value);
   if (prepared.mimeType.startsWith("image/")) {
-    const image = inspectImageAttachment(
+    const image = await inspectImageAttachment(
       prepared.bytes,
       prepared.mimeType as ImageAttachmentMimeType,
     );

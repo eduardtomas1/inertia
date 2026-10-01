@@ -50,6 +50,16 @@ export class PullRequestRepository {
         const active = this.database.prepare("SELECT COUNT(*) AS count FROM pull_request_stack_operations WHERE conversation_id=? AND state IN ('running','pending','unknown')")
           .get(review.conversationId) as { count: number };
         if (active.count >= 20) throw new PullRequestRepositoryError("Check this chat's pending stack actions before starting another one.");
+        // Stack membership can change while a remote outcome is unknown. Keep
+        // the claim on the affected PR identities as well as the stack number.
+        const overlap = this.database.prepare(`SELECT 1 FROM pull_request_stack_operations AS operation,
+          json_each(operation.review_json, '$.layers') AS layer
+          WHERE operation.state IN ('running','pending','unknown')
+            AND json_extract(operation.review_json, '$.key.host')=?
+            AND lower(json_extract(operation.review_json, '$.key.repository'))=?
+            AND json_extract(layer.value, '$.number') IN (SELECT value FROM json_each(?)) LIMIT 1`)
+          .get(review.key.host, review.key.repository.toLowerCase(), JSON.stringify(review.layers.map(({ number }) => number)));
+        if (overlap) throw new PullRequestRepositoryError("A stack action is already running or needs its outcome checked.");
         return this.database.prepare("UPDATE pull_request_stack_operations SET state='running' WHERE conversation_id=? AND id=? AND state='prepared'").run(review.conversationId, review.id).changes === 1;
       })();
     } catch (error) {

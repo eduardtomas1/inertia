@@ -141,7 +141,7 @@ describe("reviewed native stack actions", () => {
     client.merge = vi.fn(async () => ({ status: "pending" as const, details: { uuid: "old-merge" } }));
     const pending = await prepare(); await service.execute(conversationId, pending.id);
     for (let number = 100; number < 122; number++) {
-      const review = { ...pending, id: randomUUID(), key: prKey(number), stack: { ...pending.stack, number } };
+      const review = { ...pending, id: randomUUID(), key: prKey(number, `acme/workspace-${number}`), stack: { ...pending.stack, number } };
       store.pullRequests.prepare(review); store.pullRequests.claim(review);
       store.pullRequests.settle(conversationId, { id: review.id, key: review.key, stackNumber: number, action: "merge",
         state: "completed", completedLayers: 2, message: "Merged", updatedAt: new Date(now).toISOString() });
@@ -170,7 +170,7 @@ describe("reviewed native stack actions", () => {
   it("bounds outstanding actions without hiding their receipts or accepting another mutation", async () => {
     const template = await prepare();
     for (let number = 100; number < 120; number++) {
-      const review = { ...template, id: randomUUID(), key: prKey(number), stack: { ...template.stack, number } };
+      const review = { ...template, id: randomUUID(), key: prKey(number, `acme/workspace-${number}`), stack: { ...template.stack, number } };
       store.pullRequests.prepare(review); store.pullRequests.claim(review);
       store.pullRequests.settle(conversationId, { id: review.id, key: review.key, stackNumber: number, action: "merge",
         state: "unknown", completedLayers: 0, message: "Check GitHub", updatedAt: new Date(now).toISOString() });
@@ -196,6 +196,20 @@ describe("reviewed native stack actions", () => {
     const review = await prepare(); await service.execute(conversationId, review.id); expect(operation().state).toBe("failed");
     client.merge = vi.fn(async () => ({ status: "merged" as const, details: {} }));
     await service.execute(conversationId, (await prepare()).id); expect(operation().state).toBe("completed");
+  });
+  it.each(["merge", "rebase"] as const)("retains an unknown outcome lock when a reviewed PR moves to another stack before %s", async (action) => {
+    client.merge = vi.fn(async () => { throw new Error("socket closed after request"); });
+    await service.execute(conversationId, (await prepare()).id);
+    expect(operation().state).toBe("unknown");
+
+    const other = store.createConversation(store.conversation(conversationId).projectId, "New stack owner").id;
+    stack = { ...stack, id: "replacement-stack", number: stack.number + 1 };
+    store.pullRequests.save(other, { ...prLink(), stack });
+    const review = (await service.prepare(other, prKey(), action)).review;
+    await expect(service.execute(other, review.id)).rejects.toThrow("outcome checked");
+    expect(client.merge).toHaveBeenCalledOnce();
+    expect(client.rebase).not.toHaveBeenCalled();
+    expect(operation().state).toBe("unknown");
   });
   it("rebases bottom-to-top against expected heads and records updated bases", async () => {
     const review = await prepare("rebase"); await service.execute(conversationId, review.id);

@@ -112,6 +112,34 @@ describe("POSIX process tree root observation", () => {
     expect(spawnProcessSync).toHaveBeenCalledTimes(9);
   });
 
+  it.each([
+    ["empty", ""],
+    ["truncated", "1 0 Ss\n"],
+  ])("never takes a timed-out read that exited 0 with %s output as the process table", (_name, stdout) => {
+    const reads = [
+      { status: 0, signal: null, stdout, error: error("ETIMEDOUT") },
+      { status: 0, signal: null, stdout: "4242 1 Ts\n5000 4242 Ss\n" },
+      { status: 0, signal: null, stdout: "4242 1 Ts\n5000 4242 Ts\n" },
+    ];
+    const spawnProcessSync = vi.fn(() => reads.shift() ?? reads.at(-1));
+    const kill = vi.fn(() => true);
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: kill as never,
+      spawnProcessSync: spawnProcessSync as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "stopped",
+      rootRunningObserved: false,
+      snapshotConfirmed: true,
+      snapshotReads: 3,
+      snapshotTimeouts: 1,
+      descendants: [5_000],
+    });
+    expect(kill).toHaveBeenCalledWith(5_000, "SIGKILL");
+  });
+
   it("stops re-reading at the deadline", () => {
     let clock = 0;
     const spawnProcessSync = vi.fn(() => {

@@ -225,7 +225,7 @@ describe("compact Work sidebar", () => {
     expect(freeRow.querySelector(".work-thread-meta")).toHaveTextContent(/^$/u);
     expect(freeRow).toHaveAccessibleName(/, No project,/u);
     expect(screen.getByRole("button", { name: /^Build the app,/ }).querySelector(".work-thread-meta"))
-      .toHaveTextContent("Local workspace");
+      .toHaveTextContent("acme-monorepo/apps/studio");
     expect(screen.getByRole("button", { name: /^Build the app,/ }).closest("[data-work-section]"))
       .toHaveAttribute("data-work-section", "recent");
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));

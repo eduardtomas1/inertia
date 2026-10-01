@@ -18,7 +18,7 @@ test("explicitly schedules, cancels, snoozes and resumes once after reset and re
       writeFileSync(join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: { account_id: "fixture-subscription-account" } }));
       writeFileSync(join(home, "config.toml"), 'cli_auth_credentials_store = "file"\n');
       statePath = join(testDirectory, "reset-state.json");
-      writeFileSync(statePath, JSON.stringify({ resetsAt: Math.floor(Date.now() / 1000) + 45, turns: 0 }));
+      writeFileSync(statePath, JSON.stringify({ resetsAt: null, turns: 0 }));
       const source = `
 const fs = require("node:fs");
 const path = ${JSON.stringify(statePath)};
@@ -34,11 +34,13 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   if (message.method === "account/read") send({ id: message.id, result: { account: { type: "chatgpt", email: "fixture@example.test", planType: "plus" } } });
   if (message.method === "config/read") send({ id: message.id, result: { config: { cli_auth_credentials_store: "file" } } });
   if (message.method === "account/rateLimits/read") {
-    const state = JSON.parse(fs.readFileSync(path, "utf8")); const available = Date.now() >= state.resetsAt * 1000;
+    const state = JSON.parse(fs.readFileSync(path, "utf8"));
+    if (state.resetsAt === null) { state.resetsAt = Math.floor(Date.now() / 1000) + 60; fs.writeFileSync(path, JSON.stringify(state)); }
+    const available = Date.now() >= state.resetsAt * 1000;
     send({ id: message.id, result: { rateLimits: { limitId: "codex", primary: { usedPercent: available ? 0 : 100, windowDurationMins: 300, resetsAt: available ? state.resetsAt + 18000 : state.resetsAt } } } });
   }
   if (message.method === "thread/goal/get") send({ id: message.id, result: { goal: null } });
-  if (message.method === "thread/start" || message.method === "thread/resume") send({ id: message.id, result: { thread: { id: threadId }, model: "gpt-test" } });
+  if (message.method === "thread/start" || message.method === "thread/resume") send({ id: message.id, result: { thread: { id: threadId }, model: "gpt-test", serviceTier: message.params.serviceTier ?? null } });
   if (message.method !== "turn/start") return;
   const state = JSON.parse(fs.readFileSync(path, "utf8")); state.turns += 1; fs.writeFileSync(path, JSON.stringify(state));
   const turn = { id: "reset-turn-" + state.turns, status: "inProgress", items: [], error: null };
@@ -48,6 +50,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   send({ method: "turn/completed", params: { threadId, turn: { ...turn, status: "completed" } } });
 });`;
       const binary = writeNodeFlagExecutable(join(testDirectory, "provider-bin"), "codex", source);
+      environment.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED = binary;
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
       try {
         const chat = store.snapshot().conversations[0]!;

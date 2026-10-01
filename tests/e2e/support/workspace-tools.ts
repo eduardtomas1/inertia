@@ -56,7 +56,7 @@ export async function selectWorkspaceTool(
   panel: Locator,
   name: string,
 ): Promise<void> {
-  const tabId = name === "Browser" ? "preview" : name.toLowerCase();
+  const tabId = name === "Browser" ? "preview" : name.toLowerCase().replaceAll(" ", "-");
   const tab = panel.locator(`[data-workspace-tab="${tabId}"]`);
   const launcher = panel.getByRole("group", { name: "Open a surface" });
   const add = panel.getByRole("button", { name: "Add panel surface" });

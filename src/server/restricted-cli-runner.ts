@@ -41,6 +41,7 @@ export class RestrictedCliError extends Error {
 export interface RestrictedCliResult {
   stdout: string;
   stderr: string;
+  exitCode?: number;
 }
 
 export interface RestrictedCliOptions {
@@ -51,6 +52,8 @@ export interface RestrictedCliOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   failureMessage: string;
+  /** Opt-in for protocols that carry a validated status in bounded stdout. */
+  acceptedExitCodes?: readonly number[];
 }
 
 export interface RestrictedCliDependencies {
@@ -230,8 +233,9 @@ export async function runRestrictedCli(
       const result = {
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
+        ...(options.acceptedExitCodes ? { exitCode: code ?? undefined } : {}),
       };
-      if (code === 0) finish(undefined, result);
+      if (code === 0 || (code !== null && options.acceptedExitCodes?.includes(code))) finish(undefined, result);
       else finish(new RestrictedCliError("failed", options.failureMessage));
     });
     child.stdin.on("error", () => undefined);

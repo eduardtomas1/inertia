@@ -36,6 +36,7 @@ export function PullRequestDialog({
   const [title, setTitle] = useState(initialTitle);
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState(true);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [completionNotice, setCompletionNotice] = useState<
     "open-failed" | "copied" | "copy-failed" | null
@@ -49,6 +50,7 @@ export function PullRequestDialog({
   useEffect(() => {
     if (!open) return;
     setCreatedUrl(null);
+    setLinkNotice(null);
     setCompletionNotice(null);
   }, [open]);
   useEffect(() => {
@@ -82,6 +84,11 @@ export function PullRequestDialog({
         },
       }));
       if (event.result.kind !== "external.url") return;
+      if (event.result.notice) {
+        setCreatedUrl(event.result.url); setLinkNotice(event.result.notice);
+        window.requestAnimationFrame(() => createdUrlRef.current?.focus());
+        return;
+      }
       try {
         await window.inertia.openExternal(event.result.url);
         onClose();
@@ -158,7 +165,7 @@ export function PullRequestDialog({
         </header>
         {createdUrl ? <>
           <p className="commit-review-warning" role="alert">
-            The pull request was created, but Inertia could not open it in your browser. Do not create it again; copy the verified link or retry opening it.
+            {linkNotice ?? "The pull request was created, but Inertia could not open it in your browser. Do not create it again; copy the verified link or retry opening it."}
           </p>
           <label>
             <span>Created pull request</span>

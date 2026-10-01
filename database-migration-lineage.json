@@ -692,6 +692,11 @@
       "version": 87,
       "name": "PersistUsageLimitResumePlans",
       "digest": "2ae6d103468f09d1ea9b5dd21a62d50cf9c7242cf30e48936352861e138a2453"
+    },
+    {
+      "version": 88,
+      "name": "PersistConversationPullRequestsAndStackOperations",
+      "digest": "fb4ecb077fd9d30991e4ba9a1a0840a9f08e35cfbe70cb64646374e2c3618e8e"
     }
   ]
 }

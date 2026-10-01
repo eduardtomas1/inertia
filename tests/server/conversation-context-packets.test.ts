@@ -1485,7 +1485,7 @@ describe("conversation context packets", () => {
 
     const database = new Database(databasePath);
     database.pragma("foreign_keys = OFF");
-    database.exec("DROP TABLE usage_limit_resume_plans; DROP TABLE queued_messages;");
+    database.exec("DROP TRIGGER pull_request_stack_protect_owner; DROP TABLE pull_request_stack_operations; DROP TABLE conversation_pull_requests; DROP TABLE usage_limit_resume_plans; DROP TABLE queued_messages;");
     database.exec("ALTER TABLE agent_thread_operations DROP COLUMN target_turn_id; ALTER TABLE agent_thread_operations DROP COLUMN target_run_id;");
     database.exec(conversationContextWholeChatMigration.up as string);
     database.exec("ALTER TABLE app_state DROP COLUMN attachment_storage_gib; ALTER TABLE app_state DROP COLUMN auto_remove_old_attachments;");

@@ -1,4 +1,5 @@
 export type WorkspacePanelTab =
+  | "pull-requests"
   | "changes"
   | "files"
   | "preview"

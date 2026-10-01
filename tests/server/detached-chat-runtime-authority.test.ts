@@ -1,3 +1,4 @@
+import { clientCommandSchema } from "../../src/shared/contracts";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -145,6 +146,22 @@ function mainRejection(command: ClientCommand): string | null {
 }
 
 describe("detached chat runtime authority", () => {
+  it("restricts every pull request and stack command to the detached chat owner", () => {
+    const key = { host: "github.com", repository: "acme/repo", number: 42 };
+    const commands = [
+      { type: "conversation.prs.get", payload: {} },
+      { type: "conversation.prs.refresh", payload: {} },
+      { type: "conversation.prs.link", payload: { url: "https://github.com/acme/repo/pull/42" } },
+      { type: "conversation.prs.unlink", payload: { key } },
+      { type: "conversation.stack.prepare", payload: { key, action: "merge" } },
+      { type: "conversation.stack.execute", payload: { reviewId: REQUEST } },
+    ];
+    for (const command of commands) {
+      expect(rejection(clientCommandSchema.parse({ ...command, requestId: REQUEST, payload: { ...command.payload, conversationId: CONVERSATION } }))).toBeNull();
+      expect(rejection(clientCommandSchema.parse({ ...command, requestId: REQUEST, payload: { ...command.payload, conversationId: OTHER_CONVERSATION } }))).not.toBeNull();
+    }
+  });
+
   it("preserves appearance-specific presets and custom colors in detached snapshots", () => {
     const state = snapshot();
     state.settings = { ...state.settings, lightColorTheme: "ocean", darkColorTheme: "iris", lightCustomColor: "#0d9488", darkCustomColor: "#f97316" };

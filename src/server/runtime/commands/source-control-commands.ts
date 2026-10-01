@@ -1,3 +1,4 @@
+import { linkCreatedPullRequest } from "../../pull-requests/created-link";
 import { repositoryAuthorityBinding, commitReviewAuthorityBinding } from "./source-control-authority";
 import { realpath } from "node:fs/promises";
 import WebSocket from "ws";
@@ -1180,6 +1181,7 @@ export function createSourceControlCommandHandler(
             kind: "external.url",
             url,
             label: "Open pull request",
+            notice: linkCreatedPullRequest(dependencies.store, command.payload.conversationId, url),
           },
         });
         return "handled";

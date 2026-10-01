@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ import type {
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { createStreamingAgentStore } from "../../src/renderer/src/hooks/useStreamingAgentState";
+import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
 
 function streamingSource(text: string) {
   const store = createStreamingAgentStore();
@@ -359,6 +360,67 @@ afterEach(() => {
 });
 
 describe("ChatWorkspace final-answer hydration", () => {
+  it.each(["jump", "layout", "other-conversation"] as const)("keeps restoration owned while handling %s during queued frames", async (navigation) => {
+    const activeConversation = conversation("conversation-restoration-jump");
+    const settledTurns = Array.from({ length: 4 }, (_, index) => turn(activeConversation, index + 1, "completed"));
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    let now = 0;
+    let scrollTop = 400;
+    let rowTop = 500;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.responseRowId === settledTurns[0]!.id
+        ? rect(rowTop - scrollTop, 400)
+        : rect(100, 600);
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number, y?: number) {
+      this.scrollTop = typeof options === "number" ? y ?? 0 : options?.top ?? this.scrollTop;
+    });
+    rememberTranscriptPosition(activeConversation.id, {
+      rowId: settledTurns[0]!.id, viewportOffset: 0, scrollTop, wasFollowing: false,
+    });
+    try {
+      const view = render(<ChatWorkspace {...workspaceProps(activeConversation)}
+        turns={settledTurns} messages={settledTurns.flatMap(messagesForTurn)} autoScrollToFinalAnswer={false} />);
+      await waitFor(() => expect(view.container.querySelectorAll("[data-response-row-id]")).toHaveLength(4));
+      const transcript = screen.getByLabelText("Thread transcript");
+      Object.defineProperties(transcript, {
+        clientHeight: { configurable: true, value: 600 },
+        scrollHeight: { configurable: true, value: 1600 },
+        scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = Math.max(0, Math.min(value, 1000)); } },
+      });
+      const frame = async (): Promise<void> => {
+        now += 16;
+        const callbacks = [...frames.values()];
+        frames.clear();
+        await act(async () => { for (const callback of callbacks) callback(now); });
+      };
+      await frame();
+      expect(scrollTop).toBe(400);
+      if (navigation === "jump") {
+        fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+        expect(scrollTop).toBe(1000);
+      } else {
+        if (navigation === "other-conversation") {
+          rememberTranscriptPosition("another-conversation", { rowId: null, viewportOffset: 0, scrollTop: 300, wasFollowing: false });
+          forgetTranscriptPosition("another-conversation");
+        }
+        rowTop += 160;
+      }
+      for (let index = 0; index < 35 && frames.size; index += 1) await frame();
+      expect(scrollTop).toBe(navigation === "jump" ? 1000 : 560);
+    } finally {
+      forgetTranscriptPosition(activeConversation.id);
+    }
+  });
+
   it("marks only the exact trailing reader activity committed at the workspace boundary", async () => {
     const activeConversation = conversation("conversation-stream-commit");
     const runningTurn = turn(activeConversation, 1, "running");

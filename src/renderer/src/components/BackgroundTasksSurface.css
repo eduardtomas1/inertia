@@ -144,47 +144,60 @@
   outline-offset: 2px;
 }
 
-.background-task-expanded {
+.background-task-line {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.background-task-transcript-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.background-task-transcript-toggle svg {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.background-task-transcript-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.background-task-transcript {
   display: grid;
   min-width: 0;
   grid-column: 1 / -1;
-  gap: 8px;
-  padding-top: 8px;
-}
-
-.background-task-details {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
-  margin: 0;
+  justify-items: start;
+  gap: 4px;
+  padding-top: 4px;
+  color: var(--text-muted);
   font-size: var(--ui-font-secondary);
   line-height: 1.45;
-}
-
-.background-task-details > div {
-  display: contents;
-}
-
-.background-task-details dt {
-  color: var(--text-muted);
-}
-
-.background-task-details dd {
-  margin: 0;
-  color: var(--text-soft);
   font-variant-numeric: tabular-nums;
+}
+
+.background-task-transcript p {
+  margin: 0;
   overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
-.background-task-context {
-  display: grid;
-  gap: 4px;
-  padding-top: 5px;
+.background-task-clamp:not([data-open]) {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp-lines);
 }
 
-.background-task-context .usage-surface-track {
-  height: 4px;
+.background-task-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .background-tasks-finished {
@@ -221,19 +234,11 @@
   .background-task-card {
     padding: 9px 10px;
   }
-
-  .background-task-details {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 1px;
-  }
-
-  .background-task-details > div + div > dt {
-    margin-top: 5px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .background-tasks-finished-toggle svg {
+  .background-tasks-finished-toggle svg,
+  .background-task-transcript-toggle svg {
     transition: none;
   }
 }
@@ -242,14 +247,5 @@
   .background-task-card,
   .background-task-stop {
     border: 1px solid CanvasText;
-  }
-
-  .background-task-context .usage-surface-track {
-    border: 1px solid CanvasText;
-  }
-
-  .background-task-context .usage-surface-track > i {
-    background: Highlight;
-    forced-color-adjust: none;
   }
 }

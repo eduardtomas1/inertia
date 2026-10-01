@@ -154,7 +154,7 @@ export function BackgroundTasksSurface({
         trace={trace}
         turns={turns}
         parentTitle={parent ? backgroundTaskTitle(parent) : null}
-        detailsId={`${surfaceId}-${trace.id}-details`}
+        transcriptId={`${surfaceId}-${trace.id}-transcript`}
         expanded={expanded.has(trace.id)}
         stopping={stopping.has(trace.id)}
         now={now}

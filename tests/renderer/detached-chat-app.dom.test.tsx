@@ -217,6 +217,7 @@ describe("detached chat window", () => {
     };
     const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
     render(<DetachedChatApp initialWindowContext={context} />);
+    await act(async () => { await vi.dynamicImportSettled(); });
     const status = await screen.findByText("2 agents finished");
     expect(status.closest("button")).toBeNull();
     expect(status.parentElement).toHaveTextContent(/^2 agents finished · 1 failed$/u);

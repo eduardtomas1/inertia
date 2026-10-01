@@ -55,9 +55,10 @@
         "deltaBytes": 5
       },
       "coreJavaScript": {
-        "baselineBytes": 2228183,
-        "implementationBytes": 2228188,
-        "deltaBytes": 5
+        "baselineBytes": 2228257,
+        "implementationBytes": 2228262,
+        "deltaBytes": 5,
+        "note": "Measured after merging a705e1b3, whose build fills the previous cap exactly; the cap grows by these 5 bytes."
       },
       "entryCss": {
         "baselineBytes": 354742,

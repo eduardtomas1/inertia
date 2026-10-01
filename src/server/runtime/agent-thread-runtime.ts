@@ -25,6 +25,7 @@ interface AgentThreadRuntimeDependencies {
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   workspaceRuns: Pick<WorkspaceRunController<never>, "trackSourceControl">;
+  worktreeSetups?: import("./worktree-setup-controller").WorktreeSetupController;
   dataDirectory: string;
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;

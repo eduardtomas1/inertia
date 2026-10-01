@@ -841,6 +841,7 @@ export default function App(): React.JSX.Element {
         }
       },
       run,
+      runWorktreeSetupCommand: draftConversation.runWorktreeSetupCommand,
       runConversationContextCommand: draftConversation.runConversationContextCommand,
       runQueueCommand,
   });

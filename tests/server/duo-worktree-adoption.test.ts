@@ -12,6 +12,8 @@ import {
   modelSelectionSchema,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
+import { WorktreeSetupController } from "../../src/server/runtime/worktree-setup-controller";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
@@ -76,6 +78,10 @@ describe("Duo worktree ownership adoption", () => {
       workspace,
       await inspectProjectIdentity(workspace),
     );
+    const action = { id: randomUUID(), name: "Prepare Duo checkout", executable: process.execPath,
+      args: ["-e", 'require("fs").writeFileSync("setup-ready", "ready")'] };
+    store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), actions: [action], worktreeSetupActionId: action.id } });
+    const worktreeSetups = new WorktreeSetupController({ store, broadcastSnapshot: () => {}, signal: new AbortController().signal, track: (operation) => operation() });
     const providerRuntime = {
       resolveModelRoute: resolveNativeModelRoute,
       harnessIdFor: (input: { harnessId: string }) => input.harnessId,
@@ -106,6 +112,7 @@ describe("Duo worktree ownership adoption", () => {
       turns,
       dataDirectory,
       () => [providerInfo()],
+      { worktreeSetups },
     );
     const modelSelection = modelSelectionSchema.parse(providerNativeModelSelection({
       providerId: "codex",
@@ -138,6 +145,12 @@ describe("Duo worktree ownership adoption", () => {
         },
       ],
     });
+    for (const side of prepared.sides) {
+      const chat = store.conversation(side.conversationId);
+      expect(chat.worktreeSetup?.status).toBe("succeeded");
+      expect(existsSync(join(chat.worktreePath!, "setup-ready"))).toBe(true);
+    }
+    expect(existsSync(join(workspace, "setup-ready"))).toBe(false);
     const conversationId = prepared.sides[0].conversationId;
     const conversation = store.conversation(conversationId);
     const worktreePath = conversation.worktreePath;

@@ -1,3 +1,4 @@
+import { parseWorktreeSetup } from "../../shared/worktree-setup";
 import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
@@ -222,6 +223,7 @@ export function conversationFromRow(row: ConversationRow): Conversation {
     }),
   );
   return {
+    ...(row.worktree_setup_json ? { worktreeSetup: parseWorktreeSetup(row.worktree_setup_json) } : {}),
     id: row.id,
     projectId: row.project_id,
     title: row.title,

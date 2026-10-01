@@ -88,6 +88,7 @@ export function useDraftConversation({
   run: (
     key: string,
     command: CommandWithoutId,
+    options?: { reportError?: boolean; passive?: boolean },
   ) => Promise<ServerEvent>;
   runNavigationCommand?: (
     key: string,
@@ -781,6 +782,11 @@ export function useDraftConversation({
     chooseModel,
     sendFromComposer,
     updateConversation,
+    runWorktreeSetupCommand: (key: string, command: Extract<CommandWithoutId, { type: `worktree.setup.${string}` }>, options?: { reportError?: boolean; passive?: boolean }) => {
+      const current = draftRef.current;
+      return run(key, current?.materialized && current.conversation.id === command.payload.conversationId
+        ? { ...command, payload: { conversationId: current.materialized.conversationId } } : command, options);
+    },
     runConversationContextCommand,
   };
 }

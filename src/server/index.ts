@@ -1,4 +1,6 @@
 import { usageLimitsRuntime } from "./usage/runtime";
+import { WorktreeSetupController } from "./runtime/worktree-setup-controller";
+import { createWorktreeSetupCommandHandler } from "./runtime/commands/worktree-setup-commands";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
@@ -481,6 +483,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       conversationId,
     }),
   );
+  const worktreeSetups = new WorktreeSetupController({ store, broadcastSnapshot, signal: runtimeLifetimeAbort.signal, track: trackRuntimeOperation, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed });
   isolatedRuns = new IsolatedRunController(
     store,
     providers,
@@ -647,7 +650,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
+    store, providers, backendProfileController, workspaceRuns, worktreeSetups, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     agentBrowser: options.agentBrowser,
@@ -660,7 +663,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     turns,
     dataDirectory,
     () => providerInfo,
-    { workspaceRuns, runtimeClosed: () => closed },
+    { workspaceRuns, worktreeSetups, runtimeClosed: () => closed },
   );
   duoLaunches = duoLaunchCoordinator;
   const turnInteractionDependencies: TurnInteractionCommandDependencies = {
@@ -680,6 +683,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   queuedMessages.start();
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      createWorktreeSetupCommandHandler(worktreeSetups, send),
       queuedMessages.handler,
       usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),

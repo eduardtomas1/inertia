@@ -198,6 +198,7 @@ export type ServerEvent =
             usedFallback: boolean;
           }
         | { kind: "project.actions"; actions: ProjectAction[] }
+        | { kind: "worktree.setup"; summary: import("../worktree-setup").WorktreeSetupSummary | null; output: string }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
         | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }

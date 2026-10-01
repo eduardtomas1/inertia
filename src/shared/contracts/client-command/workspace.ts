@@ -8,6 +8,11 @@ import {
 import { workspaceFileWriteCommandSchema } from "./workspace-file-write";
 
 export const workspaceCommandSchemas = [
+  z.object({ ...requestBase, type: z.literal("worktree.setup.read"), payload: z.object({ conversationId: z.string().uuid() }).strict() }).strict(),
+  z.object({ ...requestBase, type: z.literal("worktree.setup.wait"), payload: z.object({ conversationId: z.string().uuid() }).strict() }).strict(),
+  z.object({ ...requestBase, type: z.literal("worktree.setup.retry"), payload: z.object({ conversationId: z.string().uuid() }).strict() }).strict(),
+  z.object({ ...requestBase, type: z.literal("worktree.setup.cancel"), payload: z.object({ conversationId: z.string().uuid() }).strict() }).strict(),
+  z.object({ ...requestBase, type: z.literal("worktree.setup.skip"), payload: z.object({ conversationId: z.string().uuid() }).strict() }).strict(),
   z
     .object({
       ...requestBase,

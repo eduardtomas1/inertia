@@ -117,6 +117,7 @@ export class DuoLaunchCoordinator {
   >();
   /** Launch ids needing another comparison pass, and whether it is an explicit retry. */
   private readonly comparisonRechecks = new Map<string, boolean>();
+  private readonly worktreeSetups?: import("../worktree-setup-controller").WorktreeSetupController;
   private readonly worktrees: DuoWorktreeOperations;
   private readonly workspaceRuns: DuoSourceControlOperations | null;
   private readonly comparisonCheckoutAcquireTimeoutMs: number;
@@ -130,12 +131,14 @@ export class DuoLaunchCoordinator {
     private readonly dataDirectory: string,
     private readonly providerInfo: () => readonly ProviderInfo[],
     options: {
+      worktreeSetups?: import("../worktree-setup-controller").WorktreeSetupController;
       worktrees?: DuoWorktreeOperations;
       workspaceRuns?: DuoSourceControlOperations;
       comparisonCheckoutAcquireTimeoutMs?: number;
       runtimeClosed?: () => boolean;
     } = {},
   ) {
+    this.worktreeSetups = options.worktreeSetups;
     this.worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
     this.workspaceRuns = options.workspaceRuns ?? null;
     this.runtimeClosed = options.runtimeClosed ?? (() => false);
@@ -231,6 +234,9 @@ export class DuoLaunchCoordinator {
       if (!launch) {
         return publicStatus(this.store, this.store.pairedLaunch(launchId));
       }
+    }
+    for (const plan of launch.sides) {
+      if (plan.conversationId && this.store.worktreeSetups.read(plan.conversationId)) this.worktreeSetups?.cancel(plan.conversationId);
     }
     this.store.requestPairedLaunchCancellation(launchId);
     const latest = this.store.pairedLaunch(launchId);
@@ -785,6 +791,9 @@ export class DuoLaunchCoordinator {
           : null,
       );
       conversationsAdopted = true;
+      this.assertNotCancelled(payload.launchId);
+      for (const side of sides) if (side.ownsWorktree) this.worktreeSetups?.initialize(side.conversationId);
+      await Promise.all(conversations.sides.map(async (conversation) => { await this.worktreeSetups?.waitUntilReady(conversation.id); }));
       this.assertNotCancelled(payload.launchId);
       const queued = this.turns.queuePair(payload.launchId, [
         {

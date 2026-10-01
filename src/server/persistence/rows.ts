@@ -49,6 +49,7 @@ export interface ProjectRow {
 }
 
 export interface ConversationRow {
+  worktree_setup_json?: string | null;
   id: string;
   project_id: string;
   title: string;

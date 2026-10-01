@@ -82,6 +82,7 @@ import {
   markTestStreamingReaderActivityReceipt,
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
+import { WorktreeSetupCard, type WorktreeSetupCommandRunner } from "./WorktreeSetupCard";
 import type { QueueCommandRunner } from "./composer/runtimeQueueClient";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type {
@@ -198,6 +199,7 @@ type ChatWorkspaceProps = {
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
+  onWorktreeSetupCommand?: WorktreeSetupCommandRunner;
   onQueueCommand?: QueueCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
@@ -309,6 +311,7 @@ export function ChatWorkspace({
   contextSources = EMPTY_CONTEXT_SOURCES,
   contextPackets = EMPTY_CONTEXT_PACKETS,
   onConversationContextCommand,
+  onWorktreeSetupCommand,
   onQueueCommand,
   previewContextUrl,
   providerIdentityLabels,
@@ -948,6 +951,7 @@ export function ChatWorkspace({
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
         <div ref={timelineRef} className="response-timeline">
+          {conversation?.worktreePath && onWorktreeSetupCommand && <WorktreeSetupCard key={conversation.id} conversation={conversation} request={onWorktreeSetupCommand} />}
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
               {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"

@@ -1556,7 +1556,9 @@ describe("composer asynchronous ownership", () => {
       },
     }));
     const hook = renderHook(() => useAppRuntimeActions({
-      sendCommand,
+      sendCommand: async (command) => command.type === "worktree.setup.wait"
+        ? { type: "request.result", requestId: command.requestId, result: { kind: "worktree.setup", summary: null, output: "" } }
+        : sendCommand(command),
       refreshDetail: vi.fn(),
       setBusyAction: vi.fn(),
       setActionError: vi.fn(),
@@ -1594,7 +1596,8 @@ describe("composer asynchronous ownership", () => {
       value: { prepareAttachmentHandoff, finishAttachmentHandoff },
     });
     const hook = renderHook(() => useAppRuntimeActions({
-      sendCommand: vi.fn(async () => {
+      sendCommand: vi.fn(async (command) => {
+        if (command.type === "worktree.setup.wait") return { type: "request.result" as const, requestId: command.requestId, result: { kind: "worktree.setup" as const, summary: null, output: "" } };
         throw new RuntimeCommandError("send failed", delivery);
       }),
       refreshDetail: vi.fn(),

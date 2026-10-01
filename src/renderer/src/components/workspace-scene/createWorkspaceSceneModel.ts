@@ -264,6 +264,7 @@ export interface WorkspaceSceneActions {
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  runWorktreeSetupCommand?: import("../WorktreeSetupCard").WorktreeSetupCommandRunner;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
 }
@@ -722,6 +723,7 @@ export function createWorkspaceSceneModel({
       contextSources,
       contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
+      onWorktreeSetupCommand: actions.runWorktreeSetupCommand ?? actions.run,
       onQueueCommand: actions.runQueueCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,

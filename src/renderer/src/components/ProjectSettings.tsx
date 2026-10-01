@@ -151,7 +151,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ "": `Use global (${settings.projectGrouping})`, repository: "Group by repository", "repository-path": "Group by repository and folder", separate: "Keep separate" }}
           onChange={(value) => void save({ groupingMode: value as Project["groupingMode"] || null })} />
       </Row>
-      <Row title="Actions" description="Named commands for this checkout. Run explicitly from the workspace; saving never executes them.">
+      <Row title="Actions" description="Named commands for this checkout. Run from the workspace or choose one for new worktrees. Saving never executes them.">
         <button type="button" disabled={blocked || preferences.actions.length >= 20} aria-expanded={actionOpen} onClick={() => setActionOpen(!actionOpen)}><Plus size={14} />Add action</button>
       </Row>
       {actionOpen && <form className="project-action-form" onSubmit={(event) => {
@@ -165,7 +165,16 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         <div><button type="button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" disabled={blocked || !actionName.trim() || !executable.trim()}>Save action</button></div>
       </form>}
       {preferences.actions.length === 0 ? <p className="project-actions-empty">No custom actions configured. Detected package scripts remain available in the workspace.</p>
-        : <ul className="project-actions-list">{preferences.actions.map((action) => <li key={action.id}><div><strong>{action.name}</strong><code>{[action.executable, ...action.args].join(" ")}</code></div><button type="button" aria-label={`Remove ${action.name}`} disabled={blocked} onClick={() => setPreference("actions", preferences.actions.filter(({ id }) => id !== action.id))}><Trash2 size={14} /></button></li>)}</ul>}
+        : <ul className="project-actions-list">{preferences.actions.map((action) => <li key={action.id}><div><strong>{action.name}</strong><code>{[action.executable, ...action.args].join(" ")}</code></div><button type="button" aria-label={`Remove ${action.name}`} disabled={blocked} onClick={() => void save({ preferences: { ...preferences, actions: preferences.actions.filter(({ id }) => id !== action.id), worktreeSetupActionId: preferences.worktreeSetupActionId === action.id ? null : preferences.worktreeSetupActionId } })}><Trash2 size={14} /></button></li>)}</ul>}
+    </section>
+    <h2 className="project-settings-group-title">Worktree setup</h2>
+    <section className="project-settings-card" aria-label="Worktree setup settings">
+      <Row title="Run when creating a worktree" description="Prepare each new isolated checkout before its first prompt, for example install dependencies. Existing checkouts and snapshots are unchanged.">
+        <ProjectSelect label="Worktree setup action" value={preferences.worktreeSetupActionId ?? ""} disabled={blocked}
+          options={{ "": "Off", ...Object.fromEntries(preferences.actions.map((action) => [action.id, action.name])) }}
+          onChange={(value) => setPreference("worktreeSetupActionId", value || null)} />
+      </Row>
+      <p className="project-actions-empty">Choose a saved action above. Runs in the new worktree, including each new Duo checkout. If setup fails, inspect its output, retry, or continue without setup.</p>
     </section>
     <h2 className="project-settings-group-title">Danger zone</h2>
     <section className="project-settings-card"><Row title="Remove project" description="Remove this project and its threads from Inertia. Files on disk are not touched.">

@@ -67,7 +67,10 @@ it.each([
   const error = new RuntimeCommandError("The follow-up was accepted as its turn ended.", delivery);
   const setActionError = vi.fn();
   const { result } = renderHook(() => useAppRuntimeActions({
-    sendCommand: vi.fn().mockRejectedValue(error), refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+    sendCommand: async (command) => {
+      if (command.type === "worktree.setup.wait") return { type: "request.result", requestId: command.requestId, result: { kind: "worktree.setup", summary: null, output: "" } };
+      throw error;
+    }, refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
   }));
   await act(async () => {
     await expect(result.current.sendMessageToConversation("33333333-3333-4333-8333-333333333333", "Follow up", []))
@@ -76,4 +79,33 @@ it.each([
   const reported = String(setActionError.mock.lastCall?.[0]);
   expect(reported.startsWith("Delivery could not be confirmed.")).toBe(unconfirmed);
   expect(reported).toContain(error.message);
+});
+
+it("keeps setup connection failures unambiguously unsent", async () => {
+  const sendCommand = vi.fn().mockRejectedValue(new RuntimeCommandError("Setup connection lost", "ambiguous"));
+  const { result } = renderHook(() => useAppRuntimeActions({ sendCommand, refreshDetail: vi.fn(), setActionError: vi.fn(), setBusyAction: vi.fn() }));
+  await act(async () => {
+    await expect(result.current.sendMessageToConversation("33333333-3333-4333-8333-333333333333", "First prompt", []))
+      .rejects.toMatchObject({ delivery: "not-sent", message: "Setup connection lost" });
+  });
+  expect(sendCommand).toHaveBeenCalledTimes(1);
+  expect(sendCommand.mock.calls[0]?.[0].type).toBe("worktree.setup.wait");
+});
+
+it("waits for setup before sending and preserves a failed setup as an unsent prompt", async () => {
+  let release!: (value: import("../../src/shared/contracts").ServerEvent) => void;
+  const pending = new Promise<import("../../src/shared/contracts").ServerEvent>((resolve) => { release = resolve; });
+  const sendCommand = vi.fn(async () => pending);
+  const { result } = renderHook(() => useAppRuntimeActions({ sendCommand, refreshDetail: vi.fn(), setActionError: vi.fn(), setBusyAction: vi.fn() }));
+  let sending!: Promise<unknown>;
+  act(() => { sending = result.current.sendMessageToConversation("33333333-3333-4333-8333-333333333333", "First prompt", []); });
+  expect(sendCommand).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    release({ type: "request.result", requestId: "setup", result: { kind: "worktree.setup", output: "", summary: {
+      actionName: "Install", status: "failed", attempt: 1, detail: "Failed", startedAt: null, finishedAt: null,
+    } } });
+    await expect(sending).rejects.toMatchObject({ delivery: "not-sent" });
+  });
+  expect(sendCommand).toHaveBeenCalledTimes(1);
+  expect(result.current.sendingConversationIds.size).toBe(0);
 });

@@ -19,6 +19,16 @@ Inertia keeps review next to the chat, so you can check an agent's work before i
 
 The **branch menu** searches local and remote branches, shows which are checked out in another worktree, creates branches and starts chats in an isolated worktree.
 
+### Set up new worktrees automatically
+
+In **Settings → Projects**, choose a project and add a saved **Action**, such as executable `npm` with argument `ci`. Under **Worktree setup**, select that action in **Run when creating a worktree**. Setup is off by default; saving these settings does not run a command.
+
+Inertia runs the action in each newly created isolated checkout, including both new Duo worktrees, before allowing its first prompt. Local and reused checkouts do not run setup again. Commands use literal arguments, without implicit shell expansion; use a project script for multiple steps.
+
+The chat shows setup status and its bounded output. If setup fails, choose **Retry setup**, or **Continue without setup**, then send your retained prompt again. Retrying uses the command saved for that checkout. **Stop setup** cancels the running command and its child processes. Setup has a ten-minute limit. After a runtime interruption, Inertia asks you to retry or continue explicitly and keeps the checkout.
+
+Setup prepares files and dependencies. Browser snapshots add visual context to prompts, and Git checkpoints support recovery; both remain separate from worktree setup.
+
 ## Pull requests
 
 Open a pull request from the Git menu, and check its readiness before merging.

@@ -44,6 +44,7 @@ export type ProjectAppearancePatch = z.infer<typeof projectAppearancePatchSchema
 export const projectPreferencesSchema = z.strictObject({
   workspace: z.enum(["local", "worktree"]).nullable(),
   autoPull: z.boolean(),
+  worktreeSetupActionId: z.string().uuid().nullable().default(null),
   browserAccess: z.boolean().nullable(),
   icon: projectIconSchema.nullable(),
   actions: z.array(z.strictObject({
@@ -59,12 +60,13 @@ export const projectPreferencesSchema = z.strictObject({
   claudeMaxBudgetUsd: z.number().refine(isValidClaudeTurnBudgetUsd, "Use an amount from 0.01 to 10,000 USD with at most two decimals.").nullable().default(null),
   ...appearanceFields,
 }).refine((value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 192 * 1024, "Project settings exceed the local command size limit.")
+  .refine((value) => value.worktreeSetupActionId === null || value.actions.some((action) => action.id === value.worktreeSetupActionId), "Choose an existing project action for worktree setup.")
   .refine((value) => new Set(value.actions.map(({ id }) => id)).size === value.actions.length, "Project actions must have distinct identities.");
 
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
+  return { workspace: null, autoPull: false, worktreeSetupActionId: null, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
 }
 
 export function applyProjectAppearance(preferences: ProjectPreferences | undefined, appearance: ProjectAppearancePatch): ProjectPreferences {

@@ -76,7 +76,7 @@ describe("project tools provider authority", () => {
     } });
     const launched = harness.start({ input: nativeProviderRunInput({ providerId: "claude", conversationId: "tools-chat", cwd: root, prompt: "Use docs", interactionMode: "build", access: "supervised" }), executable: process.execPath, environment: {}, providerNativeToolsAvailable: native, projectTools: run });
     expect((await launched.result).status).toBe("completed");
-    expect(options?.strictMcpConfig).toBe(true);
+    expect(options?.strictMcpConfig).toBe(native ? true : undefined);
     expect(Object.keys(options?.mcpServers ?? {})).toEqual(native ? [projectToolServerName(connection.id)] : []);
     if (native) {
       expect(options?.managedSettings?.allowedMcpServers).toEqual([{ serverName: projectToolServerName(connection.id) }]);

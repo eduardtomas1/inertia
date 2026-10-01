@@ -511,8 +511,7 @@ function startClaudeRun(
           settingSources: [],
           systemPrompt: { type: "preset", preset: "claude_code", snapshot: true },
           managedSettings: projectTools.settings,
-          mcpServers: projectTools.servers,
-          strictMcpConfig: true,
+          ...(projectToolRun ? { mcpServers: projectTools.servers, strictMcpConfig: true } : {}),
           ...(supportsFastMode
             ? {
                 settings: {

@@ -8,6 +8,10 @@ import {
 } from "../../src/renderer/src/components/welcome-guide/helpTopics";
 import { WELCOME_TOPICS } from "../../src/renderer/src/components/welcome-guide/welcomeGuideModel";
 import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
+import {
+  RIGHT_PANEL_SURFACE_META,
+  RIGHT_PANEL_SURFACES,
+} from "../../src/renderer/src/utils/rightPanelSurfaces";
 
 const SETTINGS_ARROW = "Settings → ";
 
@@ -113,5 +117,15 @@ describe("help topics", () => {
     const keyboard = HELP_TOPICS.find(({ id }) => id === "keys")!;
     expect(keyboard.entries.flatMap(({ shortcut }) => (shortcut ? [shortcut] : [])))
       .toEqual(Object.keys(DEFAULT_APP_KEYBINDINGS));
+  });
+
+  it("names every right panel surface by its current label", () => {
+    const entries = HELP_TOPICS.flatMap(({ entries: topicEntries }) => topicEntries);
+    const surfaces = entries.find(({ name }) => name === "Surfaces")!;
+    for (const surface of RIGHT_PANEL_SURFACES) {
+      expect(surfaces.detail).toContain(RIGHT_PANEL_SURFACE_META[surface].label);
+    }
+    const delegated = entries.find(({ name }) => name === "Plan, goal and subagents")!;
+    expect(delegated.detail).toContain(`${RIGHT_PANEL_SURFACE_META.agents.label} surface`);
   });
 });

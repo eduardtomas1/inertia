@@ -91,7 +91,7 @@ export class TurnSubagentTelemetry {
   project(event: ProviderSubagentEvent, updatedAt: string): void {
     const trace = this.closed ? null : this.coalescible(event);
     if (!trace) {
-      this.flushAll();
+      this.flush();
       this.persist(event, updatedAt);
       return;
     }
@@ -103,7 +103,7 @@ export class TurnSubagentTelemetry {
     };
     const elapsed = this.options.nowMs() - trace.writtenAt;
     if (elapsed >= SUBAGENT_TELEMETRY_INTERVAL_MS) {
-      this.flush(trace);
+      this.flushTrace(trace);
       return;
     }
     if (trace.timer !== null) return;
@@ -111,7 +111,7 @@ export class TurnSubagentTelemetry {
       trace.timer = null;
       if (this.closed) return;
       try {
-        this.flush(trace);
+        this.flushTrace(trace);
       } catch {
         return;
       }
@@ -120,7 +120,7 @@ export class TurnSubagentTelemetry {
 
   close(): void {
     this.closed = true;
-    this.flushAll();
+    this.flush();
   }
 
   private coalescible(event: ProviderSubagentEvent): TraceTelemetry | null {
@@ -141,11 +141,11 @@ export class TurnSubagentTelemetry {
     }) ? trace : null;
   }
 
-  private flushAll(): void {
+  flush(): void {
     const failures: unknown[] = [];
     for (const trace of this.traces.values()) {
       try {
-        this.flush(trace);
+        this.flushTrace(trace);
       } catch (error) {
         failures.push(error);
       }
@@ -153,7 +153,7 @@ export class TurnSubagentTelemetry {
     if (failures.length > 0) throw failures[0];
   }
 
-  private flush(trace: TraceTelemetry): void {
+  private flushTrace(trace: TraceTelemetry): void {
     if (trace.timer !== null) {
       this.options.scheduler.clearTimeout(trace.timer);
       trace.timer = null;

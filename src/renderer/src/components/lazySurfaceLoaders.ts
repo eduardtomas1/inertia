@@ -8,7 +8,7 @@ export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog
 export const loadConversationSplitView = createSurfaceLoader(() => import("./ConversationSplitView"));
 export const loadDailyWorkDialog = createSurfaceLoader(() => import("./DailyWorkDialog"));
 export const loadAttachmentsSurface = createSurfaceLoader(() => import("./AttachmentsSurface"));
-export const loadAgentsSurface = createSurfaceLoader(() => import("./AgentsSurface"));
+export const loadBackgroundTasksSurface = createSurfaceLoader(() => import("./BackgroundTasksSurface"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
 export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
 export const loadHistoricalDiffPanel = createSurfaceLoader(() => import("./HistoricalDiffPanel"));
@@ -49,7 +49,7 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
   } else if (tab === "usage") {
     void loadUsageSurface();
   } else if (tab === "agents") {
-    void loadAgentsSurface();
+    void loadBackgroundTasksSurface();
   } else if (tab === "changes") {
     void loadWorkspaceChangesPanel();
     void loadHistoricalDiffPanel();

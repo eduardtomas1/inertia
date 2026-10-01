@@ -65,6 +65,7 @@ const PROVIDER_LABELS: Partial<Record<SubagentTrace["providerId"], string>> = {
   cursor: "Cursor",
   kimi: "Kimi Code",
   opencode: "OpenCode",
+  antigravity: "Antigravity",
 };
 
 export function subagentProviderLabel(trace: SubagentTrace): string {
@@ -77,6 +78,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "cursor-acp": "ACP",
   "kimi-acp": "ACP",
   "opencode-sdk": "SDK",
+  "antigravity-cli": "CLI",
 };
 
 export function subagentHarnessLabel(

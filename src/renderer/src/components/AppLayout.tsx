@@ -758,7 +758,7 @@ export const AppLayout = memo(function AppLayout({
               rightPanelAvailable={Boolean(headerTools)}
               rightPanelOpen={Boolean(headerTools) && scenePanel.panel.isOpen}
               rightPanelUnavailableLabel={workspaceToolsUnavailableReason ?? "Right panel is unavailable"}
-              liveAgentCount={headerTools?.panel.liveAgentCount ?? 0}
+              runningBackgroundTaskCount={headerTools?.panel.runningBackgroundTaskCount ?? 0}
               onToggleTerminal={scenePanel.toggleTerminal}
               onToggleRightPanel={scenePanel.toggleWorkspaceTools}
               onOpenUsage={() => scenePanel.openSurface("usage")}

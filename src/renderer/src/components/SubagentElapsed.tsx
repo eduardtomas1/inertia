@@ -17,7 +17,7 @@ interface SubagentElapsedProps {
 const liveElapsedSubscribers = new Set<() => void>();
 let liveElapsedTimer: number | null = null;
 
-function subscribeLiveElapsed(update: () => void): () => void {
+export function subscribeLiveElapsed(update: () => void): () => void {
   liveElapsedSubscribers.add(update);
   update();
   liveElapsedTimer ??= window.setInterval(() => {

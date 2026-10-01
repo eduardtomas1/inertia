@@ -48,7 +48,7 @@ function SurfaceHost({
       presentation={presentation}
       visible={state.isOpen}
       unavailable={unavailable}
-      liveAgentCount={2}
+      runningBackgroundTaskCount={2}
       onActivateSurface={(surface) => update((current) => activateRightPanelSurface(current, surface))}
       onOpenSurface={(surface) => update((current) => openRightPanelSurface(current, surface))}
       onCloseSurface={(surface) => update((current) => closeRightPanelSurface(current, surface))}
@@ -166,10 +166,10 @@ describe("right panel surface host", () => {
     const launcher = await screen.findByRole("group", { name: "Open a surface" });
     await waitFor(() => expect(launcher).toHaveFocus());
     expect(launcher).toHaveAttribute("aria-keyshortcuts", "D F B T H A U G P");
-    for (const label of ["Changes", "Files", "Browser", "Terminal", "Attachments", "Agents", "Usage"]) {
+    for (const label of ["Changes", "Files", "Browser", "Terminal", "Attachments", "Background tasks", "Usage"]) {
       expect(within(launcher).getByRole("button", { name: new RegExp(`^${label}`, "u") })).toBeVisible();
     }
-    expect(within(launcher).getByRole("button", { name: /^Agents 2 running/u })).toBeVisible();
+    expect(within(launcher).getByRole("button", { name: /^Background tasks 2 running/u })).toBeVisible();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
 
     fireEvent.keyDown(launcher, { key: "u" });
@@ -233,17 +233,17 @@ describe("right panel surface host", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
     const shortcutMenu = await screen.findByRole("menu", { name: "Add panel surface" });
-    await within(shortcutMenu).findByRole("menuitem", { name: /^Agents/u });
+    await within(shortcutMenu).findByRole("menuitem", { name: /^Background tasks/u });
     fireEvent.keyDown(shortcutMenu, { key: "a" });
-    expect(screen.getByRole("tab", { name: "Agents 2" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Background tasks, 2 running" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("data-workspace-tab")))
       .toEqual(["changes", "preview", "agents"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Close Browser" }));
     expect(screen.queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Agents 2" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Background tasks, 2 running" })).toHaveAttribute("aria-selected", "true");
 
-    const agentsTab = screen.getByRole("tab", { name: "Agents 2" });
+    const agentsTab = screen.getByRole("tab", { name: "Background tasks, 2 running" });
     fireEvent(agentsTab.parentElement!, new MouseEvent("auxclick", { bubbles: true, button: 1 }));
     expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
 

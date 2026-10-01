@@ -30,6 +30,7 @@ type PairState =
 interface PromptDraft {
   content: string;
   pendingDelivery?: { content: string; deliveryId: string };
+  error?: string;
 }
 
 export default function App({
@@ -411,7 +412,11 @@ export default function App({
         return next;
       });
     } catch (error) {
-      setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "The prompt was not accepted." } : current);
+      const message = error instanceof Error ? error.message : "The prompt was not accepted.";
+      setPromptDrafts((current) => {
+        const draft = current[selectedConversation];
+        return draft ? { ...current, [selectedConversation]: { ...draft, error: message } } : current;
+      });
     } finally { setBusy(false); }
   };
 
@@ -461,7 +466,7 @@ export default function App({
     <WorkspaceShell
       shell={shell}
       detail={detail}
-      error={pair.error}
+      error={pair.error ?? promptDraft?.error ?? null}
       prompt={prompt}
       busy={busy}
       offline={hostUnavailable}

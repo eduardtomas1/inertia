@@ -180,6 +180,44 @@ describe("Private Connect packaged workspace", () => {
     });
   });
 
+  it("keeps a late uncertain-delivery warning with its own chat", async () => {
+    scopes = ["private:read", "private:prompt"];
+    otherConversationAvailable = true;
+    uncertainPromptResponses = 1;
+    await openConversation();
+    fireEvent.change(screen.getByRole("textbox", { name: "Send a prompt" }), { target: { value: "First chat" } });
+    let finish!: () => void;
+    promptResponseGate = new Promise<void>((resolve) => { finish = resolve; });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sent.some((request) => request.type === "prompt.send")).toBe(true));
+    await selectConversation("Other chat");
+    await act(async () => { finish(); await promptResponseGate; });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Send a prompt" })).not.toBeDisabled());
+    expect(screen.queryByText(/Sending again will safely check the same delivery/iu)).not.toBeInTheDocument();
+    await selectConversation("Conversation");
+    expect(screen.getByText(/Sending again will safely check the same delivery/iu)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Send a prompt" })).toHaveValue("First chat");
+  });
+
+  it("clears every chat draft when the device's authority changes", async () => {
+    scopes = ["private:read", "private:prompt"];
+    otherConversationAvailable = true;
+    let close!: (code: number) => void;
+    socket.onClose.mockImplementation(((listener: (code: number) => void) => { close = listener; return () => undefined; }) as never);
+    try {
+      await openConversation();
+      fireEvent.change(screen.getByRole("textbox", { name: "Send a prompt" }), { target: { value: "Secret draft" } });
+      const { PRIVATE_CONNECT_SOCKET_CLOSE } = await import("../../src/shared/private-connect/protocol");
+      await act(async () => { close(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged); });
+      await waitFor(() => expect(screen.queryByRole("heading", { name: "Conversation" })).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getByRole("button", { name: /^Conversation/u })).toBeInTheDocument(), { timeout: 8_000 });
+      await selectConversation("Conversation");
+      expect(screen.getByRole("textbox", { name: "Send a prompt" })).toHaveValue("");
+    } finally {
+      socket.onClose.mockImplementation(() => () => undefined);
+    }
+  }, 15_000);
+
   it("settles a pending send without clearing the newly selected chat's draft", async () => {
     scopes = ["private:read", "private:prompt"];
     otherConversationAvailable = true;

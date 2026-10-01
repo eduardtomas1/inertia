@@ -1,3 +1,5 @@
+import type { SubagentTaskUsage } from "../../shared/contracts";
+import { validateSubagentTaskUsage } from "../provider/usage-values";
 import {
   boundedText,
   CappedTextBuffer,
@@ -5,8 +7,10 @@ import {
   stringValue,
   type JsonObject,
 } from "./protocol";
+import { codexItemActivityLabel } from "./app-server-item-labels";
 import { codexTurnInterruptionFailure } from "./app-server-status";
 import type { CodexAppServerOptions } from "./types";
+import { parseCodexTokenUsage } from "./usage";
 
 export type CodexSubagentUpdate = Parameters<
   NonNullable<CodexAppServerOptions["onSubagent"]>
@@ -45,15 +49,24 @@ interface CodexThreadSpawnSource {
   providerRole: string | null;
 }
 
-interface ProvisionalChildEvent {
-  method:
-    | "turn/started"
-    | "turn/completed"
-    | "thread/status/changed"
-    | "error"
-    | "thread/closed";
-  params: JsonObject;
-}
+type ProvisionalChildEvent =
+  | {
+      method:
+        | "turn/started"
+        | "turn/completed"
+        | "thread/status/changed"
+        | "error"
+        | "thread/closed";
+      params: JsonObject;
+    }
+  | {
+      method: "thread/tokenUsage/updated";
+      usage: SubagentTaskUsage;
+    };
+
+type CodexChildTelemetry =
+  | { activity: string }
+  | { usage: SubagentTaskUsage };
 
 export interface CodexChildTurn {
   threadId: string;
@@ -94,6 +107,21 @@ export function strictCodexProviderIdentifier(
       && identifier.length <= maxChars
     ? identifier
     : null;
+}
+
+function codexSubagentTaskUsage(value: unknown): SubagentTaskUsage | null {
+  const usage = parseCodexTokenUsage(value);
+  if (!usage) return null;
+  return validateSubagentTaskUsage({
+    totalTokens: usage.totalProcessedTokens,
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheWriteInputTokens: usage.cacheWriteInputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningOutputTokens: usage.reasoningOutputTokens,
+    contextTokens: usage.usedTokens,
+    maxContextTokens: usage.maxTokens,
+  });
 }
 
 function agentPathName(value: unknown): string | null {
@@ -305,7 +333,11 @@ export class CodexSubagentLifecycle {
     this.provisionalActiveTurns.delete(threadId);
     if (!buffered) return;
     for (const event of buffered) {
-      this.handleChildNotification(event.method, event.params, threadId);
+      if (event.method === "thread/tokenUsage/updated") {
+        this.emitChildTelemetry(threadId, { usage: event.usage });
+      } else {
+        this.handleChildNotification(event.method, event.params, threadId);
+      }
     }
   }
 
@@ -327,6 +359,11 @@ export class CodexSubagentLifecycle {
       events = [];
       this.provisionalEvents.set(threadId, events);
     }
+    if (event.method === "thread/tokenUsage/updated") {
+      const prior = events.findIndex(({ method: buffered }) =>
+        buffered === event.method);
+      if (prior >= 0) events.splice(prior, 1);
+    }
     if (events.length >= MAX_CODEX_PROVISIONAL_EVENTS_PER_CHILD) {
       this.rejectProvisionalOverflow(
         `Codex exceeded the ${MAX_CODEX_PROVISIONAL_EVENTS_PER_CHILD}-event provisional child limit.`,
@@ -334,6 +371,7 @@ export class CodexSubagentLifecycle {
       return true;
     }
     events.push(event);
+    if (event.method === "thread/tokenUsage/updated") return true;
     const turnId = strictCodexProviderIdentifier(
       objectValue(event.params.turn)?.id,
     );
@@ -413,6 +451,10 @@ export class CodexSubagentLifecycle {
     if (method === "thread/closed") {
       return { method, params: { threadId } };
     }
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexSubagentTaskUsage(params.tokenUsage);
+      return usage ? { method, usage } : null;
+    }
     return null;
   }
 
@@ -480,6 +522,9 @@ export class CodexSubagentLifecycle {
     }
     const toolUseId = strictCodexProviderIdentifier(item.id) ?? null;
     const prompt = boundedText(item.prompt, 4_000) ?? null;
+    const model = tool === "spawnAgent"
+      ? boundedText(item.model, 200)
+      : undefined;
     const agentsStates = objectValue(item.agentsStates) ?? {};
     for (const providerAgentId of receiverThreadIds) {
       const rootThreadId = this.host.rootThreadId();
@@ -528,6 +573,7 @@ export class CodexSubagentLifecycle {
         result: terminal
           ? boundedText(agentState?.message, 16_000) ?? null
           : null,
+        ...(model ? { model } : {}),
       }, exactStatus ? "state" : "activity", isLive);
       this.replayProvisionalLifecycle(providerAgentId);
     }
@@ -694,6 +740,7 @@ export class CodexSubagentLifecycle {
       progress?: string | null;
       result?: string | null;
       isLive?: boolean;
+      telemetry?: CodexChildTelemetry;
     } = {},
   ): void {
     this.host.emitSubagent({
@@ -712,7 +759,22 @@ export class CodexSubagentLifecycle {
       description: null,
       progress: options.progress ?? null,
       result: options.result ?? null,
+      ...options.telemetry,
     }, authority, options.isLive ?? LIVE_SUBAGENT_STATUSES.has(status));
+  }
+
+  private emitChildTelemetry(
+    threadId: string,
+    telemetry: CodexChildTelemetry,
+  ): void {
+    const projection = this.host.projection(threadId);
+    if (!projection || ("activity" in telemetry && !projection.isLive)) return;
+    this.emitChildLifecycle(
+      threadId,
+      projection.status,
+      projection.authority,
+      { isLive: projection.isLive, telemetry },
+    );
   }
 
   private handleChildNotification(
@@ -778,7 +840,11 @@ export class CodexSubagentLifecycle {
       });
       return true;
     }
-    if (method === "thread/tokenUsage/updated") return true;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexSubagentTaskUsage(params.tokenUsage);
+      if (usage) this.emitChildTelemetry(threadId, { usage });
+      return true;
+    }
     if (method === "item/agentMessage/delta") {
       const delta = stringValue(params.delta);
       if (delta) {
@@ -799,6 +865,10 @@ export class CodexSubagentLifecycle {
         method === "item/started" ? "started" : "completed",
         threadId,
       )) return true;
+      if (method === "item/started") {
+        const activity = boundedText(codexItemActivityLabel(item), 200);
+        if (activity) this.emitChildTelemetry(threadId, { activity });
+      }
       if (
         method === "item/completed"
         && stringValue(item.type) === "agentMessage"

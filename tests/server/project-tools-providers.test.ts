@@ -1,6 +1,4 @@
 // @inertia-test-suite portable
-// @inertia-harness codex-app-server
-// @inertia-harness claude-agent-sdk
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -37,6 +37,7 @@ const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-ch
   : "item/commandExecution/requestApproval";
 let threadId = "thread-new";
 let turnId = "turn-1";
+let heldInterruptId;
 const requestInput = () => send({
 id: "input-rpc",
 method: "item/tool/requestUserInput",
@@ -681,9 +682,16 @@ if (message.method === "turn/steer") {
   ]);
   return;
 }
+if (message.id === "late-approval" && message.method === undefined) {
+  send({ id: heldInterruptId, result: {} });
+  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+  return;
+}
 if (message.method === "turn/interrupt") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt") {
+    heldInterruptId = message.id;
     send({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-late", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } });
+    return;
   }
   send({ id: message.id, result: {} });
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });

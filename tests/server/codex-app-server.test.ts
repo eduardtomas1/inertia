@@ -1366,8 +1366,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(failedActivities).toEqual([]);
     expect(approvals).toEqual([]);
     const response = captured(fake.capturePath).find(({ id, method }) => id === "late-approval" && method === undefined);
-    expect(response).toBeDefined();
-    expect(response?.result).not.toEqual({ decision: "accept" });
+    expect(response?.result).toEqual({ decision: "cancel" });
     await manager.disposeAll();
   });
 

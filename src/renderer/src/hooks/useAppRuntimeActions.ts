@@ -20,8 +20,10 @@ import {
 } from "../lib/runtimeCommands";
 import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import type { ProjectMemoryCommandRunner } from "../components/project-memory/types";
 
 export interface AppRuntimeActions {
+  runProjectMemoryCommand: ProjectMemoryCommandRunner;
   runQueueCommand: QueueCommandRunner;
   sendingConversationIds: ReadonlySet<string>;
   run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
@@ -96,6 +98,9 @@ export function useAppRuntimeActions(options: {
       if (handoff && !ambiguous) await window.inertia.finishAttachmentHandoff(request.requestId).catch(() => undefined);
     }
   }, [sendCommand]);
+  const runProjectMemoryCommand = useCallback<ProjectMemoryCommandRunner>(
+    (command) => sendCommand(withRequestId(command)), [sendCommand],
+  );
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
@@ -239,6 +244,7 @@ export function useAppRuntimeActions(options: {
   }, [sendCommand]);
 
   return {
+    runProjectMemoryCommand,
     runQueueCommand,
     sendingConversationIds,
     run,

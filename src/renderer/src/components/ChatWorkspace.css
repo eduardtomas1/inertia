@@ -55,3 +55,5 @@
   color: var(--text-muted);
   font-size: 13px;
 }
+
+.project-memory-launcher { display: flex; justify-content: flex-end; padding: 0 5px 5px; }

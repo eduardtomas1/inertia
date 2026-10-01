@@ -252,6 +252,7 @@ export default function App(): React.JSX.Element {
     sendMessageToConversation,
     compactConversation: compactConversationById,
     runQueueCommand,
+    runProjectMemoryCommand,
     updateConversationById,
     sendingConversationIds,
   } = useAppRuntimeActions({
@@ -843,6 +844,7 @@ export default function App(): React.JSX.Element {
       run,
       runConversationContextCommand: draftConversation.runConversationContextCommand,
       runQueueCommand,
+      runProjectMemoryCommand,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view: view === "settings" ? "settings" : "workspace",
@@ -926,6 +928,7 @@ export default function App(): React.JSX.Element {
         sendMessageToConversation,
         compactConversation: compactConversationById,
         runQueueCommand,
+        runProjectMemoryCommand,
         updateConversationById,
       },
       sendingConversationIds,

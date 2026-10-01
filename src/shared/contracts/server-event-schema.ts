@@ -1,4 +1,6 @@
+import { modelSelection, continuationIdentity, optionalContinuationReasonCode, backendProfile, backendDefault } from "./model-route-result-schema";
 import { serverEventBoundary } from "./server-event-boundary";
+import { projectMemoryResultValidators } from "./project-memory-results";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
@@ -8,9 +10,6 @@ import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
-import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
-import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
-import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
@@ -72,25 +71,6 @@ function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownR
 }
 function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(validate);
-}
-function modelSelection(value: unknown): boolean {
-  return modelSelectionSchema.safeParse(value).success;
-}
-function continuationIdentity(value: unknown): boolean {
-  return versionedContinuationIdentitySchema.safeParse(value).success;
-}
-function optionalContinuationReasonCode(value: UnknownRecord): boolean {
-  const reason = value.continuationReasonCode;
-  const recovery = value.sessionRecovery;
-  return (reason === undefined || reason === null || isContinuationReasonCode(reason)) && (recovery === undefined || recovery === null || isTurnSessionRecovery(recovery));
-}
-function backendProfile(value: unknown, detail = false): boolean {
-  return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
-    .safeParse(value).success;
-}
-
-function backendDefault(value: unknown): boolean {
-  return modelBackendDefaultSchema.safeParse(value).success;
 }
 function syncCursor(value: unknown): boolean {
   return recordWithStrings(value, "runtimeGeneration")
@@ -1110,6 +1090,7 @@ import { messageQueueResultSchema } from "../queued-messages";
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  ...projectMemoryResultValidators,
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,

@@ -67,6 +67,26 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
 }
 
 describe("durable runtime message queue", () => {
+  it("resolves project decisions at queue dispatch and preserves the running turn snapshot", async () => {
+    const f = await fixture();
+    try {
+      const projectId = f.store.conversation(f.conversationId).projectId;
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First task" });
+      f.controller.start(initial.turn.id);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      const entry = { kind: "decision" as const, title: "Billing", text: "Preserve the snapshot", reason: "Protect previous-cycle changes" };
+      f.store.projectMemory.save({ projectId, id: randomUUID(), mode: "create", expectedRevision: 0, entry });
+      expect(f.store.projectMemory.sentContext({ projectId, conversationId: f.conversationId, turnId: initial.turn.id })).toBeNull();
+      f.provider.resolve({ status: "completed", text: "Done" });
+      await f.drain();
+      expect(f.provider.input?.prompt).toContain(entry.reason);
+      const receipt = f.store.queuedMessages.get(f.conversationId, id)!;
+      expect(f.store.projectMemory.sentContext({ projectId, conversationId: f.conversationId, turnId: receipt.turnId! })).toContain(entry.reason);
+    } finally { await f.close(); }
+  });
   it("dispatches in the background after completion and replays a lost enqueue acknowledgement without a duplicate turn", async () => {
     const f = await fixture();
     try {

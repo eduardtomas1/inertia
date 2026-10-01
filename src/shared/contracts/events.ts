@@ -1,5 +1,6 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { MessageQueueResult } from "../queued-messages";
+import type { ProjectMemoryState, ProjectMemorySourcePreview } from "../project-memory";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -199,6 +200,9 @@ export type ServerEvent =
           }
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
+        | { kind: "project.memory.source"; preview: ProjectMemorySourcePreview }
+        | { kind: "project.memory"; state: ProjectMemoryState }
+        | { kind: "project.memory.context"; projectId: string; conversationId: string; turnId: string; context: string | null }
         | { kind: "conversation.created"; conversationId: string }
         | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }

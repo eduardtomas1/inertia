@@ -224,6 +224,7 @@ export function resolveTurnRequest(
       : {}),
     cwd: dependencies.store.conversationPath(conversation.id),
     visibleContent: request.content,
+    projectMemoryContext: dependencies.store.projectMemory.contextForConversation(conversation.id),
     interactionMode: conversation.interactionMode,
     attachments,
     imagePaths: request.imagePaths,

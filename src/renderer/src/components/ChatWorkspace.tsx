@@ -100,6 +100,8 @@ import type {
 import { LoadingMark } from "./ui";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
+import { ProjectMemoryHost, ProjectMemoryButton } from "./project-memory/ProjectMemoryHost";
+import type { ProjectMemoryCommandRunner } from "./project-memory/types";
 
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
@@ -199,6 +201,7 @@ type ChatWorkspaceProps = {
   contextPackets?: readonly ConversationContextPacketSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
+  onProjectMemoryCommand?: ProjectMemoryCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
@@ -310,6 +313,7 @@ export function ChatWorkspace({
   contextPackets = EMPTY_CONTEXT_PACKETS,
   onConversationContextCommand,
   onQueueCommand,
+  onProjectMemoryCommand,
   previewContextUrl,
   providerIdentityLabels,
   loading,
@@ -919,6 +923,8 @@ export function ChatWorkspace({
     && ownedTurns.length === 0;
 
   return (
+    <ProjectMemoryHost key={`${project.id}:${conversation.id}`} projectId={project.id} conversationId={conversation.id}
+      projectName={project.name} request={onProjectMemoryCommand} disabled={loading || detailLoading}>
     <Root
       className={clsx(
         "chat-workspace",
@@ -1040,6 +1046,7 @@ export function ChatWorkspace({
       {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
 
       <div ref={composerRegionRef} className="composer-region">
+        <div className="project-memory-launcher"><ProjectMemoryButton /></div>
         {pendingInputRequest && (
           <div
             className="pending-input-notice"
@@ -1140,5 +1147,6 @@ export function ChatWorkspace({
         />
       </div>
     </Root>
+    </ProjectMemoryHost>
   );
 }

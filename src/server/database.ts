@@ -37,6 +37,7 @@ import { AgentThreadManagementRepository } from "./persistence/agent-thread-mana
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationContextPacketRepository } from "./persistence/conversation-context-packet-repository";
+import { ProjectMemoryRepository } from "./persistence/project-memory-repository";
 import { ConversationWorktreeRepository } from "./persistence/conversation-worktree-repository";
 import {
   createDuoConversationsAtomically,
@@ -117,6 +118,7 @@ export class RuntimeStore {
   readonly agentThreadManagement: AgentThreadManagementRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
+  readonly projectMemory: ProjectMemoryRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
@@ -176,6 +178,7 @@ export class RuntimeStore {
         this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
+    this.projectMemory = new ProjectMemoryRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
@@ -232,23 +235,7 @@ export class RuntimeStore {
       database: this.database,
     });
     this.turnLedgerRepository = new TurnLedgerRepository({
-      createMessage: (
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ) => this.createMessage(
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ),
+      createMessage: (...args) => this.createMessage(...args),
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),

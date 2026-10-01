@@ -25,6 +25,7 @@ import {
 import { shouldShowChangedFilesSummary } from "./changedFiles";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
+import { RememberProjectMessage } from "../project-memory/ProjectMemoryHost";
 
 export function CopyAnswerButton({
   content,
@@ -220,6 +221,7 @@ export function TurnMetadata({
         {terminalAnswer && (
           <CopyAnswerButton content={terminalAnswer.content} ariaLabel="Copy final answer" />
         )}
+        {terminalAnswer && <RememberProjectMessage message={terminalAnswer} />}
         {showTimestamp && terminalAnswer && (
           <time dateTime={terminalAnswer.createdAt}>{formatClockTime(terminalAnswer.createdAt)}</time>
         )}

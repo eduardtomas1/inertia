@@ -1,0 +1,49 @@
+import { createContext, lazy, Suspense, useContext, useMemo, useState, type ReactNode } from "react";
+import { BookmarkPlus, BookOpen } from "lucide-react";
+import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
+import type { ChatMessage } from "@shared/contracts";
+import type { ProjectMemoryPanelProps } from "./types";
+
+const Dialog = lazy(() => import("./ProjectMemoryDialog"));
+type Selection = { message?: ChatMessage; turnId?: string };
+const MemoryActions = createContext<{ open(selection: Selection): void; disabled: boolean } | null>(null);
+
+export function ProjectMemoryHost({ children, request, ...props }: Omit<ProjectMemoryPanelProps, "request"> & {
+  request?: ProjectMemoryPanelProps["request"];
+  children: ReactNode;
+}): React.JSX.Element {
+  const [selection, setSelection] = useState<Selection | null>(null);
+  useNativePreviewSuspension(selection !== null);
+  const actions = useMemo(() => request ? { open: setSelection, disabled: props.disabled === true } : null, [request, props.disabled]);
+  return <MemoryActions.Provider value={actions}>
+    {children}
+    {selection && request && <Suspense fallback={<span role="status">Opening project memory…</span>}>
+      <Dialog {...props} request={request} sourceMessage={selection.message} turnId={selection.turnId} onClose={() => setSelection(null)} />
+    </Suspense>}
+  </MemoryActions.Provider>;
+}
+
+export function ProjectMemoryButton(): React.JSX.Element | null {
+  const actions = useContext(MemoryActions);
+  if (!actions) return null;
+  return <button type="button" className="turn-action" disabled={actions.disabled} onClick={() => actions.open({})}>
+    <BookOpen size={13} aria-hidden="true" /><span>Rules & decisions</span>
+  </button>;
+}
+
+export function RememberProjectMessage({ message }: { message: ChatMessage }): React.JSX.Element | null {
+  const actions = useContext(MemoryActions);
+  if (!actions || !message.content.trim()) return null;
+  return <button type="button" className="turn-action" title="Remember for this project" aria-label="Remember for this project"
+    disabled={actions.disabled} onClick={() => actions.open({ message })}>
+    <BookmarkPlus size={12} aria-hidden="true" /><span>Remember</span>
+  </button>;
+}
+
+export function SentProjectMemoryButton({ turnId }: { turnId: string }): React.JSX.Element | null {
+  const actions = useContext(MemoryActions);
+  if (!actions) return null;
+  return <button type="button" className="turn-action" disabled={actions.disabled} onClick={() => actions.open({ turnId })}>
+    <BookOpen size={12} aria-hidden="true" /><span>Project context</span>
+  </button>;
+}

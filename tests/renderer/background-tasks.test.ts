@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import type { WorkspaceRun } from "../../src/shared/contracts";
+
 import {
+  backgroundCommandStatusLabel,
   backgroundTaskContextUsage,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
@@ -11,6 +14,7 @@ import {
   backgroundTaskTitle,
   backgroundTaskTokens,
   backgroundTaskTokenTotalLabel,
+  orderedBackgroundCommands,
 } from "../../src/renderer/src/utils/backgroundTasks";
 import {
   backgroundCommandRuns,
@@ -116,9 +120,9 @@ describe("background task rows", () => {
       cachedInputTokens: 12_000,
       outputTokens: 3_200,
       reasoningOutputTokens: 300,
-    }))).toBe("Input 18K · Cached 12K · Output 3.2K · Reasoning 300");
+    }))).toEqual(["Input 18K", "Cached 12K", "Output 3.2K", "Reasoning 300"]);
     expect(backgroundTaskLatestStep(taskUsage({ cacheWriteInputTokens: 1_500 })))
-      .toBe("Cache write 1.5K");
+      .toEqual(["Cache write 1.5K"]);
   });
 
   it("reports the context window only when the provider reports its size", () => {
@@ -189,6 +193,11 @@ describe("background task rows", () => {
     ]);
   });
 
+  it("names command states with the same words as agent states", () => {
+    const statuses: WorkspaceRun["status"][] = ["running", "waiting", "succeeded", "failed", "cancelled"];
+    expect(statuses.map(backgroundCommandStatusLabel)).toEqual(["Running", "Waiting", "Completed", "Failed", "Cancelled"]);
+  });
+
   it("explains what each harness can report when the chat has no tasks", () => {
     expect(backgroundTaskEmptyNote("kimi-acp"))
       .toBe("Kimi Code does not report delegated agents. Commands it starts appear here.");
@@ -242,8 +251,9 @@ describe("background commands", () => {
       workspaceRun({ id: "waiting", status: "waiting", startedAt: "2030-01-01T00:03:00.000Z" }),
       workspaceRun({ id: "done-old", status: "cancelled", startedAt: "2030-01-01T00:02:00.000Z" }),
     ];
-    expect(backgroundCommandRuns(runs, "conversation-1", turns).map(({ id }) => id))
+    expect(orderedBackgroundCommands(runs).map(({ id }) => id))
       .toEqual(["waiting", "live-old", "done-new", "done-old"]);
+    expect(runs.map(({ id }) => id)).toEqual(["done-new", "live-old", "waiting", "done-old"]);
   });
 
   it("counts live agents and live commands for the panel badges", () => {

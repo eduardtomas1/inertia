@@ -1,6 +1,9 @@
 import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
-import { workspaceRunIsLive } from "./workspaceRuns";
+
+export function backgroundCommandIsLive({ status }: WorkspaceRun): boolean {
+  return status === "running" || status === "waiting";
+}
 
 export function backgroundCommandRuns(
   runs: readonly WorkspaceRun[],
@@ -14,19 +17,14 @@ export function backgroundCommandRuns(
       earliest === null || requestedAt < earliest ? requestedAt : earliest,
     null,
   );
-  return runs
-    .filter((run) =>
-      run.conversationId === conversationId
-      && workspaceRunAttentionView(run).bucket !== "hidden"
-      && (run.kind !== "agent" || (
-        !turnRunIds.has(run.id)
-        && earliestTurn !== null
-        && run.startedAt >= earliestTurn
-      )))
-    .sort((left, right) =>
-      Number(workspaceRunIsLive(right)) - Number(workspaceRunIsLive(left))
-      || right.startedAt.localeCompare(left.startedAt, "en")
-      || right.id.localeCompare(left.id, "en"));
+  return runs.filter((run) =>
+    run.conversationId === conversationId
+    && workspaceRunAttentionView(run).bucket !== "hidden"
+    && (run.kind !== "agent" || (
+      !turnRunIds.has(run.id)
+      && earliestTurn !== null
+      && run.startedAt >= earliestTurn
+    )));
 }
 
 export function runningBackgroundTaskCount(
@@ -34,7 +32,7 @@ export function runningBackgroundTaskCount(
   commands: readonly WorkspaceRun[],
 ): number {
   return subagents.filter(({ isLive }) => isLive).length
-    + commands.filter(workspaceRunIsLive).length;
+    + commands.filter(backgroundCommandIsLive).length;
 }
 
 export function runningBackgroundTasksLabel(count: number): string {

@@ -15,10 +15,12 @@ import { workspaceRunAttentionView } from "../../../shared/attention";
 import { useDocumentVisibility } from "../hooks/useDocumentPresence";
 import {
   BACKGROUND_TASK_TOKENS_NOTE,
+  backgroundCommandStatusLabel,
   backgroundTaskEmptyNote,
   backgroundTaskGroups,
   backgroundTaskSummaryLabel,
   backgroundTaskTokenTotalLabel,
+  orderedBackgroundCommands,
 } from "../utils/backgroundTasks";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { formatElapsed } from "../utils/responseTimeline";
@@ -27,10 +29,7 @@ import {
   subagentDisclosureRows,
   type SubagentDisclosureRow,
 } from "../utils/subagentDisclosure";
-import {
-  workspaceRunIsLive,
-  workspaceRunStatusLabel,
-} from "../utils/workspaceRuns";
+import { backgroundCommandIsLive } from "../utils/backgroundTaskRuns";
 import { BackgroundTaskRow } from "./BackgroundTaskRow";
 import { subscribeLiveElapsed } from "./SubagentElapsed";
 import "./BeautifulUiMotion.css";
@@ -64,7 +63,7 @@ const commandIcons: Record<WorkspaceRun["kind"], React.JSX.Element> = {
 
 function commandElapsedMs(run: WorkspaceRun, now: number): number | null {
   const startedAt = Date.parse(run.startedAt);
-  const end = workspaceRunIsLive(run)
+  const end = backgroundCommandIsLive(run)
     ? now
     : run.finishedAt ? Date.parse(run.finishedAt) : Number.NaN;
   if (!Number.isFinite(startedAt) || !Number.isFinite(end)) return null;
@@ -79,7 +78,7 @@ function CommandElapsed({
   now?: number;
 }): React.JSX.Element | null {
   const textRef = useRef<HTMLSpanElement>(null);
-  const live = workspaceRunIsLive(run);
+  const live = backgroundCommandIsLive(run);
   const documentVisible = useDocumentVisibility();
   useEffect(() => {
     if (!live || now !== undefined || !documentVisible) return;
@@ -106,15 +105,15 @@ function CommandRow({
   onStop?: (run: WorkspaceRun) => void;
   onDismiss?: (run: WorkspaceRun) => void;
 }): React.JSX.Element {
-  const status = workspaceRunStatusLabel(run.status);
+  const status = backgroundCommandStatusLabel(run.status);
   const canDismiss = Boolean(onDismiss && workspaceRunAttentionView(run).canDismiss);
-  const canStop = Boolean(onStop && run.canStop && workspaceRunIsLive(run));
+  const canStop = Boolean(onStop && run.canStop && backgroundCommandIsLive(run));
   return (
     <li
       className="background-task-row is-command"
       data-run-id={run.id}
       data-status={run.status}
-      data-live={workspaceRunIsLive(run)}
+      data-live={backgroundCommandIsLive(run)}
       aria-label={`${run.label}, ${status}`}
     >
       <span className="background-command-mark" data-status={run.status} aria-hidden="true">
@@ -126,35 +125,35 @@ function CommandRow({
           <span className="background-task-status">{status}</span>
         </div>
         {run.detail && <p className="background-task-doing" title={run.detail}>{run.detail}</p>}
-        {(canStop || canDismiss) && (
-          <div className="background-task-actions">
-            {canStop && (
-              <button
-                type="button"
-                className="background-task-stop"
-                aria-label={`Stop ${run.label}`}
-                onClick={() => onStop?.(run)}
-              >
-                <Square size={9} fill="currentColor" aria-hidden="true" />
-                Stop
-              </button>
-            )}
-            {canDismiss && (
-              <button
-                type="button"
-                aria-label={`Dismiss ${run.label}`}
-                onClick={() => onDismiss?.(run)}
-              >
-                <Trash2 size={11} aria-hidden="true" />
-                Dismiss
-              </button>
-            )}
-          </div>
-        )}
       </div>
       <div className="background-task-metrics">
         <CommandElapsed run={run} now={now} />
       </div>
+      {(canStop || canDismiss) && (
+        <div className="background-task-actions">
+          {canStop && (
+            <button
+              type="button"
+              className="background-task-stop"
+              aria-label={`Stop ${run.label}`}
+              onClick={() => onStop?.(run)}
+            >
+              <Square size={9} fill="currentColor" aria-hidden="true" />
+              Stop
+            </button>
+          )}
+          {canDismiss && (
+            <button
+              type="button"
+              aria-label={`Dismiss ${run.label}`}
+              onClick={() => onDismiss?.(run)}
+            >
+              <Trash2 size={11} aria-hidden="true" />
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -386,7 +385,7 @@ export function BackgroundTasksSurface({
           <section className="background-tasks-section" aria-labelledby={`${surfaceId}-commands`}>
             <h4 id={`${surfaceId}-commands`}>Commands</h4>
             <ol className="background-tasks-list" aria-label="Commands">
-              {commands.map((run) => (
+              {orderedBackgroundCommands(commands).map((run) => (
                 <CommandRow
                   key={run.id}
                   run={run}

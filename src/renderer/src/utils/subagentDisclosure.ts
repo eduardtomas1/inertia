@@ -158,10 +158,6 @@ const STATUS_LABELS: Record<SubagentTrace["status"], string> = {
   unknown: "Unknown",
 };
 
-export function subagentStateLabel(trace: SubagentTrace): string {
-  return STATUS_LABELS[trace.status];
-}
-
 function normalizedProviderStatus(status: string): string {
   return status.toLowerCase().replaceAll(/[-_\s]/gu, "");
 }

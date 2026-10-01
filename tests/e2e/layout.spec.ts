@@ -137,9 +137,9 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
         const addMenu = page.getByRole("menu", { name: "Add panel surface" });
         await expect(addMenu.getByRole("menuitem").first()).toBeFocused();
         await page.keyboard.press("a");
-        await expect(page.getByRole("tab", { name: /^Agents/u })).toHaveAttribute("aria-selected", "true");
-        await expect(page.getByRole("heading", { name: "Delegated work" })).toBeVisible();
-        await page.getByRole("button", { name: "Close Agents" }).click();
+        await expect(page.getByRole("tab", { name: /^Background tasks/u })).toHaveAttribute("aria-selected", "true");
+        await expect(page.getByRole("heading", { name: "Background tasks" })).toBeVisible();
+        await page.getByRole("button", { name: "Close Background tasks" }).click();
         await page.getByRole("button", { name: "Close Usage" }).click();
         await expect(panel).toBeHidden();
       } else {

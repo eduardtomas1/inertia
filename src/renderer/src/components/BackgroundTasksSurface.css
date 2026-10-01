@@ -110,9 +110,9 @@
   transition: border-color 150ms ease, background-color 150ms ease;
 }
 
-.background-task-row:is(:hover, :focus-within) {
+.background-task-row:is(:hover, :focus-within, [data-expanded="true"]) {
   border-color: color-mix(in srgb, var(--border-strong) 78%, transparent);
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--surface-hover) 55%, var(--surface));
 }
 
 .background-task-row:not([data-depth="0"]):not(.is-command)::before {
@@ -231,9 +231,10 @@
 .background-task-actions {
   display: flex;
   min-width: 0;
+  grid-column: 2 / -1;
   flex-wrap: wrap;
   gap: 2px;
-  margin: 2px 0 0 -6px;
+  margin: 1px 0 0 -6px;
 }
 
 .background-task-actions button {
@@ -280,6 +281,7 @@
 
 .background-task-metrics {
   display: grid;
+  min-width: 68px;
   min-height: 22px;
   justify-items: end;
   align-content: start;
@@ -320,6 +322,7 @@
 
 .background-task-details {
   margin-top: 6px;
+  font-size: var(--ui-font-secondary);
 }
 
 .background-task-details > div {
@@ -328,6 +331,16 @@
 
 .background-task-details dd {
   font-variant-numeric: tabular-nums;
+}
+
+.background-task-step {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.3em;
+}
+
+.background-task-step > span {
+  white-space: nowrap;
 }
 
 .background-task-context {
@@ -412,6 +425,7 @@
 
   .background-task-metrics {
     display: flex;
+    min-width: 0;
     min-height: 0;
     grid-column: 2;
     grid-row: 2;

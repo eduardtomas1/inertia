@@ -14,7 +14,7 @@ import {
   subagentTraceLabel,
   type SubagentDisclosureRow,
 } from "./subagentDisclosure";
-import { workspaceRunIsLive } from "./workspaceRuns";
+import { backgroundCommandIsLive } from "./backgroundTaskRuns";
 
 interface HarnessTaskReporting {
   provider: string;
@@ -29,6 +29,14 @@ const HARNESS_TASK_REPORTING: Readonly<Record<string, HarnessTaskReporting>> = {
   "cursor-acp": { provider: "Cursor", agents: "completion-only", tokens: false },
   "kimi-acp": { provider: "Kimi Code", agents: "none", tokens: false },
   "antigravity-cli": { provider: "Antigravity", agents: "none", tokens: false },
+};
+
+const COMMAND_STATUS_LABELS: Record<WorkspaceRun["status"], string> = {
+  running: "Running",
+  waiting: "Waiting",
+  succeeded: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 export const BACKGROUND_TASK_TOKENS_NOTE =
@@ -94,7 +102,7 @@ export function backgroundTaskTokens(
 
 export function backgroundTaskLatestStep(
   usage: SubagentTaskUsage | null,
-): string | null {
+): string[] | null {
   if (!usage) return null;
   const parts = ([
     ["Input", usage.inputTokens],
@@ -104,7 +112,7 @@ export function backgroundTaskLatestStep(
     ["Reasoning", usage.reasoningOutputTokens],
   ] as const).flatMap(([label, value]) =>
     value === null ? [] : [`${label} ${formatCompact(value)}`]);
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return parts.length > 0 ? parts : null;
 }
 
 export function backgroundTaskContextUsage(
@@ -133,7 +141,7 @@ export function backgroundTaskSummaryLabel(
     else finished += 1;
   }
   for (const run of commands) {
-    if (workspaceRunIsLive(run)) running += 1;
+    if (backgroundCommandIsLive(run)) running += 1;
     else if (workspaceRunAttentionView(run).reason === "failure") review += 1;
     else finished += 1;
   }
@@ -197,6 +205,19 @@ export function backgroundTaskGroups(
     finished: rowsWithin(rows, (trace) =>
       !isLiveSubagentTrace(trace) && !subagentNeedsReview(trace)),
   };
+}
+
+export function orderedBackgroundCommands(
+  commands: readonly WorkspaceRun[],
+): WorkspaceRun[] {
+  return [...commands].sort((left, right) =>
+    Number(backgroundCommandIsLive(right)) - Number(backgroundCommandIsLive(left))
+    || right.startedAt.localeCompare(left.startedAt, "en")
+    || right.id.localeCompare(left.id, "en"));
+}
+
+export function backgroundCommandStatusLabel(status: WorkspaceRun["status"]): string {
+  return COMMAND_STATUS_LABELS[status];
 }
 
 export function backgroundTaskEmptyNote(harnessId: string | null): string | null {

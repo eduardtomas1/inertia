@@ -323,7 +323,7 @@ describe("Background tasks surface", () => {
     await user.click(within(devRow).getByRole("button", { name: "Stop npm run dev" }));
     expect(onStopCommand).toHaveBeenCalledWith(live);
     const lintRow = within(commands).getByRole("listitem", { name: /^npm run lint/u });
-    expect(within(lintRow).getByText("Needs attention")).toBeVisible();
+    expect(within(lintRow).getByText("Failed", { selector: ".background-task-status" })).toBeVisible();
     expect(within(lintRow).getByText("30s")).toBeVisible();
     expect(within(lintRow).queryByRole("button", { name: /^Stop/u })).toBeNull();
     await user.click(within(lintRow).getByRole("button", { name: "Dismiss npm run lint" }));

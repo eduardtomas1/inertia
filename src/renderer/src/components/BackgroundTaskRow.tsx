@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties } from "react";
 import { ChevronDown, Eye, Square } from "lucide-react";
 
 import type { AgentTurn, SubagentTrace } from "@shared/contracts";
@@ -17,7 +17,6 @@ import {
   subagentProviderLabel,
   subagentRelationshipLabel,
   subagentRouteLabel,
-  subagentStateLabel,
   subagentStatusLabel,
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
@@ -80,12 +79,22 @@ function TaskDetails({
   const live = isLiveSubagentTrace(trace);
   const tokens = backgroundTaskTokens(trace, turns);
   const context = backgroundTaskContextUsage(trace.usage);
+  const latestStep = backgroundTaskLatestStep(trace.usage);
   const rows: [string, React.ReactNode][] = [
     ["Task", trace.description],
     ["Latest activity", trace.progress],
     ["Outcome", trace.result],
     ["Total tokens", tokens.value === null ? tokens.reason : formatCount(tokens.value)],
-    ["Latest step", backgroundTaskLatestStep(trace.usage)],
+    ["Latest step", latestStep && (
+      <dd key="latest-step" className="background-task-step">
+        {latestStep.map((part, index) => (
+          <Fragment key={part}>
+            {index > 0 && " "}
+            <span>{index < latestStep.length - 1 ? `${part} ·` : part}</span>
+          </Fragment>
+        ))}
+      </dd>
+    )],
     ["Context", context ? <TaskContextDetail key="context" context={context} /> : null],
     ["Tool uses", trace.toolUseCount === null ? null : formatCount(trace.toolUseCount)],
     ["Runtime", live ? null : formatElapsed(backgroundTaskElapsedMs(trace, now ?? Date.now()))],
@@ -163,7 +172,7 @@ export function BackgroundTaskRow({
             className="background-task-status"
             title={trace.providerStatus ? `Provider state: ${trace.providerStatus}` : undefined}
           >
-            {subagentStateLabel(trace)}
+            {subagentStatusLabel({ ...trace, providerStatus: null })}
           </span>
         </div>
         {doing && <p className="background-task-doing" title={doing}>{doing}</p>}
@@ -175,47 +184,6 @@ export function BackgroundTaskRow({
             {omittedAncestors} earlier {omittedAncestors === 1 ? "ancestor" : "ancestors"} compacted
           </small>
         )}
-        <div className="background-task-actions">
-          {canOpen && (
-            <button type="button" aria-label={`View parent turn for ${title}`} onClick={onOpen}>
-              <Eye size={11} aria-hidden="true" />
-              View turn
-            </button>
-          )}
-          {canFollowUp && (
-            <button
-              type="button"
-              aria-label={`Guide parent about ${title}`}
-              title="Draft guidance to the active parent; nothing is sent yet."
-              onClick={onFollowUp}
-            >
-              Guide parent
-            </button>
-          )}
-          <button
-            type="button"
-            className="background-task-details-toggle"
-            aria-label={`Details for ${title}`}
-            aria-expanded={expanded}
-            aria-controls={expanded ? detailsId : undefined}
-            onClick={onToggleDetails}
-          >
-            Details
-            <ChevronDown size={11} aria-hidden="true" />
-          </button>
-          {canStop && (
-            <button
-              type="button"
-              className="background-task-stop"
-              aria-label={`${stopping ? "Stopping" : "Stop"} ${title}`}
-              disabled={stopping}
-              onClick={onStop}
-            >
-              <Square size={9} fill="currentColor" aria-hidden="true" />
-              {stopping ? "Stopping…" : "Stop"}
-            </button>
-          )}
-        </div>
       </div>
       <div className="background-task-metrics">
         {!live && trace.durationMs !== null
@@ -230,6 +198,47 @@ export function BackgroundTaskRow({
               : `${formatCount(tokens.value)} tokens`}
           </span>
         </span>
+      </div>
+      <div className="background-task-actions">
+        {canOpen && (
+          <button type="button" aria-label={`View parent turn for ${title}`} onClick={onOpen}>
+            <Eye size={11} aria-hidden="true" />
+            View turn
+          </button>
+        )}
+        {canFollowUp && (
+          <button
+            type="button"
+            aria-label={`Guide parent about ${title}`}
+            title="Draft guidance to the active parent; nothing is sent yet."
+            onClick={onFollowUp}
+          >
+            Guide parent
+          </button>
+        )}
+        <button
+          type="button"
+          className="background-task-details-toggle"
+          aria-label={`Details for ${title}`}
+          aria-expanded={expanded}
+          aria-controls={expanded ? detailsId : undefined}
+          onClick={onToggleDetails}
+        >
+          Details
+          <ChevronDown size={11} aria-hidden="true" />
+        </button>
+        {canStop && (
+          <button
+            type="button"
+            className="background-task-stop"
+            aria-label={`${stopping ? "Stopping" : "Stop"} ${title}`}
+            disabled={stopping}
+            onClick={onStop}
+          >
+            <Square size={9} fill="currentColor" aria-hidden="true" />
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        )}
       </div>
       {expanded && (
         <div className="subagent-detail-reveal background-task-details-reveal">

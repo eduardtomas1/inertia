@@ -10,6 +10,7 @@ import {
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { spawnRuntimeOwnedProcess } from "../../src/node/runtime-owned-processes";
@@ -1480,10 +1481,19 @@ process.exit(1);
       "incomplete-codex",
       "process.exit(0);",
     );
+    // This fixture is a known leaf. Observe its complete close before asking
+    // for cleanup so Windows taskkill cannot race its already-exited root.
+    const terminateProcessTree = vi.fn(async (child: ChildProcess, force: boolean) => {
+      await once(child, "close", { signal: AbortSignal.timeout(2_000) });
+      return await terminateProcessTreeAndWait(child, force);
+    });
     const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createProcessLifecycleHarnessForTests("codex", { prefixArgs: [program] }),
+        createProcessLifecycleHarnessForTests("codex", {
+          prefixArgs: [program],
+          terminateProcessTree,
+        }),
       ]),
     );
 
@@ -1501,6 +1511,7 @@ process.exit(1);
       error: "Codex could not complete the request.",
       cleanupConfirmed: true,
     });
+    expect(terminateProcessTree).toHaveBeenCalledExactlyOnceWith(expect.anything(), true);
     expect(manager.isRunning("incomplete-conversation")).toBe(false);
     await expect(manager.disposeAll()).resolves.toBeUndefined();
   });

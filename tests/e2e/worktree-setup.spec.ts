@@ -22,7 +22,8 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
         const project = store.shellSnapshot().projects.find(({ path }) => path === workspaceDirectory)!;
         projectId = project.id;
         store.updateProject(project.id, { name: "Setup studio", preferences: { ...defaultProjectPreferences(), workspace: "worktree", worktreeSetupActionId: actionId,
-          actions: [{ id: actionId, name: "Install dependencies", executable: "node", args: ["setup-worktree.cjs"] }],
+          // Provider discovery in this fixture searches only its fake binary directory.
+          actions: [{ id: actionId, name: "Install dependencies", executable: process.execPath, args: ["setup-worktree.cjs"] }],
         } });
         store.selectProject(project.id);
         store.updateSettings({ theme: "dark", newThreadMode: "worktree" });

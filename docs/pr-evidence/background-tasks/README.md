@@ -18,6 +18,37 @@ for failed work. The line of a running task uses the timeline's own thinking
 sweep (`turn-thinking-sweep` in `src/renderer/src/styles.css`), with the same
 reduced-motion, forced-colours and hidden-window guards.
 
+In the chat, a turn that delegated work shows one quiet line instead of the old
+expandable "N delegated tasks" block: "2 agents working" while any of its agents
+is live (with the same sweep), otherwise "4 agents finished", followed by
+" · 1 failed" in danger colour when an agent failed, was interrupted or was
+lost. The line is a real button named, for example, "Open Background tasks,
+2 agents working". Click, Enter or Space opens the right panel on Background
+tasks (including the sheet presentation) and moves focus to its tab. In a
+detached chat window the same line returns the chat to the main window
+("Return chat to main window, 2 agents working"), where the panel lives.
+
+## Chat timeline: before and after
+
+Both columns use the same fixture, the same frozen clock and the same window.
+"Before" is the branch at `1a6dfd1d`; "after" is this change. The before
+screenshots were taken with a one-off capture appended to this spec at that
+commit and are kept here for review only.
+
+| Before | After |
+| --- | --- |
+| ![Before: collapsed disclosure](before-chat-delegated-collapsed-dark.png) | ![After: agents line](after-chat-agents-line-dark.png) |
+| 1440 × 1100 dark. "4 delegated tasks · 2 working · 1 needs review · 1 settled", route and status squares | 1440 × 1100 dark. "2 agents working" |
+| ![Before: expanded disclosure](before-chat-delegated-expanded-dark.png) | ![After: line opened the panel](after-chat-agents-line-opened-dark.png) |
+| 1440 × 1100 dark. The disclosure expanded inline into one row per task | 1440 × 1100 dark. Enter on the line opened Background tasks; focus is on its tab |
+| ![Before: narrow light](before-chat-delegated-narrow-light.png) | ![After: narrow light](after-chat-agents-line-narrow-light.png) |
+| 1000 × 800 light | 1000 × 800 light |
+
+A settled turn (seeded only for this capture: three completed agents and one
+failed one) has no before counterpart:
+
+![After: settled turn](after-chat-agents-finished-dark.png)
+
 ## Reproducibility
 
 Every seeded timestamp is relative to a fixed instant (2026-09-30 16:20 UTC) and
@@ -63,6 +94,11 @@ animated working indicator and composer stop control are canvas drawings that
 
 ## What the spec asserts
 
+- The chat line: "2 agents working" with the shared sweep and no danger text
+  while agents run; "4 agents finished · 1 failed" with only "1 failed" in the
+  danger colour once they settle; one line per turn. Enter or Space on the line
+  opens Background tasks and focuses its tab, and the panel lists the turn's
+  agents.
 - Card content per harness, the "from <parent>" line for a child agent, and no
   headings, pills or summary block in the panel.
 - The same active count on the tab and the corner toggle ("3 background tasks
@@ -84,17 +120,23 @@ animated working indicator and composer stop control are canvas drawings that
 
 ## Runs on this machine
 
-- `tests/e2e/background-tasks.spec.ts --repeat-each=3`: 9 passed normally and
-  9 passed under 12 CPU-burning processes.
+- `tests/e2e/background-tasks.spec.ts --repeat-each=3`: 12 passed normally
+  and 12 passed under 12 CPU-burning processes.
 - `tests/e2e/activity.spec.ts --repeat-each=3`: 9 passed normally and 9 passed
   under 12 CPU-burning processes.
-- `layout`, `composer-entry`, `terminal`, `draft-worktree` and
-  `session-continuity` specs: each passed once.
-- `npm run benchmark:desktop:built` passed on the branch and on a build of
-  `origin/main` (`fd02e238`): long-conversation scroll 8.3 ms median frame on
-  both, p95 10.3 ms on the branch and 9.8 ms on main, no long tasks on either;
-  streaming first paint 23 ms against 22 ms and final paint 268 ms against
-  277 ms.
+- `tests/e2e/renderer-background.spec.ts`: the mature profile, which now opens
+  Background tasks from the agents line and measures its six live timers,
+  passed 3 of 4 runs under 12 CPU-burning processes and every unloaded run.
+  Across all runs of the spec the only failures were the sidebar aurora
+  assertion (the window lost OS focus mid-sample), which also failed in the
+  128-turn profile that has no sub-agents and so no agents line.
+- `layout`, `composer-entry`, `terminal`, `draft-worktree`, `transcript`,
+  `chat-scroll-memory` and `activity-lifecycle` specs: each passed once.
+- `npm run benchmark:desktop:built` with the agents line: long-conversation
+  scroll 8.3 ms median frame and 10.2 ms p95 with no long tasks; streaming first
+  paint 22 ms and final paint 265 ms. With the old disclosure the branch
+  measured 8.3 ms, 10.3 ms, 23 ms and 268 ms, and `origin/main` (`fd02e238`)
+  8.3 ms, 9.8 ms, 22 ms and 277 ms.
 
 ## Not exercised
 
@@ -103,11 +145,18 @@ animated working indicator and composer stop control are canvas drawings that
 - Pressing Stop against a real provider or process; the Stop wiring and focus
   behaviour when a control disappears are covered by DOM tests.
 - Live telemetry from real providers; all data is seeded.
+- The detached chat window's line ("Return chat to main window, …") is covered
+  by DOM tests only.
+- A turn settling while scrolled up was not driven live; the spec instead
+  asserts that the line keeps the same height when working and when finished,
+  so settling cannot move the rows below it.
 
 See [renderer-bundle.json](renderer-bundle.json) for every closure measured
-against `origin/main` (`fd02e238`). The workbench first load grows by 1,036
-bytes, the detached chat first load by 263 bytes and shared core by 1,002
-bytes; each of those caps is main's cap plus exactly that growth. The
-Background tasks surface itself (12,590 bytes) loads on demand, and the
-running-card sweep adds 128 bytes to the entry stylesheet within its existing
-cap.
+against `origin/main` (`fd02e238`) and against the branch before the agents
+line. Replacing the disclosure removed 278 bytes from the workbench first load,
+5,008 bytes from the detached chat first load, 4,776 bytes from shared core,
+7,112 bytes from the entry stylesheet and 6,994 bytes from the transcript
+chunk. Against main, the workbench first load now grows by 758 bytes, while the
+detached chat first load (-4,745), shared core (-3,774), entry stylesheet
+(-6,984) and transcript chunk (-6,815) are smaller than on main. No cap was
+changed. The Background tasks surface itself (12,617 bytes) loads on demand.

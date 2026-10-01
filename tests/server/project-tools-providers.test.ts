@@ -71,6 +71,28 @@ describe("project tools provider authority", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each(["claude", "codex"])("does not disclose credentials echoed in %s tool names", async (provider) => {
+    const token = "synthetic-mcp-token-12345";
+    const backendToken = "synthetic-backend-token-67890";
+    const run = { ...toolRun([{ ...connection, bearerTokenEnv: "INERTIA_MCP_DOCS" }]), resolveToken: async () => token };
+    const launch = await prepareProjectToolLaunch(run, { API_KEY: backendToken }, new AbortController().signal);
+    const names = ["search_docs", token, `search_${token}`, Buffer.from(token).toString("base64url"), backendToken];
+    const report = (toolNames: string[]) => {
+      if (provider === "claude") observeClaudeProjectTools(launch.projectTools!, [{
+        name: projectToolServerName(connection.id), status: "connected", tools: toolNames.map((name) => ({ name })),
+      }]);
+      else observeCodexProjectTool(launch.projectTools!, connection, { data: [{
+        name: projectToolServerName(connection.id), runtimeStatus: "connected", tools: Object.fromEntries(toolNames.map((name) => [name, {}])),
+      }] });
+    };
+    report(names);
+    expect(run.report).toHaveBeenLastCalledWith(expect.objectContaining({ state: "available", toolNames: ["search_docs"] }));
+    report(names.slice(1));
+    expect(run.report).toHaveBeenLastCalledWith(expect.objectContaining({ state: "unavailable", toolNames: [] }));
+    expect(JSON.stringify(run.report.mock.calls)).not.toContain(token);
+    expect(JSON.stringify(run.report.mock.calls)).not.toContain(backendToken);
+  });
+
   it.each([true, false])("Claude only installs and reports project tools with native authority=%s", async (native) => {
     const root = portableFixtureRoot("Claude project tools"); roots.push(root);
     const run = toolRun(); let options: Options | undefined;

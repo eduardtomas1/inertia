@@ -3,6 +3,7 @@ import { projectToolServerName } from "../../shared/project-tools";
 import { isProjectToolBearerToken } from "../../shared/project-tool-values";
 import { observeClaudeProjectTools, projectToolsUnverified, type ProjectToolRun } from "./project-tools";
 import { CLAUDE_ISOLATED_SKILL_SETTINGS } from "./claude-skill-plugin";
+import { credentialEncodings, launchCredentialValues } from "./activity-detail";
 
 export async function prepareProjectToolLaunch(run: ProjectToolRun | undefined, environment: NodeJS.ProcessEnv, signal: AbortSignal): Promise<{ environment: NodeJS.ProcessEnv; projectTools?: ProjectToolRun }> {
   const nextEnvironment = { ...environment };
@@ -23,7 +24,21 @@ export async function prepareProjectToolLaunch(run: ProjectToolRun | undefined, 
     nextEnvironment[key] = token;
     return [{ ...connection, bearerTokenEnv: key }];
   }))).flat();
-  return { environment: nextEnvironment, projectTools: { ...run, connections } };
+  const credentials = credentialEncodings(launchCredentialValues(nextEnvironment));
+  return { environment: nextEnvironment, projectTools: { ...run, connections,
+    report: (observation) => {
+      // MCP tool names are provider output too. Do not let a server echo a
+      // launch credential into the renderer through the status-only channel.
+      const toolNames = observation.toolNames.filter((name) =>
+        !credentials.some((credential) => name.includes(credential)));
+      run.report({ ...observation, toolNames,
+        ...(observation.state === "available" && toolNames.length === 0 ? {
+          state: "unavailable" as const,
+          reason: "The provider returned tool names that could not be displayed safely.",
+        } : {}),
+      });
+    },
+  } };
 }
 
 export function claudeProjectToolOptions(run: ProjectToolRun | undefined) {

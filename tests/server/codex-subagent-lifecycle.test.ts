@@ -79,6 +79,346 @@ function childTurn(
   });
 }
 
+const CHILD_TOKEN_USAGE = {
+  total: {
+    totalTokens: 5_400,
+    inputTokens: 5_000,
+    cachedInputTokens: 1_200,
+    cacheWriteInputTokens: 90,
+    outputTokens: 400,
+    reasoningOutputTokens: 64,
+  },
+  last: {
+    totalTokens: 900,
+    inputTokens: 800,
+    cachedInputTokens: 300,
+    cacheWriteInputTokens: 50,
+    outputTokens: 100,
+    reasoningOutputTokens: 16,
+  },
+  modelContextWindow: 258_400,
+};
+
+const CHILD_TASK_USAGE = {
+  totalTokens: 5_400,
+  inputTokens: 800,
+  cachedInputTokens: 300,
+  cacheWriteInputTokens: 50,
+  outputTokens: 100,
+  reasoningOutputTokens: 16,
+  contextTokens: 900,
+  maxContextTokens: 258_400,
+};
+
+function tokenUsage(
+  lifecycle: CodexSubagentLifecycle,
+  threadId: string,
+  usage: unknown,
+): void {
+  lifecycle.handleNotification("thread/tokenUsage/updated", {
+    threadId,
+    turnId: `${threadId}-turn`,
+    tokenUsage: usage,
+  });
+}
+
+function childItem(
+  lifecycle: CodexSubagentLifecycle,
+  method: "item/started" | "item/completed",
+  threadId: string,
+  item: JsonObject,
+): void {
+  lifecycle.handleNotification(method, {
+    threadId,
+    turnId: `${threadId}-turn`,
+    item,
+  });
+}
+
+describe("Codex delegated-agent telemetry", () => {
+  it("maps child usage like the root: total from total, context and breakdown from last, window from modelContextWindow", () => {
+    const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
+    activity(lifecycle, "usage-child-a");
+    activity(lifecycle, "usage-child-b");
+    tokenUsage(lifecycle, "usage-child-b", CHILD_TOKEN_USAGE);
+
+    expect(rejectMalformed).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toEqual({
+      sequence: 3,
+      providerTaskId: null,
+      providerAgentId: "usage-child-b",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      providerStatus: null,
+      status: "running",
+      description: null,
+      progress: null,
+      result: null,
+      usage: CHILD_TASK_USAGE,
+      isLive: true,
+    });
+    expect(updates.filter(({ providerAgentId }) =>
+      providerAgentId === "usage-child-a")).not.toContainEqual(
+      expect.objectContaining({ usage: expect.anything() }),
+    );
+  });
+
+  it("attaches nested child usage to that child with its own parent identity", () => {
+    const { lifecycle, updates } = lifecycleHarness();
+    lifecycle.handleNotification("thread/started", {
+      thread: { id: "usage-parent", parentThreadId: ROOT_THREAD_ID },
+    });
+    lifecycle.handleNotification("thread/started", {
+      thread: { id: "usage-grandchild", parentThreadId: "usage-parent" },
+    });
+    tokenUsage(lifecycle, "usage-grandchild", CHILD_TOKEN_USAGE);
+
+    expect(updates.at(-1)).toMatchObject({
+      providerAgentId: "usage-grandchild",
+      parentProviderAgentId: "usage-parent",
+      usage: CHILD_TASK_USAGE,
+    });
+  });
+
+  it.each([
+    ["a string", "not usage"],
+    ["an empty object", {}],
+    ["negative totals", { total: { totalTokens: -1 }, last: { totalTokens: -1 } }],
+    ["fractional counts", { last: { totalTokens: 1.5 }, modelContextWindow: 0.5 }],
+    ["counts beyond the token ceiling", { total: { totalTokens: 1e13 } }],
+  ])("ignores malformed child usage: %s", (_label, usage) => {
+    const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
+    activity(lifecycle, "malformed-usage-child");
+    tokenUsage(lifecycle, "malformed-usage-child", usage);
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).not.toHaveProperty("usage");
+    expect(rejectMalformed).not.toHaveBeenCalled();
+  });
+
+  it("never attaches usage from an unknown thread to an owned child", () => {
+    const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
+    tokenUsage(lifecycle, "stranger-thread", CHILD_TOKEN_USAGE);
+    activity(lifecycle, "owned-child");
+    tokenUsage(lifecycle, "stranger-thread", CHILD_TOKEN_USAGE);
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ providerAgentId: "owned-child" });
+    expect(updates[0]).not.toHaveProperty("usage");
+    expect(JSON.stringify(updates)).not.toContain("stranger-thread");
+    expect(rejectMalformed).not.toHaveBeenCalled();
+  });
+
+  it("keeps only the latest provisional usage, drops provisional activity, and replays usage once owned", () => {
+    const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
+    childTurn(lifecycle, "turn/started", "late-child", "late-turn", "inProgress");
+    for (let index = 1; index <= 12; index += 1) {
+      tokenUsage(lifecycle, "late-child", {
+        ...CHILD_TOKEN_USAGE,
+        total: { totalTokens: index * 100 },
+      });
+    }
+    childItem(lifecycle, "item/started", "late-child", {
+      id: "late-command",
+      type: "commandExecution",
+      command: "npm test",
+    });
+
+    expect(updates).toEqual([]);
+    expect(rejectMalformed).not.toHaveBeenCalled();
+    activity(lifecycle, "late-child");
+
+    expect(updates.map(({ status }) => status)).toEqual([
+      "running",
+      "running",
+      "running",
+    ]);
+    expect(updates.filter((update) => "usage" in update)).toEqual([
+      expect.objectContaining({
+        providerAgentId: "late-child",
+        usage: { ...CHILD_TASK_USAGE, totalTokens: 1_200 },
+      }),
+    ]);
+    expect(updates.some((update) => "activity" in update)).toBe(false);
+  });
+
+  it("fails closed when provisional usage alone exceeds the thread limit", () => {
+    const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
+    for (let index = 0; index < 129; index += 1) {
+      tokenUsage(lifecycle, `usage-only-${index}`, CHILD_TOKEN_USAGE);
+    }
+
+    expect(updates).toEqual([]);
+    expect(rejectMalformed).toHaveBeenCalledOnce();
+    expect(rejectMalformed).toHaveBeenCalledWith(
+      "Codex exceeded the 128-thread provisional child limit.",
+    );
+  });
+
+  it("still fails closed when provisional lifecycle events exceed the per-child limit", () => {
+    const { lifecycle, rejectMalformed } = lifecycleHarness();
+    tokenUsage(lifecycle, "busy-child", CHILD_TOKEN_USAGE);
+    for (let index = 0; index < 8; index += 1) {
+      lifecycle.handleNotification("thread/status/changed", {
+        threadId: "busy-child",
+        status: { type: "active", activeFlags: [] },
+      });
+    }
+
+    expect(rejectMalformed).toHaveBeenCalledOnce();
+    expect(rejectMalformed).toHaveBeenCalledWith(
+      "Codex exceeded the 8-event provisional child limit.",
+    );
+  });
+
+  it("uses the model requested by the spawning collaboration item", () => {
+    const { lifecycle, updates } = lifecycleHarness();
+    lifecycle.handleItem({
+      type: "collabAgentToolCall",
+      id: "spawn-with-model",
+      tool: "spawnAgent",
+      senderThreadId: ROOT_THREAD_ID,
+      receiverThreadIds: ["model-child", "default-model-child"],
+      prompt: "Review the protocol.",
+      model: "gpt-5.5-codex",
+      reasoningEffort: "high",
+      agentsStates: {
+        "model-child": { status: "pendingInit" },
+        "default-model-child": { status: "pendingInit" },
+      },
+    }, "started", ROOT_THREAD_ID);
+    lifecycle.handleItem({
+      type: "collabAgentToolCall",
+      id: "spawn-default-model",
+      tool: "spawnAgent",
+      senderThreadId: ROOT_THREAD_ID,
+      receiverThreadIds: ["null-model-child"],
+      model: null,
+      agentsStates: { "null-model-child": { status: "pendingInit" } },
+    }, "started", ROOT_THREAD_ID);
+
+    expect(updates.find(({ providerAgentId }) =>
+      providerAgentId === "model-child")).toMatchObject({
+      model: "gpt-5.5-codex",
+      status: "queued",
+    });
+    expect(updates.find(({ providerAgentId }) =>
+      providerAgentId === "null-model-child")).not.toHaveProperty("model");
+    expect(JSON.stringify(updates)).not.toContain("high");
+  });
+
+  it("labels child activity with the parent's item labels and never includes command output", () => {
+    const { lifecycle, updates } = lifecycleHarness();
+    activity(lifecycle, "busy-child");
+    const items: JsonObject[] = [
+      {
+        id: "child-command",
+        type: "commandExecution",
+        command: "npm run check && cat .env",
+        aggregatedOutput: "SECRET_OUTPUT",
+      },
+      { id: "child-plain-command", type: "commandExecution", command: "cat .env" },
+      { id: "child-mcp", type: "mcpToolCall", server: "docs", tool: "search", arguments: { q: "SECRET_ARGUMENT" } },
+      { id: "child-files", type: "fileChange", changes: [{ path: "src/secret.ts", kind: "update", diff: "" }] },
+      { id: "child-dynamic", type: "dynamicToolCall", tool: "preview" },
+      { id: "child-web", type: "webSearch", query: "SECRET_QUERY", action: { type: "search", query: "SECRET_QUERY" } },
+      { id: "child-reasoning", type: "reasoning", summary: [] },
+      { id: "child-long-mcp", type: "mcpToolCall", server: "s".repeat(120), tool: "t".repeat(160) },
+      { id: "child-message", type: "agentMessage", text: "Not an activity." },
+    ];
+    for (const item of items) {
+      childItem(lifecycle, "item/started", "busy-child", item);
+    }
+    childItem(lifecycle, "item/completed", "busy-child", {
+      id: "child-command",
+      type: "commandExecution",
+      command: "npm run check",
+      aggregatedOutput: "SECRET_OUTPUT",
+    });
+
+    const activities = updates.flatMap((update) =>
+      "activity" in update ? [update.activity] : []);
+    expect(activities).toEqual([
+      "npm run check",
+      "Command",
+      "MCP · docs/search",
+      "File change",
+      "Tool · preview",
+      "Search the web",
+      "Thinking",
+      `MCP · ${"s".repeat(120)}/${"t".repeat(160)}`.slice(0, 200),
+    ]);
+    expect(updates.slice(1)).toEqual(activities.map(() => expect.objectContaining({
+      providerAgentId: "busy-child",
+      status: "running",
+      isLive: true,
+      progress: null,
+      result: null,
+    })));
+    const serialized = JSON.stringify(updates);
+    for (const secret of ["SECRET_OUTPUT", ".env", "SECRET_ARGUMENT", "src/secret.ts", "SECRET_QUERY"]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("keeps the current status and authority for telemetry-only updates", () => {
+    const { lifecycle, projections, updates } = lifecycleHarness();
+    activity(lifecycle, "waiting-child");
+    lifecycle.handleNotification("thread/status/changed", {
+      threadId: "waiting-child",
+      status: { type: "active", activeFlags: ["waitingOnApproval"] },
+    });
+    tokenUsage(lifecycle, "waiting-child", CHILD_TOKEN_USAGE);
+    childItem(lifecycle, "item/started", "waiting-child", {
+      id: "waiting-command",
+      type: "commandExecution",
+      command: "npm test",
+    });
+
+    expect(updates.slice(-2)).toEqual([
+      expect.objectContaining({ status: "waiting", usage: CHILD_TASK_USAGE }),
+      expect.objectContaining({ status: "waiting", activity: "npm test" }),
+    ]);
+    expect(projections.get("waiting-child")).toEqual({
+      status: "waiting",
+      authority: "state",
+      isLive: true,
+    });
+    expect(updates.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("enriches a settled child with final usage but never revives it with activity", () => {
+    const { lifecycle, projections, updates } = lifecycleHarness();
+    activity(lifecycle, "settled-child");
+    childTurn(lifecycle, "turn/started", "settled-child", "settled-turn", "inProgress");
+    childTurn(lifecycle, "turn/completed", "settled-child", "settled-turn", "completed");
+    const settledCount = updates.length;
+    childItem(lifecycle, "item/started", "settled-child", {
+      id: "late-command",
+      type: "commandExecution",
+      command: "npm test",
+    });
+    tokenUsage(lifecycle, "settled-child", CHILD_TOKEN_USAGE);
+
+    expect(updates).toHaveLength(settledCount + 1);
+    expect(updates.at(-1)).toMatchObject({
+      providerAgentId: "settled-child",
+      status: "completed",
+      isLive: false,
+      usage: CHILD_TASK_USAGE,
+    });
+    expect(updates.at(-1)).not.toHaveProperty("activity");
+    expect(projections.get("settled-child")).toEqual({
+      status: "completed",
+      authority: "turn",
+      isLive: false,
+    });
+  });
+});
+
 describe("Codex delegated-agent lifecycle", () => {
   it("buffers bounded lifecycle traffic until an owned activity registers the child", () => {
     const { lifecycle, updates } = lifecycleHarness();
@@ -417,6 +757,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       threadId: "provisional-child",
       turn: { id: "provisional-turn", status: "inProgress" },
     } });
+    for (const childThreadId of ["known-child", "provisional-child"]) {
+      send({ method: "item/started", params: {
+        threadId: childThreadId,
+        turnId: childThreadId === "known-child" ? "known-turn" : "provisional-turn",
+        item: { id: childThreadId + "-command", type: "commandExecution", command: "npm test" },
+      } });
+      send({ method: "thread/tokenUsage/updated", params: {
+        threadId: childThreadId,
+        turnId: childThreadId === "known-child" ? "known-turn" : "provisional-turn",
+        tokenUsage: { total: { totalTokens: 300 }, last: { totalTokens: 120 }, modelContextWindow: 1000 },
+      } });
+    }
     send({
       id: childrenReadyRequestId,
       method: "fixture/childrenReady",
@@ -437,6 +789,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
+      const subagents: CodexSubagentUpdate[] = [];
       const run = startCodexAppServerRun({
         executable,
         environment: {
@@ -448,6 +801,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         prompt: "Cancel all delegated work",
         planMode: false,
         access: "full",
+        onSubagent: (event) => subagents.push(event),
       });
 
       await waitFor("both child turns to reach the client", () =>
@@ -472,6 +826,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         threadId: "cancel-root",
         turnId: "cancel-root-turn",
       });
+      expect(subagents).toContainEqual(expect.objectContaining({
+        providerAgentId: "known-child",
+        activity: "npm test",
+      }));
+      expect(subagents).toContainEqual(expect.objectContaining({
+        providerAgentId: "known-child",
+        usage: expect.objectContaining({
+          totalTokens: 300,
+          contextTokens: 120,
+          maxContextTokens: 1000,
+        }),
+      }));
+      expect(subagents.filter(({ providerAgentId }) =>
+        providerAgentId === "known-child").at(-1)).toMatchObject({
+        status: "interrupted",
+        isLive: false,
+      });
+      expect(JSON.stringify(subagents)).not.toContain("provisional-child");
     } finally {
       await removePortableFixture(root);
     }

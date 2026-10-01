@@ -7,30 +7,31 @@ import { probeCanvasInEnvironment } from "../helpers/canvas-in-environment";
 
 const native = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock("electron", () => ({ utilityProcess: native }));
-import { conversationAttachmentStoreRunner } from "../../src/main/conversation-attachment-store-desktop-runner";
+import { attachmentImportRunner } from "../../src/main/attachment-import-desktop-runner";
 
 class Worker extends EventEmitter {
   kill = vi.fn(() => true);
   postMessage = vi.fn();
 }
 
-it("validates retained images without loading system fonts on every read", async () => {
+it("validates imported images without loading system fonts on every import", async () => {
   const worker = new Worker();
   native.fork.mockReset().mockReturnValue(worker);
   const controller = new AbortController();
-  const reading = conversationAttachmentStoreRunner({
-    operation: "read",
-    root: resolve("/tmp", "conversation-attachments"),
+  const importing = attachmentImportRunner({
+    root: resolve("/tmp", "inertia-attachment-import"),
     rootDev: "1",
     rootIno: "2",
     rootUid: null,
-    id: "11111111-1111-4111-8111-111111111111",
-    stallBeforeRecordRevalidateMs: 0,
-    validateContent: true,
+    fileName: "11111111-1111-4111-8111-111111111111.png",
+    name: "screenshot.png",
+    mimeType: "image/png",
+    size: 100,
+    stallBeforeValidationMs: 0,
   }, controller.signal);
   controller.abort();
   worker.emit("exit", 1);
-  await expect(reading.result).rejects.toThrow();
+  await expect(importing.result).rejects.toThrow();
   const env = native.fork.mock.calls[0]![2].env as Record<string, string>;
   expect(env).toEqual({ DISABLE_SYSTEM_FONTS_LOAD: "1" });
   expect(probeCanvasInEnvironment(env)).toEqual({

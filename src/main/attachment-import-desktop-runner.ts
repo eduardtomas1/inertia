@@ -10,7 +10,7 @@ export const attachmentImportRunner = createAttachmentImportUtilityRunner({
     [],
     {
       cwd,
-      env: {},
+      env: { DISABLE_SYSTEM_FONTS_LOAD: "1" },
       stdio: "ignore",
       serviceName: "Inertia Attachment Validation",
     },

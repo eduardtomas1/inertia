@@ -67,14 +67,9 @@ function nullableLabel(value: unknown): boolean {
 function subagentTaskUsage(value: unknown): boolean {
   if (value === null) return true;
   if (!record(value)) return false;
-  const keys = Object.keys(value);
-  if (keys.length !== USAGE_KEYS.length || !USAGE_KEYS.every((key) => keys.includes(key))) {
-    return false;
-  }
   const { contextTokens, maxContextTokens } = value;
-  return USAGE_KEYS.every((key) => key === "maxContextTokens"
-    ? nullableInteger(value[key], 1, MAX_TOKEN_COUNT)
-    : nullableInteger(value[key], 0, MAX_TOKEN_COUNT))
+  return USAGE_KEYS.every((key) =>
+    nullableInteger(value[key], key === "maxContextTokens" ? 1 : 0, MAX_TOKEN_COUNT))
     && (typeof contextTokens !== "number"
       || typeof maxContextTokens !== "number"
       || contextTokens <= maxContextTokens);

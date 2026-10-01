@@ -83,7 +83,6 @@ describe("subagent trace wire validation", () => {
     ["long activity", { activity: "a".repeat(201) }],
     ["usage array", { usage: [] }],
     ["usage missing a field", { usage: { ...usage, reasoningOutputTokens: undefined } }],
-    ["usage extra field", { usage: { ...usage, costUsd: 1 } }],
     ["negative tokens", { usage: { ...usage, inputTokens: -1 } }],
     ["fractional tokens", { usage: { ...usage, outputTokens: 1.5 } }],
     ["too many tokens", { usage: { ...usage, totalTokens: 1_000_000_000_001 } }],

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Clock3 } from "lucide-react";
+import { CircleAlert, Clock3 } from "lucide-react";
 import type { LimitResetResult } from "@shared/limit-reset";
 import type { LimitResetCommand, LimitResetCommandRunner } from "./limitResetClient";
 import { INTERFACE_LOCALE } from "../../lib/locale";
+import { diagnosticErrorReference } from "../../utils/diagnosticNavigation";
 import "./LimitResetBanner.css";
 
 const loads = new WeakMap<LimitResetCommandRunner, Map<string, Promise<LimitResetResult>>>();
@@ -62,23 +63,29 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const offer = result.offer;
   if (!plan && !offer) return null;
   const pending = plan?.state === "waiting" || plan?.state === "dispatching";
+  const blocked = plan?.state === "blocked";
   const resetsAt = plan?.resetsAt ?? offer!.resetsAt;
   const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) >= Date.parse(resetsAt);
   const when = new Date(resetsAt).toLocaleString(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return <div className="limit-reset-banner" role="region" aria-label="Usage limit">
-    <div className="limit-reset-row">
-      <Clock3 size={14} aria-hidden="true" />
-      <span className="limit-reset-label">{pending ? "Resume scheduled" : plan?.state === "blocked" ? "Resume needs attention" : "Usage limit reached"}</span>
-      <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>{pending ? "At" : "Resets"} {when}</time>
-      <div className="limit-reset-actions">
-        {pending || plan?.state === "blocked" ? <button type="button" disabled={disabled || busy} onClick={() => void mutate({ type: "conversation.limit-reset.cancel", payload: { conversationId, id: plan.id } })}>Cancel resume</button>
-          : offer && <button type="button" disabled={disabled || busy || !offer.canResume}
-            title={offer.canResume ? "Continue this chat when quota is available and Inertia is running" : "Automatic resume is unavailable for this account"}
-            onClick={() => void mutate({ type: "conversation.limit-reset.schedule", payload: { conversationId, id: crypto.randomUUID(), failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt } })}>Resume at reset</button>}
-        {offer && <button type="button" disabled={disabled || busy || snoozed}
-          onClick={() => void mutate({ type: "conversation.limit-reset.snooze", payload: { conversationId, failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt } })}>{snoozed ? "Snoozed until reset" : "Snooze until reset"}</button>}
-      </div>
-    </div>
-    {(error ?? plan?.error) && <p role="status">{error ?? plan?.error}</p>}
+  const unavailable = disabled || busy;
+  const action = "secondary-button limit-reset-action";
+  const message = error ? diagnosticErrorReference(error).message : plan?.error ?? null;
+  const Icon = blocked ? CircleAlert : Clock3;
+  return <div className="limit-reset" role="group" aria-label="Usage limit" data-state={pending ? "scheduled" : blocked ? "blocked" : "offer"}>
+    <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
+    <span className="limit-reset-copy">
+      <strong>{pending ? "Resume scheduled" : blocked ? "Resume needs attention" : "Usage limit reached"}</strong>
+      <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>{pending ? "Resumes" : "Resets"} {when}</time>
+    </span>
+    <span className="limit-reset-actions">
+      {pending || blocked ? <button type="button" className={action} aria-disabled={unavailable || undefined}
+        onClick={() => void mutate({ type: "conversation.limit-reset.cancel", payload: { conversationId, id: plan.id } })}>Cancel resume</button>
+        : offer && <button type="button" className={action} aria-disabled={unavailable || !offer.canResume || undefined}
+          title={offer.canResume ? "Continue this chat when quota is available and Inertia is running" : "Automatic resume is unavailable for this account"}
+          onClick={() => { if (offer.canResume) void mutate({ type: "conversation.limit-reset.schedule", payload: { conversationId, id: crypto.randomUUID(), failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt } }); }}>Resume at reset</button>}
+      {offer && <button type="button" className={action} aria-disabled={unavailable || snoozed || undefined}
+        onClick={() => { if (!snoozed) void mutate({ type: "conversation.limit-reset.snooze", payload: { conversationId, failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt } }); }}>{snoozed ? "Snoozed until reset" : "Snooze until reset"}</button>}
+    </span>
+    {message && <p className="limit-reset-message" role={error ? "alert" : "status"}>{message}</p>}
   </div>;
 }

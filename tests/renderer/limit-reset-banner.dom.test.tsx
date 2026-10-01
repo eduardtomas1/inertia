@@ -77,3 +77,45 @@ describe("quota reset banner", () => {
     expect(screen.getByRole("button", { name: "Cancel resume" })).toBeEnabled();
   });
 });
+
+describe("quota reset row inside the composer", () => {
+  it("keeps focus on the action while busy and on its replacement after scheduling", async () => {
+    let resolve!: (value: LimitResetResult) => void;
+    const scheduled = new Promise<LimitResetResult>((done) => { resolve = done; });
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(result()).mockReturnValueOnce(scheduled);
+    render(banner(run));
+    const resume = await screen.findByRole("button", { name: "Resume at reset" });
+    resume.focus();
+    fireEvent.click(resume);
+    expect(resume).toHaveAttribute("aria-disabled", "true");
+    expect(resume).not.toBeDisabled();
+    expect(resume).toHaveFocus();
+    fireEvent.click(resume);
+    expect(run).toHaveBeenCalledTimes(2);
+    await act(async () => { resolve(pending()); await scheduled; });
+    const cancel = screen.getByRole("button", { name: "Cancel resume" });
+    expect(cancel).toHaveFocus();
+    expect(cancel).not.toHaveAttribute("aria-disabled");
+  });
+  it("marks unavailable actions without removing them from the focus order", async () => {
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: { failedTurnId, resetsAt, canResume: false } });
+    render(<LimitResetBanner conversationId={conversationId} latestTurnId={failedTurnId} snoozedUntil={resetsAt} disabled={false} onCommand={run} />);
+    const resume = await screen.findByRole("button", { name: "Resume at reset" });
+    const snoozed = screen.getByRole("button", { name: "Snoozed until reset" });
+    expect(resume).toHaveAttribute("aria-disabled", "true");
+    expect(snoozed).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(resume);
+    fireEvent.click(snoozed);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("group", { name: "Usage limit" })).toBeInTheDocument();
+  });
+  it("reports a failed action as an alert without the diagnostic reference", async () => {
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(result())
+      .mockRejectedValueOnce(new Error("The reported limit changed. Refresh this chat before scheduling a resume. [incident:21feb702-c9bc-4896-a470-8cb97fd58d25]"));
+    render(banner(run));
+    fireEvent.click(await screen.findByRole("button", { name: "Resume at reset" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^The reported limit changed\. Refresh this chat before scheduling a resume\.$/u);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});

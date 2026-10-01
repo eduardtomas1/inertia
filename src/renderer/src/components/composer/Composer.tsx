@@ -945,13 +945,13 @@ export const Composer = memo(function Composer({
       );
     });
   };
+  const limitResetRow = onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
+    <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
+      snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
+      onCommand={onLimitResetCommand} />
+  </Suspense>;
   return (
     <div className="composer-shell">
-      {onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
-        <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
-          snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
-          onCommand={onLimitResetCommand} />
-      </Suspense>}
       <section
         ref={composerRef}
         className={clsx(
@@ -994,13 +994,13 @@ export const Composer = memo(function Composer({
         )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
-          contextCards={conversationContextHandoffEnabled && (
+          contextCards={<>{limitResetRow}{conversationContextHandoffEnabled && (
             <>
               <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
               <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />
               <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
             </>
-          )}
+          )}</>}
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
           disabled={disabled || conversationUpdatePending}

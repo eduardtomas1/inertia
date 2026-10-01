@@ -117,5 +117,33 @@
     "transcriptJavaScript": 142,
     "detachedChatJavaScript": 55,
     "coreJavaScript": 2821
+  },
+  "uiPolish": {
+    "baselineCommit": "3ad25592acd25ad7e0f129f1ad7a25795cbb1245",
+    "environment": "macOS ARM64, Node 22.23.2, identical package-lock.json and node_modules",
+    "before": {
+      "deferredProjectMemoryJavaScript": 13630,
+      "deferredProjectSettingsJavaScript": 14282,
+      "mainWorkbenchFirstLoadJavaScript": 856596,
+      "detachedChatFirstLoadJavaScript": 662909,
+      "coreJavaScript": 2228817,
+      "entryCss": 354742
+    },
+    "after": {
+      "deferredProjectMemoryJavaScript": 13748,
+      "deferredProjectSettingsJavaScript": 14349,
+      "mainWorkbenchFirstLoadJavaScript": 856621,
+      "detachedChatFirstLoadJavaScript": 662934,
+      "coreJavaScript": 2228896,
+      "entryCss": 354742
+    },
+    "delta": {
+      "deferredProjectMemoryJavaScript": 118,
+      "deferredProjectSettingsJavaScript": 67,
+      "mainWorkbenchFirstLoadJavaScript": 25,
+      "detachedChatFirstLoadJavaScript": 25,
+      "coreJavaScript": 79,
+      "entryCss": 0
+    }
   }
 }

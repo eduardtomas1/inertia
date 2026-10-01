@@ -63,7 +63,7 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 700,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 700 + 21,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -96,8 +96,10 @@ const budgets = {
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   // Scope review stays deferred; shared guards and routing add 700 startup /
-  // 2,391 core bytes (56 use existing headroom). See scope-review/bundle.json.
-  deferredScopeReviewJavaScript: 7.5 * kibibyte,
+  // 2,391 core bytes (56 use existing headroom). Its deferred stylesheet adds
+  // 21 startup bytes and the polished panel 1,452 deferred bytes. See
+  // scope-review/bundle.json.
+  deferredScopeReviewJavaScript: 7.5 * kibibyte + 1_452,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,

@@ -531,7 +531,7 @@ export class ClaudeSubagentTraceTracker {
       description: state.description,
       progress,
       result,
-      ...optionalText("model", state.model),
+      ...optionalText("model", state.role === "fork" ? null : state.model),
       ...telemetry,
     });
   }

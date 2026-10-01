@@ -63,7 +63,9 @@ HTTP servers over HTTPS (or HTTP on loopback), with no authentication or a beare
 token. For a token, enter an environment variable name beginning with
 `INERTIA_MCP_`, such as `INERTIA_MCP_DOCS_TOKEN`. Set its value in the environment
 that launches Inertia and restart the app. Token values stay in privileged memory;
-only names and connection settings are saved.
+only names and connection settings are saved. URLs must be literal: environment
+templates are rejected so agents cannot expand other launch credentials into them.
+Token values must also be literal, without nested environment references.
 
 **Configured** means saved. **Available in this chat** means the running native
 provider confirmed both its connection and tool names. The open panel refreshes

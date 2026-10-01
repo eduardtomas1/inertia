@@ -53,6 +53,9 @@ describe("project tools provider authority", () => {
     const missing = await prepareProjectToolLaunch({ ...run, resolveToken: async () => null }, {}, signal);
     expect(missing.projectTools?.connections).toEqual([]);
     expect(run.report).toHaveBeenLastCalledWith(expect.objectContaining({ state: "needs-auth" }));
+    const nested = await prepareProjectToolLaunch({ ...run, resolveToken: async () => "synthetic-${OTHER_CREDENTIAL}" }, {}, signal);
+    expect(nested.projectTools?.connections).toEqual([]);
+    expect(nested.environment).toEqual({});
   });
 
   it("bounds Claude status requests and ignores replies after cancellation", async () => {

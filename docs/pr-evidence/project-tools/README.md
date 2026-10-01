@@ -17,6 +17,9 @@ Project Tools desktop evidence
 - A real Claude bearer-authentication probe also passed: five authenticated HTTP
   requests, `search_docs` reported connected, and no token value in subprocess
   arguments. Claude expands the environment reference inside its process.
+- Real Claude probes confirmed expansion in URLs and nested token values too.
+  The connection validator and privileged token resolver reject these templates
+  before launch; percent-encoded literal URL characters remain supported.
 
 The initial local screenshot comes from Linux. The cloud kernel lacks
 `/proc/<pid>/task/<pid>/children`, so Inertia's existing process guardian correctly

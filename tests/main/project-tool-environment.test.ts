@@ -11,8 +11,8 @@ describe("privileged project tool environment lookup", () => {
     expect(projectToolEnvironmentToken(projectToolTokenReference("INERTIA_MCP_DOCS"), environment, AbortSignal.abort())).toBeNull();
     expect(() => projectToolTokenReference("ANTHROPIC_API_KEY")).toThrow();
   });
-  it("refuses multiline, empty and oversized values", () => {
-    for (const value of ["", "x", "synthetic\nheader", "synthetic\rheader", "synthetic\0header", "x".repeat(8193)]) {
+  it("refuses multiline, empty, oversized and recursively expanded values", () => {
+    for (const value of ["", "x", "synthetic\nheader", "synthetic\rheader", "synthetic\0header", "x".repeat(8193), "synthetic-${OTHER_CREDENTIAL}", "synthetic-$OTHER_CREDENTIAL"]) {
       expect(projectToolEnvironmentToken(projectToolTokenReference("INERTIA_MCP_DOCS"), { INERTIA_MCP_DOCS: value })).toBeNull();
     }
   });

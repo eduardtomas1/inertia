@@ -119,6 +119,14 @@ describe("provider quota attribution", () => {
     expect(kimiSubscriptionWindows({ limits: [{ limit: "100", remaining: "10", resetTime: reset }] }, now)[0]).toMatchObject({ remainingPercent: 10, resetsAt: reset });
     expect(kimiSubscriptionWindows({ usage: { limit: 100 } }, now)[0]).toMatchObject({ remainingPercent: null, resetsAt: null });
   });
+  it("rejects numeric strings that overflow rather than publishing non-finite quota", () => {
+    const overflow = "9".repeat(400);
+    expect(() => kimiSubscriptionWindows({ usage: { limit: overflow, used: overflow, reset_in: 60 } }, Date.now())).toThrow();
+  });
+  it("rejects negative usage percentages instead of treating them as available quota", () => {
+    expect(() => cursorSubscriptionWindows({ planUsage: { totalPercentUsed: -1 } })).toThrow();
+    expect(() => openCodeSubscriptionWindows({ usage: { ...go.usage, rolling: { percent: -1, resetsAt: reset } } })).toThrow();
+  });
   it("rejects symlink credential files instead of following another account", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-credential-fixture-"));
     try {

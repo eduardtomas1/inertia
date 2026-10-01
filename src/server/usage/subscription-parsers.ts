@@ -8,7 +8,7 @@ const iso = (value: unknown): string | null => {
 };
 export function cursorSubscriptionWindows(raw: unknown): UsageWindow[] {
   const value = z.object({ billingCycleEnd: z.union([z.string(), finite]).optional(),
-    planUsage: z.object({ totalPercentUsed: finite.optional(), autoPercentUsed: finite.optional(), apiPercentUsed: finite.optional() }).optional() }).parse(raw);
+    planUsage: z.object({ totalPercentUsed: finite.nonnegative().optional(), autoPercentUsed: finite.nonnegative().optional(), apiPercentUsed: finite.nonnegative().optional() }).optional() }).parse(raw);
   const end = Number(value.billingCycleEnd);
   const resetsAt = end > 0 && Number.isFinite(end) && end < 8.64e15 ? new Date(end).toISOString() : null;
   return ([ ["totalPercentUsed", "Overall"], ["autoPercentUsed", "Cursor Models"], ["apiPercentUsed", "Other Models"] ] as const)
@@ -16,12 +16,12 @@ export function cursorSubscriptionWindows(raw: unknown): UsageWindow[] {
       remainingPercent: percent(value.planUsage[id]), resetsAt, windowMinutes: null }]);
 }
 export function openCodeSubscriptionWindows(raw: unknown): UsageWindow[] {
-  const window = z.object({ percent: finite, resetsAt: z.string().refine((value) => iso(value) !== null) });
+  const window = z.object({ percent: finite.nonnegative(), resetsAt: z.string().refine((value) => iso(value) !== null) });
   const { usage } = z.object({ usage: z.object({ rolling: window, weekly: window, monthly: window }) }).parse(raw);
   return ([ ["rolling", "Go · Session", 300], ["weekly", "Go · Weekly", 10080], ["monthly", "Go · Monthly", null] ] as const)
     .map(([id, label, windowMinutes]) => ({ id: `opencode:go_${id}`, label, remainingPercent: percent(usage[id].percent), resetsAt: iso(usage[id].resetsAt), windowMinutes }));
 }
-const count = z.union([finite.nonnegative(), z.string().regex(/^\d+(?:\.\d+)?$/u)]).transform(Number);
+const count = z.union([finite.nonnegative(), z.string().regex(/^\d+(?:\.\d+)?$/u)]).transform(Number).pipe(finite.nonnegative());
 const kimiWindow = z.object({ limit: count, used: count.optional(), remaining: count.optional(),
   reset_at: z.unknown().optional(), resetAt: z.unknown().optional(), reset_time: z.unknown().optional(), resetTime: z.unknown().optional(),
   reset_in: count.optional(), resetIn: count.optional(), ttl: count.optional() });

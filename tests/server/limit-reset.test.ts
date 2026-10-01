@@ -203,6 +203,10 @@ describe("reported quota windows", () => {
     input.windows.push({ ...input.windows[0]!, id: "claude:model_0", remainingPercent: 0 });
     expect(resetQuota(input, "claude-sonnet-4-6")).toEqual({ kind: "unknown" });
   });
+  it.each([NaN, Infinity, -Infinity, -1, 101])("never authorizes a resume from invalid remaining quota: %s", (remainingPercent) => {
+    const input = usage(); input.windows[0]!.remainingPercent = remainingPercent;
+    expect(resetQuota(input, "gpt-test").kind).toBe("unknown");
+  });
   it("keeps reported account signatures separate from verified credit-redemption identities", () => {
     const input = usage(); input.identityKey = null;
     expect(resumeAccountIdentity(input)).toMatch(/^[0-9a-f]{64}$/u);

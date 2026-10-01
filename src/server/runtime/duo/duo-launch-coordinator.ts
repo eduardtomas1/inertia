@@ -654,6 +654,12 @@ export class DuoLaunchCoordinator {
   private async prepareFresh(
     payload: DuoPreparePayload,
   ): Promise<PreparedDuoLaunch> {
+    // Duo creates its own conversations without ScratchWorkspace's per-chat
+    // folder allocation. Enforce the project picker restriction at the boundary.
+    const participants = [...payload.sides, ...(payload.comparison ? [payload.comparison] : [])];
+    if (participants.some(({ projectId }) => this.store.project(projectId).workspaceKind === "scratch")) {
+      throw new Error("Choose a project for each Duo chat and comparison.");
+    }
     // Preflights can own Git or provider resources, so a sibling failure must
     // not return to callers until every concurrent preflight has settled.
     let firstFailure: PromiseRejectedResult | null = null;

@@ -1,4 +1,4 @@
-import type { ParsedCodexApprovalRequest } from "./approvals";
+import { codexApprovalResult, type ParsedCodexApprovalRequest } from "./approvals";
 import { CODEX_RPC_TIMEOUT_MS, type CodexRunPhase } from "./app-server-config";
 import type { CodexSubagentLifecycle } from "./app-server-subagents";
 import {
@@ -18,6 +18,7 @@ interface DeferredApproval extends Required<ApprovalOwner> {
   rpcId: RpcId;
   method: string;
   params: JsonObject;
+  protocol: ParsedCodexApprovalRequest["protocol"];
   beforeStartResponse: boolean;
   timer: NodeJS.Timeout;
 }
@@ -63,7 +64,7 @@ export class CodexApprovalAuthority {
       return false;
     }
     if (this.host.cancelRequested()) {
-      this.refuse(id);
+      this.host.writeMessage({ id, result: codexApprovalResult(approval.protocol, "cancel") });
       return false;
     }
     if (approval.protocol !== "legacy-review" && providerTurnId) {
@@ -71,11 +72,11 @@ export class CodexApprovalAuthority {
         && this.host.phase() === "starting-turn"
         && this.host.requestedTurnId?.() === null;
       if (beforeStartResponse || this.host.subagents.isAwaitingChildTurn(providerThreadId, providerTurnId)) {
-        this.defer(id, method, params, providerThreadId, providerTurnId, beforeStartResponse);
+        this.defer(id, method, params, approval.protocol, providerThreadId, providerTurnId, beforeStartResponse);
         return false;
       }
       if (!this.owns({ providerThreadId, providerTurnId })) {
-        this.reject(id);
+        this.refuse(id);
         return false;
       }
     }
@@ -154,6 +155,7 @@ export class CodexApprovalAuthority {
     for (const pending of this.deferred.values()) {
       clearTimeout(pending.timer);
       this.host.releaseServerRequest(pending.rpcId);
+      this.host.writeMessage({ id: pending.rpcId, result: codexApprovalResult(pending.protocol, "cancel") });
     }
     this.deferred.clear();
     this.preResponse.clear();
@@ -163,6 +165,7 @@ export class CodexApprovalAuthority {
     rpcId: RpcId,
     method: string,
     params: JsonObject,
+    protocol: ParsedCodexApprovalRequest["protocol"],
     providerThreadId: string,
     providerTurnId: string,
     beforeStartResponse: boolean,
@@ -171,11 +174,11 @@ export class CodexApprovalAuthority {
     const timer = setTimeout(() => {
       this.deferred.delete(rpcId);
       this.host.releaseServerRequest(rpcId);
-      this.reject(rpcId);
+      this.refuse(rpcId);
     }, CODEX_RPC_TIMEOUT_MS);
     timer.unref();
     this.deferred.set(rpcId, {
-      rpcId, method, params, providerThreadId, providerTurnId, beforeStartResponse, timer,
+      rpcId, method, params, protocol, providerThreadId, providerTurnId, beforeStartResponse, timer,
     });
     if (beforeStartResponse && !this.preResponse.hold(method, providerTurnId, params, rpcId)) {
       this.host.failMalformedProtocol("Codex sent too many updates before the turn/start response.",

@@ -32,6 +32,7 @@ interface CodexSubagentLifecycleHost {
   projection: (providerAgentId: string) =>
     CodexSubagentProjection | undefined;
   rejectMalformed: (message: string) => void;
+  retireTurn?: (threadId: string, turnId: string) => void;
 }
 
 interface CodexSpawnMetadata {
@@ -757,7 +758,7 @@ export class CodexSubagentLifecycle {
           { providerStatus: statusType },
         );
       } else if (statusType === "systemError") {
-        if (!this.retireChildTurn(threadId)) return true;
+        this.retireChildTurn(threadId);
         this.emitChildLifecycle(threadId, "failed", "turn", {
           providerStatus: statusType,
           result: "Codex reported a system error for this delegated agent.",
@@ -769,7 +770,7 @@ export class CodexSubagentLifecycle {
       if (params.willRetry === true) return true;
       const message = boundedText(objectValue(params.error)?.message, 16_000)
         ?? "Codex reported an error for this delegated agent.";
-      if (!this.retireChildTurn(threadId)) return true;
+      this.retireChildTurn(threadId);
       this.emitChildLifecycle(threadId, "failed", "turn", {
         providerStatus: "error",
         result: message,
@@ -777,7 +778,7 @@ export class CodexSubagentLifecycle {
       return true;
     }
     if (method === "thread/closed") {
-      if (!this.retireChildTurn(threadId)) return true;
+      this.retireChildTurn(threadId);
       this.childResults.delete(threadId);
       this.emitChildLifecycle(threadId, "unknown", "turn", {
         providerStatus: "closed",
@@ -846,7 +847,7 @@ export class CodexSubagentLifecycle {
     if (this.completedChildTurns.has(completionKey)) return true;
     const activeTurnId = this.childActiveTurns.get(threadId);
     if (activeTurnId && activeTurnId !== turnId) return true;
-    if (!this.retireChildTurn(threadId, turnId)) return true;
+    this.retireChildTurn(threadId, turnId);
     const status = stringValue(turn?.status);
     const turnError = objectValue(turn?.error);
     const interruptionFailure = codexTurnInterruptionFailure(
@@ -883,19 +884,18 @@ export class CodexSubagentLifecycle {
   private retireChildTurn(
     threadId: string,
     turnId = this.childActiveTurns.get(threadId),
-  ): boolean {
+  ): void {
     if (turnId) {
       const completionKey = `${threadId}\0${turnId}`;
-      if (!this.completedChildTurns.has(completionKey)
-        && this.completedChildTurns.size >= MAX_CODEX_CHILD_TURN_HISTORY) {
-        this.host.rejectMalformed(
-          `Codex exceeded the ${MAX_CODEX_CHILD_TURN_HISTORY}-turn delegated-agent history limit; retired approval authority cannot be forgotten.`,
-        );
-        return false;
+      if (!this.completedChildTurns.has(completionKey)) {
+        if (this.completedChildTurns.size >= MAX_CODEX_CHILD_TURN_HISTORY) {
+          const oldest = this.completedChildTurns.values().next().value;
+          if (oldest) this.completedChildTurns.delete(oldest);
+        }
+        this.completedChildTurns.add(completionKey);
       }
-      this.completedChildTurns.add(completionKey);
+      this.host.retireTurn?.(threadId, turnId);
     }
     this.childActiveTurns.delete(threadId);
-    return true;
   }
 }

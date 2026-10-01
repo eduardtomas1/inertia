@@ -183,6 +183,7 @@ export class CodexAppServerEvents {
       projection: (providerAgentId) =>
         this.subagentProjection.get(providerAgentId),
       rejectMalformed: (message) => this.rejectMalformedSubagent(message),
+      retireTurn: (threadId, turnId) => this.retireApprovals(threadId, turnId),
     });
     this.approvalAuthority = new CodexApprovalAuthority({
       providerThreadId: host.providerThreadId,
@@ -204,7 +205,10 @@ export class CodexAppServerEvents {
       isSettled: host.isSettled,
       providerThreadId: host.providerThreadId,
       activeTurnId: host.activeTurnId,
-      isOwnedTurn: (providerThreadId, providerTurnId) => !host.cancelRequested() && this.approvalAuthority.owns({ providerThreadId, providerTurnId }),
+      isOwnedTurn: (providerThreadId, providerTurnId) => (
+        !host.cancelRequested()
+        && this.approvalAuthority.owns({ providerThreadId, providerTurnId })
+      ),
       reserveServerRequest: (id) => this.reserveServerRequest(id),
       releaseServerRequest: (id) => {
         this.pendingServerRequestIds.delete(rpcRequestKey(id));
@@ -346,10 +350,7 @@ export class CodexAppServerEvents {
       || !pending.request.availableDecisions.includes(decision)
     ) return false;
     if (this.host.cancelRequested() || !this.approvalAuthority.owns(pending)) {
-      this.pendingApprovals.delete(requestId);
-      this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
-      this.approvalAuthority.refuse(pending.rpcId);
-      this.host.options.onApprovalResolved?.(requestId, "cancelled");
+      this.retireApproval(requestId, pending);
       return true;
     }
     const result = codexApprovalResult(pending.protocol, decision, pending.requestedPermissions);
@@ -548,6 +549,23 @@ export class CodexAppServerEvents {
     this.host.rememberFailure("malformed-protocol", summary, message);
     this.emitActivity("system", "failed", label);
     this.host.cancel("malformed-protocol");
+  }
+
+  private retireApprovals(threadId: string, turnId: string): void {
+    for (const [requestId, pending] of this.pendingApprovals) {
+      if (pending.providerThreadId === threadId && pending.providerTurnId === turnId) {
+        this.retireApproval(requestId, pending);
+      }
+    }
+  }
+
+  private retireApproval(requestId: string, pending: PendingApproval): void {
+    this.pendingApprovals.delete(requestId);
+    this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
+    if (this.host.cancelRequested()) {
+      this.host.writeMessage({ id: pending.rpcId, result: codexApprovalResult(pending.protocol, "cancel") });
+    } else this.approvalAuthority.refuse(pending.rpcId);
+    this.host.options.onApprovalResolved?.(requestId, "cancelled");
   }
 
   private isOwnedProviderThread(threadId: string): boolean {

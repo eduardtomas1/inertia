@@ -90,6 +90,7 @@ const budgets = {
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172,
+  deferredBackgroundTasksJavaScript: 14.125 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -664,6 +665,12 @@ if (entryJavaScriptClosure.has(attachmentStorageSettingsEntry) || mainWorkbenchJ
   throw new Error("Attachment storage settings must remain deferred from the initial chat routes");
 }
 const deferredAttachmentStorageSettingsJavaScriptBytes = await assetBytes(`assets/${attachmentStorageSettingsEntry}`);
+const backgroundTasksEntry = assetNames.find((name) => /^tasks-.*\.js$/u.test(name));
+if (!backgroundTasksEntry) throw new Error("Missing deferred Background tasks surface");
+if (entryJavaScriptClosure.has(backgroundTasksEntry) || mainWorkbenchJavaScriptClosure.has(backgroundTasksEntry) || detachedChatJavaScriptClosure.has(backgroundTasksEntry)) {
+  throw new Error("Background tasks must remain deferred from the initial chat routes");
+}
+const deferredBackgroundTasksJavaScriptBytes = await assetBytes(`assets/${backgroundTasksEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
@@ -673,6 +680,7 @@ const coreJavaScriptBytes =
   - deferredSnapshotSettingsJavaScriptBytes
   - deferredSnapshotControlJavaScriptBytes
   - deferredAttachmentStorageSettingsJavaScriptBytes
+  - deferredBackgroundTasksJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
@@ -713,6 +721,7 @@ const measurements = {
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
   deferredSnapshotControlJavaScript: deferredSnapshotControlJavaScriptBytes,
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
+  deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

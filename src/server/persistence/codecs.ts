@@ -58,6 +58,7 @@ import {
 import { providerTimestamp, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
 import {
   boundedSubagentCount,
+  boundedSubagentLabel,
   MAX_SUBAGENT_DURATION_MS,
   MAX_SUBAGENT_TOOL_USE_COUNT,
 } from "../provider/subagent-trace";
@@ -796,8 +797,8 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     description: row.description,
     progress: row.progress,
     result: row.result,
-    model: row.model,
-    activity: row.activity,
+    model: boundedSubagentLabel(row.model),
+    activity: boundedSubagentLabel(row.activity),
     usage: subagentTaskUsageFromJson(row.usage_json),
     toolUseCount: boundedSubagentCount(row.tool_use_count, MAX_SUBAGENT_TOOL_USE_COUNT),
     durationMs: boundedSubagentCount(row.duration_ms, MAX_SUBAGENT_DURATION_MS),

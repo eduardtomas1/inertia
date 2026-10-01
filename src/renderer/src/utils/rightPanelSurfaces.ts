@@ -21,7 +21,7 @@ export const RIGHT_PANEL_SURFACE_META: Record<
   preview: { label: "Browser", shortcut: "B" },
   terminal: { label: "Terminal", shortcut: "T" },
   attachments: { label: "Attachments", shortcut: "H" },
-  agents: { label: "Agents", shortcut: "A" },
+  agents: { label: "Background tasks", shortcut: "A" },
   usage: { label: "Usage", shortcut: "U" },
   goal: { label: "Goal", shortcut: "G" },
   plan: { label: "Plan", shortcut: "P" },

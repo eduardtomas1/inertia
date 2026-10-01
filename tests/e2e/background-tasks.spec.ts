@@ -358,8 +358,21 @@ async function openBackgroundTasks(page: Page): Promise<Locator> {
   return region;
 }
 
-function row(region: Locator, title: string): Locator {
-  return region.getByRole("listitem", { name: new RegExp(`^${title},`, "u") });
+function card(region: Locator, title: string): Locator {
+  return region.locator("li").filter({
+    has: region.page().locator(".background-task-title").getByText(title, { exact: true }),
+  });
+}
+
+function toggle(region: Locator, title: string): Locator {
+  return card(region, title).getByRole("button", { name: new RegExp(`^${title}`, "u") });
+}
+
+async function openFinished(region: Locator): Promise<Locator> {
+  const finished = region.getByRole("button", { name: /^Finished/u });
+  if (await finished.getAttribute("aria-expanded") === "false") await finished.click();
+  await expect(finished).toHaveAttribute("aria-expanded", "true");
+  return region.getByRole("list", { name: "Finished" });
 }
 
 async function capture(page: Page, info: TestInfo, name: string): Promise<void> {
@@ -372,11 +385,19 @@ async function capture(page: Page, info: TestInfo, name: string): Promise<void> 
 async function expectLayoutHolds(app: AppFixture, region: Locator): Promise<void> {
   await app.expectNoViewportOverflow();
   await expectComposerEndsAtDock(app.page.getByRole("region", { name: "Message composer" }));
-  const overflow = await region.evaluate((element) => {
+  const layout = await region.evaluate((element) => {
     const scroll = element.querySelector<HTMLElement>(".workspace-surface-scroll");
-    return scroll ? scroll.scrollWidth - scroll.clientWidth : 0;
+    return {
+      overflow: scroll ? scroll.scrollWidth - scroll.clientWidth : 0,
+      nested: [...element.querySelectorAll("button")]
+        .filter((button) => button.parentElement?.closest("button")).length,
+      truncatedTitles: [...element.querySelectorAll<HTMLElement>(".background-task-title")]
+        .filter((title) => title.scrollWidth > title.clientWidth + 1).length,
+    };
   });
-  expect(overflow).toBeLessThanOrEqual(1);
+  expect(layout.overflow).toBeLessThanOrEqual(1);
+  expect(layout.nested).toBe(0);
+  expect(layout.truncatedTitles).toBe(0);
 }
 
 let app!: AppFixture;
@@ -400,77 +421,58 @@ async function attachFailure(info: TestInfo): Promise<void> {
     .catch(() => undefined);
 }
 
-test("summarizes a chat's agents, tokens and commands with keyboard access", async ({ browserName: _browserName }, info) => {
+test("lists a chat's running work as plain cards with keyboard access", async ({ browserName: _browserName }, info) => {
   try {
     await app.resizeWindow(1440, 1100);
     const region = await showChat(app, seed.codex);
     const page = app.page;
 
-    await expect(region.getByRole("heading", { name: "Background tasks", level: 3 })).toBeVisible();
-    await expect(region.getByText("3 active · 2 need review · 1 finished", { exact: true })).toBeVisible();
-    await expect(region.getByText("176.55K tokens reported", { exact: true })).toBeVisible();
-    await expect(region.getByText(
-      "Sum of what the providers reported for these agents. This chat's own usage is in Usage.",
-      { exact: true },
-    )).toBeVisible();
+    await expect(region.getByRole("heading")).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "Background tasks, 3 active" })).toHaveAttribute("aria-selected", "true");
     await expect(rightPanelToggle(page)).toHaveAttribute("aria-label", "Toggle right panel, 3 background tasks active");
-
-    const active = region.getByRole("list", { name: "Active" });
-    await expect(active.getByRole("listitem")).toHaveCount(3);
-    const explorer = row(region, "Explorer");
-    await expect(explorer.locator(".background-task-status")).toHaveText("Running");
-    await expect(explorer.getByText("gpt-5.3-codex", { exact: true })).toBeVisible();
-    await expect(explorer.getByText("Searching src/server for usage parsers", { exact: true })).toBeVisible();
-    await expect(explorer.getByText("128.4K", { exact: true })).toBeVisible();
-    await expect(explorer.getByRole("img", { name: "Codex" })).toBeVisible();
-    const writer = row(region, "Fixture writer");
-    await expect(writer).toHaveAttribute("data-depth", "1");
-    await expect(writer.getByText("Child of Explorer", { exact: true })).toBeVisible();
-    const explorerLeft = await explorer.evaluate((element) => element.getBoundingClientRect().left);
-    const writerLeft = await writer.evaluate((element) => element.getBoundingClientRect().left);
-    expect(writerLeft).toBeGreaterThan(explorerLeft);
-    const verifier = row(region, "Build verifier");
-    await expect(verifier.locator(".background-task-status")).toHaveText("Failed (errored)");
-    await expect(verifier.getByText("42s", { exact: true })).toBeVisible();
-    await expect(region.getByRole("list", { name: "Finished" }).getByRole("listitem")).toHaveCount(1);
-
-    const commands = region.getByRole("list", { name: "Commands" });
-    await expect(commands.getByRole("listitem")).toHaveCount(2);
-    const devServer = commands.getByRole("listitem", { name: "npm run dev, Running" });
-    await expect(devServer.getByText("http://localhost:5173", { exact: true })).toBeVisible();
-    await expect(devServer.getByText(/tokens/u)).toHaveCount(0);
-    await expect(devServer.getByText("1m 15s", { exact: true })).toBeVisible();
+    const running = region.getByRole("list", { name: "Running" });
+    await expect(running.getByRole("listitem")).toHaveCount(3);
+    const explorer = card(region, "Explorer");
+    await expect(explorer).toContainText("Agent");
+    await expect(explorer).toContainText("1m 35s");
+    await expect(explorer).toContainText("gpt-5.3-codex");
+    await expect(explorer).toContainText("128.4K tokens");
+    await expect(explorer).toContainText("14 tool uses");
+    await expect(explorer).toContainText("Searching src/server for usage parsers");
+    await expect(explorer.getByRole("button", { name: "View turn for Explorer" })).toBeVisible();
+    await expect(card(region, "Fixture writer")).toContainText("Agent · from Explorer");
+    const devServer = card(region, "npm run dev");
+    await expect(devServer).toContainText("Command");
+    await expect(devServer).toContainText("1m 15s");
+    await expect(devServer).toContainText("http://localhost:5173");
+    await expect(devServer).not.toContainText("tokens");
     await expect(region.getByText("rg usage src")).toHaveCount(0);
     await expect(region.getByText("sed -n 1,80p src/usage.ts")).toHaveCount(0);
-    const failedTest = commands.getByRole("listitem", { name: "npm test, Failed" });
-    await expect(failedTest.getByRole("button", { name: "Dismiss npm test" })).toBeVisible();
+    const finishedToggle = region.getByRole("button", { name: "Finished 3 · 2 failed" });
+    await expect(finishedToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(region.getByRole("button", { name: "Dismiss finished commands" })).toBeVisible();
 
     for (const button of await region.getByRole("button").all()) {
       await expect(button).toHaveAccessibleName(/\S/u);
     }
     await page.getByRole("tab", { name: "Background tasks, 3 active" }).focus();
-    const explorerDetails = explorer.getByRole("button", { name: "Details for Explorer" });
+    const explorerToggle = toggle(region, "Explorer");
     for (let presses = 0; presses < 12; presses += 1) {
-      if (await explorerDetails.evaluate((element) => element === document.activeElement)) break;
+      if (await explorerToggle.evaluate((element) => element === document.activeElement)) break;
       await page.keyboard.press("Tab");
     }
-    await expect(explorerDetails).toBeFocused();
+    await expect(explorerToggle).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(explorerDetails).toHaveAttribute("aria-expanded", "true");
-    const explorerDetailList = explorer.locator(".background-task-details");
-    await expect(explorerDetailList.getByText("Latest step", { exact: true })).toBeVisible();
-    await expect(explorerDetailList.getByText("Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640", { exact: true })).toBeVisible();
-    await expect(explorerDetailList.getByRole("meter", { name: "Context window remaining" })).toHaveAttribute("aria-valuenow", "75");
-    await expect(explorerDetailList.getByText("75% of 200K remaining", { exact: true })).toBeVisible();
-    await expect(explorerDetailList.getByText("Doing now", { exact: true })).toBeVisible();
-    await expect(explorerDetailList.getByText("Mapping the token usage pipeline", { exact: true })).toBeVisible();
-    await expect(explorerDetailList.getByText("gpt-5.3-codex", { exact: true })).toBeVisible();
+    await expect(explorerToggle).toHaveAttribute("aria-expanded", "true");
+    const details = explorer.locator(".background-task-details");
+    await expect(details.getByText("Latest step", { exact: true })).toBeVisible();
+    await expect(details.getByText("Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640", { exact: true })).toBeVisible();
+    await expect(details.getByRole("meter", { name: "Context window remaining" })).toHaveAttribute("aria-valuenow", "75");
+    await expect(details.getByText("Mapping the token usage pipeline", { exact: true })).toBeVisible();
     await expectLayoutHolds(app, region);
     await page.keyboard.press("Enter");
-    await expect(explorerDetails).toHaveAttribute("aria-expanded", "false");
-    await explorerDetails.blur();
-    await expect(commands).toBeInViewport();
+    await expect(explorerToggle).toHaveAttribute("aria-expanded", "false");
+    await explorerToggle.blur();
 
     await capture(page, info, "background-tasks-wide-dark");
     await setAppearanceInPlace(app, "light");
@@ -478,29 +480,34 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     await capture(page, info, "background-tasks-wide-light");
 
     await app.resizeWindow(1000, 800);
-    await expect(region).toBeVisible();
     await expect(explorer).toBeVisible();
-    await explorerDetails.click();
-    await expect(explorerDetailList).toBeVisible();
+    await explorerToggle.click();
+    await expect(details).toBeVisible();
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-narrow-light");
     await setAppearanceInPlace(app, "dark");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await capture(page, info, "background-tasks-narrow-dark");
+    await explorerToggle.click();
 
     await app.resizeWindow(760, 600);
-    await expect(region).toBeVisible();
     await expect(explorer).toBeVisible();
     await expectLayoutHolds(app, region);
-    expect(await region.evaluate((element) => [...element.querySelectorAll<HTMLElement>(".background-task-heading > strong")]
-      .filter((title) => title.scrollWidth > title.clientWidth + 1)
-      .map((title) => title.textContent))).toEqual([]);
     await capture(page, info, "background-tasks-760x600-dark");
-    await app.resizeWindow(1000, 800);
+    await app.resizeWindow(1440, 1100);
 
-    await failedTest.getByRole("button", { name: "Dismiss npm test" }).click();
-    await expect(commands.getByRole("listitem")).toHaveCount(1);
-    await expect(region.getByText("3 active · 1 needs review · 1 finished", { exact: true })).toBeVisible();
+    const finished = await openFinished(region);
+    await expect(finished.getByRole("listitem")).toHaveCount(3);
+    const verifier = card(region, "Build verifier");
+    await expect(verifier).toContainText("Agent · Failed");
+    await expect(verifier.locator(".background-task-danger")).toHaveText("Failed");
+    await expect(verifier).toContainText("42s");
+    await expect(card(region, "npm test")).toContainText("Command · Failed");
+    await expect(card(region, "npm test")).toContainText("30s");
+    await region.getByRole("button", { name: "Dismiss finished commands" }).click();
+    await expect(card(region, "npm test")).toHaveCount(0);
+    await expect(region.getByRole("button", { name: "Finished 2 · 1 failed" })).toBeVisible();
+    await expect(region.getByRole("button", { name: "Dismiss finished commands" })).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);
@@ -508,17 +515,19 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
   }
 });
 
-test("labels each harness's reporting honestly", async ({ browserName: _browserName }, info) => {
+test("shows what each harness reports and nothing more", async ({ browserName: _browserName }, info) => {
   try {
     await app.resizeWindow(1440, 1100);
     const page = app.page;
     let region = await showChat(app, seed.claude);
-    const reviewer = row(region, "Code reviewer");
-    await expect(reviewer.getByText("Grep", { exact: true })).toBeVisible();
-    await expect(reviewer.getByText("18.6K", { exact: true })).toBeVisible();
-    const runner = row(region, "Test runner");
-    await runner.getByRole("button", { name: "Details for Test runner" }).click();
-    const runnerDetails = runner.locator(".background-task-details");
+    const reviewer = card(region, "Code reviewer");
+    await expect(reviewer).toContainText("Grep");
+    await expect(reviewer).toContainText("18.6K tokens");
+    await expect(reviewer).toContainText("9 tool uses");
+    await expect(reviewer.getByRole("button", { name: "Stop Code reviewer" })).toBeVisible();
+    await openFinished(region);
+    await toggle(region, "Test runner").click();
+    const runnerDetails = card(region, "Test runner").locator(".background-task-details");
     await expect(runnerDetails.getByText("9,000", { exact: true })).toBeVisible();
     await expect(runnerDetails.getByText("Latest step", { exact: true })).toHaveCount(0);
     await expect(runnerDetails.getByText("1m 23s", { exact: true })).toBeVisible();
@@ -526,31 +535,34 @@ test("labels each harness's reporting honestly", async ({ browserName: _browserN
     await capture(page, info, "background-tasks-claude-wide-dark");
 
     region = await showChat(app, seed.opencode);
-    const sweep = row(region, "Schema sweep");
-    await expect(sweep.getByText("read src/shared/contracts/agent.ts", { exact: true })).toBeVisible();
-    await sweep.getByRole("button", { name: "Details for Schema sweep" }).click();
+    const sweep = card(region, "Schema sweep");
+    await expect(sweep).toContainText("read src/shared/contracts/agent.ts");
+    await toggle(region, "Schema sweep").click();
     await expect(sweep.locator(".background-task-details").getByText(
       "Input 4.8K · Cached 2.05K · Cache write 512 · Output 610 · Reasoning 120",
       { exact: true },
     )).toBeVisible();
-    await expect(row(region, "Schema checker").getByText("Child of Schema sweep", { exact: true })).toBeVisible();
+    await openFinished(region);
+    await expect(card(region, "Schema checker")).toContainText("Agent · from Schema sweep");
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-opencode-wide-dark");
 
     region = await showChat(app, seed.cursor);
-    const summary = row(region, "Summarize the open review threads");
-    await expect(summary.getByText("Three threads remain open.", { exact: true })).toBeVisible();
-    await expect(summary.getByText("Tokens: Cursor does not report tokens for delegated tasks")).toBeAttached();
-    await expect(region.getByText(/tokens reported/u)).toHaveCount(0);
+    await expect(region.getByRole("list", { name: "Running" })).toHaveCount(0);
+    await openFinished(region);
+    const summary = card(region, "Summarize the open review threads");
+    await expect(summary).toContainText("Three threads remain open.");
+    await expect(summary).toContainText("gpt-5");
+    await expect(summary).not.toContainText("tokens");
+    await toggle(region, "Summarize the open review threads").click();
+    await expect(summary.locator(".background-task-details").getByText("Not reported by Cursor", { exact: true }))
+      .toBeVisible();
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-cursor-wide-dark");
 
     region = await showChat(app, seed.kimi);
-    await expect(region.getByText("No background tasks in this chat.", { exact: true })).toBeVisible();
-    await expect(region.getByText(
-      "Kimi Code does not report delegated agents. Commands it starts appear here.",
-      { exact: true },
-    )).toBeVisible();
+    await expect(region.getByText("No background tasks.", { exact: true })).toBeVisible();
+    await expect(region.getByText(/Kimi/u)).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);
@@ -568,14 +580,14 @@ test("keeps the surface and reported tokens across a restart", async ({ browserN
     await expect(restarted.locator('[data-workspace-tab="agents"]')).toHaveAttribute("aria-selected", "true");
     const region = restarted.getByRole("region", { name: "Background tasks" });
     await expect(region).toBeVisible();
-    await expect(row(region, "Explorer").locator(".background-task-status")).toHaveText("Lost");
-    await expect(row(region, "Explorer").getByText("128.4K", { exact: true })).toBeVisible();
-    await expect(row(region, "Explorer").getByText("Runtime not reported", { exact: true })).toBeAttached();
-    await expect(row(region, "Docs reviewer").getByText("31.25K", { exact: true })).toBeVisible();
-    await expect(region.getByRole("list", { name: "Commands" }).getByRole("listitem", {
-      name: "npm run dev, Failed",
-    })).toBeVisible();
-    await expect(region.getByText("176.55K tokens reported", { exact: true })).toBeVisible();
+    await expect(region.getByRole("list", { name: "Running" })).toHaveCount(0);
+    await openFinished(region);
+    const explorer = card(region, "Explorer");
+    await expect(explorer).toContainText("Agent · Lost");
+    await expect(explorer).toContainText("128.4K tokens");
+    await expect(explorer.locator(".subagent-elapsed")).toHaveCount(0);
+    await expect(card(region, "Docs reviewer")).toContainText("31.25K tokens");
+    await expect(card(region, "npm run dev")).toContainText("Command · Failed");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);

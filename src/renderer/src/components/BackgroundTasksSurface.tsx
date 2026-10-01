@@ -238,7 +238,7 @@ export function BackgroundTasksSurface({
               {dismissible.length > 0 && (
                 <button
                   type="button"
-                  className="background-task-stop"
+                  className="background-task-stop background-tasks-dismiss"
                   aria-label="Dismiss finished commands"
                   onClick={() => {
                     for (const run of dismissible) onDismissCommand?.(run);

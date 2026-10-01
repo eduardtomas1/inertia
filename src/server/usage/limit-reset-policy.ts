@@ -50,7 +50,8 @@ export function resetQuota(account: UsageAccount, model: string, now = Date.now(
   // for another Claude family and the extra-usage allowance do not block this route.
   const unrelated = new Set(["cursor:autoPercentUsed", "cursor:apiPercentUsed", "claude:seven_day_opus", "claude:seven_day_sonnet", "claude:seven_day_overage_included"]);
   if (account.windows.some((window) => window.remainingPercent === 0 && !relevant.includes(window) && !unrelated.has(window.id))) return { kind: "unknown" };
-  if (!relevant.length || relevant.some((window) => window.remainingPercent === null)) return { kind: "unknown" };
+  if (!relevant.length || relevant.some(({ remainingPercent }) => remainingPercent === null
+    || !Number.isFinite(remainingPercent) || remainingPercent < 0 || remainingPercent > 100)) return { kind: "unknown" };
   const exhausted = relevant.filter((window) => window.remainingPercent === 0);
   if (!exhausted.length) return { kind: "available" };
   const resets = exhausted.map(({ resetsAt }) => Date.parse(resetsAt ?? ""));

@@ -69,7 +69,8 @@ describe("file-backed attachments", () => {
     expect((await reader.resolve(retained[0]!.id))?.bytes.length).toBe(0);
     expect((await reader.preview(retained[0]!.id))?.bytes.length).toBe(ATTACHMENT_PREVIEW_BYTES);
     const request = assembleTurnRequest({ cwd: root, visibleContent: "Search the attached log.", attachments: retained });
-    expect(request.executionPrompt).toContain(retained[0]!.path);
+    const manifest = JSON.parse(request.executionPrompt.split("\n").at(-1)!);
+    expect(manifest).toEqual([{ name: retained[0]!.name, path: retained[0]!.path, size }]);
     expect(request.executionPrompt).not.toContain(marker.trim());
   });
 

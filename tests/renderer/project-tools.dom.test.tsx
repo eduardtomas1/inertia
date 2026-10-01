@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { ProjectToolsPanel } from "../../src/renderer/src/components/ProjectToolsPanel";
@@ -18,12 +18,75 @@ describe("project tools panel", () => {
     expect(screen.getByText("search_docs")).toBeVisible();
     view.rerender(<ProjectToolsPanel {...props} connected={false} run={run} />);
     expect(screen.queryByText("Available in this chat")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add connection" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add connection" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnect to view or change tool connections.");
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+  });
+  it("labels each field by its visible text and links its help", async () => {
+    const run = vi.fn(async () => result([]));
+    render(<ProjectToolsPanel {...props} run={run} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add connection" }));
+    expect(screen.getByRole("form", { name: "New connection" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveAccessibleDescription(/^HTTPS or loopback HTTP\./u);
+    const token = screen.getByRole("textbox", { name: "Bearer token environment variable (optional)" });
+    expect(token).toHaveAccessibleDescription(/^Use a name starting with INERTIA_MCP_/u);
+    expect(screen.getByRole("group", { name: "Use with" })).toHaveAccessibleDescription(/^Changes apply on the next message\./u);
+    expect(screen.getByRole("button", { name: "Add connection" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("reports a failed status refresh passively", async () => {
+    const run = vi.fn(async () => { throw new Error("offline"); });
+    render(<ProjectToolsPanel {...props} run={run} />);
+    const message = await screen.findByText("Could not refresh tool status. Reconnect or try again.");
+    expect(message.closest("[role]")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("keeps focus on a busy control and shows a refused removal in its connection", async () => {
+    let answer!: (event: ServerEvent) => void;
+    const run = vi.fn((_key: string, command: { type: string }) => command.type === "project.tools.load"
+      ? Promise.resolve(result())
+      : new Promise<ServerEvent>((done) => { answer = done; }));
+    render(<ProjectToolsPanel {...props} run={run} />);
+    const remove = await screen.findByRole("button", { name: "Remove Documentation" });
+    remove.focus();
+    fireEvent.click(remove);
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    expect(remove).not.toBeDisabled();
+    expect(remove).toHaveFocus();
+    fireEvent.click(remove);
+    expect(run.mock.calls.filter(([key]) => key === "project-tools-save")).toHaveLength(1);
+    await act(async () => { answer({ type: "request.error", requestId: "remove", message: "This connection is loaded by a running chat." }); });
+    const card = screen.getByRole("article", { name: "Documentation" });
+    expect(within(card).getByRole("alert")).toHaveTextContent("This connection is loaded by a running chat.");
+    expect(remove).toHaveFocus();
+    expect(remove).toHaveAttribute("aria-disabled", "false");
+  });
+  it("swaps the save label in place while saving", async () => {
+    let answer!: (event: ServerEvent) => void;
+    const run = vi.fn((_key: string, command: { type: string }) => command.type === "project.tools.load"
+      ? Promise.resolve(result([]))
+      : new Promise<ServerEvent>((done) => { answer = done; }));
+    render(<ProjectToolsPanel {...props} run={run} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add connection" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Documentation" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Server URL" }), { target: { value: "https://docs.example.com/mcp" } });
+    const save = screen.getByRole("button", { name: "Save connection" });
+    save.focus();
+    fireEvent.click(save);
+    expect(save).toHaveAccessibleName("Saving…");
+    expect(save).toHaveAttribute("aria-disabled", "true");
+    expect(save).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("readonly");
+    await act(async () => { answer({ type: "request.error", requestId: "save", message: "A project can have up to 12 tool connections." }); });
+    expect(within(screen.getByRole("form", { name: "New connection" })).getByRole("alert")).toHaveTextContent("up to 12");
+    expect(save).toHaveAccessibleName("Save connection");
+    expect(save).toHaveFocus();
   });
   it("defines one connection for both providers and returns keyboard focus after saving", async () => {
     const run = vi.fn(async (_key, command) => command.type === "project.tools.load" ? result([]) : { type: "request.ok", requestId: "save" } as ServerEvent);
     render(<ProjectToolsPanel {...props} run={run} />);
-    await screen.findByText("No connections yet");
+    await screen.findByText(/^No connections\./u);
     fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
     const name = screen.getByRole("textbox", { name: "Name" });
     expect(name).toHaveFocus();
@@ -54,6 +117,6 @@ describe("project tools panel", () => {
     await act(async () => { oldResolve(result()); });
     expect(screen.queryByText("Available in this chat")).not.toBeInTheDocument();
     await act(async () => { resolve(result([], nextId)); });
-    expect(screen.getByText("No connections yet")).toBeVisible();
+    expect(screen.getByText(/^No connections\./u)).toBeVisible();
   });
 });

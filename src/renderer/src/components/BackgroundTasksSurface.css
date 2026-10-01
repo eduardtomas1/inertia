@@ -38,7 +38,6 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.background-task-toggle,
 .background-task-body {
   display: grid;
   min-width: 0;
@@ -49,10 +48,6 @@
   background: none;
   font: inherit;
   text-align: left;
-}
-
-.background-task-toggle {
-  cursor: pointer;
 }
 
 .background-task-title {
@@ -135,7 +130,6 @@
   color: var(--text);
 }
 
-.background-task-toggle:focus-visible,
 .background-task-stop:focus-visible,
 .background-task-link:focus-visible,
 .background-tasks-finished-toggle:focus-visible {

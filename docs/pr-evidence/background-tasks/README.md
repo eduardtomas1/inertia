@@ -86,8 +86,13 @@ animated working indicator and composer stop control are canvas drawings that
 
 - `tests/e2e/background-tasks.spec.ts --repeat-each=3`: 9 passed normally and
   9 passed under 12 CPU-burning processes.
-- `activity`, `layout`, `composer-entry`, `terminal` and `draft-worktree` specs:
-  each passed once.
+- `tests/e2e/activity.spec.ts --repeat-each=3`: 9 passed normally and 9 passed
+  under 12 CPU-burning processes.
+- `layout`, `composer-entry`, `terminal`, `draft-worktree` and
+  `session-continuity` specs: each passed once.
+- `npm run benchmark:desktop:built` passed: 120-frame long-conversation scroll
+  at 8.3 ms median and 10.3 ms p95 with no long tasks; streaming first paint
+  22 ms and final paint 282 ms.
 
 ## Not exercised
 

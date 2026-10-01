@@ -77,7 +77,7 @@ describe("sent message attachments", () => {
     // The row says so in readable text; the tile itself is aria-hidden.
     expect(thumbnail!.closest("li")).toHaveAttribute("data-attachment-unavailable", "true");
     expect(thumbnail!.closest("li")).toHaveTextContent("no longer stored");
-    expect(thumbnail?.querySelector(".lucide-image-off")).not.toBeNull();
+    expect(thumbnail?.querySelector(".lucide-triangle-alert")).not.toBeNull();
 
     trigger.focus();
     await user.keyboard("{Enter}");

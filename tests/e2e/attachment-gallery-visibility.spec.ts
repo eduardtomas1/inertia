@@ -1,6 +1,6 @@
 // @inertia-e2e-resource primary-display
 import { createCanvas } from "@napi-rs/canvas";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Request } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,15 +11,24 @@ import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-t
 
 const largeId = randomUUID();
 const requestedPreviewIds = new Set<string>();
+const pendingPreviewRequests = new Set<Request>();
+let peakPendingPreviews = 0;
 let app: AppFixture;
 
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "gallery-visibility", initialState: "conversation", windowDisplay: "primary",
-    observePage: (page) => page.on("request", (request) => {
-      const id = /\/attachment-preview\/([^/]+)$/u.exec(request.url())?.[1];
-      if (id) requestedPreviewIds.add(id);
-    }),
+    observePage: (page) => {
+      page.on("request", (request) => {
+        const id = /\/attachment-preview\/([^/]+)$/u.exec(request.url())?.[1];
+        if (!id) return;
+        requestedPreviewIds.add(id);
+        pendingPreviewRequests.add(request);
+        peakPendingPreviews = Math.max(peakPendingPreviews, pendingPreviewRequests.size);
+      });
+      page.on("requestfinished", (request) => pendingPreviewRequests.delete(request));
+      page.on("requestfailed", (request) => pendingPreviewRequests.delete(request));
+    },
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const canvas = createCanvas(8_000, 5_000);
       canvas.getContext("2d").fillRect(0, 0, 8_000, 5_000);
@@ -106,6 +115,9 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   await expect.poll(() => last.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(8_000);
   await expect(last.locator("img")).toHaveAttribute("src", `inertia://bundle/attachment-preview/${largeId}`);
   await expect.poll(mountedImagesAreVisible).toBe(true);
+  // Detached in-flight thumbnails still own their native reads. Scrolling to
+  // the focused tile cannot flood the utility queue with abandoned originals.
+  expect(peakPendingPreviews).toBeLessThanOrEqual(2);
   await page.keyboard.press("Enter");
   const preview = page.getByRole("dialog", { name: "gallery-0.png" });
   await expect(preview).toBeVisible();

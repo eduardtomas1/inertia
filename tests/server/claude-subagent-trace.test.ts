@@ -919,6 +919,36 @@ describe("Claude delegated-agent projection", () => {
     expect(ignoredTasks.retainedStateCounts().ignoredTaskIds)
       .toBe(MAX_CLAUDE_IGNORED_TASK_IDS);
   });
+
+  it.each([
+    ["the Agent tool input", { subagent_type: "fork", prompt: "Continue.", model: "haiku" }, "fork"],
+    ["the task start", { prompt: "Continue.", model: "haiku" }, "fork"],
+  ])("does not report a requested model for a fork named by %s", (_label, input, startedType) => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => updates.push(event));
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "tool-fork", name: "Agent", input }] },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-fork",
+      tool_use_id: "tool-fork",
+      subagent_type: startedType,
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-fork",
+      tool_use_id: "tool-fork",
+      usage: { total_tokens: 30, tool_uses: 1, duration_ms: 5 },
+    }));
+    expect(updates.length).toBeGreaterThan(0);
+    expect(updates[0]).toMatchObject({ providerRole: "fork" });
+    for (const update of updates) expect(update).not.toHaveProperty("model");
+  });
 });
 
 describe("Claude persistent parent prompt channel", () => {

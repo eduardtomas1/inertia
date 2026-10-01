@@ -245,25 +245,54 @@ describe("Codex delegated-agent telemetry", () => {
     expect(updates.some((update) => "activity" in update)).toBe(false);
   });
 
-  it("fails closed when provisional usage alone exceeds the thread limit", () => {
+  it("drops usage for a thread without provisional lifecycle and opens no provisional slot", () => {
     const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
     for (let index = 0; index < 129; index += 1) {
       tokenUsage(lifecycle, `usage-only-${index}`, CHILD_TOKEN_USAGE);
     }
+    for (let index = 0; index < 128; index += 1) {
+      childTurn(
+        lifecycle,
+        "turn/started",
+        `lifecycle-${index}`,
+        `lifecycle-turn-${index}`,
+        "inProgress",
+      );
+    }
 
     expect(updates).toEqual([]);
-    expect(rejectMalformed).toHaveBeenCalledOnce();
-    expect(rejectMalformed).toHaveBeenCalledWith(
-      "Codex exceeded the 128-thread provisional child limit.",
-    );
+    expect(rejectMalformed).not.toHaveBeenCalled();
+    activity(lifecycle, "usage-only-0");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).not.toHaveProperty("usage");
+  });
+
+  it("keeps provisional usage outside the per-child lifecycle event limit", () => {
+    const { lifecycle, rejectMalformed, updates } = lifecycleHarness();
+    tokenUsage(lifecycle, "busy-child", CHILD_TOKEN_USAGE);
+    childTurn(lifecycle, "turn/started", "busy-child", "busy-turn", "inProgress");
+    tokenUsage(lifecycle, "busy-child", CHILD_TOKEN_USAGE);
+    for (let index = 0; index < 7; index += 1) {
+      lifecycle.handleNotification("thread/status/changed", {
+        threadId: "busy-child",
+        status: { type: "active", activeFlags: [] },
+      });
+      tokenUsage(lifecycle, "busy-child", CHILD_TOKEN_USAGE);
+    }
+
+    expect(rejectMalformed).not.toHaveBeenCalled();
+    activity(lifecycle, "busy-child");
+    expect(updates.filter((update) => "usage" in update)).toHaveLength(1);
+    expect(updates.at(-1)).toMatchObject({ usage: CHILD_TASK_USAGE });
   });
 
   it("still fails closed when provisional lifecycle events exceed the per-child limit", () => {
     const { lifecycle, rejectMalformed } = lifecycleHarness();
-    tokenUsage(lifecycle, "busy-child", CHILD_TOKEN_USAGE);
+    childTurn(lifecycle, "turn/started", "flooding-child", "flood-turn", "inProgress");
+    tokenUsage(lifecycle, "flooding-child", CHILD_TOKEN_USAGE);
     for (let index = 0; index < 8; index += 1) {
       lifecycle.handleNotification("thread/status/changed", {
-        threadId: "busy-child",
+        threadId: "flooding-child",
         status: { type: "active", activeFlags: [] },
       });
     }

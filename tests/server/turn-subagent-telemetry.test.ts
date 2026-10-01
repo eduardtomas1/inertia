@@ -252,6 +252,56 @@ describe("subagent telemetry coalescing", () => {
 });
 
 describe("subagent telemetry settlement", () => {
+  it("keeps telemetry held for a sub-agent the user stops", async () => {
+    let clockMs = Date.parse("2030-01-01T00:00:00.000Z");
+    const runtime = await createTurnControllerTestRuntime({}, {
+      clock: () => new Date(clockMs),
+      modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate this work.",
+    });
+    runtime.controller.start(queued.turn.id);
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 1,
+      providerTaskId: "task-1",
+      providerToolUseId: "tool-1",
+      status: "running",
+      isLive: true,
+    });
+    clockMs += 10;
+    emitTurnControllerTestSubagent(runtime, {
+      sequence: 2,
+      providerTaskId: "task-1",
+      providerToolUseId: "tool-1",
+      status: "running",
+      isLive: true,
+      activity: "Bash",
+      usage: usage(5_000),
+      toolUseCount: 12,
+      durationMs: 9_000,
+    });
+    const traceId = runtime.store.conversationDetail(runtime.conversationId)!.subagents[0]!.id;
+    expect(runtime.store.subagentTrace(traceId)).toMatchObject({ sequence: 1, usage: null });
+
+    expect(await runtime.controller.stopSubagent(runtime.conversationId, traceId)).toBe(true);
+
+    expect(runtime.store.subagentTrace(traceId)).toMatchObject({
+      status: "cancelled",
+      isLive: false,
+      sequence: 2,
+      activity: null,
+      usage: usage(5_000),
+      toolUseCount: 12,
+      durationMs: 9_000,
+    });
+    expect([...runtime.scheduler.delays.values()]).not.toContain(990);
+    runtime.provider.resolve();
+    await flushTurnControllerTestPromises();
+    runtime.store.close();
+  });
+
   it("delivers buffered telemetry before the turn settles live work and leaves no timer", async () => {
     let clockMs = Date.parse("2030-01-01T00:00:00.000Z");
     const runtime = await createTurnControllerTestRuntime({}, { clock: () => new Date(clockMs) });

@@ -49,20 +49,15 @@ interface CodexThreadSpawnSource {
   providerRole: string | null;
 }
 
-type ProvisionalChildEvent =
-  | {
-      method:
-        | "turn/started"
-        | "turn/completed"
-        | "thread/status/changed"
-        | "error"
-        | "thread/closed";
-      params: JsonObject;
-    }
-  | {
-      method: "thread/tokenUsage/updated";
-      usage: SubagentTaskUsage;
-    };
+interface ProvisionalChildEvent {
+  method:
+    | "turn/started"
+    | "turn/completed"
+    | "thread/status/changed"
+    | "error"
+    | "thread/closed";
+  params: JsonObject;
+}
 
 type CodexChildTelemetry =
   | { activity: string }
@@ -213,6 +208,7 @@ export class CodexSubagentLifecycle {
     ProvisionalChildEvent[]
   >();
   private readonly provisionalActiveTurns = new Map<string, string>();
+  private readonly provisionalUsage = new Map<string, SubagentTaskUsage>();
   private provisionalOverflowed = false;
 
   constructor(private readonly host: CodexSubagentLifecycleHost) {}
@@ -227,6 +223,7 @@ export class CodexSubagentLifecycle {
     this.subagentByToolUseId.clear();
     this.provisionalEvents.clear();
     this.provisionalActiveTurns.clear();
+    this.provisionalUsage.clear();
     this.provisionalOverflowed = false;
   }
 
@@ -329,16 +326,15 @@ export class CodexSubagentLifecycle {
 
   private replayProvisionalLifecycle(threadId: string): void {
     const buffered = this.provisionalEvents.get(threadId);
+    const usage = this.provisionalUsage.get(threadId);
     this.provisionalEvents.delete(threadId);
     this.provisionalActiveTurns.delete(threadId);
+    this.provisionalUsage.delete(threadId);
     if (!buffered) return;
     for (const event of buffered) {
-      if (event.method === "thread/tokenUsage/updated") {
-        this.emitChildTelemetry(threadId, { usage: event.usage });
-      } else {
-        this.handleChildNotification(event.method, event.params, threadId);
-      }
+      this.handleChildNotification(event.method, event.params, threadId);
     }
+    if (usage) this.emitChildTelemetry(threadId, { usage });
   }
 
   private rememberProvisionalLifecycle(
@@ -346,6 +342,12 @@ export class CodexSubagentLifecycle {
     params: JsonObject,
     threadId: string,
   ): boolean {
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexSubagentTaskUsage(params.tokenUsage);
+      if (!usage || !this.provisionalEvents.has(threadId)) return false;
+      this.provisionalUsage.set(threadId, usage);
+      return true;
+    }
     const event = this.normalizedProvisionalEvent(method, params, threadId);
     if (!event) return false;
     let events = this.provisionalEvents.get(threadId);
@@ -359,11 +361,6 @@ export class CodexSubagentLifecycle {
       events = [];
       this.provisionalEvents.set(threadId, events);
     }
-    if (event.method === "thread/tokenUsage/updated") {
-      const prior = events.findIndex(({ method: buffered }) =>
-        buffered === event.method);
-      if (prior >= 0) events.splice(prior, 1);
-    }
     if (events.length >= MAX_CODEX_PROVISIONAL_EVENTS_PER_CHILD) {
       this.rejectProvisionalOverflow(
         `Codex exceeded the ${MAX_CODEX_PROVISIONAL_EVENTS_PER_CHILD}-event provisional child limit.`,
@@ -371,7 +368,6 @@ export class CodexSubagentLifecycle {
       return true;
     }
     events.push(event);
-    if (event.method === "thread/tokenUsage/updated") return true;
     const turnId = strictCodexProviderIdentifier(
       objectValue(event.params.turn)?.id,
     );
@@ -450,10 +446,6 @@ export class CodexSubagentLifecycle {
     }
     if (method === "thread/closed") {
       return { method, params: { threadId } };
-    }
-    if (method === "thread/tokenUsage/updated") {
-      const usage = codexSubagentTaskUsage(params.tokenUsage);
-      return usage ? { method, usage } : null;
     }
     return null;
   }

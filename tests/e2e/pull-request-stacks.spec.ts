@@ -60,21 +60,21 @@ process.stdin.on("end", () => {
   let page = app.page;
   try {
     await selectWorkspaceTool(await ensureWorkspaceTools(page), "Pull requests");
-    await page.getByRole("button", { name: "Link a pull request", exact: true }).click();
+    await page.getByRole("button", { name: "Link pull request", exact: true }).click();
     await page.getByRole("textbox", { name: "GitHub pull request URL" }).fill("https://github.com/acme/workspace/pull/42");
     await page.getByRole("button", { name: "Link", exact: true }).click();
     await expect(page.getByRole("button", { name: /Add workspace navigation/u })).toBeVisible();
     await page.getByRole("button", { name: "Link pull request", exact: true }).click();
     await page.getByRole("textbox", { name: "GitHub pull request URL" }).fill("https://github.com/acme/docs/pull/18");
     await page.getByRole("button", { name: "Link", exact: true }).click();
-    await expect(page.getByText("3 linked", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Linked 3" })).toBeVisible();
     await page.getByRole("button", { name: /Keep related pull requests together.*acme\/workspace/u }).click();
-    await page.getByRole("button", { name: "Stack 43, layer 2 of 2" }).click();
-    await page.getByRole("menuitem", { name: "Merge stack (2)" }).click();
-    const dialog = page.getByRole("dialog", { name: "Merge stack" });
+    await page.getByRole("button", { name: "Stack #43 · layer 2 of 2" }).click();
+    await page.getByRole("menuitem", { name: "Merge 2 layers…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Merge stack #43" });
     await expect(dialog).toBeVisible();
     expect(JSON.parse(await readFile(statePath, "utf8")).mutations).toBe(0);
-    await dialog.getByRole("button", { name: "Merge reviewed layers" }).click();
+    await dialog.getByRole("button", { name: "Merge 2 layers" }).click();
     await expect(page.getByText("GitHub is merging the stack. Refresh to check its outcome.")).toBeVisible();
     expect(JSON.parse(await readFile(statePath, "utf8")).mutations).toBe(1);
     ({ page } = await app.restart());

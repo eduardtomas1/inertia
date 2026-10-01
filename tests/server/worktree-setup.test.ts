@@ -143,24 +143,30 @@ describe("worktree setup", () => {
     const queuePair = vi.fn();
     const coordinator = new DuoLaunchCoordinator(f.store, { resolveModelRoute: resolveNativeModelRoute }, {
       validateSelection: (selection: unknown) => selection, readiness: async () => null,
-    } as never, { queuePair } as unknown as TurnController, f.dataDirectory, () => [{ id: "codex", canRun: true } as ProviderInfo], { worktreeSetups: f.setup });
+    } as never, { queuePair, waitForProviderCleanup: async () => undefined } as unknown as TurnController, f.dataDirectory, () => [{ id: "codex", canRun: true } as ProviderInfo], { worktreeSetups: f.setup });
     const side = { projectId: f.project.id, title: "Duo setup", useWorktree: true, activate: false as const,
       interactionMode: "build" as const, accessMode: "supervised" as const,
       modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test" })),
     };
     const launchId = randomUUID();
     const preparing = coordinator.prepare({ launchId, sides: [side, side], prompt: "Wait for setup" });
-    const rejected = expect(preparing).rejects.toThrow(/cancelled/u);
-    await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(2));
-    expect(queuePair).not.toHaveBeenCalled();
-    await coordinator.cancel(launchId);
-    await rejected;
-    expect(coordinator.status(launchId).state).toBe("cancelled");
-    for (const chat of f.store.shellSnapshot().conversations) {
-      expect(chat.worktreeSetup?.status).toBe("cancelled");
-      expect(existsSync(chat.worktreePath!)).toBe(true);
+    const result = preparing.then(() => null, (error: unknown) => error);
+    try {
+      // Preparation creates two real Git worktrees before either setup starts.
+      await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(2), { timeout: 15_000 });
+      expect(queuePair).not.toHaveBeenCalled();
+      await coordinator.cancel(launchId);
+      expect(await result).toMatchObject({ message: expect.stringMatching(/cancelled/u) });
+      expect(coordinator.status(launchId).state).toBe("cancelled");
+      for (const chat of f.store.shellSnapshot().conversations) {
+        expect(chat.worktreeSetup?.status).toBe("cancelled");
+        expect(existsSync(chat.worktreePath!)).toBe(true);
+      }
+      expect(queuePair).not.toHaveBeenCalled();
+    } finally {
+      await coordinator.cancel(launchId);
+      await result;
     }
-    expect(queuePair).not.toHaveBeenCalled();
   });
 
   it("redacts credentials and bounds persisted output", async () => {

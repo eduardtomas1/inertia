@@ -43,6 +43,7 @@ import {
   loadGoalPanel,
   loadHistoricalDiffPanel,
   loadPlanPanel,
+  loadProjectToolsPanel,
   loadPreviewPanel,
   loadSettingsView,
   loadWorkspaceTerminal,
@@ -86,6 +87,7 @@ const HistoricalDiffPanel = lazySurface(
   (module) => module.HistoricalDiffPanel,
 );
 const GoalPanel = lazySurface(loadGoalPanel, (module) => module.GoalPanel);
+const ProjectToolsPanel = lazySurface(loadProjectToolsPanel, (module) => module.ProjectToolsPanel);
 const PlanPanel = lazySurface(loadPlanPanel, (module) => module.PlanPanel);
 const PreviewPanel = lazySurface(
   loadPreviewPanel,
@@ -124,6 +126,7 @@ export interface WorkspaceToolScene {
   terminalKey: string;
   goal: ComponentProps<typeof GoalPanel>;
   plan: ComponentProps<typeof PlanPanel>;
+  projectTools?: ComponentProps<typeof ProjectToolsPanel>;
   preview: Omit<ComponentProps<typeof PreviewPanel>, "owner">;
 }
 
@@ -213,6 +216,7 @@ function WorkspaceToolSurface({
                 <FilesPanel key={tools.filesKey} {...tools.files} />
               )}
               {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
+              {tools.activeTool === "tools" && tools.projectTools && tools.panel.visible !== false && <ProjectToolsPanel {...tools.projectTools} />}
               {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
               {tools.activeTool === "preview" && (
                 <PreviewPanel owner={owner} {...tools.preview} />

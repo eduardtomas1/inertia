@@ -1,3 +1,4 @@
+import { projectToolsViewSchema } from "../project-tools";
 import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
@@ -88,7 +89,6 @@ function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
     .safeParse(value).success;
 }
-
 function backendDefault(value: unknown): boolean {
   return modelBackendDefaultSchema.safeParse(value).success;
 }
@@ -97,7 +97,6 @@ function syncCursor(value: unknown): boolean {
     && (value.runtimeGeneration as string).length > 0
     && integerFieldAtLeast(value, "latestSequence");
 }
-
 function providerMaintenanceStatus(value: unknown): boolean {
   return recordWithStrings(
     value,
@@ -1140,6 +1139,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "workspace.file": (value) => workspaceFile(value.file) && booleanField(value, "usedFallback"),
   "project.actions": (value) => arrayOf(value.actions, projectAction)
     && uniqueRecordField(value.actions as unknown[], "id"),
+  "project.tools": (value) => projectToolsViewSchema.safeParse(value.tools).success,
   "agent.workflow": (value) => agentWorkflow(value.workflow),
   "agent.skills": (value) => stringField(value, "conversationId")
     && arrayOf(value.skills, (entry) =>

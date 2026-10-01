@@ -1,3 +1,4 @@
+import { projectToolEnvironmentToken } from "./project-tool-environment";
 import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
@@ -1037,7 +1038,9 @@ async function bootstrap(): Promise<void> {
         attachmentRegistry().release(attachmentId),
     },
     credentialBroker: {
-      resolve: (secretReference) => credentialVault!.resolve(secretReference),
+      resolve: (secretReference, signal) => secretReference.startsWith("secret:project-tool-env:")
+        ? Promise.resolve(projectToolEnvironmentToken(secretReference, process.env, signal))
+        : credentialVault!.resolve(secretReference),
       status: (secretReference) => credentialVault!.status(secretReference),
       clear: (secretReference) => credentialVault!.clear(secretReference),
       forget: (secretReference) => credentialVault!.forget(secretReference),

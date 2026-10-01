@@ -1,5 +1,5 @@
+import { startClaudeProjectToolStatus, claudeProjectToolOptions } from "./project-tool-launch";
 import { randomUUID } from "node:crypto";
-
 import {
   query as claudeQuery,
   type CanUseTool,
@@ -10,7 +10,6 @@ import {
   type SDKUserMessage,
   type TerminalReason,
 } from "@anthropic-ai/claude-agent-sdk";
-
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import {
@@ -52,7 +51,6 @@ import {
   normalizedClaudeFollowUp,
 } from "./claude-prompt";
 import {
-  CLAUDE_ISOLATED_SKILL_SETTINGS,
   claudePluginLoadedSelectedSkills,
   stageClaudeSkillPlugin,
 } from "./claude-skill-plugin";
@@ -71,7 +69,6 @@ import {
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
-
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
@@ -82,7 +79,6 @@ const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
 const CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS = 6_000;
-
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
   session: { resume: "native", identity: "session" },
@@ -100,7 +96,6 @@ export const CLAUDE_AGENT_SDK_CAPABILITIES = {
     modelMetadata: "agent-sdk",
   },
 } as const satisfies ClaudeAgentSdkHarnessCapabilities;
-
 export interface ClaudeAgentSdkHarnessOptions
   extends ClaudeOwnedQueryDependencies {
   createQuery?: ClaudeQueryFactory;
@@ -117,7 +112,6 @@ export interface ClaudeAgentSdkHarnessOptions
   terminalSubagentDrainTimeoutMs?: number;
   skillFilesystem?: ClaudeSkillFilesystemTestSeam;
 }
-
 export { readClaudeAgentSdkSkills } from "./claude-skill-query";
 export { claudeQuestions } from "./claude-questions";
 export {
@@ -125,7 +119,6 @@ export {
   readClaudeAgentSdkMetadata,
   readClaudeAgentSdkModels,
 } from "./claude-agent-sdk-metadata";
-
 function claudeStopTaskTimeout(value: number | undefined): number {
   if (
     typeof value !== "number"
@@ -139,7 +132,6 @@ function claudeStopTaskTimeout(value: number | undefined): number {
     Math.min(value, CLAUDE_STOP_TASK_TIMEOUT_MS),
   );
 }
-
 function claudeTerminalSubagentDrainTimeout(
   value: number | undefined,
 ): number {
@@ -197,6 +189,9 @@ function startClaudeRun(
   terminalSubagentDrainTimeoutMs: number,
   skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
 ): AgentHarnessRun {
+  const projectToolRun = options.input.toolRestriction === "none" || !options.providerNativeToolsAvailable ? undefined : options.projectTools;
+  const projectTools = claudeProjectToolOptions(projectToolRun, options.environment);
+  const toolStatusAbort = new AbortController();
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "claude",
@@ -515,7 +510,9 @@ function startClaudeRun(
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
           systemPrompt: { type: "preset", preset: "claude_code", snapshot: true },
-          managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
+          managedSettings: projectTools.settings,
+          mcpServers: projectTools.servers,
+          strictMcpConfig: true,
           ...(supportsFastMode
             ? {
                 settings: {
@@ -537,7 +534,7 @@ function startClaudeRun(
           ...(options.input.toolRestriction === "none" ? { mcpServers: {}, strictMcpConfig: true } : {}),
           ...(claudeHostTools
             ? {
-                mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
+                mcpServers: { ...projectTools.servers, [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
                 strictMcpConfig: true,
               }
             : {}),
@@ -633,6 +630,7 @@ function startClaudeRun(
           && messageSessionId === authoritativeSessionId;
         if (message.type === "system" && message.subtype === "init"
           && initAttestsRequestedSession) {
+          await startClaudeProjectToolStatus(query, projectToolRun, toolStatusAbort.signal);
           if (requestedFastModeState === "on"
             && record.fast_mode_state !== requestedFastModeState) {
             throw new Error(claudeFastModeFailure(record));
@@ -877,6 +875,7 @@ function startClaudeRun(
         ...(technicalDetail ? { technicalDetail } : {}),
       });
     } finally {
+      toolStatusAbort.abort();
       acceptingFollowUps = false;
       hostToolRuntime?.settle();
       try {
@@ -1002,6 +1001,7 @@ function startClaudeRun(
     cancelPending();
     if (force) {
       ownedProcess.requestTermination(true);
+      toolStatusAbort.abort();
       abortController.abort();
       try { query?.close(); } catch { /* Best-effort force close. */ }
       return;

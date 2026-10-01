@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { monotonicTurnClock } from "./turn-clock";
 import { releaseTurnAttachments } from "./turn-attachment-release";
-
 import {
   type AgentApprovalDecision,
   type AgentApprovalRequest,
@@ -86,7 +85,6 @@ import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
-
 export type {
   QueuedTurn,
   QueueTurnRequest,
@@ -826,6 +824,8 @@ export class TurnController {
       active.providerRunStarted = true;
       const result = this.providers.run(active.providerInput, {
         hostTools,
+        projectTools: active.providerInput.toolRestriction === "none" ? undefined
+          : this.hooks.projectToolsForTurn?.(active.conversation, active.turn.runId),
         onStarted: () => {
           if (active.runState.isTerminal() || this.closing) {
             requestProviderCancellation(this.providers, active.conversation.id);

@@ -10,6 +10,7 @@ export const RIGHT_PANEL_SURFACES = [
   "usage",
   "goal",
   "plan",
+  "tools",
 ] as const satisfies readonly WorkspacePanelTab[];
 
 export const RIGHT_PANEL_SURFACE_META: Record<
@@ -25,6 +26,7 @@ export const RIGHT_PANEL_SURFACE_META: Record<
   usage: { label: "Usage", shortcut: "U" },
   goal: { label: "Goal", shortcut: "G" },
   plan: { label: "Plan", shortcut: "P" },
+  tools: { label: "Tools", shortcut: "M" },
 };
 
 export const WORKSPACE_BOUND_SURFACES = [

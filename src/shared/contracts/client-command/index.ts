@@ -1,3 +1,4 @@
+import { projectToolCommandSchemas } from "./project-tools";
 import { z } from "zod";
 import { issueReportCommandSchemas } from "./issue-report";
 
@@ -12,6 +13,7 @@ import { promptPresetCommandSchema } from "./prompt-presets";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
+  ...projectToolCommandSchemas,
   ...issueReportCommandSchemas,
   ...agentCommandSchemas,
   ...configurationCommandSchemas,

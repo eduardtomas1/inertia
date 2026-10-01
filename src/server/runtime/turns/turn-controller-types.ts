@@ -1,3 +1,4 @@
+import type { ProjectToolRun } from "../../provider/project-tools";
 import type {
   ProviderCapabilityId,
 } from "../../provider/capability-manifest";
@@ -139,6 +140,7 @@ export interface TurnAttachmentReleaseHookInput {
 }
 
 export interface TurnControllerHooks {
+  projectToolsForTurn?(conversation: Conversation, runId: string): ProjectToolRun | undefined;
   reportIncident?(observation: import("../../../node/application-incidents").IncidentObservation): unknown;
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void | Promise<void>;

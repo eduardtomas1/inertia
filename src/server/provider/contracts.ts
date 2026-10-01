@@ -1,3 +1,4 @@
+import type { ProjectToolRun } from "./project-tools";
 import type { ZodType } from "zod";
 
 import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
@@ -400,6 +401,7 @@ export interface ProviderRunCallbacks {
   onSubagent?: (event: ProviderSubagentEvent) => void;
   /** Process-local, exact-turn authority for audited Inertia host tools. */
   hostTools?: ProviderHostToolBridge;
+  projectTools?: ProjectToolRun;
 }
 
 export interface ProviderHostToolDefinition {

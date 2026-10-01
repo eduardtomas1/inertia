@@ -55,6 +55,30 @@ See [supported attachment formats and provider limits](docs/ATTACHMENTS.md) for 
 
 ![Zooming into an attached interface screenshot](docs/screenshots/inertia-image-preview.png)
 
+## Project tools
+
+Open **Tools** in the workspace panel to define a project MCP connection once
+and enable it for Claude, Codex, or both. The first release supports Streamable
+HTTP servers over HTTPS (or HTTP on loopback), with no authentication or a bearer
+token. For a token, enter an environment variable name beginning with
+`INERTIA_MCP_`, such as `INERTIA_MCP_DOCS_TOKEN`. Set its value in the environment
+that launches Inertia and restart the app. Token values stay in privileged memory;
+only names and connection settings are saved.
+
+**Configured** means saved. **Available in this chat** means the running native
+provider confirmed both its connection and tool names. The open panel refreshes
+that evidence; completed runs return to Configured. **Needs authentication**
+identifies missing credentials or a server authentication requirement. **Needs
+restart** means a running agent still has the previous configuration: stop it or
+let it finish, then send another message. Removing a connection is blocked while
+any chat in the project has it loaded.
+
+Claude's native Agent SDK and Codex's app server are supported. Older providers
+that cannot report session-specific status show an unavailable result instead of
+assuming success. Local command servers, legacy SSE, OAuth sign-in, other providers,
+and importing terminal configuration are not supported yet. Existing provider
+approval behavior still applies to tool calls. Only connect servers you trust.
+
 ## Local by default
 
 History and preferences stay on your computer. Providers retain their own authentication; custom backend credentials use the operating system credential vault. Provider capabilities remain explicit, including approvals, cancellation, context, and usage.

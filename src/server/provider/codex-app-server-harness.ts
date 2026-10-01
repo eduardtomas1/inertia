@@ -164,6 +164,7 @@ function startCodexRun(
       goalContinuationExpected:
         options.input.goalContinuationExpected === true,
       ...(options.hostTools ? { hostTools: options.hostTools } : {}),
+      ...(options.input.toolRestriction !== "none" && options.providerNativeToolsAvailable && options.projectTools ? { projectTools: options.projectTools } : {}),
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
       onText: emitter.text,

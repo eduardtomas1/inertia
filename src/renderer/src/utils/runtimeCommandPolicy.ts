@@ -73,6 +73,9 @@ const duoCancellation = {
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "project.tools.load": shortRetrySafe,
+  "project.tools.save": shortMutation,
+  "project.tools.remove": shortMutation,
   "message.queue.get": shortRetrySafe,
   "message.queue.enqueue": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "message.queue.remove": shortMutation,

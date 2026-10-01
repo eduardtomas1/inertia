@@ -10,7 +10,7 @@ The empty profile, command palette and new-chat selector expose “Start without
 
 ## Visual evidence
 
-The four PNGs are unedited Electron captures from `tests/e2e/scratch-appearance.spec.ts`, using an existing-chat fixture and the actual renderer, runtime and persisted folder records. Two scenarios pass on Linux under Xvfb, each starting with persisted appearance settings and asserting the applied theme before capture. They check section visibility, project-filter exclusion, selector deduplication and narrow-window overflow. These screenshots do not claim provider execution was verified on this host.
+The PNGs are unedited Electron captures from `tests/e2e/scratch-appearance.spec.ts` on macOS (arm64) at device scale 2, using synthetic chats seeded through the actual runtime store and persisted folder records. [README.md](README.md) lists every surface and state, the before and after captures of the presentation polish, and what the spec asserts. These screenshots do not claim provider execution was verified on this host.
 
 ## Validation
 

@@ -128,5 +128,38 @@
     "coreJavaScript": 2230182,
     "deferredPdfJavaScript": 437530,
     "deferredPdfWorker": 1265413
+  },
+  "uiPolish": {
+    "baseline": "faf4d53c",
+    "platform": "macOS arm64, Node 22.23.2",
+    "method": "npm run build:bundle on the branch head before and after the presentation polish; closures measured with scripts/check-renderer-bundle.mjs. No ceiling changed.",
+    "changedMeasurements": {
+      "coreJavaScript": {
+        "beforeBytes": 2230222,
+        "afterBytes": 2229862,
+        "deltaBytes": -360
+      },
+      "mainWorkbenchFirstLoadJavaScript": {
+        "beforeBytes": 856631,
+        "afterBytes": 856633,
+        "deltaBytes": 2
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "beforeBytes": 661956,
+        "afterBytes": 662001,
+        "deltaBytes": 45
+      },
+      "filesFirstLoadJavaScript": {
+        "beforeBytes": 106403,
+        "afterBytes": 106138,
+        "deltaBytes": -265
+      },
+      "transcriptJavaScript": {
+        "beforeBytes": 552627,
+        "afterBytes": 552357,
+        "deltaBytes": -270
+      }
+    },
+    "unchanged": "Every other measured closure, including entryCss (354782 bytes), is byte-identical."
   }
 }

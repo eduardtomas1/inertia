@@ -145,3 +145,14 @@ it("stops retrying a visible tile after three stalled reads until it becomes vis
   act(() => { setVisible(view.container, 0, false); setVisible(view.container, 0, true); });
   expect(created).toHaveLength(4);
 });
+
+it("admits waiting tiles in document order whatever order their visibility callbacks arrive in", () => {
+  const view = render(<SentMessageAttachmentList attachments={attachments} />);
+  act(() => { setVisible(view.container, 7, true); setVisible(view.container, 6, true); });
+  act(() => { for (let index = 5; index >= 0; index -= 1) setVisible(view.container, index, true); });
+  expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([]);
+  fireEvent.load(created[0]!);
+  expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([0]);
+  fireEvent.load(created[1]!);
+  expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([0, 1]);
+});

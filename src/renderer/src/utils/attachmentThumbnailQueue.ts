@@ -16,8 +16,11 @@ const loading = new Set<HTMLImageElement>();
 
 function pump(): void {
   while (loading.size < 2 && pending.size) {
-    const next = [...pending].find(({ element }) => element.parentElement === document.activeElement)
-      ?? pending.values().next().value!;
+    const waiting = [...pending];
+    const next = waiting.find(({ element }) => element.parentElement === document.activeElement)
+      ?? waiting.reduce((first, entry) => (
+        first.element.compareDocumentPosition(entry.element) & Node.DOCUMENT_POSITION_PRECEDING ? entry : first
+      ));
     pending.delete(next);
     next.attempts += 1;
     const image = next.image = new Image();

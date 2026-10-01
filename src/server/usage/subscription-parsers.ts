@@ -33,6 +33,9 @@ export function kimiSubscriptionWindows(raw: unknown, receivedAt: number): Usage
     ...(value.limits ?? []).map((entry, index) => ({ id: `kimi:window_${index}`, label: `Limit ${index + 1}`, detail: entry.detail,
       minutes: entry.window ? entry.window.duration * ({ MINUTE: 1, HOUR: 60, DAY: 1440, SECOND: 1 / 60 }[entry.window.timeUnit] ?? 0) || null : null })) ];
   return entries.map(({ id, label, detail, minutes }) => {
+    if (detail.remaining !== undefined && detail.remaining > detail.limit) {
+      throw new Error("The provider reported an invalid remaining quota.");
+    }
     const used = detail.used ?? (detail.remaining !== undefined ? detail.limit - detail.remaining : null);
     const relative = detail.reset_in ?? detail.resetIn ?? detail.ttl;
     const reset = iso(detail.reset_at ?? detail.resetAt ?? detail.reset_time ?? detail.resetTime)

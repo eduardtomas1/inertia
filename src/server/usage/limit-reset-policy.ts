@@ -11,7 +11,7 @@ export function sameReportedReset(left: string, right: string): boolean {
 }
 export const MAX_RESET_WAIT_MS = 31 * 86_400_000;
 export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentTurn | null): boolean {
-  return conversation.archivedAt === null && turn?.status === "failed"
+  return conversation.archivedAt === null && conversation.settledAt === null && turn?.status === "failed"
     && conversation.providerId === turn.providerId
     && conversation.modelSelection.backendProfileId === providerNativeBackendProfile(conversation.providerId).id
     && conversation.modelSelection.backendProfileId === turn.modelSelection.backendProfileId

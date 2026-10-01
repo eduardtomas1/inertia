@@ -14,6 +14,7 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
   const requestRef = useRef(request);
   requestRef.current = request;
   const active = summary?.status === "pending" || summary?.status === "running";
@@ -33,7 +34,7 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
     };
     void read();
     return () => { disposed = true; if (timer) clearTimeout(timer); };
-  }, [conversation.id, conversation.worktreeSetup]);
+  }, [conversation.id, conversation.worktreeSetup, refresh]);
 
   async function act(operation: Operation): Promise<void> {
     setBusy(true);
@@ -44,7 +45,12 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
       setSummary(event.result.summary);
       setOutput(event.result.output);
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Setup could not be updated."); }
-    finally { setBusy(false); }
+    finally {
+      setBusy(false);
+      // Reused chats inherit setup from its owner, so their own snapshot field
+      // does not change when an action starts a new attempt. Resume polling here.
+      setRefresh((current) => current + 1);
+    }
   }
 
   if (!summary) return null;

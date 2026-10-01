@@ -34,11 +34,7 @@ import {
   sanitizeProviderFailureSummary,
   stripTerminalControlSequences,
 } from "./activity-detail";
-import {
-  CappedProviderBuffer,
-  ProviderRunEventBudget,
-  PROVIDER_RUN_BUDGET_BURSTS,
-} from "./io";
+import { CappedProviderBuffer } from "./io";
 import {
   createOwnedOpenCodeClient,
   ownedOpenCodeCredentials,
@@ -53,6 +49,10 @@ import {
   waitForOpenCodeHealth,
   withOpenCodeRequestDeadline,
 } from "./opencode-owned-server";
+import {
+  MAX_OPENCODE_EVENT_BYTES,
+  pumpOpenCodeEvents,
+} from "./opencode-event-pump";
 import {
   boundedOpenCodeEventFetch,
   OPENCODE_OVERSIZED_EVENT_MESSAGE,
@@ -74,7 +74,6 @@ import {
   type OpenCodeInteractionReplies,
 } from "./opencode-interaction-replies";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
-import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
 import { openCodeRequestRejected, openCodeSessionUnavailable } from "./session-unavailable";
 import { openCodeModels } from "./opencode-sdk-metadata";
 import {
@@ -110,10 +109,7 @@ export {
   readOpenCodeSdkModels,
   type OpenCodeSdkMetadataOptions,
 } from "./opencode-sdk-metadata";
-const MAX_EVENT_BYTES = 1024 * 1024;
-const MAX_EVENT_FRAME_BYTES = 2 * MAX_EVENT_BYTES;
-const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
-const MAX_RUN_EVENTS = 8_192;
+const MAX_EVENT_FRAME_BYTES = 2 * MAX_OPENCODE_EVENT_BYTES;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
@@ -1136,66 +1132,6 @@ function completesRequestedOpenCodeCompaction(
     && proof.startedAt !== null
     && timestamp >= proof.startedAt
     && messageId === proof.messageId;
-}
-
-async function pumpOpenCodeEvents(
-  stream: AsyncGenerator<Event>,
-  sessionId: string,
-  handlers: {
-    onDescendantLive: () => void;
-    onDescendantActivity: () => void;
-    onDescendantInteraction: (event: Event) => void | Promise<void>;
-    onEvent: (
-      event: Event,
-      hasLiveDescendants: boolean,
-      novelRootActivity: boolean,
-    ) => void | Promise<void>;
-    isDone: (
-      event: Event,
-      hasLiveDescendants: boolean,
-    ) => boolean | Promise<boolean>;
-  },
-): Promise<void> {
-  const maxRunEvents = MAX_RUN_EVENTS * PROVIDER_RUN_BUDGET_BURSTS;
-  const sessionOwnership = new OpenCodeSessionOwnership(
-    sessionId,
-    maxRunEvents,
-  );
-  const eventBudget = new ProviderRunEventBudget(
-    "OpenCode",
-    MAX_EVENT_BYTES,
-    MAX_RUN_EVENTS,
-    MAX_RUN_EVENT_BYTES,
-    { maxRunEvents },
-  );
-  for await (const event of stream) {
-    eventBudget.observe(event);
-    const {
-      scope,
-      active,
-      lifecycleProgress,
-      novelRootActivity,
-    } = sessionOwnership.observe(event);
-    if (scope === "unrelated") continue;
-    if (scope === "descendant") {
-      if (sessionOwnership.hasLiveDescendants()) handlers.onDescendantLive();
-      if (active || lifecycleProgress) handlers.onDescendantActivity();
-      if (active && openCodeEventRequiresPromptAdmission(event)) {
-        await handlers.onDescendantInteraction(event);
-      }
-      continue;
-    }
-    await handlers.onEvent(
-      event,
-      sessionOwnership.hasLiveDescendants(),
-      novelRootActivity === true,
-    );
-    if (await handlers.isDone(
-      event,
-      sessionOwnership.hasLiveDescendants(),
-    )) return;
-  }
-  throw new Error("OpenCode closed its event stream before the session completed.");
 }
 
 function openCodeRunDeadlines(

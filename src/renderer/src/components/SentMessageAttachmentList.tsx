@@ -25,11 +25,9 @@ import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
 function SentImageThumbnail({
   attachment,
-  visibleOnly,
   onUnavailable,
 }: {
   attachment: AttachmentPreviewSource;
-  visibleOnly?: boolean;
   onUnavailable?: (id: string) => void;
 }): React.JSX.Element {
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(
@@ -37,13 +35,13 @@ function SentImageThumbnail({
   );
   const [visible, setVisible] = useState(false);
   const observe = useCallback((node: HTMLSpanElement | null) => {
-    if (!node || !visibleOnly) return;
-    // The viewport observer also clips against the gallery's scrollport.
+    if (!node) return;
+    // The viewport observer also clips against nested chat/gallery scrollports.
     // Keep observing exits: native lazy loading retains every visited image.
     const observer = new IntersectionObserver(([entry]) => setVisible(entry!.isIntersecting));
     observer.observe(node);
     return () => observer.disconnect();
-  }, [visibleOnly]);
+  }, []);
   const PlaceholderIcon = state === "unavailable" ? ImageOff : ImageIcon;
   return (
     <span
@@ -53,7 +51,7 @@ function SentImageThumbnail({
       aria-hidden="true"
     >
       {state !== "ready" && <PlaceholderIcon size={18} />}
-      {(!visibleOnly || visible) && (
+      {visible && (
         <img
           src={attachmentPreviewUrl(attachment)}
           alt=""
@@ -71,11 +69,9 @@ function SentImageThumbnail({
 export function SentMessageAttachmentList({
   attachments,
   label = "Message attachments",
-  deferImages,
 }: {
   attachments: readonly AttachmentPreviewSource[];
   label?: string;
-  deferImages?: boolean;
 }): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
     useState<AttachmentPreviewSource | null>(null);
@@ -115,7 +111,6 @@ export function SentMessageAttachmentList({
                 ? (
                     <SentImageThumbnail
                       attachment={attachment}
-                      visibleOnly={deferImages}
                       onUnavailable={markUnavailable}
                     />
                   )

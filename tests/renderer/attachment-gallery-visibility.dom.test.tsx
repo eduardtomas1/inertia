@@ -5,7 +5,7 @@ import { SentMessageAttachmentList } from "../../src/renderer/src/components/Sen
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("loads only visible gallery images and releases images without removing keyboard targets", () => {
+it("loads only visible sent images by default and releases images without removing keyboard targets", () => {
   const observations: Array<{ change: (visible: boolean) => void; disconnect: () => void }> = [];
   vi.stubGlobal("IntersectionObserver", class {
     disconnect = vi.fn();
@@ -22,7 +22,7 @@ it("loads only visible gallery images and releases images without removing keybo
   const attachments = Array.from({ length: 60 }, (_, index) => ({
     id: `image-${index}`, name: `image-${index}.png`, mimeType: "image/png" as const, size: 1024,
   }));
-  const view = render(<SentMessageAttachmentList attachments={attachments} deferImages />);
+  const view = render(<SentMessageAttachmentList attachments={attachments} />);
   expect(screen.getAllByRole("button")).toHaveLength(60);
   expect(view.container.querySelectorAll("img")).toHaveLength(0);
   expect(observations).toHaveLength(60);

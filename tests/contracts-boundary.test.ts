@@ -144,6 +144,8 @@ describe("shared contracts boundary", () => {
       "prompt-preset.duplicate",
       "prompt-preset.delete",
       "prompt-preset.reorder",
+      "conversation.notes.get",
+      "conversation.notes.update",
       "git.refresh",
       "git.diff",
       "git.workspace.refresh",

@@ -1,4 +1,4 @@
-import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, CircleHelp, FolderPlus, LayoutGrid, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -28,6 +28,7 @@ type CommandPaletteProps = {
   onNewThreadIn: (project: Project) => void;
   onAddProject: () => void;
   onOpenSettings: () => void;
+  onOpenTaskBoard?: () => void;
 };
 
 type PaletteItem = {
@@ -75,7 +76,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onAddProject, onOpenSettings, onOpenTaskBoard }: CommandPaletteProps): React.JSX.Element | null {
   const [view, setView] = useState(initialView);
   const choosingProject = view === "new-chat";
   const [query, setQuery] = useState("");
@@ -107,6 +108,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={15} />, view: "new-chat" as const }]
         : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
+      ...(onOpenTaskBoard ? [{ id: "action:task-board", group: "Actions" as const, label: "Open task board", detail: "Tasks and chat notes", icon: <LayoutGrid size={15} />, run: onOpenTaskBoard }] : []),
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={15} />, run: openHelpGuide },
     ];
@@ -114,7 +116,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
+  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onOpenSettings, onOpenTaskBoard, onSelectConversation, onSelectProject, projects]);
   const messageItems = useMemo<PaletteItem[]>(() => {
     if (!onSelectMessage) return [];
     return (search.result?.hits ?? []).flatMap((hit) => {

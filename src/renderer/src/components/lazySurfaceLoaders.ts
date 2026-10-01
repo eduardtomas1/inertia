@@ -24,6 +24,8 @@ export const loadSettingsView = createSurfaceLoader(async () => ({
 }));
 export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface"));
 export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
+export const loadTaskBoard = createSurfaceLoader(() => import("./TaskBoard"));
+export const loadConversationNotes = createSurfaceLoader(() => import("./ConversationNotes"));
 export const loadWorkspaceTerminal = createSurfaceLoader(() => import("./WorkspaceTerminal"));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
@@ -60,6 +62,8 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
     void loadGoalPanel();
   } else if (tab === "plan") {
     void loadPlanPanel();
+  } else if (tab === "notes") {
+    void loadConversationNotes();
   } else if (tab === "preview") {
     void loadPreviewPanel();
   }

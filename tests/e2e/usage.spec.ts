@@ -255,6 +255,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   const usageDestination = page.getByRole("button", { name: "Usage", exact: true });
   await expect(page.locator(".sidebar-footer .sidebar-destination")).toHaveText([
     "Daily work",
+    "Task board",
     "Usage",
     "Settings",
     "Help",

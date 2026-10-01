@@ -64,6 +64,7 @@ import {
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
   loadUsageView,
+  loadTaskBoard,
 } from "./lazySurfaceLoaders";
 
 const RootCommitDialog = lazy(async () => ({
@@ -87,6 +88,9 @@ const Sidebar = lazy(async () => ({
 }));
 const UsageView = lazy(async () => ({
   default: (await loadUsageView()).UsageView,
+}));
+const TaskBoard = lazy(async () => ({
+  default: (await loadTaskBoard()).TaskBoard,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -774,7 +778,14 @@ export const AppLayout = memo(function AppLayout({
               frameHasInlinePanel ? " has-tools" : ""
             }${frameHasSheetPanel ? " has-tools-sheet" : ""}`}
           >
-          {view === "usage" ? (
+          {view === "board" ? (
+              <Suspense fallback={<LoadingMark label="Loading tasks" />}>
+                <TaskBoard snapshot={connection.snapshot} online={connection.status === "online"}
+                  projectId={projectScopeId} onProjectChange={setProjectScopeId}
+                  onOpen={(chat) => { actions.selectConversation(chat); setView("workspace"); }}
+                  run={actions.run} sendCommand={connection.sendCommand} />
+              </Suspense>
+            ) : view === "usage" ? (
               <Suspense fallback={(
                 <div className="workspace-tool-loading usage-surface-loading">
                   <LoadingMark label="Loading usage" />
@@ -897,6 +908,7 @@ export const AppLayout = memo(function AppLayout({
         createConversationIn={(project) => actions.createConversation(project)}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}
+        openTaskBoard={() => setView("board")}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}

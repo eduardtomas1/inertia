@@ -448,6 +448,9 @@ export function createWorkspaceSceneModel({
     layout.openSurface(surface);
   };
   const unavailableSurfaces: Partial<Record<WorkspacePanelTab, string>> = {};
+  if (!persistedConversation) {
+    unavailableSurfaces.notes = "Create or open a saved chat to keep notes.";
+  }
   if (workspaceToolsUnavailable) {
     for (const surface of WORKSPACE_BOUND_SURFACES) {
       unavailableSurfaces[surface] =
@@ -863,6 +866,12 @@ export function createWorkspaceSceneModel({
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
       attachments: { attachments: environmentSummary.attachments },
+      notes: persistedConversation ? {
+        conversationId: persistedConversation.id,
+        title: persistedConversation.title,
+        online: connection.status === "online",
+        sendCommand: connection.sendCommand,
+      } : undefined,
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,

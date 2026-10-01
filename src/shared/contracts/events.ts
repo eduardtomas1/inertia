@@ -1,5 +1,6 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { MessageQueueResult } from "../queued-messages";
+import type { ConversationNotesResult } from "../conversation-notes";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -228,7 +229,8 @@ export type ServerEvent =
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
-        | MessageSearchResult;
+        | MessageSearchResult
+        | ConversationNotesResult;
     }
   | RuntimeMutationEvent
   | ({

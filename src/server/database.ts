@@ -36,6 +36,7 @@ import { BackendProfileRepository } from "./persistence/backend-profile-reposito
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
+import { ConversationNotesRepository } from "./persistence/conversation-notes-repository";
 import { ConversationContextPacketRepository } from "./persistence/conversation-context-packet-repository";
 import { ConversationWorktreeRepository } from "./persistence/conversation-worktree-repository";
 import {
@@ -107,7 +108,6 @@ import type {
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 export { RecordNotFoundError } from "./persistence/errors";
 export type * from "./database-public-types";
-
 export class RuntimeStore {
   private readonly database: Database.Database;
   private readonly backupManager: DatabaseBackupManager;
@@ -116,6 +116,7 @@ export class RuntimeStore {
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
   private readonly conversationRepository: ConversationRepository;
+  readonly conversationNotes: ConversationNotesRepository;
   readonly contextPackets: ConversationContextPacketRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
@@ -186,6 +187,7 @@ export class RuntimeStore {
     });
     this.usageLimits = new UsageLimitsRepository(this.database);
     this.settingsRepository = new SettingsRepository({ database: this.database });
+    this.conversationNotes = new ConversationNotesRepository(this.database, (id) => this.requireConversation(id));
     this.conversationRepository = new ConversationRepository({
       database: this.database,
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -292,13 +294,11 @@ export class RuntimeStore {
       throw error;
     }
   }
-
   close(): void {
     this.backupManager.stop();
     this.conversationWork.clear();
     if (this.database.open) this.database.close();
   }
-
   startBackups(): void {
     this.backupManager.start();
   }

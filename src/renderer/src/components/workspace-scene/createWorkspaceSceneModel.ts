@@ -48,8 +48,11 @@ import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
-  isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
+import {
+  backgroundCommandRuns,
+  runningBackgroundTaskCount,
+} from "../../utils/backgroundTaskRuns";
 import { buildWorkspaceSurfaceSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
@@ -536,7 +539,15 @@ export function createWorkspaceSceneModel({
   const canGuideParent = (trace: SubagentTrace): boolean =>
     Boolean(conversationIsRunning
       && canFollowUpSubagentTrace(trace, projection.turns));
-  const liveAgentCount = projection.subagents.filter(isLiveSubagentTrace).length;
+  const backgroundCommands = backgroundCommandRuns(
+    connection.snapshot?.runs ?? [],
+    persistedConversation?.id ?? null,
+    projection.turns,
+  );
+  const runningBackgroundTasks = runningBackgroundTaskCount(
+    projection.subagents,
+    backgroundCommands,
+  );
   const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
     try {
       await actions.stopSubagent(trace);
@@ -842,7 +853,7 @@ export function createWorkspaceSceneModel({
         unavailable: unavailableSurfaces,
         presentation: stackedTools ? "stacked" : sheetPanel ? "sheet" : "inline",
         visible: toolsVisible,
-        liveAgentCount,
+        runningBackgroundTaskCount: runningBackgroundTasks,
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: currentWorkflow?.goals.some(({ status }) =>
@@ -867,6 +878,12 @@ export function createWorkspaceSceneModel({
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,
         turns: projection.turns,
+        commands: backgroundCommands,
+        harnessId: projection.turns.at(-1)?.harnessId
+          ?? conversation?.modelSelection.harnessId
+          ?? null,
+        onStopCommand: activityActions.stopWorkspaceRun,
+        onDismissCommand: activityActions.dismissActivity,
         canFollowUpSubagent: canGuideParent,
         onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {

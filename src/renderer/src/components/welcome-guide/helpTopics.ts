@@ -120,7 +120,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Plan, goal and subagents",
-        detail: "The Plan and Goal surfaces show what the provider reports. Delegated agents appear in the transcript and in the Agents surface.",
+        detail: "The Plan and Goal surfaces show what the provider reports. Delegated agents appear in the transcript and in the Background tasks surface.",
       },
       {
         name: "Daily work",
@@ -143,7 +143,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Surfaces",
-        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Agents, Usage, Goal or Plan. Each chat remembers its own surfaces.",
+        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
       },
       {
         name: "Terminal",

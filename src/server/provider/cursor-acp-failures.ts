@@ -6,6 +6,10 @@ import {
   sanitizeProviderFailureSummary,
 } from "./activity-detail";
 import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  describePosixCleanupDiagnostic,
+  type PosixCleanupDiagnostic,
+} from "../posix-cleanup-diagnostics";
 import { acpResumeStep, acpSessionUnavailable } from "./session-unavailable";
 
 export function cursorCleanupResult(
@@ -13,6 +17,7 @@ export function cursorCleanupResult(
   child: ChildProcessWithoutNullStreams,
   workspaceRoot: string,
   subject: "process-tree" | "host-tools",
+  cleanupDiagnostic: PosixCleanupDiagnostic | null = null,
 ): ProviderRunResult {
   const error = subject === "process-tree"
     ? "Cursor ACP process tree could not be confirmed stopped."
@@ -20,6 +25,13 @@ export function cursorCleanupResult(
   const priorFailure = outcome.failure
     ? cursorPriorFailureDetail(outcome.failure, workspaceRoot)
     : undefined;
+  const technicalDetail = cleanupDiagnostic
+    ? sanitizeProviderActivityDetail(
+        [describePosixCleanupDiagnostic(cleanupDiagnostic), priorFailure]
+          .filter(Boolean).join("\n"),
+        { workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
+      )
+    : priorFailure;
   return {
     ...outcome,
     status: "failed",
@@ -31,7 +43,7 @@ export function cursorCleanupResult(
       message: error,
       phase: "cleanup",
       terminalEvent: `${subject}/cleanup`,
-      ...(priorFailure ? { technicalDetail: priorFailure } : {}),
+      ...(technicalDetail ? { technicalDetail } : {}),
     },
     cleanupConfirmed: false,
   };

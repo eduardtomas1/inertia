@@ -263,7 +263,7 @@ export interface WorkspaceSceneActions {
   followUpSubagent: (trace: SubagentTrace) => void;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { passive?: boolean; reportError?: boolean }) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
 }
@@ -862,6 +862,8 @@ export function createWorkspaceSceneModel({
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
+      projectTools: { projectId: project.id, projectName: project.name,
+        conversationId: persistedConversation?.id, connected: connection.status === "online", run: actions.run },
       attachments: { attachments: environmentSummary.attachments },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,

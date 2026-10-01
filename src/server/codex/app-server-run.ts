@@ -1,3 +1,5 @@
+import { codexProjectToolConfig } from "../provider/project-tool-launch";
+import { observeCodexProjectTool, projectToolsUnverified } from "../provider/project-tools";
 import { spawn } from "node:child_process";
 import { recordWindowsCleanupFailure } from "../windows-cleanup-diagnostics";
 import {
@@ -861,6 +863,7 @@ interface OpenCodexTurnOptions {
     params: JsonObject,
     onResponseFrame?: (result?: JsonObject) => void,
     recordFailure?: boolean,
+    timeoutMs?: number,
   ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
@@ -948,6 +951,7 @@ export async function openCodexTurn({
     ...(modelProvider ? {
       modelProvider: modelProvider.providerId,
       config: {
+        ...codexProjectToolConfig(options.projectTools),
         [`model_providers.${modelProvider.providerId}`]: {
           name: modelProvider.displayName,
           base_url: modelProvider.baseUrl,
@@ -960,6 +964,9 @@ export async function openCodexTurn({
       },
     } : {}),
   };
+  if (!modelProvider && options.projectTools?.connections.length) {
+    Object.assign(threadConfig, { config: codexProjectToolConfig(options.projectTools) });
+  }
   let opened: JsonObject;
   if (options.sessionId) {
     try {
@@ -1018,6 +1025,22 @@ export async function openCodexTurn({
   if (isCancelRequested()) {
     finish("cancelled", null, null);
     return;
+  }
+
+  if (options.projectTools?.connections.length) {
+    const tools = options.projectTools;
+    const refresh = async () => {
+      if (isCancelRequested() || isSettled()) return;
+      try {
+        const status = await request("mcpServerStatus/list", { threadId: openedThreadId, limit: 100, detail: "toolsAndAuthOnly" }, undefined, false, 5_000);
+        if (!isCancelRequested() && !isSettled()) for (const connection of tools.connections) observeCodexProjectTool(tools, connection, status);
+      } catch {
+        if (!isCancelRequested() && !isSettled()) projectToolsUnverified(tools, "Codex could not report this chat's tool status. Update Codex or retry on the next message.");
+      }
+    };
+    tools.setRefresh?.(refresh);
+    await refresh();
+    if (isCancelRequested()) { finish("cancelled", null, null); return; }
   }
 
   if (options.goalStart) {

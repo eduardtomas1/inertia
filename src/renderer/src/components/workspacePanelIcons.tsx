@@ -1,5 +1,6 @@
 import {
   Bot,
+  Cable,
   Paperclip,
   TerminalSquare,
   Files,
@@ -20,5 +21,6 @@ export const surfaceIcons: Record<WorkspacePanelTab, React.JSX.Element> = {
   agents: <Bot size={14} aria-hidden="true" />,
   usage: <Gauge size={14} aria-hidden="true" />,
   goal: <Flag size={14} aria-hidden="true" />,
+  tools: <Cable size={14} aria-hidden="true" />,
   plan: <ListChecks size={14} aria-hidden="true" />,
 };

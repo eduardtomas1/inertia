@@ -7,4 +7,5 @@ export type WorkspacePanelTab =
   | "agents"
   | "usage"
   | "goal"
-  | "plan";
+  | "plan"
+  | "tools";

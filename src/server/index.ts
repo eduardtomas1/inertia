@@ -1,3 +1,5 @@
+import { ProjectToolsController } from "./runtime/project-tools-controller";
+import { createProjectToolsCommandHandler } from "./runtime/commands/project-tools-commands";
 import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
@@ -595,6 +597,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     })),
     track: trackRuntimeOperation,
   };
+  const projectTools = new ProjectToolsController(store, options.backendCredentials);
   let queuedMessages: ReturnType<typeof createQueuedMessageRuntime> | undefined;
   turns = new TurnController(
     store,
@@ -609,6 +612,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
       harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
+      projectToolsForTurn: (conversation, runId) => projectTools.begin(conversation, runId),
       hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
@@ -634,6 +638,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
       onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+        (settled) => projectTools.finish(settled.conversationId, settled.runId),
         (settled) => queuedMessages?.onTurnSettled(settled),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
@@ -681,6 +686,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       queuedMessages.handler,
+      createProjectToolsCommandHandler(store, projectTools, send),
       usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({

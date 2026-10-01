@@ -682,6 +682,11 @@
       "version": 85,
       "name": "CustomAppearanceColors",
       "digest": "c7e987dedea9feb72677ef2498ac2407e5b9b9287b02a0eb2496523f244a60bb"
+    },
+    {
+      "version": 86,
+      "name": "PersistProjectToolConnections",
+      "digest": "2ca530eee9dc4c8715e7aa8d7047e709aa3c2ad9e01be4a92d4f97e2fa8a5d27"
     }
   ]
 }

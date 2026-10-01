@@ -1,6 +1,6 @@
 import { CheckpointError } from "./checkpoints";
 import { RecordNotFoundError } from "./database";
-import { ConversationHistoryTooLargeError, ConversationProviderChangeError } from "./persistence/errors";
+import { ProjectToolRepositoryError, ConversationHistoryTooLargeError, ConversationProviderChangeError } from "./persistence/errors";
 import { GitError } from "./git";
 import { ConversationWorktreeRemovalError } from "./persistence/conversation-worktree-repository";
 import { ProviderRuntimeError } from "./providers";
@@ -35,6 +35,7 @@ export function publicRuntimeError(error: unknown): string {
   }
   if (
     error instanceof RuntimeRequestError
+    || error instanceof ProjectToolRepositoryError
     || error instanceof RecordNotFoundError
     || error instanceof ConversationHistoryTooLargeError
     || error instanceof ConversationProviderChangeError

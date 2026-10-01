@@ -1,3 +1,4 @@
+import type { ProjectToolsView } from "../project-tools";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { MessageQueueResult } from "../queued-messages";
 import type {
@@ -218,6 +219,7 @@ export type ServerEvent =
         | { kind: "usage.reset.outcome"; outcome: UsageResetOutcome }
         | { kind: "usage.dashboard"; dashboard: UsageDashboard }
         | { kind: "daily.work"; dashboard: DailyWorkDashboard }
+        | { kind: "project.tools"; tools: ProjectToolsView }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }
         | {
             kind: "agent.skills";

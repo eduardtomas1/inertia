@@ -1,3 +1,4 @@
+import type { ProjectToolRun } from "../provider/project-tools";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ProviderRateLimit } from "../../shared/contracts";
 import type { ProviderSkillInput } from "../../shared/contracts";
@@ -51,6 +52,7 @@ export interface CodexAppServerOptions {
   access: "supervised" | "auto-edit" | "full";
   /** Exact-run Inertia tools; advertised only on new provider threads. */
   hostTools?: ProviderHostToolBridge;
+  projectTools?: ProjectToolRun;
   /** Test seam that may shorten, but never extend, host-tool approval expiry. */
   hostToolApprovalTimeoutMs?: number;
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */

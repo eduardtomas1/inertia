@@ -1,3 +1,4 @@
+import { ProjectToolRepository } from "./persistence/project-tool-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
@@ -107,8 +108,8 @@ import type {
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 export { RecordNotFoundError } from "./persistence/errors";
 export type * from "./database-public-types";
-
 export class RuntimeStore {
+  readonly projectTools: ProjectToolRepository;
   private readonly database: Database.Database;
   private readonly backupManager: DatabaseBackupManager;
   private readonly recoveryReport: DatabaseRecoveryReport;
@@ -154,6 +155,7 @@ export class RuntimeStore {
     );
     this.recoveryReport = recoverDatabaseOnStartup(databasePath);
     this.database = new Database(databasePath);
+    this.projectTools = new ProjectToolRepository(this.database);
     this.backupManager = new DatabaseBackupManager(
       this.database,
       databasePath,
@@ -292,21 +294,17 @@ export class RuntimeStore {
       throw error;
     }
   }
-
   close(): void {
     this.backupManager.stop();
     this.conversationWork.clear();
     if (this.database.open) this.database.close();
   }
-
   startBackups(): void {
     this.backupManager.start();
   }
-
   createInitialBackup(options: { quietGraceMs?: number } = {}): Promise<DatabaseBackupResult | null> {
     return this.backupManager.requestInitialBackup(options.quietGraceMs ?? 0);
   }
-
   createBackup(): Promise<DatabaseBackupResult> {
     return this.backupManager.createBackup();
   }

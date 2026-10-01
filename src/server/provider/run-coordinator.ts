@@ -1,3 +1,5 @@
+import { projectToolsUnverified } from "./project-tools";
+import { prepareProjectToolLaunch } from "./project-tool-launch";
 import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
@@ -486,6 +488,7 @@ export class ProviderRunCoordinator {
     };
     const startHarness = (
       resolvedLaunchOptions: ProviderBackendLaunchOptions,
+      projectToolLaunch?: Awaited<ReturnType<typeof prepareProjectToolLaunch>>,
     ): Promise<ProviderRunResult> => {
       launchOptions = resolvedLaunchOptions;
       if (active.cancelRequested || active.settled) {
@@ -524,19 +527,21 @@ export class ProviderRunCoordinator {
               ...input,
               model: launchOptions.modelArgument ?? undefined,
             };
+        const providerNativeToolsAvailable = input.toolRestriction !== "none"
+          && this.options.capabilityAvailable(input, "provider-native-tools");
+        if (!providerNativeToolsAvailable && callbacks.projectTools) {
+          projectToolsUnverified(callbacks.projectTools, "This provider route does not support native project tools.");
+        }
         active.harnessStartInvoked = true;
         harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
           executable,
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.
-          environment: { ...launchOptions.environment },
+          ...(projectToolLaunch ?? { environment: { ...launchOptions.environment } }),
           installationVersion:
             this.options.metadataCache.nativeScope(providerId).version ?? null,
-          providerNativeToolsAvailable: input.toolRestriction !== "none" && this.options.capabilityAvailable(
-            input,
-            "provider-native-tools",
-          ),
+          providerNativeToolsAvailable,
           ...(launchOptions.harnessConfiguration
             ? { harnessConfiguration: launchOptions.harnessConfiguration }
             : {}),
@@ -631,6 +636,16 @@ export class ProviderRunCoordinator {
     this.cleanupReceipts.delete(conversationId);
     this.consumeRefusal(conversationId, active);
 
+    const startWithProjectTools = (resolved: ProviderBackendLaunchOptions): Promise<ProviderRunResult> => {
+      if (!callbacks.projectTools?.connections.length || input.toolRestriction === "none"
+        || !this.options.capabilityAvailable(input, "provider-native-tools")) return startHarness(resolved);
+      // Preserve the existing synchronous admission path for ordinary runs.
+      // Only credential resolution adds an asynchronous launch boundary.
+      launchOptions = resolved;
+      return prepareProjectToolLaunch(callbacks.projectTools, resolved.environment, launchAbort.signal)
+        .then((prepared) => startHarness(resolved, prepared));
+    };
+
     let launched: Promise<ProviderRunResult>;
     try {
       const resolved = this.options.resolveBackendLaunchOptions?.(
@@ -640,13 +655,13 @@ export class ProviderRunCoordinator {
       ) ?? launchOptions;
       launched = isPromiseLike(resolved)
         ? Promise.resolve(resolved).then(
-            startHarness,
+            startWithProjectTools,
             (error: unknown) => {
               if (active.cancelRequested) return cancelledBeforeStart();
               throw error;
             },
           )
-        : startHarness(resolved);
+        : startWithProjectTools(resolved);
     } catch (error) {
       if (!active.harnessStartInvoked) {
         active.processCleanupConfirmed = true;

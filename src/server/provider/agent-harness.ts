@@ -1,3 +1,4 @@
+import type { ProjectToolRun } from "./project-tools";
 import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
@@ -303,6 +304,7 @@ export interface AgentHarnessStartOptions {
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
   hostTools?: ProviderHostToolBridge;
+  projectTools?: ProjectToolRun;
 }
 
 export interface CodexAppServerRunExtension {

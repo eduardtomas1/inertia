@@ -1,0 +1,31 @@
+{
+  "baselineCommit": "2364d768a71214bfbff7481bb5545cf19906a78f",
+  "environment": "Linux x64, Node 22.23.3, identical package-lock.json and node_modules",
+  "command": "electron-vite build; node scripts/check-renderer-bundle.mjs",
+  "beforeBytes": {
+    "entryJavaScript": 222475,
+    "mainWorkbenchFirstLoadJavaScript": 853542,
+    "detachedChatFirstLoadJavaScript": 660072,
+    "coreJavaScript": 2226045
+  },
+  "afterBytes": {
+    "entryJavaScript": 222475,
+    "mainWorkbenchFirstLoadJavaScript": 854156,
+    "detachedChatFirstLoadJavaScript": 660174,
+    "coreJavaScript": 2228669,
+    "deferredProjectToolsJavaScript": 8465
+  },
+  "deltaBytes": {
+    "entryJavaScript": 0,
+    "mainWorkbenchFirstLoadJavaScript": 614,
+    "detachedChatFirstLoadJavaScript": 102,
+    "coreJavaScript": 2624,
+    "deferredProjectToolsJavaScript": 8465
+  },
+  "notes": [
+    "ProjectToolsPanel is lazy-loaded and individually capped at 8704 bytes.",
+    "Both startup closures are checked to exclude ProjectToolsPanel.",
+    "Core excludes the separately capped panel; the remaining increase contains shared validation, state labels, workspace routing and loader metadata.",
+    "Existing budget headroom is retained with less than 300 bytes additional headroom per affected budget."
+  ]
+}

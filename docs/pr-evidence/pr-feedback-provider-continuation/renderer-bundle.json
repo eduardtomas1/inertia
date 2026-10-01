@@ -20,8 +20,8 @@
     },
     "preMergeConfidenceJavaScript": {
       "baselineBytes": 23040,
-      "implementationBytes": 27004,
-      "deltaBytes": 3964
+      "implementationBytes": 27064,
+      "deltaBytes": 4024
     },
     "coreJavaScript": {
       "baselineBytes": 2226045,

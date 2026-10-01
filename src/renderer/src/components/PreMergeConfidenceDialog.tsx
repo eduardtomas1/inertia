@@ -161,6 +161,7 @@ export function PreMergeConfidenceDialog({
   const [error, setError] = useState<string | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   const requestRevision = useRef(0);
+  const feedbackDraftCreatedRef = useRef(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
   const holdRefreshFocus = useBusyTriggerFocus(loading, closeRef, refreshRef);
@@ -209,6 +210,7 @@ export function PreMergeConfidenceDialog({
 
   useEffect(() => {
     if (!open) return;
+    feedbackDraftCreatedRef.current = false;
     setConfidence(null);
     setError(null);
     void load();
@@ -219,7 +221,8 @@ export function PreMergeConfidenceDialog({
       requestRevision.current += 1;
       window.clearTimeout(focusTimer);
       window.clearInterval(clockTimer);
-      restoreFocus();
+      // Prefill owns focus after drafting, even if its frame precedes cleanup.
+      if (!feedbackDraftCreatedRef.current) restoreFocus();
     };
   }, [load, open]);
 
@@ -357,7 +360,8 @@ export function PreMergeConfidenceDialog({
               <PrFeedbackSection
                 confidence={confidence} projectId={projectId} conversationId={conversationId}
                 repositoryPath={repositoryPath} authorityRef={authorityRef}
-                disabled={loading || stale} run={run} onOpenUrl={(url) => void openExternal(url)} onClose={onClose}
+                disabled={loading || stale} run={run} onOpenUrl={(url) => void openExternal(url)}
+                onClose={() => { feedbackDraftCreatedRef.current = true; onClose(); }}
               />
 
               <section className="pre-merge-section" aria-labelledby="pre-merge-scope-title">

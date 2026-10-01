@@ -125,6 +125,39 @@ describe("PR feedback drafts", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("preserves composer focus when prefill runs before dialog cleanup, while normal dismissal restores its trigger", async () => {
+    const trigger = document.createElement("button");
+    const composer = document.createElement("textarea");
+    document.body.append(trigger, composer);
+    trigger.focus();
+    // Reproduce the animation frame completing before React's passive cleanup.
+    const focusDraft = (): void => composer.focus();
+    window.addEventListener(COMPOSER_PREFILL_EVENT, focusDraft);
+    const run = vi.fn(async () => result(feedback()));
+    const onClose = vi.fn();
+    const dialogProps = { ...props, run, onClose };
+    const view = render(<PreMergeConfidenceDialog {...dialogProps} open />);
+    try {
+      await waitFor(() => expect(screen.getByRole("button", { name: "Close pre-merge confidence" })).toHaveFocus());
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "Address selected feedback" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      view.rerender(<PreMergeConfidenceDialog {...dialogProps} open={false} />);
+      expect(composer).toHaveFocus();
+
+      trigger.focus();
+      view.rerender(<PreMergeConfidenceDialog {...dialogProps} open />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Close pre-merge confidence" })).toHaveFocus());
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      view.rerender(<PreMergeConfidenceDialog {...dialogProps} open={false} />);
+      expect(trigger).toHaveFocus();
+    } finally {
+      view.unmount();
+      window.removeEventListener(COMPOSER_PREFILL_EVENT, focusDraft);
+      trigger.remove(); composer.remove();
+    }
+  });
+
   it("keeps the action focused and prevents duplicate requests while loading", async () => {
     let fail!: (reason: Error) => void;
     const run = vi.fn(() => new Promise<ServerEvent>((_resolve, reject) => { fail = reject; }));

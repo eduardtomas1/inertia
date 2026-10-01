@@ -451,7 +451,7 @@ export function createWorkspaceSceneModel({
   if (workspaceToolsUnavailable) {
     for (const surface of WORKSPACE_BOUND_SURFACES) {
       unavailableSurfaces[surface] =
-        "Available after the first message creates this isolated worktree.";
+        "Available after the first message creates this chat's workspace.";
     }
   }
   if (!conversation) {

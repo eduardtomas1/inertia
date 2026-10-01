@@ -682,6 +682,11 @@
       "version": 85,
       "name": "CustomAppearanceColors",
       "digest": "c7e987dedea9feb72677ef2498ac2407e5b9b9287b02a0eb2496523f244a60bb"
+    },
+    {
+      "version": 86,
+      "name": "PersistSubagentTaskTelemetry",
+      "digest": "cdf61c1d2c3f405676453cb09e7cd19a25c32bc9a49e032d6a6b2d771954c2f2"
     }
   ]
 }

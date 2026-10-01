@@ -23,6 +23,7 @@ import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchem
 import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator"; import { isCompletionSoundSettings } from "../completion-sound";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
+import { subagentTrace } from "./subagent-trace-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -414,31 +415,6 @@ function activity(value: unknown): boolean {
     && oneOf(value, "status", SERVER_EVENT_OPTIONS.activityStatuses)
     && nullableStringField(value, "turnId")
     && nullableStringField(value, "detail");
-}
-
-function subagentTrace(value: unknown): boolean {
-  if (!recordWithStrings(
-    value,
-    "id",
-    "conversationId",
-    "runId",
-    "turnId",
-    "providerId",
-    "status",
-    "createdAt",
-    "updatedAt",
-  )) return false;
-  const nullableStrings = [
-    "providerTaskId", "providerAgentId", "parentTraceId",
-    "parentProviderAgentId", "parentProviderToolUseId", "providerToolUseId",
-    "providerRole", "providerName", "providerStatus", "description",
-    "progress", "result",
-  ];
-  return nullableStrings.every((key) => nullableStringField(value, key))
-    && providerId(value, "providerId")
-    && oneOf(value, "status", SERVER_EVENT_OPTIONS.subagentStatuses)
-    && booleanField(value, "isLive")
-    && integerField(value, "sequence");
 }
 
 function approvalRequest(value: unknown): boolean {

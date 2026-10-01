@@ -7,6 +7,7 @@ import { conversationContextWholeChatMigration } from "./conversation-context-wh
 import { customAppearanceColorsMigration } from "./custom-appearance-colors";
 import { nativeAntigravityProviderMigration } from "./native-antigravity-provider";
 import { queuedMessagesMigration } from "./queued-messages";
+import { subagentTaskTelemetryMigration } from "./subagent-task-telemetry";
 import { turnSessionRecoveryMigration } from "./turn-session-recovery";
 import { workingIndicatorMigration } from "./working-indicator";
 
@@ -21,4 +22,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   completionSoundMigration,
   turnSessionRecoveryMigration,
   customAppearanceColorsMigration,
+  subagentTaskTelemetryMigration,
 ];

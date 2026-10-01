@@ -12,6 +12,7 @@ import type {
   ProviderModel,
   ProviderRateLimit,
   ProviderSkillInput,
+  SubagentTaskUsage,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
@@ -357,6 +358,11 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
   description: string | null;
   progress: string | null;
   result: string | null;
+  model?: string;
+  activity?: string;
+  usage?: SubagentTaskUsage;
+  toolUseCount?: number;
+  durationMs?: number;
 }
 
 export type ProviderEvent =

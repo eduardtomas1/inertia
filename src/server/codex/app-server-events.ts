@@ -347,8 +347,9 @@ export class CodexAppServerEvents {
     if (this.host.cancelRequested() || !this.approvalAuthority.owns(pending)) {
       this.pendingApprovals.delete(requestId);
       this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
-      this.approvalAuthority.reject(pending.rpcId);
-      return false;
+      this.approvalAuthority.refuse(pending.rpcId);
+      this.host.options.onApprovalResolved?.(requestId, "cancelled");
+      return true;
     }
     const result: JsonObject = pending.protocol === "permissions"
       ? {

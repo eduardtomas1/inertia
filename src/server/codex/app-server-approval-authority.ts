@@ -7,6 +7,8 @@ import {
 } from "./pre-response-turn-notifications";
 import type { JsonObject, RpcId } from "./protocol";
 
+const UNOWNED_APPROVAL_MESSAGE = "Codex sent an approval outside the exact owned provider turn.";
+
 interface ApprovalOwner {
   providerThreadId: string;
   providerTurnId?: string;
@@ -52,14 +54,17 @@ export class CodexApprovalAuthority {
   ): approval is ParsedCodexApprovalRequest & { providerThreadId: string } {
     const { providerThreadId, providerTurnId } = approval;
     if (
-      this.host.cancelRequested()
-      || !providerThreadId
+      !providerThreadId
       || !this.host.subagents.isOwnedProviderThread(providerThreadId)
       || (approval.protocol !== "legacy-review" && !providerTurnId)
     ) {
       this.reject(id, providerThreadId && !this.host.subagents.isOwnedProviderThread(providerThreadId)
         ? "Codex sent an approval for a different provider thread."
         : undefined);
+      return false;
+    }
+    if (this.host.cancelRequested()) {
+      this.refuse(id);
       return false;
     }
     if (approval.protocol !== "legacy-review" && providerTurnId) {
@@ -89,8 +94,12 @@ export class CodexApprovalAuthority {
     return this.host.subagents.isOwnedProviderTurn(owner.providerThreadId, owner.providerTurnId);
   }
 
-  reject(id: RpcId, message = "Codex sent an approval outside the exact owned provider turn."): void {
+  refuse(id: RpcId, message = UNOWNED_APPROVAL_MESSAGE): void {
     this.host.writeMessage({ id, error: { code: -32602, message } });
+  }
+
+  private reject(id: RpcId, message = UNOWNED_APPROVAL_MESSAGE): void {
+    this.refuse(id, message);
     this.host.failMalformedProtocol(message, message);
   }
 

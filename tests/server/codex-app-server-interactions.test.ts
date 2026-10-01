@@ -37,6 +37,7 @@ function interactionHarness() {
   let cancelled = false;
   const inputs: AgentInputRequest[] = [];
   const approvals: AgentApprovalRequest[] = [];
+  const resolved: Array<[string, string]> = [];
   const writes: JsonObject[] = [];
   const cancel = vi.fn();
   const rememberFailure = vi.fn();
@@ -50,6 +51,7 @@ function interactionHarness() {
       access: "full",
       onInputRequest: (request) => inputs.push(request),
       onApproval: (request) => approvals.push(request),
+      onApprovalResolved: (requestId, decision) => resolved.push([requestId, decision]),
     },
     resultText: new CappedTextBuffer(1_024),
     isSettled: () => phase === "settled",
@@ -82,6 +84,7 @@ function interactionHarness() {
     events: new CodexAppServerEvents(host),
     inputs,
     approvals,
+    resolved,
     rememberFailure,
     writes,
     awaitStartResponse: () => {
@@ -233,8 +236,37 @@ describe("Codex native approval turn authority", () => {
     try {
       h.events.handleServerRequest("approval", "item/commandExecution/requestApproval", approvalParams());
       h.changeActiveTurn("next-turn");
-      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(false);
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
       expect(h.writes).toEqual([{ id: "approval", error: expect.any(Object) }]);
+      expect(h.resolved).toEqual([[h.approvals[0]!.requestId, "cancelled"]]);
+    } finally { h.events.dispose(); }
+  });
+
+  it("answers an approval that arrives after the user stops without a protocol failure", () => {
+    const h = interactionHarness();
+    try {
+      h.cancelRun();
+      h.events.handleServerRequest("late", "item/commandExecution/requestApproval", approvalParams());
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([{ id: "late", error: expect.objectContaining({ code: -32602 }) }]);
+      expect(h.rememberFailure).not.toHaveBeenCalled();
+      expect(h.cancel).not.toHaveBeenCalled();
+    } finally { h.events.dispose(); }
+  });
+
+  it.each(["stop", "turn-completed"] as const)("retires a displayed approval answered after %s without a protocol failure", (edge) => {
+    const h = interactionHarness();
+    try {
+      h.events.handleServerRequest("approval", "item/commandExecution/requestApproval", approvalParams());
+      const { requestId } = h.approvals[0]!;
+      if (edge === "stop") h.cancelRun();
+      else h.events.handleNotification("turn/completed", { threadId: ROOT_THREAD_ID, turn: { id: ROOT_TURN_ID, status: "completed" } });
+      expect(h.events.respondToApproval(requestId, "approve")).toBe(true);
+      expect(h.writes).toEqual([{ id: "approval", error: expect.objectContaining({ code: -32602 }) }]);
+      expect(h.resolved).toEqual([[requestId, "cancelled"]]);
+      expect(h.rememberFailure).not.toHaveBeenCalled();
+      expect(h.cancel).not.toHaveBeenCalled();
+      expect(h.events.respondToApproval(requestId, "approve")).toBe(false);
     } finally { h.events.dispose(); }
   });
 
@@ -253,7 +285,8 @@ describe("Codex native approval turn authority", () => {
         expect(h.approvals).toHaveLength(1);
         h.events.handleNotification(method, { ...params, threadId: "approval-child" });
         if (delayedStart) h.events.handleNotification("turn/started", started);
-        expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(false);
+        expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+        expect(h.resolved).toEqual([[h.approvals[0]!.requestId, "cancelled"]]);
         expect(h.writes.some(({ result }) => (result as JsonObject)?.decision === "accept")).toBe(false);
       } finally { h.events.dispose(); }
     }
@@ -311,7 +344,8 @@ describe("Codex native approval turn authority", () => {
         "malformed-protocol", expect.any(String), expect.stringContaining("1024-turn delegated-agent history limit"),
       );
       h.events.handleNotification("turn/started", { threadId: "approval-child", turn: { id: "original-turn", status: "inProgress" } });
-      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(false);
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+      expect(h.writes.some(({ result }) => (result as JsonObject)?.decision === "accept")).toBe(false);
     } finally { h.events.dispose(); }
   });
 

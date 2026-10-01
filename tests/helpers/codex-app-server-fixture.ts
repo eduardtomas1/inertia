@@ -562,6 +562,7 @@ if (message.method === "turn/start") {
   }
   if (
     process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
+    || process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only"
   ) return;
@@ -682,6 +683,9 @@ if (message.method === "turn/steer") {
   return;
 }
 if (message.method === "turn/interrupt") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt") {
+    send({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-late", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } });
+  }
   send({ id: message.id, result: {} });
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
 }

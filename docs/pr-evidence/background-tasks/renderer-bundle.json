@@ -1,7 +1,7 @@
 {
   "baseline": "2364d768a71214bfbff7481bb5545cf19906a78f",
   "featureBase": "70d3d0f8",
-  "after": "b87a734d",
+  "after": "08b14fd8",
   "platform": "macOS 27.0.1 arm64, Node 22.23.2, same package-lock.json",
   "note": "Every closure measured by scripts/check-renderer-bundle.mjs. The Background tasks surface is its own lazy chunk (tasks-*.js) with a lazily loaded stylesheet. Only deferredBackgroundTasksJavaScript was added; other caps are unchanged and left to the coordinator's final re-measurement. coreJavaScript was already over its cap on the feature base (W1).",
   "measurements": {
@@ -71,10 +71,10 @@
     "deferredBackgroundTasksJavaScript": {
       "mainBytes": null,
       "featureBaseBytes": null,
-      "afterBytes": 14178,
+      "afterBytes": 17142,
       "deltaFromMainBytes": null,
       "deltaFromFeatureBaseBytes": null,
-      "capBytes": 14336,
+      "capBytes": 17408,
       "withinCap": true
     },
     "deferredProjectSettingsJavaScript": {
@@ -188,20 +188,20 @@
     "mainWorkbenchFirstLoadJavaScript": {
       "mainBytes": 853542,
       "featureBaseBytes": 853542,
-      "afterBytes": 854396,
-      "deltaFromMainBytes": 854,
-      "deltaFromFeatureBaseBytes": 854,
+      "afterBytes": 854609,
+      "deltaFromMainBytes": 1067,
+      "deltaFromFeatureBaseBytes": 1067,
       "capBytes": 853557,
       "withinCap": false
     },
     "detachedChatFirstLoadJavaScript": {
       "mainBytes": 660072,
       "featureBaseBytes": 660072,
-      "afterBytes": 660150,
-      "deltaFromMainBytes": 78,
-      "deltaFromFeatureBaseBytes": 78,
+      "afterBytes": 660344,
+      "deltaFromMainBytes": 272,
+      "deltaFromFeatureBaseBytes": 272,
       "capBytes": 660155,
-      "withinCap": true
+      "withinCap": false
     },
     "entryCss": {
       "mainBytes": 354742,
@@ -260,9 +260,9 @@
     "transcriptJavaScript": {
       "mainBytes": 552627,
       "featureBaseBytes": 552627,
-      "afterBytes": 552753,
-      "deltaFromMainBytes": 126,
-      "deltaFromFeatureBaseBytes": 126,
+      "afterBytes": 552784,
+      "deltaFromMainBytes": 157,
+      "deltaFromFeatureBaseBytes": 157,
       "capBytes": 614400,
       "withinCap": true
     },
@@ -440,9 +440,9 @@
     "coreJavaScript": {
       "mainBytes": 2226045,
       "featureBaseBytes": 2226990,
-      "afterBytes": 2227108,
-      "deltaFromMainBytes": 1063,
-      "deltaFromFeatureBaseBytes": 118,
+      "afterBytes": 2227255,
+      "deltaFromMainBytes": 1210,
+      "deltaFromFeatureBaseBytes": 265,
       "capBytes": 2226119,
       "withinCap": false
     },

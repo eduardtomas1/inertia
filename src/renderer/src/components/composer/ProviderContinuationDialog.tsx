@@ -73,9 +73,9 @@ export default function ProviderContinuationDialog({ pendingRoute, busy, disable
               <span><strong>{message.role === "user" ? "You" : "Agent"}</strong><p>{message.content}</p>{message.truncated && <small>Excerpt shortened</small>}</span>
             </label>)}</div>
           {transcript.messages.length > 50 && <nav aria-label="Context preview pages">
-            <button type="button" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous messages</button>
+            <button type="button" className="secondary-button" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous messages</button>
             <span>Page {page + 1} of {Math.ceil(transcript.messages.length / 50)}</span>
-            <button type="button" disabled={(page + 1) * 50 >= transcript.messages.length} onClick={() => setPage((value) => value + 1)}>Next messages</button>
+            <button type="button" className="secondary-button" disabled={(page + 1) * 50 >= transcript.messages.length} onClick={() => setPage((value) => value + 1)}>Next messages</button>
           </nav>}
         </>}
       <label className="provider-continuation-instruction">Next instruction (optional)<textarea rows={3} maxLength={4_000} value={instruction}

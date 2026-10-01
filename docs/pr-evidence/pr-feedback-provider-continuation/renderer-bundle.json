@@ -5,8 +5,8 @@
   "measurements": {
     "deferredProviderContinuationJavaScript": {
       "baselineBytes": 0,
-      "implementationBytes": 4760,
-      "deltaBytes": 4760
+      "implementationBytes": 4818,
+      "deltaBytes": 4818
     },
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 853542,
@@ -20,8 +20,8 @@
     },
     "preMergeConfidenceJavaScript": {
       "baselineBytes": 23040,
-      "implementationBytes": 26974,
-      "deltaBytes": 3934
+      "implementationBytes": 27004,
+      "deltaBytes": 3964
     },
     "coreJavaScript": {
       "baselineBytes": 2226045,

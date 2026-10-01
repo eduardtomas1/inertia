@@ -16,6 +16,7 @@
 .provider-continuation-messages span { min-width: 0; }
 .provider-continuation-messages p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
 .provider-continuation-dialog input { accent-color: var(--accent); }
+.provider-continuation-dialog nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
 .provider-continuation-instruction { display: grid; gap: 8px; margin: 16px 0; }
 .provider-continuation-instruction textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); resize: vertical; }
 .provider-continuation-dialog footer { justify-content: flex-end; flex-wrap: wrap; }

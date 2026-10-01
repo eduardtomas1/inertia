@@ -125,6 +125,24 @@ describe("PR feedback drafts", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("keeps the action focused and prevents duplicate requests while loading", async () => {
+    let fail!: (reason: Error) => void;
+    const run = vi.fn(() => new Promise<ServerEvent>((_resolve, reject) => { fail = reject; }));
+    render(<PrFeedbackSection {...props} confidence={feedback()} run={run} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+    const action = screen.getByRole("button", { name: "Address selected feedback" });
+    action.focus();
+    fireEvent.click(action);
+    expect(action).toHaveAttribute("aria-disabled", "true");
+    expect(action).toHaveFocus();
+    fireEvent.click(action);
+    expect(run).toHaveBeenCalledOnce();
+    await act(async () => fail(new Error("Connection lost")));
+    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost");
+    expect(action).toHaveFocus();
+    expect(action).not.toHaveAttribute("aria-disabled");
+  });
+
   it("ignores a late response after the selected chat changes", async () => {
     let settle!: (event: ServerEvent) => void;
     const run = vi.fn(() => new Promise<ServerEvent>((resolve) => { settle = resolve; }));

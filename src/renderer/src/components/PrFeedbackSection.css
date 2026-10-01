@@ -1,7 +1,7 @@
 .pr-feedback-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 6px; }
 .pr-feedback-actions label { display: inline-flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: var(--ui-font-secondary); }
 .pr-feedback-actions button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: var(--ui-font-secondary); }
-.pr-feedback-actions button:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+.pr-feedback-actions button:disabled, .pr-feedback-actions button[aria-disabled="true"] { opacity: var(--disabled-opacity); cursor: not-allowed; }
 .pr-feedback-hint { margin: 6px 0 12px; color: var(--text-muted); font-size: var(--ui-font-secondary); }
 .pr-feedback-error { color: var(--danger); font-size: var(--ui-font-secondary); }
 .pre-merge-thread-list input[type="checkbox"], .pr-feedback-actions input { flex-shrink: 0; accent-color: var(--accent); }

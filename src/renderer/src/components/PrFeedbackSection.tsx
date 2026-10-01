@@ -34,8 +34,9 @@ export function PrFeedbackSection({ confidence, projectId, conversationId, repos
   }, [scope]);
   const threads = confidence.reviewThreads;
   const codexCount = threads.filter(({ codex }) => codex).length;
-  const canDraft = Boolean(conversationId && confidence.github?.state === "OPEN"
-    && confidence.identity.state === "exact" && !disabled && !busy);
+  const eligible = Boolean(conversationId && confidence.github?.state === "OPEN"
+    && confidence.identity.state === "exact" && !disabled);
+  const canDraft = eligible && !busy;
   const createDraft = async (): Promise<void> => {
     if (!canDraft || !conversationId || !confidence.github || !selected.length || inFlight.current) return;
     const requestRevision = revision.current;
@@ -72,7 +73,7 @@ export function PrFeedbackSection({ confidence, projectId, conversationId, repos
           checked={selected.length > 0 && threads.slice(0, MAX_PR_FEEDBACK_THREADS).every(({ id }) => selected.includes(id))}
           onChange={(event) => setSelected(event.target.checked ? threads.slice(0, MAX_PR_FEEDBACK_THREADS).map(({ id }) => id) : [])} />
           {selected.length} selected{threads.length > MAX_PR_FEEDBACK_THREADS ? ` · up to ${MAX_PR_FEEDBACK_THREADS} at a time` : ""}</label>
-        <button type="button" disabled={!canDraft || selected.length === 0} onClick={() => void createDraft()}>
+        <button type="button" disabled={!eligible || selected.length === 0} aria-disabled={busy || undefined} onClick={() => void createDraft()}>
           <MessageSquarePlus size={14} aria-hidden="true" />{busy ? "Loading discussions…" : "Address selected feedback"}
         </button>
       </div>

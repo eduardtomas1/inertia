@@ -39,7 +39,6 @@ interface CodexApprovalAuthorityHost {
   failMalformedProtocol: (summary: string, message: string) => void;
 }
 
-/** Holds early approvals until their exact native turn can be verified. */
 export class CodexApprovalAuthority {
   private readonly deferred = new Map<RpcId, DeferredApproval>();
   private readonly preResponse = new PreResponseTurnNotifications();

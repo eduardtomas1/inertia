@@ -21,8 +21,6 @@ const TOOLING_EXCLUDED_DIRECTORIES = new Set([
 ]);
 const TOOLING_EXCLUDED_PATHS = new Set([
   "resources/generated",
-  // Separate agent checkouts can contain the whole repository many times.
-  // Keep other .claude tooling, such as repository hooks, in the inventory.
   ".claude/worktrees",
 ]);
 const portable = (path) => path.replaceAll("\\", "/");

@@ -238,7 +238,6 @@ describe("backend credential draft identity", () => {
     await waitFor(() => expect(container.querySelector(".backend-identity-card"))
       .toHaveTextContent("custom-a.example.test"));
     await user.type(credentialInput(container), "profile-a-draft");
-    // Runtime publication may add the profile before the create response arrives.
     rerender(<ModelBackendsSettings {...props} profiles={[profileA, created]} />);
     await act(async () => { finish(created); await pending; });
 

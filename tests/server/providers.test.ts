@@ -1481,8 +1481,6 @@ process.exit(1);
       "incomplete-codex",
       "process.exit(0);",
     );
-    // This fixture is a known leaf. Observe its complete close before asking
-    // for cleanup so Windows taskkill cannot race its already-exited root.
     const terminateProcessTree = vi.fn(async (child: ChildProcess, force: boolean) => {
       await once(child, "close", { signal: AbortSignal.timeout(2_000) });
       return await terminateProcessTreeAndWait(child, force);

@@ -884,8 +884,6 @@ export class CodexSubagentLifecycle {
     threadId: string,
     turnId = this.childActiveTurns.get(threadId),
   ): boolean {
-    // Thread-level terminal events may arrive without turn/completed. Keep
-    // their known turn retired so a delayed start cannot restore authority.
     if (turnId) {
       const completionKey = `${threadId}\0${turnId}`;
       if (!this.completedChildTurns.has(completionKey)

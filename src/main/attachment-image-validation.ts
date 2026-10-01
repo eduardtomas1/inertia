@@ -593,7 +593,6 @@ export async function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata
   try {
     const image = new Image();
     image.src = bytes;
-    // Buffer sources publish header dimensions before the native decoder settles.
     await image.decode();
     return image.width === metadata.width && image.height === metadata.height;
   } catch {

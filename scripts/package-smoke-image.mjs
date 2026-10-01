@@ -24,9 +24,7 @@ export function packageSmokeImageBytes() {
   header.writeUInt32BE(4, 0);
   header.writeUInt32BE(1, 4);
   header[8] = 8;
-  header[9] = 6; // Four RGBA pixels, with the default PNG filter/compression.
-  // Fresh pixel bytes prevent a candidate's ordinary fixture from matching
-  // its predecessor's historical attachment during recovery smoke tests.
+  header[9] = 6;
   const scanline = Buffer.concat([Buffer.from([0]), randomBytes(16)]);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

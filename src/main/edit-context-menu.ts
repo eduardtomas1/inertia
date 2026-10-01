@@ -1,6 +1,5 @@
 import { Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 
-/** Native editing stays in the owning app window without a clipboard IPC API. */
 export function registerEditContextMenu(
   window: BrowserWindow,
   isTrustedRenderer: (url: string) => boolean,

@@ -273,7 +273,6 @@ export function ModelBackendsSettings({
     const ownsDraft = draft !== null;
     const ownsResponse = (): boolean => (
       isCurrent()
-      // New-chat defaults remain visible independently of the profile rail.
       && (key === "default" || (
         selectionEpochRef.current === selectionEpoch
         && (ownsDraft || selectedAuthorityRef.current.profileId === selectedProfileId)

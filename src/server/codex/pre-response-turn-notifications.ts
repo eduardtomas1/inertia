@@ -34,7 +34,6 @@ export class PreResponseTurnNotifications {
 
   /** Drains matching notifications and every request in their wire order. */
   take(turnId: string): HeldTurnNotification[] {
-    // Requests for a mismatched turn must be rejected, never silently dropped.
     return this.held.splice(0).filter((notification) =>
       notification.turnId === turnId || notification.requestId !== undefined);
   }

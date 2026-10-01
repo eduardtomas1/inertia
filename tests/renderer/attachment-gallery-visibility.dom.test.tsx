@@ -112,7 +112,6 @@ it("shares admission across lists and retains detached active slots without revi
   act(() => { for (const entry of observations) entry.change(true); });
   expect(images).toHaveLength(2);
   first.unmount();
-  // Even a queued observer delivery after cleanup cannot issue a request.
   act(() => { for (const entry of observations.slice(0, 3)) entry.change(true); });
   expect(images).toHaveLength(2);
   fireEvent.load(images[0]!);

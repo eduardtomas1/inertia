@@ -10,7 +10,6 @@ for (const detached of [false, true]) test(`offers working native edit commands 
     windowDisplay: "primary",
   });
   try {
-    // Capture native menus without automating platform-specific menu geometry.
     await app.electronApp.evaluate(({ Menu, clipboard }) => {
       Reflect.set(globalThis, "editContextMenus", []);
       Menu.prototype.popup = function (options) {
@@ -58,8 +57,6 @@ for (const detached of [false, true]) test(`offers working native edit commands 
         const item = menu.items.find((entry) => entry.role === selectedRole);
         const window = Reflect.get(globalThis, "editContextWindow") as Electron.BrowserWindow;
         if (!item?.enabled) throw new Error(`The native ${selectedRole} action is unavailable.`);
-        // Cocoa handles edit roles outside MenuItem.click. Exercise the same
-        // native Chromium commands without relying on OS focus in CI.
         if (process.platform === "darwin") {
           const commands: Record<string, () => void> = {
             paste: () => window.webContents.paste(),

@@ -81,7 +81,6 @@ describe("Private Connect host shutdown evidence", () => {
 
     const failure = new Error("Tailscale Serve cleanup failed");
     const cleanup = Promise.reject(failure);
-    // The real service retains its shutdown result for subsequent callers.
     void cleanup.catch(() => undefined);
     const service = {
       shutdownStep: () => "disabling-serve",

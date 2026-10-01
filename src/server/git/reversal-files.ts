@@ -27,7 +27,6 @@ export function bufferHash(content: Buffer): string {
 
 export function textBuffer(content: Buffer): string {
   try {
-    // Keep the BOM as content so reversal preserves the exact Git line bytes.
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);
   } catch {
     throw new GitError(

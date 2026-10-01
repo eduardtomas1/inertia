@@ -75,8 +75,6 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   const transcript = page.locator(".message-scroll");
   await expect(transcript.getByRole("button", { name: "Preview attachment gallery-59.png" })).toBeVisible();
   await expect.poll(() => transcript.evaluate((scroll) => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight)).toBeLessThan(2);
-  // Virtualization retains overscan rows. Their thumbnails must not fetch and
-  // decode originals outside the transcript scrollport.
   await expect.poll(() => transcript.evaluate((scroll) => {
     const clip = scroll.getBoundingClientRect();
     const images = [...scroll.querySelectorAll(".sent-attachment-thumbnail img")];
@@ -115,8 +113,6 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   await expect.poll(() => last.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(8_000);
   await expect(last.locator("img")).toHaveAttribute("src", `inertia://bundle/attachment-preview/${largeId}`);
   await expect.poll(mountedImagesAreVisible).toBe(true);
-  // Detached in-flight thumbnails still own their native reads. Scrolling to
-  // the focused tile cannot flood the utility queue with abandoned originals.
   expect(peakPendingPreviews).toBeLessThanOrEqual(2);
   await page.keyboard.press("Enter");
   const preview = page.getByRole("dialog", { name: "gallery-0.png" });

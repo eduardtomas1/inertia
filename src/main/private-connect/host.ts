@@ -120,8 +120,6 @@ export class PrivateConnectHost {
           buildVersion: this.options.buildVersion,
           onStateChange: (state) => this.emitState(state),
         });
-        // Shutdown waits for initialization and must own cleanup, including its
-        // failure. Cleaning up here would swallow that failure in this catch.
         this.service = service;
         if (this.stopped) return;
         this.initializationError = null;

@@ -26,8 +26,6 @@ function pump(): void {
       }
       pump();
     };
-    // Keep the slot until load/error after unmount: abandoning the browser
-    // request does not stop its native attachment read.
     image.onload = () => finish(false);
     image.onerror = () => finish(true);
     image.src = next.source;

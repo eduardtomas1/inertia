@@ -65,8 +65,6 @@ export function openConversationAttachments(
   operationRunner: ConversationAttachmentStoreAnyOperationRunner,
 ): ConversationAttachmentAccess {
   return ConversationAttachmentStore.open(dataDirectory, {
-    // The supervised utility validates structure before returning read receipts.
-    // Keep only the store's metadata and digest checks on the main thread.
     operationRunner,
     readOperationRunner: operationRunner,
   });

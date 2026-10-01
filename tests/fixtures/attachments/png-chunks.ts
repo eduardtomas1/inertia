@@ -22,7 +22,6 @@ export function withEmptyPngDataChunks(png: Buffer): Buffer {
   return Buffer.concat(chunks);
 }
 
-/** A CRC-valid indexed PNG whose dimensions are readable, but its palette is missing. */
 export function pngWithoutPalette(): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(2, 0);

@@ -43,8 +43,6 @@ function normalizeRecoveryConversation<T extends {
   reasoningEffort: string;
 }>(conversation: T) {
   const { providerId, ...rest } = conversation;
-  // Released Gemini archives follow the same provider/model reset as the
-  // database migration that retired Gemini in favor of Antigravity.
   return {
     ...rest,
     providerId: providerId === "gemini" ? "antigravity" as const : providerId,

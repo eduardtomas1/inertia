@@ -8,9 +8,6 @@ import { metadataFor } from "../../src/node/conversation-attachment-store-metada
 import type { ChatAttachmentMimeType } from "../../src/shared/attachments";
 import { pngWithoutPalette } from "../fixtures/attachments/png-chunks";
 
-// The secure filesystem operation is covered by conversation-attachment-store
-// tests. Supply its receipt here to exercise the real worker's validation and
-// result/ack boundary without changing the test runner's working directory.
 vi.mock("../../src/node/conversation-attachment-store-child.js", () => ({
   CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE: `
     async function performConversationAttachmentStoreOperation(operation) {

@@ -51,7 +51,6 @@ describe("Claude SDK list override keeps call-time checks", () => {
     try {
       await tools.config.instance.connect(serverTransport);
       await client.connect(clientTransport);
-      // More cancellations than the concurrent-call bound must not exhaust it.
       for (let index = 0; index < 9; index += 1) {
         const controller = new AbortController();
         const call = client.callTool({ name: "inertia_create_conversation", arguments: {} }, undefined, { signal: controller.signal });

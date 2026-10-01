@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
+import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
@@ -12,6 +13,8 @@ import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-t
 const provider = `
 const readline = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+if (process.argv[2] === "--version") { process.stdout.write("codex-cli 0.200.0\\n"); process.exit(0); }
+if (process.argv[2] === "login") { process.stdout.write("Logged in using ChatGPT\\n"); process.exit(0); }
 if (process.argv.includes("--help")) { process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n"); process.exit(0); }
 const threadId = "scope-review-fixture";
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -50,13 +53,19 @@ let app: AppFixture;
 test.afterEach(async () => { await app?.close(); });
 
 test("reviews the brief, drafts an unexpected-change request, and refreshes after correction", async ({ browserName: _browserName }, testInfo) => {
-  app = await createAppFixture({ name: "scope-review", initialState: "conversation", codexAppServerSource: provider,
+  const providerEnvironment: Record<string, string> = {};
+  app = await createAppFixture({ name: "scope-review", initialState: "conversation", additionalEnvironment: providerEnvironment,
     beforeLaunch: async ({ workspaceDirectory, testDirectory }) => {
+      // Isolated reviews launch from a private directory, so the executable
+      // must locate its protocol fixture independently of the checkout cwd.
+      providerEnvironment.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED = writeNodeFlagExecutable(
+        join(testDirectory, "provider-bin"), "codex", provider,
+      );
       await writeFile(join(workspaceDirectory, "retry.ts"), "export const maxAttempts = 1;\n");
       await writeFile(join(workspaceDirectory, "retry.test.ts"), "expect(maxAttempts).toBe(1);\n");
       await writeFile(join(workspaceDirectory, "auth.ts"), "export const authenticationRequired = true;\n");
       execFileSync("git", ["add", "."], { cwd: workspaceDirectory });
-      execFileSync("git", ["commit", "-m", "Seed review baseline"], { cwd: workspaceDirectory });
+      execFileSync("git", ["-c", "user.name=Inertia", "-c", "user.email=test@inertia.local", "commit", "-m", "Seed review baseline"], { cwd: workspaceDirectory });
       await writeFile(join(workspaceDirectory, "retry.ts"), "export const maxAttempts = 3;\n");
       await writeFile(join(workspaceDirectory, "retry.test.ts"), "expect(maxAttempts).toBe(3);\n");
       await writeFile(join(workspaceDirectory, "auth.ts"), "export const authenticationRequired = false;\n");

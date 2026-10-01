@@ -160,6 +160,7 @@ describe("shared contracts boundary", () => {
       "review.note.create",
       "review.note.update",
       "review.note.delete",
+      "review.brief.save",
       "review.summary.generate",
       "review.summary.cancel",
       "git.branches",

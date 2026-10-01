@@ -217,5 +217,31 @@
     "coreJavaScript": 2238180,
     "deferredPdfJavaScript": 437530,
     "deferredPdfWorker": 1265413
+  },
+  "uiPolish": {
+    "method": "Measured on macOS arm64 with npm run build:bundle before and after the panel polish on this branch. Each cap is the branch cap plus the exact growth.",
+    "before": {
+      "deferredPullRequestsJavaScript": 14653,
+      "mainWorkbenchFirstLoadJavaScript": 858707,
+      "coreJavaScript": 2238220,
+      "entryCss": 354782
+    },
+    "after": {
+      "deferredPullRequestsJavaScript": 19105,
+      "mainWorkbenchFirstLoadJavaScript": 858740,
+      "coreJavaScript": 2238343,
+      "entryCss": 354782
+    },
+    "growth": {
+      "deferredPullRequestsJavaScript": 4452,
+      "mainWorkbenchFirstLoadJavaScript": 33,
+      "coreJavaScript": 123,
+      "entryCss": 0
+    },
+    "caps": {
+      "deferredPullRequestsJavaScript": 19361,
+      "mainWorkbenchFirstLoadJavaScript": 858755,
+      "coreJavaScript": 2238377
+    }
   }
 }

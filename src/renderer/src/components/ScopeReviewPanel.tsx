@@ -117,7 +117,7 @@ export default function ScopeReviewPanel({ brief, sources, review, fingerprint, 
       </div>
       <div className="scope-review-findings" aria-live="polite">
         <h3 className="scope-review-label">Evidence in changes</h3>
-        {!activeReview && <p className="scope-review-empty">{editing ? "Save your brief to review its requirements." : "Run a review against the current brief and diff. Earlier findings are hidden when either changes."}</p>}
+        {!activeReview && <p className="scope-review-empty">{editing ? "Save your brief to review its requirements." : loading ? "Reviewing the changes against your brief…" : "Run a review against the current brief and diff. Earlier findings are hidden when either changes."}</p>}
         {activeReview && <ol className="scope-review-cards">{activeReview.requirements.map((requirement) => {
           const label = activeReview.brief.requirements[requirement.requirementIndex];
           const missing = requirement.evidence.length === 0;

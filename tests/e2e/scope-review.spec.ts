@@ -169,7 +169,9 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
 
   await requirements.fill("Retry temporary failures up to three times.\nAdd a test covering the retry limit.\nStop retrying when the request is cancelled.");
   await review.getByLabel("Link a user message").selectOption({ index: 1 });
-  await captureStates(testInfo, review, "brief-editing", [WIDE_LIGHT, WIDE_DARK, NARROW_DARK]);
+  await captureStates(testInfo, review, "brief-editing", [WIDE_LIGHT, WIDE_DARK, NARROW_DARK], async () => {
+    await save.scrollIntoViewIfNeeded();
+  });
 
   await save.click();
   const start = review.getByRole("button", { name: "Review request", exact: true });
@@ -178,6 +180,7 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
 
   await start.click();
   await expect(review.getByRole("button", { name: "Reviewing…", exact: true })).toBeVisible();
+  await expect(review.getByText("Reviewing the changes against your brief…")).toBeVisible();
   await captureStates(testInfo, review, "generating", [WIDE_LIGHT, WIDE_DARK]);
   await writeFile(release, "");
 
@@ -187,8 +190,12 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
   await expect(review.getByText("No visible implementation or test evidence")).toBeVisible();
   const toTop = async () => { await review.evaluate((element) => { element.scrollTop = 0; }); };
   await captureStates(testInfo, review, "results", [WIDE_LIGHT, WIDE_DARK, NARROW_LIGHT, NARROW_DARK, TIGHT_DARK], toTop);
+  const unexplained = review.locator(".scope-review-unexplained");
+  await captureStates(testInfo, review, "findings", [WIDE_LIGHT, WIDE_DARK, NARROW_DARK], async () => {
+    await unexplained.evaluate((element) => element.scrollIntoView({ block: "end" }));
+  });
 
-  await review.locator(".scope-review-unexplained").getByRole("button", { name: "Draft request" }).click();
+  await unexplained.getByRole("button", { name: "Draft request" }).click();
   const request = review.getByRole("textbox", { name: "Edit request to agent" });
   await expect(request).toBeFocused();
   await request.fill("Keep authentication unchanged. Remove this unrelated change and explain the retry behavior.");
@@ -210,7 +217,9 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
 
   await review.getByRole("button", { name: "Review request", exact: true }).click();
   await expect(review.getByText("No unconnected changes were identified by this review.")).toBeVisible();
-  await captureStates(testInfo, review, "refreshed", [WIDE_LIGHT, WIDE_DARK], toTop);
+  await captureStates(testInfo, review, "refreshed", [WIDE_LIGHT, WIDE_DARK], async () => {
+    await unexplained.evaluate((element) => element.scrollIntoView({ block: "end" }));
+  });
 
   await app.resizeWindow(900, 800);
   await app.expectNoViewportOverflow();

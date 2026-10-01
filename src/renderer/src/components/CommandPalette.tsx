@@ -1,4 +1,4 @@
-import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, MessageSquarePlus, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -101,13 +101,13 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
 
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
-      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <MessageSquare size={15} />, run: onNewThreadWithoutProject }] : []),
       ...(projects.length > 0
         ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: newThreadShortcut, run: onNewThread }]
         : []),
       ...(projects.length > 1
         ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={15} />, view: "new-chat" as const }]
         : []),
+      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <MessageSquarePlus size={15} />, run: onNewThreadWithoutProject }] : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={15} />, run: openHelpGuide },

@@ -22,8 +22,8 @@
   outline-offset: -2px;
 }
 
-.work-thread-section:is(.is-no-project-done, .is-no-project-snoozed) > h2 {
-  padding-left: 14px;
+.work-thread-section.is-no-project > h2 {
+  padding-left: 10px;
 }
 
 /* Working shows the chat timeline's own 3x3 pixel glyph, so a running thread

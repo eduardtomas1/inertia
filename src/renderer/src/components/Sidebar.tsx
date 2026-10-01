@@ -17,6 +17,7 @@ import {
   Clock,
   ChevronDown,
   ChevronRight,
+  Folder,
   FolderOpen,
   FolderGit2,
   RefreshCw,
@@ -696,6 +697,7 @@ function SidebarView({
       ?? agentRequestProviderName(conversation.providerId);
     const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
+    const chatFolder = project?.workspaceKind === "scratch";
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
@@ -771,8 +773,9 @@ function SidebarView({
             onClick={() => activateConversation(conversation)}
           >
             <span className="activity-thread-projectline">
-              {project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
-              <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>
+              {chatFolder ? <Folder size={15} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
+              {chatFolder ? <span className="activity-thread-project-meta" title={conversation.worktreePath ?? undefined}>Chat folder</span>
+                : <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue
@@ -790,7 +793,7 @@ function SidebarView({
               {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
             </span>
             <span className="work-thread-meta">
-              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{repositoryLabel ?? "Local workspace"}</span>}
+              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{chatFolder ? null : repositoryLabel ?? "Local workspace"}</span>}
               <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={15} /></span>
             </span>
           </button>
@@ -845,7 +848,7 @@ function SidebarView({
               data-sidebar-nav
               data-work-focus-id={`section:${section.id}`}
               aria-expanded={expanded}
-              aria-label={section.id.startsWith("no-project-") ? `No project ${section.label} ${section.threads.length}` : undefined}
+              aria-label={section.id.startsWith("no-project-") ? `${section.label} ${section.threads.length}, No project` : undefined}
               onClick={() => {
                 dismissMenu("context-change");
                 setExpandedWorkSections((current) => {

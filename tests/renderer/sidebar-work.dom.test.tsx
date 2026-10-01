@@ -219,8 +219,13 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("heading", { name: /No project/ })).not.toBeInTheDocument();
     view.rerenderSnapshot(snapshot([ordinary, free], [], [project, scratch]));
     expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^Weekend plans,/ }).closest("[data-work-section]"))
-      .toHaveAttribute("data-work-section", "no-project");
+    const freeRow = screen.getByRole("button", { name: /^Weekend plans,/ });
+    expect(freeRow.closest("[data-work-section]")).toHaveAttribute("data-work-section", "no-project");
+    expect(freeRow.querySelector(".activity-thread-projectline")).toHaveTextContent(/^Chat folder/u);
+    expect(freeRow.querySelector(".work-thread-meta")).toHaveTextContent(/^$/u);
+    expect(freeRow).toHaveAccessibleName(/, No project,/u);
+    expect(screen.getByRole("button", { name: /^Build the app,/ }).querySelector(".work-thread-meta"))
+      .toHaveTextContent("Local workspace");
     expect(screen.getByRole("button", { name: /^Build the app,/ }).closest("[data-work-section]"))
       .toHaveAttribute("data-work-section", "recent");
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
@@ -264,7 +269,7 @@ describe("compact Work sidebar", () => {
     renderSidebar([ordinary, ...free], undefined, [], { projects: [project, scratch] });
     expect(screen.getByRole("heading", { name: "No project 11" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Done 1" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "No project Done 11" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done 11, No project" }));
     expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(10);
     expect(screen.queryByRole("button", { name: /^Project task,/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show more 1 older" }));
@@ -282,13 +287,13 @@ describe("compact Work sidebar", () => {
     const view = renderSidebar([free], undefined, [], { projects: [project, scratch] });
     expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Weekend plans,/ })).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "No project Snoozed 1" });
+    const toggle = screen.getByRole("button", { name: "Snoozed 1, No project" });
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: /^Weekend plans,/ }).closest("[data-work-section]"))
       .toHaveAttribute("data-work-section", "no-project-snoozed");
     toggle.focus();
     view.rerenderSnapshot(snapshot([{ ...free, snoozedUntil: null }], [], [project, scratch]));
-    expect(screen.queryByRole("button", { name: "No project Snoozed 1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Snoozed 1, No project" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Weekend plans,/ })).toHaveFocus();
   });
 

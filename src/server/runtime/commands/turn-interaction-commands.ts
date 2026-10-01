@@ -160,6 +160,7 @@ export function createTurnInteractionCommandHandler(
           conversation = dependencies.store.conversation(
             command.payload.conversationId,
           );
+          dependencies.store.worktreeSetups.assertReady(conversation.id);
           if (dependencies.queuedMessage && (
             dependencies.queuedMessage.conversationId !== conversation.id
             || conversation.archivedAt !== null

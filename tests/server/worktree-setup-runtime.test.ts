@@ -19,7 +19,7 @@ it("wires saved setup actions through the ordinary runtime creation command", as
   mkdirSync(workspace);
   mkdirSync(data, { mode: 0o700 });
   execFileSync("git", ["init", "-b", "main", workspace]);
-  writeFileSync(join(workspace, "setup.cjs"), 'console.log("Checkout ready")');
+  writeFileSync(join(workspace, "setup.cjs"), 'const fs=require("fs");const timer=setInterval(()=>{if(!fs.existsSync("release-setup"))return;clearInterval(timer);console.log("Checkout ready")},20)');
   execFileSync("git", ["-C", workspace, "add", "."]);
   execFileSync("git", ["-C", workspace, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "Initial"]);
   const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace);
@@ -49,11 +49,22 @@ it("wires saved setup actions through the ordinary runtime creation command", as
     const created = await request({ type: "conversation.create", payload: { projectId: project.id, title: "Prepared chat", useWorktree: true, activate: false } });
     expect(created).toMatchObject({ type: "request.result", result: { kind: "conversation.created" } });
     if (created.type !== "request.result" || created.result.kind !== "conversation.created") throw new Error("Chat was not created");
-    let result: ServerEvent;
-    do {
-      result = await request({ type: "worktree.setup.wait", payload: { conversationId: created.result.conversationId } });
-    } while (result.type === "request.result" && result.result.kind === "worktree.setup" && ["pending", "running"].includes(result.result.summary?.status ?? ""));
-    expect(result).toMatchObject({ type: "request.result", result: { kind: "worktree.setup", summary: { status: "succeeded" }, output: "Checkout ready" } });
+    const conversationId = created.result.conversationId;
+    const inspector = new RuntimeStore(join(data, "inertia.sqlite"), workspace, { recoverInterruptedRuns: false });
+    try {
+      const message = { type: "message.send", payload: { conversationId, content: "Wait for checkout readiness", attachments: [], activate: false } };
+      expect(await request(message)).toMatchObject({ type: "request.error" });
+      expect(inspector.conversationDetail(conversationId)!.messages).toEqual([]);
+      writeFileSync(join(inspector.conversation(conversationId).worktreePath!, "release-setup"), "ready");
+      let result: ServerEvent;
+      do {
+        result = await request({ type: "worktree.setup.wait", payload: { conversationId } });
+      } while (result.type === "request.result" && result.result.kind === "worktree.setup" && ["pending", "running"].includes(result.result.summary?.status ?? ""));
+      expect(result).toMatchObject({ type: "request.result", result: { kind: "worktree.setup", summary: { status: "succeeded" }, output: "Checkout ready" } });
+      expect(await request(message)).toMatchObject({ type: "request.ok" });
+      expect(inspector.conversationDetail(conversationId)!.messages.map(({ role, content }) => ({ role, content })))
+        .toEqual([{ role: "user", content: message.payload.content }]);
+    } finally { inspector.close(); }
   } finally {
     socket.terminate();
     await runtime.close();

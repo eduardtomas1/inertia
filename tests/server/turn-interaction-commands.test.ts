@@ -172,6 +172,7 @@ function dependencies(options: {
   } as unknown as ProviderInfo;
   return {
     store: {
+      worktreeSetups: { assertReady: vi.fn() },
       conversation: vi.fn(() => ({
         id: conversationId,
         title: "Existing conversation",

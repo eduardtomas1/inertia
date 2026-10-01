@@ -32,7 +32,10 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
   });
   const readChat = () => {
     const store = new RuntimeStore(join(app.testDirectory, "data", "inertia.sqlite"), app.workspaceDirectory, { recoverInterruptedRuns: false });
-    try { return store.shellSnapshot().conversations.find((chat) => chat.projectId === projectId && chat.worktreePath !== null); }
+    try {
+      const chat = store.shellSnapshot().conversations.find((chat) => chat.projectId === projectId && chat.worktreePath !== null);
+      return chat ? { ...chat, messages: store.conversationDetail(chat.id)!.messages } : undefined;
+    }
     finally { store.close(); }
   };
   const capture = async (name: string) => {
@@ -54,7 +57,7 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
     await app.page.getByRole("button", { name: "Send message", exact: true }).click();
     await expect.poll(() => readChat()?.worktreeSetup?.status).toBe("running");
     await expect(card.getByText("Setting up worktree", { exact: true })).toBeVisible();
-    expect(readChat()?.latestTurn).toBeNull();
+    expect(readChat()?.messages).toEqual([]);
     const worktreePath = readChat()!.worktreePath!;
     expect(existsSync(join(app.workspaceDirectory, "first-attempt"))).toBe(false);
     await capture("worktree-setup-running");
@@ -64,7 +67,7 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
     await card.getByRole("button", { name: "Show setup output", exact: true }).click();
     await expect(card.getByLabel("Setup output", { exact: true })).toContainText("Dependency installation failed");
     await capture("worktree-setup-recovery");
-    expect(readChat()?.latestTurn).toBeNull();
+    expect(readChat()?.messages).toEqual([]);
     await card.getByRole("button", { name: "Retry setup", exact: true }).click();
     await expect(card.getByText("Worktree ready", { exact: true })).toBeVisible();
     await expect(card.getByLabel("Setup output", { exact: true })).toContainText("Dependencies installed");
@@ -72,7 +75,10 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
     expect(readFileSync(join(worktreePath, "first-attempt"), "utf8")).toBe("kept");
     expect(readFileSync(join(worktreePath, "setup-ready"), "utf8")).toBe("ready");
     await app.page.getByRole("button", { name: "Send message", exact: true }).click();
-    await expect.poll(() => readChat()?.latestTurn?.id).toBeTruthy();
+    // This fixture disables providers, so accepted prompts are transcript-only
+    // messages. Verify persistence exactly once, without assuming a provider turn.
+    await expect.poll(() => readChat()?.messages.map(({ role, content }) => ({ role, content })))
+      .toEqual([{ role: "user", content: prompt }]);
     await capture("worktree-setup-ready");
     await app.page.getByRole("button", { name: "Settings", exact: true }).click();
     await app.page.getByRole("button", { name: "Projects", exact: true }).click();

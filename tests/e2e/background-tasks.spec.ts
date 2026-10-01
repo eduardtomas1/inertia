@@ -14,6 +14,7 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { expectComposerEndsAtDock } from "./support/layout-assertions";
 import {
+  closeWorkspaceTools,
   ensureWorkspaceTools,
   rightPanelToggle,
   selectWorkspaceTool,
@@ -575,6 +576,97 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
   } catch (error) {
     await attachFailure(info);
     throw error;
+  }
+});
+
+test("shows each turn's agents as one line that opens Background tasks", async ({ browserName: _browserName }, info) => {
+  let settledConversationId: string | null = null;
+  try {
+    await app.resizeWindow(1440, 1100);
+    const page = app.page;
+    await showChat(app, seed.codex);
+    await closeWorkspaceTools(page);
+    const working = page.getByRole("button", { name: "Open Background tasks, 2 agents working" });
+    await expect(working).toHaveText("2 agents working");
+    await expect(working.locator(".background-task-live")).toHaveText("2 agents working");
+    await expect(page.locator(".turn-agents-danger")).toHaveCount(0);
+    await expect(page.locator(".turn-agents-line")).toHaveCount(1);
+    await capture(page, info, "after-chat-agents-line-dark");
+
+    await working.focus();
+    await page.keyboard.press("Enter");
+    const agentsTab = page.locator('[data-workspace-tab="agents"]');
+    await expect(agentsTab).toHaveAttribute("aria-selected", "true");
+    await expect(agentsTab).toBeFocused();
+    const region = page.getByRole("region", { name: "Background tasks" });
+    await expect(card(region, "Explorer")).toBeVisible();
+    await expect(card(region, "Fixture writer")).toBeVisible();
+    await expectLayoutHolds(app, region);
+    await capture(page, info, "after-chat-agents-line-opened-dark");
+
+    await closeWorkspaceTools(page);
+    await setAppearanceInPlace(app, "light");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await app.resizeWindow(1000, 800);
+    await expect(working).toBeVisible();
+    await app.expectNoViewportOverflow();
+    await capture(page, info, "after-chat-agents-line-narrow-light");
+    await setAppearanceInPlace(app, "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await app.resizeWindow(1440, 1100);
+
+    const store = openStore(app);
+    try {
+      const projectId = store.shellSnapshot().activeProjectId;
+      if (!projectId) throw new Error("Settled agents fixture setup failed.");
+      const outcomes = [
+        ["Contract reader", "completed"],
+        ["Fixture auditor", "completed"],
+        ["Docs checker", "completed"],
+        ["Migration verifier", "failed"],
+      ] as const;
+      const settled = seedChat(store, projectId, "claude", "Settled usage audit", "claude-sonnet-4-5", false, outcomes.map(([name, status], index) => ({
+        ...traceDefaults,
+        providerTaskId: `task-settled-${index}`,
+        providerAgentId: `agent-settled-${index}`,
+        providerName: name,
+        status,
+        isLive: false,
+        result: status === "failed" ? "The migration check stopped early." : "Done.",
+        durationMs: 20_000 + index * 5_000,
+        updatedAt: ago(60_000 - index * 5_000),
+      })));
+      settledConversationId = settled.conversationId;
+    } finally {
+      store.close();
+    }
+    if (!settledConversationId) throw new Error("Settled agents fixture setup failed.");
+    await showChat(app, { conversationId: settledConversationId, title: "Settled usage audit" });
+    await closeWorkspaceTools(page);
+    const finished = page.getByRole("button", { name: "Open Background tasks, 4 agents finished · 1 failed" });
+    await expect(finished).toHaveText("4 agents finished · 1 failed");
+    await expect(finished.locator(".background-task-live")).toHaveCount(0);
+    await expect(finished.locator(".turn-agents-danger")).toHaveText("1 failed");
+    await capture(page, info, "after-chat-agents-finished-dark");
+    await finished.focus();
+    await page.keyboard.press("Space");
+    await expect(agentsTab).toBeFocused();
+    await openFinished(region);
+    await expect(card(region, "Migration verifier")).toContainText("Agent · Failed");
+    expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    await attachFailure(info);
+    throw error;
+  } finally {
+    if (settledConversationId) {
+      const store = openStore(app);
+      try {
+        store.selectConversation(seed.codex.conversationId);
+        store.deleteConversation(settledConversationId);
+      } finally {
+        store.close();
+      }
+    }
   }
 });
 

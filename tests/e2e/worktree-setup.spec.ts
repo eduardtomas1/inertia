@@ -48,8 +48,8 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
     await composer.fill(prompt);
     await app.page.getByRole("button", { name: "Send message", exact: true }).click();
     const card = app.page.getByRole("region", { name: "Worktree setup", exact: true });
-    await expect(card.getByText("Setting up worktree", { exact: true })).toBeVisible();
     await expect.poll(() => readChat()?.worktreeSetup?.status).toBe("running");
+    await expect(card.getByText("Setting up worktree", { exact: true })).toBeVisible();
     expect(readChat()?.latestTurn).toBeNull();
     const worktreePath = readChat()!.worktreePath!;
     expect(existsSync(join(app.workspaceDirectory, "first-attempt"))).toBe(false);
@@ -80,5 +80,18 @@ test("prepares a new worktree before the first prompt and preserves a failed dra
     await setupSelector.scrollIntoViewIfNeeded();
     await capture("worktree-setup-settings");
     expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    const chat = readChat();
+    const store = new RuntimeStore(join(app.testDirectory, "data", "inertia.sqlite"), app.workspaceDirectory, { recoverInterruptedRuns: false });
+    let output = "";
+    try { output = chat ? store.worktreeSetups.read(chat.id)?.output ?? "" : ""; }
+    finally { store.close(); }
+    const diagnostics = JSON.stringify({ setup: chat?.worktreeSetup, output, rendererErrors: app.rendererErrors,
+      screen: await app.page.locator("body").innerText().catch(() => "Window unavailable"),
+    }, null, 2);
+    console.error(`Worktree setup diagnostics: ${diagnostics}`);
+    writeFileSync(info.outputPath("worktree-setup-diagnostics.json"), diagnostics);
+    await app.page.screenshot({ path: info.outputPath("worktree-setup-error.png") }).catch(() => undefined);
+    throw error;
   } finally { await app.close(); }
 });

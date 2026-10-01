@@ -137,6 +137,49 @@ describe("reviewed native stack actions", () => {
     client.read = vi.fn(async (key) => ({ ...prSnapshot(key.number), state: "merged" as const }));
     await service.refresh(conversationId); expect(operation().state).toBe("completed");
   });
+  it("keeps an older pending action visible and reconciles it after newer history fills the limit", async () => {
+    client.merge = vi.fn(async () => ({ status: "pending" as const, details: { uuid: "old-merge" } }));
+    const pending = await prepare(); await service.execute(conversationId, pending.id);
+    for (let number = 100; number < 122; number++) {
+      const review = { ...pending, id: randomUUID(), key: prKey(number), stack: { ...pending.stack, number } };
+      store.pullRequests.prepare(review); store.pullRequests.claim(review);
+      store.pullRequests.settle(conversationId, { id: review.id, key: review.key, stackNumber: number, action: "merge",
+        state: "completed", completedLayers: 2, message: "Merged", updatedAt: new Date(now).toISOString() });
+    }
+    expect(service.get(conversationId).operations).toHaveLength(20);
+    expect(operation()).toMatchObject({ id: pending.id, state: "pending" });
+    await service.refresh(conversationId);
+    expect(client.mergeStatus).toHaveBeenCalledExactlyOnceWith(prKey(), "old-merge");
+    expect(() => store.deleteConversation(conversationId)).not.toThrow();
+    expect(client.merge).toHaveBeenCalledOnce();
+  });
+  it("cannot unlink a pending stack layer when fresh GitHub membership disappears", async () => {
+    client.merge = vi.fn(async () => ({ status: "pending" as const, details: { uuid: "pending-merge" } }));
+    client.mergeStatus = vi.fn(async () => ({ status: "pending" as const, details: { uuid: "pending-merge" } }));
+    await service.execute(conversationId, (await prepare()).id);
+    client.stack = vi.fn(async () => null);
+    await service.refresh(conversationId);
+    expect(service.get(conversationId).links.every((link) => link.stack === null)).toBe(true);
+    await expect(service.unlink(conversationId, prKey(41))).rejects.toThrow("pending GitHub stack action");
+    await expect(service.unlink(conversationId, prKey(42))).rejects.toThrow("pending GitHub stack action");
+    expect(service.get(conversationId).links).toHaveLength(2);
+    client.mergeStatus = vi.fn(async () => ({ status: "merged" as const, details: { uuid: "pending-merge" } }));
+    await service.refresh(conversationId); await service.unlink(conversationId, prKey(41));
+    expect(service.get(conversationId).links.map((link) => link.number)).toEqual([42]);
+  });
+  it("bounds outstanding actions without hiding their receipts or accepting another mutation", async () => {
+    const template = await prepare();
+    for (let number = 100; number < 120; number++) {
+      const review = { ...template, id: randomUUID(), key: prKey(number), stack: { ...template.stack, number } };
+      store.pullRequests.prepare(review); store.pullRequests.claim(review);
+      store.pullRequests.settle(conversationId, { id: review.id, key: review.key, stackNumber: number, action: "merge",
+        state: "unknown", completedLayers: 0, message: "Check GitHub", updatedAt: new Date(now).toISOString() });
+    }
+    await expect(service.execute(conversationId, (await prepare()).id)).rejects.toThrow("pending stack actions");
+    expect(service.get(conversationId).operations).toHaveLength(20);
+    expect(service.get(conversationId).operations.every(({ state }) => state === "unknown")).toBe(true);
+    expect(client.merge).not.toHaveBeenCalled();
+  });
   it("locks unknown outcomes across chats and does not lose the lock when deleting the owner", async () => {
     client.merge = vi.fn(async () => { throw new Error("socket closed after request"); });
     const review = await prepare(); await service.execute(conversationId, review.id);

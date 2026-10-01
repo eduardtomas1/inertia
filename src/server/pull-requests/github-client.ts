@@ -26,7 +26,17 @@ export class GitHubPullRequestsClient implements GitHubPullRequests {
     return snapshotForPr(decodePr(await this.request("POST", "graphql", { query: PR_QUERY, variables: this.variables(key) }), key), this.now());
   }
   async stack(key: PullRequestKey): Promise<PullRequestStack | null> {
-    try { return decodeStack(await this.request("GET", `repos/${key.repository}/stacks?pull_request=${key.number}`), key); }
+    try {
+      const membership = decodeStack(await this.request("GET", `repos/${key.repository}/stacks?pull_request=${key.number}`), key);
+      if (!membership) return null;
+      const detail = decodeStack([await this.request("GET", `repos/${key.repository}/stacks/${membership.number}`)], key);
+      if (!detail || detail.number !== membership.number || detail.base !== membership.base
+        || detail.layers.length !== membership.layers.length || membership.layers.some((layer, index) => {
+          const next = detail.layers[index]!;
+          return next.number !== layer.number || next.headBranch !== layer.headBranch;
+        })) throw new RuntimeRequestError("The stack changed while loading its details. Refresh and try again.");
+      return detail;
+    }
     catch (error) { if (error instanceof GitHubResponseError && error.status === 404) return null; throw error; }
   }
   async merge(key: PullRequestKey, head: string): Promise<MergeResponse> {

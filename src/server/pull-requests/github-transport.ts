@@ -14,7 +14,7 @@ export type GitHubRequest = (method: "GET" | "POST" | "PUT", endpoint: string, b
 /** No arbitrary host, shell, token environment or local-repository inference. */
 export function createGitHubRequest(cwd: string, signal: AbortSignal, dependencies: GitHubPullRequestDependencies = {}): GitHubRequest {
   return async (method, endpoint, body) => {
-    if (endpoint !== "graphql" && !/^repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:stacks\?pull_request=[1-9][0-9]*|pulls\/[1-9][0-9]*\/merge-async(?:\/[A-Za-z0-9_-]+)?)$/u.test(endpoint)) {
+    if (endpoint !== "graphql" && !/^repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:stacks(?:\?pull_request=[1-9][0-9]*|\/[1-9][0-9]*)|pulls\/[1-9][0-9]*\/merge-async(?:\/[A-Za-z0-9_-]+)?)$/u.test(endpoint)) {
       throw new RuntimeRequestError("The GitHub request endpoint is invalid.");
     }
     try {

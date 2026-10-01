@@ -61,6 +61,22 @@ describe("native GitHub stack protocol", () => {
     request.mockRejectedValueOnce(new GitHubResponseError(403));
     await expect(client.stack(prKey())).rejects.toThrow("access was refused");
   });
+  it("loads native stack details when membership omits heads, draft and state", async () => {
+    const details = rawStack()[0]!;
+    const membership = { ...details, id: null, node_id: null, pull_requests: details.pull_requests.map(({ number, head }) => ({ number, head: { ref: head.ref } })) };
+    const request = vi.fn<GitHubRequest>().mockResolvedValueOnce([membership]).mockResolvedValueOnce(details);
+    const result = await new GitHubPullRequestsClient(request).stack(prKey());
+    expect(request.mock.calls).toEqual([["GET", "repos/acme/workspace/stacks?pull_request=42"], ["GET", "repos/acme/workspace/stacks/43"]]);
+    expect(result?.layers.map(({ head, state }) => ({ head, state }))).toEqual([{ head: prSha(41), state: "merged" }, { head: prSha(42), state: "open" }]);
+  });
+  it.each(["number", "order", "base"])("rejects a changed %s between membership and detail reads", async (change) => {
+    const detail = rawStack()[0]!;
+    if (change === "number") detail.number++;
+    if (change === "order") detail.pull_requests.reverse();
+    if (change === "base") detail.base.ref = "other";
+    const request = vi.fn<GitHubRequest>().mockResolvedValueOnce(rawStack()).mockResolvedValueOnce(detail);
+    await expect(new GitHubPullRequestsClient(request).stack(prKey())).rejects.toThrow("stack changed");
+  });
   it("uses the native merge endpoint, reviewed SHA and opaque polling receipt", async () => {
     const request = vi.fn<GitHubRequest>().mockResolvedValue({ status: "pending", details: { uuid: "receipt_1" } });
     const client = new GitHubPullRequestsClient(request);

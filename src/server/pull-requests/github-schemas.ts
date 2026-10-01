@@ -53,10 +53,10 @@ export function snapshotForPr(pr: GitHubPr, now: string): PullRequestSnapshot {
     canUpdateBranch: hasWrite(pr.headRepository?.viewerPermission) || (pr.maintainerCanModify && hasWrite(pr.repository.viewerPermission)),
   });
 }
-const rawStack = z.object({ id: z.union([z.string(), z.number()]).optional(), node_id: z.string().optional(), number: z.number().int().positive(),
+const rawStack = z.object({ id: z.union([z.string(), z.number()]).nullish(), node_id: z.string().nullish(), number: z.number().int().positive(),
   base: z.union([z.string(), z.object({ ref: z.string() })]),
   pull_requests: z.array(z.object({ number: z.number().int().positive(), head: z.object({ ref: z.string(), sha: sha.optional() }),
-    state: z.enum(["open", "closed", "merged"]), merged_at: z.string().nullable().optional(), draft: z.boolean().optional() })).min(1).max(100),
+    state: z.enum(["open", "closed", "merged"]).nullish(), merged_at: z.string().nullable().optional(), draft: z.boolean().optional() })).min(1).max(100),
 });
 export function decodeStack(raw: unknown, key: PullRequestKey): PullRequestStack | null {
   const decoded = z.array(rawStack).max(1).safeParse(raw);
@@ -67,7 +67,7 @@ export function decodeStack(raw: unknown, key: PullRequestKey): PullRequestStack
   return pullRequestStackSchema.parse({ id: String(stack.node_id ?? stack.id ?? stack.number), number: stack.number,
     base: typeof stack.base === "string" ? stack.base : stack.base.ref,
     layers: stack.pull_requests.map((layer) => ({ number: layer.number, headBranch: layer.head.ref, head: layer.head.sha ?? null,
-      state: layer.merged_at ? "merged" : layer.state, draft: layer.draft ?? false })) });
+      state: layer.merged_at ? "merged" : layer.state ?? "open", draft: layer.draft ?? false })) });
 }
 export const mergeResponseSchema = z.object({ status: z.enum(["pending", "merged", "enqueued", "failed"]),
   details: z.object({ uuid: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/u).optional(), message: z.string().optional() }) });

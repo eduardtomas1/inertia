@@ -42,6 +42,11 @@ export class PullRequestService {
   }
   async unlink(conversationId: string, key: PullRequestKey): Promise<PullRequestsResult> {
     return await this.exclusive(conversationId, async () => {
+      const ownsPendingLayer = this.store.pullRequests.operations(conversationId).some((operation) =>
+        ["running", "pending", "unknown"].includes(operation.state)
+        && operation.key.repository.toLowerCase() === key.repository.toLowerCase()
+        && this.store.pullRequests.review(conversationId, operation.id)?.stack.layers.some((layer) => layer.number === key.number));
+      if (ownsPendingLayer) throw new RuntimeRequestError("Check the pending GitHub stack action before unlinking this pull request.");
       this.store.pullRequests.unlink(conversationId, key);
       return this.get(conversationId);
     });

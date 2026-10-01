@@ -40,8 +40,11 @@ process.stdin.on("end", () => {
     } } } };
   } else {
     const endpoint = args.find(value => value.startsWith("repos/"));
-    if (endpoint.includes("/stacks?")) result = endpoint.includes("/docs/") ? [] : [{ id: "stack-one", number: 43, base: "main",
-      pull_requests: [41, 42].map(number => ({ number, head: { ref: "feature-" + number, sha: sha(number) }, state: state.merged ? "closed" : "open", merged_at: state.merged ? "2026-10-01T12:00:00Z" : null, draft: false })) }];
+    if (endpoint.includes("/stacks")) {
+      const stack = { id: "stack-one", number: 43, base: "main",
+        pull_requests: [41, 42].map(number => ({ number, head: { ref: "feature-" + number, ...(endpoint.endsWith("/43") ? { sha: sha(number) } : {}) }, state: state.merged ? "closed" : "open", merged_at: state.merged ? "2026-10-01T12:00:00Z" : null, draft: false })) };
+      result = endpoint.includes("/docs/") ? [] : endpoint.endsWith("/43") ? stack : [stack];
+    }
     else if (args.includes("PUT")) {
       if (body.sha !== sha(42) || body.merge_action !== "default") process.exit(1);
       state.mutations++; result = { status: "pending", details: { uuid: "fixture-merge" } };

@@ -43,7 +43,15 @@ export class PullRequestRepository {
   }
   claim(review: StackReview): boolean {
     try {
-      return this.database.prepare("UPDATE pull_request_stack_operations SET state='running' WHERE conversation_id=? AND id=? AND state='prepared'").run(review.conversationId, review.id).changes === 1;
+      return this.database.transaction(() => {
+        const row = this.database.prepare("SELECT state FROM pull_request_stack_operations WHERE conversation_id=? AND id=?")
+          .get(review.conversationId, review.id) as { state: string } | undefined;
+        if (row?.state !== "prepared") return false;
+        const active = this.database.prepare("SELECT COUNT(*) AS count FROM pull_request_stack_operations WHERE conversation_id=? AND state IN ('running','pending','unknown')")
+          .get(review.conversationId) as { count: number };
+        if (active.count >= 20) throw new PullRequestRepositoryError("Check this chat's pending stack actions before starting another one.");
+        return this.database.prepare("UPDATE pull_request_stack_operations SET state='running' WHERE conversation_id=? AND id=? AND state='prepared'").run(review.conversationId, review.id).changes === 1;
+      })();
     } catch (error) {
       if ((error as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE") throw new PullRequestRepositoryError("A stack action is already running or needs its outcome checked.");
       throw error;
@@ -54,7 +62,7 @@ export class PullRequestRepository {
       .run(operation.state, JSON.stringify(operation), uuid, conversationId, operation.id);
   }
   operations(conversationId: string): StackOperation[] {
-    return (this.database.prepare("SELECT operation_json FROM pull_request_stack_operations WHERE conversation_id=? AND operation_json IS NOT NULL ORDER BY rowid DESC LIMIT 20").all(conversationId) as Array<{ operation_json: string }>).map((row) => stackOperationSchema.parse(JSON.parse(row.operation_json)));
+    return (this.database.prepare("SELECT operation_json FROM pull_request_stack_operations WHERE conversation_id=? AND operation_json IS NOT NULL ORDER BY state IN ('running','pending','unknown') DESC, rowid DESC LIMIT 20").all(conversationId) as Array<{ operation_json: string }>).map((row) => stackOperationSchema.parse(JSON.parse(row.operation_json)));
   }
   mergeUuid(id: string): string | null {
     return (this.database.prepare("SELECT merge_uuid FROM pull_request_stack_operations WHERE id=?").get(id) as { merge_uuid: string | null } | undefined)?.merge_uuid ?? null;

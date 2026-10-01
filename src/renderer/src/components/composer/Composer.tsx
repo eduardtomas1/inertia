@@ -125,6 +125,7 @@ export const Composer = memo(function Composer({
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
+  const latestKnownTurn = latestTurnSummary ?? latestTurn;
   const [message, setMessage] = useState(
     () => readComposerDraft(conversation.id),
   );
@@ -151,11 +152,11 @@ export const Composer = memo(function Composer({
   const submissionReleaseTimerRef = useRef<number | null>(null);
   const { stopping, stopClaimRef, stop } = useComposerStopAction({
     conversationId: conversation.id, running, onStop,
-    cancelling: (latestTurnSummary ?? latestTurn)?.runState?.state === "cancelling",
+    cancelling: latestKnownTurn?.runState?.state === "cancelling",
   });
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
-  const attachmentAuthorityKey = JSON.stringify([conversation.id, running, (latestTurnSummary ?? latestTurn)?.id ?? null, (latestTurnSummary ?? latestTurn)?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
+  const attachmentAuthorityKey = JSON.stringify([conversation.id, running, latestKnownTurn?.id ?? null, latestKnownTurn?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
   const submissionSequenceRef = useRef(0);
   const activeSubmissionsRef = useRef(new Map<string, number>());
   const editorRevisionSequenceRef = useRef(0);
@@ -188,7 +189,7 @@ export const Composer = memo(function Composer({
     pendingRoute, creatingRouteConversation, routeCancelRef, canCreateRouteConversation, routeCreationBlockedReason,
     offerNewChat, dismissPendingRoute, createRouteConversation, resetNewChatOffer,
   } = useComposerNewChatOffer({
-    conversation, latestTurn: latestTurnSummary ?? latestTurn ?? null, backendProfiles, message,
+    conversation, latestTurn: latestKnownTurn ?? null, backendProfiles, message,
     composerRef, textareaRef, mountedRef, conversationIdRef, editorRevisionsRef, onCreateConversationForSelection, setConversationUpdateError,
     blockedReason: attachments.length > 0 || Boolean(promptContext) || previewContextSelected || fileReferences.length > 0 || contextPacketIds.length > 0
       ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
@@ -435,7 +436,7 @@ export const Composer = memo(function Composer({
   };
 
   const promptHistoryController = useComposerPromptHistory({
-    conversationId: conversation.id, entries: promptHistory, latestTurn: latestTurnSummary ?? latestTurn, message,
+    conversationId: conversation.id, entries: promptHistory, latestTurn: latestKnownTurn, message,
     onApplyMessage: applyMessage, readEditorRevision: () => editorRevisionsRef.current.get(conversation.id) ?? 0,
     canRestoreStoppedPrompt: () => draftValueRef.current.length === 0 && attachmentsRef.current.length === 0 && pendingAttachmentIdsRef.current.size === 0 && !attachmentImportingRef.current && !submittingRef.current && !promptContext && selectedPreviewUrlRef.current === null && fileReferences.length === 0 && contextPacketIds.length === 0 && pendingRoute === null, textareaRef,
   });
@@ -685,7 +686,7 @@ export const Composer = memo(function Composer({
   const followUpState = composerFollowUpState({
     running,
     stopping,
-    harnessId: (latestTurnSummary ?? latestTurn)?.harnessId ?? null,
+    harnessId: latestKnownTurn?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
       attachmentsAreImages
@@ -828,7 +829,7 @@ export const Composer = memo(function Composer({
     : conversation.modelSelection.modelId;
   const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
     const transition = resolveModelRouteTransition(
-      modelRouteTransitionContext(conversation, latestTurnSummary ?? latestTurn ?? null),
+      modelRouteTransitionContext(conversation, latestKnownTurn ?? null),
       route,
     );
     const label = `${route.backendProfileName} · ${route.displayName}`;
@@ -1142,8 +1143,8 @@ export const Composer = memo(function Composer({
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           primaryAction={primaryAction}
           canSendQueuedNow={!continuationRefusal && !disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
-          queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
-          queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
+          queuedTurnId={latestKnownTurn?.id ?? null}
+          queuedTurnStatus={latestKnownTurn?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
           onQueueCommand={onQueueCommand}

@@ -377,6 +377,7 @@ export function conversationShellFromRow(
     attentionKind: conversation.attentionKind,
     branch: conversation.branch,
     worktreePath: conversation.worktreePath,
+    ...(conversation.worktreeSetup ? { worktreeSetup: conversation.worktreeSetup } : {}),
     providerSessionId: conversation.providerSessionId,
     archivedAt: conversation.archivedAt,
     settledAt: conversation.settledAt,

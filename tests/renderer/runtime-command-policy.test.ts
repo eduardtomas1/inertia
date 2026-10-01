@@ -1,3 +1,4 @@
+import { WORKTREE_SETUP_TIMEOUT_MS } from "../../src/shared/worktree-setup";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -88,7 +89,7 @@ describe("runtime command delivery policy", () => {
       timeoutDelivery: "ambiguous",
     });
     expect(runtimeCommandPolicy("duo.prepare")).toEqual({
-      timeoutMs: GIT_MUTATION_REQUEST_TIMEOUT_MS,
+      timeoutMs: WORKTREE_SETUP_TIMEOUT_MS + GIT_MUTATION_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
     });
     expect(runtimeCommandPolicy("duo.dispatch")).toEqual({

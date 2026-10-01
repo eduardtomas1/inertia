@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { ProjectPreferences } from "../../shared/project-preferences";
-import { parseWorktreeSetup, WORKTREE_SETUP_OUTPUT_LIMIT, type WorktreeSetupSummary } from "../../shared/worktree-setup";
+import { parseWorktreeSetup, worktreeSetupReady, WORKTREE_SETUP_OUTPUT_LIMIT, type WorktreeSetupSummary } from "../../shared/worktree-setup";
 
 export type WorktreeSetupAction = ProjectPreferences["actions"][number];
 
@@ -49,7 +49,7 @@ export class WorktreeSetupRepository {
 
   assertReady(conversationId: string): void {
     const setup = this.forCheckout(conversationId);
-    if (setup && !["succeeded", "skipped"].includes(setup.summary.status)) {
+    if (setup && !worktreeSetupReady(setup.summary)) {
       throw new Error("Finish worktree setup, retry it, or choose Continue without setup before sending a prompt.");
     }
   }

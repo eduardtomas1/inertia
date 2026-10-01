@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { removeWorktreeSetupFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DuoLaunchCoordinator } from "../../src/server/runtime/duo/duo-launch-coordinator";
+import type { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import type { ProviderInfo } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
 import { ConversationCreationService, type ConversationCreationDependencies } from "../../src/server/runtime/conversation-creation-service";
@@ -41,10 +46,28 @@ async function fixture(script: string, run?: typeof runRestrictedCli) {
   const create = (useWorktree = true, worktreePath?: string) => creation.create({ projectId: project.id, title: "New chat", useWorktree,
     modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test" })), ...(worktreePath ? { worktreePath } : {}) }, randomUUID());
   cleanups.push(async () => { abort.abort(); await Promise.allSettled(tasks); store.close(); await removeTemporaryDirectory(root); });
-  return { store, setup, create, workspace, action, project, databasePath };
+  return { store, setup, create, workspace, action, project, databasePath, dataDirectory: join(root, "data") };
 }
 
 describe("worktree setup", () => {
+  it("upgrades schema 85 with setup disabled and preserves existing actions and chats", async () => {
+    const f = await fixture("");
+    const chat = await f.create(false);
+    const old = new Database(f.databasePath);
+    removeWorktreeSetupFromLegacyFixture(old);
+    old.prepare("DELETE FROM schema_migrations WHERE version = 86").run();
+    const preferences = { ...defaultProjectPreferences(), actions: [f.action] };
+    const { worktreeSetupActionId: _removed, ...legacy } = preferences;
+    old.prepare("UPDATE projects SET preferences_json=? WHERE id=?").run(JSON.stringify(legacy), f.project.id);
+    old.close();
+    const upgraded = new RuntimeStore(f.databasePath, f.workspace);
+    try {
+      expect(upgraded.project(f.project.id).preferences).toMatchObject({ actions: [f.action], worktreeSetupActionId: null });
+      expect(upgraded.conversation(chat.id).title).toBe(chat.title);
+      expect(upgraded.worktreeSetups.read(chat.id)).toBeNull();
+    } finally { upgraded.close(); }
+  });
+
   it("is opt-in and rejects an unknown setup action", () => {
     const old = { ...defaultProjectPreferences(), worktreeSetupActionId: undefined };
     expect(projectPreferencesSchema.parse(old).worktreeSetupActionId).toBeNull();
@@ -110,6 +133,34 @@ describe("worktree setup", () => {
     expect(f.setup.read(chat.id).summary?.status).toBe("skipped");
     expect(() => f.store.worktreeSetups.assertReady(chat.id)).not.toThrow();
     expect(f.store.hasActiveWorkspaceRunForConversation(chat.id)).toBe(false);
+  });
+
+  it("cancels both Duo setup attempts before queueing either prompt and keeps their checkouts", async () => {
+    const runner = vi.fn<typeof runRestrictedCli>(async (_executable, _args, options) => await new Promise((_resolve, reject) => {
+      options.signal!.addEventListener("abort", () => reject(new RestrictedCliError("timeout", "cancelled")), { once: true });
+    }));
+    const f = await fixture("", runner);
+    const queuePair = vi.fn();
+    const coordinator = new DuoLaunchCoordinator(f.store, { resolveModelRoute: resolveNativeModelRoute }, {
+      validateSelection: (selection: unknown) => selection, readiness: async () => null,
+    } as never, { queuePair } as unknown as TurnController, f.dataDirectory, () => [{ id: "codex", canRun: true } as ProviderInfo], { worktreeSetups: f.setup });
+    const side = { projectId: f.project.id, title: "Duo setup", useWorktree: true, activate: false,
+      interactionMode: "build" as const, accessMode: "supervised" as const,
+      modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test" })),
+    };
+    const launchId = randomUUID();
+    const preparing = coordinator.prepare({ launchId, sides: [side, side], prompt: "Wait for setup" });
+    const rejected = expect(preparing).rejects.toThrow(/cancelled/u);
+    await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(2));
+    expect(queuePair).not.toHaveBeenCalled();
+    await coordinator.cancel(launchId);
+    await rejected;
+    expect(coordinator.status(launchId).state).toBe("cancelled");
+    for (const chat of f.store.shellSnapshot().conversations) {
+      expect(chat.worktreeSetup?.status).toBe("cancelled");
+      expect(existsSync(chat.worktreePath!)).toBe(true);
+    }
+    expect(queuePair).not.toHaveBeenCalled();
   });
 
   it("redacts credentials and bounds persisted output", async () => {

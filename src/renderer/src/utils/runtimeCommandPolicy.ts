@@ -1,3 +1,4 @@
+import { WORKTREE_SETUP_TIMEOUT_MS } from "@shared/worktree-setup";
 import type { ClientCommand } from "@shared/contracts";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
@@ -145,7 +146,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "duo.pending": shortRetrySafe,
-  "duo.prepare": { timeoutMs: 12 * 60_000, timeoutDelivery: "ambiguous" },
+  "duo.prepare": { timeoutMs: WORKTREE_SETUP_TIMEOUT_MS + GIT_MUTATION_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "duo.status": shortRetrySafe,
   "git.branch.create": gitMutation,
   "git.branch.switch": gitMutation,

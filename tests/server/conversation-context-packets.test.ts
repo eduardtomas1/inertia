@@ -1,3 +1,4 @@
+import { removeWorktreeSetupFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1490,6 +1491,7 @@ describe("conversation context packets", () => {
     database.exec(conversationContextWholeChatMigration.up as string);
     database.exec("ALTER TABLE app_state DROP COLUMN attachment_storage_gib; ALTER TABLE app_state DROP COLUMN auto_remove_old_attachments;");
     database.exec("ALTER TABLE app_state DROP COLUMN light_custom_color; ALTER TABLE app_state DROP COLUMN dark_custom_color;");
+    removeWorktreeSetupFromLegacyFixture(database);
     database.prepare("DELETE FROM schema_migrations WHERE version >= 79").run();
     database.close();
 

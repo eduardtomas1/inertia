@@ -793,8 +793,10 @@ export class DuoLaunchCoordinator {
       conversationsAdopted = true;
       this.assertNotCancelled(payload.launchId);
       for (const side of sides) if (side.ownsWorktree) this.worktreeSetups?.initialize(side.conversationId);
-      await Promise.all(conversations.sides.map(async (conversation) => { await this.worktreeSetups?.waitUntilReady(conversation.id); }));
+      const setups = await Promise.allSettled(conversations.sides.map(async (conversation) => { await this.worktreeSetups?.waitUntilReady(conversation.id); }));
       this.assertNotCancelled(payload.launchId);
+      const setupFailure = setups.find((result) => result.status === "rejected");
+      if (setupFailure?.status === "rejected") throw setupFailure.reason;
       const queued = this.turns.queuePair(payload.launchId, [
         {
           conversationId: conversations.sides[0].id,

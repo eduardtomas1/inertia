@@ -51,7 +51,57 @@ describe("request-aware Changes review", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Edit request to agent" }), { target: { value: "My edited request" } });
     view.rerender(<ScopeReviewPanel {...handlers} review={undefined} fingerprint="b" />);
     expect((screen.getByRole("textbox", { name: "Edit request to agent" }) as HTMLTextAreaElement).value).toBe("My edited request");
-    expect((screen.getByRole("button", { name: "Add request to prompt" }) as HTMLButtonElement).disabled).toBe(true);
+    const add = screen.getByRole("button", { name: "Add request to prompt" });
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(add);
     expect(handlers.onAddTextToPrompt).not.toHaveBeenCalled();
+  });
+  it("keeps the request action focused and inert when the review becomes stale", () => {
+    const handlers = props(); const view = render(<ScopeReviewPanel {...handlers} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Draft request" })[1]!);
+    const add = screen.getByRole("button", { name: "Add request to prompt" });
+    add.focus();
+    view.rerender(<ScopeReviewPanel {...handlers} review={undefined} fingerprint="b" />);
+    expect(document.activeElement).toBe(add);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("status").textContent).toContain("The brief or diff changed.");
+  });
+  it("keeps the review action focused while the review runs and ignores repeated clicks", () => {
+    const handlers = props(); const view = render(<ScopeReviewPanel {...handlers} review={undefined} />);
+    const start = screen.getByRole("button", { name: "Review request" });
+    start.focus();
+    view.rerender(<ScopeReviewPanel {...handlers} review={undefined} loading />);
+    const running = screen.getByRole("button", { name: "Reviewing…" });
+    expect(running).toBe(start);
+    expect(document.activeElement).toBe(running);
+    expect(running.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(running);
+    expect(handlers.onReview).not.toHaveBeenCalled();
+  });
+  it("names the requirements field by its visible label and describes the format", () => {
+    const handlers = props(); render(<ScopeReviewPanel {...handlers} brief={null} review={undefined} />);
+    const field = screen.getByRole("textbox", { name: "Requirements" });
+    const help = document.getElementById(field.getAttribute("aria-describedby") ?? "");
+    expect(help?.textContent).toBe("One per line, up to 20.");
+    const actions = screen.getAllByRole("button").map((button) => button.textContent);
+    expect(actions.slice(-2)).toEqual(["Cancel", "Save brief"]);
+  });
+  it("offers one primary action at a time, secondary actions first", () => {
+    const handlers = props(); const view = render(<ScopeReviewPanel {...handlers} review={undefined} />);
+    const primary = () => [...document.querySelectorAll(".primary-button")].map((button) => button.textContent);
+    expect(primary()).toEqual(["Review request"]);
+    expect(screen.getByRole("button", { name: "Edit brief" }).compareDocumentPosition(screen.getByRole("button", { name: "Review request" })))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    view.rerender(<ScopeReviewPanel {...handlers} />);
+    expect(primary()).toEqual([]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Draft request" })[1]!);
+    expect(primary()).toEqual(["Add request to prompt"]);
+    expect(screen.getByRole("button", { name: "Dismiss request" }).compareDocumentPosition(screen.getByRole("button", { name: "Add request to prompt" })))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  it("states the reason for an unexplained change in words", () => {
+    render(<ScopeReviewPanel {...props()} />);
+    expect(screen.getByText("Connection unclear · medium confidence")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Needs explanation 1" })).toBeTruthy();
   });
 });

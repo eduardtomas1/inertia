@@ -2,6 +2,7 @@ import type { ReviewBrief, ReviewBriefInput } from "@shared/review-brief";
 import type { ReviewNoteDraft } from "./ReviewNoteDialog";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
+import "./scope-review.css";
 import {
   useEffect,
   useLayoutEffect,
@@ -574,8 +575,8 @@ export function ChangesPanel({
       {notice}
       {scopeNavigator}
       {onSaveBrief && onGenerateSummary && reviewConversationId && <>
-        <button type="button" className="diff-overall-summary" aria-expanded={scopeReviewOpen}
-          onClick={() => setScopeReviewOpen((open) => !open)}><Sparkles size={14} /><strong>Review against request</strong></button>
+        <button type="button" className="scope-review-toggle" aria-expanded={scopeReviewOpen}
+          onClick={() => setScopeReviewOpen((open) => !open)}><Sparkles size={14} />Review against request<ChevronDown size={14} /></button>
         {scopeReviewOpen && ScopeReviewPanel && <ScopeReviewPanel key={reviewConversationId}
           brief={reviewBrief ?? null} sources={reviewBriefSources ?? []} review={activeSummary?.scopeReview} fingerprint={activeSummary?.fingerprint}
           loading={Boolean(summaryLoading)} locked={reviewLocked || Boolean(diffParsingError) || diffBusy}

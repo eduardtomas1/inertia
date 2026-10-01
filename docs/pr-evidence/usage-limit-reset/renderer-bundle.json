@@ -127,5 +127,38 @@
     "coreJavaScript": 2234811,
     "deferredPdfJavaScript": 437530,
     "deferredPdfWorker": 1265413
+  },
+  "uiPolish": {
+    "baseline": "c8946f6f",
+    "method": "Node 22 production builds on macOS ARM64 of the branch head before and after the composer reset-row polish. Only exceeded ceilings rise, by the exact measured growth.",
+    "changedBudgets": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "baselineBytes": 857813,
+        "implementationBytes": 857867,
+        "deltaBytes": 54,
+        "previousBudget": 857828.8,
+        "budget": 857882.8
+      },
+      "coreJavaScript": {
+        "baselineBytes": 2234851,
+        "implementationBytes": 2235174,
+        "deltaBytes": 323,
+        "previousBudget": 2234885.4,
+        "budget": 2235208.4
+      }
+    },
+    "unchangedBudgets": {
+      "detachedChatFirstLoadJavaScript": {
+        "baselineBytes": 662945,
+        "implementationBytes": 662999,
+        "deltaBytes": 54,
+        "budget": 663028.2
+      },
+      "entryCss": {
+        "baselineBytes": 354782,
+        "implementationBytes": 354782,
+        "deltaBytes": 0
+      }
+    }
   }
 }

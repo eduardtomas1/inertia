@@ -1,6 +1,6 @@
 # Usage-limit reset actions
 
-A failed chat on a supported native provider with a current, reported exhausted quota window gains **Resume at reset** and **Snooze until reset** above the composer. The banner uses the existing amber status treatment and composer width, in main, split and detached chats. It stays absent when there is no usable reset time.
+A failed chat on a supported native provider with a current, reported exhausted quota window gains **Resume at reset** and **Snooze until reset** in a row inside the composer, above the message field, like the composer's provider-readiness row. It appears in main, split and detached chats. It stays absent when there is no usable reset time.
 
 Resume is explicit and cancellable. A durable plan pins the failed turn, route and reported account identity. At the reset, the runtime checks fresh quota and sends one continuation through the normal turn admission path. The plan's acceptance and the new turn are committed in one database transaction. A restart cannot repeat an accepted continuation; unaccepted work remains recoverable. Changed chats, account changes, unknown quota and interrupted cleanup require attention instead of guessing. Inertia must be running; reopening after a reset checks quota before proceeding. Snoozing only changes the existing sidebar snooze state and acknowledges the failed run; it never authorizes a continuation or spends reset credits.
 
@@ -29,15 +29,30 @@ Credential fingerprints from the Cursor, Kimi and OpenCode readers pin credentia
 
 ## Screenshots
 
-Captured from the production Electron renderer with real persisted failed-turn and waiting-plan fixtures, theme asserted before capture. These demonstrate the scheduled state and responsive geometry; they do not claim a successful provider execution on this host.
+Captured on macOS (Apple silicon) at device scale 2 from the production Electron renderer by `tests/e2e/limit-reset-appearance.spec.ts`. The spec seeds synthetic failed turns and a blocked plan through `RuntimeStore` and uses a fake Codex app server that reports an exhausted five-hour window; no real provider runs. The renderer clock is frozen. The same run asserts the composer dock invariant (`expectComposerEndsAtDock`), no viewport overflow, that the row stays inside the dock without clipped or nested buttons, and that focus stays on the action through busy and replaced states. The Codex quota toast is dismissed before capture. "Before" images are the previous head (`c8946f6f`) captured by the same scenario.
 
-- `limit-reset-light.png`
-- `limit-reset-dark.png`
-- `limit-reset-light-narrow.png`
-- `limit-reset-dark-narrow.png`
+| State | Before | After |
+| --- | --- | --- |
+| Offer, dark | ![](before-limit-reset-offer-dark.png) | ![](limit-reset-offer-dark.png) |
+| Offer, light | ![](before-limit-reset-offer-light.png) | ![](limit-reset-offer-light.png) |
+| Offer, 760×600 | ![](before-limit-reset-offer-dark-760x600.png) | ![](limit-reset-offer-dark-760x600.png) |
+| Failed action, dark | ![](before-limit-reset-error-dark.png) | ![](limit-reset-error-dark.png) |
+| Scheduled, dark | ![](before-limit-reset-dark.png) | ![](limit-reset-dark.png) |
+| Scheduled, narrow dark | ![](before-limit-reset-dark-narrow.png) | ![](limit-reset-dark-narrow.png) |
+| Blocked, light | ![](before-limit-reset-blocked-light.png) | ![](limit-reset-blocked-light.png) |
+
+Further after captures: `limit-reset-offer-light-narrow.png`, `limit-reset-offer-dark-narrow.png`, `limit-reset-light.png`, `limit-reset-light-narrow.png`, `limit-reset-snoozed-dark.png`, `limit-reset-blocked-dark.png`, `limit-reset-blocked-light-760x600.png`.
+
+## UI polish
+
+- The row moved from a tab-shaped amber box above the dock into the composer's input zone as a zone row with the composer separator, so `.composer-shell` again ends at the dock and only `.chat-goal-control` may precede it.
+- Title in `--text`, reset time in `--text-muted` with tabular numerals, all sizes from the interface-scale tokens; no literal font sizes, radii or tinted panel.
+- The actions are compact secondary buttons with a resting outline, hover, pressed (motion-safe) and focus states. Unavailable actions use `aria-disabled` with click guards at `--disabled-opacity`, so focus stays on the button while a command is busy and moves straight to "Cancel resume" after scheduling.
+- A failed command is an alert in danger text without the `[incident:…]` reference; a blocked plan's explanation stays a passive status line. Blocked plans show an alert icon; scheduled plans use a muted clock; the scheduled time reads "Resumes …".
+- The row is a labelled group ("Usage limit") inside the composer region instead of a second region landmark.
 
 ## Validation
 
-Focused tests cover durable restart, atomic acceptance, cancellation during preparation and persistence, stale routes and accounts, bounded quota retries, independent snooze, actual standard turn admission, renderer ownership and polling races, strict IPC and migration lineage. Electron appearance tests cover both themes, banner/composer alignment and narrow-window overflow. Renderer budget deltas are recorded in `renderer-bundle.json` and preserve the prior headroom.
+Focused tests cover durable restart, atomic acceptance, cancellation during preparation and persistence, stale routes and accounts, bounded quota retries, independent snooze, actual standard turn admission, renderer ownership and polling races, strict IPC and migration lineage. Electron appearance tests cover both themes, the composer dock invariant, focus continuity and narrow-window overflow. Renderer budget deltas are recorded in `renderer-bundle.json` and preserve the prior headroom.
 
 The initial complete suite exposed old-schema test fixtures that retained the new table; those fixtures are corrected and focused upgrade tests pass. The stable reruns after provider expansion completed: full suite **11,844 passed, 74 failed, 106 skipped, one unhandled error** across 1,087 files; portable suite **2,204 passed, 15 failed, three skipped** across 144 files. All feature-owned tests passed. The remaining failing files match the native/host/baseline failures observed in the project-free branch (with its inode-specific issue-report failure absent in this worktree). The unchanged secure-file permission-race test also fails on the detached main baseline. Quality, production build, private-connect build and renderer budget checks pass; native binding packaging and Windows installer accounting checks pass. The complete provider-resume Electron scenario stops before the offer because runtime readiness fails with `owned process containment could not be confirmed (stage=linux-readiness, probe=git)`; its trace contains the runtime-state receipt. This cloud host lacks `/proc/self/task/<pid>/children`; the existing Linux native guardian fails closed during readiness. Native containment has not been bypassed. macOS, Windows and live provider accounts require their normal CI or platform validation.

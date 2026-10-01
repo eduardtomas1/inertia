@@ -6,27 +6,33 @@ an isolated synthetic database through `RuntimeStore.upsertSubagentTrace` and
 `RuntimeStore.createWorkspaceRun`. No live profile, credentials, provider CLI,
 private prompt or user repository content is used.
 
+The panel is a plain list: a muted "Running" label, one quiet card per task
+(title; kind and elapsed time; model, tokens and tool uses when reported; what
+it is doing with a "View turn" link), then one collapsed "Finished" row that
+counts failures in words and offers a dismiss icon for finished commands. A
+card expands in place into label and value rows. The only colour is the danger
+text for failed work.
+
 ## Reproducibility
 
 Every seeded timestamp is relative to a fixed instant (2026-09-30 16:20 UTC) and
 the renderer's clock is frozen there with Playwright's `page.clock.setFixedTime`
-before any capture, so elapsed times, the transcript timer and message times are
-the same on every run. Run start and finish times are written to the fixture
+before any capture. Run start and finish times are written to the fixture
 database directly because `createWorkspaceRun` stamps the wall clock. Across the
-three `--repeat-each` runs every pixel of the Background tasks panel matched;
-the only differences above a small threshold were in the chat column (the
-animated working indicator and composer stop control, which are canvas drawings
-that `animations: "disabled"` does not freeze).
+three `--repeat-each` runs the Background tasks panel matched pixel for pixel;
+the remaining differences above a small threshold were in the chat column (the
+animated working indicator and composer stop control are canvas drawings that
+`animations: "disabled"` does not freeze) and one pixel of the corner badge.
 
 ## Fixture
 
 | Chat | Harness | What it shows |
 | --- | --- | --- |
-| Usage pipeline refactor | `codex-app-server` | Live root with model, current tool, cumulative tokens, the latest step and context remaining; live nested child; failed task with provider state; completed task; a running dev server and a failed test the user started; two commands the provider ran inside its turn, which the panel correctly leaves out |
-| Claude delegated review | `claude-agent-sdk` | Live task with its last tool, a cumulative total only, and a Stop control (the Claude harness supports stopping one task); completed task with provider-reported runtime |
-| OpenCode schema sweep | `opencode-sdk` | Live task with every latest-step field, including cache writes; finished nested child |
-| Cursor thread summary | `cursor-acp` | Completed task with model and runtime; tokens explained as not reported by Cursor |
-| Kimi quick fix | `kimi-acp` | Empty state that explains Kimi Code does not report delegated agents |
+| Usage pipeline refactor | `codex-app-server` | Running: Explorer (model, tokens, tool uses, current tool), a dev server the user started, and a child agent "from Explorer". Finished: a failed agent, a completed agent and a failed test command (2 failed). Two commands the provider ran inside its turn are correctly left out. |
+| Claude delegated review | `claude-agent-sdk` | Running task with its last tool, a total-only token count and a Stop control; a finished task expanded to show its details |
+| OpenCode schema sweep | `opencode-sdk` | Running task expanded with every latest-step field; a finished child "from Schema sweep" |
+| Cursor thread summary | `cursor-acp` | Finished task with model and runtime and no token text on the card; Details says "Not reported by Cursor" |
+| Kimi quick fix | `kimi-acp` | Empty state: "No background tasks." |
 
 ## Wide (1440 × 1100)
 
@@ -34,7 +40,7 @@ that `animations: "disabled"` does not freeze).
 | --- | --- |
 | ![Wide dark](background-tasks-wide-dark.png) | ![Wide light](background-tasks-wide-light.png) |
 
-## Narrow (1000 × 800), Details open
+## Narrow (1000 × 800), one card expanded
 
 | Light | Dark |
 | --- | --- |
@@ -52,22 +58,22 @@ that `animations: "disabled"` does not freeze).
 
 ## What the spec asserts
 
-- Header counts ("3 active · 2 need review · 1 finished"), the reported-token
-  total with its visible explanation, and the same active count on the tab and
-  the corner toggle ("3 background tasks active").
-- Provider command activities inside a turn are not listed or counted.
-- Row content: status text pill, model chip, provider icon, current tool,
-  elapsed time and tokens; tree indentation of a nested child.
-- Details: Doing now, Progress, Model, cumulative total, latest step, context
-  remaining (same meaning as the Usage surface), tool uses, runtime and route.
-- Keyboard: the Details control is reached with Tab from the tab and toggled
-  with Enter; every button in the region has an accessible name.
-- No viewport overflow, no horizontal overflow in the panel, task titles never
-  truncate at 760 × 600, and the composer still ends at its dock.
-- The existing Dismiss command removes a failed command and updates the counts.
-- After an application restart the surface is still selected, reported tokens
-  persist, recovery marks live tasks Lost with no invented runtime, and the
-  interrupted dev server shows as Failed.
+- Card content per harness, the "from <parent>" line for a child agent, and no
+  headings, pills or summary block in the panel.
+- The same active count on the tab and the corner toggle ("3 background tasks
+  active"); provider command activities inside a turn are not listed or counted.
+- The Finished row ("Finished 3 · 2 failed"), its danger word, and the dismiss
+  icon, which removes the finished command through the existing
+  `activity.dismiss` command and disappears when nothing is dismissible.
+- Details: cumulative total, latest step, context remaining (same meaning as the
+  Usage surface), progress and runtime; "Not reported by Cursor" only there.
+- Keyboard: a card is reached with Tab from the tab and expanded with Enter;
+  every button has an accessible name and no control sits inside another.
+- No viewport or panel overflow, no truncated titles at 760 × 600, and the
+  composer still ends at its dock.
+- After an application restart the surface is still selected, tokens persist,
+  recovery marks live tasks Lost with no invented runtime, and the interrupted
+  dev server shows as a failed command.
 
 ## Runs on this machine
 
@@ -80,12 +86,9 @@ that `animations: "disabled"` does not freeze).
 
 - Linux and Windows rendering; forced colours and reduced motion in a real
   window (covered by stylesheet assertions in the DOM tests only).
-- Pressing Stop against a real provider or process; the Stop wiring and the
-  focus behaviour when a control disappears are covered by DOM tests.
+- Pressing Stop against a real provider or process; the Stop wiring and focus
+  behaviour when a control disappears are covered by DOM tests.
 - Live telemetry from real providers; all data is seeded.
 
 See [renderer-bundle.json](renderer-bundle.json) for every closure measured
-against `origin/main` (`2364d768`). The workbench first load grows by 1,067
-bytes, the detached chat first load by 272 bytes and shared core by 1,210
-bytes; each of those caps is main's cap plus exactly that growth. The
-Background tasks surface itself (17,142 bytes) loads on demand.
+against `origin/main` (`2364d768`) and the feature base (`70d3d0f8`).

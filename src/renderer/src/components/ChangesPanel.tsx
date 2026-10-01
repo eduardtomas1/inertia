@@ -574,8 +574,8 @@ export function ChangesPanel({
       {notice}
       {scopeNavigator}
       {onSaveBrief && onGenerateSummary && reviewConversationId && <>
-        <button type="button" className="subtle-button" aria-expanded={scopeReviewOpen}
-          onClick={() => setScopeReviewOpen((open) => !open)}>Review against request</button>
+        <button type="button" className="diff-overall-summary" aria-expanded={scopeReviewOpen}
+          onClick={() => setScopeReviewOpen((open) => !open)}><Sparkles size={14} /><strong>Review against request</strong></button>
         {scopeReviewOpen && ScopeReviewPanel && <ScopeReviewPanel key={reviewConversationId}
           brief={reviewBrief ?? null} sources={reviewBriefSources ?? []} review={activeSummary?.scopeReview} fingerprint={activeSummary?.fingerprint}
           loading={Boolean(summaryLoading)} locked={reviewLocked || Boolean(diffParsingError) || diffBusy}

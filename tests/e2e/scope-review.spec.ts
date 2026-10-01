@@ -61,7 +61,7 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
       await writeFile(join(workspaceDirectory, "retry.test.ts"), "expect(maxAttempts).toBe(3);\n");
       await writeFile(join(workspaceDirectory, "auth.ts"), "export const authenticationRequired = false;\n");
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
-      try { store.createMessage(store.snapshot().activeConversationId!, "Add retry handling, capped at three attempts, and test the retry limit. Keep other behavior unchanged.", "user"); }
+      try { store.createMessage(store.snapshot().activeConversationId!, "Add retry handling, capped at three attempts, and test the retry limit. Stop retrying when cancelled; keep other behavior unchanged.", "user"); }
       finally { store.close(); }
     } });
   const { page } = app;
@@ -70,7 +70,7 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   await page.getByRole("button", { name: "Review against request", exact: true }).click();
   const review = page.getByRole("region", { name: "Review against request", exact: true });
-  await review.getByRole("textbox", { name: /Requirements/ }).fill("Retry temporary failures up to three times.\nAdd a test covering the retry limit.");
+  await review.getByRole("textbox", { name: /Requirements/ }).fill("Retry temporary failures up to three times.\nAdd a test covering the retry limit.\nStop retrying when the request is cancelled.");
   const source = review.getByLabel("Link a user message");
   await source.selectOption({ index: 1 });
   await review.getByRole("button", { name: "Save brief", exact: true }).click();
@@ -78,6 +78,7 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
   await expect(review.getByText("The retry limit increases from one attempt to three.")).toBeVisible();
   await expect(review.getByText("Disabling authentication has no clear connection to retry handling.")).toBeVisible();
   await expect(review.getByText(/Test changes do not mean tests ran or passed/)).toBeVisible();
+  await expect(review.getByText("No visible implementation or test evidence")).toBeVisible();
   const capture = async (name: string) => {
     const path = testInfo.outputPath(`${name}.png`);
     await page.screenshot({ path, animations: "disabled", scale: "css" });
@@ -88,6 +89,7 @@ test("reviews the brief, drafts an unexpected-change request, and refreshes afte
   const request = review.getByRole("textbox", { name: "Edit request to agent" });
   await expect(request).toBeFocused();
   await request.fill("Keep authentication unchanged. Remove this unrelated change and explain the retry behavior.");
+  await review.getByRole("button", { name: "Add request to prompt" }).scrollIntoViewIfNeeded();
   await capture("unexpected-change-request");
   await review.getByRole("button", { name: "Add request to prompt" }).click();
   await expect(page.getByLabel("Selected diff context", { exact: true })).toContainText("Keep authentication unchanged");

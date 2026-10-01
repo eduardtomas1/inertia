@@ -96,7 +96,7 @@ const budgets = {
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   // Scope review stays deferred; shared guards and routing add 700 startup /
-  // 2,335 core bytes on the same dependencies. See scope-review/bundle.json.
+  // 2,391 core bytes (56 use existing headroom). See scope-review/bundle.json.
   deferredScopeReviewJavaScript: 7.5 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,

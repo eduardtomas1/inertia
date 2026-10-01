@@ -97,12 +97,11 @@ export default function ScopeReviewPanel({ brief, sources, review, fingerprint, 
         {!activeReview && <p>{editing ? "Save your brief to review its requirements." : "Run a review against the current brief and diff. Earlier findings are hidden when either changes."}</p>}
         {activeReview?.requirements.map((requirement) => {
           const label = activeReview.brief.requirements[requirement.requirementIndex];
-          const missing = [!requirement.evidence.some((item) => item.kind === "implementation") && "implementation",
-            !requirement.evidence.some((item) => item.kind === "test") && "test"].filter(Boolean).join(" or ");
+          const missing = requirement.evidence.length === 0;
           return <article key={requirement.requirementIndex} className="scope-review-requirement">
             <h4>{requirement.requirementIndex + 1}. {label}</h4>
-            {missing && <div className="scope-review-missing"><span>No visible {missing} evidence</span>
-              <button type="button" onClick={() => prepare(`Requirement: ${label}\nNo visible ${missing} evidence was found in this diff. This does not establish that the behavior is missing elsewhere.`)}>Draft request</button></div>}
+            {missing && <div className="scope-review-missing"><span>No visible implementation or test evidence</span>
+              <button type="button" onClick={() => prepare(`Requirement: ${label}\nNo visible implementation or test evidence was found in this diff. This does not establish that the behavior is missing elsewhere.`)}>Draft request</button></div>}
             {requirement.evidence.map((evidence) => <div className="scope-review-evidence" key={`${evidence.path}:${evidence.hunkId}`}>
               {evidenceLink(evidence)}<small>{evidence.kind === "test" ? "Test change" : "Implementation"} · {evidence.confidence} confidence</small>
               <p>{evidence.reason}</p></div>)}

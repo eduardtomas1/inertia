@@ -3,6 +3,6 @@
   "environment": "Linux x64, Node 22.23.3, identical package-lock.json and node_modules",
   "command": "npm run build:bundle --ignore-scripts (native guardian build unavailable locally)",
   "mainWorkbenchFirstLoadJavaScript": { "before": 853542, "after": 854242, "added": 700 },
-  "coreJavaScript": { "before": 2226045, "after": 2228380, "added": 2335 },
-  "notes": "Preserves existing eager/core headroom. The new ScopeReviewPanel has its own 7.5 KiB deferred ceiling and is asserted absent from both initial chat routes. No dependency changes."
+  "coreJavaScript": { "before": 2226045, "after": 2228436, "added": 2391 },
+  "notes": "Adds 700 bytes to the startup ceiling and 2335 bytes to the core ceiling; the final styled toggle uses 56 bytes of the original core headroom. Remaining startup/core headroom: 15/18 bytes. ScopeReviewPanel emits 6870 bytes within its own 7.5 KiB deferred ceiling and is asserted absent from both initial chat routes. No dependency changes."
 }

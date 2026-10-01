@@ -1,8 +1,8 @@
 .scope-review { border-bottom: 1px solid var(--border); padding: 14px; max-height: 58vh; overflow: auto; font-size: 12px; container-type: inline-size; }
 .scope-review header { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
 .scope-review header span, .scope-review small, .scope-review-caveat { color: var(--text-muted); }
-.scope-review h3 { margin: 0 0 10px; font-size: 12px; }
-.scope-review h4 { margin: 0 0 8px; font-size: 12px; }
+.scope-review h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; }
+.scope-review h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
 .scope-review p { line-height: 1.55; margin: 6px 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .scope-review-columns { display: grid; grid-template-columns: minmax(180px, .85fr) minmax(240px, 1.3fr); gap: 18px; }
 .scope-review-brief, .scope-review-findings { min-width: 0; }

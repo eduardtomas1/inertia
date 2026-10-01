@@ -12,6 +12,15 @@ const props = (): ScopeReviewPanelProps => {
 };
 
 describe("request-aware Changes review", () => {
+  it("accepts visible test evidence without claiming execution or requiring an implementation change", () => {
+    const handlers = props();
+    handlers.brief!.requirements = ["Add a test for the retry limit"];
+    handlers.review!.requirements[0]!.evidence = [{ path: "retry.test.ts", hunkId: "test-hunk", kind: "test", reason: "Adds an assertion for the retry limit; execution is unknown.", confidence: "medium" }];
+    render(<ScopeReviewPanel {...handlers} />);
+    expect(screen.queryByText("No visible implementation or test evidence")).toBeNull();
+    expect(screen.getByText("Test change · medium confidence")).toBeTruthy();
+    expect(screen.getByText(/Test changes do not mean tests ran or passed/)).toBeTruthy();
+  });
   it("shows missing evidence, uncertainty and linked source; findings become editable requests without sending", async () => {
     const handlers = props(); render(<ScopeReviewPanel {...handlers} />);
     expect(screen.getByText("No visible implementation or test evidence")).toBeTruthy();

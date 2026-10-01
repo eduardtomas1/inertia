@@ -822,6 +822,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       return;
     }
     const { rowId, viewportOffset, wasFollowing } = layoutAnchor;
+    const restoresSavedPosition = readTranscriptPosition(props.conversationId) === layoutAnchor;
     const anchorIndex = rowId === null
       ? -1
       : timeline.findIndex((item) => item.id === rowId);
@@ -852,6 +853,12 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     };
     const restore = (): void => {
       if (cancelled) return;
+      // Explicit latest navigation clears this owner's saved position. Queued
+      // restoration frames must not reclaim the historical row afterwards.
+      if (restoresSavedPosition && readTranscriptPosition(props.conversationId) !== layoutAnchor) {
+        finishRestoration();
+        return;
+      }
       if (wasFollowing) {
         scrollElement.scrollTo({ top: scrollElement.scrollHeight, behavior: "auto" });
         finishRestoration();

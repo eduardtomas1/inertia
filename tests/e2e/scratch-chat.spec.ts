@@ -1,7 +1,7 @@
 // @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import Database from "better-sqlite3";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
@@ -67,7 +67,9 @@ test("starts without a project, runs in separate folders, and restores after res
     await expect.poll(() => chats().length).toBe(1);
     const first = chats()[0]!;
     expect(first.worktree_path).toContain(join("data", "scratch"));
-    expect(JSON.parse(await readFile(join(first.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: first.worktree_path, requestedCwd: first.worktree_path });
+    // macOS exposes temporary folders through /var -> /private/var. Node's
+    // process.cwd() is canonical, while the requested workspace keeps its path.
+    expect(JSON.parse(await readFile(join(first.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: await realpath(first.worktree_path), requestedCwd: first.worktree_path });
     await expect(page.getByText("Chat folder", { exact: true })).toBeVisible();
     ({ page } = await app.restart());
     await expect(page.getByText("A calm weekend:", { exact: false }).first()).toBeVisible();
@@ -79,7 +81,7 @@ test("starts without a project, runs in separate folders, and restores after res
     const second = chats().find(({ id }) => id !== first.id)!;
     expect(second.worktree_path).not.toBe(first.worktree_path);
     await expect(page.getByText("A calm weekend:", { exact: false }).first()).toBeVisible();
-    expect(JSON.parse(await readFile(join(second.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: second.worktree_path, requestedCwd: second.worktree_path });
+    expect(JSON.parse(await readFile(join(second.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: await realpath(second.worktree_path), requestedCwd: second.worktree_path });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "General", exact: true }).click();
     await page.getByRole("radio", { name: "Dark", exact: true }).click();

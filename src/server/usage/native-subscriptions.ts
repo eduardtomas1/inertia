@@ -6,7 +6,7 @@ import type { ProviderId } from "../../shared/contracts";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 import { providerChildEnvironment, providerEnvironment } from "../environment";
 import { cursorSubscriptionWindows, kimiSubscriptionWindows, openCodeSubscriptionWindows } from "./subscription-parsers";
-import { readSubscriptionFile, subscriptionFingerprint, subscriptionJson } from "./subscription-io";
+import { readSubscriptionFile, subscriptionFingerprint, subscriptionJson, type NativeUsageAccount } from "./subscription-io";
 
 interface Credential { token: string; scope: string }
 export interface NativeSubscriptionDependencies {
@@ -90,11 +90,11 @@ export class NativeSubscriptionReader {
     value ||= env.KIMI_API_KEY?.trim() || providerConfig.api_key;
     return value ? { token: token.parse(value), scope: "kimi:code" } : null;
   }
-  async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string): Promise<UsageAccount> {
+  async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string): Promise<NativeUsageAccount> {
     const provider = base.providerId as ProviderId;
     if (provider === "antigravity") return { ...base, windows: [], status: "unsupported", detail: "Antigravity's current CLI protocol does not report subscription reset times." };
     const signal = AbortSignal.any([lifetime, AbortSignal.timeout(10_000)]);
-    const work = async (): Promise<UsageAccount> => {
+    const work = async (): Promise<NativeUsageAccount> => {
       const env = providerChildEnvironment(provider, await (this.dependencies.environment?.() ?? providerEnvironment().then(({ env }) => env)));
       const account = await this.credentials(provider, model, env, cwd, signal);
       if (!account) return { ...base, windows: [], status: "unsupported", detail: provider === "opencode"

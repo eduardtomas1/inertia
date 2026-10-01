@@ -29,8 +29,6 @@ export const usageWindowSchema = z.strictObject({
 });
 export const usageAccountSchema = z.strictObject({
   id: identity, providerId: label, providerLabel: label, label,
-  /** Reported credential continuity only; never authority to redeem a reset credit. */
-  credentialFingerprint: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   organization: z.string().max(256).nullable().optional(),
   email: z.string().max(256).nullable(), plan: label.nullable(),
   /** Opaque provider account identity, never inferred from email or plan. */

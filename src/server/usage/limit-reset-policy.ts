@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AgentTurn, Conversation } from "../../shared/contracts";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
+import type { NativeUsageAccount } from "./subscription-io";
 
 /** Relative reset durations are sampled across a network round trip. Accept
  * at most two seconds of sampling drift; a moved quota window needs a new offer. */
@@ -22,7 +23,7 @@ export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentT
 /** Pin the native API's reported account metadata across the wait. This is
  * separate from the verified identity required for reset-credit redemption;
  * email/organization metadata must never grant authority to spend a credit. */
-export function resumeAccountIdentity(account: UsageAccount): string | null {
+export function resumeAccountIdentity(account: NativeUsageAccount): string | null {
   if (account.credentialFingerprint) return account.credentialFingerprint;
   if (account.identityKey) return account.identityKey;
   if (!account.email) return null;

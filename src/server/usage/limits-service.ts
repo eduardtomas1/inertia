@@ -3,11 +3,12 @@ import { ProviderRuntimeError } from "../provider/contracts";
 import { USAGE_RESET_CONFIRMATION_EXPIRED } from "../../shared/provider-usage-limits";
 import { createHash, randomUUID } from "node:crypto";
 import type { ProviderInfo } from "../../shared/contracts";
-import { usageSourceInputSchema, usageSourceOrigin, usageSourceProfileId, type UsageAccount, type UsageLimitsSnapshot, type UsageResetConfirmation, type UsageResetOutcome, type UsageSource } from "../../shared/provider-usage-limits";
+import { usageSourceInputSchema, usageSourceOrigin, usageSourceProfileId, type UsageLimitsSnapshot, type UsageResetConfirmation, type UsageResetOutcome, type UsageSource } from "../../shared/provider-usage-limits";
 import type { UsageLimitsRepository } from "../persistence/usage-limits-repository";
 import type { BackendCredentialBroker } from "../runtime/backends/backend-profile-types";
 import { CliproxyUsageClient, opaqueUsageIdentity, usageWindows } from "./cliproxy";
 import type { NativeUsageReader } from "./native";
+import type { NativeUsageAccount } from "./subscription-io";
 
 type AccountRoute = { source: UsageSource; auth: Awaited<ReturnType<CliproxyUsageClient["accounts"]>>[number] };
 export interface UsageLimitsDependencies {
@@ -21,7 +22,7 @@ export interface UsageLimitsDependencies {
   hub?: CliproxyUsageClient;
 }
 export class UsageLimitsService {
-  private accounts: UsageAccount[] = [];
+  private accounts: NativeUsageAccount[] = [];
   private nativeModels = new Map<string, string>();
   private routes = new Map<string, AccountRoute>();
   private sourceErrors = new Map<string, string>();
@@ -35,9 +36,11 @@ export class UsageLimitsService {
     return { checkedAt: this.checkedAt,
       sources: this.dependencies.repository.sources().map((source) => ({ ...source, error: this.sourceErrors.get(source.id) ?? null })),
       accounts: this.accounts.map((account) => {
+        const publicAccount = { ...account };
+        delete publicAccount.credentialFingerprint;
         const pending = account.identityKey ? this.dependencies.repository.pending(account.identityKey) : null;
         const incompatible = pending && pending.confirmation.creditId === null && account.id !== "native:codex";
-        return { ...account,
+        return { ...publicAccount,
         pendingReset: Boolean(pending && !incompatible),
         ...(incompatible ? { canReset: false, detail: "A server-selected reset is pending on this computer. Check it through the original native Codex connection." } : {}),
         ...(account.status === "ready" && (now - Date.parse(account.updatedAt ?? "") > 180000 || account.windows.some((window) => window.resetsAt && Date.parse(window.resetsAt) <= now))
@@ -82,11 +85,13 @@ export class UsageLimitsService {
       return this.snapshot();
     });
   }
-  async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string): Promise<UsageAccount | null> {
+  async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string): Promise<NativeUsageAccount | null> {
     const id = `native:${providerId}`;
     const scope = JSON.stringify([model ?? null, cwd ?? null]);
     const cached = this.snapshot().accounts.find((account) => account.id === id);
-    if (!force && this.nativeModels.get(id) === scope && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) return cached;
+    if (!force && this.nativeModels.get(id) === scope && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) {
+      return { ...this.accounts.find((account) => account.id === id), ...cached };
+    }
     return this.serial(async () => {
       const info = this.dependencies.providers().find((provider) => provider.id === providerId);
       if (!info || !this.dependencies.enabled) return null;
@@ -100,7 +105,7 @@ export class UsageLimitsService {
   private async read(): Promise<UsageLimitsSnapshot> {
     this.nativeModels.clear();
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
-    const next: UsageAccount[] = [];
+    const next: NativeUsageAccount[] = [];
     this.routes.clear(); this.sourceErrors.clear();
     for (const info of this.dependencies.providers()) {
       if (!info.available && info.installState === "not-installed") continue;

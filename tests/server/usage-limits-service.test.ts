@@ -1,5 +1,5 @@
 import { backendSecretReferenceForProfile } from "../../src/node/backend-secret-reference";
-import { USAGE_RESET_CONFIRMATION_EXPIRED } from "../../src/shared/provider-usage-limits";
+import { USAGE_RESET_CONFIRMATION_EXPIRED, usageAccountSchema } from "../../src/shared/provider-usage-limits";
 import { publicRuntimeError } from "../../src/server/runtime-errors";
 import { deduplicateUsageAccounts } from "../../src/shared/usage-limits-projection";
 import { CliproxyUsageClient, opaqueUsageIdentity } from "../../src/server/usage/cliproxy";
@@ -18,12 +18,31 @@ afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 function setup() {
   const db = new Database(":memory:"); databases.push(db); db.exec(providerUsageLimitsMigration.up as string);
   const repository = new UsageLimitsRepository(db);
-  const read = vi.fn(async () => usageAccount());
+  const read = vi.fn<NativeUsageReader["read"]>(async () => usageAccount());
   const consume = vi.fn<NativeUsageReader["consume"]>(async () => "reset" as const);
   const deps: UsageLimitsDependencies = { repository, native: { read, consume }, providers: () => [{ ...initialProviderSnapshots(false)[0]!, available: true, canRun: true }], customProfiles: () => [], signal: new AbortController().signal, enabled: true };
   return { repository, read, consume, deps, service: new UsageLimitsService(deps) };
 }
 describe("privileged usage limits", () => {
+  it("excludes credential continuity from refreshed and cached public snapshots", async () => {
+    const f = setup();
+    const account = { ...usageAccount(), credentialFingerprint: "a".repeat(64) };
+    f.read.mockResolvedValue(account);
+    expect((await f.service.refresh()).accounts[0]).not.toHaveProperty("credentialFingerprint");
+    expect(f.service.snapshot().accounts[0]).not.toHaveProperty("credentialFingerprint");
+    expect(usageAccountSchema.safeParse(account).success).toBe(false);
+  });
+  it("retains private resume identity and stale-quota projection on cached native reads", async () => {
+    const f = setup();
+    const account = { ...usageAccount(), credentialFingerprint: "b".repeat(64) };
+    account.windows[0]!.resetsAt = new Date(Date.now() - 1000).toISOString();
+    f.read.mockResolvedValue(account);
+    expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toHaveProperty("credentialFingerprint", account.credentialFingerprint);
+    expect(await f.service.nativeAccount("codex", false, "model", "/chat"))
+      .toMatchObject({ credentialFingerprint: account.credentialFingerprint, status: "stale", canReset: false });
+    expect(f.read).toHaveBeenCalledOnce();
+    expect(f.service.snapshot().accounts[0]).not.toHaveProperty("credentialFingerprint");
+  });
   it("upgrades exact schema 73 transactionally without rewriting released migration records", () => {
     const db = new Database(":memory:"); databases.push(db); migrateRuntimeDatabase(db, 73);
     const history = db.prepare("SELECT * FROM schema_migrations ORDER BY version").all();

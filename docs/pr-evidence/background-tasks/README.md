@@ -90,9 +90,11 @@ animated working indicator and composer stop control are canvas drawings that
   under 12 CPU-burning processes.
 - `layout`, `composer-entry`, `terminal`, `draft-worktree` and
   `session-continuity` specs: each passed once.
-- `npm run benchmark:desktop:built` passed: 120-frame long-conversation scroll
-  at 8.3 ms median and 10.3 ms p95 with no long tasks; streaming first paint
-  22 ms and final paint 282 ms.
+- `npm run benchmark:desktop:built` passed on the branch and on a build of
+  `origin/main` (`fd02e238`): long-conversation scroll 8.3 ms median frame on
+  both, p95 10.3 ms on the branch and 9.8 ms on main, no long tasks on either;
+  streaming first paint 23 ms against 22 ms and final paint 268 ms against
+  277 ms.
 
 ## Not exercised
 

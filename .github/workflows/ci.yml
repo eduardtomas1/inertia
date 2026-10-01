@@ -265,6 +265,15 @@ jobs:
         if: needs.classify.outputs.renderer == 'true'
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
 
+      - name: Keep CLI conversation import screenshots
+        if: always() && needs.classify.outputs.renderer == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-conversation-import-screenshots
+          path: test-results/**/cli-import-*.png
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 

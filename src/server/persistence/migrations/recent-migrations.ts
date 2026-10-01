@@ -1,4 +1,5 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
+import { cliConversationImportsMigration } from "./cli-conversation-imports";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
 import { attachmentStorageSettingsMigration } from "./attachment-storage-settings";
 import { completionSoundMigration } from "./completion-sound";
@@ -21,4 +22,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   completionSoundMigration,
   turnSessionRecoveryMigration,
   customAppearanceColorsMigration,
+  cliConversationImportsMigration,
 ];

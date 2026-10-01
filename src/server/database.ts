@@ -1,4 +1,5 @@
 import type { MessageSearchTarget } from "../shared/message-search";
+import { importedCliConversation, importCliConversation, type CliConversationImportInput } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
 import Database from "better-sqlite3";
@@ -424,10 +425,9 @@ export class RuntimeStore {
   markConversationUnread(conversationId: string): void { this.conversationRepository.markUnread(conversationId); }
   regenerateConversationTitle(conversationId: string): void { this.conversationRepository.regenerateTitle(conversationId); }
 
-  createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation {
-    return this.conversationRepository.create(projectId, title, options);
-  }
-
+  createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
+  importedCliConversation(providerId: "codex" | "claude", sessionId: string): string | null { return importedCliConversation(this.database, providerId, sessionId); }
+  importCliConversation(input: CliConversationImportInput): string { return importCliConversation(this.database, this.conversationRepository, this.transcriptRepository, input); }
   createPairedConversations(
     launchId: string,
     sides: readonly [DuoConversationPlan, DuoConversationPlan],

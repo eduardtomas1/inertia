@@ -1,4 +1,5 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
+import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
 import type { MessageQueueResult } from "../queued-messages";
 import type {
   AgentGoal,
@@ -200,6 +201,9 @@ export type ServerEvent =
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
+        | { kind: "conversation.cli.scan"; scan: CliConversationScan }
+        | { kind: "conversation.cli.preview"; preview: CliConversationPreview }
+        | { kind: "conversation.cli.imported"; conversationId: string }
         | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance

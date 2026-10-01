@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Folders, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
@@ -12,6 +12,8 @@ import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
 import "./ProjectSettings.css";
+
+const CliConversationImportDialog = lazy(async () => ({ default: (await import("./CliConversationImportDialog")).CliConversationImportDialog }));
 
 interface Props {
   initialProjectId?: string;
@@ -54,6 +56,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [iconsOpen, setIconsOpen] = useState(false);
+  const [cliImportOpen, setCliImportOpen] = useState(false);
   const [actionOpen, setActionOpen] = useState(false);
   const [actionName, setActionName] = useState("");
   const [executable, setExecutable] = useState("");
@@ -145,6 +148,10 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </Row>
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>
+    <section className="project-settings-card" aria-label="CLI conversation history"><Row title="CLI conversations" description="Bring existing Codex and Claude Code conversations into this project.">
+      <button type="button" disabled={blocked} onClick={() => setCliImportOpen(true)}>Import conversations…</button>
+    </Row></section>
+    {cliImportOpen && request && <Suspense fallback={<p role="status">Opening conversation importer…</p>}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} /></Suspense>}
     <section className="project-settings-card" aria-label="Checkout settings">
       <Row title="Project grouping" description="How this checkout joins project groups in navigation.">
         <ProjectSelect label="Project grouping" value={project.groupingMode ?? ""} disabled={blocked}

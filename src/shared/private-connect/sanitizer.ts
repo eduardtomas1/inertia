@@ -1,14 +1,5 @@
-import { redactCredentialUrls, removeTrailingSecretFragment } from "./credential-redaction";
-const SECRET_PATTERNS = [
-  /\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu,
-  /\b(?:gh[opusr]|github_pat|glpat|npm|pypi|hf|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu,
-  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu,
-  /\bAIza[A-Za-z0-9_-]{20,}\b/gu,
-  /(?<![A-Za-z0-9])(?:api[-_ ]?key|access[-_ ]?key|password|passwd|pwd|secret|token|authorization)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
-  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|$)/gu,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu,
-  /\b(Bearer|Basic)\s+\S+/giu,
-] as const;
+import { SECRET_PATTERNS, redactCredentialUrls, removeTrailingSecretFragment } from "./credential-redaction";
+
 
 const DIRECTIONAL_FORMATTING =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;

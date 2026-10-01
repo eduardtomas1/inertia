@@ -1,3 +1,4 @@
+import { cliConversationPreviewSchema, cliConversationScanSchema } from "../cli-conversations";
 import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
@@ -88,7 +89,6 @@ function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
     .safeParse(value).success;
 }
-
 function backendDefault(value: unknown): boolean {
   return modelBackendDefaultSchema.safeParse(value).success;
 }
@@ -1127,6 +1127,7 @@ const REQUEST_RESULT_VALIDATORS = {
     providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
   "conversation.created": (value) => stringField(value, "conversationId"),
+  "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),
   "conversation.context.source": (value) =>

@@ -83,4 +83,46 @@ describe("chat notes editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use saved notes" }));
     expect(screen.getByRole("textbox")).toHaveValue("Updated elsewhere");
   });
+
+  it("restores the newest draft when session storage rejects a later write", async () => {
+    const conversationId = id();
+    const send = vi.fn<(command: ClientCommand) => Promise<ServerEvent>>()
+      .mockResolvedValue(result(conversationId));
+    const first = render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled());
+    edit("Older draft");
+    const storage = vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage full", "QuotaExceededError");
+    });
+    try {
+      edit("Newest draft");
+      first.unmount();
+      render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Save notes" })).toBeEnabled());
+      expect(screen.getByRole("textbox")).toHaveValue("Newest draft");
+    } finally { storage.mockRestore(); }
+  });
+
+  it("does not resurrect a saved draft when session storage rejects removal", async () => {
+    const conversationId = id();
+    const send = vi.fn<(command: ClientCommand) => Promise<ServerEvent>>()
+      .mockResolvedValueOnce(result(conversationId))
+      .mockResolvedValueOnce(result(conversationId, "Saved draft", 1, "saved"))
+      .mockResolvedValueOnce(result(conversationId, "Updated elsewhere", 2));
+    const first = render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled());
+    edit("Saved draft");
+    const storage = vi.spyOn(window.sessionStorage, "removeItem").mockImplementation(() => {
+      throw new DOMException("Storage unavailable", "SecurityError");
+    });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Save notes" }));
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+      first.unmount();
+      render(<ConversationNotes conversationId={conversationId} online sendCommand={send} />);
+      await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Updated elsewhere"));
+      expect(screen.queryByText("Notes changed in another window.")).not.toBeInTheDocument();
+    } finally { storage.mockRestore(); }
+  });
+
 });

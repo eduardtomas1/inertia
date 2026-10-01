@@ -18,9 +18,11 @@ export interface ConversationNotesProps {
 
 interface NoteDraft { content: string; revision: number }
 const draftKey = (id: string) => `inertia:conversation-notes:${id}`;
-const memoryDrafts = new Map<string, NoteDraft>();
+const memoryDrafts = new Map<string, NoteDraft | null>();
 
 function readDraft(id: string): NoteDraft | null {
+  // Storage can retain an older draft when quota or privacy settings reject a write.
+  if (memoryDrafts.has(id)) return memoryDrafts.get(id) ?? null;
   try {
     const value: unknown = JSON.parse(window.sessionStorage.getItem(draftKey(id)) ?? "null");
     if (value && typeof value === "object" && "content" in value && "revision" in value
@@ -33,8 +35,8 @@ function readDraft(id: string): NoteDraft | null {
 }
 
 function retainDraft(id: string, draft: NoteDraft | null): void {
-  if (draft) memoryDrafts.set(id, draft);
-  else memoryDrafts.delete(id);
+  // Keep cleared entries too, so a failed storage removal cannot resurrect a draft.
+  memoryDrafts.set(id, draft);
   try {
     if (draft) window.sessionStorage.setItem(draftKey(id), JSON.stringify(draft));
     else window.sessionStorage.removeItem(draftKey(id));

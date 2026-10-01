@@ -25,6 +25,7 @@ import {
 const MAX_SUBAGENT_LABEL_CHARS = 200;
 const MAX_CHILD_MESSAGES = 2_048;
 const MAX_CHILD_TOOL_PARTS = 4_096;
+const MAX_CHILD_RESULT_PARTS = 128;
 const SESSION_ERROR_FALLBACK = "OpenCode reported an error for this delegated task.";
 const TASK_ERROR_FALLBACK = "OpenCode reported that this delegated task failed.";
 
@@ -51,6 +52,7 @@ interface OpenCodeChildTrace {
   usage: SubagentTaskUsage | null;
   toolParts: Set<string>;
   uncountedToolParts: boolean;
+  textParts: Map<string, string>;
   text: string | null;
   result: string | null;
   emitted: string | null;
@@ -178,6 +180,7 @@ export class OpenCodeSubagentProjection {
       usage: null,
       toolParts: new Set(),
       uncountedToolParts: false,
+      textParts: new Map(),
       text: null,
       result: null,
       emitted: null,
@@ -193,7 +196,11 @@ export class OpenCodeSubagentProjection {
     const messageId = stringValue(info?.id);
     if (!info || !messageId || info.role !== "assistant") return;
     if (!child.messageTotals.has(messageId)) {
-      child.lastAssistantId = messageId;
+      if (child.lastAssistantId !== messageId) {
+        child.lastAssistantId = messageId;
+        child.textParts.clear();
+        child.text = null;
+      }
       if (child.messageTotals.size < MAX_CHILD_MESSAGES) {
         child.messageTotals.set(messageId, undefined);
       } else {
@@ -262,14 +269,18 @@ export class OpenCodeSubagentProjection {
       part.type === "text"
       && part.synthetic !== true
       && typeof part.text === "string"
-      && part.text.trim()
       && messageId
-      && (
-        child.messageTotals.has(messageId)
-        || messageId === child.lastAssistantId
-      )
+      && messageId === child.lastAssistantId
     ) {
-      child.text = part.text.slice(0, MAX_SUBAGENT_RESULT_CHARS);
+      if (!child.textParts.has(partId) && child.textParts.size >= MAX_CHILD_RESULT_PARTS) return;
+      child.textParts.set(partId, part.text.slice(0, MAX_SUBAGENT_RESULT_CHARS));
+      let remaining = MAX_SUBAGENT_RESULT_CHARS;
+      for (const [id, snapshot] of child.textParts) {
+        const retained = snapshot.slice(0, remaining);
+        child.textParts.set(id, retained);
+        remaining -= retained.length;
+      }
+      child.text = [...child.textParts.values()].join("") || null;
     }
   }
 
@@ -319,6 +330,7 @@ export class OpenCodeSubagentProjection {
     child.status = status;
     child.activity = null;
     child.result = boundedSubagentText(result, MAX_SUBAGENT_RESULT_CHARS);
+    child.textParts.clear();
     child.text = null;
     this.publish(sessionId, child);
     child.messageTotals.clear();

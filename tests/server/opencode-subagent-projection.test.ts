@@ -207,6 +207,74 @@ describe("OpenCode delegated-agent projection", () => {
       .toEqual(updates.map((_update, index) => index + 1));
   });
 
+  it.each([false, true])("retains every latest-assistant text part without duplicating snapshots (late older part: %s)", (lateOlderPart) => {
+    const { projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      assistant(CHILD, "earlier-assistant"),
+      part(CHILD, { id: "earlier-text", messageID: "earlier-assistant", type: "text", text: "Earlier progress." }),
+      assistant(CHILD, "final-assistant"),
+      part(CHILD, { id: "final-text-1", messageID: "final-assistant", type: "text", text: "First finding" }),
+      part(CHILD, { id: "final-text-2", messageID: "final-assistant", type: "text", text: "Second finding." }),
+      part(CHILD, { id: "final-text-1", messageID: "final-assistant", type: "text", text: "First finding.\n\n" }),
+    );
+    if (lateOlderPart) {
+      observe(part(CHILD, { id: "earlier-text", messageID: "earlier-assistant", type: "text", text: "Late earlier progress." }));
+    }
+    observe(idle(CHILD));
+    projection.finish(true);
+
+    expect(latest(CHILD)).toMatchObject({
+      status: "completed",
+      result: "First finding.\n\nSecond finding.",
+    });
+  });
+
+  it("does not reuse an earlier assistant result when the latest assistant has no text", () => {
+    const { projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      assistant(CHILD, "earlier-assistant"),
+      part(CHILD, { id: "earlier-text", messageID: "earlier-assistant", type: "text", text: "Earlier progress." }),
+      assistant(CHILD, "final-assistant"),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)).toMatchObject({ status: "completed", result: null });
+  });
+
+  it("bounds the combined result across text parts and clears replaced text", () => {
+    const { projection, observe, latest } = harness();
+    observe(
+      created(CHILD, ROOT),
+      assistant(CHILD, "final-assistant"),
+      part(CHILD, { id: "removed-text", messageID: "final-assistant", type: "text", text: "Removed text." }),
+      part(CHILD, { id: "removed-text", messageID: "final-assistant", type: "text", text: "" }),
+      part(CHILD, { id: "first-text", messageID: "final-assistant", type: "text", text: "a".repeat(10_000) }),
+      part(CHILD, { id: "second-text", messageID: "final-assistant", type: "text", text: "b".repeat(10_000) }),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)?.result).toBe("a".repeat(10_000) + "b".repeat(6_000));
+  });
+
+  it("bounds retained result parts while accepting later snapshots for retained parts", () => {
+    const { projection, observe, latest } = harness();
+    observe(created(CHILD, ROOT), assistant(CHILD, "final-assistant"));
+    for (let index = 0; index < 130; index += 1) {
+      observe(part(CHILD, { id: `text-${index}`, messageID: "final-assistant", type: "text", text: "a" }));
+    }
+    observe(
+      part(CHILD, { id: "text-0", messageID: "final-assistant", type: "text", text: "Updated " }),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)?.result).toBe(`Updated ${"a".repeat(127)}`);
+  });
+
   it("reports a child session error as a failed task with bounded error text", () => {
     const { observe, latest } = harness();
     observe(

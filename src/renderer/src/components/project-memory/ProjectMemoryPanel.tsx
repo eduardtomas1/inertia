@@ -101,7 +101,7 @@ export function ProjectMemoryPanel({ projectId, conversationId, request, disable
   const change = (field: keyof ProjectMemoryDraft, value: string): void => setEditor((current) => current
     ? { ...current, draft: { ...current.draft, [field]: value } } : null);
   const draftValid = editor !== null && projectMemoryDraftSchema.safeParse(editor.draft).success;
-  const notice = (inEditor: boolean): React.JSX.Element | null => error && inEditor === (editor !== null)
+  const notice = (inEditor: boolean): React.JSX.Element | null => error && inEditor === (state !== null && editor !== null)
     ? <p className="project-memory-error" role={error.failedChange ? "alert" : "status"}>{diagnosticErrorReference(error.text).message}</p>
     : null;
   const summary = state

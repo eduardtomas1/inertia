@@ -103,6 +103,29 @@ describe("project memory panel", () => {
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument());
   });
 
+  it("shows a remembered message's initial load error and keeps its draft when retrying", async () => {
+    const request = vi.fn<ProjectMemoryCommandRunner>()
+      .mockRejectedValueOnce(new Error("Rules and decisions could not be loaded."))
+      .mockResolvedValueOnce(result(empty));
+    render(<ProjectMemoryDialog {...props} request={request} sourceMessage={message} onClose={vi.fn()} />);
+    expect(await screen.findByText("Rules and decisions could not be loaded.")).toHaveAttribute("role", "status");
+    expect(screen.queryByLabelText("Rule or decision")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh rules & decisions" }));
+    expect(await screen.findByLabelText("Rule or decision")).toHaveValue(message.content);
+    expect(screen.queryByText("Rules and decisions could not be loaded.")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Billing history" } });
+    fireEvent.change(screen.getByLabelText("Why it matters"), { target: { value: populated.entries[0].reason } });
+    request.mockResolvedValueOnce(result(populated));
+    fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "project.memory.save", payload: expect.objectContaining({
+        expectedRevision: 0, source: { conversationId, messageId: message.id },
+        entry: expect.objectContaining({ kind: "decision", text: message.content }),
+      }),
+    })));
+    await waitFor(() => expect(screen.queryByLabelText("Title")).not.toBeInTheDocument());
+  });
+
   it("previews sent text and excludes an entry only in the current chat", async () => {
     const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(populated));
     render(<ProjectMemoryPanel {...props} request={request} />);

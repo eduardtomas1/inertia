@@ -290,6 +290,44 @@ describe("OpenCode delegated-agent projection", () => {
     expect(latest(CHILD)?.result).toBe("Corrected first finding.\n\nSecond finding.");
   });
 
+  it("retains the latest result when an older message updates beyond the usage accounting cap", () => {
+    const { projection, observe, latest } = harness();
+    observe(created(CHILD, ROOT));
+    for (let index = 0; index < 2_048; index += 1) {
+      observe(assistant(CHILD, `assistant-${index}`));
+    }
+    observe(
+      assistant(CHILD, "overflow-old"),
+      assistant(CHILD, "overflow-new"),
+      part(CHILD, { id: "final-text", messageID: "overflow-new", type: "text", text: "Latest answer." }),
+      assistant(CHILD, "overflow-old", { input: 10, output: 1 }),
+      part(CHILD, { id: "older-text", messageID: "overflow-old", type: "text", text: "Stale answer." }),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)?.result).toBe("Latest answer.");
+  });
+
+  it("uses provider creation times to reject stale messages beyond retained identity history", () => {
+    const { projection, observe, latest } = harness();
+    const datedAssistant = (index: number, completed?: number): Event => event({
+      type: "message.updated",
+      properties: { sessionID: CHILD, info: { id: `assistant-${index}`, sessionID: CHILD, role: "assistant", time: { created: index, ...(completed === undefined ? {} : { completed }) } } },
+    });
+    observe(created(CHILD, ROOT));
+    for (let index = 0; index < 2_300; index += 1) observe(datedAssistant(index));
+    observe(
+      part(CHILD, { id: "final-text", messageID: "assistant-2299", type: "text", text: "Latest answer." }),
+      datedAssistant(2_048, 2_400),
+      part(CHILD, { id: "older-text", messageID: "assistant-2048", type: "text", text: "Stale answer." }),
+      idle(CHILD),
+    );
+    projection.finish(true);
+
+    expect(latest(CHILD)?.result).toBe("Latest answer.");
+  });
+
   it("reports a child session error as a failed task with bounded error text", () => {
     const { observe, latest } = harness();
     observe(

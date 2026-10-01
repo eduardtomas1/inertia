@@ -24,6 +24,7 @@ import {
 
 const MAX_SUBAGENT_LABEL_CHARS = 200;
 const MAX_CHILD_MESSAGES = 2_048;
+const MAX_RECENT_CHILD_MESSAGES = 128;
 const MAX_CHILD_TOOL_PARTS = 4_096;
 const MAX_CHILD_RESULT_PARTS = 128;
 const SESSION_ERROR_FALLBACK = "OpenCode reported an error for this delegated task.";
@@ -49,6 +50,8 @@ interface OpenCodeChildTrace {
   totalTokens: number;
   unknownTotals: number;
   lastAssistantId: string | null;
+  lastAssistantCreatedAt: number | null;
+  recentAssistantIds: Set<string>;
   usage: SubagentTaskUsage | null;
   toolParts: Set<string>;
   uncountedToolParts: boolean;
@@ -177,6 +180,8 @@ export class OpenCodeSubagentProjection {
       totalTokens: 0,
       unknownTotals: 0,
       lastAssistantId: null,
+      lastAssistantCreatedAt: null,
+      recentAssistantIds: new Set(),
       usage: null,
       toolParts: new Set(),
       uncountedToolParts: false,
@@ -195,12 +200,33 @@ export class OpenCodeSubagentProjection {
   ): void {
     const messageId = stringValue(info?.id);
     if (!info || !messageId || info.role !== "assistant") return;
-    if (!child.messageTotals.has(messageId)) {
-      if (child.lastAssistantId !== messageId) {
+    const rawCreatedAt = objectValue(info.time)?.created;
+    const createdAt = typeof rawCreatedAt === "number" && Number.isFinite(rawCreatedAt) && rawCreatedAt >= 0
+      ? rawCreatedAt
+      : null;
+    const seen = messageId === child.lastAssistantId
+      || child.messageTotals.has(messageId)
+      || child.recentAssistantIds.has(messageId);
+    // Usage accounting stops retaining new IDs at its cap. Track recent
+    // identities separately, with provider timestamps covering older replays.
+    if (!seen) {
+      child.recentAssistantIds.add(messageId);
+      if (child.recentAssistantIds.size > MAX_RECENT_CHILD_MESSAGES) {
+        child.recentAssistantIds.delete(child.recentAssistantIds.values().next().value!);
+      }
+      if (
+        child.lastAssistantCreatedAt === null
+        || (createdAt !== null && createdAt >= child.lastAssistantCreatedAt)
+      ) {
         child.lastAssistantId = messageId;
         child.textParts.clear();
         child.text = null;
       }
+    }
+    if (messageId === child.lastAssistantId && createdAt !== null) {
+      child.lastAssistantCreatedAt = Math.max(child.lastAssistantCreatedAt ?? 0, createdAt);
+    }
+    if (!child.messageTotals.has(messageId)) {
       if (child.messageTotals.size < MAX_CHILD_MESSAGES) {
         child.messageTotals.set(messageId, undefined);
       } else {
@@ -336,6 +362,7 @@ export class OpenCodeSubagentProjection {
     child.text = null;
     this.publish(sessionId, child);
     child.messageTotals.clear();
+    child.recentAssistantIds.clear();
     child.toolParts.clear();
   }
 

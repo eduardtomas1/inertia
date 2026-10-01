@@ -122,9 +122,9 @@ export function CliConversationImportDialog({ project, request, disabled = false
         </div>
         <div className="cli-import-body">
           <aside className="cli-import-list" aria-label="CLI conversations" aria-busy={busy === "scan"}>
-            <p id={listLabelId} className="cli-import-list-label">{scan ? plural(candidates.length, "conversation") : "Conversations"}</p>
+            <p id={listLabelId} className="cli-import-list-label">{candidates.length ? plural(candidates.length, "conversation") : "Conversations"}</p>
             {scan?.limited && <p className="cli-import-list-note">Showing recent history only. Older conversations were not scanned.</p>}
-            {Boolean(scan?.skipped) && <p className="cli-import-list-note">{plural(scan!.skipped, "file")} skipped: unreadable, unsupported or larger than 16 MiB.</p>}
+            {Boolean(scan?.skipped) && <p className="cli-import-list-note">{plural(scan!.skipped, "file")} skipped: unreadable, unsupported or larger than 16&nbsp;MiB.</p>}
             {busy === "scan" ? <p className="cli-import-list-empty" role="status"><span className="loading-mark" aria-hidden="true" />Looking for conversations…</p>
               : <div className="cli-import-candidates" role="group" aria-labelledby={listLabelId}>
                 {candidates.map((item) => <button key={item.id} type="button" className="cli-import-candidate" aria-pressed={selected === item.id}
@@ -134,7 +134,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
                     <strong>{item.title}</strong>
                     <span className="cli-import-candidate-meta">
                       {providerLabel(item.providerId)} · <time dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time>
-                      {item.importedConversationId && <span className="cli-import-candidate-imported"> · <Check size={12} aria-hidden="true" />Imported</span>}
+                      {item.importedConversationId && <> · <span className="cli-import-candidate-imported"><Check size={12} aria-hidden="true" />Imported</span></>}
                     </span>
                   </span>
                 </button>)}

@@ -236,12 +236,12 @@
 }
 
 .cli-import-candidate-imported {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: var(--text-soft);
-}
-
-.cli-import-candidate-imported svg {
-  margin-right: 3px;
-  vertical-align: -2px;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .cli-import-preview {
@@ -423,7 +423,9 @@
     padding-right: 16px;
     padding-left: 16px;
   }
+}
 
+@media (max-width: 640px) {
   .cli-import-footer {
     align-items: flex-end;
     flex-direction: column;

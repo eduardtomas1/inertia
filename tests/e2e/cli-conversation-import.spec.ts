@@ -161,7 +161,7 @@ async function expectDialogLayout(dialog: Locator): Promise<void> {
     truncatedTitles: [...element.querySelectorAll<HTMLElement>("button[aria-pressed] strong, h3")]
       .filter((title) => title.scrollWidth > title.clientWidth + 1 || title.scrollHeight > title.clientHeight + 1).length,
   }));
-  expect.soft(layout).toEqual({ nested: 0, overflowing: 0, truncatedTitles: 0 });
+  expect(layout).toEqual({ nested: 0, overflowing: 0, truncatedTitles: 0 });
 }
 
 test("captures the importer in light, dark, narrow, empty and error states", async ({ browserName: _browserName }, info) => {

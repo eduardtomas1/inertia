@@ -9,7 +9,7 @@ import { forceKillPosixProcessTreeWithStatus } from "../../src/node/posix-proces
 import { settleOperationBounded } from "./support/electron-app-lifecycle";
 
 const require = createRequire(import.meta.url);
-test("Linux X11 global shortcut captures masked pixels and refuses missing accessibility", async () => {
+test("Linux X11 global shortcut captures protected pixels and reviews images without accessibility", async () => {
   test.skip(process.platform !== "linux", "Native Linux X11 regression for issue #384");
   await mkdir(".cache", { recursive: true });
   // Inside the checkout so external native bindings resolve exactly as shipped.
@@ -30,6 +30,7 @@ test("Linux X11 global shortcut captures masked pixels and refuses missing acces
     expect(child.exitCode, output).toBe(0);
     expect(output).toContain("NATIVE_SNAPSHOT_EVIDENCE masked-capture");
     expect(output).toContain("NATIVE_SNAPSHOT_EVIDENCE accessibility-refused");
+    expect(output).toContain("NATIVE_SNAPSHOT_EVIDENCE reviewed-without-accessibility");
   } finally {
     let stopped = !child;
     if (child && exited) {

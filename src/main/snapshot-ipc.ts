@@ -8,7 +8,11 @@ import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 import { privacySafeAttachmentImportError } from "./attachment-selection-import.js";
 import { clearSnapshotPreferences, readSnapshotPreferences, writeSnapshotPreferences, type SnapshotPreferences } from "./snapshot-preferences.js";
 
+import { snapshotReviewRequestSchemas, type SnapshotReviewRequest } from "../shared/snapshot-review.js";
+import { SnapshotReviewService } from "./snapshot-review.js";
+
 const requestSchema = z.discriminatedUnion("type", [
+  ...snapshotReviewRequestSchemas,
   z.object({ type: z.literal("state") }).strict(),
   z.object({ type: z.literal("configure"), enabled: z.boolean(), shortcut: z.enum(["both-shift", "accelerator"]) }).strict(),
   z.object({ type: z.literal("bind"), conversationId: z.uuid() }).strict(),
@@ -24,6 +28,7 @@ export function registerSnapshotIpc(options: {
   imports: RendererAttachmentImportCoordinator;
   onFailure?: (diagnostic: SnapshotFailureDiagnostic) => void;
 }): SnapshotService {
+  const reviews = new SnapshotReviewService({ ...options, onFailure: () => options.onFailure?.({ category: "native-failure", phase: "screenshot" }) });
   let target: { document: AttachmentImportDocument; window: BrowserWindow; conversationId: string } | null = null;
   let operation = false;
   let generation = 0;
@@ -103,7 +108,7 @@ export function registerSnapshotIpc(options: {
       operation = false;
       cancelCapture = null;
     }
-  }, options.onFailure);
+  }, options.onFailure, () => reviews.stop());
   const revoke = (): Promise<PromiseSettledResult<void>[]> => {
     generation += 1;
     captureEnabled = false;
@@ -129,6 +134,16 @@ export function registerSnapshotIpc(options: {
   ipcMain.handle(DESKTOP_IPC.snapshot, async (event, ...args) => {
     const window = options.owner(event, args.length);
     const request = requestSchema.parse(args[0]);
+    if (request.type.startsWith("review-")) {
+      const document = attachmentImportDocumentFromEvent(event);
+      const reviewRequest = request as SnapshotReviewRequest;
+      if (reviewRequest.type === "review-start") await configuration;
+      const conversationId = reviewRequest.type === "review-start" ? reviewRequest.conversationId : target?.conversationId;
+      if (service.isDisposing() || !target || target.window !== window || !sameDocument(target.document, document)
+        || target.conversationId !== conversationId) throw new SnapshotError("Focus the chat you want to attach the screenshot to.");
+      await reviews.request({ document, window, conversationId }, reviewRequest);
+      return service.state();
+    }
     switch (request.type) {
       case "state": await configuration; return service.state();
       case "configure": {
@@ -177,7 +192,9 @@ export function registerSnapshotIpc(options: {
           if (!target || target.window !== window || target.conversationId !== request.conversationId
             || target.document.owner !== document.owner || target.document.processId !== document.processId
             || target.document.frameId !== document.frameId || target.document.frameToken !== document.frameToken) {
+            const cancelled = reviews.cancel();
             target = { document, window, conversationId: request.conversationId };
+            await cancelled;
           }
         }
         return service.state();
@@ -185,7 +202,7 @@ export function registerSnapshotIpc(options: {
       case "unbind": {
         const document = attachmentImportDocumentFromEvent(event);
         if (target && sameDocument(target.document, document)) target = null;
-        await cancelCapture?.(document);
+        await Promise.all([cancelCapture?.(document), reviews.cancel(document)]);
         return service.state();
       }
       case "permission": {

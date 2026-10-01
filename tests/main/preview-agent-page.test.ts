@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentPageActivationBlocked,
+  agentPageEvidencePrivacy,
   agentPageHasSensitiveEvidence,
   agentPageHasSensitiveScreenshotEvidence,
   agentPageInputRefusal,
@@ -293,7 +294,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
       context,
     );
     runInNewContext("new HTMLElement().attachInternals()", context);
@@ -330,7 +331,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
       context,
     );
     expect(() => runInNewContext("new Element().attachShadow({mode:'invalid'})", context))
@@ -445,7 +446,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
       context,
     );
     runInNewContext(`
@@ -519,7 +520,7 @@ describe("agent browser semantic snapshots", () => {
       attachedTextAttr.textContent = "";
     `, context);
 
-    expect(dispatched).toEqual(Array(12).fill("nested-boundary"));
+    expect(dispatched).toEqual(Array(12).fill("credential-signal"));
     const descriptorRoutes = [
       `const input = new HTMLInputElement(); input.type = "password";
         Object.defineProperty(input, "value", {
@@ -582,9 +583,10 @@ describe("agent browser semantic snapshots", () => {
       Reflect.setPrototypeOf(ordinary, null);
     }`, context);
     expect(dispatched).toHaveLength(21);
+    expect(new Set(dispatched)).toEqual(new Set(["credential-signal"]));
   });
 
-  it("signals private parser content before a detached host can disappear", () => {
+  it("signals private parser content by kind and leaves oversized markup alone", () => {
     const dispatched: string[] = [];
     class FakeEvent {
       constructor(readonly type: string) {}
@@ -597,10 +599,12 @@ describe("agent browser semantic snapshots", () => {
     }
     class FakeDocumentFragment {
       source = "";
-      querySelector(_selector: string): object | null {
-        const beforeClose = this.source.split("</template>", 1)[0] ?? "";
-        if (beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")) {
-          return {};
+      querySelector(selector: string): object | null {
+        if (selector.startsWith("template")) {
+          const beforeClose = this.source.split("</template>", 1)[0] ?? "";
+          return beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")
+            ? {}
+            : null;
         }
         return /<input\b(?=[^>]*\btype\s*=\s*['"]?password\b)(?=[^>]*\bvalue\s*=\s*(?:['"][^'"]+['"]|[^\s>]+))/iu
           .test(this.source) ? {} : null;
@@ -663,7 +667,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
       context,
     );
     runInNewContext(`
@@ -685,7 +689,10 @@ describe("agent browser semantic snapshots", () => {
       new Document().writeln('<input type="password" ', 'value="hunter2">');
     `, context);
 
-    expect(dispatched).toEqual(Array(15).fill("nested-boundary"));
+    expect(dispatched).toEqual([
+      ...Array<string>(6).fill("nested-boundary"),
+      ...Array<string>(9).fill("credential-signal"),
+    ]);
 
     runInNewContext(`
       new Element().setHTML('<p>ordinary</p>');
@@ -708,8 +715,40 @@ describe("agent browser semantic snapshots", () => {
     `, context);
     expect(dispatched).toHaveLength(15);
 
-    runInNewContext("new Element().setHTML('x'.repeat(4097))", context);
-    expect(dispatched).toEqual(Array(16).fill("nested-boundary"));
+    runInNewContext(`
+      new Element().setHTML('x'.repeat(4097));
+      new Element().innerHTML = '<div>'.repeat(2000);
+      new Document().write('x'.repeat(4000), 'y'.repeat(200));
+    `, context);
+    expect(dispatched).toHaveLength(15);
+
+    const withoutSanitizer: string[] = [];
+    class BareEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        withoutSanitizer.push(event.type);
+        return true;
+      }
+    }
+    class BareElement extends BareEventTarget {
+      attachShadow(): object { return {}; }
+      set innerHTML(_source: string) {}
+    }
+    class BareHTMLElement extends BareElement {
+      attachInternals(): object { return { shadowRoot: null }; }
+    }
+    const bareContext = {
+      document: new BareEventTarget(),
+      Element: BareElement,
+      HTMLElement: BareHTMLElement,
+      EventTarget: BareEventTarget,
+      Event: FakeEvent,
+    };
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      bareContext,
+    );
+    runInNewContext("new Element().innerHTML = '<p>ordinary</p>'", bareContext);
+    expect(withoutSanitizer).toEqual(["credential-signal"]);
   });
 
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {
@@ -1281,36 +1320,6 @@ describe("agent browser semantic snapshots", () => {
     expect(getComputedStyle).toHaveBeenCalledTimes(nodes.length + 1);
   });
 
-  it("fails sensitive-evidence inspection closed at the bounded DOM scan limit", async () => {
-    let nextNodeCalls = 0;
-    const context = {
-      __inertiaAgentBrowser: {
-        privacyGuardInstalled: true,
-        nestedContentObserved: false,
-        passwordNodes: new WeakSet(),
-        passwordValues: new Set(),
-      },
-      document: {
-        documentElement: {},
-        createNodeIterator: () => ({
-          nextNode: () => {
-            nextNodeCalls += 1;
-            return { tagName: "DIV" };
-          },
-        }),
-      },
-    };
-    const contents = {
-      executeJavaScriptInIsolatedWorld: vi.fn(async (
-        _worldId: number,
-        scripts: Array<{ code: string }>,
-      ) => runInNewContext(scripts[0]!.code, context)),
-    };
-
-    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
-    expect(nextNodeCalls).toBe(4_001);
-  });
-
   it("does not read an ordinary input value during sensitive-evidence preflight", async () => {
     const readValue = vi.fn(() => "x".repeat(50_000));
     const input = { tagName: "INPUT", type: "text" } as { tagName: string; type: string; value: string };
@@ -1341,158 +1350,7 @@ describe("agent browser semantic snapshots", () => {
     expect(readValue).not.toHaveBeenCalled();
   });
 
-  it("bounds document-start privacy discovery on a dense DOM", async () => {
-    let nextNodeCalls = 0;
-    class MutationObserver {
-      constructor(_callback: (records: unknown[]) => void) {}
-      observe(): void {}
-    }
-    const context = {
-      document: {
-        documentElement: { nodeType: 1, tagName: "HTML" },
-        addEventListener: vi.fn(),
-        createNodeIterator: () => ({
-          nextNode: () => {
-            nextNodeCalls += 1;
-            return { nodeType: 1, tagName: "DIV" };
-          },
-        }),
-      },
-      MutationObserver,
-    };
-    const contents = {
-      executeJavaScriptInIsolatedWorld: vi.fn(async (
-        _worldId: number,
-        scripts: Array<{ code: string }>,
-      ) => runInNewContext(scripts[0]!.code, context)),
-    };
-
-    await installAgentPagePrivacyGuard(contents as never);
-    expect(nextNodeCalls).toBe(4_001);
-    expect(runInNewContext(
-      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
-      context,
-    )).toBe(true);
-  });
-
-  it("retains document-start taint for a consumed declarative shadow template", async () => {
-    let callback: ((records: unknown[]) => void) | undefined;
-    class MutationObserver {
-      constructor(observer: (records: unknown[]) => void) { callback = observer; }
-      observe(): void {}
-    }
-    const documentElement = { nodeType: 1, tagName: "HTML", matches: () => false };
-    const template = {
-      nodeType: 1,
-      tagName: "TEMPLATE",
-      matches: (selector: string) => selector.includes("template[shadowrootmode]"),
-    };
-    const context = {
-      document: {
-        documentElement,
-        addEventListener: vi.fn(),
-        createNodeIterator: (root: unknown) => {
-          let next = root;
-          return {
-            nextNode: () => {
-              const value = next;
-              next = null;
-              return value;
-            },
-          };
-        },
-      },
-      MutationObserver,
-    };
-    const contents = {
-      executeJavaScriptInIsolatedWorld: vi.fn(async (
-        _worldId: number,
-        scripts: Array<{ code: string }>,
-      ) => runInNewContext(scripts[0]!.code, context)),
-    };
-
-    await installAgentPagePrivacyGuard(contents as never);
-    expect(callback).toBeTypeOf("function");
-    callback!([{
-      type: "childList",
-      target: documentElement,
-      oldValue: null,
-      removedNodes: [template],
-      addedNodes: [],
-    }]);
-    expect(runInNewContext(
-      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
-      context,
-    )).toBe(true);
-  });
-
-  it("shares one fail-closed scan budget across each mutation callback", async () => {
-    let callback: ((records: unknown[]) => void) | undefined;
-    let attributeTargetsInspected = 0;
-    let addedNodesInspected = 0;
-    class MutationObserver {
-      constructor(observer: (records: unknown[]) => void) { callback = observer; }
-      observe(): void {}
-    }
-    const documentElement = { nodeType: 1, tagName: "HTML" };
-    const context = {
-      document: {
-        documentElement,
-        addEventListener: vi.fn(),
-        createNodeIterator: (root: { nodeType?: number }) => {
-          let first = true;
-          return {
-            nextNode: () => {
-              if (!first) return null;
-              first = false;
-              if (root.nodeType === 1 && root !== documentElement) {
-                addedNodesInspected += 1;
-              }
-              return root;
-            },
-          };
-        },
-      },
-      MutationObserver,
-    };
-    const contents = {
-      executeJavaScriptInIsolatedWorld: vi.fn(async (
-        _worldId: number,
-        scripts: Array<{ code: string }>,
-      ) => runInNewContext(scripts[0]!.code, context)),
-    };
-
-    await installAgentPagePrivacyGuard(contents as never);
-    expect(callback).toBeTypeOf("function");
-    const attributeRecords = Array.from({ length: 5_000 }, () => ({
-      type: "attributes",
-      get target() {
-        attributeTargetsInspected += 1;
-        return { tagName: "DIV" };
-      },
-      oldValue: null,
-      removedNodes: [],
-      addedNodes: [],
-    }));
-    callback!(attributeRecords);
-    expect(attributeTargetsInspected).toBe(4_000);
-
-    const addedNodes = Array.from({ length: 5_000 }, () => ({ nodeType: 1, tagName: "DIV" }));
-    callback!([{
-      type: "childList",
-      target: { tagName: "DIV" },
-      oldValue: null,
-      removedNodes: [],
-      addedNodes,
-    }]);
-    expect(addedNodesInspected).toBe(2_000);
-    expect(runInNewContext(
-      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
-      context,
-    )).toBe(true);
-  });
-
-  it("refuses interaction labels when their password scan budget is exhausted", async () => {
+  it("hides interaction labels when their password scan budget is exhausted", async () => {
     let nextNodeCalls = 0;
     const element = {
       tagName: "BUTTON",
@@ -1533,8 +1391,14 @@ describe("agent browser semantic snapshots", () => {
       ) => runInNewContext(scripts[0]!.code, context)),
     };
 
-    await expect(locateAgentPageRef(contents as never, "e1"))
-      .resolves.toEqual({ found: false });
+    await expect(locateAgentPageRef(contents as never, "e1")).resolves.toMatchObject({
+      found: true,
+      blocked: false,
+      label: "page element",
+      sensitive: true,
+      x: 120,
+      y: 50,
+    });
     expect(nextNodeCalls).toBe(4_001);
   });
 
@@ -1627,6 +1491,7 @@ describe("agent browser semantic snapshots", () => {
     let privacyInputListener: ((event: Record<string, unknown>) => void) | undefined;
     const activationListeners = new Map<string, (event: Record<string, unknown>) => void>();
     let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
+    let credentialSignalListener: ((event: Record<string, unknown>) => void) | undefined;
     const document = withSemanticIterator({
       title: "Sign in",
       body: bodyWithText("Password"),
@@ -1656,6 +1521,7 @@ describe("agent browser semantic snapshots", () => {
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "input" && !privacyInputListener) privacyInputListener = listener;
         if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
+        if (name === "__inertia_agent_credential_signal__") credentialSignalListener = listener;
         activationListeners.set(name, listener);
       }),
     };
@@ -1669,8 +1535,13 @@ describe("agent browser semantic snapshots", () => {
     await installAgentPagePrivacyGuard(contents as never);
     expect(document.addEventListener.mock.calls.map(([name]) => name))
       .not.toContain("input");
-    expect(context.addEventListener.mock.calls.slice(0, 3).map(([name]) => name))
-      .toEqual(["__inertia_agent_nested_boundary__", "beforeinput", "input"]);
+    expect(context.addEventListener.mock.calls.slice(0, 4).map(([name]) => name))
+      .toEqual([
+        "__inertia_agent_nested_boundary__",
+        "__inertia_agent_credential_signal__",
+        "beforeinput",
+        "input",
+      ]);
     input.value = secret;
     input.type = "text";
     document.title = secret;
@@ -1822,10 +1693,16 @@ describe("agent browser semantic snapshots", () => {
       composedPath: () => [{ tagName: "CREDENTIAL-HOST" }],
       isTrusted: true,
     });
-    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
-    runInNewContext("globalThis.__inertiaAgentBrowser.nestedContentObserved = false", context);
+    await expect(agentPageEvidencePrivacy(contents as never))
+      .resolves.toEqual({ withheld: "hidden-input" });
+    runInNewContext("globalThis.__inertiaAgentBrowser.evidenceWithheld = undefined", context);
     nestedBoundaryListener?.({});
-    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(false);
+    expect(runInNewContext("globalThis.__inertiaAgentBrowser.shadowRootsObserved", context))
+      .toBe(true);
+    credentialSignalListener?.({});
+    await expect(agentPageEvidencePrivacy(contents as never))
+      .resolves.toEqual({ withheld: "credential-signal" });
   });
 
   it("masks password values in semantic evidence and interaction labels", async () => {

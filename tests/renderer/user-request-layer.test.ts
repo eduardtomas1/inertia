@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { sessionRecoveryDetail } from "../../src/renderer/src/utils/sessionRecovery";
 import type {
   AgentTurn,
   ChatAttachment,
@@ -92,9 +93,10 @@ function renderRequest(
     checkpointRestoreDisabled?: boolean;
     internalInstruction?: string;
     contextPackets?: ConversationContextPacketSummary[];
+    turn?: Partial<AgentTurn>;
   } = {},
 ): string {
-  const currentTurn = turn(options.checkpoint?.id ?? null);
+  const currentTurn = { ...turn(options.checkpoint?.id ?? null), ...options.turn };
   return renderToStaticMarkup(createElement(ResponseTimeline, {
     turns: [currentTurn],
     messages: [
@@ -236,6 +238,58 @@ describe("Quiet Ledger user request layer", () => {
     expect(request).toContain("Please review the provider route.");
     expect(request).not.toContain(internalInstruction);
     expect(html).toContain(internalInstruction);
+  });
+
+  it("states when a turn started a new provider session and what was restored", () => {
+    const html = renderRequest("Continue.", {
+      turn: {
+        continuationReasonCode: "stale-provider-session",
+        sessionRecovery: { restoredMessageCount: 113, omittedMessageCount: 20 },
+      },
+    });
+    const requestStart = html.indexOf('aria-label="Your request"');
+    const request = html.slice(requestStart, html.indexOf("</article>", requestStart));
+    expect(request).toContain('aria-label="Provider session"');
+    expect(request).toContain("<strong>New provider session</strong>");
+    expect(request).toContain("Saved session no longer available · 113 earlier messages restored · 20 omitted");
+    expect(request.indexOf("New provider session")).toBeGreaterThan(request.indexOf("Continue."));
+
+    for (const quiet of [
+      {},
+      { continuationReasonCode: "same-continuation" as const, sessionRecovery: null },
+      { continuationReasonCode: "first-turn" as const },
+    ]) {
+      expect(renderRequest("Continue.", { turn: quiet })).not.toContain("New provider session");
+    }
+  });
+
+  it("describes every session recovery outcome without overstating it", () => {
+    expect(sessionRecoveryDetail({ continuationReasonCode: "same-continuation", sessionRecovery: null })).toBeNull();
+    expect(sessionRecoveryDetail({ sessionRecovery: undefined })).toBeNull();
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "missing-continuation-identity",
+      sessionRecovery: { restoredMessageCount: 1, omittedMessageCount: 0 },
+    })).toBe("1 earlier message restored");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "provider-installation-changed",
+      sessionRecovery: { restoredMessageCount: 24, omittedMessageCount: 0 },
+    })).toBe("Provider updated · 24 earlier messages restored");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "incompatible-model-changed",
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 300 },
+    })).toBe("Model changed · Earlier messages did not fit and were not restored");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "backend-endpoint-changed",
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0 },
+    })).toBe("Model backend endpoint changed · Earlier messages were not restored automatically");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "backend-endpoint-changed",
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 4 },
+    })).toBe("Model backend endpoint changed · Earlier messages from another model endpoint were not restored");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "missing-continuation-identity",
+      sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 1, withheldMessageCount: 2 },
+    })).toBe("2 earlier messages restored · 1 omitted · Earlier messages from another model endpoint were not restored");
   });
 
   it("renders reloaded context provenance and states a deleted source truthfully", () => {

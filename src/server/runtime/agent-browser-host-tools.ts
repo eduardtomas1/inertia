@@ -2,10 +2,19 @@ import { parseAgentBrowserApproval, type AgentBrowserRequest } from "../../share
 import { z } from "zod";
 
 import type { Conversation } from "../../shared/contracts.js";
-import type {
-  AgentBrowserCommand,
-  AgentBrowserKey,
-  AgentBrowserRunIdentity,
+import {
+  AGENT_BROWSER_TAB_ID_PATTERN,
+  DEFAULT_AGENT_BROWSER_WAIT_MS,
+  MAX_AGENT_BROWSER_TYPE_CHARS,
+  MAX_AGENT_BROWSER_URL_CHARS,
+  MAX_AGENT_BROWSER_WAIT_MS,
+  MAX_AGENT_BROWSER_WAIT_TEXT_CHARS,
+  MIN_AGENT_BROWSER_WAIT_MS,
+  agentBrowserTextLength,
+  type AgentBrowserCommand,
+  type AgentBrowserKey,
+  type AgentBrowserRunIdentity,
+  type AgentBrowserState,
 } from "../../shared/agent-browser.js";
 import type {
   ProviderHostToolCall,
@@ -18,119 +27,208 @@ import type {
 import { withFrontendBrowserAudit } from "./frontend-browser-audit.js";
 import { isSafeApprovalDisplayText } from "../provider/approval-display.js";
 
-const tabIdSchema = z.string().uuid();
-const refSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u);
-const urlSchema = z.string().min(1).max(4_096).refine((value) => !value.includes("\0"));
-const emptySchema = z.object({}).strict();
-const navigateSchema = z.object({ url: urlSchema }).strict();
-const keySchema = z.enum([
+const REF_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
+const NUL_FREE_PATTERN = "^[^\\u0000]*$";
+const SINGLE_LINE_PATTERN = "^[^\\u0000\\r\\n]*$";
+const BROWSER_KEYS = [
   "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
   "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
-]);
-const interactSchema = z.discriminatedUnion("action", [
+] as const satisfies readonly AgentBrowserKey[];
+
+const boundedText = (maximum: number) => z.string().refine(
+  (value) => agentBrowserTextLength(value) <= maximum,
+  `Too long: expected at most ${maximum} Unicode code points`,
+);
+const tabIdSchema = z.string().regex(new RegExp(AGENT_BROWSER_TAB_ID_PATTERN, "u"));
+const refSchema = z.string().regex(new RegExp(REF_PATTERN, "u"));
+const urlSchema = boundedText(MAX_AGENT_BROWSER_URL_CHARS).min(1).regex(new RegExp(NUL_FREE_PATTERN, "u"));
+const textSchema = boundedText(MAX_AGENT_BROWSER_TYPE_CHARS).regex(new RegExp(NUL_FREE_PATTERN, "u"));
+const keySchema = z.enum(BROWSER_KEYS);
+const deltaSchema = z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0);
+const emptySchema = z.object({}).strict();
+const navigateSchema = z.object({ url: urlSchema }).strict();
+const clickSchema = z.object({ ref: refSchema }).strict();
+const typeSchema = z.object({
+  ref: refSchema,
+  text: textSchema,
+  replace: z.boolean().default(true),
+}).strict();
+const pressSchema = z.object({ key: keySchema }).strict();
+const scrollSchema = z.object({ deltaY: deltaSchema }).strict();
+const waitSchema = z.object({
+  text: boundedText(MAX_AGENT_BROWSER_WAIT_TEXT_CHARS).min(1)
+    .regex(new RegExp(SINGLE_LINE_PATTERN, "u"))
+    .refine((value) => value.trim().length > 0).optional(),
+  state: z.enum(["present", "absent"]).default("present"),
+  timeoutMs: z.number().int().min(MIN_AGENT_BROWSER_WAIT_MS).max(MAX_AGENT_BROWSER_WAIT_MS)
+    .default(DEFAULT_AGENT_BROWSER_WAIT_MS),
+}).strict();
+const openTabSchema = z.object({ url: urlSchema.optional() }).strict();
+const tabSchema = z.object({ tabId: tabIdSchema }).strict();
+const retiredInteractSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("click"), ref: refSchema }).strict(),
   z.object({
     action: z.literal("type"),
     ref: refSchema,
-    text: z.string().max(4_000).refine((value) => !value.includes("\0")),
+    text: textSchema,
     replace: z.boolean().default(true),
   }).strict(),
   z.object({ action: z.literal("press"), key: keySchema }).strict(),
-  z.object({
-    action: z.literal("scroll"),
-    deltaY: z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0),
-  }).strict(),
+  z.object({ action: z.literal("scroll"), deltaY: deltaSchema }).strict(),
 ]);
-const tabsSchema = z.discriminatedUnion("action", [
+const retiredTabsSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }).strict(),
   z.object({ action: z.literal("open"), url: urlSchema.optional() }).strict(),
   z.object({ action: z.literal("activate"), tabId: tabIdSchema }).strict(),
   z.object({ action: z.literal("close"), tabId: tabIdSchema }).strict(),
 ]);
 
-export const AGENT_BROWSER_TOOL_NAMES = new Set([
-  "inertia_browser_snapshot",
-  "inertia_browser_screenshot",
-  "inertia_browser_navigate",
-  "inertia_browser_interact",
-  "inertia_browser_tabs",
-]);
+const objectSchema = (
+  properties: Record<string, unknown>,
+  required: readonly string[] = [],
+): Readonly<Record<string, unknown>> => ({
+  type: "object",
+  additionalProperties: false,
+  properties,
+  ...(required.length > 0 ? { required: [...required] } : {}),
+});
+const refProperty = { type: "string", pattern: REF_PATTERN, description: "An element ref from the latest inertia_browser_snapshot." };
+const urlProperty = { type: "string", minLength: 1, maxLength: MAX_AGENT_BROWSER_URL_CHARS, pattern: NUL_FREE_PATTERN, description: `A local development URL such as http://localhost:3000. At most ${MAX_AGENT_BROWSER_URL_CHARS} Unicode code points.` };
+const tabIdProperty = { type: "string", format: "uuid", pattern: AGENT_BROWSER_TAB_ID_PATTERN, description: "A tab id from inertia_browser_tabs." };
 
 export const AGENT_BROWSER_TOOL_DEFINITIONS:
 readonly ProviderHostToolDefinition[] = [
   {
-    name: "inertia_browser_snapshot",
-    description: "Inspect the active page in Inertia's visible Browser. Returns a bounded semantic page snapshot with stable element refs for later browser interactions. Use this native tool instead of launching Playwright when a live Inertia Browser is available.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
-    },
-    inputValidator: emptySchema,
-    readOnly: true,
-  },
-  {
-    name: "inertia_browser_screenshot",
-    description: "Capture the active visible Inertia Browser page into the bounded local Evidence timeline. Bitmap bytes stay on the user's device; use inertia_browser_snapshot for provider-visible page inspection.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
-    },
-    inputValidator: emptySchema,
-    readOnly: true,
-  },
-  {
     name: "inertia_browser_navigate",
-    description: "Navigate the active Inertia Browser tab to a validated local development URL. Remote websites stay outside the embedded browser security boundary.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: { url: { type: "string", minLength: 1, maxLength: 4_096 } },
-      required: ["url"],
-    },
+    description: "Open a local development URL in this chat's Inertia Browser. Call this first: a new tab is blank until you navigate. Waits for the page to load and returns the tab state. Only loopback addresses such as http://localhost:3000 or http://127.0.0.1:5173 can be opened. The Browser works even when its panel is not showing.",
+    inputSchema: objectSchema({ url: urlProperty }, ["url"]),
     inputValidator: navigateSchema,
     readOnly: false,
   },
   {
+    name: "inertia_browser_snapshot",
+    description: "Read the active Inertia Browser page. Returns visible text, the viewport, and up to 200 visible controls with element refs for inertia_browser_click and inertia_browser_type. Take a new snapshot after the page changes because older refs stop matching. Content inside embedded frames and shadow roots is listed as not inspected. Use this instead of launching Playwright or another browser.",
+    inputSchema: objectSchema({}),
+    inputValidator: emptySchema,
+    readOnly: true,
+  },
+  {
+    name: "inertia_browser_click",
+    description: "Click one visible element in the active Inertia Browser page by its ref from the latest inertia_browser_snapshot. Waits for any navigation the click starts.",
+    inputSchema: objectSchema({ ref: refProperty }, ["ref"]),
+    inputValidator: clickSchema,
+    readOnly: false,
+  },
+  {
+    name: "inertia_browser_type",
+    description: "Type text into one editable element in the active Inertia Browser page by its ref from the latest inertia_browser_snapshot. Replaces the existing value unless replace is false.",
+    inputSchema: objectSchema({
+      ref: refProperty,
+      text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS, pattern: NUL_FREE_PATTERN, description: `The text to type. At most ${MAX_AGENT_BROWSER_TYPE_CHARS} Unicode code points.` },
+      replace: { type: "boolean", default: true, description: "Replace the current value (default) or append to it." },
+    }, ["ref", "text"]),
+    inputValidator: typeSchema,
+    readOnly: false,
+  },
+  {
+    name: "inertia_browser_press",
+    description: "Press one key in the active Inertia Browser page. The key goes to the focused element, so click or type into it first.",
+    inputSchema: objectSchema({ key: { type: "string", enum: [...BROWSER_KEYS] } }, ["key"]),
+    inputValidator: pressSchema,
+    readOnly: false,
+  },
+  {
+    name: "inertia_browser_scroll",
+    description: "Scroll the active Inertia Browser page vertically by a number of pixels. Positive values scroll down and negative values scroll up.",
+    inputSchema: objectSchema({
+      deltaY: { type: "integer", minimum: -2_000, maximum: 2_000, description: "Pixels to scroll; must not be 0." },
+    }, ["deltaY"]),
+    inputValidator: scrollSchema,
+    readOnly: false,
+  },
+  {
+    name: "inertia_browser_wait_for",
+    description: "Wait for the active Inertia Browser page to reach a state before continuing. With text, waits until that visible text or control name is present, or absent when state is absent. Without text, waits until the page finishes loading. Returns matched true or false; it never fails just because the condition was not reached.",
+    inputSchema: objectSchema({
+      text: { type: "string", minLength: 1, maxLength: MAX_AGENT_BROWSER_WAIT_TEXT_CHARS, pattern: SINGLE_LINE_PATTERN, description: `Visible text or a control name to look for, matched case-insensitively. At most ${MAX_AGENT_BROWSER_WAIT_TEXT_CHARS} Unicode code points.` },
+      state: { type: "string", enum: ["present", "absent"], default: "present" },
+      timeoutMs: { type: "integer", minimum: MIN_AGENT_BROWSER_WAIT_MS, maximum: MAX_AGENT_BROWSER_WAIT_MS, default: DEFAULT_AGENT_BROWSER_WAIT_MS },
+    }),
+    inputValidator: waitSchema,
+    readOnly: true,
+  },
+  {
+    name: "inertia_browser_screenshot",
+    description: "Capture the active Inertia Browser page into the user's local Evidence timeline. The pixels stay on the user's device and are not shown to you, so use inertia_browser_snapshot to inspect the page.",
+    inputSchema: objectSchema({}),
+    inputValidator: emptySchema,
+    readOnly: true,
+  },
+  {
+    name: "inertia_browser_tabs",
+    description: "List this chat's Inertia Browser tabs and show which one is active. Also reports whether the active tab is still blank or loading.",
+    inputSchema: objectSchema({}),
+    inputValidator: emptySchema,
+    readOnly: true,
+  },
+  {
+    name: "inertia_browser_open_tab",
+    description: "Open a new Inertia Browser tab and make it active, optionally loading a local development URL. At most eight tabs are allowed per chat.",
+    inputSchema: objectSchema({ url: urlProperty }),
+    inputValidator: openTabSchema,
+    readOnly: false,
+  },
+  {
+    name: "inertia_browser_select_tab",
+    description: "Make another Inertia Browser tab active by its id from inertia_browser_tabs.",
+    inputSchema: objectSchema({ tabId: tabIdProperty }, ["tabId"]),
+    inputValidator: tabSchema,
+    readOnly: false,
+  },
+  {
+    name: "inertia_browser_close_tab",
+    description: "Close one Inertia Browser tab by its id from inertia_browser_tabs.",
+    inputSchema: objectSchema({ tabId: tabIdProperty }, ["tabId"]),
+    inputValidator: tabSchema,
+    readOnly: false,
+  },
+] as const;
+
+export const RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS:
+readonly ProviderHostToolDefinition[] = [
+  {
     name: "inertia_browser_interact",
-    description: "Interact with the active visible Inertia Browser page using a semantic ref from inertia_browser_snapshot, a bounded key press, or a bounded scroll. Inertia shows the agent cursor and action in the Browser chrome.",
+    description: "Click, type, press a key, or scroll in the active Inertia Browser page.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: { enum: ["click", "type", "press", "scroll"] },
-        ref: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" },
-        text: { type: "string", maxLength: 4_000 },
+        ref: { type: "string", pattern: REF_PATTERN },
+        text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS },
         replace: { type: "boolean", default: true },
-        key: { enum: [...keySchema.options] },
+        key: { enum: [...BROWSER_KEYS] },
         deltaY: { type: "integer", minimum: -2_000, maximum: 2_000 },
       },
       required: ["action"],
     },
-    inputValidator: interactSchema,
-    readOnly: false,
-  },
-  {
-    name: "inertia_browser_tabs",
-    description: "List, open, activate, or close pages in the current chat's visible Inertia Browser. At most eight ephemeral tabs are allowed and they share only the Browser's non-persistent hardened session.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        action: { enum: ["list", "open", "activate", "close"] },
-        url: { type: "string", minLength: 1, maxLength: 4_096 },
-        tabId: { type: "string", format: "uuid" },
-      },
-      required: ["action"],
-    },
-    inputValidator: tabsSchema,
+    inputValidator: retiredInteractSchema,
     readOnly: false,
   },
 ] as const;
 
+export const AGENT_BROWSER_TOOL_NAMES = new Set([
+  ...AGENT_BROWSER_TOOL_DEFINITIONS,
+  ...RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
+].map(({ name }) => name));
+
 function failure(code: string, message: string): ProviderHostToolResult {
   return { success: false, text: JSON.stringify({ error: { code, message } }) };
+}
+
+function retiredTabsArguments(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && Object.hasOwn(value, "action");
 }
 
 function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
@@ -145,8 +243,45 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
       const args = navigateSchema.parse(call.arguments);
       return { action: "navigate", url: args.url };
     }
+    case "inertia_browser_click": {
+      const args = clickSchema.parse(call.arguments);
+      return { action: "click", ref: args.ref };
+    }
+    case "inertia_browser_type": {
+      const args = typeSchema.parse(call.arguments);
+      return { action: "type", ref: args.ref, text: args.text, replace: args.replace };
+    }
+    case "inertia_browser_press": {
+      const args = pressSchema.parse(call.arguments);
+      return { action: "press", key: args.key };
+    }
+    case "inertia_browser_scroll": {
+      const args = scrollSchema.parse(call.arguments);
+      return { action: "scroll", deltaY: args.deltaY };
+    }
+    case "inertia_browser_wait_for": {
+      const args = waitSchema.parse(call.arguments);
+      return {
+        action: "wait",
+        ...(args.text === undefined ? {} : { text: args.text.trim() }),
+        state: args.state,
+        timeoutMs: args.timeoutMs,
+      };
+    }
+    case "inertia_browser_open_tab": {
+      const args = openTabSchema.parse(call.arguments);
+      return { action: "tab-open", ...(args.url ? { url: args.url } : {}) };
+    }
+    case "inertia_browser_select_tab": {
+      const args = tabSchema.parse(call.arguments);
+      return { action: "tab-activate", tabId: args.tabId };
+    }
+    case "inertia_browser_close_tab": {
+      const args = tabSchema.parse(call.arguments);
+      return { action: "tab-close", tabId: args.tabId };
+    }
     case "inertia_browser_interact": {
-      const args = interactSchema.parse(call.arguments);
+      const args = retiredInteractSchema.parse(call.arguments);
       switch (args.action) {
         case "click":
           return { action: "click", ref: args.ref };
@@ -158,13 +293,17 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
             replace: args.replace,
           };
         case "press":
-          return { action: "press", key: args.key as AgentBrowserKey };
+          return { action: "press", key: args.key };
         case "scroll":
           return { action: "scroll", deltaY: args.deltaY };
       }
     }
     case "inertia_browser_tabs": {
-      const args = tabsSchema.parse(call.arguments);
+      if (!retiredTabsArguments(call.arguments)) {
+        emptySchema.parse(call.arguments);
+        return { action: "tabs" };
+      }
+      const args = retiredTabsSchema.parse(call.arguments);
       switch (args.action) {
         case "list":
           return { action: "tabs" };
@@ -187,7 +326,46 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
 function requiresApproval(command: AgentBrowserCommand): boolean {
   return command.action !== "snapshot"
     && command.action !== "screenshot"
-    && command.action !== "tabs";
+    && command.action !== "tabs"
+    && command.action !== "wait";
+}
+
+function invalidArguments(error: z.ZodError): ProviderHostToolResult {
+  const detail = error.issues.slice(0, 4).map((issue) => {
+    const path = issue.path.map(String).join(".");
+    return `${path || "arguments"}: ${issue.message}`.slice(0, 200);
+  }).join("; ");
+  return failure(
+    "invalid",
+    `The browser tool arguments were not accepted (${detail}). Check the tool's input schema and try again.`,
+  );
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function resultText(
+  command: AgentBrowserCommand,
+  text: string,
+  state: AgentBrowserState,
+): string {
+  let parsed: Record<string, unknown> | null;
+  try {
+    parsed = record(JSON.parse(text) as unknown);
+  } catch {
+    return text;
+  }
+  if (!parsed) return text;
+  if (command.action === "snapshot") {
+    return withFrontendBrowserAudit(JSON.stringify(
+      Array.isArray(parsed.elements) ? { tabId: state.activeTabId, ...parsed } : { ...parsed, state },
+    ));
+  }
+  if (Object.hasOwn(parsed, "state") || Object.hasOwn(parsed, "activeTabId")) return text;
+  return JSON.stringify({ ...parsed, state });
 }
 
 export class AgentBrowserHostTools {
@@ -201,7 +379,13 @@ export class AgentBrowserHostTools {
     if (identity.conversationId !== conversation.id) {
       return failure("invalid_owner", "The Browser action no longer owns this chat.");
     }
-    const command = commandFor(call);
+    let command: AgentBrowserCommand | null;
+    try {
+      command = commandFor(call);
+    } catch (error) {
+      if (error instanceof z.ZodError) return invalidArguments(error);
+      throw error;
+    }
     if (!command) return failure("unknown_tool", "That Inertia browser tool is unavailable.");
     let execution: AgentBrowserRequest = command;
     if (
@@ -239,12 +423,7 @@ export class AgentBrowserHostTools {
       call.signal,
     );
     return result.ok
-      ? {
-          success: true,
-          text: command.action === "snapshot"
-            ? withFrontendBrowserAudit(result.text)
-            : result.text,
-        }
+      ? { success: true, text: resultText(command, result.text, result.state) }
       : failure(result.code, result.message);
   }
 }

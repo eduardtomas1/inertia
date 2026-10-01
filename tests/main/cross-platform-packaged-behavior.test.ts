@@ -891,15 +891,16 @@ describe("cross-platform packaged behavior contract", () => {
     );
   });
 
-  it("destroys native previews when the renderer reloads or exits", async () => {
+  it("hides native previews when the renderer reloads or exits and destroys them with the window", async () => {
     const main = await source("src/main/index.ts");
     expect(main).toContain('window.webContents.on("did-start-navigation"');
     expect(main).toContain(
-      "if (details.isMainFrame && !details.isSameDocument) previewBroker.close()",
+      "if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces()",
     );
     expect(main).toContain(
-      'window.webContents.on("render-process-gone", () => previewBroker.close())',
+      'window.webContents.on("render-process-gone", () => previewBroker.releaseSurfaces())',
     );
+    expect(main).toMatch(/window\.on\("closed", \(\) => \{[^}]*previewBroker\.close\(\);/u);
   });
 
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {

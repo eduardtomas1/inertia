@@ -36,6 +36,7 @@ import {
   createProviderEmitter,
   providerCallbacksFromHarness,
 } from "./emitter";
+import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
 import { providerChildEnvironment } from "../environment";
@@ -524,7 +525,7 @@ export class ProviderRunCoordinator {
               model: launchOptions.modelArgument ?? undefined,
             };
         active.harnessStartInvoked = true;
-        harnessRun = harness.start({
+        harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
           executable,
           // The harness owns this copy for the lifetime of its child process.
@@ -568,7 +569,7 @@ export class ProviderRunCoordinator {
             },
           ),
           ...(callbacks.hostTools ? { hostTools: callbacks.hostTools } : {}),
-        });
+        }, callbacks.freshSessionFallback);
       } finally {
         releaseLaunch();
       }

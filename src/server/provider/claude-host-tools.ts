@@ -2,9 +2,11 @@ import {
   createSdkMcpServer,
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+import { providerMcpTools } from "./host-tool-mcp-protocol";
 
 interface McpRequestExtra {
   requestId?: unknown;
@@ -42,7 +44,6 @@ export function createClaudeHostTools(
     name: INERTIA_HOST_MCP_NAME,
     version: "1.0.0",
     instructions: "Manage bounded top-level Inertia chats in the current project. Inertia itself asks for approval before mutations.",
-    alwaysLoad: true,
   });
   const providerToolNames = new Set<string>();
   for (const definition of runtime.definitions()) {
@@ -85,6 +86,12 @@ export function createClaudeHostTools(
       },
     );
   }
+  config.instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: providerMcpTools(runtime.definitions()).map((tool) => ({
+      ...tool,
+      _meta: { "anthropic/alwaysLoad": true },
+    })),
+  }));
   let closePromise: Promise<void> | undefined;
   return {
     config,

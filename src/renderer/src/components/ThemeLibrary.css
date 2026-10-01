@@ -374,3 +374,49 @@
   content: "";
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
+
+
+.custom-theme-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+}
+
+.custom-theme-color {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
+}
+
+.custom-theme-color.is-active {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 28%, var(--surface-strong));
+}
+
+.custom-theme-preview {
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.custom-theme-controls { flex: 1; min-width: 0; }
+.custom-theme-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+.custom-theme-label label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 9px; font-weight: 650; }
+.custom-theme-status { color: var(--text-muted); font-size: 8px; }
+.custom-theme-inputs { display: flex; align-items: center; gap: 6px; }
+.custom-theme-inputs input { min-width: 0; height: 28px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); }
+.custom-theme-inputs input[type="color"] { width: 28px; flex: 0 0 28px; padding: 3px; cursor: pointer; }
+.custom-theme-inputs input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.custom-theme-inputs input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 3px; }
+.custom-theme-inputs input[type="text"] { width: 80px; flex: 1; padding: 4px 6px; font-family: var(--font-mono); font-size: 9px; }
+.custom-theme-inputs input[aria-invalid="true"] { border-color: var(--danger); }
+.custom-theme-reset { padding: 4px 0 4px 3px; background: transparent; color: var(--text-soft); font-size: 8.5px; }
+.custom-theme-preview:focus-visible, .custom-theme-inputs input:focus-visible, .custom-theme-reset:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.custom-theme-color :disabled { opacity: .5; cursor: not-allowed; }
+.custom-theme-controls p[role="alert"] { color: var(--danger); }

@@ -5,9 +5,11 @@ import {
 } from "node:child_process";
 import { win32 } from "node:path";
 import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
-import type {
-  PosixCleanupFailure,
-  PosixCleanupFailureReason,
+import {
+  posixCleanupDiagnostic,
+  type PosixCleanupDiagnostic,
+  type PosixCleanupFailure,
+  type PosixCleanupFailureReason,
 } from "./posix-cleanup-diagnostics";
 import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
@@ -67,10 +69,12 @@ export interface OwnedPidProcessTreeTermination {
 
 interface ProcessTreeTerminationErrorOptions extends ErrorOptions {
   priorError?: unknown;
+  posixCleanupDiagnostic?: PosixCleanupDiagnostic | null;
 }
 
 export class ProcessTreeTerminationError extends Error {
   readonly code = "process-tree-termination-unconfirmed";
+  readonly posixCleanupDiagnostic: PosixCleanupDiagnostic | null;
 
   constructor(
     subject: string,
@@ -87,7 +91,50 @@ export class ProcessTreeTerminationError extends Error {
       options,
     );
     this.name = "ProcessTreeTerminationError";
+    this.posixCleanupDiagnostic = options?.posixCleanupDiagnostic ?? null;
   }
+}
+
+const latestPosixCleanupDiagnostics = new WeakMap<ChildProcess, PosixCleanupDiagnostic>();
+
+export function posixCleanupDiagnosticFor(
+  child: ChildProcess,
+): PosixCleanupDiagnostic | null {
+  return latestPosixCleanupDiagnostics.get(child) ?? null;
+}
+
+export function posixCleanupDiagnosticOf(error: unknown): PosixCleanupDiagnostic | null {
+  const visited = new Set<unknown>();
+  let current = error;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== "object" || current === null || visited.has(current)) return null;
+    visited.add(current);
+    if (current instanceof ProcessTreeTerminationError && current.posixCleanupDiagnostic) {
+      return current.posixCleanupDiagnostic;
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return null;
+}
+
+export function recordingProcessTreeTermination(
+  terminate: ProcessTreeTerminator,
+  diagnostics: PosixCleanupDiagnostic[],
+): ProcessTreeTerminator {
+  const record = (child: ChildProcess): void => {
+    const diagnostic = posixCleanupDiagnosticFor(child);
+    if (diagnostic) diagnostics.push(diagnostic);
+  };
+  return async (child, force) => {
+    try {
+      const confirmed = await terminate(child, force);
+      if (!confirmed) record(child);
+      return confirmed;
+    } catch (error) {
+      record(child);
+      throw error;
+    }
+  };
 }
 
 export function isProcessTreeTerminationUnconfirmed(error: unknown): boolean {
@@ -119,9 +166,16 @@ export async function requireProcessTreeTermination(
   try {
     confirmed = await terminate(child, force);
   } catch (cause) {
-    throw new ProcessTreeTerminationError(subject, { cause });
+    throw new ProcessTreeTerminationError(subject, {
+      cause,
+      posixCleanupDiagnostic: posixCleanupDiagnosticFor(child),
+    });
   }
-  if (!confirmed) throw new ProcessTreeTerminationError(subject);
+  if (!confirmed) {
+    throw new ProcessTreeTerminationError(subject, {
+      posixCleanupDiagnostic: posixCleanupDiagnosticFor(child),
+    });
+  }
 }
 
 /**
@@ -804,7 +858,16 @@ export async function terminateProcessTreeAndWait(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
-  const report = dependencies.onPosixCleanupFailure ?? (() => undefined);
+  const startedAt = performance.now();
+  let killed: PosixProcessTreeKillResult | null = null;
+  latestPosixCleanupDiagnostics.delete(child);
+  const report = (failure: PosixCleanupFailure): void => {
+    latestPosixCleanupDiagnostics.set(
+      child,
+      posixCleanupDiagnostic(failure, killed, performance.now() - startedAt),
+    );
+    dependencies.onPosixCleanupFailure?.(failure);
+  };
   const reported = (
     confirmed: boolean,
     reason: PosixCleanupFailureReason,
@@ -958,7 +1021,7 @@ export async function terminateProcessTreeAndWait(
     child.exitCode === null && child.signalCode === null;
   if (force) {
     const leaderSignalable = leaderUnreaped();
-    const killed: PosixProcessTreeKillResult = leaderSignalable
+    killed = leaderSignalable
       ? forceKillPosixProcessTreeWithStatus(pid, {
         kill: killProcess,
         spawnProcessSync,
@@ -972,6 +1035,8 @@ export async function terminateProcessTreeAndWait(
         rootStop: "absent",
         rootState: "absent",
         rootRunningObserved: false,
+        snapshotReads: 0,
+        snapshotTimeouts: 0,
       };
     const enumeration = posixTreeEnumeration(killed, true);
     const { descendants } = killed;

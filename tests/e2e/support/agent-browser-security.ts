@@ -116,12 +116,77 @@ export async function expectDocumentStartPrivacyGuard(
   );
   expect(evidence, `privacy evidence remained available for ${url}`).toMatchObject({
     opened: { ok: true },
-    snapshot: { ok: false, code: "invalid" },
-    screenshot: { ok: false, code: "invalid" },
+    snapshot: { ok: false, code: "sensitive" },
+    screenshot: { ok: false, code: "sensitive" },
     closed: { ok: true },
     restored: { ok: true },
   });
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
+}
+
+export async function expectStructuralCoverage(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+  expected: {
+    notInspected: string[];
+    present?: string;
+    absent: string[];
+    truncated?: boolean;
+  },
+): Promise<void> {
+  const evidence = await app.electronApp.evaluate(
+    async (_electron, request) => {
+      type Command =
+        | { action: "snapshot" | "screenshot" | "tabs" }
+        | { action: "tab-open"; url: string }
+        | { action: "tab-activate" | "tab-close"; tabId: string };
+      type Result = {
+        code?: string;
+        message?: string;
+        ok: boolean;
+        state?: { activeTabId: string };
+        text?: string;
+      };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const before = await runtime.agentBrowser(request.conversationId, { action: "tabs" });
+      if (!before.ok || !before.state) return { before };
+      const previousTabId = before.state.activeTabId;
+      const opened = await runtime.agentBrowser(request.conversationId, {
+        action: "tab-open", url: request.url,
+      });
+      if (!opened.ok || !opened.state) return { opened };
+      const tabId = opened.state.activeTabId;
+      const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const screenshot = await runtime.agentBrowser(request.conversationId, { action: "screenshot" });
+      const closed = await runtime.agentBrowser(request.conversationId, { action: "tab-close", tabId });
+      const restored = await runtime.agentBrowser(request.conversationId, {
+        action: "tab-activate", tabId: previousTabId,
+      });
+      return { closed, opened, restored, screenshot, snapshot };
+    },
+    { conversationId, url },
+  );
+  expect(evidence, `page evidence was refused for ${url}`).toMatchObject({
+    opened: { ok: true },
+    snapshot: { ok: true },
+    screenshot: { ok: true },
+    closed: { ok: true },
+    restored: { ok: true },
+  });
+  const page = JSON.parse(evidence.snapshot?.text ?? "{}") as {
+    notInspected?: string[];
+    text?: string;
+    truncated?: boolean;
+  };
+  expect(page.notInspected ?? [], url).toEqual(expected.notInspected);
+  if (expected.truncated !== undefined) expect(page.truncated, url).toBe(expected.truncated);
+  if (expected.present) expect(page.text, url).toContain(expected.present);
+  for (const absent of expected.absent) {
+    expect(JSON.stringify(evidence), url).not.toContain(absent);
+  }
 }
 
 export async function expectScreenshotPrivacyGuard(
@@ -175,8 +240,8 @@ export async function expectScreenshotPrivacyGuard(
     opened: { ok: true },
     screenshot: {
       ok: false,
-      code: "invalid",
-      message: "Screenshots are unavailable while the document contains sensitive evidence.",
+      code: "sensitive",
+      message: "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.",
     },
     closed: { ok: true },
     restored: { ok: true },
@@ -250,8 +315,8 @@ export async function expectWindowCapturePrivacyGuard(
     initial: { ok: true },
     typed: { ok: true },
     pageState: { inputEmpty: true, mirrorMatched: true },
-    snapshot: { ok: false, code: "invalid" },
-    screenshot: { ok: false, code: "invalid" },
+    snapshot: { ok: false, code: "sensitive" },
+    screenshot: { ok: false, code: "sensitive" },
     closed: { ok: true },
     restored: { ok: true },
   });
@@ -351,8 +416,8 @@ export async function expectPasswordAssignmentPrivacyGuard(
     opened: true,
     page: { produced: true, route, supported: true },
     route,
-    screenshot: { code: "invalid", ok: false },
-    snapshot: { code: "invalid", ok: false },
+    screenshot: { code: "sensitive", ok: false },
+    snapshot: { code: "sensitive", ok: false },
   })));
   await preview.getByRole("button", { name: /Evidence/u }).click();
   const evidence = preview.getByRole("list", { name: "Browser evidence timeline" });

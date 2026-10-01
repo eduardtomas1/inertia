@@ -16,7 +16,7 @@ export type RuntimeAgentBrowserEvent =
       type: "runtime.agent-browser-request";
       requestId: string;
       identity: AgentBrowserRunIdentity;
-      command: AgentBrowserRequest;
+      command: AgentBrowserRequest | null;
     }
   | {
       type: "runtime.agent-browser-cancel";
@@ -88,14 +88,11 @@ export function parseRuntimeAgentBrowserEvent(
         }
       : null;
   }
-  if (Object.keys(value).length !== 4) return null;
-  const command = parseAgentBrowserRequest(value.command);
-  return command
-    ? {
-        type: "runtime.agent-browser-request",
-        requestId: value.requestId,
-        identity,
-        command,
-      }
-    : null;
+  if (Object.keys(value).length !== 4 || !Object.hasOwn(value, "command")) return null;
+  return {
+    type: "runtime.agent-browser-request",
+    requestId: value.requestId,
+    identity,
+    command: parseAgentBrowserRequest(value.command),
+  };
 }

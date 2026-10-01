@@ -51,3 +51,7 @@ Open **Settings → Report an issue** and choose **Show welcome guide**.
 - [Inertia Agent Browser](../AGENT_BROWSER.md)
 - [Private Connect](../PRIVATE_CONNECT.md) and its [security model](../PRIVATE_CONNECT_SECURITY.md)
 - [Guided issue reporting](../ISSUE_REPORTING.md)
+
+### Can I choose my own theme colors?
+
+In **Settings → General → Appearance → Custom colors**, choose separate light and dark colors with the color picker or hex field. Press Enter or leave the hex field to apply it; Escape cancels an edit. Inertia adapts the color into readable surfaces and accents. **System** switches between your saved colors with your operating system. **Reset** returns that appearance to its previous preset; choosing a theme card replaces both custom colors.

@@ -6,6 +6,7 @@ import {
   sanitizeProviderFailureSummary,
 } from "./activity-detail";
 import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import { acpResumeStep, acpSessionUnavailable } from "./session-unavailable";
 
 export function cursorCleanupResult(
   outcome: ProviderRunResult,
@@ -71,6 +72,12 @@ export function cursorRuntimeFailure(
     phase,
     terminalEvent,
     ...(technicalDetail && technicalDetail !== summary ? { technicalDetail } : {}),
+    ...(reason === "provider-error" && acpSessionUnavailable(terminalEvent, message)
+      ? { sessionUnavailable: true as const }
+      : {}),
+    ...(reason === "provider-error" && acpResumeStep(terminalEvent)
+      ? { resumeRejected: true as const }
+      : {}),
   };
 }
 

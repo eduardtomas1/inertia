@@ -25,6 +25,8 @@ export interface PosixProcessTreeKillResult {
   rootStop: PosixRootStopResult;
   rootState: PosixRootState;
   rootRunningObserved: boolean;
+  snapshotReads: number;
+  snapshotTimeouts: number;
 }
 
 export function posixDescendantPids(
@@ -93,6 +95,8 @@ export function forceKillPosixProcessTreeWithStatus(
       rootStop: "absent",
       rootState: "absent",
       rootRunningObserved: false,
+      snapshotReads: 0,
+      snapshotTimeouts: 0,
     };
   }
   const kill = dependencies.kill ?? process.kill;
@@ -128,6 +132,8 @@ export function forceKillPosixProcessTreeWithStatus(
   let scanStabilized = false;
   let stopObservationReads = 0;
   let rootRunningObserved = false;
+  let snapshotReads = 0;
+  let snapshotTimeouts = 0;
   for (let pass = 0; pass < MAX_FREEZE_PASSES; pass += 1) {
     const remainingMs = deadlineAt - now();
     if (remainingMs <= 0) break;
@@ -135,6 +141,7 @@ export function forceKillPosixProcessTreeWithStatus(
     let processTable = "";
     let snapshotRead = false;
     try {
+      snapshotReads += 1;
       const table = spawnProcessSync(
         PROCESS_TABLE_COMMAND,
         ["-axo", "pid=,ppid=,stat="],
@@ -148,6 +155,9 @@ export function forceKillPosixProcessTreeWithStatus(
           shell: false,
         },
       );
+      if ((table.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
+        snapshotTimeouts += 1;
+      }
       if (table.status === 0 && typeof table.stdout === "string") {
         snapshotRead = true;
         processTable = table.stdout;
@@ -204,5 +214,7 @@ export function forceKillPosixProcessTreeWithStatus(
     rootStop,
     rootState,
     rootRunningObserved,
+    snapshotReads,
+    snapshotTimeouts,
   };
 }

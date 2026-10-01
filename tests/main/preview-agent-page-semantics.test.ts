@@ -314,9 +314,9 @@ describe("agent Browser semantic audit inputs", () => {
     const deepPath = Array.from({ length: 4_001 }, () => ({}));
     listeners.get("input")?.[0]?.({ composedPath: () => deepPath, isTrusted: true });
     expect(runInNewContext(
-      "globalThis.__inertiaAgentBrowser.nestedContentObserved",
+      "globalThis.__inertiaAgentBrowser.evidenceWithheld",
       context,
-    )).toBe(true);
+    )).toBe("hidden-input");
     const deepClickPrevented = vi.fn();
     documentListeners.get("click")?.[0]?.({
       composedPath: () => deepPath, isTrusted: true,

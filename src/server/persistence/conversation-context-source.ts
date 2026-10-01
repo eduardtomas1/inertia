@@ -13,6 +13,30 @@ export type ConversationContextSourceRow = Pick<
   MessageRow, "id" | "turn_id" | "role" | "created_at" | "attachments_json" | "content"
 > & { contentTruncated: boolean; tail: string | null };
 
+export interface ContinuationRouteFilter {
+  backendProfileId: string;
+  endpointIdentity: string | null;
+  includeUnattributed: boolean;
+}
+
+export function continuationRouteSql(route?: ContinuationRouteFilter): {
+  sql: string;
+  parameters: Array<string | null>;
+} {
+  if (!route) return { sql: "", parameters: [] };
+  return {
+    sql: `AND (${route.includeUnattributed ? "messages.turn_id IS NULL OR " : ""}EXISTS (
+      SELECT 1 FROM agent_turns AS route_turn
+      WHERE route_turn.id = messages.turn_id
+        AND route_turn.backend_profile_id = ?
+        AND (CASE WHEN json_valid(route_turn.continuation_identity_json)
+          THEN json_extract(route_turn.continuation_identity_json, '$.endpointIdentity')
+        END) IS ?
+    ))`,
+    parameters: [route.backendProfileId, route.endpointIdentity],
+  };
+}
+
 type StoredSourceRow = Omit<ConversationContextSourceRow, "content" | "contentTruncated" | "tail"> & {
   content: Buffer;
 };
@@ -54,16 +78,28 @@ export function* conversationContextSourceRows(
   conversationId: string,
   limit: number,
   messageIds?: readonly string[],
+  excludedMessageId?: string,
+  route?: ContinuationRouteFilter,
 ): Generator<ConversationContextSourceRow> {
+  const routed = continuationRouteSql(route);
   const rows = database.prepare(`
     SELECT id, turn_id, role, created_at, attachments_json,
       COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content
     FROM messages
     WHERE conversation_id = ? AND role IN ('user', 'assistant')
       ${messageIds ? `AND id IN (${messageIds.map(() => "?").join(", ")})` : ""}
+      ${excludedMessageId ? "AND id <> ?" : ""}
+      ${routed.sql}
     ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).iterate(MAX_SOURCE_BYTES + 1, conversationId, ...(messageIds ?? []), limit) as Iterable<StoredSourceRow>;
+  `).iterate(
+    MAX_SOURCE_BYTES + 1,
+    conversationId,
+    ...(messageIds ?? []),
+    ...(excludedMessageId ? [excludedMessageId] : []),
+    ...routed.parameters,
+    limit,
+  ) as Iterable<StoredSourceRow>;
   const read = sourceRowReader(database);
   for (const row of rows) yield read(row);
 }
@@ -71,14 +107,24 @@ export function* conversationContextSourceRows(
 export function conversationContextOpeningRow(
   database: Database.Database,
   conversationId: string,
+  excludedMessageId?: string,
+  route?: ContinuationRouteFilter,
 ): ConversationContextSourceRow | null {
+  const routed = continuationRouteSql(route);
   const row = database.prepare(`
     SELECT id, turn_id, role, created_at, attachments_json,
       COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content
     FROM messages
     WHERE conversation_id = ? AND role = 'user'
+      ${excludedMessageId ? "AND id <> ?" : ""}
+      ${routed.sql}
     ORDER BY created_at ASC, id ASC
     LIMIT 1
-  `).get(MAX_SOURCE_BYTES + 1, conversationId) as StoredSourceRow | undefined;
+  `).get(
+    MAX_SOURCE_BYTES + 1,
+    conversationId,
+    ...(excludedMessageId ? [excludedMessageId] : []),
+    ...routed.parameters,
+  ) as StoredSourceRow | undefined;
   return row ? sourceRowReader(database)(row) : null;
 }

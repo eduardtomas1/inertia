@@ -145,6 +145,16 @@ function mainRejection(command: ClientCommand): string | null {
 }
 
 describe("detached chat runtime authority", () => {
+  it("preserves appearance-specific presets and custom colors in detached snapshots", () => {
+    const state = snapshot();
+    state.settings = { ...state.settings, lightColorTheme: "ocean", darkColorTheme: "iris", lightCustomColor: "#0d9488", darkCustomColor: "#f97316" };
+    expect(projectDetachedChatSnapshot(state, CONVERSATION).settings).toMatchObject({
+      lightColorTheme: "ocean", darkColorTheme: "iris", lightCustomColor: "#0d9488", darkCustomColor: "#f97316",
+    });
+    state.settings.lightCustomColor = null;
+    expect(projectDetachedChatSnapshot(state, CONVERSATION).settings).toMatchObject({ lightCustomColor: null, darkCustomColor: "#f97316" });
+  });
+
   it("projects a welcome snapshot to one chat without global mutation state", () => {
     const projected = projectDetachedChatSnapshot(snapshot(), CONVERSATION);
 

@@ -308,10 +308,19 @@ describe("AgentThreadManager", () => {
             "inertia_browser_snapshot",
             "inertia_browser_screenshot",
             "inertia_browser_navigate",
-            "inertia_browser_interact",
+            "inertia_browser_click",
+            "inertia_browser_type",
+            "inertia_browser_press",
+            "inertia_browser_scroll",
+            "inertia_browser_wait_for",
             "inertia_browser_tabs",
+            "inertia_browser_open_tab",
+            "inertia_browser_select_tab",
+            "inertia_browser_close_tab",
           ]),
         );
+        expect(bridge?.definitions.map(({ name }) => name)).not.toContain("inertia_browser_interact");
+        expect(bridge?.retiredToolNames?.has("inertia_browser_interact")).toBe(true);
       }
       expect(manager.capabilityManifest()).toMatchObject({
         schemaVersion: 1,

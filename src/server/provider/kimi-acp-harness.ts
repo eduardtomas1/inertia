@@ -506,6 +506,8 @@ function startKimiRun(
           modes = loaded.modes;
           configOptions = loaded.configOptions;
         } else {
+          activeFailurePhase = "session";
+          activeTerminalEvent = "session/load";
           throw new Error(
             "This Kimi ACP server does not advertise session resume support.",
           );

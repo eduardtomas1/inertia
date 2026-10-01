@@ -535,10 +535,65 @@ hang();
     });
     expect(result).toMatchObject({
       status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true,
-      failure: { reason: "malformed-protocol" },
+      failure: { reason: "malformed-protocol", sessionUnavailable: true },
     });
     expect(text).toEqual([]);
     expect(sessions).not.toContain(foreign);
+  });
+
+  it("does not treat a conversation switch after output as an unavailable session", async () => {
+    const root = fixtureRoot("antigravity late foreign conversation");
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { cwd: process.cwd(), tools: [] } });
+emit({ event: "step_update", step_update: { text_delta: "Partial answer" } });
+emit({ event: "result", conversation_id: ${JSON.stringify(foreign)}, result: { status: "SUCCESS", response: "Foreign answer" } });
+hang();
+`);
+    const result = await managerFor(command).run(antigravityInput(root, { sessionId: CONVERSATION }));
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
+  });
+
+  it("answers from a fresh conversation when Antigravity no longer has the saved one", async () => {
+    const root = fixtureRoot("antigravity missing conversation fallback");
+    const replacement = "6f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a13";
+    const fresh = "7f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a14";
+    const launches = join(root, "launches.jsonl");
+    const { command } = fakeAgy(root, `
+const resumed = process.argv.includes("--conversation");
+fs.appendFileSync(${JSON.stringify(launches)}, JSON.stringify({ resumed, stdin: capture.stdin }) + "\\n");
+if (resumed) {
+  process.stderr.write('warning: conversation "${CONVERSATION}" not found\\n');
+  emit({ event: "init", conversation_id: ${JSON.stringify(replacement)}, init: { cwd: process.cwd(), tools: [] } });
+  hang();
+} else {
+  emit({ event: "init", conversation_id: ${JSON.stringify(fresh)}, init: { cwd: process.cwd(), tools: [] } });
+  emit({ event: "result", result: { status: "SUCCESS", response: "Answered from a fresh conversation" } });
+  hang();
+}
+`);
+    const sessions: string[] = [];
+    const terminal = terminalStatuses();
+    const result = await managerFor(command).run(antigravityInput(root, { sessionId: CONVERSATION }), {
+      onSession: (event) => sessions.push(event.sessionId),
+      onStatus: terminal.onStatus,
+      freshSessionFallback: () => ({ prompt: "Continue with the restored history." }),
+    });
+    expect(result).toMatchObject({
+      status: "completed", sessionId: fresh, cleanupConfirmed: true,
+      text: "Answered from a fresh conversation",
+    });
+    expect(sessions).toEqual([fresh]);
+    expect(terminal.statuses).toEqual(["completed"]);
+    const recorded = readFileSync(launches, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { resumed: boolean; stdin: string });
+    expect(recorded.map(({ resumed }) => resumed)).toEqual([true, false]);
+    expect(recorded[1]!.stdin).toContain("Continue with the restored history.");
+    expect(recorded[0]!.stdin).toContain("Inspect the change");
+    expect(recorded[1]!.stdin).not.toContain("Inspect the change");
   });
 
   it("fails closed when an init carries conflicting conversation identities", async () => {

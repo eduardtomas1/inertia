@@ -28,6 +28,7 @@ export type SnapshotRect = z.infer<typeof rect>;
 
 export interface SnapshotState {
   enabled: boolean;
+  reviewedBackend?: "system-picker" | "window-picker" | null;
   shortcut: "both-shift" | "accelerator";
   available: boolean;
   permission: "granted" | "required" | "unverified";
@@ -56,12 +57,14 @@ export function snapshotPromptContext(attachments: readonly { name: string; snap
 }
 
 export type SnapshotRequest =
+  | import("./snapshot-review").SnapshotReviewRequest
   | { type: "state" }
   | { type: "configure"; enabled: boolean; shortcut: SnapshotState["shortcut"] }
   | { type: "bind"; conversationId: string }
   | { type: "unbind" }
   | { type: "permission"; permission: "screen" | "accessibility" };
 export type SnapshotDelivery = { conversationId: string } & (
-  | { selection: import("./desktop").DesktopAttachmentImportSelection; error?: never }
-  | { error: string; selection?: never }
+  | { review: import("./snapshot-review").SnapshotReview; selection?: never; error?: never }
+  | { selection: import("./desktop").DesktopAttachmentImportSelection; error?: never; review?: never }
+  | { error: string; selection?: never; review?: never }
 );

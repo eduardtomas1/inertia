@@ -6,7 +6,10 @@ import {
   browserEvidenceTextContainsSensitiveCredential,
   MAX_BROWSER_EVIDENCE_TEXT_CHARS,
 } from "../shared/browser-evidence.js";
-import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy-guard.js";
+import {
+  installPreviewAgentPrivacyGuard,
+  type PreviewAgentWithheldReason,
+} from "../shared/preview-agent-privacy-guard.js";
 import { agentPageIsFrozen, evaluateInFrozenAgentPage } from "./preview-agent-boundary.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
@@ -21,6 +24,15 @@ const MAX_REMEMBERED_PASSWORD_VALUES = 32;
 const MAX_PAGE_VALUE_SOURCE_CHARS = 4_096;
 const MAX_LABEL_TEXT_SOURCE_CHARS = 1_200;
 const MAX_LABEL_TEXT_NODES = 128;
+const MAX_FRAME_PLACEHOLDERS = 16;
+const NOT_INSPECTED_REGIONS = ["frames", "shadow-roots"] as const;
+
+export type AgentPageNotInspected = (typeof NOT_INSPECTED_REGIONS)[number];
+export type AgentPageWithheldReason = "password" | PreviewAgentWithheldReason;
+
+export interface AgentPageEvidencePrivacy {
+  withheld: AgentPageWithheldReason | null;
+}
 
 export interface PreviewAgentTarget {
   found: boolean;
@@ -54,12 +66,19 @@ function viewport(value: unknown): Record<string, number> {
   return Object.fromEntries(entries);
 }
 
+function notInspected(value: unknown): AgentPageNotInspected[] {
+  return Array.isArray(value)
+    ? NOT_INSPECTED_REGIONS.filter((region) => value.includes(region))
+    : [];
+}
+
 function serializedSnapshot(
   value: Record<string, unknown>,
   text: string,
   elements: readonly unknown[],
   truncated: boolean,
 ): string {
+  const regions = notInspected(value.notInspected);
   return JSON.stringify({
     title: boundedString(value.title, 300),
     url: boundedString(value.url, 4_096),
@@ -67,6 +86,8 @@ function serializedSnapshot(
     text,
     elements,
     truncated,
+    ...(regions.length > 0 ? { notInspected: regions } : {}),
+    ...(value.errorPage === true ? { errorPage: true } : {}),
   });
 }
 
@@ -144,6 +165,7 @@ export async function waitForAgentPageHover(contents: WebContents): Promise<void
 
 export async function semanticPageSnapshot(
   contents: WebContents,
+  observed: readonly AgentPageNotInspected[] = [],
 ): Promise<string> {
   const value = await execute(contents, `(() => {
     const owner = globalThis;
@@ -465,7 +487,29 @@ export async function semanticPageSnapshot(
       || editableHost(element)
       || hasAttribute(element, "tabindex");
     const elements = [];
+    let framePlaceholders = 0;
+    let framesPresent = false;
+    let shadowRootsPresent = false;
     for (const element of scannedElementNodes) {
+      if (element.shadowRoot) shadowRootsPresent = true;
+      if (["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(element.tagName)) {
+        framesPresent = true;
+        if (framePlaceholders >= ${MAX_FRAME_PLACEHOLDERS}
+          || elements.length >= ${MAX_SEMANTIC_ELEMENTS}) continue;
+        const frameRect = element.getBoundingClientRect();
+        if (!visible(element, frameRect)) continue;
+        framePlaceholders += 1;
+        elements.push({
+          role: "frame",
+          name: redact(element.getAttribute("title") || element.getAttribute("aria-label") || "Embedded frame", 300),
+          notInspected: true,
+          rect: {
+            x: frameRect.x, y: frameRect.y,
+            width: frameRect.width, height: frameRect.height,
+          },
+        });
+        continue;
+      }
       if (!semanticCandidate(element)) continue;
       if (elements.length >= ${MAX_SEMANTIC_ELEMENTS}) {
         elementScanTruncated = true;
@@ -494,6 +538,7 @@ export async function semanticPageSnapshot(
         ),
         checked: typeof element.checked === "boolean" ? element.checked : undefined,
         value: typeof element.value === "string"
+          && !element.shadowRoot && !element.tagName.includes("-")
           ? passwordField(element) ? "[redacted]" : redact(element.value, 500)
           : undefined,
         rect: {
@@ -568,9 +613,18 @@ export async function semanticPageSnapshot(
       elements,
       truncated: elementScanTruncated
         || elements.length >= ${MAX_SEMANTIC_ELEMENTS}
-        || bodyTruncated,
+        || bodyTruncated
+        || state.scanLimitReached === true,
+      notInspected: [
+        ...(framesPresent || state.framesObserved === true ? ["frames"] : []),
+        ...(shadowRootsPresent || state.shadowRootsObserved === true ? ["shadow-roots"] : []),
+      ],
+      errorPage: location.protocol === "chrome-error:",
     };
   })()`);
+  if (plainObject(value)) {
+    value.notInspected = [...notInspected(value.notInspected), ...observed];
+  }
   return serializeAgentPageSnapshot(value);
 }
 
@@ -579,6 +633,12 @@ export async function installAgentPagePrivacyGuard(contents: WebContents): Promi
 }
 
 export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {
+  return (await agentPageEvidencePrivacy(contents)).withheld !== null;
+}
+
+export async function agentPageEvidencePrivacy(
+  contents: WebContents,
+): Promise<AgentPageEvidencePrivacy> {
   const value = await execute(contents, `(() => {
     const state = globalThis.__inertiaAgentBrowser;
     if (state?.privacyGuardInstalled !== true) {
@@ -587,19 +647,10 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
     const normalize = (value) => String(value ?? "")
       .slice(0, ${MAX_PAGE_VALUE_SOURCE_CHARS})
       .replace(/\\s+/gu, " ").trim();
-    const root = document.documentElement || document.body;
-    const iterator = root && typeof document.createNodeIterator === "function"
-      ? document.createNodeIterator(root, 1)
-      : null;
-    let scanned = 0;
-    while (iterator && scanned < ${MAX_SEMANTIC_SCAN_NODES}) {
-      const input = iterator.nextNode();
-      if (!input) break;
-      scanned += 1;
-      if (input.tagName !== "INPUT") continue;
+    const inspect = (input) => {
       if (!(typeof input.type === "string" && input.type.length <= 20
         && input.type.toLowerCase() === "password")
-        && !state.passwordNodes.has(input)) continue;
+        && !state.passwordNodes.has(input)) return;
       const value = normalize(input.value);
       state.passwordNodes.add(input);
       if (value) {
@@ -609,13 +660,44 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
           state.passwordValues.delete(state.passwordValues.values().next().value);
         }
       }
+    };
+    if (typeof document.getElementsByTagName === "function") {
+      const inputs = document.getElementsByTagName("input");
+      let index = 0;
+      for (; index < ${MAX_SEMANTIC_SCAN_NODES}; index += 1) {
+        const input = inputs[index];
+        if (!input) break;
+        inspect(input);
+      }
+      if (inputs[index]) state.evidenceWithheld ??= "document-too-large";
+    } else {
+      const root = document.documentElement || document.body;
+      const iterator = root && typeof document.createNodeIterator === "function"
+        ? document.createNodeIterator(root, 1)
+        : null;
+      let scanned = 0;
+      while (iterator && scanned < ${MAX_SEMANTIC_SCAN_NODES}) {
+        const candidate = iterator.nextNode();
+        if (!candidate) break;
+        scanned += 1;
+        if (candidate.tagName === "INPUT") inspect(candidate);
+      }
+      if (!iterator) state.evidenceWithheld ??= "credential-signal";
+      else if (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode()) {
+        state.evidenceWithheld ??= "document-too-large";
+      }
     }
-    if (!iterator || (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode())) {
-      state.nestedContentObserved = true;
-    }
-    return state.passwordValues.size > 0 || state.nestedContentObserved === true;
+    if (state.passwordValues.size > 0) return "password";
+    return state.evidenceWithheld === "hidden-input" || state.evidenceWithheld === "document-too-large"
+      ? state.evidenceWithheld
+      : state.evidenceWithheld ? "credential-signal" : null;
   })()`);
-  return value === true;
+  return {
+    withheld: value === "password" || value === "hidden-input" || value === "credential-signal"
+      || value === "document-too-large"
+      ? value
+      : value === null ? null : "credential-signal",
+  };
 }
 
 function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
@@ -867,9 +949,8 @@ export async function locateAgentPageRef(
       scannedNodes += 1;
       if (candidate.tagName === "INPUT") scannedInputs.push(candidate);
     }
-    if (scanIterator
-      && scannedNodes >= ${MAX_SEMANTIC_SCAN_NODES}
-      && scanIterator.nextNode()) return { found: false };
+    const scanTruncated = scannedNodes >= ${MAX_SEMANTIC_SCAN_NODES}
+      && Boolean(scanIterator.nextNode());
     const rememberPasswordValue = (value) => {
       const normalized = normalizeText(value);
       if (!normalized) return;
@@ -901,7 +982,9 @@ export async function locateAgentPageRef(
     const password = element.tagName === "INPUT" && (
       inputType === "password" || passwordNodes.has(element)
     );
-    const blocked = inputType === "file";
+    const blocked = inputType === "file"
+      || ["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(hit.tagName)
+      || ["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(element.tagName);
     const editable = !element.readOnly && (
       element.tagName === "TEXTAREA"
       || editableHost(element)
@@ -966,12 +1049,12 @@ export async function locateAgentPageRef(
       editable,
       role: password ? "textbox" : boundedLowerAttribute(element, "role", 50)
         || (editable ? "textbox" : ({ A: "link", SUMMARY: "button" })[element.tagName] || element.tagName.toLowerCase()),
-      sensitive: password || passwordValues.size > 0
+      sensitive: password || passwordValues.size > 0 || scanTruncated
         || /password|passcode|passphrase|token|secret|credential|api.?key|private.?key|authorization/iu.test(
           ["id", "name", "autocomplete", "placeholder", "aria-label"].map((name) =>
             String(element.getAttribute?.(name) ?? "").slice(0, 300)).join(" ")
         ),
-      label: passwordValues.size > 0
+      label: passwordValues.size > 0 || scanTruncated
         ? "page element"
         : redact(
           password
@@ -1018,7 +1101,7 @@ export async function agentPageRefHasFocus(
 
 export async function agentPageActivationBlocked(
   contents: WebContents,
-): Promise<"disabled" | "file" | null> {
+): Promise<"disabled" | "file" | "nested" | null> {
   const value = await execute(contents, `(() => {
     const ariaDisabled = (candidate) => {
       const value = candidate?.getAttribute?.("aria-disabled");
@@ -1033,6 +1116,7 @@ export async function agentPageActivationBlocked(
       shadowDepth += 1;
     }
     if (active?.shadowRoot?.activeElement) return "disabled";
+    if (["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(active?.tagName)) return "nested";
     if (active?.tagName === "INPUT"
       && typeof active.type === "string" && active.type.length <= 20
       && active.type.toLowerCase() === "file") return "file";
@@ -1046,7 +1130,7 @@ export async function agentPageActivationBlocked(
     }
     return current ? "disabled" : null;
   })()`);
-  return value === "file" || value === "disabled" ? value : null;
+  return value === "file" || value === "disabled" || value === "nested" ? value : null;
 }
 
 /**

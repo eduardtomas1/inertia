@@ -94,11 +94,10 @@ export async function verifyBrowserEvidence({
           | undefined;
         return contents?.getURL() === url;
       });
-      const bounds = view?.getBounds();
-      return bounds ? { width: bounds.width, height: bounds.height } : null;
+      return view ? view.getVisible() : null;
     },
     typeDestinationUrl,
-  )).toEqual({ width: 0, height: 0 });
+  )).toBe(false);
 
   await app.electronApp.evaluate(({ dialog }) => {
     const owner = globalThis as typeof globalThis & {
@@ -231,7 +230,7 @@ export async function verifyBrowserEvidence({
         return contents?.getURL() === url;
       });
       const bounds = view?.getBounds();
-      return Boolean(bounds && bounds.width > 0 && bounds.height > 0);
+      return Boolean(view?.getVisible() && bounds && bounds.width > 0 && bounds.height > 0);
     },
     typeDestinationUrl,
   )).toBe(true);

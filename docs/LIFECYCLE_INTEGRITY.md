@@ -65,7 +65,7 @@ lease; it does not mean an in-memory absence proves cleanup.
 | Runtime worker | Supervisor; generation identity + native process creation identity | `RuntimeProcessRecord.child` / containment and owned-process records | Supervisor after exact `runtime.stopped`, child close, and generation cleanup | Supervisor joins one bounded shutdown/force path. Late worker messages are ignored. Startup recovery reconciles the prior record before spawn. |
 | Runtime HTTP/WebSocket server | Worker runtime; runtime generation + loopback server instance | Runtime server/socket registries / covered by runtime lease | Runtime shutdown coordinator | Listener close and all socket/operation drains must finish before the worker can report stopped. The supervisor remains the outer cleanup authority. |
 | Provider run | Turn controller and `ProviderManager`; exact provider, conversation, run, turn, harness, and backend tuple | controller/manager active maps / `provider_run_ownership` row | Server run-state engine selects the root outcome | The manager first validates the exact terminal-result tuple and `cleanupConfirmed: true`; the turn owner clears durable ownership and releases attachments only after exact `stopOwned(...) === "settled"` proof. Missing, mismatched, detached, thrown, or false cleanup evidence retains ownership, quarantines admission, and leaves startup recovery to reconcile the durable row. |
-| Provider session/thread | Exact provider adapter; native ID bound to continuation identity | adapter session / conversation and turn session snapshots | Server decides whether the native ID is eligible for reuse | Adapter closes protocol resources; continuation requires an exact compatibility token. Unknown or changed compatibility preserves history but starts a fresh provider session. |
+| Provider session/thread | Exact provider adapter; native ID bound to continuation identity | adapter session / conversation and turn session snapshots | Server decides whether the native ID is eligible for reuse | Adapter closes protocol resources. A native provider keeps its saved session across an installation change and the provider decides whether it can still be resumed; a custom backend requires an exact compatibility token. A rejected or ineligible session starts a fresh one in the same chat with the earlier visible messages restored. |
 | Provider-owned server | OpenCode SDK harness; provider run tuple + server process identity | harness-owned server/client / owned-process evidence under the runtime generation | Harness only after protocol terminal and server cleanup | SSE/client settlement alone is insufficient. Process-tree/server shutdown failure poisons cleanup and keeps replacement admission closed. |
 | Provider metadata/model/auth probe | Provider manager metadata scope; provider + installation/configuration + exact model identity + probe operation | discovery/metadata operations / a bounded versioned per-model evidence envelope | Probe owner | Exact child-tree cleanup and bounded parser completion. An immediate database transaction rejects older same-model completions and configuration drift while preserving independent models. Maintenance and shutdown wait for probes; installation/capability changes invalidate cached evidence. |
 | Provider maintenance/update | Runtime preparation gate and maintenance controller; operation ID + installation identity | reservations/active operation / integrity-checked maintenance journal while replacement may survive a crash | Maintenance controller after post-action re-resolution and verification | Admission requires an active, exact-installation capability attestation. Owned action cleanup is followed by provider detect/auth/metadata/capability verification, version re-read, and cache invalidation. Active runs, probes, recovery, shutdown, or another lease block admission. This does not claim a real production turn is run as a post-update probe. |
@@ -189,8 +189,12 @@ legacy CLI route, and a sunset test pins that boundary.
 
 ## Session-continuation compatibility
 
-A reusable native session is identified by the existing route identity plus a
-checked compatibility token covering:
+A saved provider session is identified by the existing route identity: harness,
+backend profile, backend configuration revision, opaque endpoint identity,
+model identity where the transport cannot switch safely, and relevant
+performance mode. A change in any of those starts a fresh session.
+
+Each identity also records a checked compatibility token covering:
 
 - canonical provider executable path/package and exact executable or SDK
   version;
@@ -201,14 +205,68 @@ checked compatibility token covering:
 - model identity where the transport cannot switch safely; and
 - relevant performance mode.
 
-Historical identities without the token are incompatible by construction.
-Custom routes without positive session-continuation evidence do not receive a
-compatibility token, even when their text probe succeeds. They therefore start
-a fresh provider session instead of attempting a resume that would fail later.
-The safe migration is to retain the conversation, transcript, attachments,
-and native ID for audit, record a bounded reason code, clear it from admission
-authority, and start a fresh provider session. Missing compatibility must not
-break startup and must never silently force continuation.
+The token attests capabilities and installation leases. It gates session reuse
+only for custom backends: a custom route without positive
+session-continuation evidence receives no token, and a missing or changed
+token starts a fresh provider session there.
+
+A native provider keeps its sessions in its own store, independent of the
+executable that created them, so a native route resumes its saved session when
+only the token changed or could not be verified. Provider updates therefore do
+not reset a chat. The provider remains the authority on whether the session
+still exists. When its resume or load step (Codex `thread/resume`, ACP
+`session/load` or `session/resume`, the OpenCode session lookup, or Claude's
+missing-conversation result) fails with a missing-session error, every harness
+reports an unavailable session. Errors that name a missing working directory,
+model, field or file path, and errors from any later step, do not count. If the
+first attempt produced no text, reasoning, tool, command, status or approval
+activity, the same turn restarts once on a fresh session; otherwise it fails,
+and every harness reports the same explanation: the saved session is no
+longer available and the next turn starts a fresh one. Either way the dead
+native ID is cleared, the fresh session records `stale-provider-session`, and
+no later turn retries it.
+
+A rejection the harness does not recognise cannot strand the chat. The Codex,
+Cursor, Kimi and OpenCode harnesses also report any provider error at their
+resume or load step as a rejected resume, whatever its wording, and the turn
+ledger records that on the failed turn. A saved session whose last two turns
+were both rejected resumes, with no answer and no activity other than the
+error, is retired, and the next turn starts fresh. Usage limits, outages,
+process exits and other failures never count. A session started after such a
+retirement is exempt from the rule until it completes a turn, so a lasting
+fault cannot cycle through new sessions. Claude has no separate resume step,
+so only its recognised missing-conversation result counts.
+
+The token no longer retires native sessions, so a harness change that makes
+previously saved sessions unusable must retire them explicitly with a
+migration, as schema 65 did for Codex.
+
+A fresh session in an established chat does not start blank. The request
+carries the chat's earlier visible messages that were already sent to the
+current backend profile and endpoint, selected by the same packer as an
+explicit reference to this chat: the opening request first, then the newest
+turns, bounded by the room left beside the selected context and, on a custom
+backend, by a smaller fixed share. Attachments, tool output and hidden provider
+state are not included, and known secret patterns (bearer, API, GitHub, Slack
+and AWS keys, JSON credential values, URL passwords and PEM private keys) are
+redacted. The turn records how many messages were restored, omitted and
+withheld, and the conversation shows that a new provider session started. An
+explicit reference to this chat in the same message is not duplicated.
+
+Earlier messages are never sent automatically to a backend profile or endpoint
+that did not already receive them. A message belongs to the route of the turn
+that carried it: the turn's user message, its follow-ups and its answers. Only
+messages whose turn used the current backend profile and endpoint are
+restored; the rest are withheld and the note says that earlier messages from
+another model endpoint were not restored. Each native provider profile counts
+as one endpoint, so a provider update or a configuration revision of the same
+backend and endpoint restores everything sent there. Moving a chat from
+endpoint A to B withholds the A messages; if B's session later goes stale,
+only the B messages are restored; returning to A restores the A messages and
+withholds the B ones. Legacy messages recorded without a turn are restored only
+while the conversation's recorded route, every turn and every earlier restore
+stayed on the current endpoint. The user can still attach this chat
+explicitly, with its preview, to carry the whole history across.
 
 ## Cross-version application handoff
 
@@ -340,8 +398,13 @@ observed after measurement.
   Schema 68 adds continuation evidence after that rebuild, preserving upgrades
   from both pre-Gemini databases and existing schema-67 installations.
 - Existing provider continuation records without the full compatibility token
-  are readable but cannot authorize resume. They fall back to a fresh session
-  without deleting conversation data.
+  stay readable. Native routes resume them; custom backends fall back to a
+  fresh session without deleting conversation data.
+- Schema 84 appends a nullable, bounded session-recovery column to agent
+  turns. Existing turns read as not recovered. The column holds either the
+  restored and omitted message counts of a fresh session, with an optional
+  count of messages withheld because another endpoint received them, or a
+  marker that the provider rejected the turn's resume.
 - Existing single-result backend probe JSON remains readable. The next
   successful probe writes a versioned, bounded collection with at most one
   monotonic result per configured model; incompatible profile revisions still

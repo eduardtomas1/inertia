@@ -1,3 +1,4 @@
+import { ReviewedScreenshotControl } from "./ReviewedScreenshotControl";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -6,7 +7,7 @@ import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import "./SnapshotControl.css";
 
 /** Capture failures stay with their destination chat; configuration lives in Settings. */
-export function SnapshotControl({ conversationId }: { conversationId: string }): React.JSX.Element | null {
+export function SnapshotControl({ conversationId, disabled }: { conversationId: string; disabled?: boolean }): React.JSX.Element | null {
   const [error, setError] = useState<string | null>(null);
   const close = useRef<HTMLButtonElement>(null);
   useNativePreviewSuspension(error !== null);
@@ -27,8 +28,7 @@ export function SnapshotControl({ conversationId }: { conversationId: string }):
     close.current?.focus();
     return restore;
   }, [open]);
-  if (!open) return null;
-  return createPortal(<div className="snapshot-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setError(null); }}>
+  return <><ReviewedScreenshotControl conversationId={conversationId} disabled={disabled} />{open && createPortal(<div className="snapshot-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setError(null); }}>
     <section className="snapshot-dialog" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" onKeyDown={(event) => {
       if (event.key === "Escape") { event.stopPropagation(); setError(null); }
       else trapModalFocus(event, event.currentTarget);
@@ -37,5 +37,5 @@ export function SnapshotControl({ conversationId }: { conversationId: string }):
       <p role="alert" className="snapshot-alert">{error.split(/`([^`]+)`/u).map((part, index) => index % 2 ? <code key={index}>{part}</code> : part)}</p>
       <p className="snapshot-note">Capture options and access guidance are in Settings → Snapshots in the main window.</p>
     </section>
-  </div>, document.body);
+  </div>, document.body)}</>;
 }

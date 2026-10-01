@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
-import { expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectPasswordAssignmentPrivacyGuard, expectScreenshotPrivacyGuard, expectWindowCapturePrivacyGuard } from "./support/agent-browser-security";
+import { expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectPasswordAssignmentPrivacyGuard, expectScreenshotPrivacyGuard, expectStructuralCoverage, expectWindowCapturePrivacyGuard } from "./support/agent-browser-security";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
@@ -135,13 +135,30 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
     `${app.previewUrl}agent-browser-password-assignment-privacy`, workspaceTools);
   for (const [path, secret] of [
     ["agent-browser-nested-privacy-start", "nested-password-sentinel"],
-    ["agent-browser-frame-lifetime-privacy", "removed-frame-password-sentinel"],
     ["agent-browser-shadow-lifetime-privacy", "removed-shadow-password-sentinel"],
-    ["agent-browser-declarative-shadow-privacy", "declarative-shadow-password-sentinel"],
-    ["agent-browser-declarative-closed-privacy", "declarative-closed-password-sentinel"],
-    ["agent-browser-declarative-detached-privacy", "detached-declarative-password-sentinel"],
-    ["agent-browser-trusted-types-declarative-detached-privacy", "trusted-types-declarative-password-sentinel"],
   ]) await expectDocumentStartPrivacyGuard(app, conversationId, `${app.previewUrl}${path}`, secret);
+  await expectStructuralCoverage(app, conversationId, `${app.previewUrl}agent-browser-frame-coverage`, {
+    notInspected: ["frames"],
+    present: "Orders dashboard",
+    absent: ["frame-only-sentinel", "frame-password-sentinel"],
+  });
+  await expectStructuralCoverage(app, conversationId, `${app.previewUrl}agent-browser-shadow-coverage`, {
+    notInspected: ["shadow-roots"],
+    present: "Component page",
+    absent: ["shadow-only-sentinel", "component-value-sentinel"],
+  });
+  await expectStructuralCoverage(app, conversationId, `${app.previewUrl}agent-browser-declarative-closed-privacy`, {
+    notInspected: [],
+    absent: ["declarative-closed-shadow-text"],
+  });
+  for (const [path, visible] of [
+    ["agent-browser-declarative-detached-privacy", "detached-declarative-visible-text"],
+    ["agent-browser-trusted-types-declarative-detached-privacy", "trusted-types-declarative-visible-text"],
+  ]) await expectStructuralCoverage(app, conversationId, `${app.previewUrl}${path}`, {
+    notInspected: ["shadow-roots"],
+    present: visible,
+    absent: ["private"],
+  });
 
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });

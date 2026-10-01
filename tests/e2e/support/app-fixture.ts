@@ -11,6 +11,7 @@ import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
 import { assertE2eWindowResource } from "../../support/e2e-resource-policy";
+import { serveAgentBrowserCoverageFixture } from "./agent-browser-coverage-pages";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, FIXTURE_PREPARED_EXIT_TIMEOUT_MS, observeElectronPage,
@@ -98,6 +99,7 @@ async function createPreviewServer(): Promise<{
 }> {
   const server = createServer((request, response) => {
     if (serveAgentBrowserPrivacyFixture(request.url, response)) return;
+    if (serveAgentBrowserCoverageFixture(request, response)) return;
     if (
       request.method === "POST"
       && request.url === "/backend-probe/v1/messages"
@@ -203,7 +205,7 @@ async function createPreviewServer(): Promise<{
         + "disabled.addEventListener('click',()=>{window.__lateDisabledClicked=true});"
         + "for(const name of ['keydown','keypress','keyup','beforeinput','input'])window.addEventListener(name,event=>{"
         + "if((!event.key||event.key==='Enter')&&document.activeElement===disabled)disabled.click()},true);"
-        + "window.__armDisabledFocus=()=>{safe.focus();setTimeout(()=>disabled.focus(),10);return document.activeElement===safe}</script>",
+        + "window.__armDisabledFocus=()=>{safe.focus();setTimeout(()=>disabled.focus(),0);return document.activeElement===safe}</script>",
       );
       return;
     }
@@ -290,22 +292,6 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
-    if (request.url === "/agent-browser-frame-lifetime-privacy") {
-      const secret = "removed-frame-password-sentinel";
-      response.writeHead(200, {
-        "Content-Type": "text/html",
-        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
-      });
-      response.end(
-        "<!doctype html><title>Removed frame privacy probe</title><body></body>"
-        + "<script>const frame=document.createElement('iframe');document.body.append(frame);"
-        + "const input=frame.contentDocument.createElement('input');input.type='password';"
-        + `input.value=${JSON.stringify(secret)};frame.contentDocument.body.append(input);`
-        + "const mirror=document.createElement('p');mirror.textContent=input.value;"
-        + "document.body.append(mirror);frame.remove()</script>",
-      );
-      return;
-    }
     if (request.url === "/agent-browser-shadow-lifetime-privacy") {
       const secret = "removed-shadow-password-sentinel";
       response.writeHead(200, {
@@ -314,7 +300,7 @@ async function createPreviewServer(): Promise<{
       });
       response.end(
         "<!doctype html><title>Removed shadow privacy probe</title><body></body>"
-        + "<script>window.addEventListener('__inertia_agent_nested_boundary__',event=>event.stopImmediatePropagation(),true);const host=document.createElement('div');document.body.append(host);"
+        + "<script>for(const name of ['__inertia_agent_nested_boundary__','__inertia_agent_credential_signal__'])window.addEventListener(name,event=>event.stopImmediatePropagation(),true);const host=document.createElement('div');document.body.append(host);"
         + "const root=host.attachShadow({mode:'closed'});const input=document.createElement('input');"
         + `input.type='password';input.value=${JSON.stringify(secret)};root.append(input);`
         + "const mirror=document.createElement('p');mirror.textContent=input.value;"
@@ -322,21 +308,8 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
-    if (request.url === "/agent-browser-declarative-shadow-privacy") {
-      response.writeHead(200, {
-        "Content-Type": "text/html",
-        "Content-Security-Policy": "default-src 'none'; frame-src 'self'",
-      });
-      response.end(
-        "<!doctype html><title>Declarative shadow privacy probe</title><body>"
-        + "<div><template shadowrootmode='closed'>"
-        + "<iframe src='/agent-browser-declarative-shadow-frame'></iframe>"
-        + "</template></div>",
-      );
-      return;
-    }
     if (request.url === "/agent-browser-declarative-closed-privacy") {
-      const secret = "declarative-closed-password-sentinel";
+      const secret = "declarative-closed-shadow-text";
       response.writeHead(200, {
         "Content-Type": "text/html",
         "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
@@ -349,7 +322,7 @@ async function createPreviewServer(): Promise<{
       return;
     }
     if (request.url === "/agent-browser-declarative-detached-privacy") {
-      const secret = "detached-declarative-password-sentinel";
+      const secret = "detached-declarative-visible-text";
       response.writeHead(200, {
         "Content-Type": "text/html",
         "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
@@ -364,7 +337,7 @@ async function createPreviewServer(): Promise<{
       return;
     }
     if (request.url === "/agent-browser-trusted-types-declarative-detached-privacy") {
-      const secret = "trusted-types-declarative-password-sentinel";
+      const secret = "trusted-types-declarative-visible-text";
       response.writeHead(200, {
         "Content-Type": "text/html",
         "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; "
@@ -378,21 +351,6 @@ async function createPreviewServer(): Promise<{
         + "host.setHTML(\"<template shadowrootmode='closed'><p>private</p></template>\");"
         + "document.body.append(host);const mirror=document.createElement('p');"
         + `mirror.textContent=${JSON.stringify(secret)};document.body.replaceChildren(mirror)</script>`,
-      );
-      return;
-    }
-    if (request.url === "/agent-browser-declarative-shadow-frame") {
-      const secret = "declarative-shadow-password-sentinel";
-      response.writeHead(200, {
-        "Content-Type": "text/html",
-        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
-      });
-      response.end(
-        "<!doctype html><input id='credential' type='password'>"
-        + "<script>const input=document.querySelector('#credential');"
-        + `input.value=${JSON.stringify(secret)};`
-        + "const mirror=parent.document.createElement('p');mirror.textContent=input.value;"
-        + "parent.document.body.append(mirror);frameElement.getRootNode().host.remove()</script>",
       );
       return;
     }

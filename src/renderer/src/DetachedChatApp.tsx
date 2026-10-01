@@ -189,7 +189,7 @@ export default function DetachedChatApp({
     () => connection.snapshot?.settings ?? cachedAppSettings(),
     [connection.snapshot?.settings],
   );
-  useTheme(settings.theme, settings.colorTheme, settings.lightColorTheme, settings.darkColorTheme);
+  useTheme(settings);
 
   useEffect(() => {
     return onComposerDraftPersisted((persistence) => {

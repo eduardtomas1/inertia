@@ -63,7 +63,7 @@ import {
 } from "./claude-skill-operation";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
-import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeStartupFailure } from "./claude-startup-failure";
+import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeSessionUnavailable, claudeStartupFailure } from "./claude-startup-failure";
 import { claudeRouteFailureDetail, claudeRouteFailureMessage } from "./claude-custom-backend-failure";
 import {
   ClaudeUsageLedger, readClaudeContextUsage,
@@ -247,6 +247,7 @@ function startClaudeRun(
     ? requestedFastMode === "fast" ? "on" : "off"
     : null;
   let fastModeVerified = requestedFastModeState === null;
+  let sessionUnavailable = false;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
     lifecycleDependencies,
@@ -576,6 +577,7 @@ function startClaudeRun(
         // instead of failing the turn (#338). Claude keeps the full content.
         const observed = eventBudget.observe(next.value);
         const message = observed.value as SDKMessage;
+        sessionUnavailable ||= options.input.sessionId !== undefined && claudeSessionUnavailable(message);
         if (observed.shortened && !announcedShortenedEvent) {
           announcedShortenedEvent = true;
           emitter.activity("system", "info", "Shortened a large Claude update", {
@@ -954,6 +956,7 @@ function startClaudeRun(
       ...terminal,
       exitCode: child?.exitCode ?? null,
       signal: child?.signalCode ?? null,
+      ...(sessionUnavailable && terminal.failure ? { failure: { ...terminal.failure, sessionUnavailable: true as const } } : {}),
     };
     emitter.status(terminal.status, terminal.error);
     return {

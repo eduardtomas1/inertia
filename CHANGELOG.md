@@ -4,9 +4,11 @@ The useful changes in each Inertia release, in plain language.
 
 ## 0.0.65 — 2026-09-30
 
-Find help inside Inertia, hear when a task ends, keep each chat with the
-provider it started on, and use Codex 0.159.0, with a broad round of
-reliability and safety fixes.
+Find help inside Inertia, hear when a task ends, choose your own light and
+dark colors, attach reviewed screenshots on Linux, and use Codex 0.159.0. Each
+chat stays with the provider it started on and keeps its provider session
+across updates, and the agent Browser now works off screen and on ordinary
+pages. A broad round of reliability and safety fixes comes with them.
 
 ### New
 
@@ -26,6 +28,14 @@ reliability and safety fixes.
 - Pin the mascot to one of your eight most recent chats with its **Auto /
   Pinned** switch or **Show chat** in its menu. Its bubble now shows the
   project, the elapsed or finished time and plan progress.
+- Choose **Custom colors** in **Settings → General → Appearance**: one color
+  for the light appearance and another for dark, from the color pickers or by
+  typing a hex value. Inertia adapts the shades to keep the workbench
+  readable, **System** switches between the two automatically, and detached
+  windows and terminals follow. **Reset** returns to the previous preset.
+- On Linux, use **Take reviewed screenshot** beside the composer's attachment
+  button, even where protected Snapshots cannot run. Pick a window or screen,
+  crop it and mask anything sensitive, and approve it before it is attached.
 
 ### Chats keep their provider
 
@@ -36,6 +46,17 @@ reliability and safety fixes.
 - An older chat whose turns ran on more than one provider stays readable, and
   you can still rename or archive it, but it cannot continue. Its controls
   explain why and offer **Start a new chat**.
+- A chat keeps its provider session when the provider or Inertia is updated,
+  so the provider still remembers the conversation instead of starting over.
+  Chats on a custom backend keep the stricter rule and start a new session
+  after such an update.
+- If the provider can no longer open a chat's saved session, the same turn
+  restarts once on a new session instead of failing. The new session receives
+  the chat's earlier messages that were already sent to that backend and
+  endpoint, with known credential formats redacted, and the message shows a
+  **New provider session** note that says why.
+- Only the provider's refusal to resume a saved session sets it aside. Usage
+  limits, crashes and outages no longer discard a session that still works.
 
 ### Providers
 
@@ -54,6 +75,31 @@ reliability and safety fixes.
 - Claude installed with npm now runs on Windows. Cursor and Kimi Code redact
   credentials even when a streamed reply splits them across chunks.
 
+### Agent Browser
+
+- Each chat's Browser keeps working when it is not on screen. An agent can use
+  it from a background chat or a detached window, and its pages stay loaded
+  when you switch chats, close the Browser panel, open Settings or reload the
+  window. Inertia keeps the Browsers of up to four off-screen chats and closes
+  one that has gone unused off screen for thirty minutes.
+- Pages with frames, shadow roots or large documents are no longer refused.
+  The agent reads the rest of the page and is told which parts were not read.
+  A page's content is still withheld once one of its password fields holds a
+  value.
+- Browser errors say what to do next: a blank tab asks for a page to be opened
+  first, rejected arguments name the field, and a failed load names its cause.
+  A new wait tool lets the agent wait for text to appear or disappear, or for
+  a page to finish loading.
+- Providers get complete Browser tool instructions, including the fields each
+  action needs, such as the element to click or the tab to switch to. Claude
+  now receives these fields instead of empty lists.
+- Each Browser action now has its own tool, so Browser tool names change for
+  new provider sessions. The old names still work in sessions that registered
+  them, so existing Codex threads keep working.
+- A Browser request with text that is too long, for example text full of
+  emoji, is refused with an error instead of stopping the runtime and every
+  running turn with it.
+
 ### Reliability and safety
 
 - File references in the composer are refused when they would read a file
@@ -63,7 +109,8 @@ reliability and safety fixes.
 - Installing an app update on macOS no longer leaves Inertia unable to quit
   when preparing the update is slow. An interrupted Windows update no longer
   blocks the next launch, and rollback works after the system clock moves
-  back.
+  back. On Linux, the new version gets 30 seconds instead of 15 to confirm it
+  has started, so updates no longer time out on slower machines.
 - Git treats file names such as `docs/[a].md` literally, so committing,
   comparing or reverting one file no longer touches another. Changes review
   reads removed lines starting with `--` and added lines starting with `++`
@@ -71,7 +118,9 @@ reliability and safety fixes.
 - Inertia confirms more carefully that terminals and agent processes have
   stopped on Linux, macOS and Windows, and starting a process in a deleted
   worktree no longer restarts the runtime. Queued messages no longer retry in a
-  busy loop while an update is being prepared.
+  busy loop while an update is being prepared. When Inertia cannot confirm
+  that a provider's helper processes stopped at shutdown, the error now names
+  each one and why, instead of only saying cleanup could not be confirmed.
 - Recover from a first launch that was interrupted before the database was
   set up. Removing another project no longer switches away from the current
   one, and Linux keeps attachments in your profile instead of the shared
@@ -80,6 +129,9 @@ reliability and safety fixes.
   keys in its option groups and menus. Dialogs keep focus after **Refresh** or
   **Delete**, and **Restore defaults** asks first when confirmations are on
   and keeps your imported sounds.
+- Closing Help or the welcome guide in the middle of a page change no longer
+  leaves a pending update behind, and quick moves back and forth keep the
+  outgoing page for its whole transition.
 - In the workspace, the review comment you are typing and the loaded diff
   survive a refresh, failed review actions keep your draft and show the error,
   and open terminals keep their shell when a project is renamed.

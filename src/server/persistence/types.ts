@@ -40,7 +40,7 @@ import type {
   BackendCompatibilityProbeResult,
   BackendProbeAdmissionHighWater,
 } from "../../shared/backend-probe";
-import type { ContinuationReasonCode } from "../../shared/continuation-policy";
+import type { ContinuationReasonCode, TurnSessionRecovery } from "../../shared/continuation-policy";
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
 import type { WorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
@@ -105,6 +105,7 @@ export interface CreateAgentTurnInput {
   modelSelection?: ModelSelection;
   continuationIdentity?: ContinuationIdentity;
   continuationReasonCode?: ContinuationReasonCode | null;
+  sessionRecovery?: TurnSessionRecovery | null;
   /** Legacy database-boundary fields accepted for V0.0.6 compatibility. */
   harnessId?: string;
   backendProfileId?: string;

@@ -15,7 +15,6 @@ import { MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversati
 import {
   BUILD_MODE_INSTRUCTION,
   MAX_EXECUTION_PAYLOAD_BYTES,
-  RECOVERED_PROVIDER_HISTORY_LABEL,
   type AssembleTurnRequestInput,
   assembleTurnRequest,
   parseSanitizedTurnExecutionManifest,
@@ -475,13 +474,16 @@ describe("bounded structured turn request context", () => {
   });
 });
 
-describe("automatic recovery respects the selected request's capacity", () => {
-  const continuationHistory = {
-    content: JSON.stringify({ source: "Historical reference only", messages: [{ role: "user", content: 'Keep café 🚀 and "quoted" text.\n' }] }),
-    truncated: true,
+describe("restored history respects the selected request's capacity", () => {
+  const block = {
+    label: "Earlier messages restored for a new session · 1 message",
+    content: JSON.stringify({ about: "Historical reference only", messages: [["user", 'Keep café 🚀 and "quoted" text.\n']] }),
   };
+  const history = { blocks: [block], messageCount: 1, omittedMessageCount: 4 };
+  const restoredHistory = () => history;
+  const unrestored = { restoredMessageCount: 0, omittedMessageCount: 5 };
 
-  it("preserves all 32 selected references when recovery has no reference slot", async () => {
+  it("preserves all 32 selected references when restored history has no reference slot", async () => {
     const cwd = await workspace();
     await writeFile(join(cwd, "source.ts"), "export const answer = 42;");
     const request: AssembleTurnRequestInput = {
@@ -494,18 +496,66 @@ describe("automatic recovery respects the selected request's capacity", () => {
     };
     const selected = assembleTurnRequest(request);
     expect(selected.persistence.manifest.contextReferenceCount).toBe(32);
-    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(selected);
+    expect(selected.sessionRecovery).toBeNull();
+    expect(assembleTurnRequest({ ...request, restoredHistory })).toEqual({ ...selected, sessionRecovery: unrestored });
   });
 
-  it("preserves all 48 execution segments when recovery has no segment slot", async () => {
+  it("preserves all 48 execution segments when restored history has no segment slot", async () => {
     const request: AssembleTurnRequestInput = {
       cwd: await workspace(), visibleContent: "Continue.",
       internalInstructions: Array.from({ length: 47 }, (_, i) => ({ label: `control-${i}`, text: "Keep the sandbox." })),
     };
     const selected = assembleTurnRequest(request);
     expect(selected.persistence.manifest.executionSegmentCount).toBe(48);
-    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(selected);
-    expect(() => assembleTurnRequest({ ...request, continuationHistory, internalInstructions: [...request.internalInstructions!, { label: "extra", text: "Control" }] })).toThrow(/segment limit/u);
+    expect(assembleTurnRequest({ ...request, restoredHistory })).toEqual({ ...selected, sessionRecovery: unrestored });
+    expect(() => assembleTurnRequest({ ...request, restoredHistory, internalInstructions: [...request.internalInstructions!, { label: "extra", text: "Control" }] })).toThrow(/segment limit/u);
+  });
+
+  it("appends every restored block after the selected context and reports what was restored", async () => {
+    const cwd = await workspace();
+    const blocks = [
+      { label: "Earlier messages restored for a new session · 7 messages · 2 omitted · part 1 of 2", content: JSON.stringify({ part: 1 }) },
+      { label: "Earlier messages restored for a new session · 7 messages · 2 omitted · part 2 of 2", content: JSON.stringify({ part: 2 }) },
+    ];
+    const capacities: number[] = [];
+    const request: AssembleTurnRequestInput = {
+      cwd, visibleContent: "Continue.",
+      context: { terminalContexts: [{ terminalId: "terminal-1", terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "selected output" }] },
+    };
+    const assembled = assembleTurnRequest({
+      ...request,
+      restoredHistory: (capacityBytes) => {
+        capacities.push(capacityBytes);
+        return { blocks, messageCount: 7, omittedMessageCount: 2 };
+      },
+    });
+    expect(capacities).toEqual([MAX_CONVERSATION_CONTEXT_TURN_BYTES]);
+    expect(assembled.sessionRecovery).toEqual({ restoredMessageCount: 7, omittedMessageCount: 2 });
+    expect(assembled.persistence.manifest.references.map(({ kind, label, truncated }) => ({ kind, label, truncated }))).toEqual([
+      { kind: "terminal", label: "Logs · lines 1-1", truncated: false },
+      { kind: "attachment", label: blocks[0]!.label, truncated: true },
+      { kind: "attachment", label: blocks[1]!.label, truncated: true },
+    ]);
+    expect(assembled.persistence.manifest.executionSegmentCount).toBe(4);
+    expect(assembled.executionPrompt.indexOf("selected output")).toBeLessThan(assembled.executionPrompt.indexOf('{\\"part\\":1}'));
+    expect(assembled.persistence.manifest.assembledPayloadBytes).toBe(Buffer.byteLength(assembled.executionPrompt));
+    expect(assembleTurnRequest({ ...request, restoredHistory: () => null })).toEqual(assembleTurnRequest(request));
+  });
+
+  it("offers only the capacity left beside a large selected request", async () => {
+    const cwd = await workspace();
+    const capacities: number[] = [];
+    const request: AssembleTurnRequestInput = {
+      cwd, visibleContent: "x",
+      context: {
+        terminalContexts: Array.from({ length: 3 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "y".repeat(60_000) })),
+      },
+    };
+    const selected = assembleTurnRequest(request);
+    assembleTurnRequest({ ...request, restoredHistory: (capacityBytes) => { capacities.push(capacityBytes); return null; } });
+    expect(capacities).toHaveLength(1);
+    expect(capacities[0]).toBeLessThan(MAX_EXECUTION_PAYLOAD_BYTES - selected.persistence.manifest.assembledPayloadBytes);
+    expect(capacities[0]).toBeGreaterThan(MAX_EXECUTION_PAYLOAD_BYTES - selected.persistence.manifest.assembledPayloadBytes - 4 * 1_024);
   });
 
   it("counts escaped UTF-8 history, framing, instructions and image paths at the exact byte limit", async () => {
@@ -519,23 +569,23 @@ describe("automatic recovery respects the selected request's capacity", () => {
         terminalContexts: Array.from({ length: 3 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: '\\"\n🚀'.repeat(6_000) })),
       },
     };
-    const initial = assembleTurnRequest({ ...request, continuationHistory });
+    const initial = assembleTurnRequest({ ...request, restoredHistory });
     const padding = MAX_EXECUTION_PAYLOAD_BYTES - initial.persistence.manifest.assembledPayloadBytes;
     request.visibleContent += "x".repeat(padding);
-    const exact = assembleTurnRequest({ ...request, continuationHistory });
+    const exact = assembleTurnRequest({ ...request, restoredHistory });
     expect(exact.persistence.manifest.assembledPayloadBytes).toBe(MAX_EXECUTION_PAYLOAD_BYTES);
-    expect(exact.persistence.manifest.references.at(-1)).toMatchObject({ label: RECOVERED_PROVIDER_HISTORY_LABEL, truncated: true });
-    expect(exact.persistence.blobs.at(-1)?.content).toBe(continuationHistory.content);
+    expect(exact.persistence.manifest.references.at(-1)).toMatchObject({ label: block.label, truncated: true });
+    expect(exact.persistence.blobs.at(-1)?.content).toBe(block.content);
+    expect(exact.sessionRecovery).toEqual({ restoredMessageCount: 1, omittedMessageCount: 4 });
     expect(exact.persistence.manifest.assembledPayloadBytes).toBe(Buffer.byteLength(exact.executionPrompt) + Buffer.byteLength(realpathSync(imagePath)) + 8);
 
-    // One more visible byte still fits the selected request, but history no longer fits.
     request.visibleContent += "x";
-    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(assembleTurnRequest(request));
+    expect(assembleTurnRequest({ ...request, restoredHistory })).toEqual({ ...assembleTurnRequest(request), sessionRecovery: unrestored });
 
     const selected = assembleTurnRequest(request);
     request.visibleContent += "x".repeat(MAX_EXECUTION_PAYLOAD_BYTES - selected.persistence.manifest.assembledPayloadBytes);
-    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(assembleTurnRequest(request));
+    expect(assembleTurnRequest({ ...request, restoredHistory })).toEqual({ ...assembleTurnRequest(request), sessionRecovery: unrestored });
     request.visibleContent += "x";
-    expect(() => assembleTurnRequest({ ...request, continuationHistory })).toThrow(/Assembled execution payload exceeds/u);
+    expect(() => assembleTurnRequest({ ...request, restoredHistory })).toThrow(/Assembled execution payload exceeds/u);
   });
 });

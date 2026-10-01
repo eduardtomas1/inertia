@@ -80,12 +80,12 @@ test("shares one directly openable Browser across user, agent, and restart lifec
         agentBrowser: (
           conversationId: string,
           command: { action: "tabs" },
-        ) => Promise<{ ok: boolean; code?: string }>;
+        ) => Promise<{ ok: boolean; state?: { tabs: Array<{ url: string }> } }>;
       };
       return await runtime.agentBrowser(id, { action: "tabs" });
     },
     conversationId,
-  )).toMatchObject({ ok: false, code: "unavailable" });
+  )).toMatchObject({ ok: true, state: { tabs: [{ url: "" }] } });
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(rightPanelToggle(page)).toBeVisible();
 

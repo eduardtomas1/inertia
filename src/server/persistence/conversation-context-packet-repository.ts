@@ -13,7 +13,6 @@ import {
   MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
-  type ConversationContextAttachmentReference,
   type ConversationContextExcerpt,
   type ConversationContextPacket,
   type ConversationContextPacketSummary,
@@ -25,14 +24,15 @@ import {
 } from "../../shared/contracts";
 import { normalizeIdentityPath } from "../project-identity";
 import { boundedSubagentText } from "../provider/subagent-trace";
-import { neutralizeUntrustedAgentText, truncateUtf8 } from "../runtime/untrusted-agent-text";
-import { parseStoredAttachments as parseAttachments } from "./codecs";
+import { truncateUtf8 } from "../runtime/untrusted-agent-text";
 import type { ConversationRow, ProjectRow } from "./rows";
+import { conversationContextSourceRows } from "./conversation-context-source";
 import {
-  conversationContextOpeningRow,
-  conversationContextSourceRows,
-  type ConversationContextSourceRow,
-} from "./conversation-context-source";
+  collectConversationContextExcerpts,
+  conversationContextWorkspaceLabel as workspaceLabel,
+  scrubAndBoundExcerpt,
+  scrubConversationContextMetadata as scrubMetadata,
+} from "./conversation-context-excerpts";
 import {
   CONVERSATION_CONTEXT_TRANSPORT_VERSION,
   allocateConversationContextBudgets,
@@ -160,19 +160,6 @@ const ATTACHMENT_REFERENCE_KEYS = ["id", "mimeType", "name", "size"]
   .sort()
   .join("\0");
 
-function attachmentReferences(
-  attachmentsJson: string,
-): ConversationContextAttachmentReference[] {
-  return parseAttachments(attachmentsJson)
-    .slice(0, MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE)
-    .map((attachment) => ({
-      id: attachment.id,
-      name: scrubMetadata(attachment.name, "Attachment", 200),
-      mimeType: attachment.mimeType,
-      size: attachment.size,
-    }));
-}
-
 function isAttachmentReferenceList(value: unknown): boolean {
   if (
     !Array.isArray(value)
@@ -199,85 +186,6 @@ function isAttachmentReferenceList(value: unknown): boolean {
     ids.add(attachment.id);
   }
   return true;
-}
-
-const SHORTENED_MIDDLE = "…\n\n[middle of message omitted]\n\n";
-
-function cleanExcerptText(value: string): string | null {
-  const scrubbed = boundedSubagentText(value, value.length);
-  return scrubbed === null
-    ? null
-    : neutralizeUntrustedAgentText(scrubbed.replace(/\r\n?/gu, "\n"));
-}
-
-function tailUtf8(value: string, maximumBytes: number): string {
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.length <= maximumBytes) return value;
-  let start = bytes.length - maximumBytes;
-  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1;
-  const tail = bytes.subarray(start).toString("utf8");
-  const lineEnd = tail.indexOf("\n");
-  if (lineEnd !== -1 && lineEnd < tail.length / 2) return tail.slice(lineEnd + 1);
-  const space = tail.search(/\s/u);
-  return space !== -1 && space < tail.length / 2 ? tail.slice(space + 1) : tail;
-}
-
-function boundExcerptText(head: string, tail: string, maximumBytes: number): string {
-  const available = maximumBytes - byteLength(SHORTENED_MIDDLE);
-  const keptTail = tail.trim()
-    ? neutralizeUntrustedAgentText(tailUtf8(tail, Math.floor(available * 0.4)))
-    : "";
-  if (!keptTail.trim()) return truncateUtf8(head, maximumBytes).text;
-  let headBytes = available - byteLength(keptTail);
-  while (headBytes > 0) {
-    const candidate = neutralizeUntrustedAgentText(
-      `${truncateUtf8(head, headBytes).text}${SHORTENED_MIDDLE}${keptTail}`,
-    );
-    const overflow = byteLength(candidate) - maximumBytes;
-    if (overflow <= 0) return candidate;
-    headBytes -= overflow;
-  }
-  return truncateUtf8(head, maximumBytes).text;
-}
-
-/**
- * Defense-in-depth only. The user previews the exact bounded copy because any
- * visible chat prose may legitimately contain material no pattern can detect.
- * Media stays in its source chat; only its durable identity travels.
- */
-function scrubAndBoundExcerpt(
-  row: ConversationContextSourceRow,
-  remainingBytes = MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
-): ConversationContextExcerpt {
-  const limit = Math.min(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, remainingBytes);
-  // Redact, then neutralize instruction-shaped text another model may have
-  // written, then bound: neutralizing grows the text, so the cap comes last.
-  const head = cleanExcerptText(row.content);
-  const bounded = head === null
-    ? truncateUtf8(
-        row.contentTruncated ? "[Message excerpt omitted]" : "[Empty message omitted]",
-        limit,
-      )
-    : !row.contentTruncated && byteLength(head) <= limit
-      ? { text: head, truncated: false }
-      : {
-          text: boundExcerptText(
-            head,
-            row.contentTruncated ? cleanExcerptText(row.tail ?? "") ?? "" : head,
-            limit,
-          ),
-          truncated: true,
-        };
-  const attachments = attachmentReferences(row.attachments_json);
-  return {
-    sourceMessageId: row.id,
-    sourceTurnId: row.turn_id,
-    role: row.role as "user" | "assistant",
-    content: bounded.text,
-    truncated: row.contentTruncated || bounded.truncated,
-    createdAt: row.created_at,
-    ...(attachments.length > 0 ? { attachments } : {}),
-  };
 }
 
 function parseExcerpts(row: ConversationContextPacketRow): ConversationContextExcerpt[] {
@@ -460,26 +368,6 @@ function agentRequestFromRow(
   };
 }
 
-function workspaceLabel(conversation: ConversationRow): string {
-  if (conversation.worktree_path) {
-    return conversation.branch
-      ? `Isolated worktree · ${conversation.branch}`
-      : "Isolated worktree";
-  }
-  return conversation.branch
-    ? `Project checkout · ${conversation.branch}`
-    : "Project checkout";
-}
-
-// Titles and branch-derived labels can be authored by another agent run.
-// Neutralize after collapsing whitespace, which could otherwise form a tag.
-function scrubMetadata(value: string, fallback: string, maxLength: number): string {
-  const collapsed = (boundedSubagentText(value, value.length) ?? fallback)
-    .replace(/\s+/gu, " ")
-    .trim();
-  return neutralizeUntrustedAgentText(collapsed).slice(0, maxLength) || fallback;
-}
-
 function uniquePacketIds(ids: readonly string[]): string[] {
   if (
     ids.length < 1
@@ -640,66 +528,13 @@ export class ConversationContextPacketRepository {
         );
       }
     }
-    const eligibleCount = (this.context.database.prepare(`
-      SELECT COUNT(*) AS count FROM messages
-      WHERE conversation_id = ? AND role IN ('user', 'assistant')
-        ${selectedIds ? `AND id IN (${selectedIds.map(() => "?").join(", ")})` : ""}
-    `).get(source.id, ...(selectedIds ?? [])) as { count: number }).count;
-    if (selectedIds && eligibleCount !== selectedIds.length) {
-      throw new Error(
-        "Only visible user and assistant messages from the selected source chat can be shared.",
-      );
-    }
-    if (eligibleCount < 1) {
-      throw new Error("That chat has no shareable messages yet.");
-    }
-    const perExcerptBudget = selectedIds
-      ? Math.min(
-          MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
-          Math.floor(MAX_CONVERSATION_CONTEXT_TOTAL_BYTES / eligibleCount),
-        )
-      : MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
-    let retainedBytes = 0;
-    let retainedJsonBytes = 2;
-    const retain = (excerpt: ConversationContextExcerpt): boolean => {
-      const bytes = byteLength(excerpt.content);
-      const jsonBytes = byteLength(JSON.stringify(excerpt)) + 1;
-      if (
-        retainedBytes + bytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
-        || retainedJsonBytes + jsonBytes > MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES
-      ) return false;
-      retainedBytes += bytes;
-      retainedJsonBytes += jsonBytes;
-      return true;
-    };
-    const openingRow = selectedIds
-      ? null
-      : conversationContextOpeningRow(this.context.database, source.id);
-    let opening = openingRow ? scrubAndBoundExcerpt(openingRow, perExcerptBudget) : null;
-    if (opening && !retain(opening)) opening = null;
-    const window: ConversationContextExcerpt[] = [];
-    for (const row of conversationContextSourceRows(
-      this.context.database, source.id, MAX_CONVERSATION_CONTEXT_MESSAGES,
-      selectedIds ?? undefined,
-    )) {
-      if (window.length + (opening ? 1 : 0) >= MAX_CONVERSATION_CONTEXT_MESSAGES) break;
-      if (opening && row.id === opening.sourceMessageId) {
-        window.push(opening);
-        opening = null;
-        continue;
-      }
-      const excerpt = scrubAndBoundExcerpt(row, perExcerptBudget);
-      if (!retain(excerpt)) break;
-      window.push(excerpt);
-    }
-    const excerpts = [...(opening ? [opening] : []), ...window.reverse()];
-    if (excerpts.length < 1) {
-      throw new Error("The selected chat context exceeds the shared size limit.");
-    }
-    const droppedMessageCount = Math.min(
-      Math.max(eligibleCount - excerpts.length, 0),
-      1_000_000,
+    const collected = collectConversationContextExcerpts(
+      this.context.database,
+      source.id,
+      selectedIds,
     );
+    if (!collected) throw new Error("That chat has no shareable messages yet.");
+    const { excerpts, droppedMessageCount } = collected;
     const noteSource = input.note?.trim();
     const note = noteSource
       ? truncateUtf8(
@@ -1136,6 +971,16 @@ export class ConversationContextPacketRepository {
       blocks: prepared.flatMap(({ blocks }) => blocks),
       deliveries: prepared.map(({ packet }, index) => deliveryFor(packet, budgets[index]!)),
     };
+  }
+
+  includesOwnConversation(targetConversationId: string, packetIds: readonly string[]): boolean {
+    if (packetIds.length === 0) return false;
+    return this.context.database.prepare(`
+      SELECT 1 FROM conversation_context_packets
+      WHERE target_conversation_id = ? AND source_conversation_id = target_conversation_id
+        AND id IN (${packetIds.map(() => "?").join(", ")})
+      LIMIT 1
+    `).get(targetConversationId, ...packetIds) !== undefined;
   }
 
   assertSendable(targetConversationId: string, packetIds: readonly string[]): void {

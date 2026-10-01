@@ -33,7 +33,7 @@ import type {
   ProviderRunResult,
   ProviderSteerInput,
 } from "../../provider/contracts";
-import type { HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
+import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
@@ -299,6 +299,7 @@ export interface ActiveTurn {
   } | null;
   providerStopStarted: boolean;
   sessionAfter: string | null;
+  freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;
   assistantPendingHighSurrogate: string;

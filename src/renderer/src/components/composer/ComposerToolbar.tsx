@@ -277,7 +277,7 @@ export function ComposerToolbar({
           >
             <Paperclip size={16} />
           </IconButton>
-          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} /></Suspense>
+          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_CHAT_ATTACHMENTS || imageInputUnavailableReason !== null} /></Suspense>
         </div>
         <div
           className="composer-options"

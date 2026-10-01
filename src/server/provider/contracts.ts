@@ -1,5 +1,7 @@
 import type { ZodType } from "zod";
 
+import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
+
 import type {
   AgentGoalStatus,
   ContinuationIdentity,
@@ -55,6 +57,7 @@ export interface ProviderDetection {
   protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */
   cleanupConfirmed: boolean;
+  cleanupDiagnostic?: PosixCleanupDiagnostic;
   probeTimedOut?: boolean;
   statusMessage?: string;
 }
@@ -191,6 +194,12 @@ export interface ProviderRunFailure {
   phase?: string;
   terminalEvent?: string;
   activityId?: string;
+  sessionUnavailable?: true;
+  resumeRejected?: true;
+}
+
+export interface ProviderFreshSessionFallback {
+  prompt: string;
 }
 
 export interface ProviderEventBase {
@@ -371,6 +380,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
+  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;
@@ -434,7 +444,16 @@ export interface ProviderHostToolResult {
 /** Owned by one exact active Inertia run; never persisted or provider-authored. */
 export interface ProviderHostToolBridge {
   readonly definitions: readonly ProviderHostToolDefinition[];
+  readonly retiredToolNames?: ReadonlySet<string>;
   invoke(call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
+}
+
+export function providerHostToolAccepted(
+  bridge: ProviderHostToolBridge,
+  tool: string,
+): boolean {
+  return bridge.definitions.some(({ name }) => name === tool)
+    || bridge.retiredToolNames?.has(tool) === true;
 }
 
 export type ProviderTerminalOutcome =

@@ -930,6 +930,8 @@ describe("server event settings trust boundary", () => {
   });
   it.each([
     ["theme", "sepia"],
+    ["lightCustomColor", "red"],
+    ["darkCustomColor", "#12345g"],
     ["defaultProvider", "unknown-provider"],
     ["defaultAccessMode", "unrestricted"],
     ["newThreadMode", "remote"],
@@ -1032,6 +1034,42 @@ describe("server event conversation discriminant boundary", () => {
         }],
       },
     }))).toThrow("Malformed server event");
+  });
+  it("accepts only bounded session recovery counts on turn projections", () => {
+    const detail = (sessionRecovery: unknown) => event({
+      kind: "conversation.detail",
+      conversationId: conversation.id,
+      state: "ready",
+      detail: {
+        ...conversationDetail,
+        agentTurns: [{ ...conversationDetail.agentTurns[0], sessionRecovery }],
+      },
+    });
+    for (const accepted of [
+      undefined,
+      null,
+      { restoredMessageCount: 0, omittedMessageCount: 0 },
+      { restoredMessageCount: 113, omittedMessageCount: 20 },
+      { restoredMessageCount: 2, omittedMessageCount: 0, withheldMessageCount: 3 },
+    ]) {
+      expect(parseServerEvent(detail(accepted))).toMatchObject({ type: "request.result" });
+    }
+    for (const rejected of [
+      "restored",
+      [],
+      { restoredMessageCount: 1 },
+      { restoredMessageCount: -1, omittedMessageCount: 0 },
+      { restoredMessageCount: 1.5, omittedMessageCount: 0 },
+      { restoredMessageCount: 1, omittedMessageCount: "0" },
+      { restoredMessageCount: 1, omittedMessageCount: 0, transcript: "leaked" },
+      { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: -1 },
+      { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: "2" },
+      { restoredMessageCount: 0, omittedMessageCount: 0, historyWithheld: "endpoint-changed" },
+      { resumeRejected: true },
+      { restoredMessageCount: 2_000_000, omittedMessageCount: 0 },
+    ]) {
+      expect(() => parseServerEvent(detail(rejected))).toThrow("Malformed server event");
+    }
   });
   it("validates response-speed identity while allowing pending conversation transitions", () => {
     expect(() => parseServerEvent(snapshotEvent({

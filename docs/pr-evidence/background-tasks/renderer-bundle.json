@@ -1,17 +1,14 @@
 {
   "baseline": "fd02e238356c617410081c9addbe5e106eb3dd90",
-  "previousHead": "b7fcc064",
-  "after": "25c9615c",
+  "after": "4bf6a311",
   "platform": "macOS 27.0.1 arm64, Node 22.23.2, same package-lock.json",
-  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of origin/main and the branch. The Background tasks surface is its own lazy chunk (tasks-*.js) with a lazily loaded stylesheet; its 12.5 KiB cap leaves 183 bytes of headroom. mainWorkbenchFirstLoadJavaScript, detachedChatFirstLoadJavaScript and coreJavaScript exceeded main's caps, so each cap is main's cap plus the exact measured growth. Every other cap is unchanged. previousHeadBytes is the branch before the per-turn agents line replaced the delegated-task disclosure (head 1a6dfd1d, same as b7fcc064 for every closure); afterBytes is 25c9615c, measured with no cap changes.",
+  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of origin/main and the branch. Every closure the branch does not exceed keeps main's exact cap. mainWorkbenchFirstLoadJavaScript is main's cap plus the measured 741 bytes of growth. The Background tasks surface is its own lazy chunk (tasks-*.js) with a lazily loaded stylesheet, capped at 13.1 KiB (196 bytes of headroom over its 13,218 measured bytes).",
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "mainBytes": 1214,
       "mainCapBytes": 1536,
-      "previousHeadBytes": 1214,
       "afterBytes": 1214,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 1536,
       "capChangeBytes": 0,
       "withinCap": true
@@ -19,10 +16,8 @@
     "deferredUsageLimitsJavaScript": {
       "mainBytes": 19953,
       "mainCapBytes": 20172,
-      "previousHeadBytes": 19953,
       "afterBytes": 19953,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 20172,
       "capChangeBytes": 0,
       "withinCap": true
@@ -30,10 +25,8 @@
     "deferredWelcomeGuideJavaScript": {
       "mainBytes": 29090,
       "mainCapBytes": 29136,
-      "previousHeadBytes": 29110,
       "afterBytes": 29110,
       "deltaFromMainBytes": 20,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 29136,
       "capChangeBytes": 0,
       "withinCap": true
@@ -41,10 +34,8 @@
     "deferredWorkingOrbJavaScript": {
       "mainBytes": 21807,
       "mainCapBytes": 22528,
-      "previousHeadBytes": 21807,
       "afterBytes": 21807,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 22528,
       "capChangeBytes": 0,
       "withinCap": true
@@ -52,10 +43,8 @@
     "deferredSnapshotSettingsJavaScript": {
       "mainBytes": 5898,
       "mainCapBytes": 6210,
-      "previousHeadBytes": 5898,
       "afterBytes": 5898,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 6210,
       "capChangeBytes": 0,
       "withinCap": true
@@ -63,10 +52,8 @@
     "deferredSnapshotControlJavaScript": {
       "mainBytes": 7313,
       "mainCapBytes": 7372,
-      "previousHeadBytes": 7313,
       "afterBytes": 7313,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 7372,
       "capChangeBytes": 0,
       "withinCap": true
@@ -74,10 +61,8 @@
     "deferredAttachmentStorageSettingsJavaScript": {
       "mainBytes": 5277,
       "mainCapBytes": 5292,
-      "previousHeadBytes": 5277,
       "afterBytes": 5277,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 5292,
       "capChangeBytes": 0,
       "withinCap": true
@@ -85,21 +70,17 @@
     "deferredBackgroundTasksJavaScript": {
       "mainBytes": null,
       "mainCapBytes": null,
-      "previousHeadBytes": 12590,
-      "afterBytes": 12617,
+      "afterBytes": 13218,
       "deltaFromMainBytes": null,
-      "deltaFromPreviousHeadBytes": 27,
-      "capBytes": 12800,
+      "capBytes": 13414,
       "capChangeBytes": null,
       "withinCap": true
     },
     "deferredProjectSettingsJavaScript": {
       "mainBytes": 13271,
       "mainCapBytes": 13367,
-      "previousHeadBytes": 13271,
       "afterBytes": 13272,
       "deltaFromMainBytes": 1,
-      "deltaFromPreviousHeadBytes": 1,
       "capBytes": 13367,
       "capChangeBytes": 0,
       "withinCap": true
@@ -107,10 +88,8 @@
     "deferredReviewNoteJavaScript": {
       "mainBytes": 1434,
       "mainCapBytes": 1536,
-      "previousHeadBytes": 1434,
       "afterBytes": 1434,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 1536,
       "capChangeBytes": 0,
       "withinCap": true
@@ -118,10 +97,8 @@
     "deferredThreadActionsJavaScript": {
       "mainBytes": 7998,
       "mainCapBytes": 8192,
-      "previousHeadBytes": 7997,
       "afterBytes": 7997,
       "deltaFromMainBytes": -1,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 8192,
       "capChangeBytes": 0,
       "withinCap": true
@@ -129,10 +106,8 @@
     "deferredProjectCustomizeJavaScript": {
       "mainBytes": 11256,
       "mainCapBytes": 11392,
-      "previousHeadBytes": 11256,
       "afterBytes": 11256,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 11392,
       "capChangeBytes": 0,
       "withinCap": true
@@ -140,10 +115,8 @@
     "deferredProjectColorContrastJavaScript": {
       "mainBytes": 1802,
       "mainCapBytes": 1920,
-      "previousHeadBytes": 1802,
       "afterBytes": 1802,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 1920,
       "capChangeBytes": 0,
       "withinCap": true
@@ -151,10 +124,8 @@
     "deferredDiagnosticsJavaScript": {
       "mainBytes": 12325,
       "mainCapBytes": 13312,
-      "previousHeadBytes": 12325,
       "afterBytes": 12325,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 13312,
       "capChangeBytes": 0,
       "withinCap": true
@@ -162,10 +133,8 @@
     "deferredDiagnosticCatalogJavaScript": {
       "mainBytes": 9888,
       "mainCapBytes": 12288,
-      "previousHeadBytes": 9888,
       "afterBytes": 9888,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 12288,
       "capChangeBytes": 0,
       "withinCap": true
@@ -173,10 +142,8 @@
     "deferredIssueReportJavaScript": {
       "mainBytes": 12516,
       "mainCapBytes": 13312,
-      "previousHeadBytes": 12516,
       "afterBytes": 12516,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 13312,
       "capChangeBytes": 0,
       "withinCap": true
@@ -184,10 +151,8 @@
     "mascotFirstLoadJavaScript": {
       "mainBytes": 11067,
       "mainCapBytes": 11162,
-      "previousHeadBytes": 11067,
       "afterBytes": 11067,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 11162,
       "capChangeBytes": 0,
       "withinCap": true
@@ -195,10 +160,8 @@
     "mascotJavaScript": {
       "mainBytes": 11067,
       "mainCapBytes": 11162,
-      "previousHeadBytes": 11067,
       "afterBytes": 11067,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 11162,
       "capChangeBytes": 0,
       "withinCap": true
@@ -206,10 +169,8 @@
     "mascotSettingsJavaScript": {
       "mainBytes": 6642,
       "mainCapBytes": 6963,
-      "previousHeadBytes": 6642,
       "afterBytes": 6642,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 6963,
       "capChangeBytes": 0,
       "withinCap": true
@@ -217,10 +178,8 @@
     "entryJavaScript": {
       "mainBytes": 222475,
       "mainCapBytes": 222720,
-      "previousHeadBytes": 222475,
       "afterBytes": 222476,
       "deltaFromMainBytes": 1,
-      "deltaFromPreviousHeadBytes": 1,
       "capBytes": 222720,
       "capChangeBytes": 0,
       "withinCap": true
@@ -228,32 +187,26 @@
     "mainWorkbenchFirstLoadJavaScript": {
       "mainBytes": 853545,
       "mainCapBytes": 853557,
-      "previousHeadBytes": 854581,
-      "afterBytes": 854303,
-      "deltaFromMainBytes": 758,
-      "deltaFromPreviousHeadBytes": -278,
-      "capBytes": 854593,
-      "capChangeBytes": 1036,
+      "afterBytes": 854286,
+      "deltaFromMainBytes": 741,
+      "capBytes": 854298,
+      "capChangeBytes": 741,
       "withinCap": true
     },
     "detachedChatFirstLoadJavaScript": {
       "mainBytes": 660072,
       "mainCapBytes": 660155,
-      "previousHeadBytes": 660335,
-      "afterBytes": 655327,
-      "deltaFromMainBytes": -4745,
-      "deltaFromPreviousHeadBytes": -5008,
-      "capBytes": 660418,
-      "capChangeBytes": 263,
+      "afterBytes": 655245,
+      "deltaFromMainBytes": -4827,
+      "capBytes": 660155,
+      "capChangeBytes": 0,
       "withinCap": true
     },
     "entryCss": {
       "mainBytes": 354815,
       "mainCapBytes": 355064,
-      "previousHeadBytes": 354943,
-      "afterBytes": 347831,
-      "deltaFromMainBytes": -6984,
-      "deltaFromPreviousHeadBytes": -7112,
+      "afterBytes": 348022,
+      "deltaFromMainBytes": -6793,
       "capBytes": 355064,
       "capChangeBytes": 0,
       "withinCap": true
@@ -261,10 +214,8 @@
     "colorThemesCss": {
       "mainBytes": 12470,
       "mainCapBytes": 12840,
-      "previousHeadBytes": 12470,
       "afterBytes": 12470,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 12840,
       "capChangeBytes": 0,
       "withinCap": true
@@ -272,10 +223,8 @@
     "detachedChatCss": {
       "mainBytes": 2920,
       "mainCapBytes": 8192,
-      "previousHeadBytes": 2920,
       "afterBytes": 2920,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 8192,
       "capChangeBytes": 0,
       "withinCap": true
@@ -283,10 +232,8 @@
     "settingsJavaScript": {
       "mainBytes": 68586,
       "mainCapBytes": 69397,
-      "previousHeadBytes": 68586,
       "afterBytes": 68586,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 69397,
       "capChangeBytes": 0,
       "withinCap": true
@@ -294,10 +241,8 @@
     "filesFirstLoadJavaScript": {
       "mainBytes": 106403,
       "mainCapBytes": 117760,
-      "previousHeadBytes": 106403,
       "afterBytes": 106403,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 117760,
       "capChangeBytes": 0,
       "withinCap": true
@@ -305,10 +250,8 @@
     "deferredMarkdownJavaScript": {
       "mainBytes": 431757,
       "mainCapBytes": 450560,
-      "previousHeadBytes": 431757,
       "afterBytes": 431757,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 450560,
       "capChangeBytes": 0,
       "withinCap": true
@@ -316,10 +259,8 @@
     "transcriptJavaScript": {
       "mainBytes": 552665,
       "mainCapBytes": 614400,
-      "previousHeadBytes": 552844,
-      "afterBytes": 545850,
-      "deltaFromMainBytes": -6815,
-      "deltaFromPreviousHeadBytes": -6994,
+      "afterBytes": 546404,
+      "deltaFromMainBytes": -6261,
       "capBytes": 614400,
       "capChangeBytes": 0,
       "withinCap": true
@@ -327,10 +268,8 @@
     "deferredFailureDiagnosticsJavaScript": {
       "mainBytes": 6461,
       "mainCapBytes": 8192,
-      "previousHeadBytes": 6461,
       "afterBytes": 6461,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 8192,
       "capChangeBytes": 0,
       "withinCap": true
@@ -338,10 +277,8 @@
     "deferredAttachmentPreviewJavaScript": {
       "mainBytes": 17666,
       "mainCapBytes": 17730,
-      "previousHeadBytes": 17666,
       "afterBytes": 17666,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 17730,
       "capChangeBytes": 0,
       "withinCap": true
@@ -349,10 +286,8 @@
     "deferredPreviewJavaScript": {
       "mainBytes": 8173,
       "mainCapBytes": 8192,
-      "previousHeadBytes": 8173,
       "afterBytes": 8173,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 8192,
       "capChangeBytes": 0,
       "withinCap": true
@@ -360,10 +295,8 @@
     "deferredBrowserEvidenceJavaScript": {
       "mainBytes": 3746,
       "mainCapBytes": 5120,
-      "previousHeadBytes": 3746,
       "afterBytes": 3746,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 5120,
       "capChangeBytes": 0,
       "withinCap": true
@@ -371,10 +304,8 @@
     "deferredSpreadsheetJavaScript": {
       "mainBytes": 487396,
       "mainCapBytes": 522240,
-      "previousHeadBytes": 487396,
       "afterBytes": 487396,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 522240,
       "capChangeBytes": 0,
       "withinCap": true
@@ -382,10 +313,8 @@
     "deferredDiscordSettingsJavaScript": {
       "mainBytes": 5390,
       "mainCapBytes": 6144,
-      "previousHeadBytes": 5390,
       "afterBytes": 5390,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 6144,
       "capChangeBytes": 0,
       "withinCap": true
@@ -393,10 +322,8 @@
     "deferredCanaryRollbackJavaScript": {
       "mainBytes": 2428,
       "mainCapBytes": 4096,
-      "previousHeadBytes": 2428,
       "afterBytes": 2428,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 4096,
       "capChangeBytes": 0,
       "withinCap": true
@@ -404,10 +331,8 @@
     "deferredLifecycleIntegritySettingsJavaScript": {
       "mainBytes": 5285,
       "mainCapBytes": 6222,
-      "previousHeadBytes": 5285,
       "afterBytes": 5285,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 6222,
       "capChangeBytes": 0,
       "withinCap": true
@@ -415,10 +340,8 @@
     "deferredSidebarUpdateControlJavaScript": {
       "mainBytes": 10817,
       "mainCapBytes": 11008,
-      "previousHeadBytes": 10817,
       "afterBytes": 10817,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 11008,
       "capChangeBytes": 0,
       "withinCap": true
@@ -426,10 +349,8 @@
     "deferredProviderAuthJavaScript": {
       "mainBytes": 10992,
       "mainCapBytes": 12288,
-      "previousHeadBytes": 10992,
       "afterBytes": 10992,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 12288,
       "capChangeBytes": 0,
       "withinCap": true
@@ -437,10 +358,8 @@
     "deferredProviderMaintenanceJavaScript": {
       "mainBytes": 4185,
       "mainCapBytes": 5120,
-      "previousHeadBytes": 4185,
       "afterBytes": 4185,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 5120,
       "capChangeBytes": 0,
       "withinCap": true
@@ -448,10 +367,8 @@
     "deferredComposerQueueJavaScript": {
       "mainBytes": 12750,
       "mainCapBytes": 13187,
-      "previousHeadBytes": 12750,
       "afterBytes": 12750,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 13187,
       "capChangeBytes": 0,
       "withinCap": true
@@ -459,10 +376,8 @@
     "deferredTerminalJavaScript": {
       "mainBytes": 26789,
       "mainCapBytes": 26871,
-      "previousHeadBytes": 26789,
       "afterBytes": 26789,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 26871,
       "capChangeBytes": 0,
       "withinCap": true
@@ -470,10 +385,8 @@
     "deferredGitMenusJavaScript": {
       "mainBytes": 9365,
       "mainCapBytes": 9383,
-      "previousHeadBytes": 9365,
       "afterBytes": 9365,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 9383,
       "capChangeBytes": 0,
       "withinCap": true
@@ -481,10 +394,8 @@
     "deferredWorkspaceHeaderActionsJavaScript": {
       "mainBytes": 22078,
       "mainCapBytes": 22082,
-      "previousHeadBytes": 22078,
       "afterBytes": 22078,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 22082,
       "capChangeBytes": 0,
       "withinCap": true
@@ -492,10 +403,8 @@
     "detachedChatJavaScript": {
       "mainBytes": 11582,
       "mainCapBytes": 16384,
-      "previousHeadBytes": 11582,
-      "afterBytes": 11292,
-      "deltaFromMainBytes": -290,
-      "deltaFromPreviousHeadBytes": -290,
+      "afterBytes": 11247,
+      "deltaFromMainBytes": -335,
       "capBytes": 16384,
       "capChangeBytes": 0,
       "withinCap": true
@@ -503,10 +412,8 @@
     "preMergeConfidenceJavaScript": {
       "mainBytes": 23040,
       "mainCapBytes": 28672,
-      "previousHeadBytes": 23040,
       "afterBytes": 23040,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 28672,
       "capChangeBytes": 0,
       "withinCap": true
@@ -514,10 +421,8 @@
     "morphiconsJavaScript": {
       "mainBytes": 15829,
       "mainCapBytes": 20480,
-      "previousHeadBytes": 15829,
       "afterBytes": 15829,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 20480,
       "capChangeBytes": 0,
       "withinCap": true
@@ -525,10 +430,8 @@
     "morphingIconFeedbackJavaScript": {
       "mainBytes": 4392,
       "mainCapBytes": 8192,
-      "previousHeadBytes": 4392,
       "afterBytes": 4392,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 8192,
       "capChangeBytes": 0,
       "withinCap": true
@@ -536,21 +439,17 @@
     "coreJavaScript": {
       "mainBytes": 2226151,
       "mainCapBytes": 2226225,
-      "previousHeadBytes": 2227153,
-      "afterBytes": 2222377,
-      "deltaFromMainBytes": -3774,
-      "deltaFromPreviousHeadBytes": -4776,
-      "capBytes": 2227227,
-      "capChangeBytes": 1002,
+      "afterBytes": 2222896,
+      "deltaFromMainBytes": -3255,
+      "capBytes": 2226225,
+      "capChangeBytes": 0,
       "withinCap": true
     },
     "deferredPdfJavaScript": {
       "mainBytes": 437530,
       "mainCapBytes": 512000,
-      "previousHeadBytes": 437530,
       "afterBytes": 437530,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 512000,
       "capChangeBytes": 0,
       "withinCap": true
@@ -558,10 +457,8 @@
     "deferredPdfWorker": {
       "mainBytes": 1265413,
       "mainCapBytes": 1382400,
-      "previousHeadBytes": 1265413,
       "afterBytes": 1265413,
       "deltaFromMainBytes": 0,
-      "deltaFromPreviousHeadBytes": 0,
       "capBytes": 1382400,
       "capChangeBytes": 0,
       "withinCap": true

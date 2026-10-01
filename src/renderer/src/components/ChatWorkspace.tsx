@@ -264,7 +264,15 @@ type ChatWorkspaceProps = {
   onLatestContentVisibilityChange?: (visible: boolean) => void;
 };
 
-export function ChatWorkspace({
+export function ChatWorkspace(props: ChatWorkspaceProps): React.JSX.Element {
+  return <ProjectMemoryHost projectId={props.project?.id ?? ""} conversationId={props.conversation?.id}
+    projectName={props.project?.name ?? ""} request={props.project && props.conversation ? props.onProjectMemoryCommand : undefined}
+    disabled={props.loading || props.detailLoading}>
+    <ChatWorkspaceContent {...props} />
+  </ProjectMemoryHost>;
+}
+
+function ChatWorkspaceContent({
   embedded = false,
   project,
   conversation,
@@ -313,7 +321,6 @@ export function ChatWorkspace({
   contextPackets = EMPTY_CONTEXT_PACKETS,
   onConversationContextCommand,
   onQueueCommand,
-  onProjectMemoryCommand,
   previewContextUrl,
   providerIdentityLabels,
   loading,
@@ -923,8 +930,6 @@ export function ChatWorkspace({
     && ownedTurns.length === 0;
 
   return (
-    <ProjectMemoryHost key={`${project.id}:${conversation.id}`} projectId={project.id} conversationId={conversation.id}
-      projectName={project.name} request={onProjectMemoryCommand} disabled={loading || detailLoading}>
     <Root
       className={clsx(
         "chat-workspace",
@@ -1147,6 +1152,5 @@ export function ChatWorkspace({
         />
       </div>
     </Root>
-    </ProjectMemoryHost>
   );
 }

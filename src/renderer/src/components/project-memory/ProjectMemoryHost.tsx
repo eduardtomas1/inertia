@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, lazy, Suspense, useContext, useMemo, useState, useEffect, type ReactNode } from "react";
 import { BookmarkPlus, BookOpen } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import type { ChatMessage } from "@shared/contracts";
@@ -12,13 +12,18 @@ export function ProjectMemoryHost({ children, request, ...props }: Omit<ProjectM
   request?: ProjectMemoryPanelProps["request"];
   children: ReactNode;
 }): React.JSX.Element {
-  const [selection, setSelection] = useState<Selection | null>(null);
-  useNativePreviewSuspension(selection !== null);
-  const actions = useMemo(() => request ? { open: setSelection, disabled: props.disabled === true } : null, [request, props.disabled]);
+  const [selection, setSelection] = useState<(Selection & { projectId: string; conversationId?: string }) | null>(null);
+  const { projectId, conversationId } = props;
+  const active = selection?.projectId === projectId && selection.conversationId === conversationId ? selection : null;
+  useEffect(() => { setSelection(null); }, [projectId, conversationId]);
+  useNativePreviewSuspension(active !== null);
+  const actions = useMemo(() => request ? {
+    open: (next: Selection) => setSelection({ ...next, projectId, conversationId }), disabled: props.disabled === true,
+  } : null, [request, props.disabled, projectId, conversationId]);
   return <MemoryActions.Provider value={actions}>
     {children}
-    {selection && request && <Suspense fallback={<span role="status">Opening project memory…</span>}>
-      <Dialog {...props} request={request} sourceMessage={selection.message} turnId={selection.turnId} onClose={() => setSelection(null)} />
+    {active && request && <Suspense fallback={<span role="status">Opening project memory…</span>}>
+      <Dialog key={`${projectId}:${conversationId}`} {...props} request={request} sourceMessage={active.message} turnId={active.turnId} onClose={() => setSelection(null)} />
     </Suspense>}
   </MemoryActions.Provider>;
 }

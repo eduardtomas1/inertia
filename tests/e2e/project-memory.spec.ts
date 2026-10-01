@@ -10,7 +10,7 @@ let projectId: string;
 let conversationId: string;
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "project-memory", initialState: "conversation", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+  app = await createAppFixture({ name: "project-memory", initialState: "conversation", workspaceGit: false, beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
     const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
     try {
       const snapshot = store.shellSnapshot();
@@ -31,6 +31,12 @@ test.beforeAll(async () => {
     } finally { store.close(); }
   } });
 });
+test.afterEach(async ({ browserName: _browserName }, info) => {
+  if (info.status !== info.expectedStatus && app) {
+    await info.attach("Project memory failure state", { body: (await app.page.locator("body").innerText()).slice(0, 16000), contentType: "text/plain" });
+    await info.attach("Project memory failure view", { body: await app.page.screenshot(), contentType: "image/png" });
+  }
+});
 test.afterAll(async () => { await app?.close(); });
 
 test("curates a message, inspects its source and context, and persists chat exclusions after restart", async ({ browserName: _browserName }, info) => {
@@ -47,6 +53,8 @@ test("curates a message, inspects its source and context, and persists chat excl
   await dialog.getByRole("button", { name: "Save entry", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "Preserve billing history", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: /^From /u }).click();
+  await expect.poll(() => dialog.locator(".project-memory-source-preview, [role=alert]").count()).toBeGreaterThan(0);
+  expect(await dialog.getByRole("alert").allTextContents()).toEqual([]);
   await expect(dialog.locator(".project-memory-source-preview")).toBeVisible();
   await dialog.getByRole("button", { name: "Inspect included context", exact: true }).click();
   await expect(dialog.getByLabel("Included project context")).toContainText("previous-cycle plan changes");
@@ -54,7 +62,8 @@ test("curates a message, inspects its source and context, and persists chat excl
   await page.screenshot({ path: panelPath, animations: "disabled" });
   await info.attach("Rules and decisions with source and context", { path: panelPath, contentType: "image/png" });
   await app.expectNoViewportOverflow();
-  await dialog.getByRole("checkbox", { name: "Use in this chat", exact: true }).uncheck();
+  await dialog.getByRole("checkbox", { name: "Use in this chat", exact: true }).click();
+  await expect(dialog.getByRole("checkbox", { name: "Use in this chat", exact: true })).not.toBeChecked();
   await expect(dialog.getByLabel("Included project context")).not.toContainText("previous-cycle plan changes");
   await dialog.getByRole("button", { name: "Close project memory", exact: true }).click();
   await app.restart();

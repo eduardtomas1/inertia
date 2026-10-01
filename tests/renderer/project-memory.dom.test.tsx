@@ -69,6 +69,21 @@ describe("project memory panel", () => {
     expect(screen.getByRole("heading", { name: "Updated decision" })).toBeInTheDocument();
   });
 
+  it("opens a linked source as text and keeps the curated reason separate", async () => {
+    const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(populated));
+    render(<ProjectMemoryPanel {...props} request={request} />);
+    const button = await screen.findByRole("button", { name: "From Billing investigation" });
+    request.mockResolvedValueOnce({ type: "request.result", requestId: "source", result: { kind: "project.memory.source",
+      preview: { projectId, id: populated.entries[0].id, source: populated.entries[0].source!, role: "assistant", content: "<script>original discussion</script>", truncated: true } } });
+    fireEvent.click(button);
+    expect(await screen.findByText("<script>original discussion</script>")).toBeInTheDocument();
+    expect(screen.getByText("Showing the first 4,000 characters.")).toBeInTheDocument();
+    expect(screen.getByText(populated.entries[0].reason)).toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(button);
+    expect(screen.queryByText("<script>original discussion</script>")).not.toBeInTheDocument();
+  });
+
   it("guards unsaved modal drafts, restores focus, and blocks offline edits", async () => {
     const trigger = document.createElement("button"); document.body.append(trigger); trigger.focus();
     const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(empty));

@@ -41,6 +41,7 @@ import { CheckoutBranchSlot } from "../CheckoutBranchControl";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
+import { ProjectMemoryButton } from "../project-memory/ProjectMemoryHost";
 import { menuId } from "./config";
 import {
   ComposerSettings,
@@ -363,6 +364,7 @@ export function ComposerToolbar({
           role="group"
           aria-label="Add context"
         >
+        <ProjectMemoryButton />
         {attachmentImporting && (
           <span className="provider-status is-ready" role="status">
             <LoaderCircle

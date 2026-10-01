@@ -2,10 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import ProjectMemoryPanel from "../../src/renderer/src/components/project-memory/ProjectMemoryPanel";
 import ProjectMemoryDialog from "../../src/renderer/src/components/project-memory/ProjectMemoryDialog";
+import { ProjectMemoryHost } from "../../src/renderer/src/components/project-memory/ProjectMemoryHost";
+import { Composer } from "../../src/renderer/src/components/Composer";
 import type { ProjectMemoryCommandRunner } from "../../src/renderer/src/components/project-memory/types";
 import type { ChatMessage, ServerEvent } from "../../src/shared/contracts";
 import { projectMemoryContext, type ProjectMemoryState } from "../../src/shared/project-memory";
-import { deferred } from "./composer-fixtures";
+import { composerProps, conversation, deferred } from "./composer-fixtures";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
@@ -17,6 +19,17 @@ const result = (state: ProjectMemoryState): ServerEvent => ({ type: "request.res
 const props = { projectId, conversationId, projectName: "Billing" };
 
 describe("project memory panel", () => {
+  it("opens project memory from inside the composer context controls", async () => {
+    const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(empty));
+    render(<ProjectMemoryHost {...props} request={request}>
+      <Composer {...composerProps(conversation(conversationId))} />
+    </ProjectMemoryHost>);
+    const trigger = screen.getByRole("button", { name: "Rules & decisions" });
+    expect(screen.getByRole("region", { name: "Message composer" })).toContainElement(trigger);
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("dialog", { name: "Project memory" })).toBeInTheDocument();
+  });
+
   it("requires curation and retains a failed draft across refresh, saving against the new revision", async () => {
     const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(empty));
     render(<ProjectMemoryPanel {...props} request={request} sourceMessage={message} />);

@@ -31,8 +31,8 @@ export function ProjectMemoryHost({ children, request, ...props }: Omit<ProjectM
 export function ProjectMemoryButton(): React.JSX.Element | null {
   const actions = useContext(MemoryActions);
   if (!actions) return null;
-  return <button type="button" className="turn-action" disabled={actions.disabled} onClick={() => actions.open({})}>
-    <BookOpen size={13} aria-hidden="true" /><span>Rules & decisions</span>
+  return <button type="button" className="icon-button" aria-label="Rules & decisions" title="Rules & decisions" disabled={actions.disabled} onClick={() => actions.open({})}>
+    <BookOpen size={16} aria-hidden="true" />
   </button>;
 }
 

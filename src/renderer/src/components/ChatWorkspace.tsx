@@ -100,7 +100,7 @@ import type {
 import { LoadingMark } from "./ui";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
-import { ProjectMemoryHost, ProjectMemoryButton } from "./project-memory/ProjectMemoryHost";
+import { ProjectMemoryHost } from "./project-memory/ProjectMemoryHost";
 import type { ProjectMemoryCommandRunner } from "./project-memory/types";
 
 const ResponseTimeline = lazy(async () => ({
@@ -1051,7 +1051,6 @@ function ChatWorkspaceContent({
       {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
 
       <div ref={composerRegionRef} className="composer-region">
-        <div className="project-memory-launcher"><ProjectMemoryButton /></div>
         {pendingInputRequest && (
           <div
             className="pending-input-notice"

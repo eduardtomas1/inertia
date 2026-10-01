@@ -49,6 +49,42 @@ afterEach(async () => {
 });
 
 describe("GitHub pre-merge confidence", () => {
+  it.each([false, true])("loads selected replies under the same final identity check (final read fails: %s)", async (failFinalRead) => {
+    const { root, head } = await repository();
+    const url = "https://github.com/openai/codex/pull/42";
+    const details = { number: 42, url, title: "Retry safety", state: "OPEN", isDraft: false,
+      headRefName: "feature/confidence", headRefOid: head, baseRefName: "main", mergeStateStatus: "CLEAN",
+      reviewDecision: "CHANGES_REQUESTED", updatedAt: "2026-09-30T12:00:00Z", changedFiles: 0, files: [], statusCheckRollup: [] };
+    const node = { id: "selected", isResolved: false, isOutdated: false, path: "src/retry.ts", line: 42,
+      comments: { nodes: [{ author: { login: "reviewer" }, body: "Handle failures.", url: `${url}#discussion_r1` }] } };
+    let views = 0;
+    const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args, options) => {
+      let data: unknown;
+      if (args[0] === "pr") {
+        if (++views === 2 && failFinalRead) throw new Error("GitHub unavailable");
+        data = details;
+      } else if (args[1] === "--method") {
+        data = [{ number: 42, state: "open", head: { ref: "feature/confidence", sha: head, repo: { full_name: "openai/codex" } }, base: { ref: "main", repo: { full_name: "openai/codex", html_url: "https://github.com/openai/codex" } } }];
+      } else if (String(options.input).includes('"ids"')) {
+        data = { data: { nodes: [{ ...node, pullRequest: details, comments: { nodes: [...node.comments.nodes, { author: { login: "author" }, body: "Preserve the retry count too.", url: `${url}#discussion_r2` }], pageInfo: { hasNextPage: false } } }] } };
+      } else {
+        data = { data: { repository: { pullRequest: { ...details, reviewThreads: { nodes: [node], pageInfo: { hasNextPage: false } } } } } };
+      }
+      return { stdout: JSON.stringify(data), stderr: "" };
+    });
+    const loading = inspectGitHubPreMergeConfidence(root, { reviewThreadIds: ["selected"] }, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"], runCli,
+    });
+    if (failFinalRead) await expect(loading).rejects.toThrow("could not be revalidated");
+    else {
+      const result = await loading;
+      expect(result.identity.state).toBe("exact");
+      expect(result.reviewThreads[0]?.discussion?.comments.map(({ body }) => body)).toEqual(["Handle failures.", "Preserve the retry count too."]);
+      expect(runCli).toHaveBeenCalledTimes(5);
+    }
+  });
+
   it("marks only a stable exact head with clean reviews and complete platforms ready", async () => {
     const { root, head } = await repository();
     const pullRequest = {

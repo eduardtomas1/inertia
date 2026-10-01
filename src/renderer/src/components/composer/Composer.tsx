@@ -1012,6 +1012,7 @@ export const Composer = memo(function Composer({
           routeCreationBlockedReason={routeCreationBlockedReason}
           onDismissPendingRoute={dismissPendingRoute}
           onCreateRouteConversation={createRouteConversation}
+          onConversationContextCommand={onConversationContextCommand}
           textareaRef={textareaRef}
           message={message}
           onMessageChange={promptHistoryController.onMessageChange}

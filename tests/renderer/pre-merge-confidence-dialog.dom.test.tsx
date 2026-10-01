@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import PreMergeConfidenceDialog from "../../src/renderer/src/components/PreMergeConfidenceDialog";
+import { PrFeedbackSection } from "../../src/renderer/src/components/PrFeedbackSection";
+import { COMPOSER_PREFILL_EVENT } from "../../src/renderer/src/utils/composerPrefill";
 import type { GitPreMergeConfidence, ServerEvent } from "../../src/shared/contracts";
 
 function confidence(
@@ -87,6 +89,111 @@ function result(value: GitPreMergeConfidence): ServerEvent {
     result: { kind: "git.pr.confidence", confidence: value },
   };
 }
+
+describe("PR feedback drafts", () => {
+  const conversationId = "22222222-2222-4222-8222-222222222222";
+  const feedback = (): GitPreMergeConfidence => confidence({ reviewThreads: [{
+    id: "review-1", path: "src/retry.ts", line: 42, author: "reviewer", codex: false,
+    body: "Handle failures.", outdated: false, url: "https://github.com/openai/codex/pull/42#discussion_r1",
+    discussion: { truncated: false, comments: [{ author: "reviewer", body: "Handle failures and preserve the retry count.", url: null }] },
+  }] });
+  const props = { projectId: "11111111-1111-4111-8111-111111111111", conversationId, repositoryPath: ".", authorityRef: "33333333-3333-4333-8333-333333333333", disabled: false, onOpenUrl: vi.fn() };
+
+  it("reloads selected discussions and sends a scoped prefill only after successful verification", async () => {
+    const prefill = vi.fn();
+    window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
+    try {
+      const run = vi.fn(async () => result(feedback()));
+      const onClose = vi.fn();
+      render(<PrFeedbackSection {...props} confidence={feedback()} run={run} onClose={onClose} />);
+      expect(screen.getByRole("button", { name: "Address selected feedback" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "Address selected feedback" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      expect(run).toHaveBeenCalledWith("git.pr.feedback", { type: "git.pr.confidence", payload: { projectId: props.projectId, conversationId, repositoryPath: ".", authorityRef: props.authorityRef, reviewThreadIds: ["review-1"] } });
+      expect((prefill.mock.calls[0]![0] as CustomEvent).detail).toMatchObject({ conversationId, text: expect.stringContaining("preserve the retry count") });
+      expect(prefill).toHaveBeenCalledOnce();
+    } finally { window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill); }
+  });
+
+  it("keeps the dialog open without changing a draft when feedback changes", async () => {
+    const onClose = vi.fn();
+    render(<PrFeedbackSection {...props} confidence={feedback()} run={vi.fn(async () => result({ ...feedback(), reviewThreads: [] }))} onClose={onClose} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Address selected feedback" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("discussion changed");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("preserves composer focus when prefill runs before dialog cleanup, while normal dismissal restores its trigger", async () => {
+    const trigger = document.createElement("button");
+    const composer = document.createElement("textarea");
+    document.body.append(trigger, composer);
+    trigger.focus();
+    // Reproduce the animation frame completing before React's passive cleanup.
+    const focusDraft = (): void => composer.focus();
+    window.addEventListener(COMPOSER_PREFILL_EVENT, focusDraft);
+    const run = vi.fn(async () => result(feedback()));
+    const onClose = vi.fn();
+    const dialogProps = { ...props, run, onClose };
+    const view = render(<PreMergeConfidenceDialog {...dialogProps} open />);
+    try {
+      await waitFor(() => expect(screen.getByRole("button", { name: "Close pre-merge confidence" })).toHaveFocus());
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "Address selected feedback" }));
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+      view.rerender(<PreMergeConfidenceDialog {...dialogProps} open={false} />);
+      expect(composer).toHaveFocus();
+
+      trigger.focus();
+      view.rerender(<PreMergeConfidenceDialog {...dialogProps} open />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Close pre-merge confidence" })).toHaveFocus());
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      view.rerender(<PreMergeConfidenceDialog {...dialogProps} open={false} />);
+      expect(trigger).toHaveFocus();
+    } finally {
+      view.unmount();
+      window.removeEventListener(COMPOSER_PREFILL_EVENT, focusDraft);
+      trigger.remove(); composer.remove();
+    }
+  });
+
+  it("keeps the action focused and prevents duplicate requests while loading", async () => {
+    let fail!: (reason: Error) => void;
+    const run = vi.fn(() => new Promise<ServerEvent>((_resolve, reject) => { fail = reject; }));
+    render(<PrFeedbackSection {...props} confidence={feedback()} run={run} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+    const action = screen.getByRole("button", { name: "Address selected feedback" });
+    action.focus();
+    fireEvent.click(action);
+    expect(action).toHaveAttribute("aria-disabled", "true");
+    expect(action).toHaveFocus();
+    fireEvent.click(action);
+    expect(run).toHaveBeenCalledOnce();
+    await act(async () => fail(new Error("Connection lost")));
+    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost");
+    expect(action).toHaveFocus();
+    expect(action).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("ignores a late response after the selected chat changes", async () => {
+    let settle!: (event: ServerEvent) => void;
+    const run = vi.fn(() => new Promise<ServerEvent>((resolve) => { settle = resolve; }));
+    const prefill = vi.fn();
+    const onClose = vi.fn();
+    const value = feedback();
+    window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
+    try {
+      const view = render(<PrFeedbackSection {...props} confidence={value} run={run} onClose={onClose} />);
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select all review feedback" }));
+      fireEvent.click(screen.getByRole("button", { name: "Address selected feedback" }));
+      view.rerender(<PrFeedbackSection {...props} conversationId="another-chat" confidence={value} run={run} onClose={onClose} />);
+      await act(async () => settle(result(value)));
+      expect(prefill).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    } finally { window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill); }
+  });
+});
 
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");

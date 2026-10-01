@@ -27,6 +27,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
+import { PrFeedbackSection } from "./PrFeedbackSection";
 
 const EVIDENCE_FRESH_MS = 60_000;
 
@@ -160,6 +161,7 @@ export function PreMergeConfidenceDialog({
   const [error, setError] = useState<string | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   const requestRevision = useRef(0);
+  const feedbackDraftCreatedRef = useRef(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
   const holdRefreshFocus = useBusyTriggerFocus(loading, closeRef, refreshRef);
@@ -208,6 +210,7 @@ export function PreMergeConfidenceDialog({
 
   useEffect(() => {
     if (!open) return;
+    feedbackDraftCreatedRef.current = false;
     setConfidence(null);
     setError(null);
     void load();
@@ -218,7 +221,8 @@ export function PreMergeConfidenceDialog({
       requestRevision.current += 1;
       window.clearTimeout(focusTimer);
       window.clearInterval(clockTimer);
-      restoreFocus();
+      // Prefill owns focus after drafting, even if its frame precedes cleanup.
+      if (!feedbackDraftCreatedRef.current) restoreFocus();
     };
   }, [load, open]);
 
@@ -231,8 +235,6 @@ export function PreMergeConfidenceDialog({
   if (!open) return null;
 
   const github = confidence?.github ?? null;
-  const codexThreads = confidence?.reviewThreads.filter(({ codex }) => codex) ?? [];
-  const otherThreads = confidence?.reviewThreads.filter(({ codex }) => !codex) ?? [];
   const visibleFiles = confidence?.files.slice(0, 12) ?? [];
   const remainingFiles = confidence?.files.slice(12) ?? [];
   return (
@@ -355,34 +357,12 @@ export function PreMergeConfidenceDialog({
                 {confidence.checksTruncated && <p className="pre-merge-caution">More checks exist than this bounded view can show. The result cannot be green.</p>}
               </section>
 
-              <section className="pre-merge-section" aria-labelledby="pre-merge-reviews-title">
-                <div className="pre-merge-section-heading">
-                  <FileCheck2 size={15} />
-                  <div>
-                    <h3 id="pre-merge-reviews-title">Actionable review threads</h3>
-                    <span>{codexThreads.length} Codex · {otherThreads.length} other unresolved</span>
-                  </div>
-                  <FactSource kind="github">GitHub</FactSource>
-                </div>
-                {confidence.reviewThreads.length === 0 ? (
-                  <p className="pre-merge-empty">{confidence.state === "ready" ? "No unresolved, current review threads." : "Review-thread cleanliness was not proven."}</p>
-                ) : (
-                  <ul className="pre-merge-thread-list">
-                    {confidence.reviewThreads.map((thread) => (
-                      <li key={thread.id}>
-                        <div>
-                          <strong>{thread.codex ? "Codex" : thread.author}</strong>
-                          <code>{thread.path}{thread.line ? `:${thread.line}` : ""}</code>
-                          {thread.outdated && <em>Outdated position</em>}
-                        </div>
-                        <p>{thread.body}</p>
-                        {thread.url && <button type="button" onClick={() => void openExternal(thread.url!)}><ExternalLink size={11} />Open thread</button>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {confidence.reviewThreadsTruncated && <p className="pre-merge-caution">More than 100 review threads exist; this view is incomplete and cannot be green.</p>}
-              </section>
+              <PrFeedbackSection
+                confidence={confidence} projectId={projectId} conversationId={conversationId}
+                repositoryPath={repositoryPath} authorityRef={authorityRef}
+                disabled={loading || stale} run={run} onOpenUrl={(url) => void openExternal(url)}
+                onClose={() => { feedbackDraftCreatedRef.current = true; onClose(); }}
+              />
 
               <section className="pre-merge-section" aria-labelledby="pre-merge-scope-title">
                 <div className="pre-merge-section-heading">

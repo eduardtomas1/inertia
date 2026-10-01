@@ -18,6 +18,7 @@ import { inspectGitRemoteRouting } from "./remote-routing";
 import { isGitProcessTreeTerminationFailure, runGitInspection, settleGitInspections } from "./runner";
 import { getRepositoryStatus } from "./status";
 import { GitError, type GitRepositoryStatus } from "./types";
+import { parseReviewDiscussions, REVIEW_DISCUSSIONS_QUERY } from "./github-review-discussions";
 
 const MAX_GITHUB_OUTPUT_BYTES = 1024 * 1024;
 const MAX_LOCAL_FILES = 100;
@@ -693,7 +694,7 @@ function githubUnavailableReason(error: unknown): string {
 
 export async function inspectGitHubPreMergeConfidence(
   repositoryPath: string,
-  options: { signal?: AbortSignal; recordTriggeringFailure?: (reason: unknown) => void } = {},
+  options: { signal?: AbortSignal; recordTriggeringFailure?: (reason: unknown) => void; reviewThreadIds?: readonly string[] } = {},
   dependencies: GitHubPreMergeDependencies = {},
 ): Promise<GitPreMergeConfidence> {
   const now = dependencies.now ?? (() => new Date());
@@ -862,7 +863,28 @@ export async function inspectGitHubPreMergeConfidence(
       repositoryBaseUrl,
       details.number,
     );
+    if (options.reviewThreadIds) {
+      if (options.reviewThreadIds.some((id) => !reviewEvidence!.threads.some((thread) => thread.id === id))) {
+        throw new GitError("operation-failed", "Selected review feedback is no longer available.");
+      }
+      const discussionsResult = await runCli(gh.executable, ["api", "graphql", "--input", "-"], {
+        cwd: repositoryPath,
+        environment: gh.environment,
+        input: JSON.stringify({ query: REVIEW_DISCUSSIONS_QUERY, variables: { ids: options.reviewThreadIds } }),
+        signal: options.signal,
+        timeoutMs: 30_000,
+        maxOutputBytes: MAX_GITHUB_OUTPUT_BYTES,
+        failureMessage: "GitHub could not load the selected review discussions.",
+      }, dependencies);
+      const discussions = parseReviewDiscussions(discussionsResult.stdout, options.reviewThreadIds, details);
+      for (const thread of reviewEvidence.threads) {
+        const discussion = discussions.get(thread.id);
+        if (discussion) thread.discussion = discussion;
+      }
+    }
   } catch (error) {
+    // A repair task must not silently fall back to the first-comment summary.
+    if (options.reviewThreadIds) throw error;
     reviewEvidenceReason = githubUnavailableReason(error);
   }
   let finalDetailsLoaded = false;
@@ -891,6 +913,9 @@ export async function inspectGitHubPreMergeConfidence(
     finalDetailsLoaded = true;
   } catch (error) {
     reviewEvidenceReason ??= githubUnavailableReason(error);
+  }
+  if (options.reviewThreadIds && !finalDetailsLoaded) {
+    throw new GitError("operation-failed", "The pull request could not be revalidated. Try loading the feedback again.");
   }
   const [finalStatus, finalHead, finalRouting] = await settleFinalGit();
   const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;

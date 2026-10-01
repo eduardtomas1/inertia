@@ -70,6 +70,7 @@ export function useComposerNewChatOffer(options: {
       ?? pendingRoute.selection.backendConfigurationRevision;
     if (
       pendingRoute.sourceConversationId !== conversation.id
+      || pendingRoute.sourceUpdatedAt !== undefined && pendingRoute.sourceUpdatedAt !== conversation.updatedAt
       || pendingRoute.sourceProjectId !== conversation.projectId
       || pendingRoute.sourceSelectionKey !== JSON.stringify(conversation.modelSelection)
       || pendingRoute.sourceConfigurationKey !== `${conversation.accessMode}:${conversation.interactionMode}`
@@ -89,6 +90,7 @@ export function useComposerNewChatOffer(options: {
     conversation.interactionMode,
     conversation.modelSelection,
     conversation.projectId,
+    conversation.updatedAt,
     backendProfiles,
     latestTurn,
     pendingRoute,
@@ -126,9 +128,10 @@ export function useComposerNewChatOffer(options: {
     });
   };
 
-  const createRouteConversation = (): void => {
+  const createRouteConversation = (continuation?: { sourceMessageIds: string[]; instruction: string }): void => {
     routeConversation({
       pendingRoute,
+      continuation,
       message,
       conversationId: conversation.id,
       onCreateConversationForSelection,

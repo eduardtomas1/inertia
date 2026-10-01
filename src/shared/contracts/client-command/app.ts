@@ -41,7 +41,7 @@ import {
 } from "./common";
 import {
   conversationCreateCommandSchema,
-  conversationCreatePayloadSchema,
+  conversationCreateBasePayloadSchema,
 } from "./conversation-create";
 import { COLOR_THEME_IDS } from "../app";
 import { projectAppearancePatchSchema, projectPreferencesSchema } from "../../project-preferences";
@@ -50,11 +50,12 @@ import {
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
 } from "../../conversation-context";
 
-const duoSideSchema = conversationCreatePayloadSchema.extend({
+const duoSideSchema = conversationCreateBasePayloadSchema.omit({ continuation: true }).extend({
   activate: z.literal(false).optional(),
 }).strict();
 
-const duoComparisonSchema = conversationCreatePayloadSchema.omit({
+const duoComparisonSchema = conversationCreateBasePayloadSchema.omit({
+  continuation: true,
   branch: true,
   useWorktree: true,
   worktreePath: true,
@@ -266,7 +267,7 @@ export const appCommandSchemas = [
   z.strictObject({
     ...requestBase,
     type: z.literal("conversation.context.source.load"),
-    payload: z.strictObject(conversationContextSourceFields),
+    payload: z.strictObject({ ...conversationContextSourceFields, forContinuation: z.literal(true).optional() }),
   }),
   z.strictObject({
     ...requestBase,

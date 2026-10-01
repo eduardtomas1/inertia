@@ -43,7 +43,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   const items = [
     ...(includeAll ? [{ id: null, name: "All projects", path: "" }] : []),
     ...(onSelectNoProject ? [{ id: "no-project", name: "No project", path: "" }] : []),
-    ...pinnedFirst(projects.filter((project) => !onSelectNoProject || project.workspaceKind !== "scratch")),
+    ...pinnedFirst(projects.filter((project) => project.workspaceKind !== "scratch")),
   ].filter((project) => `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle));
   const active = activeId === undefined ? items[0] : items.find((project) => project.id === activeId)
     ?? items.find((project) => project.id === selection) ?? items[0];

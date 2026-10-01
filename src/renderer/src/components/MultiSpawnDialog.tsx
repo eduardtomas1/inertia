@@ -311,6 +311,8 @@ export function MultiSpawnDialog({
   const initializedForOpenRef = useRef(false);
   const restoreFocusRef = useRef(true);
   const [draft, setDraft] = useState<MultiSpawnDraft | null>(null);
+  const regularProjects = useMemo(() => (snapshot?.projects ?? [])
+    .filter(({ workspaceKind }) => workspaceKind !== "scratch"), [snapshot?.projects]);
   const [copiedRecoveryCommand, setCopiedRecoveryCommand] = useState<
     string | null
   >(null);
@@ -347,17 +349,17 @@ export function MultiSpawnDialog({
     }
     if (
       initializedForOpenRef.current
-      || !snapshot?.activeProjectId
+      || !snapshot || regularProjects.length === 0
     ) return;
     initializedForOpenRef.current = true;
     setDraft(initialMultiSpawnDraft({
       snapshot,
       settings,
-      activeProjectId: snapshot.activeProjectId,
+      activeProjectId: regularProjects.find(({ id }) => id === snapshot.activeProjectId)?.id ?? regularProjects[0]!.id,
       routesForSelection,
       preset: readMultiSpawnPreset(window.localStorage),
     }));
-  }, [open, routesForSelection, settings, snapshot]);
+  }, [open, regularProjects, routesForSelection, settings, snapshot]);
 
   useEffect(() => {
     if (!open) return;
@@ -616,7 +618,7 @@ export function MultiSpawnDialog({
           <MultiSpawnSideEditor
             index={0}
             side={draft.sides[0]}
-            projects={snapshot.projects}
+            projects={regularProjects}
             routeState={routeStates[0]}
             disabled={busy}
             onChange={(next) => updateSide(0, next)}
@@ -625,7 +627,7 @@ export function MultiSpawnDialog({
           <MultiSpawnSideEditor
             index={1}
             side={draft.sides[1]}
-            projects={snapshot.projects}
+            projects={regularProjects}
             routeState={routeStates[1]}
             disabled={busy}
             onChange={(next) => updateSide(1, next)}
@@ -673,7 +675,7 @@ export function MultiSpawnDialog({
                 <MultiSpawnSideEditor
                   index={2}
                   side={draft.comparison.side}
-                  projects={snapshot.projects}
+                  projects={regularProjects}
                   routeState={comparisonRouteState}
                   disabled={busy}
                   onChange={updateComparison}

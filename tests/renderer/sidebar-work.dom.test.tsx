@@ -211,6 +211,87 @@ afterEach(() => {
 });
 
 describe("compact Work sidebar", () => {
+  it("shows project-free chats separately only while matching chats exist", () => {
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    const ordinary = conversation("ordinary", "Build the app", new Date());
+    const free = conversation("free", "Weekend plans", new Date(), { projectId: scratch.id });
+    const view = renderSidebar([ordinary], undefined, [], { projects: [project, scratch] });
+    expect(screen.queryByRole("heading", { name: /No project/ })).not.toBeInTheDocument();
+    view.rerenderSnapshot(snapshot([ordinary, free], [], [project, scratch]));
+    expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Weekend plans,/ }).closest("[data-work-section]"))
+      .toHaveAttribute("data-work-section", "no-project");
+    expect(screen.getByRole("button", { name: /^Build the app,/ }).closest("[data-work-section]"))
+      .toHaveAttribute("data-work-section", "recent");
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    expect(screen.queryByRole("option", { name: /No project/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /Studio/ }));
+    expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Build the app" } });
+    expect(screen.queryByRole("heading", { name: /No project/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
+    view.rerenderSnapshot(snapshot([ordinary, { ...free, archivedAt: new Date().toISOString() }], [], [project, scratch]));
+    expect(screen.queryByRole("heading", { name: /No project/ })).not.toBeInTheDocument();
+  });
+
+  it("navigates into a separate project-free section beyond the virtualized viewport", () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(now);
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `project-${index}`, `Project task ${index}`, now,
+    ));
+    const free = conversation("free", "Weekend plans", now, { projectId: scratch.id });
+    renderSidebar([...entries, free], undefined, [], { projects: [project, scratch] });
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Project task 0,/ }), { key: "End" });
+    act(() => { vi.advanceTimersByTime(100); });
+    const target = screen.getByRole("button", { name: /^Weekend plans,/ });
+    expect(target).toHaveFocus();
+    expect(target.closest("[data-work-section]"))
+      .toHaveAttribute("data-work-section", "no-project");
+    expect(target.closest("[role=listitem]"))
+      .toHaveAttribute("aria-posinset", "81");
+  });
+
+  it("keeps settled project-free chats out of project Done and paginates them independently", () => {
+    const now = new Date();
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    const ordinary = conversation("ordinary", "Project task", now, { settledAt: now.toISOString() });
+    const free = Array.from({ length: 11 }, (_, index) => conversation(`free-${index}`, `Plan ${index}`, now, {
+      projectId: scratch.id, settledAt: now.toISOString(),
+    }));
+    renderSidebar([ordinary, ...free], undefined, [], { projects: [project, scratch] });
+    expect(screen.getByRole("heading", { name: "No project 11" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Done 1" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "No project Done 11" }));
+    expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(10);
+    expect(screen.queryByRole("button", { name: /^Project task,/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show more 1 older" }));
+    expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(11);
+  });
+
+  it("keeps snoozed project-free chats separate and restores keyboard focus when they wake", () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 7, 11, 12);
+    vi.setSystemTime(now);
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    const free = conversation("free", "Weekend plans", now, {
+      projectId: scratch.id, snoozedUntil: new Date(now.getTime() + 60_000).toISOString(),
+    });
+    const view = renderSidebar([free], undefined, [], { projects: [project, scratch] });
+    expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Weekend plans,/ })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "No project Snoozed 1" });
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: /^Weekend plans,/ }).closest("[data-work-section]"))
+      .toHaveAttribute("data-work-section", "no-project-snoozed");
+    toggle.focus();
+    view.rerenderSnapshot(snapshot([{ ...free, snoozedUntil: null }], [], [project, scratch]));
+    expect(screen.queryByRole("button", { name: "No project Snoozed 1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Weekend plans,/ })).toHaveFocus();
+  });
+
   it("opens the global project launcher from the Inertia logo", () => {
     const view = renderSidebar([]);
 

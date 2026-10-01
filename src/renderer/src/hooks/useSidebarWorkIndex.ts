@@ -23,6 +23,8 @@ export const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new 
   "earlier",
   "done",
   "snoozed",
+  "no-project-done",
+  "no-project-snoozed",
 ]);
 
 export type WorkIndexItem =
@@ -41,7 +43,7 @@ export type WorkIndexItem =
       sectionId: SidebarWorkSectionId;
     }
   | {
-      id: "show-more:done";
+      id: "show-more:done" | "show-more:no-project-done";
       kind: "show-more";
       remaining: number;
     };
@@ -86,7 +88,7 @@ export function useSidebarWorkIndex({
     const next: WorkIndexItem[] = [];
     let threadPosition = 0;
     for (const section of sections) {
-      if (section.threads.length === 0) continue;
+      if ((section.totalCount ?? section.threads.length) === 0) continue;
       const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
       const disclosure = collapsible && !searchActive;
       const expanded = !collapsible
@@ -100,7 +102,8 @@ export function useSidebarWorkIndex({
         disclosure,
       });
       if (!expanded) continue;
-      const visibleThreads = section.id === "done"
+      const paginated = section.id === "done" || section.id === "no-project-done";
+      const visibleThreads = paginated
         ? section.threads.slice(0, doneVisible)
         : section.threads;
       for (const { conversation } of visibleThreads) {
@@ -113,9 +116,9 @@ export function useSidebarWorkIndex({
           sectionId: section.id,
         });
       }
-      if (section.id === "done" && visibleThreads.length < section.threads.length) {
+      if (paginated && visibleThreads.length < section.threads.length) {
         next.push({
-          id: "show-more:done",
+          id: section.id === "done" ? "show-more:done" : "show-more:no-project-done",
           kind: "show-more",
           remaining: section.threads.length - visibleThreads.length,
         });

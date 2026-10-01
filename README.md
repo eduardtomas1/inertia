@@ -26,7 +26,7 @@ Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type a
 
 Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions. Pin favourite projects and give each one a colour to keep them easy to find.
 
-Choose **No project** in a new chat’s project selector, or **Start without a project** in the command palette, to work without opening a folder. Each chat gets a separate folder under Inertia’s runtime data directory (`scratch/<date>-<title>-<chat-id>`) when its workspace is first created. These are plain folders, with no automatic Git initialization. Deleting a chat keeps its files.
+Choose **No project** in a new chat’s project selector, or **Start without a project** in the command palette, to work without opening a folder. Each chat gets a separate folder under Inertia’s runtime data directory (`scratch/<date>-<title>-<chat-id>`) when its workspace is first created. These are plain folders, with no automatic Git initialization. Deleting a chat keeps its files. Project-free chats have a separate **No project** sidebar section that appears only when it has chats; they stay out of the project list and filters.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 

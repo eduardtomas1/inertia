@@ -285,6 +285,14 @@ function SidebarView({
     () => new Map((snapshot?.projects ?? []).map((project) => [project.id, project])),
     [snapshot?.projects],
   );
+  const regularProjects = useMemo(
+    () => (snapshot?.projects ?? []).filter(({ workspaceKind }) => workspaceKind !== "scratch"),
+    [snapshot?.projects],
+  );
+  const scratchProjectIds = useMemo(
+    () => new Set((snapshot?.projects ?? []).filter(({ workspaceKind }) => workspaceKind === "scratch").map(({ id }) => id)),
+    [snapshot?.projects],
+  );
   const threadViewsById = useMemo(
     () => sidebarThreadViewMap(
       snapshot?.conversations ?? [],
@@ -297,13 +305,14 @@ function SidebarView({
       snapshot?.runs,
     ],
   );
-  const scopedProjectId = projectScopeId && projectById.has(projectScopeId) ? projectScopeId : null;
+  const scopedProjectId = projectScopeId && regularProjects.some(({ id }) => id === projectScopeId) ? projectScopeId : null;
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return sortSidebarThreadViews(
       conversations
         .filter((conversation) => {
-          if (scopedProjectId && conversation.projectId !== scopedProjectId) return false;
+          if (scopedProjectId && conversation.projectId !== scopedProjectId
+            && !scratchProjectIds.has(conversation.projectId)) return false;
           if (!needle) return true;
           const project = projectById.get(conversation.projectId);
           const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
@@ -325,6 +334,7 @@ function SidebarView({
     );
   }, [
     scopedProjectId,
+    scratchProjectIds,
     projectById,
     query,
     conversations,
@@ -332,8 +342,8 @@ function SidebarView({
     threadViewsById,
   ]);
   const workSections = useMemo(
-    () => groupWorkThreads(activityThreads, snoozeNow),
-    [activityThreads, snoozeNow],
+    () => groupWorkThreads(activityThreads, snoozeNow, scratchProjectIds),
+    [activityThreads, snoozeNow, scratchProjectIds],
   );
   const workSearchActive = Boolean(query.trim());
   const [
@@ -814,7 +824,7 @@ function SidebarView({
           type="button"
           className="activity-show-more"
           data-sidebar-nav
-          data-work-focus-id="show-more:done"
+          data-work-focus-id={item.id}
           onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
         >
           Show more <span>{item.remaining} older</span>
@@ -835,6 +845,7 @@ function SidebarView({
               data-sidebar-nav
               data-work-focus-id={`section:${section.id}`}
               aria-expanded={expanded}
+              aria-label={section.id.startsWith("no-project-") ? `No project ${section.label} ${section.threads.length}` : undefined}
               onClick={() => {
                 dismissMenu("context-change");
                 setExpandedWorkSections((current) => {
@@ -854,7 +865,7 @@ function SidebarView({
           </h2>
         ) : (
           <h2 id={`work-section-${section.id}`}>
-            <span>{section.label}</span><span>{section.threads.length}</span>
+            <span>{section.label}</span><span>{section.totalCount ?? section.threads.length}</span>
           </h2>
         )}
       </div>
@@ -923,15 +934,15 @@ function SidebarView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
             {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
           </div>
-          <IconButton label="New chat" aria-haspopup={(snapshot?.projects.length ?? 0) !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
-            if ((snapshot?.projects.length ?? 0) > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
-            const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
+          <IconButton label="New chat" aria-haspopup={regularProjects.length !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
+            if (regularProjects.length > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
+            const target = regularProjects.find((project) => project.id === (scopedProjectId ?? snapshot?.activeProjectId)) ?? regularProjects[0];
             if (target) onCreateConversation(target); else onChooseNewChatProject();
           }}><SquarePen size={17} /></IconButton>
-          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
+          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
-        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"}
+        <ProjectScopePicker projects={regularProjects} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"}
           onCustomize={connectionStatus === "online" ? onUpdateProjectAppearance : undefined} onOpenSettings={onOpenProjectSettings} onManage={(project, trigger) => {
           setMenuTrigger(`:${project.id}`, trigger);
           toggleMenu(`:${project.id}`);

@@ -5,24 +5,24 @@
   "changedBudgets": {
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 853542,
-      "implementationBytes": 856134,
-      "deltaBytes": 2592,
+      "implementationBytes": 856631,
+      "deltaBytes": 3089,
       "previousBudget": 853557.8,
-      "budget": 856149.8
+      "budget": 856646.8
     },
     "detachedChatFirstLoadJavaScript": {
       "baselineBytes": 660072,
-      "implementationBytes": 661502,
-      "deltaBytes": 1430,
+      "implementationBytes": 661956,
+      "deltaBytes": 1884,
       "previousBudget": 660155.2,
-      "budget": 661585.2
+      "budget": 662039.2
     },
     "coreJavaScript": {
       "baselineBytes": 2226045,
-      "implementationBytes": 2229102,
-      "deltaBytes": 3057,
+      "implementationBytes": 2230182,
+      "deltaBytes": 4137,
       "previousBudget": 2226119.4,
-      "budget": 2229176.4
+      "budget": 2230256.4
     }
   },
   "baselineMeasurements": {
@@ -97,12 +97,12 @@
     "mascotJavaScript": 11067,
     "mascotSettingsJavaScript": 6642,
     "entryJavaScript": 222475,
-    "mainWorkbenchFirstLoadJavaScript": 856134,
-    "detachedChatFirstLoadJavaScript": 661502,
+    "mainWorkbenchFirstLoadJavaScript": 856631,
+    "detachedChatFirstLoadJavaScript": 661956,
     "entryCss": 354782,
     "colorThemesCss": 12470,
     "detachedChatCss": 2920,
-    "settingsJavaScript": 68586,
+    "settingsJavaScript": 68655,
     "filesFirstLoadJavaScript": 106403,
     "deferredMarkdownJavaScript": 431757,
     "transcriptJavaScript": 552627,
@@ -125,7 +125,7 @@
     "preMergeConfidenceJavaScript": 23040,
     "morphiconsJavaScript": 15829,
     "morphingIconFeedbackJavaScript": 4392,
-    "coreJavaScript": 2229102,
+    "coreJavaScript": 2230182,
     "deferredPdfJavaScript": 437530,
     "deferredPdfWorker": 1265413
   }

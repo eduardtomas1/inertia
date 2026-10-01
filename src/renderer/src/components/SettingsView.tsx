@@ -224,6 +224,7 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const regularProjects = useMemo(() => projects.filter(({ workspaceKind }) => workspaceKind !== "scratch"), [projects]);
   const isCanary = appUpdateStatus?.channel === "canary";
   const rootRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -563,7 +564,7 @@ export function SettingsView({
         {section === "projects" && (ProjectSettings
           ? <ProjectSettings key={target?.section === "projects" ? target.projectId ?? "all" : "all"}
               initialProjectId={target?.section === "projects" ? target.projectId : undefined}
-              projects={projects} conversations={conversations} providers={providers} settings={settings}
+              projects={regularProjects} conversations={conversations} providers={providers} settings={settings}
               backendDefaults={backendDefaults} backendProfiles={backendProfiles}
               disabled={disabled} request={onReportCommand} onUpdateSettings={onUpdate} />
           : <SettingsSectionFallback />)}
@@ -1042,7 +1043,7 @@ export function SettingsView({
 
         {section === "connections" && (
           ConnectionsAndDevicesSettings ? (
-            <ConnectionsAndDevicesSettings projects={projects} />
+            <ConnectionsAndDevicesSettings projects={regularProjects} />
           ) : <SettingsSectionFallback />
         )}
 

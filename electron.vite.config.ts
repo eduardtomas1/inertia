@@ -183,7 +183,7 @@ export default defineConfig({
             const budgetedChunks = new Set([
               "App", "DetachedChatApp", "FilesPanel", "ResponseTimeline", "ResponseMarkdown", "SettingsView",
               "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "ProjectSettings", "ConversationActionsMenu", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
-              "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
+              "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions", "WorktreeSetupCard",
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
               "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",

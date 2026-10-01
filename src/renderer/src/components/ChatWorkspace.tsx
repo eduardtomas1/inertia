@@ -82,7 +82,7 @@ import {
   markTestStreamingReaderActivityReceipt,
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
-import { WorktreeSetupCard, type WorktreeSetupCommandRunner } from "./WorktreeSetupCard";
+import type { WorktreeSetupCommandRunner } from "./WorktreeSetupCard";
 import type { QueueCommandRunner } from "./composer/runtimeQueueClient";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type {
@@ -104,6 +104,9 @@ import "./ChatWorkspace.css";
 
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
+}));
+const WorktreeSetupCard = lazy(async () => ({
+  default: (await import("./WorktreeSetupCard")).WorktreeSetupCard,
 }));
 
 function StreamingResponseTimeline({
@@ -951,7 +954,7 @@ export function ChatWorkspace({
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
         <div ref={timelineRef} className="response-timeline">
-          {conversation?.worktreePath && onWorktreeSetupCommand && <WorktreeSetupCard key={conversation.id} conversation={conversation} request={onWorktreeSetupCommand} />}
+          {conversation?.worktreePath && onWorktreeSetupCommand && <Suspense fallback={null}><WorktreeSetupCard key={conversation.id} conversation={conversation} request={onWorktreeSetupCommand} /></Suspense>}
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
               {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"

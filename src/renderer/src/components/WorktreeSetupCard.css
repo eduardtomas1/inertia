@@ -15,3 +15,6 @@
 .worktree-setup-card[data-state="attention"] .worktree-setup-heading > svg { color: var(--warning); }
 .worktree-setup-card[data-state="ready"] .worktree-setup-heading > svg { color: var(--success); }
 .worktree-setup-card[data-state="running"] .worktree-setup-heading > svg { color: var(--accent); }
+/* Setup output can be taller than the centered empty-chat introduction. */
+.chat-workspace.is-empty-thread:has(.worktree-setup-card) { grid-template-rows: minmax(0, 1fr) auto; }
+.chat-workspace.is-empty-thread:has(.worktree-setup-card) .message-scroll { align-items: flex-start; overflow-y: auto; }

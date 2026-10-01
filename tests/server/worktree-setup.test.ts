@@ -144,7 +144,7 @@ describe("worktree setup", () => {
     const coordinator = new DuoLaunchCoordinator(f.store, { resolveModelRoute: resolveNativeModelRoute }, {
       validateSelection: (selection: unknown) => selection, readiness: async () => null,
     } as never, { queuePair } as unknown as TurnController, f.dataDirectory, () => [{ id: "codex", canRun: true } as ProviderInfo], { worktreeSetups: f.setup });
-    const side = { projectId: f.project.id, title: "Duo setup", useWorktree: true, activate: false,
+    const side = { projectId: f.project.id, title: "Duo setup", useWorktree: true, activate: false as const,
       interactionMode: "build" as const, accessMode: "supervised" as const,
       modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test" })),
     };

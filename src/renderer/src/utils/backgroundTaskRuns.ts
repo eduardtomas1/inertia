@@ -20,21 +20,21 @@ export function backgroundCommandRuns(
   return runs.filter((run) =>
     run.conversationId === conversationId
     && workspaceRunAttentionView(run).bucket !== "hidden"
-    && (run.kind !== "agent" || (
-      !turnRunIds.has(run.id)
-      && earliestTurn !== null
-      && run.startedAt >= earliestTurn
-    )));
+    && (run.kind === "agent"
+      ? !turnRunIds.has(run.id) && earliestTurn !== null && run.startedAt >= earliestTurn
+      : run.kind === "source-control" || run.actionId !== null));
 }
 
-export function runningBackgroundTaskCount(
+export function activeBackgroundTaskCount(
   subagents: readonly SubagentTrace[],
-  commands: readonly WorkspaceRun[],
+  runs: readonly WorkspaceRun[],
+  conversationId: string | null,
+  turns: readonly AgentTurn[],
 ): number {
   return subagents.filter(({ isLive }) => isLive).length
-    + commands.filter(backgroundCommandIsLive).length;
+    + backgroundCommandRuns(runs, conversationId, turns).filter(backgroundCommandIsLive).length;
 }
 
-export function runningBackgroundTasksLabel(count: number): string {
-  return `${count} background ${count === 1 ? "task" : "tasks"} running`;
+export function activeBackgroundTasksLabel(count: number): string {
+  return `${count} background ${count === 1 ? "task" : "tasks"} active`;
 }

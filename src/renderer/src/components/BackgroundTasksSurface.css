@@ -18,13 +18,12 @@
 }
 
 .background-tasks-summary,
-.background-tasks-tokens {
-  overflow: hidden;
+.background-tasks-tokens,
+.background-tasks-tokens-note {
   margin: 0;
   padding-left: 24px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .background-tasks-summary {
@@ -34,11 +33,15 @@
 }
 
 .background-tasks-tokens {
-  width: fit-content;
-  max-width: 100%;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  font-weight: 560;
+}
+
+.background-tasks-tokens-note {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
-  cursor: help;
+  line-height: 1.45;
 }
 
 .background-tasks-empty,
@@ -142,14 +145,13 @@
 }
 
 .background-task-heading > strong {
-  overflow: hidden;
-  min-width: 0;
+  min-width: 4ch;
   flex: 0 1 auto;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: var(--ui-font-secondary);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
 }
 
 .background-task-provider {
@@ -160,6 +162,7 @@
   overflow: hidden;
   min-width: 0;
   max-width: 42%;
+  flex-shrink: 100;
   flex: 0 1 auto;
   padding: 1px 5px;
   border-radius: 5px;
@@ -218,6 +221,12 @@
 
 .background-task-row[data-live="true"] .background-task-doing {
   color: var(--text);
+}
+
+.background-task-row.is-command .background-task-doing {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .background-task-note {
@@ -325,8 +334,14 @@
   font-size: var(--ui-font-secondary);
 }
 
+.background-task-details {
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 5px;
+}
+
 .background-task-details > div {
-  grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+  display: contents;
 }
 
 .background-task-details dd {
@@ -412,8 +427,8 @@
     max-width: 34%;
   }
 
-  .background-task-details > div {
-    grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  .background-task-details {
+    column-gap: 10px;
   }
 }
 
@@ -434,9 +449,17 @@
     padding-top: 0;
   }
 
-  .background-task-details > div {
+  .background-task-model {
+    display: none;
+  }
+
+  .background-task-details {
     grid-template-columns: minmax(0, 1fr);
-    gap: 1px;
+    row-gap: 1px;
+  }
+
+  .background-task-details dd + dt {
+    margin-top: 5px;
   }
 }
 

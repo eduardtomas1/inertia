@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceRun } from "../../src/shared/contracts";
 
 import {
+  backgroundCommandElapsedMs,
   backgroundCommandStatusLabel,
   backgroundTaskContextUsage,
   backgroundTaskDoingNow,
@@ -17,12 +18,13 @@ import {
   orderedBackgroundCommands,
 } from "../../src/renderer/src/utils/backgroundTasks";
 import {
+  activeBackgroundTaskCount,
+  activeBackgroundTasksLabel,
   backgroundCommandRuns,
-  runningBackgroundTaskCount,
-  runningBackgroundTasksLabel,
 } from "../../src/renderer/src/utils/backgroundTaskRuns";
 import {
   subagentDisclosureRows,
+  subagentTokensLabel,
   subagentHarnessLabel,
   subagentProviderLabel,
 } from "../../src/renderer/src/utils/subagentDisclosure";
@@ -75,6 +77,29 @@ describe("background task rows", () => {
       .toBe(12_345);
   });
 
+  it("does not report recovery downtime as the runtime of a lost task", () => {
+    const now = Date.parse("2030-01-05T00:00:00.000Z");
+    const lost = taskTrace({ status: "lost", isLive: false, updatedAt: "2030-01-04T00:00:00.000Z" });
+    expect(backgroundTaskElapsedMs(lost, now)).toBeNull();
+    expect(backgroundTaskElapsedMs({ ...lost, durationMs: 7_000 }, now)).toBe(7_000);
+    expect(backgroundTaskElapsedMs({ ...lost, status: "failed" }, now)).toBe(3 * 86_400_000);
+  });
+
+  it("does not report recovery downtime as the runtime of an interrupted command", () => {
+    const now = Date.parse("2030-01-05T00:00:00.000Z");
+    expect(backgroundCommandElapsedMs(workspaceRun(), Date.parse("2030-01-01T00:01:10.000Z"))).toBe(60_000);
+    expect(backgroundCommandElapsedMs(workspaceRun({
+      status: "failed",
+      finishedAt: "2030-01-01T00:00:40.000Z",
+    }), now)).toBe(30_000);
+    expect(backgroundCommandElapsedMs(workspaceRun({
+      status: "failed",
+      detail: "npm run dev · Interrupted when the local runtime stopped.",
+      finishedAt: "2030-01-04T00:00:00.000Z",
+    }), now)).toBeNull();
+    expect(backgroundCommandElapsedMs(workspaceRun({ status: "succeeded", finishedAt: null }), now)).toBeNull();
+  });
+
   it("formats reported tokens and names the reason when a harness does not report them", () => {
     const turns = [
       taskTurn({ id: "turn-codex", providerId: "codex" }),
@@ -125,22 +150,25 @@ describe("background task rows", () => {
       .toEqual(["Cache write 1.5K"]);
   });
 
-  it("reports the context window only when the provider reports its size", () => {
+  it("reports the context window remaining like the Usage surface, never rounding to an edge", () => {
+    const context = (contextTokens: number, maxContextTokens = 200_000) =>
+      backgroundTaskContextUsage(taskUsage({ contextTokens, maxContextTokens }));
     expect(backgroundTaskContextUsage(taskUsage({ contextTokens: 50_000 }))).toBeNull();
-    expect(backgroundTaskContextUsage(taskUsage({ contextTokens: 50_000, maxContextTokens: 0 })))
-      .toBeNull();
-    expect(backgroundTaskContextUsage(taskUsage({
-      contextTokens: 50_000,
-      maxContextTokens: 200_000,
-    }))).toEqual({ percent: 25, label: "25% of 200K used" });
-    expect(backgroundTaskContextUsage(taskUsage({
-      contextTokens: 1,
-      maxContextTokens: 400_000,
-    }))?.percent).toBe(0);
+    expect(context(50_000, 0)).toBeNull();
+    expect(context(50_000)).toEqual({ remainingPercent: 75, label: "75% of 200K remaining" });
+    expect(context(799)).toEqual({ remainingPercent: 100, label: ">99% of 200K remaining" });
+    expect(context(199_200)).toEqual({ remainingPercent: 0, label: "<1% of 200K remaining" });
+    expect(context(0)?.label).toBe("100% of 200K remaining");
+    expect(context(200_000)?.label).toBe("0% of 200K remaining");
   });
 
   it("summarizes agents and commands together without colour-only state", () => {
     expect(backgroundTaskSummaryLabel([], [])).toBe("");
+    expect(backgroundTaskSummaryLabel([
+      taskTrace({ id: "w", status: "waiting" }),
+      taskTrace({ id: "q", status: "queued" }),
+      taskTrace({ id: "u", status: "unknown", isLive: false }),
+    ], [workspaceRun({ id: "wait", status: "waiting" })])).toBe("3 active · 1 needs review");
     expect(backgroundTaskSummaryLabel([
       taskTrace({ id: "a" }),
       taskTrace({ id: "b", status: "failed" }),
@@ -151,7 +179,7 @@ describe("background task rows", () => {
       workspaceRun({ id: "y", status: "failed", attentionState: "unseen" }),
       workspaceRun({ id: "z", status: "failed", attentionState: "acknowledged" }),
       workspaceRun({ id: "w", status: "succeeded" }),
-    ])).toBe("2 running · 2 need review · 4 finished");
+    ])).toBe("2 active · 3 need review · 3 finished");
     expect(backgroundTaskSummaryLabel([taskTrace({ status: "lost" })], []))
       .toBe("1 needs review");
   });
@@ -168,7 +196,14 @@ describe("background task rows", () => {
       taskTrace({ id: "c", usage: taskUsage({ totalTokens: 0 }) }),
       taskTrace({ id: "d" }),
       taskTrace({ id: "e", usage: taskUsage({ inputTokens: 5 }) }),
-    ])).toBe("128.4K tokens reported by 3 of 5 tasks");
+    ])).toBe("128.4K tokens reported by 3 of 5 agents");
+  });
+
+  it("labels a delegated task's reported tokens for the timeline and Goal panel", () => {
+    expect(subagentTokensLabel(taskTrace())).toBeNull();
+    expect(subagentTokensLabel(taskTrace({ usage: taskUsage({ inputTokens: 4 }) }))).toBeNull();
+    expect(subagentTokensLabel(taskTrace({ usage: taskUsage({ totalTokens: 18_600 }) })))
+      .toBe("18.6K tokens");
   });
 
   it("groups live work first, then review, then finished work with relative tree depth", () => {
@@ -222,12 +257,26 @@ describe("background commands", () => {
     taskTurn({ id: "turn-2", runId: "run-2", requestedAt: "2030-01-01T00:05:00.000Z" }),
   ];
 
+  it("keeps only background work, never the commands a provider ran inside its turn", () => {
+    const providerCommands = Array.from({ length: 60 }, (_, index) => workspaceRun({
+      id: `provider-${index}`,
+      actionId: null,
+      kind: index % 2 ? "check" : "service",
+      label: index % 2 ? "rg usage src" : "npm run dev",
+      status: index === 0 ? "running" : "succeeded",
+    }));
+    expect(backgroundCommandRuns(providerCommands, "conversation-1", turns)).toEqual([]);
+    expect(activeBackgroundTaskCount([], providerCommands, "conversation-1", turns)).toBe(0);
+    const gitPush = workspaceRun({ id: "push", kind: "source-control", actionId: null, label: "Push" });
+    expect(backgroundCommandRuns([gitPush], "conversation-1", turns)).toEqual([gitPush]);
+  });
+
   it("keeps this chat's commands and app-started reviews but never the agent turn itself", () => {
     const runs = [
       workspaceRun({ id: "run-1", kind: "agent", status: "succeeded" }),
       workspaceRun({ id: "run-2", kind: "agent" }),
-      workspaceRun({ id: "review", kind: "agent", label: "Codex · read-only question", startedAt: "2030-01-01T00:06:00.000Z" }),
-      workspaceRun({ id: "older-agent", kind: "agent", startedAt: "2029-12-31T23:00:00.000Z" }),
+      workspaceRun({ id: "review", kind: "agent", actionId: null, label: "Codex · read-only question", startedAt: "2030-01-01T00:06:00.000Z" }),
+      workspaceRun({ id: "older-agent", kind: "agent", actionId: null, startedAt: "2029-12-31T23:00:00.000Z" }),
       workspaceRun({ id: "server", kind: "service", port: 5173, startedAt: "2030-01-01T00:02:00.000Z" }),
       workspaceRun({ id: "check-done", status: "succeeded", startedAt: "2030-01-01T00:07:00.000Z" }),
       workspaceRun({ id: "dismissed", status: "failed", attentionState: "dismissed" }),
@@ -256,18 +305,20 @@ describe("background commands", () => {
     expect(runs.map(({ id }) => id)).toEqual(["done-new", "live-old", "waiting", "done-old"]);
   });
 
-  it("counts live agents and live commands for the panel badges", () => {
+  it("counts exactly the active rows the panel shows for the badges", () => {
     const subagents = [
       taskTrace({ id: "a" }),
       taskTrace({ id: "b", status: "completed" }),
       taskTrace({ id: "c", status: "waiting" }),
     ];
-    const commands = [
+    const runs = [
       workspaceRun({ id: "x" }),
       workspaceRun({ id: "y", status: "succeeded" }),
+      workspaceRun({ id: "z", actionId: null }),
+      workspaceRun({ id: "other", conversationId: "conversation-2" }),
     ];
-    expect(runningBackgroundTaskCount(subagents, commands)).toBe(3);
-    expect(runningBackgroundTasksLabel(1)).toBe("1 background task running");
-    expect(runningBackgroundTasksLabel(3)).toBe("3 background tasks running");
+    expect(activeBackgroundTaskCount(subagents, runs, "conversation-1", turns)).toBe(3);
+    expect(activeBackgroundTasksLabel(1)).toBe("1 background task active");
+    expect(activeBackgroundTasksLabel(3)).toBe("3 background tasks active");
   });
 });

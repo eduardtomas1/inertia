@@ -227,8 +227,8 @@ function backgroundTasksSurface(): React.JSX.Element {
       runtimeStatus={summary.runtime.status}
       subagents={[]}
       turns={[]}
-      commands={[]}
-      harnessId={null}
+      runs={[]}
+      conversation={null}
     />
   );
 }
@@ -659,7 +659,7 @@ describe("Environment content in its workspace surfaces", () => {
         terminalUnavailableLabel={reason}
         rightPanelAvailable
         rightPanelOpen={false}
-        runningBackgroundTaskCount={0}
+        activeBackgroundTaskCount={0}
         onToggleTerminal={vi.fn()}
         onToggleRightPanel={onToggleRightPanel}
         onOpenUsage={vi.fn()}

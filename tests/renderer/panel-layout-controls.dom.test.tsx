@@ -47,7 +47,7 @@ function controls(overrides: Partial<ControlProps> = {}): ControlProps {
     terminalShortcutLabel: "Ctrl+J",
     rightPanelAvailable: true,
     rightPanelOpen: false,
-    runningBackgroundTaskCount: 0,
+    activeBackgroundTaskCount: 0,
     onToggleTerminal: vi.fn(),
     onToggleRightPanel: vi.fn(),
     onOpenUsage: vi.fn(),
@@ -89,8 +89,8 @@ describe("corner panel controls and header meter", () => {
     expect(screen.queryByRole("button", { name: /^Usage:/u })).not.toBeInTheDocument();
   });
 
-  it("toggles the terminal and right panel with pressed state and a running background task badge", () => {
-    const props = controls({ terminalOpen: true, rightPanelOpen: true, runningBackgroundTaskCount: 2 });
+  it("toggles the terminal and right panel with pressed state and an active background task badge", () => {
+    const props = controls({ terminalOpen: true, rightPanelOpen: true, activeBackgroundTaskCount: 2 });
     render(<PanelLayoutControls {...props} />);
     const terminal = screen.getByRole("button", { name: "Toggle terminal" });
     expect(terminal).toHaveAttribute("aria-pressed", "true");
@@ -98,7 +98,7 @@ describe("corner panel controls and header meter", () => {
     fireEvent.click(terminal);
     expect(props.onToggleTerminal).toHaveBeenCalledOnce();
 
-    const panel = screen.getByRole("button", { name: "Toggle right panel, 2 background tasks running" });
+    const panel = screen.getByRole("button", { name: "Toggle right panel, 2 background tasks active" });
     expect(panel).toHaveAttribute("aria-pressed", "true");
     expect(panel).toHaveTextContent("2");
     fireEvent.click(panel);

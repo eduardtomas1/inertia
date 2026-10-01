@@ -728,4 +728,23 @@ describe("delegated-agent timeline disclosure", () => {
     )].map((control) => control.getAttribute("aria-controls"));
     expect(new Set(controls).size).toBe(controls.length);
   });
+
+  it("shows the tokens a provider reported for a delegated task beside its elapsed time", () => {
+    const reported = trace({
+      usage: {
+        totalTokens: 18_600,
+        inputTokens: null,
+        cachedInputTokens: null,
+        cacheWriteInputTokens: null,
+        outputTokens: null,
+        reasoningOutputTokens: null,
+        contextTokens: null,
+        maxContextTokens: null,
+      },
+    });
+    const view = render(
+      <SubagentDisclosure {...DISCLOSURE_OWNER} subagents={[reported]} turns={[turn()]} now={NOW} />,
+    );
+    expect(view.container.querySelector(".subagent-route")).toHaveTextContent("18.6K tokens");
+  });
 });

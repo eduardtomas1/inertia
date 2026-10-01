@@ -1,6 +1,7 @@
 import { agentRunStateForTurn } from "@shared/run-state";
 import type { AgentTurn, SubagentTrace } from "@shared/contracts";
 import { supportsActiveParentFollowUp } from "./composerPrimaryAction";
+import { formatCompact } from "../lib/usageFormat";
 
 export interface SubagentDisclosureRow {
   trace: SubagentTrace;
@@ -195,6 +196,11 @@ export function subagentTraceSummary(trace: SubagentTrace): string | null {
   const detail = subagentTraceDetail(trace);
   if (!detail || detail.length <= MAX_SUBAGENT_SUMMARY_CHARS) return detail;
   return `${detail.slice(0, MAX_SUBAGENT_SUMMARY_CHARS - 1).trimEnd()}…`;
+}
+
+export function subagentTokensLabel(trace: SubagentTrace): string | null {
+  const total = trace.usage?.totalTokens;
+  return total == null ? null : `${formatCompact(total)} tokens`;
 }
 
 export function subagentRelationshipLabel(

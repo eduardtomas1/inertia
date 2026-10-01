@@ -8,7 +8,7 @@ import {
 import { PanelBottom, PanelRight } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../../utils/environmentSummary";
-import { runningBackgroundTasksLabel } from "../../utils/backgroundTaskRuns";
+import { activeBackgroundTasksLabel } from "../../utils/backgroundTaskRuns";
 
 const HeaderUsageMeter = lazy(async () => ({
   default: (await import("./HeaderUsageMeter")).HeaderUsageMeter,
@@ -23,7 +23,7 @@ interface PanelLayoutControlsProps {
   rightPanelAvailable: boolean;
   rightPanelOpen: boolean;
   rightPanelUnavailableLabel?: string;
-  runningBackgroundTaskCount: number;
+  activeBackgroundTaskCount: number;
   onToggleTerminal: () => void;
   onToggleRightPanel: () => void;
   onOpenUsage: () => void;
@@ -39,7 +39,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   rightPanelAvailable,
   rightPanelOpen,
   rightPanelUnavailableLabel = "Right panel is unavailable",
-  runningBackgroundTaskCount,
+  activeBackgroundTaskCount,
   onToggleTerminal,
   onToggleRightPanel,
   onOpenUsage,
@@ -58,8 +58,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
-  const tasksLabel = runningBackgroundTaskCount > 0
-    ? runningBackgroundTasksLabel(runningBackgroundTaskCount)
+  const tasksLabel = activeBackgroundTaskCount > 0
+    ? activeBackgroundTasksLabel(activeBackgroundTaskCount)
     : null;
   const terminalLabel = terminalAvailable
     ? `Toggle terminal${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
@@ -100,8 +100,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         onClick={onToggleRightPanel}
       >
         <PanelRight size={15} aria-hidden="true" />
-        {runningBackgroundTaskCount > 0 && (
-          <span className="corner-toggle-badge" aria-hidden="true">{runningBackgroundTaskCount}</span>
+        {activeBackgroundTaskCount > 0 && (
+          <span className="corner-toggle-badge" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}
       </button>
     </div>

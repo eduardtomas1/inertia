@@ -99,6 +99,10 @@ const failedTask = taskTrace({
   sequence: 5,
 });
 
+function chat(harnessId: string): BackgroundTasksSurfaceProps["conversation"] {
+  return { id: "conversation-1", modelSelection: { harnessId } };
+}
+
 function surface(
   overrides: Partial<BackgroundTasksSurfaceProps> = {},
 ): React.JSX.Element {
@@ -107,8 +111,8 @@ function surface(
       runtimeStatus="online"
       subagents={[codexTask, claudeTask, opencodeChild, cursorTask, failedTask]}
       turns={turns}
-      commands={[]}
-      harnessId="codex-app-server"
+      runs={[]}
+      conversation={chat("codex-app-server")}
       now={NOW}
       {...overrides}
     />
@@ -147,12 +151,11 @@ describe("Background tasks surface", () => {
     render(surface());
     const region = screen.getByRole("region", { name: "Background tasks" });
     expect(within(region).getByRole("heading", { name: "Background tasks", level: 3 })).toBeVisible();
-    expect(within(region).getByText("2 running · 1 needs review · 2 finished")).toBeVisible();
-    const tokens = within(region).getByText("137.4K tokens reported by 2 of 5 tasks");
-    expect(tokens).toHaveAttribute(
-      "title",
-      "Sum of the tokens providers reported for the tasks below. The chat's own usage is in Usage.",
-    );
+    expect(within(region).getByText("2 active · 1 needs review · 2 finished")).toBeVisible();
+    expect(within(region).getByText("137.4K tokens reported by 2 of 5 agents")).toBeVisible();
+    expect(within(region).getByText(
+      "Sum of what the providers reported for these agents. This chat's own usage is in Usage.",
+    )).toBeVisible();
   });
 
   it("groups live work first, then work needing review, and finished work separately", () => {
@@ -172,7 +175,7 @@ describe("Background tasks surface", () => {
     const codex = row(/^Explorer/u);
     expect(within(codex).getByText("Running", { selector: ".background-task-status" })).toBeVisible();
     expect(within(codex).getByRole("img", { name: "Codex" })).toBeVisible();
-    expect(within(codex).getByText("gpt-5.3-codex")).toHaveAttribute("title", "Model: gpt-5.3-codex");
+    expect(within(codex).getByText("gpt-5.3-codex")).toBeVisible();
     expect(within(codex).getByText("Running rg subagent")).toBeVisible();
     expect(within(codex).getByText("1m")).toBeVisible();
     expect(within(codex).getByText("128.4K")).toBeVisible();
@@ -184,10 +187,7 @@ describe("Background tasks surface", () => {
     expect(within(cursor).getByText("Three threads remain open.")).toBeVisible();
     expect(within(cursor).getByText("Tokens: Cursor does not report tokens for delegated tasks"))
       .toHaveClass("visually-hidden");
-    expect(within(cursor).getByText("—")).toHaveAttribute(
-      "title",
-      "Cursor does not report tokens for delegated tasks",
-    );
+    expect(within(cursor).getByText("—")).toBeVisible();
     expect(within(cursor).getByText("4s")).toBeVisible();
     const live = row(/^Fixture writer/u);
     expect(within(live).getByText("Tokens: Not reported yet")).toBeInTheDocument();
@@ -210,12 +210,15 @@ describe("Background tasks surface", () => {
     expect(detail(list, "Latest step"))
       .toHaveTextContent(/^Input 120K · Cached 96K · Output 8K · Reasoning 400$/u);
     const context = detail(list, "Context")!;
-    expect(within(context).getByRole("meter", { name: "Context window used" }))
-      .toHaveAttribute("aria-valuenow", "25");
-    expect(within(context).getByText("25% of 200K used")).toBeVisible();
+    expect(within(context).getByRole("meter", { name: "Context window remaining" }))
+      .toHaveAttribute("aria-valuenow", "75");
+    expect(within(context).getByText("75% of 200K remaining")).toBeVisible();
     expect(detail(list, "Tool uses")).toHaveTextContent(/^14$/u);
     expect(detail(list, "Route")).toHaveTextContent("Codex · App Server");
-    expect(detail(list, "Latest activity")).toHaveTextContent("Searching the persistence layer");
+    expect(detail(list, "Model")).toHaveTextContent(/^gpt-5\.3-codex$/u);
+    expect(detail(list, "Doing now")).toHaveTextContent(/^Running rg subagent$/u);
+    expect(detail(list, "Progress")).toHaveTextContent(/^Searching the persistence layer$/u);
+    expect(detail(list, "Latest activity")).toBeNull();
 
     const claude = row(/^Reviewer/u);
     const claudeDetails = within(claude).getByRole("button", { name: "Details for Reviewer" });
@@ -225,6 +228,7 @@ describe("Background tasks surface", () => {
     expect(detail(claudeList, "Latest step")).toBeNull();
     expect(detail(claudeList, "Context")).toBeNull();
     expect(detail(claudeList, "Runtime")).toHaveTextContent(/^1m 23s$/u);
+    expect(detail(claudeList, "Doing now")).toBeNull();
 
     const cursor = row(/^Summarize the open review threads/u);
     const cursorDetails = within(cursor).getByRole("button", { name: /^Details for/u });
@@ -308,11 +312,11 @@ describe("Background tasks surface", () => {
     });
     render(surface({
       subagents: [],
-      commands: [live, failed],
+      runs: [live, failed],
       onStopCommand,
       onDismissCommand,
     }));
-    expect(screen.getByText("1 running · 1 needs review")).toBeVisible();
+    expect(screen.getByText("1 active · 1 needs review")).toBeVisible();
     const commands = screen.getByRole("list", { name: "Commands" });
     const devRow = within(commands).getByRole("listitem", { name: /^npm run dev/u });
     expect(within(devRow).getByText("http://localhost:5173")).toBeVisible();
@@ -336,20 +340,21 @@ describe("Background tasks surface", () => {
     ["antigravity-cli", "Antigravity does not report delegated agents. Commands it starts appear here."],
     ["cursor-acp", "Cursor reports a delegated task when it finishes."],
   ])("explains the empty state for %s", (harnessId, note) => {
-    render(surface({ subagents: [], commands: [], harnessId }));
+    render(surface({ subagents: [], runs: [], turns: [], conversation: chat(harnessId) }));
     expect(screen.getByText("No background tasks in this chat.")).toBeVisible();
     expect(screen.getByText(note)).toBeVisible();
     expect(screen.queryByText(/tokens reported/u)).toBeNull();
   });
 
   it("keeps the empty state plain for harnesses that report agents", () => {
-    const view = render(surface({ subagents: [], commands: [], harnessId: "codex-app-server" }));
+    const view = render(surface({ subagents: [], runs: [], turns: [], conversation: chat("codex-app-server") }));
     expect(screen.getByText("No background tasks in this chat.")).toBeVisible();
     expect(view.container.querySelector(".background-tasks-note")).toBeNull();
     view.rerender(surface({
       subagents: [],
-      commands: [workspaceRun()],
-      harnessId: "kimi-acp",
+      runs: [workspaceRun()],
+      turns: [],
+      conversation: chat("kimi-acp"),
     }));
     expect(screen.queryByText("No background tasks in this chat.")).toBeNull();
     expect(screen.getByText("Kimi Code does not report delegated agents. Commands it starts appear here."))
@@ -366,7 +371,7 @@ describe("Background tasks surface", () => {
   });
 
   it("keeps labelling unique across split surfaces and labels every button", () => {
-    const view = render(<>{surface({ commands: [workspaceRun()] })}{surface({ commands: [workspaceRun()] })}</>);
+    const view = render(<>{surface({ runs: [workspaceRun()] })}{surface({ runs: [workspaceRun()] })}</>);
     const references = [...view.container.querySelectorAll<HTMLElement>("[aria-labelledby], [aria-controls]")]
       .flatMap((element) => [
         element.getAttribute("aria-labelledby"),

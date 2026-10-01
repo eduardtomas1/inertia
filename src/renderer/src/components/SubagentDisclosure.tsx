@@ -17,6 +17,7 @@ import {
   subagentRoleLabel,
   subagentRouteLabel,
   subagentStatusLabel,
+  subagentTokensLabel,
   subagentTraceLabel,
   subagentTraceSummary,
   urgentSubagentBranchEndpoints,
@@ -241,6 +242,7 @@ export function SubagentDisclosure({
           const role = subagentRoleLabel(trace);
           const route = subagentRouteLabel(trace, turns);
           const state = subagentStatusLabel(trace);
+          const tokens = subagentTokensLabel(trace);
           const relationship = subagentRelationshipLabel(trace, subagents);
           const canFollowUp = Boolean(
             onFollowUpSubagent
@@ -308,6 +310,7 @@ export function SubagentDisclosure({
                 >
                   <span className="visually-hidden">{route} · </span>
                   <SubagentElapsed trace={trace} now={fixedNow} visible={open} />
+                  {tokens && ` · ${tokens}`}
                 </small>
               </span>
               <span className="subagent-row-actions">

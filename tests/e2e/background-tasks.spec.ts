@@ -1,5 +1,6 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
@@ -45,8 +46,16 @@ function usage(update: Partial<SubagentTaskUsage>): SubagentTaskUsage {
   };
 }
 
+const FIXED_NOW = Date.parse("2026-09-30T16:20:00.000Z");
+
 function ago(milliseconds: number): string {
-  return new Date(Date.now() - milliseconds).toISOString();
+  return new Date(FIXED_NOW - milliseconds).toISOString();
+}
+
+interface RunTimes {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
 }
 
 function databasePath(app: AppFixture): string {
@@ -119,6 +128,7 @@ const traceDefaults = {
 
 function seedFixture(app: AppFixture): Seed {
   const store = openStore(app);
+  const runTimes: RunTimes[] = [];
   try {
     let snapshot = store.shellSnapshot();
     if (!snapshot.activeProjectId) {
@@ -194,7 +204,7 @@ function seedFixture(app: AppFixture): Seed {
         updatedAt: ago(120_000),
       },
     ]);
-    store.createWorkspaceRun({
+    const devServer = store.createWorkspaceRun({
       id: randomUUID(),
       kind: "service",
       projectId,
@@ -205,7 +215,8 @@ function seedFixture(app: AppFixture): Seed {
       status: "running",
       port: 5173,
     });
-    store.createWorkspaceRun({
+    runTimes.push({ id: devServer.id, startedAt: ago(75_000), finishedAt: null });
+    const failedTests = store.createWorkspaceRun({
       id: randomUUID(),
       kind: "check",
       projectId,
@@ -217,6 +228,19 @@ function seedFixture(app: AppFixture): Seed {
       status: "failed",
       port: null,
     });
+    runTimes.push({ id: failedTests.id, startedAt: ago(50_000), finishedAt: ago(20_000) });
+    for (const [label, status] of [["rg usage src", "running"], ["sed -n 1,80p src/usage.ts", "succeeded"]] as const) {
+      const providerCommand = store.createWorkspaceRun({
+        kind: "check",
+        projectId,
+        conversationId: codex.conversationId,
+        label,
+        detail: "Codex · Usage pipeline refactor",
+        status,
+        port: null,
+      });
+      runTimes.push({ id: providerCommand.id, startedAt: ago(40_000), finishedAt: status === "running" ? null : ago(39_000) });
+    }
     const claude = seedChat(store, projectId, "claude", "Claude delegated review", "claude-sonnet-4-5", true, [
       {
         ...traceDefaults,
@@ -302,6 +326,13 @@ function seedFixture(app: AppFixture): Seed {
     return { codex, claude, opencode, cursor, kimi };
   } finally {
     store.close();
+    const database = new Database(databasePath(app));
+    try {
+      const update = database.prepare("UPDATE workspace_runs SET started_at = ?, finished_at = ? WHERE id = ?");
+      for (const { id, startedAt, finishedAt } of runTimes) update.run(startedAt, finishedAt, id);
+    } finally {
+      database.close();
+    }
   }
 }
 
@@ -333,6 +364,7 @@ function row(region: Locator, title: string): Locator {
 
 async function capture(page: Page, info: TestInfo, name: string): Promise<void> {
   const path = info.outputPath(`${name}.png`);
+  await page.mouse.move(0, 0);
   await page.screenshot({ path, animations: "disabled" });
   await info.attach(name, { path, contentType: "image/png" });
 }
@@ -353,6 +385,7 @@ let seed!: Seed;
 test.beforeAll(async () => {
   app = await createAppFixture({ name: "background-tasks", initialState: "conversation" });
   seed = seedFixture(app);
+  await app.page.clock.setFixedTime(FIXED_NOW);
 });
 
 test.afterAll(async () => {
@@ -374,13 +407,14 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     const page = app.page;
 
     await expect(region.getByRole("heading", { name: "Background tasks", level: 3 })).toBeVisible();
-    await expect(region.getByText("3 running · 2 need review · 1 finished", { exact: true })).toBeVisible();
-    await expect(region.getByText("176.55K tokens reported", { exact: true })).toHaveAttribute(
-      "title",
-      "Sum of the tokens providers reported for the tasks below. The chat's own usage is in Usage.",
-    );
-    await expect(page.getByRole("tab", { name: "Background tasks, 3 running" })).toHaveAttribute("aria-selected", "true");
-    await expect(rightPanelToggle(page)).toHaveAttribute("aria-label", "Toggle right panel, 3 background tasks running");
+    await expect(region.getByText("3 active · 2 need review · 1 finished", { exact: true })).toBeVisible();
+    await expect(region.getByText("176.55K tokens reported", { exact: true })).toBeVisible();
+    await expect(region.getByText(
+      "Sum of what the providers reported for these agents. This chat's own usage is in Usage.",
+      { exact: true },
+    )).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Background tasks, 3 active" })).toHaveAttribute("aria-selected", "true");
+    await expect(rightPanelToggle(page)).toHaveAttribute("aria-label", "Toggle right panel, 3 background tasks active");
 
     const active = region.getByRole("list", { name: "Active" });
     await expect(active.getByRole("listitem")).toHaveCount(3);
@@ -398,7 +432,6 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     expect(writerLeft).toBeGreaterThan(explorerLeft);
     const verifier = row(region, "Build verifier");
     await expect(verifier.locator(".background-task-status")).toHaveText("Failed");
-    await expect(verifier.locator(".background-task-status")).toHaveAttribute("title", "Provider state: errored");
     await expect(verifier.getByText("42s", { exact: true })).toBeVisible();
     await expect(region.getByRole("list", { name: "Finished" }).getByRole("listitem")).toHaveCount(1);
 
@@ -407,13 +440,16 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     const devServer = commands.getByRole("listitem", { name: "npm run dev, Running" });
     await expect(devServer.getByText("http://localhost:5173", { exact: true })).toBeVisible();
     await expect(devServer.getByText(/tokens/u)).toHaveCount(0);
+    await expect(devServer.getByText("1m 15s", { exact: true })).toBeVisible();
+    await expect(region.getByText("rg usage src")).toHaveCount(0);
+    await expect(region.getByText("sed -n 1,80p src/usage.ts")).toHaveCount(0);
     const failedTest = commands.getByRole("listitem", { name: "npm test, Failed" });
     await expect(failedTest.getByRole("button", { name: "Dismiss npm test" })).toBeVisible();
 
     for (const button of await region.getByRole("button").all()) {
       await expect(button).toHaveAccessibleName(/\S/u);
     }
-    await page.getByRole("tab", { name: "Background tasks, 3 running" }).focus();
+    await page.getByRole("tab", { name: "Background tasks, 3 active" }).focus();
     const explorerDetails = explorer.getByRole("button", { name: "Details for Explorer" });
     for (let presses = 0; presses < 12; presses += 1) {
       if (await explorerDetails.evaluate((element) => element === document.activeElement)) break;
@@ -425,7 +461,11 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     const explorerDetailList = explorer.locator(".background-task-details");
     await expect(explorerDetailList.getByText("Latest step", { exact: true })).toBeVisible();
     await expect(explorerDetailList.getByText("Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640", { exact: true })).toBeVisible();
-    await expect(explorerDetailList.getByRole("meter", { name: "Context window used" })).toHaveAttribute("aria-valuenow", "26");
+    await expect(explorerDetailList.getByRole("meter", { name: "Context window remaining" })).toHaveAttribute("aria-valuenow", "75");
+    await expect(explorerDetailList.getByText("75% of 200K remaining", { exact: true })).toBeVisible();
+    await expect(explorerDetailList.getByText("Doing now", { exact: true })).toBeVisible();
+    await expect(explorerDetailList.getByText("Mapping the token usage pipeline", { exact: true })).toBeVisible();
+    await expect(explorerDetailList.getByText("gpt-5.3-codex", { exact: true })).toBeVisible();
     await expectLayoutHolds(app, region);
     await page.keyboard.press("Enter");
     await expect(explorerDetails).toHaveAttribute("aria-expanded", "false");
@@ -448,9 +488,19 @@ test("summarizes a chat's agents, tokens and commands with keyboard access", asy
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await capture(page, info, "background-tasks-narrow-dark");
 
+    await app.resizeWindow(760, 600);
+    await expect(region).toBeVisible();
+    await expect(explorer).toBeVisible();
+    await expectLayoutHolds(app, region);
+    expect(await region.evaluate((element) => [...element.querySelectorAll<HTMLElement>(".background-task-heading > strong")]
+      .filter((title) => title.scrollWidth > title.clientWidth + 1)
+      .map((title) => title.textContent))).toEqual([]);
+    await capture(page, info, "background-tasks-760x600-dark");
+    await app.resizeWindow(1000, 800);
+
     await failedTest.getByRole("button", { name: "Dismiss npm test" }).click();
     await expect(commands.getByRole("listitem")).toHaveCount(1);
-    await expect(region.getByText("3 running · 1 needs review · 1 finished", { exact: true })).toBeVisible();
+    await expect(region.getByText("3 active · 1 needs review · 1 finished", { exact: true })).toBeVisible();
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);
@@ -490,10 +540,6 @@ test("labels each harness's reporting honestly", async ({ browserName: _browserN
     region = await showChat(app, seed.cursor);
     const summary = row(region, "Summarize the open review threads");
     await expect(summary.getByText("Three threads remain open.", { exact: true })).toBeVisible();
-    await expect(summary.getByText("—", { exact: true })).toHaveAttribute(
-      "title",
-      "Cursor does not report tokens for delegated tasks",
-    );
     await expect(summary.getByText("Tokens: Cursor does not report tokens for delegated tasks")).toBeAttached();
     await expect(region.getByText(/tokens reported/u)).toHaveCount(0);
     await expectLayoutHolds(app, region);
@@ -524,6 +570,7 @@ test("keeps the surface and reported tokens across a restart", async ({ browserN
     await expect(region).toBeVisible();
     await expect(row(region, "Explorer").locator(".background-task-status")).toHaveText("Lost");
     await expect(row(region, "Explorer").getByText("128.4K", { exact: true })).toBeVisible();
+    await expect(row(region, "Explorer").getByText("Runtime not reported", { exact: true })).toBeAttached();
     await expect(row(region, "Docs reviewer").getByText("31.25K", { exact: true })).toBeVisible();
     await expect(region.getByRole("list", { name: "Commands" }).getByRole("listitem", {
       name: "npm run dev, Failed",

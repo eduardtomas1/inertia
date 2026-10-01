@@ -1,37 +1,17 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import {
-  GitBranch,
-  Globe2,
-  Laptop,
-  ListTree,
-  MessageSquareText,
-  Square,
-  SquareTerminal,
-  Trash2,
-} from "lucide-react";
+import { useId, useLayoutEffect, useMemo, useRef } from "react";
+import { Laptop, ListTree } from "lucide-react";
 
 import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
-import { workspaceRunAttentionView } from "../../../shared/attention";
-import { useDocumentVisibility } from "../hooks/useDocumentPresence";
+import { backgroundCommandRuns } from "../utils/backgroundTaskRuns";
 import {
   BACKGROUND_TASK_TOKENS_NOTE,
-  backgroundCommandStatusLabel,
   backgroundTaskEmptyNote,
-  backgroundTaskGroups,
   backgroundTaskSummaryLabel,
   backgroundTaskTokenTotalLabel,
-  orderedBackgroundCommands,
 } from "../utils/backgroundTasks";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
-import { formatElapsed } from "../utils/responseTimeline";
-import { compactSubagentDisclosureRows } from "../utils/subagentCompactRows";
-import {
-  subagentDisclosureRows,
-  type SubagentDisclosureRow,
-} from "../utils/subagentDisclosure";
-import { backgroundCommandIsLive } from "../utils/backgroundTaskRuns";
-import { BackgroundTaskRow } from "./BackgroundTaskRow";
-import { subscribeLiveElapsed } from "./SubagentElapsed";
+import { BackgroundTaskAgents } from "./BackgroundTaskAgents";
+import { BackgroundTaskCommands } from "./BackgroundTaskCommands";
 import "./BeautifulUiMotion.css";
 import "./WorkspaceSurfaces.css";
 import "./BackgroundTasksSurface.css";
@@ -40,8 +20,8 @@ export interface BackgroundTasksSurfaceProps {
   runtimeStatus: EnvironmentSummarySnapshot["runtime"]["status"];
   subagents: readonly SubagentTrace[];
   turns: readonly AgentTurn[];
-  commands: readonly WorkspaceRun[];
-  harnessId: string | null;
+  runs: readonly WorkspaceRun[];
+  conversation: { id: string; modelSelection: { harnessId: string } } | null;
   now?: number;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -52,265 +32,62 @@ export interface BackgroundTasksSurfaceProps {
   onDismissCommand?: (run: WorkspaceRun) => void;
 }
 
-const MAX_COMPACT_FINISHED_TASKS = 5;
-
-const commandIcons: Record<WorkspaceRun["kind"], React.JSX.Element> = {
-  agent: <MessageSquareText size={12} aria-hidden="true" />,
-  check: <SquareTerminal size={12} aria-hidden="true" />,
-  service: <Globe2 size={12} aria-hidden="true" />,
-  "source-control": <GitBranch size={12} aria-hidden="true" />,
-};
-
-function commandElapsedMs(run: WorkspaceRun, now: number): number | null {
-  const startedAt = Date.parse(run.startedAt);
-  const end = backgroundCommandIsLive(run)
-    ? now
-    : run.finishedAt ? Date.parse(run.finishedAt) : Number.NaN;
-  if (!Number.isFinite(startedAt) || !Number.isFinite(end)) return null;
-  return Math.max(0, end - startedAt);
+interface FocusRecord {
+  row: string;
+  key: string | null;
 }
 
-function CommandElapsed({
-  run,
-  now,
-}: {
-  run: WorkspaceRun;
-  now?: number;
-}): React.JSX.Element | null {
-  const textRef = useRef<HTMLSpanElement>(null);
-  const live = backgroundCommandIsLive(run);
-  const documentVisible = useDocumentVisibility();
-  useEffect(() => {
-    if (!live || now !== undefined || !documentVisible) return;
-    return subscribeLiveElapsed(() => {
-      const elapsed = commandElapsedMs(run, Date.now());
-      if (textRef.current && elapsed !== null) {
-        textRef.current.textContent = formatElapsed(elapsed);
-      }
-    });
-  }, [documentVisible, live, now, run]);
-  const elapsed = commandElapsedMs(run, now ?? Date.now());
-  if (elapsed === null) return null;
-  return <span ref={textRef} className="subagent-elapsed">{formatElapsed(elapsed)}</span>;
-}
-
-function CommandRow({
-  run,
-  now,
-  onStop,
-  onDismiss,
-}: {
-  run: WorkspaceRun;
-  now?: number;
-  onStop?: (run: WorkspaceRun) => void;
-  onDismiss?: (run: WorkspaceRun) => void;
-}): React.JSX.Element {
-  const status = backgroundCommandStatusLabel(run.status);
-  const canDismiss = Boolean(onDismiss && workspaceRunAttentionView(run).canDismiss);
-  const canStop = Boolean(onStop && run.canStop && backgroundCommandIsLive(run));
-  return (
-    <li
-      className="background-task-row is-command"
-      data-run-id={run.id}
-      data-status={run.status}
-      data-live={backgroundCommandIsLive(run)}
-      aria-label={`${run.label}, ${status}`}
-    >
-      <span className="background-command-mark" data-status={run.status} aria-hidden="true">
-        {commandIcons[run.kind]}
-      </span>
-      <div className="background-task-main">
-        <div className="background-task-heading">
-          <strong title={run.label}>{run.label}</strong>
-          <span className="background-task-status">{status}</span>
-        </div>
-        {run.detail && <p className="background-task-doing" title={run.detail}>{run.detail}</p>}
-      </div>
-      <div className="background-task-metrics">
-        <CommandElapsed run={run} now={now} />
-      </div>
-      {(canStop || canDismiss) && (
-        <div className="background-task-actions">
-          {canStop && (
-            <button
-              type="button"
-              className="background-task-stop"
-              aria-label={`Stop ${run.label}`}
-              onClick={() => onStop?.(run)}
-            >
-              <Square size={9} fill="currentColor" aria-hidden="true" />
-              Stop
-            </button>
-          )}
-          {canDismiss && (
-            <button
-              type="button"
-              aria-label={`Dismiss ${run.label}`}
-              onClick={() => onDismiss?.(run)}
-            >
-              <Trash2 size={11} aria-hidden="true" />
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
-
-function AgentGroup({
-  label,
-  rows,
-  listId,
-  labelId,
-  indexOffset,
-  render,
-}: {
-  label: string;
-  rows: readonly (SubagentDisclosureRow & { omittedAncestors: number })[];
-  listId: string;
-  labelId: string;
-  indexOffset: number;
-  render: (
-    row: SubagentDisclosureRow & { omittedAncestors: number },
-    index: number,
-  ) => React.JSX.Element;
-}): React.JSX.Element {
-  return (
-    <div className="background-tasks-group">
-      <span id={labelId} className="background-tasks-group-label">{label}</span>
-      <ol id={listId} className="background-tasks-list" aria-labelledby={labelId}>
-        {rows.map((row, index) => render(row, indexOffset + index))}
-      </ol>
-    </div>
-  );
-}
-
-function BackgroundTaskAgents({
-  subagents,
-  turns,
-  now,
-  idPrefix,
-  canFollowUpSubagent,
-  onFollowUpSubagent,
-  onOpenSubagent,
-  canStopSubagent,
-  onStopSubagent,
-}: Pick<
-  BackgroundTasksSurfaceProps,
-  | "subagents"
-  | "turns"
-  | "now"
-  | "canFollowUpSubagent"
-  | "onFollowUpSubagent"
-  | "onOpenSubagent"
-  | "canStopSubagent"
-  | "onStopSubagent"
-> & {
-  idPrefix: string;
-}): React.JSX.Element {
-  const [showAllFinished, setShowAllFinished] = useState(false);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
-  const groups = useMemo(
-    () => backgroundTaskGroups(subagentDisclosureRows(subagents, turns)),
-    [subagents, turns],
-  );
-  const compactFinished = useMemo(
-    () => compactSubagentDisclosureRows(groups.finished, MAX_COMPACT_FINISHED_TASKS),
-    [groups.finished],
-  );
-  const active = groups.active.map((row) => ({ ...row, omittedAncestors: 0 }));
-  const finished = showAllFinished
-    ? groups.finished.map((row) => ({ ...row, omittedAncestors: 0 }))
-    : compactFinished;
-  const hiddenFinished = groups.finished.length - compactFinished.length;
-  const toggle = (
-    update: (next: Set<string>) => void,
-    set: typeof setExpanded,
-  ): void => set((current) => {
-    const next = new Set(current);
-    update(next);
-    return next;
+function useFocusContinuity(): {
+  regionRef: React.RefObject<HTMLElement | null>;
+  onFocusCapture: React.FocusEventHandler<HTMLElement>;
+  onBlurCapture: React.FocusEventHandler<HTMLElement>;
+} {
+  const regionRef = useRef<HTMLElement>(null);
+  const record = useRef<FocusRecord | null>(null);
+  useLayoutEffect(() => {
+    const current = record.current;
+    const region = regionRef.current;
+    const active = document.activeElement;
+    if (!current || !region || (active && active !== document.body)) return;
+    const row = [...region.querySelectorAll<HTMLElement>("[data-focus-row]")]
+      .find((element) => element.dataset.focusRow === current.row);
+    const control = (current.key
+      ? row?.querySelector<HTMLElement>(`[data-focus-key="${current.key}"]:not(:disabled)`)
+      : null)
+      ?? row?.querySelector<HTMLElement>("button:not(:disabled)")
+      ?? region.querySelector<HTMLElement>(`[data-focus-heading="${current.row.split(":")[0]}"]`)
+      ?? region.querySelector<HTMLElement>("[data-focus-heading]");
+    control?.focus();
   });
-  const renderRow = (
-    { trace, depth, canStop, omittedAncestors }: SubagentDisclosureRow & { omittedAncestors: number },
-    index: number,
-  ): React.JSX.Element => (
-    <BackgroundTaskRow
-      key={trace.id}
-      trace={trace}
-      traces={subagents}
-      turns={turns}
-      depth={depth}
-      omittedAncestors={omittedAncestors}
-      index={index}
-      detailsId={`${idPrefix}-${trace.id}-details`}
-      expanded={expanded.has(trace.id)}
-      stopping={stopping.has(trace.id)}
-      now={now}
-      canOpen={Boolean(onOpenSubagent && turns.some(({ id }) => id === trace.turnId))}
-      canFollowUp={Boolean(onFollowUpSubagent && canFollowUpSubagent?.(trace))}
-      canStop={Boolean(onStopSubagent && canStop && (canStopSubagent?.(trace) ?? true))}
-      onToggleDetails={() => toggle((next) => {
-        if (!next.delete(trace.id)) next.add(trace.id);
-      }, setExpanded)}
-      onOpen={() => onOpenSubagent?.(trace)}
-      onFollowUp={() => onFollowUpSubagent?.(trace)}
-      onStop={() => {
-        if (!onStopSubagent || stopping.has(trace.id)) return;
-        toggle((next) => next.add(trace.id), setStopping);
-        void onStopSubagent(trace).catch(() => undefined).finally(() => {
-          toggle((next) => next.delete(trace.id), setStopping);
-        });
-      }}
-    />
-  );
-  return (
-    <>
-      {active.length > 0 && (
-        <AgentGroup
-          label="Active"
-          rows={active}
-          listId={`${idPrefix}-active`}
-          labelId={`${idPrefix}-active-label`}
-          indexOffset={0}
-          render={renderRow}
-        />
-      )}
-      {finished.length > 0 && (
-        <AgentGroup
-          label="Finished"
-          rows={finished}
-          listId={`${idPrefix}-finished`}
-          labelId={`${idPrefix}-finished-label`}
-          indexOffset={active.length}
-          render={renderRow}
-        />
-      )}
-      {hiddenFinished > 0 && (
-        <button
-          type="button"
-          className="background-tasks-toggle"
-          aria-controls={`${idPrefix}-finished`}
-          aria-expanded={showAllFinished}
-          onClick={() => setShowAllFinished((current) => !current)}
-        >
-          {showAllFinished
-            ? "Show fewer finished tasks"
-            : `Show ${hiddenFinished} more finished ${hiddenFinished === 1 ? "task" : "tasks"}`}
-        </button>
-      )}
-    </>
-  );
+  return {
+    regionRef,
+    onFocusCapture: (event) => {
+      const target = event.target as HTMLElement;
+      const row = target.closest<HTMLElement>("[data-focus-row]");
+      record.current = row?.dataset.focusRow
+        ? { row: row.dataset.focusRow, key: target.dataset.focusKey ?? null }
+        : null;
+    },
+    onBlurCapture: (event) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node) {
+        if (!event.currentTarget.contains(next)) record.current = null;
+        return;
+      }
+      const target = event.target as HTMLElement;
+      queueMicrotask(() => {
+        if (target.isConnected) record.current = null;
+      });
+    },
+  };
 }
 
 export function BackgroundTasksSurface({
   runtimeStatus,
   subagents,
   turns,
-  commands,
-  harnessId,
+  runs,
+  conversation,
   now,
   canFollowUpSubagent,
   onFollowUpSubagent,
@@ -321,6 +98,13 @@ export function BackgroundTasksSurface({
   onDismissCommand,
 }: BackgroundTasksSurfaceProps): React.JSX.Element {
   const surfaceId = useId();
+  const focus = useFocusContinuity();
+  const conversationId = conversation?.id ?? null;
+  const commands = useMemo(
+    () => backgroundCommandRuns(runs, conversationId, turns),
+    [conversationId, runs, turns],
+  );
+  const harnessId = turns.at(-1)?.harnessId ?? conversation?.modelSelection.harnessId ?? null;
   const summary = backgroundTaskSummaryLabel(subagents, commands);
   const tokenTotal = backgroundTaskTokenTotalLabel(subagents);
   const note = subagents.length === 0 ? backgroundTaskEmptyNote(harnessId) : null;
@@ -331,8 +115,11 @@ export function BackgroundTasksSurface({
       : { title: "Workspace runtime unavailable", detail: "Live task details may be out of date." };
   return (
     <section
+      ref={focus.regionRef}
       className="workspace-surface background-tasks-surface"
       aria-label="Background tasks"
+      onFocusCapture={focus.onFocusCapture}
+      onBlurCapture={focus.onBlurCapture}
     >
       <div className="workspace-surface-scroll">
         {attention && (
@@ -348,15 +135,13 @@ export function BackgroundTasksSurface({
         <header className="background-tasks-header">
           <div className="workspace-surface-heading">
             <ListTree size={14} aria-hidden="true" />
-            <h3>Background tasks</h3>
+            <h3 tabIndex={-1} data-focus-heading="surface">Background tasks</h3>
           </div>
           {summary && <p className="background-tasks-summary">{summary}</p>}
           {tokenTotal && (
             <>
-              <p className="background-tasks-tokens" title={BACKGROUND_TASK_TOKENS_NOTE}>
-                {tokenTotal}
-              </p>
-              <span className="visually-hidden">{BACKGROUND_TASK_TOKENS_NOTE}</span>
+              <p className="background-tasks-tokens">{tokenTotal}</p>
+              <p className="background-tasks-tokens-note">{BACKGROUND_TASK_TOKENS_NOTE}</p>
             </>
           )}
         </header>
@@ -365,37 +150,30 @@ export function BackgroundTasksSurface({
         )}
         {note && <p className="background-tasks-note">{note}</p>}
         {subagents.length > 0 && (
-          <section className="background-tasks-section" aria-labelledby={`${surfaceId}-agents`}>
-            <h4 id={`${surfaceId}-agents`}>Agents</h4>
-            <BackgroundTaskAgents
-              key={subagents[0]?.conversationId ?? turns[0]?.conversationId ?? "empty"}
-              subagents={subagents}
-              turns={turns}
-              now={now}
-              idPrefix={surfaceId}
-              canFollowUpSubagent={canFollowUpSubagent}
-              onFollowUpSubagent={onFollowUpSubagent}
-              onOpenSubagent={onOpenSubagent}
-              canStopSubagent={canStopSubagent}
-              onStopSubagent={onStopSubagent}
-            />
-          </section>
+          <BackgroundTaskAgents
+            key={`agents:${conversationId ?? subagents[0]?.conversationId ?? ""}`}
+            subagents={subagents}
+            turns={turns}
+            now={now}
+            idPrefix={surfaceId}
+            headingId={`${surfaceId}-agents`}
+            canFollowUpSubagent={canFollowUpSubagent}
+            onFollowUpSubagent={onFollowUpSubagent}
+            onOpenSubagent={onOpenSubagent}
+            canStopSubagent={canStopSubagent}
+            onStopSubagent={onStopSubagent}
+          />
         )}
         {commands.length > 0 && (
-          <section className="background-tasks-section" aria-labelledby={`${surfaceId}-commands`}>
-            <h4 id={`${surfaceId}-commands`}>Commands</h4>
-            <ol className="background-tasks-list" aria-label="Commands">
-              {orderedBackgroundCommands(commands).map((run) => (
-                <CommandRow
-                  key={run.id}
-                  run={run}
-                  now={now}
-                  onStop={onStopCommand}
-                  onDismiss={onDismissCommand}
-                />
-              ))}
-            </ol>
-          </section>
+          <BackgroundTaskCommands
+            key={`commands:${conversationId ?? ""}`}
+            commands={commands}
+            now={now}
+            headingId={`${surfaceId}-commands`}
+            listId={`${surfaceId}-commands-list`}
+            onStop={onStopCommand}
+            onDismiss={onDismissCommand}
+          />
         )}
       </div>
     </section>

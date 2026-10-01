@@ -124,7 +124,7 @@ export function workspaceRun(update: Partial<WorkspaceRun> = {}): WorkspaceRun {
     kind: "check",
     projectId: "project-1",
     conversationId: "conversation-1",
-    actionId: null,
+    actionId: "test",
     label: "npm test",
     detail: "Vitest watch mode",
     status: "running",

@@ -4,7 +4,6 @@ import type {
   SubagentTrace,
   WorkspaceRun,
 } from "@shared/contracts";
-import { workspaceRunAttentionView } from "../../../shared/attention";
 import { formatCompact } from "../lib/usageFormat";
 import {
   isLiveSubagentTrace,
@@ -40,7 +39,9 @@ const COMMAND_STATUS_LABELS: Record<WorkspaceRun["status"], string> = {
 };
 
 export const BACKGROUND_TASK_TOKENS_NOTE =
-  "Sum of the tokens providers reported for the tasks below. The chat's own usage is in Usage.";
+  "Sum of what the providers reported for these agents. This chat's own usage is in Usage.";
+
+const RECOVERED_COMMAND_DETAIL = "Interrupted when the local runtime stopped.";
 
 const MAX_TASK_DEPTH = 8;
 
@@ -77,10 +78,19 @@ export function backgroundTaskDoingNow(trace: SubagentTrace): string | null {
     : trace.result;
 }
 
-export function backgroundTaskElapsedMs(trace: SubagentTrace, now: number): number {
-  return !isLiveSubagentTrace(trace) && trace.durationMs !== null
-    ? trace.durationMs
-    : subagentElapsedMs(trace, now);
+export function backgroundTaskElapsedMs(trace: SubagentTrace, now: number): number | null {
+  if (isLiveSubagentTrace(trace)) return subagentElapsedMs(trace, now);
+  if (trace.durationMs !== null) return trace.durationMs;
+  return trace.status === "lost" ? null : subagentElapsedMs(trace, now);
+}
+
+export function backgroundCommandElapsedMs(run: WorkspaceRun, now: number): number | null {
+  const live = backgroundCommandIsLive(run);
+  if (!live && run.detail?.endsWith(RECOVERED_COMMAND_DETAIL)) return null;
+  const startedAt = Date.parse(run.startedAt);
+  const end = live ? now : run.finishedAt ? Date.parse(run.finishedAt) : Number.NaN;
+  if (!Number.isFinite(startedAt) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - startedAt);
 }
 
 export function backgroundTaskTokens(
@@ -117,14 +127,19 @@ export function backgroundTaskLatestStep(
 
 export function backgroundTaskContextUsage(
   usage: SubagentTaskUsage | null,
-): { percent: number; label: string } | null {
+): { remainingPercent: number; label: string } | null {
   if (!usage || usage.contextTokens === null || !usage.maxContextTokens) return null;
-  const percent = Math.min(100, Math.max(0, Math.round(
-    (usage.contextTokens / usage.maxContextTokens) * 100,
-  )));
+  const remaining = Math.min(100, Math.max(0,
+    100 - (usage.contextTokens / usage.maxContextTokens) * 100));
+  const remainingPercent = Math.round(remaining);
+  const percent = remaining > 0 && remaining < 1
+    ? "<1"
+    : remaining > 99 && remaining < 100
+      ? ">99"
+      : String(remainingPercent);
   return {
-    percent,
-    label: `${percent}% of ${formatCompact(usage.maxContextTokens)} used`,
+    remainingPercent,
+    label: `${percent}% of ${formatCompact(usage.maxContextTokens)} remaining`,
   };
 }
 
@@ -132,21 +147,21 @@ export function backgroundTaskSummaryLabel(
   traces: readonly SubagentTrace[],
   commands: readonly WorkspaceRun[],
 ): string {
-  let running = 0;
+  let active = 0;
   let review = 0;
   let finished = 0;
   for (const trace of traces) {
-    if (isLiveSubagentTrace(trace)) running += 1;
+    if (isLiveSubagentTrace(trace)) active += 1;
     else if (subagentNeedsReview(trace)) review += 1;
     else finished += 1;
   }
   for (const run of commands) {
-    if (backgroundCommandIsLive(run)) running += 1;
-    else if (workspaceRunAttentionView(run).reason === "failure") review += 1;
+    if (backgroundCommandIsLive(run)) active += 1;
+    else if (run.status === "failed") review += 1;
     else finished += 1;
   }
   const parts: string[] = [];
-  if (running > 0) parts.push(`${running} running`);
+  if (active > 0) parts.push(`${active} active`);
   if (review > 0) parts.push(`${review} ${review === 1 ? "needs" : "need"} review`);
   if (finished > 0) parts.push(`${finished} finished`);
   return parts.join(" · ");
@@ -167,7 +182,7 @@ export function backgroundTaskTokenTotalLabel(
   const label = `${formatCompact(total)} tokens reported`;
   return reporting === traces.length
     ? label
-    : `${label} by ${reporting} of ${traces.length} tasks`;
+    : `${label} by ${reporting} of ${traces.length} agents`;
 }
 
 function rowsWithin(

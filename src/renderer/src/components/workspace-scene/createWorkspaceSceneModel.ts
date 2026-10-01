@@ -49,10 +49,7 @@ import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
 } from "../../utils/subagentDisclosure";
-import {
-  backgroundCommandRuns,
-  runningBackgroundTaskCount,
-} from "../../utils/backgroundTaskRuns";
+import { activeBackgroundTaskCount } from "../../utils/backgroundTaskRuns";
 import { buildWorkspaceSurfaceSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
@@ -539,14 +536,12 @@ export function createWorkspaceSceneModel({
   const canGuideParent = (trace: SubagentTrace): boolean =>
     Boolean(conversationIsRunning
       && canFollowUpSubagentTrace(trace, projection.turns));
-  const backgroundCommands = backgroundCommandRuns(
-    connection.snapshot?.runs ?? [],
+  const workspaceRuns = connection.snapshot?.runs ?? [];
+  const activeBackgroundTasks = activeBackgroundTaskCount(
+    projection.subagents,
+    workspaceRuns,
     persistedConversation?.id ?? null,
     projection.turns,
-  );
-  const runningBackgroundTasks = runningBackgroundTaskCount(
-    projection.subagents,
-    backgroundCommands,
   );
   const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
     try {
@@ -853,7 +848,7 @@ export function createWorkspaceSceneModel({
         unavailable: unavailableSurfaces,
         presentation: stackedTools ? "stacked" : sheetPanel ? "sheet" : "inline",
         visible: toolsVisible,
-        runningBackgroundTaskCount: runningBackgroundTasks,
+        activeBackgroundTaskCount: activeBackgroundTasks,
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: currentWorkflow?.goals.some(({ status }) =>
@@ -878,10 +873,8 @@ export function createWorkspaceSceneModel({
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,
         turns: projection.turns,
-        commands: backgroundCommands,
-        harnessId: projection.turns.at(-1)?.harnessId
-          ?? conversation?.modelSelection.harnessId
-          ?? null,
+        runs: workspaceRuns,
+        conversation: persistedConversation,
         onStopCommand: activityActions.stopWorkspaceRun,
         onDismissCommand: activityActions.dismissActivity,
         canFollowUpSubagent: canGuideParent,

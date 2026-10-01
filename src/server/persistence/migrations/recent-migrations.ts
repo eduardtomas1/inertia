@@ -9,6 +9,7 @@ import { nativeAntigravityProviderMigration } from "./native-antigravity-provide
 import { queuedMessagesMigration } from "./queued-messages";
 import { turnSessionRecoveryMigration } from "./turn-session-recovery";
 import { workingIndicatorMigration } from "./working-indicator";
+import { projectMemoryMigration } from "./project-memory";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -21,4 +22,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   completionSoundMigration,
   turnSessionRecoveryMigration,
   customAppearanceColorsMigration,
+  projectMemoryMigration,
 ];

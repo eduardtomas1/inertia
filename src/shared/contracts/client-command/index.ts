@@ -9,9 +9,11 @@ import {
 import { gitCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
 import { promptPresetCommandSchema } from "./prompt-presets";
+import { projectMemoryCommandSchemas } from "./project-memory";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
+  ...projectMemoryCommandSchemas,
   ...issueReportCommandSchemas,
   ...agentCommandSchemas,
   ...configurationCommandSchemas,

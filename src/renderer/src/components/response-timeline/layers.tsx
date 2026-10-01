@@ -46,6 +46,7 @@ import {
   shouldShowChangedFilesSummary,
 } from "./changedFiles";
 import { TurnMetadata } from "./metadata";
+import { RememberProjectMessage, SentProjectMemoryButton } from "../project-memory/ProjectMemoryHost";
 import type { ResponseTimelineProps } from "./types";
 import "./ConversationContextProvenance.css";
 
@@ -114,6 +115,8 @@ export function UserRequestLayer({
       <div className="message-meta">
         <span>You</span>
         <MessageOrigin message={turn.userMessage} />
+        <RememberProjectMessage message={turn.userMessage} />
+        <SentProjectMemoryButton turnId={turn.id} />
         {props.showTimestamps && <time dateTime={turn.userMessage.createdAt}>{formatClockTime(turn.userMessage.createdAt)}</time>}
         {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
       </div>

@@ -1,4 +1,5 @@
 import { snapshotPromptContext } from "../../../shared/snapshots";
+import { MAX_PROJECT_MEMORY_CONTEXT_BYTES, PROJECT_MEMORY_CONTEXT_LABEL } from "../../../shared/project-memory";
 import { createHash } from "node:crypto";
 import {
   realpathSync,
@@ -141,6 +142,7 @@ export interface AssembleTurnRequestInput {
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   internalInstructions?: readonly HiddenProviderInstruction[];
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  projectMemoryContext?: string | null;
 }
 
 interface MaterializedContext {
@@ -635,6 +637,16 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     input.attachments ?? [],
     input.imagePaths,
   );
+  if (contexts.some(({ label }) => label === PROJECT_MEMORY_CONTEXT_LABEL)) {
+    throw new Error("An attachment uses the reserved project memory label. Rename it before sending.");
+  }
+  if (input.projectMemoryContext) {
+    contexts.push({ kind: "attachment", label: PROJECT_MEMORY_CONTEXT_LABEL,
+      content: boundedText(input.projectMemoryContext, PROJECT_MEMORY_CONTEXT_LABEL, MAX_PROJECT_MEMORY_CONTEXT_BYTES), truncated: false });
+    if (contexts.length > MAX_EXECUTION_CONTEXT_REFERENCES) {
+      throw new Error("Project memory does not fit beside the rest of this message. Remove a context reference.");
+    }
+  }
   const modeInstructions: readonly HiddenProviderInstruction[] =
     input.interactionMode === "build"
       ? [{

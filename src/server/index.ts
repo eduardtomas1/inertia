@@ -91,6 +91,7 @@ import { createTurnInteractionCommandHandler, type TurnInteractionCommandDepende
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
+import { createProjectMemoryCommandHandler } from "./runtime/commands/project-memory-commands";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -680,6 +681,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   queuedMessages.start();
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      createProjectMemoryCommandHandler({ store, send }),
       queuedMessages.handler,
       usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),

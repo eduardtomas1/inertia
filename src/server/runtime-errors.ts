@@ -11,6 +11,7 @@ import { BackendProfileControllerError } from "./runtime/backends/backend-profil
 import { ProviderMaintenanceError } from "./provider/maintenance-controller";
 import { WorkspacePathAuthorityError } from "./workspace-path-authority";
 import { PromptPresetRepositoryError } from "./persistence/prompt-preset-repository";
+import { ProjectMemoryError } from "./persistence/project-memory-repository";
 import { ConversationAttachmentDiskFullError, ConversationAttachmentStorageFullError } from "../node/conversation-attachment-store-capacity";
 import {
   ATTACHMENT_RESOLUTION_PUBLIC_ERROR,
@@ -49,6 +50,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof ProviderMaintenanceError
     || error instanceof WorkspacePathAuthorityError
     || error instanceof PromptPresetRepositoryError
+    || error instanceof ProjectMemoryError
     || error instanceof ConversationAttachmentDiskFullError
     || error instanceof ConversationAttachmentStorageFullError
   ) return error.message;

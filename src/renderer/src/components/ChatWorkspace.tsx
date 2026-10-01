@@ -100,6 +100,8 @@ import type {
 import { LoadingMark } from "./ui";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
+import { ProjectMemoryHost, ProjectMemoryButton } from "./project-memory/ProjectMemoryHost";
+import type { ProjectMemoryCommandRunner } from "./project-memory/types";
 
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
@@ -199,6 +201,7 @@ type ChatWorkspaceProps = {
   contextPackets?: readonly ConversationContextPacketSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
+  onProjectMemoryCommand?: ProjectMemoryCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
@@ -261,7 +264,15 @@ type ChatWorkspaceProps = {
   onLatestContentVisibilityChange?: (visible: boolean) => void;
 };
 
-export function ChatWorkspace({
+export function ChatWorkspace(props: ChatWorkspaceProps): React.JSX.Element {
+  return <ProjectMemoryHost projectId={props.project?.id ?? ""} conversationId={props.conversation?.id}
+    projectName={props.project?.name ?? ""} request={props.project && props.conversation ? props.onProjectMemoryCommand : undefined}
+    disabled={props.loading || props.detailLoading}>
+    <ChatWorkspaceContent {...props} />
+  </ProjectMemoryHost>;
+}
+
+function ChatWorkspaceContent({
   embedded = false,
   project,
   conversation,
@@ -1040,6 +1051,7 @@ export function ChatWorkspace({
       {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
 
       <div ref={composerRegionRef} className="composer-region">
+        <div className="project-memory-launcher"><ProjectMemoryButton /></div>
         {pendingInputRequest && (
           <div
             className="pending-input-notice"

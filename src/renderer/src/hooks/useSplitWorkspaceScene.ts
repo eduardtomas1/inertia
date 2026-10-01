@@ -78,6 +78,7 @@ interface SplitWorkspaceActions
   extends Pick<
     WorkspaceSceneActions,
     | "runQueueCommand"
+    | "runProjectMemoryCommand"
     | "importProject"
     | "createConversation"
     | "respondToApproval"
@@ -366,6 +367,10 @@ export function useSplitWorkspaceScene({
     },
     run,
     runQueueCommand: actions.runQueueCommand ?? unavailableQueue,
+    runProjectMemoryCommand: (command: Parameters<NonNullable<WorkspaceSceneActions["runProjectMemoryCommand"]>>[0]) => {
+      if (!actions.runProjectMemoryCommand) return Promise.reject(new Error("Project memory is unavailable."));
+      return actions.runProjectMemoryCommand(command);
+    },
   });
   const model = useMemo(() => createWorkspaceSceneModel({
     view: "workspace",

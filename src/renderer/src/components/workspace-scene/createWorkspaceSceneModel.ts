@@ -1,4 +1,5 @@
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
+import type { ProjectMemoryCommandRunner } from "../project-memory/types";
 import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
@@ -266,6 +267,7 @@ export interface WorkspaceSceneActions {
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
+  runProjectMemoryCommand?: ProjectMemoryCommandRunner;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -723,6 +725,7 @@ export function createWorkspaceSceneModel({
       contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onQueueCommand: actions.runQueueCommand,
+      onProjectMemoryCommand: actions.runProjectMemoryCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")

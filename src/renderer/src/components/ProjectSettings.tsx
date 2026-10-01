@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Folders, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
@@ -12,6 +12,7 @@ import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
 import "./ProjectSettings.css";
+const ProjectMemoryPanel = lazy(() => import("./project-memory/ProjectMemoryPanel"));
 
 interface Props {
   initialProjectId?: string;
@@ -53,6 +54,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [iconsOpen, setIconsOpen] = useState(false);
   const [actionOpen, setActionOpen] = useState(false);
   const [actionName, setActionName] = useState("");
@@ -167,6 +169,12 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       {preferences.actions.length === 0 ? <p className="project-actions-empty">No custom actions configured. Detected package scripts remain available in the workspace.</p>
         : <ul className="project-actions-list">{preferences.actions.map((action) => <li key={action.id}><div><strong>{action.name}</strong><code>{[action.executable, ...action.args].join(" ")}</code></div><button type="button" aria-label={`Remove ${action.name}`} disabled={blocked} onClick={() => setPreference("actions", preferences.actions.filter(({ id }) => id !== action.id))}><Trash2 size={14} /></button></li>)}</ul>}
     </section>
+    {request && <section className="project-settings-card">
+      <Row title="Rules & decisions" description="Shared project context for every provider, with the reasons behind your choices.">
+        <button type="button" className="secondary-button" aria-expanded={memoryOpen} onClick={() => setMemoryOpen(!memoryOpen)}>{memoryOpen ? "Hide project memory" : "Manage project memory"}</button>
+      </Row>
+      {memoryOpen && <Suspense fallback={<p role="status">Loading project memory…</p>}><ProjectMemoryPanel key={project.id} projectId={project.id} projectName={project.name} request={request} disabled={disabled} /></Suspense>}
+    </section>}
     <h2 className="project-settings-group-title">Danger zone</h2>
     <section className="project-settings-card"><Row title="Remove project" description="Remove this project and its threads from Inertia. Files on disk are not touched.">
       <button type="button" className="is-danger" disabled={blocked || busyProject} onClick={() => {

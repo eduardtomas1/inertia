@@ -1,8 +1,14 @@
+import type { AgentHarnessEmitter } from "./agent-harness";
 import type { AgentInputRequest, AgentPlanStep } from "./interactions";
 import {
   interactionDisplayIdentity,
   isSafeInteractionDisplayText,
 } from "./approval-display";
+import {
+  boundedSubagentCount,
+  boundedSubagentText,
+  MAX_SUBAGENT_DURATION_MS,
+} from "./subagent-trace";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_QUESTION_CHARS = 16_384;
@@ -12,6 +18,7 @@ const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
 const MAX_CURSOR_TODOS = 100;
 const MAX_CURSOR_TODO_SESSIONS = 64;
+const MAX_CURSOR_TASK_MODEL_CHARS = 200;
 
 export interface CursorQuestionParams {
   toolCallId: string;
@@ -200,6 +207,35 @@ export function parseCursorTaskNotification(value: unknown): CursorTaskParams {
       ? { agentId: requireNativeId(record.agentId, "agentId", 1_000) }
       : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}
+
+export function cursorTaskSubagentEvent(
+  params: CursorTaskParams,
+  sequence: number,
+): Parameters<AgentHarnessEmitter["subagent"]>[0] {
+  const model = boundedSubagentText(params.model, MAX_CURSOR_TASK_MODEL_CHARS);
+  const durationMs = boundedSubagentCount(
+    params.durationMs,
+    MAX_SUBAGENT_DURATION_MS,
+  );
+  return {
+    sequence,
+    providerTaskId: params.toolCallId,
+    providerAgentId: params.agentId ?? null,
+    parentProviderAgentId: null,
+    parentProviderToolUseId: null,
+    providerToolUseId: params.toolCallId,
+    providerRole: params.subagentType,
+    providerName: null,
+    providerStatus: "completed",
+    status: "completed",
+    isLive: false,
+    description: params.description,
+    progress: null,
+    result: null,
+    ...(model !== null ? { model } : {}),
+    ...(durationMs !== null ? { durationMs } : {}),
   };
 }
 

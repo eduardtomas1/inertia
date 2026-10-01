@@ -1385,6 +1385,30 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
         result: "Found coverage.",
       }),
     ]));
+    expect(subagents.find(({ providerAgentId }) =>
+      providerAgentId === "child-1")).toMatchObject({
+      model: "gpt-5.5-codex-mini",
+    });
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "child-1",
+      status: "running",
+      activity: "MCP · docs/search",
+    }));
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "child-1",
+      status: "running",
+      usage: {
+        totalTokens: 2048,
+        inputTokens: 640,
+        cachedInputTokens: 128,
+        cacheWriteInputTokens: 16,
+        outputTokens: 60,
+        reasoningOutputTokens: 12,
+        contextTokens: 700,
+        maxContextTokens: 128000,
+      },
+    }));
+    expect(JSON.stringify(subagents)).not.toContain("CHILD_MCP_ARGUMENT");
     expect(captured(fake.capturePath).find(({ method }) =>
       method === "turn/steer")).toMatchObject({
       params: {
@@ -1526,6 +1550,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     process.env.INERTIA_APP_SERVER_SCENARIO = "nested-collab";
     const manager = trackedManager(fake.command);
     const subagents: ProviderSubagentEvent[] = [];
+    const usages: unknown[] = [];
 
     const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
@@ -1538,9 +1563,51 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       access: "full",
     }), {
       onSubagent: (event) => subagents.push(event),
+      onUsage: (event) => usages.push(event),
     });
 
     await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(usages).toEqual([]);
+    expect(subagents.find(({ providerAgentId }) =>
+      providerAgentId === "child-parent")).toMatchObject({
+      model: "gpt-5.5-codex",
+    });
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "child-parent",
+      parentProviderAgentId: null,
+      status: "running",
+      activity: "npm run lint",
+    }));
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "grandchild-a",
+      parentProviderAgentId: "child-parent",
+      activity: "File change",
+    }));
+    expect(subagents.filter(({ usage }) => usage !== undefined)).toEqual([
+      expect.objectContaining({
+        providerAgentId: "grandchild-a",
+        parentProviderAgentId: "child-parent",
+        status: "running",
+        isLive: true,
+        usage: {
+          totalTokens: 5400,
+          inputTokens: 800,
+          cachedInputTokens: 300,
+          cacheWriteInputTokens: 50,
+          outputTokens: 100,
+          reasoningOutputTokens: 16,
+          contextTokens: 900,
+          maxContextTokens: 258400,
+        },
+      }),
+    ]);
+    const serialized = JSON.stringify(subagents);
+    for (const leaked of ["thread-foreign", "CHILD_COMMAND_OUTPUT", "--fix", "src/nested-a.ts"]) {
+      expect(serialized).not.toContain(leaked);
+    }
+    expect(subagents.map(({ sequence }) => sequence)).toEqual(
+      subagents.map((_, index) => index + 1),
+    );
     expect(subagents).toEqual(expect.arrayContaining([
       expect.objectContaining({
         providerAgentId: "grandchild-a",

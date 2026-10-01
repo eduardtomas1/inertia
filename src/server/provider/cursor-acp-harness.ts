@@ -65,6 +65,7 @@ import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 import {
   cursorQuestions,
+  cursorTaskSubagentEvent,
   CursorTodoSessions,
   cursorTodoSteps,
   parseCursorGenerateImageNotification,
@@ -420,24 +421,7 @@ function startCursorRun(
         );
         subagentSequence += 1;
         emitter.capability("subagent-create", true);
-        emitter.subagent({
-          sequence: subagentSequence,
-          providerTaskId: params.toolCallId,
-          providerAgentId: params.agentId ?? null,
-          parentProviderAgentId: null,
-          parentProviderToolUseId: null,
-          providerToolUseId: params.toolCallId,
-          providerRole: params.subagentType,
-          providerName: params.model ?? null,
-          providerStatus: "completed",
-          status: "completed",
-          isLive: false,
-          description: params.description,
-          progress: params.durationMs === undefined
-            ? null
-            : `Completed in ${params.durationMs} ms`,
-          result: null,
-        });
+        emitter.subagent(cursorTaskSubagentEvent(params, subagentSequence));
       }, "Cursor ACP sent an invalid task notification.");
     })
     .onNotification(

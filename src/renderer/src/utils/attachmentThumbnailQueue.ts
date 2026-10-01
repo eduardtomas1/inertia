@@ -5,18 +5,28 @@ interface Thumbnail {
   source: string;
   update: (state: AttachmentThumbnailState) => void;
   visible: boolean;
+  attempts: number;
   image?: HTMLImageElement;
 }
 
 const THUMBNAIL_READ_TIMEOUT_MS = 15_000;
+const MAX_THUMBNAIL_READ_ATTEMPTS = 3;
 const pending = new Set<Thumbnail>();
 const loading = new Set<HTMLImageElement>();
 
 function pump(): void {
   while (loading.size < 2 && pending.size) {
-    const next = [...pending].find(({ element }) => element.parentElement === document.activeElement)
-      ?? pending.values().next().value!;
+    const waiting = [...pending];
+    const next = waiting.find(({ element }) => element.parentElement === document.activeElement)
+      ?? waiting.reduce((first, entry) => (
+        entry.attempts < first.attempts
+          || (entry.attempts === first.attempts
+            && first.element.compareDocumentPosition(entry.element) & Node.DOCUMENT_POSITION_PRECEDING)
+          ? entry
+          : first
+      ));
     pending.delete(next);
+    next.attempts += 1;
     const image = next.image = new Image();
     image.alt = "";
     loading.add(image);
@@ -30,7 +40,16 @@ function pump(): void {
       }
       if (next.image === image) {
         if (next.visible && failed !== undefined) next.update(failed ? "unavailable" : "ready");
-        else next.image = undefined;
+        else {
+          next.image = undefined;
+          if (next.visible && next.attempts < MAX_THUMBNAIL_READ_ATTEMPTS) {
+            setTimeout(() => {
+              if (!next.visible || next.image) return;
+              pending.add(next);
+              pump();
+            }, next.attempts * 1_000);
+          }
+        }
       }
       pump();
     };
@@ -47,7 +66,7 @@ export function observeAttachmentThumbnail(
   source: string,
   update: (state: AttachmentThumbnailState) => void,
 ): () => void {
-  const entry: Thumbnail = { element, source, update, visible: false };
+  const entry: Thumbnail = { element, source, update, visible: false, attempts: 0 };
   let disposed = false;
   const hide = (): void => {
     entry.visible = false;
@@ -62,6 +81,7 @@ export function observeAttachmentThumbnail(
     if (entry.image) element.append(entry.image);
     else {
       update("loading");
+      entry.attempts = 0;
       pending.add(entry);
       pump();
     }

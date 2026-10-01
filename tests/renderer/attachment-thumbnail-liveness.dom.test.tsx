@@ -156,3 +156,29 @@ it("admits waiting tiles in document order whatever order their visibility callb
   fireEvent.load(created[1]!);
   expect([0, 1, 2, 3, 4, 5].filter(readIssued)).toEqual([0, 1]);
 });
+
+it("lets never-tried tiles ahead of retried stalled tiles so healthy thumbnails keep main's schedule", () => {
+  vi.useFakeTimers();
+  const view = render(<SentMessageAttachmentList attachments={attachments} />);
+  const startedAt = new Map<HTMLImageElement, number>();
+  const firstRead = new Map<number, number>();
+  const readyAt = new Map<number, number>();
+  act(() => { for (let index = 0; index < 8; index += 1) setVisible(view.container, index, true); });
+  for (let now = 0; now <= 60_000; now += 500) {
+    for (const image of [...created]) {
+      const source = image.getAttribute("src");
+      if (!source || !image.onload) continue;
+      if (!startedAt.has(image)) startedAt.set(image, now);
+      const index = Number(source.at(-1));
+      if (!firstRead.has(index)) firstRead.set(index, now);
+      if (index >= 2 && now - startedAt.get(image)! >= 3_000) {
+        fireEvent.load(image);
+        readyAt.set(index, now);
+      }
+    }
+    act(() => { vi.advanceTimersByTime(500); });
+  }
+  expect([...readyAt.keys()].sort()).toEqual([2, 3, 4, 5, 6, 7]);
+  expect(Math.max(firstRead.get(4)!, firstRead.get(5)!)).toBeLessThanOrEqual(18_500);
+  expect(Math.max(firstRead.get(6)!, firstRead.get(7)!)).toBeLessThanOrEqual(22_000);
+});

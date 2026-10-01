@@ -19,7 +19,11 @@ function pump(): void {
     const waiting = [...pending];
     const next = waiting.find(({ element }) => element.parentElement === document.activeElement)
       ?? waiting.reduce((first, entry) => (
-        first.element.compareDocumentPosition(entry.element) & Node.DOCUMENT_POSITION_PRECEDING ? entry : first
+        entry.attempts < first.attempts
+          || (entry.attempts === first.attempts
+            && first.element.compareDocumentPosition(entry.element) & Node.DOCUMENT_POSITION_PRECEDING)
+          ? entry
+          : first
       ));
     pending.delete(next);
     next.attempts += 1;

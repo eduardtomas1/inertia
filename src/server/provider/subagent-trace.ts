@@ -4,6 +4,7 @@ export const MAX_SUBAGENT_DESCRIPTION_CHARS = 4_000;
 export const MAX_SUBAGENT_PROGRESS_CHARS = 4_000;
 export const MAX_SUBAGENT_RESULT_CHARS = 16_000;
 export const MAX_SUBAGENT_TRACES_PER_TURN = 128;
+export const MAX_SUBAGENT_LABEL_CHARS = 200;
 export const MAX_SUBAGENT_TOOL_USE_COUNT = 1_000_000;
 export const MAX_SUBAGENT_DURATION_MS = 31 * 24 * 60 * 60 * 1_000;
 
@@ -67,4 +68,16 @@ export function boundedSubagentCount(
     && value <= maximum
     ? value
     : null;
+}
+
+export function boundedSubagentLabel(
+  value: string | null | undefined,
+  maxChars = MAX_SUBAGENT_LABEL_CHARS,
+): string | null {
+  const text = value?.trim();
+  if (!text) return null;
+  if (text.length <= maxChars) return text;
+  const lastUnit = text.charCodeAt(maxChars - 1);
+  const end = lastUnit >= 0xd800 && lastUnit <= 0xdbff ? maxChars - 1 : maxChars;
+  return text.slice(0, end).trim() || null;
 }

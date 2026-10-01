@@ -21,6 +21,7 @@ import {
 import {
   boundedSubagentCount,
   boundedSubagentIdentifier,
+  boundedSubagentLabel,
   isTerminalSubagentStatus,
   MAX_SUBAGENT_DESCRIPTION_CHARS,
   MAX_SUBAGENT_DURATION_MS,
@@ -79,6 +80,15 @@ function safeSubagentLabel(
     workspaceRoot,
     maxChars: 200,
   })?.replace(/\s+/gu, " ").trim() || null;
+}
+
+function safeSubagentTelemetryLabel(
+  value: unknown,
+  workspaceRoot: string,
+): string | null {
+  return boundedSubagentLabel(sanitizeProviderActivityDetail(value, {
+    workspaceRoot,
+  })?.replace(/\s+/gu, " "));
 }
 
 function safeSubagentProviderStatus(
@@ -304,9 +314,9 @@ export class ExecutionLedgerRepository {
         workspaceRoot,
         maxChars: MAX_SUBAGENT_RESULT_CHARS,
       }),
-      model: safeSubagentLabel(input.model, workspaceRoot),
+      model: safeSubagentTelemetryLabel(input.model, workspaceRoot),
       activity: input.isLive
-        ? safeSubagentLabel(input.activity, workspaceRoot)
+        ? safeSubagentTelemetryLabel(input.activity, workspaceRoot)
         : null,
       toolUseCount: boundedSubagentCount(
         input.toolUseCount,

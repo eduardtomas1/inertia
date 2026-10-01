@@ -9,6 +9,7 @@ import { RuntimeStore } from "../../src/server/database";
 import type { UpsertSubagentTraceInput } from "../../src/server/persistence/types";
 import type { SubagentTaskUsage } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { subagentTrace } from "../../src/shared/contracts/subagent-trace-schema";
 
 const directories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -222,6 +223,19 @@ describe("subagent task telemetry persistence", () => {
     });
   });
 
+  it("cuts long model and activity labels plainly on a code point boundary", async () => {
+    const { patch } = await fixture();
+    const emoji = "\u{1F600}";
+    const trace = patch(1, {
+      model: "m".repeat(10_000),
+      activity: `a${emoji.repeat(150)}`,
+    })?.trace;
+    expect(trace?.model).toBe("m".repeat(200));
+    expect(trace?.activity).toBe(`a${emoji.repeat(99)}`);
+    expect(subagentTrace(trace)).toBe(true);
+    expect(patch(2, { activity: emoji.repeat(150) })?.trace.activity).toBe(emoji.repeat(100));
+  });
+
   it("clears activity when the runtime settles or stops live work", async () => {
     const { store, patch, turn } = await fixture();
     patch(1, { activity: "Running tests" });
@@ -251,6 +265,26 @@ describe("subagent task telemetry persistence", () => {
       activity: null,
       toolUseCount: 2,
     });
+  });
+
+  it("reads directly edited labels in a shape every chat can load", async () => {
+    const { store, databasePath, workspacePath, patch } = await fixture();
+    const traceId = patch(1, { model: "gpt-5.4", activity: "Reading" })?.trace.id;
+    store.close();
+    stores.splice(stores.indexOf(store), 1);
+    const database = new Database(databasePath);
+    try {
+      database.prepare("UPDATE subagent_traces SET model = '', activity = ? WHERE id = ?")
+        .run("\u{1F600}".repeat(150), traceId);
+    } finally {
+      database.close();
+    }
+    const reopened = new RuntimeStore(databasePath, workspacePath, { recoverInterruptedRuns: false });
+    stores.push(reopened);
+    const trace = reopened.snapshot().subagents.find(({ id }) => id === traceId);
+    expect(trace).toMatchObject({ model: null, activity: "\u{1F600}".repeat(100) });
+    expect(subagentTrace(trace)).toBe(true);
+    expect(subagentTrace(reopened.conversationDetail(trace!.conversationId)!.subagents[0])).toBe(true);
   });
 
   it("reads malformed stored usage as unavailable", async () => {

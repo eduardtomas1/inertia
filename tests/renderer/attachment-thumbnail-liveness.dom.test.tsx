@@ -165,7 +165,7 @@ it("lets never-tried tiles ahead of retried stalled tiles so healthy thumbnails 
   const readyAt = new Map<number, number>();
   act(() => { for (let index = 0; index < 8; index += 1) setVisible(view.container, index, true); });
   for (let now = 0; now <= 60_000; now += 500) {
-    for (const image of [...created]) {
+    for (const image of created.slice()) {
       const source = image.getAttribute("src");
       if (!source || !image.onload) continue;
       if (!startedAt.has(image)) startedAt.set(image, now);

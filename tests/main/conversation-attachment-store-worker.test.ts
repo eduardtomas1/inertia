@@ -1,10 +1,12 @@
 import { EventEmitter } from "node:events";
 
+import { Image } from "@napi-rs/canvas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 
 import { metadataFor } from "../../src/node/conversation-attachment-store-metadata";
 import type { ChatAttachmentMimeType } from "../../src/shared/attachments";
+import { pngWithoutPalette } from "../fixtures/attachments/png-chunks";
 
 // The secure filesystem operation is covered by conversation-attachment-store
 // tests. Supply its receipt here to exercise the real worker's validation and
@@ -80,6 +82,27 @@ afterEach(() => {
 });
 
 describe("retained attachment utility validation", () => {
+  it("does not publish a valid read receipt before native image decoding finishes", async () => {
+    let resolveStarted!: () => void;
+    let resolveDecoded!: () => void;
+    const started = new Promise<void>((resolve) => { resolveStarted = resolve; });
+    const decoded = new Promise<void>((resolve) => { resolveDecoded = resolve; });
+    const decode = Image.prototype.decode;
+    vi.spyOn(Image.prototype, "decode").mockImplementation(async function (this: Image) {
+      resolveStarted();
+      await decoded;
+      await decode.call(this);
+    });
+    const operation = perform(receiptFor(png));
+    await started;
+    const parentPort = Reflect.get(process, "parentPort");
+    expect(parentPort.postMessage).not.toHaveBeenCalled();
+    expect(process.exit).not.toHaveBeenCalled();
+    resolveDecoded();
+    await operation;
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+  });
+
   it("validates a retained image before reporting success and waits for acknowledgement", async () => {
     const receipt = receiptFor(png);
     const parentPort = await perform(receipt);
@@ -114,6 +137,7 @@ describe("retained attachment utility validation", () => {
 
   it.each([
     ["reference.png", "image/png", png.subarray(0, 33)],
+    ["missing-palette.png", "image/png", pngWithoutPalette()],
     ["reference.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Buffer.from("PK\x03\x04invalid")],
   ] as const)("rejects malformed %s even when its persisted digest matches", async (name, mimeType, bytes) => {
     const parentPort = await perform(receiptFor(bytes, name, mimeType));

@@ -30,7 +30,7 @@ import {
   truncatedXlsxFixture,
   validXlsxFixture,
 } from "../fixtures/attachments/malicious-structures";
-import { withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
+import { pngWithoutPalette, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
 const directories: string[] = [];
 
@@ -95,6 +95,11 @@ afterEach(async () => {
 });
 
 describe("private staged attachment validation", () => {
+  it("reports asynchronous native decoder rejection as a content error", async () => {
+    const { operation } = await stage("missing-palette.png", "image/png", pngWithoutPalette());
+    await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({ code: "content" });
+  });
+
   it("validates UTF-16 bytes without rewriting the staged file or digest", async () => {
     const bytes = Buffer.from("\ufeffRésumé 東京\n", "utf16le");
     const { operation, path } = await stage("notes.txt", "text/plain", bytes);

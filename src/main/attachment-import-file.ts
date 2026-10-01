@@ -323,7 +323,7 @@ export async function validateAttachmentImportFile(
     await assertRoot(operation, options.requirePinnedCwd === true);
     let validated;
     try {
-      validated = validateAttachmentImport({
+      validated = await validateAttachmentImport({
         name: operation.name,
         mimeType: operation.mimeType,
         data: bytes,

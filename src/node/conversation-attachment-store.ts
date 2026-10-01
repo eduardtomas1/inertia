@@ -88,7 +88,7 @@ export type ConversationAttachmentValidator = (value: {
   readonly name: string;
   readonly mimeType: ChatAttachmentMimeType;
   readonly data: Uint8Array;
-}) => ConversationAttachmentValidationResult;
+}) => ConversationAttachmentValidationResult | Promise<ConversationAttachmentValidationResult>;
 
 export interface ConversationAttachmentStoreOptions {
   readonly platform?: NodeJS.Platform;
@@ -833,6 +833,7 @@ export class ConversationAttachmentStore {
     signal?: AbortSignal,
   ): Promise<ConversationAttachmentPreview | null> {
     if (!UUID_PATTERN.test(id)) return null;
+    const operationSignal = this.operationSignal(signal);
     const configuredReadStall = process.env.NODE_ENV === "test"
       && this.readFault?.attachmentId === id
       ? this.readFault.stallBeforeRecordRevalidateMs
@@ -848,7 +849,7 @@ export class ConversationAttachmentStore {
         0,
         Math.min(Math.trunc(configuredReadStall), 60_000),
       ),
-    }, this.operationSignal(signal)));
+    }, operationSignal));
     if (
       process.env.NODE_ENV === "test"
       && configuredReadStall > 0
@@ -874,11 +875,12 @@ export class ConversationAttachmentStore {
       || createHash("sha256").update(bytes).digest("hex") !== metadata.digest
     ) throw new Error("Conversation attachment content changed.");
     if (this.validate) {
-      const validated = this.validate({
+      const validated = await this.validate({
         name: metadata.name,
         mimeType: metadata.mimeType,
         data: bytes,
       });
+      operationSignal.throwIfAborted();
       if (
         validated.displayName !== metadata.name
         || validated.mimeType !== metadata.mimeType

@@ -41,7 +41,7 @@ it("uses a structurally valid PNG with different bytes on each packaged launch",
   const second = await smokeImageBytes();
   expect(first.equals(second)).toBe(false);
   for (const bytes of [first, second]) {
-    const validated = validateAttachmentImport({
+    const validated = await validateAttachmentImport({
       name: "package-smoke.png",
       mimeType: "image/png",
       data: bytes,

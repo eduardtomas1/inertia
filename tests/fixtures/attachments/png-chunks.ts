@@ -1,4 +1,4 @@
-import { crc32 } from "node:zlib";
+import { crc32, deflateSync } from "node:zlib";
 
 export function pngChunk(kind: string, data = Buffer.alloc(0)): Buffer {
   const header = Buffer.alloc(8);
@@ -20,4 +20,19 @@ export function withEmptyPngDataChunks(png: Buffer): Buffer {
     offset = end;
   }
   return Buffer.concat(chunks);
+}
+
+/** A CRC-valid indexed PNG whose dimensions are readable, but its palette is missing. */
+export function pngWithoutPalette(): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(2, 0);
+  header.writeUInt32BE(2, 4);
+  header[8] = 8;
+  header[9] = 3;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", Buffer.from(deflateSync(Buffer.alloc(6)))),
+    pngChunk("IEND"),
+  ]);
 }

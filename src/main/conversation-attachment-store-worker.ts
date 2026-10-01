@@ -74,7 +74,7 @@ if (parentPort) {
         // later retention can replace the record using validated source bytes.
         if (!metadata) return { missing: true };
         const { validateAttachmentImport } = await import("./attachment-import.js");
-        const validated = validateAttachmentImport({
+        const validated = await validateAttachmentImport({
           name: metadata.name,
           mimeType: metadata.mimeType,
           data: Buffer.from(receipt.bytesBase64, "base64"),

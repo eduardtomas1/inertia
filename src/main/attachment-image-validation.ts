@@ -589,10 +589,12 @@ function inspectWebp(bytes: Buffer): ImageMetadata {
   });
 }
 
-export function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata): boolean {
+export async function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata): Promise<boolean> {
   try {
     const image = new Image();
     image.src = bytes;
+    // Buffer sources publish header dimensions before the native decoder settles.
+    await image.decode();
     return image.width === metadata.width && image.height === metadata.height;
   } catch {
     return false;
@@ -625,10 +627,10 @@ export function inspectImageMetadata(
   }
 }
 
-export function inspectImageAttachment(
+export async function inspectImageAttachment(
   bytes: Buffer,
   mimeType: ImageAttachmentMimeType,
-): ImageAttachmentInspection {
+): Promise<ImageAttachmentInspection> {
   const metadata = inspectImageMetadata(bytes, mimeType);
   if (!metadata) return { status: "unsafe" };
   const { width, height, frames } = metadata;
@@ -642,7 +644,7 @@ export function inspectImageAttachment(
   if (width * height * frames > MAX_IMAGE_DECODED_PIXELS) {
     return { status: "unsafe" };
   }
-  return decodedImageMatches(bytes, metadata)
+  return await decodedImageMatches(bytes, metadata)
     ? { status: "safe" }
     : { status: "unsafe" };
 }

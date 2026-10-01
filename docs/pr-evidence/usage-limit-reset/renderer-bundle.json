@@ -1,6 +1,6 @@
 {
   "baseline": "673bc7c9",
-  "method": "Same reviewed package-lock, Node 22 and dependencies; production electron-vite builds. Increase only exceeded ceilings by the measured feature delta and retain existing headroom.",
+  "method": "Node 22 production electron-vite builds against PR543. Frontend dependency versions are unchanged; added TOML/Keychain dependencies are server-only. Increase exceeded ceilings by the measured feature delta and retain prior headroom.",
   "changedBudgets": {
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 856631,
@@ -78,7 +78,7 @@
   },
   "implementationMeasurements": {
     "deferredLegacyPromptStashJavaScript": 1214,
-    "deferredUsageLimitsJavaScript": 20001,
+    "deferredUsageLimitsJavaScript": 20063,
     "deferredWelcomeGuideJavaScript": 29090,
     "deferredWorkingOrbJavaScript": 21807,
     "deferredSnapshotSettingsJavaScript": 5898,

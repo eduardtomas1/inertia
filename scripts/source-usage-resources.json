@@ -28,6 +28,11 @@
       "review": "Package-resolved PDF worker and canvas are external runtime dependencies. Graph reachability does not authorize pruning packages or native binaries."
     },
     {
+      "owner": "src/server/usage/native-subscriptions.ts",
+      "resources": "@napi-rs/keyring native platform bindings for Cursor account access",
+      "review": "Loaded only by the privileged subscription reader. Keep platform binaries unpacked and covered by native architecture and installer checks; never treat this binding as renderer code."
+    },
+    {
       "owner": "scripts/run-electron-builder.mjs",
       "resources": "package.json build resources, scripts/electron-builder.release.cjs, installer.nsh, AppRun hooks and platform icons",
       "review": "Package metadata is included verbatim in JSON output. Release config, wrapper and helper scripts are tooling roots. Native launchers, fuses, signing, provenance, notices and packaging checks remain required."

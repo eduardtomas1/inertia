@@ -230,6 +230,9 @@ function nativeModulePaths(resources, platform, productName, app) {
         ? `@napi-rs/canvas-${canvasPlatform}-${process.arch}/skia.${canvasPlatform}-${process.arch}.node`
         : `@napi-rs/canvas-${canvasPlatform}-${process.arch}-gnu/skia.${canvasPlatform}-${process.arch}-gnu.node`,
     ),
+    join(unpacked, platform === "darwin"
+      ? `@napi-rs/keyring-darwin-${process.arch}/keyring.darwin-${process.arch}.node`
+      : `@napi-rs/keyring-linux-${process.arch}-gnu/keyring.linux-${process.arch}-gnu.node`),
     join(unpacked, `better-sqlite3/prebuilds/${platform === "darwin" ? "darwin" : "linux"}-${process.arch}.node`),
     join(unpacked, "node-pty", "build", "Release", "pty.node"),
     ...(platform === "darwin"

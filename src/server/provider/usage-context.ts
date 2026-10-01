@@ -1,3 +1,4 @@
+import { openCodeSubscriptionCredential } from "../usage/opencode-subscription";
 import { providerChildEnvironment, providerEnvironment } from "../environment";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { ProviderRuntimeError, type ProviderInstallationUseTransfer } from "./contracts";
@@ -38,4 +39,29 @@ export async function readManagedClaudeUsage(executable: string | undefined, cwd
   // The reader awaits its tree barrier even on an ordinary timeout/cancellation.
   release();
   return result;
+}
+
+/** Resolve Go credentials from the actual workspace's effective OpenCode
+ * inventory, including project config and environment overrides. */
+export async function readManagedOpenCodeAccount(executable: string | undefined, cwd: string, model: string | undefined,
+  installation: ProviderManagerInstallationAuthority, signal: AbortSignal): Promise<{ token: string; scope: string } | null> {
+  if (!executable || (model && !model.startsWith("opencode-go/"))) return null;
+  const { readOpenCodeSdkInventory } = await import("./opencode-sdk-metadata");
+  const { env } = await providerEnvironment();
+  const admission = installation.acquire("opencode", executable, providerNativeBackendProfile("opencode"), "metadata-discovery", installation.operationIdentity("metadata-discovery"));
+  const release = (): void => {
+    if (!installation.release(admission)) {
+      installation.quarantine(admission, "opencode-usage-release-unconfirmed");
+      throw new ProcessTreeTerminationError("OpenCode usage installation authority");
+    }
+  };
+  let inventory: Awaited<ReturnType<typeof readOpenCodeSdkInventory>>;
+  try { inventory = await readOpenCodeSdkInventory(executable, providerChildEnvironment("opencode", env), cwd, { signal }); }
+  catch (error) {
+    if (isProcessTreeTerminationUnconfirmed(error)) installation.quarantine(admission, "opencode-usage-cleanup-unconfirmed");
+    else release();
+    throw error;
+  }
+  release();
+  return openCodeSubscriptionCredential(inventory, model);
 }

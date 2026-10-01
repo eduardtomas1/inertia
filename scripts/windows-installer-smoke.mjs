@@ -382,6 +382,7 @@ export function installedWindowsNativeBinaryPaths(
       .map((name) => join(installDirectory, name)),
     join(unpackedModules, `@anthropic-ai/claude-agent-sdk-win32-${architecture}/claude.exe`),
     join(unpackedModules, `@napi-rs/canvas-win32-${architecture}-msvc/skia.win32-${architecture}-msvc.node`),
+    join(unpackedModules, `@napi-rs/keyring-win32-${architecture}-msvc/keyring.win32-${architecture}-msvc.node`),
     join(unpackedModules, `better-sqlite3/prebuilds/win32-${architecture}.node`),
     ...NODE_PTY_RELEASE_FILES
       .map((name) => join(unpackedModules, "node-pty", "build", "Release", name)),

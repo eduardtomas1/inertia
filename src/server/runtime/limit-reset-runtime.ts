@@ -10,7 +10,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
   options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T> }) {
   const scheduler = new LimitResetScheduler({
     store: dependencies.store, signal: options.signal, enabled: dependencies.enableProviders,
-    readAccount: (providerId, force) => limits.nativeAccount(providerId, force),
+    readAccount: (providerId, force, model, cwd) => limits.nativeAccount(providerId, force, model, cwd),
     busy: (conversationId) => dependencies.turns.isActive(conversationId)
       || dependencies.store.hasActiveWorkspaceRunForConversation(conversationId)
       || dependencies.providerTerminalResumes.isActive(conversationId),

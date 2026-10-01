@@ -3,10 +3,14 @@ import type { AgentTurn, Conversation } from "../../shared/contracts";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 
+/** Relative reset durations are sampled across a network round trip. Accept
+ * at most two seconds of sampling drift; a moved quota window needs a new offer. */
+export function sameReportedReset(left: string, right: string): boolean {
+  return Math.abs(Date.parse(left) - Date.parse(right)) <= 2_000;
+}
 export const MAX_RESET_WAIT_MS = 31 * 86_400_000;
 export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentTurn | null): boolean {
   return conversation.archivedAt === null && turn?.status === "failed"
-    && (conversation.providerId === "codex" || conversation.providerId === "claude")
     && conversation.providerId === turn.providerId
     && conversation.modelSelection.backendProfileId === providerNativeBackendProfile(conversation.providerId).id
     && conversation.modelSelection.backendProfileId === turn.modelSelection.backendProfileId
@@ -19,8 +23,9 @@ export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentT
  * separate from the verified identity required for reset-credit redemption;
  * email/organization metadata must never grant authority to spend a credit. */
 export function resumeAccountIdentity(account: UsageAccount): string | null {
+  if (account.credentialFingerprint) return account.credentialFingerprint;
   if (account.identityKey) return account.identityKey;
-  if (!["codex", "claude"].includes(account.providerId) || !account.email) return null;
+  if (!account.email) return null;
   return createHash("sha256").update(JSON.stringify([account.providerId, account.email, account.organization ?? null, account.plan])).digest("hex");
 }
 export type ResetQuota = { kind: "unknown" } | { kind: "available" } | { kind: "exhausted"; resetsAt: string };
@@ -29,6 +34,13 @@ export function resetQuota(account: UsageAccount, model: string, now = Date.now(
   if (account.status !== "ready" || !Number.isFinite(updatedAt) || updatedAt > now || now - updatedAt > 180_000) return { kind: "unknown" };
   const relevant = account.windows.filter((window) => {
     if (account.providerId === "codex") return window.id === "codex:primary" || window.id === "codex:secondary";
+    if (account.providerId === "cursor") {
+      if (window.id === "cursor:totalPercentUsed") return true;
+      if (model === "auto" || model === "provider-default") return ["cursor:autoPercentUsed", "cursor:apiPercentUsed"].includes(window.id);
+      return window.id === (model.startsWith("composer") ? "cursor:autoPercentUsed" : "cursor:apiPercentUsed");
+    }
+    if (account.providerId === "opencode") return model.startsWith("opencode-go/") && /^opencode:go_(rolling|weekly|monthly)$/u.test(window.id);
+    if (account.providerId === "kimi") return /^kimi:(weekly|window_\d+)$/u.test(window.id);
     if (account.providerId !== "claude") return false;
     if (["claude:five_hour", "claude:seven_day", "claude:seven_day_oauth_apps"].includes(window.id)) return true;
     return (window.id === "claude:seven_day_opus" && model.includes("opus"))
@@ -36,7 +48,7 @@ export function resetQuota(account: UsageAccount, model: string, now = Date.now(
   });
   // A new/model-scoped exhausted window cannot be guessed away. Known windows
   // for another Claude family and the extra-usage allowance do not block this route.
-  const unrelated = new Set(["claude:seven_day_opus", "claude:seven_day_sonnet", "claude:seven_day_overage_included"]);
+  const unrelated = new Set(["cursor:autoPercentUsed", "cursor:apiPercentUsed", "claude:seven_day_opus", "claude:seven_day_sonnet", "claude:seven_day_overage_included"]);
   if (account.windows.some((window) => window.remainingPercent === 0 && !relevant.includes(window) && !unrelated.has(window.id))) return { kind: "unknown" };
   if (!relevant.length || relevant.some((window) => window.remainingPercent === null)) return { kind: "unknown" };
   const exhausted = relevant.filter((window) => window.remainingPercent === 0);

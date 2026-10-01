@@ -22,6 +22,7 @@ export interface UsageLimitsDependencies {
 }
 export class UsageLimitsService {
   private accounts: UsageAccount[] = [];
+  private nativeModels = new Map<string, string>();
   private routes = new Map<string, AccountRoute>();
   private sourceErrors = new Map<string, string>();
   private checkedAt: string | null = null;
@@ -81,20 +82,23 @@ export class UsageLimitsService {
       return this.snapshot();
     });
   }
-  async nativeAccount(providerId: ProviderInfo["id"], force = false): Promise<UsageAccount | null> {
+  async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string): Promise<UsageAccount | null> {
     const id = `native:${providerId}`;
+    const scope = JSON.stringify([model ?? null, cwd ?? null]);
     const cached = this.snapshot().accounts.find((account) => account.id === id);
-    if (!force && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) return cached;
+    if (!force && this.nativeModels.get(id) === scope && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) return cached;
     return this.serial(async () => {
       const info = this.dependencies.providers().find((provider) => provider.id === providerId);
       if (!info || !this.dependencies.enabled) return null;
-      const account = await this.dependencies.native.read(info).catch(() => null);
+      const account = await this.dependencies.native.read(info, model, cwd).catch(() => null);
       if (!account) return null;
       this.accounts = [...this.accounts.filter((entry) => entry.id !== id), account];
+      this.nativeModels.set(id, scope);
       return account;
     });
   }
   private async read(): Promise<UsageLimitsSnapshot> {
+    this.nativeModels.clear();
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
     const next: UsageAccount[] = [];
     this.routes.clear(); this.sourceErrors.clear();

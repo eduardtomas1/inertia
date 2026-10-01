@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import { createCanvas } from "@napi-rs/canvas";
 import Database from "better-sqlite3";
+import { AsyncEntry } from "@napi-rs/keyring";
 import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
 import { probeNativeExecutable } from "./native-executable-probe.mjs";
 
@@ -55,6 +56,8 @@ for (const packageName of ["@crowecawcaw/xa11y", "ffi-rs"]) {
     throw new Error(`Snapshot native binding could not load: ${packageName}`);
   }
 }
+
+if (typeof AsyncEntry.prototype.getPassword !== "function") throw new Error("The native Keychain binding could not load.");
 
 const database = new Database(":memory:");
 try {

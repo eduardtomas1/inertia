@@ -5,13 +5,13 @@ import type { RuntimeStore } from "../database";
 import { RuntimeRequestError, publicRuntimeError } from "../runtime-errors";
 import { publicLimitResetPlan, type StoredLimitResetPlan } from "../persistence/limit-reset-repository";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
-import { matchesFailedNativeTurn, resetQuota, resumeAccountIdentity } from "./limit-reset-policy";
+import { matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
 
 export interface LimitResetDependencies {
   store: RuntimeStore;
   signal: AbortSignal;
   enabled: boolean;
-  readAccount(providerId: Conversation["providerId"], force: boolean): Promise<UsageAccount | null>;
+  readAccount(providerId: Conversation["providerId"], force: boolean, model?: string, cwd?: string): Promise<UsageAccount | null>;
   busy(conversationId: string): boolean;
   dispatch(plan: StoredLimitResetPlan, guard: () => void): Promise<void>;
   track<T>(operation: () => Promise<T>): Promise<T>;
@@ -41,10 +41,10 @@ export class LimitResetScheduler {
     const turn = store.latestAgentTurnForConversation(conversationId);
     if (!matchesFailedNativeTurn(conversation, turn) || !turn || this.dependencies.busy(conversationId)) return null;
     const route = queuedRouteIdentity(conversation);
-    const account = await this.dependencies.readAccount(conversation.providerId, force);
+    const account = await this.dependencies.readAccount(conversation.providerId, force, turn.model, store.conversationPath(conversationId));
     this.dependencies.signal.throwIfAborted();
     const current = store.conversation(conversationId);
-    if (!account || route !== queuedRouteIdentity(current)
+    if (!account || account.providerId !== conversation.providerId || route !== queuedRouteIdentity(current)
       || store.latestAgentTurnForConversation(conversationId)?.id !== turn.id
       || !matchesFailedNativeTurn(current, store.latestAgentTurnForConversation(conversationId))) return null;
     const quota = resetQuota(account, turn.model);
@@ -78,16 +78,16 @@ export class LimitResetScheduler {
     if (!this.dependencies.enabled) throw new RuntimeRequestError("Automatic resume requires an available provider runtime.");
     const old = this.dependencies.store.limitResets.get(input.conversationId);
     if (old?.id === input.id) {
-      if (old.failedTurnId !== input.failedTurnId || old.resetsAt !== input.resetsAt) throw new RuntimeRequestError("This reset action identity was reused.");
+      if (old.failedTurnId !== input.failedTurnId || !sameReportedReset(old.resetsAt, input.resetsAt)) throw new RuntimeRequestError("This reset action identity was reused.");
       return this.get(input.conversationId);
     }
     const offer = await this.offer(input.conversationId, true);
-    if (!offer || !offer.accountIdentity || offer.failedTurnId !== input.failedTurnId || offer.resetsAt !== input.resetsAt) throw new RuntimeRequestError("The reported limit changed. Refresh this chat before scheduling a resume.");
+    if (!offer || !offer.accountIdentity || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt)) throw new RuntimeRequestError("The reported limit changed. Refresh this chat before scheduling a resume.");
     // Another in-flight request must not silently replace an accepted plan.
     const current = this.dependencies.store.limitResets.get(input.conversationId);
     if (current && ["waiting", "dispatching"].includes(current.state)) return this.get(input.conversationId);
     this.dependencies.store.limitResets.save({ ...input, ...offer, accountIdentity: offer.accountIdentity,
-      nextAttemptAt: input.resetsAt, attempts: 0, state: "waiting", error: null, turnId: null });
+      nextAttemptAt: offer.resetsAt, attempts: 0, state: "waiting", error: null, turnId: null });
     this.dependencies.changed(input.conversationId);
     this.arm();
     return this.get(input.conversationId);
@@ -102,7 +102,7 @@ export class LimitResetScheduler {
   }
   async snooze(input: { conversationId: string; failedTurnId: string; resetsAt: string }): Promise<void> {
     const offer = await this.offer(input.conversationId, true);
-    if (!offer || offer.failedTurnId !== input.failedTurnId || offer.resetsAt !== input.resetsAt || this.dependencies.busy(input.conversationId)) throw new RuntimeRequestError("The reported limit changed. Refresh this chat before snoozing.");
+    if (!offer || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt) || this.dependencies.busy(input.conversationId)) throw new RuntimeRequestError("The reported limit changed. Refresh this chat before snoozing.");
     const turn = this.dependencies.store.latestAgentTurnForConversation(input.conversationId)!;
     if (this.dependencies.store.findWorkspaceRun(turn.runId)) this.dependencies.store.acknowledgeWorkspaceRun(turn.runId);
     this.dependencies.store.updateConversation(input.conversationId, { snoozedUntil: offer.resetsAt });
@@ -141,10 +141,10 @@ export class LimitResetScheduler {
             this.assertDispatch(plan);
             if (this.dependencies.busy(plan.conversationId)) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
             const conversation = this.dependencies.store.conversation(plan.conversationId);
-            const account = await this.dependencies.readAccount(conversation.providerId, true);
-            this.assertDispatch(plan);
-            if (!account || resumeAccountIdentity(account) !== plan.accountIdentity) throw new RuntimeRequestError("The account changed or could not be checked. Resume this chat manually.");
             const model = this.dependencies.store.latestAgentTurnForConversation(plan.conversationId)!.model;
+            const account = await this.dependencies.readAccount(conversation.providerId, true, model, this.dependencies.store.conversationPath(plan.conversationId));
+            this.assertDispatch(plan);
+            if (!account || account.providerId !== conversation.providerId || resumeAccountIdentity(account) !== plan.accountIdentity) throw new RuntimeRequestError("The account changed or could not be checked. Resume this chat manually.");
             const quota = resetQuota(account, model);
             if (quota.kind !== "available") {
               if (plan.attempts >= 2) throw new RuntimeRequestError("The provider has not confirmed available quota. Refresh limits before resuming.");

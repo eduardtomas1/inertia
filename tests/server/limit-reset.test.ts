@@ -30,8 +30,8 @@ function begin(limitResetPlanId?: string) {
   const conversation = store.conversation(conversationId);
   const run = store.createWorkspaceRun({ kind: "agent", projectId: conversation.projectId, conversationId,
     label: "Task", detail: null, status: "running", port: null });
-  return store.beginAgentTurn({ conversationId, runId: run.id, content: "Continue", providerId: "codex",
-    modelSelection: conversation.modelSelection, model: "gpt-test", reasoningEffort: conversation.reasoningEffort,
+  return store.beginAgentTurn({ conversationId, runId: run.id, content: "Continue", providerId: conversation.providerId,
+    modelSelection: conversation.modelSelection, model: conversation.model || "gpt-test", reasoningEffort: conversation.reasoningEffort,
     interactionMode: conversation.interactionMode, accessMode: conversation.accessMode,
     configurationRevision: 0, association: "authoritative", limitResetPlanId }).turn;
 }
@@ -59,6 +59,25 @@ beforeEach(() => {
 afterEach(() => { abort.abort(); store.close(); rmSync(directory, { recursive: true, force: true }); vi.useRealTimers(); });
 
 describe("quota reset actions", () => {
+  it.each([
+    ["codex", "gpt-test", "codex:primary"], ["claude", "claude-sonnet", "claude:five_hour"],
+    ["cursor", "composer-2", "cursor:autoPercentUsed"], ["kimi", "kimi-code/k2", "kimi:weekly"],
+    ["opencode", "opencode-go/model", "opencode:go_rolling"],
+  ] as const)("schedules and admits one continuation for the native %s route", async (providerId, model, windowId) => {
+    const projectId = store.conversation(conversationId).projectId;
+    conversationId = store.createConversation(projectId, "Paused provider task", { providerId, model }).id;
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    account.providerId = providerId; account.windows[0]!.id = windowId;
+    await schedule();
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)?.state).toBe("completed");
+    expect(store.latestAgentTurnForConversation(conversationId)?.providerId).toBe(providerId);
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+  });
+
   it("persists explicit scheduling and claims its continuation atomically exactly once", async () => {
     const id = randomUUID();
     expect((await schedule(id)).plan).toMatchObject({ id, state: "waiting" });
@@ -142,6 +161,13 @@ describe("quota reset actions", () => {
     expect(groupWorkThreads(view).find(({ id }) => id === "snoozed")?.threads).toHaveLength(1);
     vi.setSystemTime(instant + 61_000); await scheduler.tick();
     expect(dependencies.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("accepts bounded relative-reset sampling drift and persists the fresh provider time", async () => {
+    const newer = new Date(Date.parse(reset) + 1000).toISOString();
+    account.windows[0]!.resetsAt = newer;
+    const id = randomUUID(); await schedule(id); await schedule(id);
+    expect(store.limitResets.get(conversationId)).toMatchObject({ id, resetsAt: newer, nextAttemptAt: newer });
   });
 
   it("rejects stale reset times and routes changed before scheduling", async () => {

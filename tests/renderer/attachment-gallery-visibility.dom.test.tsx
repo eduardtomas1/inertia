@@ -34,6 +34,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   for (const image of images) fireEvent.error(image);
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -75,27 +76,37 @@ it("keeps two native reads in flight and admits the focused visible image before
     for (const entry of observations.slice(0, 40)) entry.change(false);
     for (const entry of observations.slice(40)) entry.change(true);
   });
-  expect(images).toHaveLength(2);
-  expect(document.querySelectorAll(".sent-attachment-thumbnail img")).toHaveLength(0);
-  fireEvent.load(images[0]!);
-  expect(images).toHaveLength(3);
-  expect(images[2]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-59");
-  expect(last.querySelector("img")).toBe(images[2]);
-  fireEvent.error(images[1]!);
   expect(images).toHaveLength(4);
-  expect(images[3]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-40");
+  expect(images[0]!).toHaveAttribute("src", "");
+  expect(images[1]!).toHaveAttribute("src", "");
+  expect(document.querySelectorAll(".sent-attachment-thumbnail img")).toHaveLength(2);
+  expect(images[2]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-40");
+  expect(images[3]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-41");
+  fireEvent.load(images[0]!);
+  expect(images).toHaveLength(4);
+  fireEvent.load(images[2]!);
+  expect(images).toHaveLength(5);
+  expect(images[4]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-59");
+  expect(last.querySelector("img")).toBe(images[4]);
+  fireEvent.error(images[3]!);
+  expect(images).toHaveLength(6);
+  expect(images[5]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-42");
   expect(images.every((image) => !/image-(?:[2-9]|[12]\d|3\d)$/u.test(image.src))).toBe(true);
 });
 
-it("reuses an in-flight native node through visibility changes and preserves it when React removes the placeholder", () => {
+it("abandons an in-flight read when hidden and preserves the next node when React removes the placeholder", () => {
   const view = render(<SentMessageAttachmentList attachments={attachments.slice(0, 1)} />);
   act(() => observations[0]!.change(true));
-  const image = images[0]!;
+  const abandoned = images[0]!;
   act(() => observations[0]!.change(false));
-  expect(image.isConnected).toBe(false);
+  expect(abandoned.isConnected).toBe(false);
+  expect(abandoned).toHaveAttribute("src", "");
   act(() => observations[0]!.change(true));
-  expect(images).toEqual([image]);
+  expect(images).toHaveLength(2);
+  const image = images[1]!;
   expect(view.container.querySelector("img")).toBe(image);
+  fireEvent.load(abandoned);
+  expect(image.parentElement).toHaveAttribute("data-thumbnail-state", "loading");
   fireEvent.load(image);
   expect(view.container.querySelector("img")).toBe(image);
   expect(image.parentElement).toHaveAttribute("data-thumbnail-state", "ready");
@@ -103,23 +114,28 @@ it("reuses an in-flight native node through visibility changes and preserves it 
   act(() => observations[0]!.change(false));
   expect(view.container.querySelector("img")).toBeNull();
   act(() => observations[0]!.change(true));
-  expect(images).toHaveLength(2);
+  expect(images).toHaveLength(3);
+  expect(images[2]!.parentElement).toHaveAttribute("data-thumbnail-state", "loading");
 });
 
-it("shares admission across lists and retains detached active slots without reviving removed consumers", () => {
+it("shares admission across lists and frees an unmounted list's slots without reviving removed consumers", () => {
+  vi.useFakeTimers();
   const first = render(<SentMessageAttachmentList attachments={attachments.slice(0, 3)} />);
   const second = render(<SentMessageAttachmentList attachments={attachments.slice(3, 6)} />);
   act(() => { for (const entry of observations) entry.change(true); });
   expect(images).toHaveLength(2);
   first.unmount();
-  act(() => { for (const entry of observations.slice(0, 3)) entry.change(true); });
   expect(images).toHaveLength(2);
-  fireEvent.load(images[0]!);
-  expect(images).toHaveLength(3);
+  act(() => { vi.runOnlyPendingTimers(); });
+  expect(images).toHaveLength(4);
+  act(() => { for (const entry of observations.slice(0, 3)) entry.change(true); });
+  expect(images).toHaveLength(4);
   expect(images[2]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-3");
+  expect(images[3]).toHaveAttribute("src", "inertia://bundle/attachment-preview/image-4");
   expect(second.container.querySelector("img")).toBe(images[2]);
-  expect(second.container.querySelector('[data-thumbnail-state="ready"]')).toBeNull();
+  fireEvent.load(images[0]!);
   fireEvent.error(images[1]!);
+  expect(second.container.querySelector('[data-thumbnail-state="ready"]')).toBeNull();
   expect(second.container.querySelector('[data-attachment-unavailable="true"]')).toBeNull();
 });
 
@@ -140,7 +156,7 @@ it("ignores an old source's completion after its replacement is admitted", () =>
   expect(view.container.querySelector("img")).toBe(currentImage);
 });
 
-it("keeps the StrictMode ref replay's abandoned native read counted until completion", () => {
+it("ignores the StrictMode ref replay's abandoned native read", () => {
   vi.stubGlobal("IntersectionObserver", class {
     constructor(private callback: IntersectionObserverCallback) {}
     observe(target: Element): void {
@@ -151,6 +167,7 @@ it("keeps the StrictMode ref replay's abandoned native read counted until comple
   const view = render(<StrictMode><SentMessageAttachmentList attachments={attachments.slice(0, 1)} /></StrictMode>);
   expect(images).toHaveLength(2);
   expect(images[0]!.isConnected).toBe(false);
+  expect(images[0]!).toHaveAttribute("src", "");
   expect(view.container.querySelector("img")).toBe(images[1]);
   fireEvent.load(images[0]!);
   expect(images[1]!.parentElement).toHaveAttribute("data-thumbnail-state", "loading");

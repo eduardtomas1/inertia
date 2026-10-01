@@ -21,7 +21,7 @@ import {
   formatAttachmentSize,
   type AttachmentPreviewSource,
 } from "../utils/composerAttachments";
-import { observeAttachmentThumbnail } from "../utils/attachmentThumbnailQueue";
+import { observeAttachmentThumbnail, type AttachmentThumbnailState } from "../utils/attachmentThumbnailQueue";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
 function SentAttachment({
@@ -34,12 +34,10 @@ function SentAttachment({
   onPreview: (attachment: AttachmentPreviewSource) => void;
 }): React.JSX.Element {
   const { id } = attachment;
-  const [state, setState] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [state, setState] = useState<AttachmentThumbnailState>("loading");
   const observe = useCallback((node: HTMLSpanElement | null) => {
     if (!node) return;
-    return observeAttachmentThumbnail(node, attachmentPreviewUrl({ id }), (failed) => {
-      setState(failed ? "unavailable" : "ready");
-    });
+    return observeAttachmentThumbnail(node, attachmentPreviewUrl({ id }), setState);
   }, [id]);
   const kind = chatAttachmentKind(attachment.mimeType);
   const previewKind = attachmentPreviewKind(attachment);

@@ -8,10 +8,15 @@ private prompt or user repository content is used.
 
 The panel is a plain list: a muted "Running" label, one quiet card per task
 (title; kind and elapsed time; model, tokens and tool uses when reported; what
-it is doing with a "View turn" link), then one collapsed "Finished" row that
-counts failures in words and offers a dismiss icon for finished commands. A
-card expands in place into label and value rows. The only colour is the danger
-text for failed work.
+it is doing or its result, then a quiet "View transcript" toggle), then one
+collapsed "Finished" row that counts failures in words and offers a dismiss icon
+for finished commands. "View transcript" opens a compact block in the same card:
+the task text (4 lines, then "Show more"), the latest progress or outcome (6
+lines, then "Show more"), one meta line with the latest step and context left,
+and the "View turn" and "Guide parent" links. The only colour is the danger text
+for failed work. The line of a running task uses the timeline's own thinking
+sweep (`turn-thinking-sweep` in `src/renderer/src/styles.css`), with the same
+reduced-motion, forced-colours and hidden-window guards.
 
 ## Reproducibility
 
@@ -29,9 +34,9 @@ animated working indicator and composer stop control are canvas drawings that
 | Chat | Harness | What it shows |
 | --- | --- | --- |
 | Usage pipeline refactor | `codex-app-server` | Running: Explorer (model, tokens, tool uses, current tool), a dev server the user started, and a child agent "from Explorer". Finished: a failed agent, a completed agent and a failed test command (2 failed). Two commands the provider ran inside its turn are correctly left out. |
-| Claude delegated review | `claude-agent-sdk` | Running task with its last tool, a total-only token count and a Stop control; a finished task expanded to show its details |
-| OpenCode schema sweep | `opencode-sdk` | Running task expanded with every latest-step field; a finished child "from Schema sweep" |
-| Cursor thread summary | `cursor-acp` | Finished task with model and runtime and no token text on the card; Details says "Not reported by Cursor" |
+| Claude delegated review | `claude-agent-sdk` | Running task with its last tool, a total-only token count and a Stop control; a finished task with its transcript open (outcome first) |
+| OpenCode schema sweep | `opencode-sdk` | Running task with its transcript open, showing every latest-step field; a finished child "from Schema sweep" |
+| Cursor thread summary | `cursor-acp` | Finished task with model and runtime and no token text on the card; its transcript says "Tokens not reported by Cursor" |
 | Kimi quick fix | `kimi-acp` | Empty state: "No background tasks." |
 
 ## Wide (1440 × 1100)
@@ -40,7 +45,7 @@ animated working indicator and composer stop control are canvas drawings that
 | --- | --- |
 | ![Wide dark](background-tasks-wide-dark.png) | ![Wide light](background-tasks-wide-light.png) |
 
-## Narrow (1000 × 800), one card expanded
+## Narrow (1000 × 800), one transcript open
 
 | Light | Dark |
 | --- | --- |
@@ -65,10 +70,12 @@ animated working indicator and composer stop control are canvas drawings that
 - The Finished row ("Finished 3 · 2 failed"), its danger word, and the dismiss
   icon, which removes the finished command through the existing
   `activity.dismiss` command and disappears when nothing is dismissible.
-- Details: cumulative total, latest step, context remaining (same meaning as the
-  Usage surface), progress and runtime; "Not reported by Cursor" only there.
-- Keyboard: a card is reached with Tab from the tab and expanded with Enter;
-  every button has an accessible name and no control sits inside another.
+- The transcript: collapsed by default, compact (no label grid or meter), task
+  text, progress, one meta line ("… · 75% context left"), and View turn; opening
+  it adds less than 110 px to a card.
+- The running task's line carries the shared thinking sweep; its title does not.
+- Keyboard: "View transcript" is reached with Tab from the tab and toggled with
+  Enter; every button has an accessible name and no control sits inside another.
 - No viewport or panel overflow, no truncated titles at 760 × 600, and the
   composer still ends at its dock.
 - After an application restart the surface is still selected, tokens persist,

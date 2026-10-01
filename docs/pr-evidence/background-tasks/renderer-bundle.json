@@ -1,7 +1,7 @@
 {
   "baseline": "2364d768a71214bfbff7481bb5545cf19906a78f",
   "featureBase": "70d3d0f8",
-  "after": "12fa20b7",
+  "after": "52db888d",
   "platform": "macOS 27.0.1 arm64, Node 22.23.2, same package-lock.json",
   "note": "Every closure measured by scripts/check-renderer-bundle.mjs. The Background tasks surface is its own lazy chunk (tasks-*.js) with a lazily loaded stylesheet. Only deferredBackgroundTasksJavaScript was added; other caps are unchanged and left to the coordinator's final re-measurement. coreJavaScript was already over its cap on the feature base (W1).",
   "measurements": {
@@ -71,10 +71,10 @@
     "deferredBackgroundTasksJavaScript": {
       "mainBytes": null,
       "featureBaseBytes": null,
-      "afterBytes": 12085,
+      "afterBytes": 12590,
       "deltaFromMainBytes": null,
       "deltaFromFeatureBaseBytes": null,
-      "capBytes": 12416,
+      "capBytes": 12928,
       "withinCap": true
     },
     "deferredProjectSettingsJavaScript": {
@@ -206,9 +206,9 @@
     "entryCss": {
       "mainBytes": 354742,
       "featureBaseBytes": 354742,
-      "afterBytes": 354742,
-      "deltaFromMainBytes": 0,
-      "deltaFromFeatureBaseBytes": 0,
+      "afterBytes": 354870,
+      "deltaFromMainBytes": 128,
+      "deltaFromFeatureBaseBytes": 128,
       "capBytes": 355064,
       "withinCap": true
     },

@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import { providerNativeModelSelection } from "../../shared/model-routing";
+import type { ProviderId } from "../../shared/contracts";
+import type { NewConversationOptions } from "./types";
+
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
 export const DATABASE_RECOVERY_EXPORT_VERSION = 2;
 export const DATABASE_RECOVERY_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
@@ -200,4 +204,20 @@ export function parseDatabaseRecoveryExport(
       })),
     })),
   };
+}
+
+export function recoveredConversationModel(conversation: {
+  providerId: ProviderId;
+  model: string;
+  reasoningEffort: string;
+}): Pick<NewConversationOptions, "providerId" | "model" | "modelSelection" | "reasoningEffort"> {
+  return conversation.model
+    ? { providerId: conversation.providerId, model: conversation.model, reasoningEffort: conversation.reasoningEffort }
+    : {
+        providerId: conversation.providerId,
+        modelSelection: providerNativeModelSelection({
+          providerId: conversation.providerId,
+          reasoningEffort: conversation.reasoningEffort,
+        }),
+      };
 }

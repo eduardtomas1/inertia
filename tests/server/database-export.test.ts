@@ -21,6 +21,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { parseDatabaseRecoveryExport } from "../../src/server/persistence/database-export";
 import {
   readDatabaseRecoveryExportFile,
@@ -570,6 +571,53 @@ describe("safe database recovery exports", () => {
       ({ role, content }) => ({ role, content }),
     )).toEqual(expected);
     store.close();
+  });
+
+  it.each(["gemini", "antigravity"])("stores an imported %s chat without a model exactly like the Antigravity migration", async (providerId) => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false });
+    const archive = {
+      format: "inertia-recovery-export",
+      version: 2,
+      exportedAt: "2026-08-10T12:00:00.000Z",
+      projects: [{
+        name: "Gemini project",
+        path: "/informational/legacy",
+        conversations: [{
+          title: "Gemini chat",
+          providerId,
+          model: providerId === "gemini" ? "gemini-2.5-pro" : "",
+          reasoningEffort: providerId === "gemini" ? "high" : "",
+          interactionMode: "build",
+          accessMode: "supervised",
+          messages: [],
+        }],
+      }],
+    };
+    try {
+      await store.importRecoveryData(JSON.stringify(archive), temporaryDirectory());
+      const reader = new Database(databasePath, { readonly: true });
+      try {
+        const row = reader.prepare(`
+          SELECT provider_id, provider_session_id, model, reasoning_effort,
+                 model_selection_json, continuation_identity_json
+          FROM conversations WHERE title = 'Gemini chat'
+        `).get() as Record<string, string | null>;
+        expect(row).toMatchObject({
+          provider_id: "antigravity",
+          provider_session_id: null,
+          model: "",
+          reasoning_effort: "",
+          continuation_identity_json: null,
+        });
+        expect(JSON.parse(row.model_selection_json!)).toEqual(providerNativeModelSelection({ providerId: "antigravity" }));
+      } finally {
+        reader.close();
+      }
+    } finally {
+      store.close();
+    }
   });
 
   it.each([1, 2])("recovers released Gemini version %i archives with current provider defaults", async (version) => {

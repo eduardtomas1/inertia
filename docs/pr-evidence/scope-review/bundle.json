@@ -4,5 +4,14 @@
   "command": "npm run build:bundle --ignore-scripts (native guardian build unavailable locally)",
   "mainWorkbenchFirstLoadJavaScript": { "before": 853542, "after": 854242, "added": 700 },
   "coreJavaScript": { "before": 2226045, "after": 2228436, "added": 2391 },
-  "notes": "Adds 700 bytes to the startup ceiling and 2335 bytes to the core ceiling; the final styled toggle uses 56 bytes of the original core headroom. Remaining startup/core headroom: 15/18 bytes. ScopeReviewPanel emits 6870 bytes within its own 7.5 KiB deferred ceiling and is asserted absent from both initial chat routes. No dependency changes."
+  "notes": "Adds 700 bytes to the startup ceiling and 2335 bytes to the core ceiling; the final styled toggle uses 56 bytes of the original core headroom. Remaining startup/core headroom: 15/18 bytes. ScopeReviewPanel emits 6870 bytes within its own 7.5 KiB deferred ceiling and is asserted absent from both initial chat routes. No dependency changes.",
+  "uiPolish": {
+    "baseline": "06d501096fb8eee532d28d4540c178612f30162f",
+    "environment": "macOS 27.0.1 arm64, Node 22.23.2, npm run build:bundle",
+    "mainWorkbenchFirstLoadJavaScript": { "before": 854242, "after": 854263, "added": 21, "cap": "854257 + 21" },
+    "coreJavaScript": { "before": 2228436, "after": 2228453, "added": 17, "cap": "unchanged, 1 byte of headroom left" },
+    "deferredScopeReviewJavaScript": { "before": 6870, "after": 8322, "added": 1452, "cap": "7.5 KiB + 1452" },
+    "entryCss": { "before": 354742, "after": 354742, "added": 0 },
+    "notes": "The panel stylesheet now loads with the Changes panel chunk so the closed disclosure row is styled; its preload entry adds 21 startup bytes. The polished panel markup (field help, notices, guarded actions) adds 1452 deferred bytes. The entry stylesheet does not change."
+  }
 }

@@ -37,6 +37,7 @@ export function TaskBoard({ snapshot, online, projectId, onProjectChange, onOpen
   const root = useRef<HTMLElement>(null);
   const newTaskButton = useRef<HTMLButtonElement>(null);
   const titleInput = useRef<HTMLInputElement>(null);
+  const closeNotesButton = useRef<HTMLButtonElement>(null);
   const wasCreating = useRef(false);
   const id = useId();
   const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
@@ -44,6 +45,7 @@ export function TaskBoard({ snapshot, online, projectId, onProjectChange, onOpen
   const cards = useMemo(() => taskBoardCards({ conversations, projects: snapshot?.projects ?? [], runs: snapshot?.runs ?? [], projectId, query, includeSnoozed, now }),
     [conversations, snapshot?.projects, snapshot?.runs, projectId, query, includeSnoozed, now]);
   const noteConversation = conversations.find((chat) => chat.id === noteId && !chat.archivedAt);
+  useEffect(() => { closeNotesButton.current?.focus(); }, [noteConversation?.id]);
   useEffect(() => { setLimits({}); }, [projectId, query, includeSnoozed]);
   useEffect(() => {
     if (snapshot && projectId && !snapshot.projects.some((project) => project.id === projectId)) onProjectChange(null);
@@ -65,7 +67,7 @@ export function TaskBoard({ snapshot, online, projectId, onProjectChange, onOpen
   const closeNotes = (): void => {
     const previous = noteId;
     setNoteId(null);
-    root.current?.querySelector<HTMLButtonElement>(`[data-task-id="${previous}"] [data-task-notes]`)?.focus();
+    window.requestAnimationFrame(() => root.current?.querySelector<HTMLButtonElement>(`[data-task-id="${previous}"] [data-task-notes]`)?.focus());
   };
 
   return <section className={`task-board${noteConversation ? " has-notes" : ""}`} ref={root} aria-label="Task board">
@@ -134,7 +136,7 @@ export function TaskBoard({ snapshot, online, projectId, onProjectChange, onOpen
       {snapshot && cards.length === 0 && <p className="task-board-notice">{query || projectId || includeSnoozed ? "Try another search or project filter." : "Create a task or open an existing chat to get started."}</p>}
     </div>
     {noteConversation && <aside className="task-board-notes" aria-label={`Notes for ${noteConversation.title}`}>
-      <button type="button" className="task-board-close-notes" aria-label="Close task notes" onClick={closeNotes}><X size={16} /></button>
+      <button ref={closeNotesButton} type="button" className="task-board-close-notes" aria-label="Close task notes" onClick={closeNotes}><X size={16} /></button>
       <ConversationNotes conversationId={noteConversation.id} title={noteConversation.title} online={online} sendCommand={sendCommand} />
     </aside>}
   </section>;

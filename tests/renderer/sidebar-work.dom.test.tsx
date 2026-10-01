@@ -314,6 +314,7 @@ describe("compact Work sidebar", () => {
 
     expect(footerButtons.map((button) => button.textContent)).toEqual([
       "Daily work",
+      "Task board",
       "Usage",
       "Settings",
       "Help",

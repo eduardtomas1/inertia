@@ -92,15 +92,15 @@ test("shows canonical work states, filters tasks, and captures both appearances"
   await view.getByRole("textbox", { name: "Search tasks" }).fill("reconnect");
   await expect(view.locator(".task-board-card")).toHaveCount(1);
   await view.getByRole("textbox", { name: "Search tasks" }).clear();
+  await view.getByRole("heading", { name: "Keep the next step in sight." }).click();
   await evidence(info, "task-board-dark");
   await setAppearanceInPlace(app, "light");
   await evidence(info, "task-board-light");
   await setAppearanceInPlace(app, "dark");
 });
 
-test("creates, settles, reopens, and saves notes through real IPC and restart", async ({ browserName: _browserName }, info) => {
-  test.setTimeout(120_000);
-  let view = await board();
+test("creates, settles, and reopens a task without starting an agent", async () => {
+  const view = await board();
   await view.getByRole("button", { name: "New task", exact: true }).click();
   await expect(view.getByRole("textbox", { name: "Task title" })).toBeFocused();
   await view.getByRole("textbox", { name: "Task title" }).fill("Check cancellation between attempts");
@@ -111,8 +111,15 @@ test("creates, settles, reopens, and saves notes through real IPC and restart", 
   await expect(view.getByRole("region", { name: "Done", exact: true }).getByRole("button", { name: createdTitle, exact: true })).toBeVisible();
   await view.getByRole("button", { name: `Reopen ${createdTitle}`, exact: true }).click();
   await expect(view.getByRole("region", { name: "Ready", exact: true }).getByRole("button", { name: createdTitle, exact: true })).toBeVisible();
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("saves notes through real IPC and restart", async ({ browserName: _browserName }, info) => {
+  test.setTimeout(120_000);
+  let view = await board();
   await view.getByRole("combobox", { name: "Task board project" }).selectOption("");
   await view.getByRole("button", { name: `Notes for ${taskTitle}`, exact: true }).click();
+  await expect(page.getByRole("button", { name: "Close task notes" })).toBeFocused();
   await page.getByRole("textbox", { name: "Chat notes" }).fill(note);
   await page.getByRole("button", { name: "Save notes", exact: true }).click();
   await expect(page.locator(".conversation-notes").getByRole("status")).toHaveText("Saved");
@@ -128,9 +135,13 @@ test("creates, settles, reopens, and saves notes through real IPC and restart", 
   view = await board();
   await view.getByRole("button", { name: `Notes for ${taskTitle}`, exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Chat notes" })).toHaveValue(note);
-  await expect(view.getByRole("region", { name: "Ready", exact: true }).getByRole("button", { name: createdTitle, exact: true })).toBeVisible();
+  await expect(view.getByRole("region", { name: "Done", exact: true }).getByRole("button", { name: "Ship clearer activity labels", exact: true })).toBeVisible();
   await app.resizeWindow(780, 900);
+  await expect(page.getByRole("textbox", { name: "Chat notes" })).toBeVisible();
   await evidence(info, "task-board-notes-narrow");
+  await page.getByRole("button", { name: "Close task notes" }).click();
+  await expect(view.getByRole("button", { name: `Notes for ${taskTitle}` })).toBeFocused();
+  await expect(view.getByRole("heading", { name: "Keep the next step in sight." })).toBeVisible();
   await app.resizeWindow(1500, 1000);
   expect(app.rendererErrors).toEqual([]);
 });

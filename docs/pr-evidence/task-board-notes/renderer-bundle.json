@@ -66,7 +66,7 @@
     "deferredProjectSettingsJavaScript": 13271,
     "deferredReviewNoteJavaScript": 1434,
     "deferredThreadActionsJavaScript": 7998,
-    "deferredTaskBoardJavaScript": 8893,
+    "deferredTaskBoardJavaScript": 9012,
     "deferredConversationNotesJavaScript": 5289,
     "deferredProjectCustomizeJavaScript": 11256,
     "deferredProjectColorContrastJavaScript": 1802,
@@ -110,7 +110,7 @@
     "deferredPdfWorker": 1265413
   },
   "delta": {
-    "deferredTaskBoardJavaScript": 8893,
+    "deferredTaskBoardJavaScript": 9012,
     "deferredConversationNotesJavaScript": 5289,
     "mainWorkbenchFirstLoadJavaScript": 1277,
     "detachedChatFirstLoadJavaScript": 78,

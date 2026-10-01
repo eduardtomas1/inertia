@@ -33,8 +33,8 @@ export function taskBoardCards(input: {
     if (query && !`${conversation.title}\n${project.name}\n${project.path}\n${conversation.branch ?? ""}`.toLocaleLowerCase().includes(query)) return [];
     return [{ ...thread, project, column: taskBoardColumn(thread) }];
   }).sort((a, b) => Number(Boolean(b.conversation.pinnedAt)) - Number(Boolean(a.conversation.pinnedAt))
-    || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)
-    || a.conversation.id.localeCompare(b.conversation.id));
+    || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt, "en")
+    || a.conversation.id.localeCompare(b.conversation.id, "en"));
 }
 
 export function canSettleBoardCard(card: TaskBoardCard): boolean {

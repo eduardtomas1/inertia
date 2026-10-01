@@ -50,7 +50,6 @@
 .task-board-notes { position: relative; flex: 0 0 340px; min-width: 0; border-left: 1px solid var(--border); background: var(--surface); overflow: auto; }
 .task-board-notes .panel-toolbar { padding-right: 48px; }
 .task-board-close-notes { position: absolute; top: 17px; right: 12px; z-index: 1; display: flex; border: 0; background: none; color: var(--text-muted); padding: 4px; }
-.task-board.has-notes .task-board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .task-board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 900px) { .task-board.has-notes { flex-direction: column; } .task-board-notes { flex-basis: auto; min-height: 420px; border-left: 0; border-top: 1px solid var(--border); } .task-board.has-notes .task-board-main { overflow: visible; } }
+@media (max-width: 900px) { .task-board.has-notes { flex-direction: column; } .task-board.has-notes .task-board-main { display: none; } .task-board-notes { flex: 1; min-height: 0; border-left: 0; } }
 @media (max-width: 650px) { .task-board-main { padding: 20px 14px; } .task-board-heading { flex-wrap: wrap; } .task-board-columns, .task-board.has-notes .task-board-columns, .task-board-create { grid-template-columns: minmax(0, 1fr); } }

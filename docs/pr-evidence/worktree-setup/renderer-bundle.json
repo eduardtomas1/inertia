@@ -47,5 +47,26 @@
       "newCeilingBytes": 3328
     }
   },
+  "uiPolish": {
+    "platform": "macOS 27.0.1 arm64, Node 22.23.2",
+    "reason": "The setup card keeps focus on a busy action (aria-disabled), moves focus to the next action when the clicked one disappears, opens output at its end, links the Output disclosure to its block, and shows a neutral icon for skipped setup. The private spinner and Terminal icon were removed.",
+    "measurements": {
+      "deferredWorktreeSetupJavaScript": {
+        "baseBytes": 3065,
+        "candidateBytes": 3928,
+        "deltaBytes": 863,
+        "previousCeilingBytes": 3328,
+        "newCeilingBytes": 4191
+      },
+      "deferredProjectSettingsJavaScript": {
+        "baseBytes": 14223,
+        "candidateBytes": 14019,
+        "deltaBytes": -204,
+        "previousCeilingBytes": 14319,
+        "newCeilingBytes": 14319
+      }
+    },
+    "unchanged": "mainWorkbenchFirstLoadJavaScript, detachedChatFirstLoadJavaScript, coreJavaScript and entryCss measure the same bytes before and after. The card stylesheet stays in its own deferred CSS chunk."
+  },
   "reproduce": "Build base and candidate with electron-vite build; scripts/check-renderer-bundle.mjs measures byte sizes and static import closures. No dependencies or minifier settings changed."
 }

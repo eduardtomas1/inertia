@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -190,6 +190,13 @@ test("captures every setup state in light, dark and narrow windows", async ({ br
     await capture(`worktree-setup-${state}-dark-760x600`);
     await app.resizeWindow(1440, 920);
   };
+  const captureElement = async (element: Locator, name: string): Promise<void> => {
+    const path = info.outputPath(`${name}.png`);
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await element.screenshot({ path, animations: "disabled" });
+    await info.attach(name, { path, contentType: "image/png" });
+  };
   const captureSettings = async (name: string): Promise<void> => {
     await settingRow.evaluate((heading) => heading.closest("section")?.scrollIntoView({ block: "center" }));
     await app.expectNoViewportOverflow();
@@ -204,12 +211,14 @@ test("captures every setup state in light, dark and narrow windows", async ({ br
     await message.fill("Review this isolated checkout once dependencies are ready.");
     await message.blur();
     await captureSizes("running");
+    await captureElement(card, "worktree-setup-running");
 
     await card.getByRole("button", { name: "Stop setup", exact: true }).click();
     await expect(card.getByText("Setup stopped. Retry or continue without setup. Your checkout has been kept.", { exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Retry setup", exact: true })).toBeFocused();
     await capture("worktree-setup-stopped-dark-wide");
 
+    await card.getByRole("button", { name: "Retry setup", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(card.getByText("Setting up worktree", { exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "Stop setup", exact: true })).toBeFocused();
@@ -223,6 +232,16 @@ test("captures every setup state in light, dark and narrow windows", async ({ br
     await expect(output).toContainText("Dependency installation failed");
     expect(await output.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
     await captureSizes("failed");
+    await captureElement(card, "worktree-setup-recovery");
+    const colorTheme = await page.locator("html").getAttribute("data-color-theme");
+    const useEmber = (): Promise<void> => page.evaluate(() => document.documentElement.setAttribute("data-color-theme", "ember"));
+    await useEmber();
+    await capture("worktree-setup-failed-ember-dark-wide");
+    await setAppearanceInPlace(app, "light");
+    await useEmber();
+    await capture("worktree-setup-failed-ember-light-wide");
+    await setAppearanceInPlace(app, "dark");
+    await page.evaluate((theme) => document.documentElement.setAttribute("data-color-theme", theme ?? "inertia"), colorTheme);
 
     await card.getByRole("button", { name: "Continue without setup", exact: true }).focus();
     await page.keyboard.press("Enter");
@@ -238,6 +257,7 @@ test("captures every setup state in light, dark and narrow windows", async ({ br
     writeFileSync(join(latestWorktree(), "release-setup"), "ok");
     await expect(card.getByText("Worktree ready", { exact: true })).toBeVisible();
     await capture("worktree-setup-ready-dark-wide");
+    await captureElement(card, "worktree-setup-ready");
     await setAppearanceInPlace(app, "light");
     await capture("worktree-setup-ready-light-wide");
     await setAppearanceInPlace(app, "dark");
@@ -249,6 +269,7 @@ test("captures every setup state in light, dark and narrow windows", async ({ br
     await page.getByRole("combobox", { name: "Search projects" }).press("Enter");
     await expect(page.getByRole("combobox", { name: "Worktree setup action", exact: true })).toHaveValue(actionId);
     await captureSettings("worktree-setup-settings-dark-wide");
+    await captureElement(page.getByRole("region", { name: "Worktree setup settings", exact: true }), "worktree-setup-settings");
     await setAppearanceInPlace(app, "light");
     await captureSettings("worktree-setup-settings-light-wide");
     await app.resizeWindow(1000, 800);

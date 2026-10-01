@@ -73,6 +73,7 @@
   height: 24px;
   align-items: center;
   gap: 4px;
+  margin-top: calc(((var(--ui-font-secondary) + 2px) * 1.4 - 24px) / 2);
   padding: 0 6px 0 8px;
   border: 0;
   border-radius: var(--radius-small);

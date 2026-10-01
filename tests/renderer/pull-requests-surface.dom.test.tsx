@@ -57,7 +57,7 @@ describe("linked pull requests surface", () => {
     fireEvent.keyDown(menu, { key: "Escape" }); expect(trigger).toHaveFocus();
     fireEvent.click(trigger); fireEvent.click(screen.getByRole("menuitem", { name: "Merge stack (2)" }));
     const dialog = await screen.findByRole("dialog", { name: "Merge stack" });
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus());
     expect(run.mock.calls[1]?.[1]).toEqual({ type: "conversation.stack.prepare", payload: { conversationId, key: prKey(), action: "merge" } });
     expect(run.mock.calls.some(([, command]) => command.type === "conversation.stack.execute")).toBe(false);
     fireEvent.click(within(dialog).getByRole("button", { name: "Merge reviewed layers" }));

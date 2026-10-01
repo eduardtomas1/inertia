@@ -8,7 +8,7 @@ import "./WorktreeSetupCard.css";
 export type WorktreeSetupCommandRunner = (key: string, command: Extract<CommandWithoutId, { type: `worktree.setup.${string}` }>, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
 type Operation = "read" | "wait" | "retry" | "cancel" | "skip";
 
-export function WorktreeSetupCard({ conversation, request }: { conversation: Conversation; request: WorktreeSetupCommandRunner }): React.JSX.Element | null {
+export function WorktreeSetupCard({ conversation, request, online }: { conversation: Conversation; request: WorktreeSetupCommandRunner; online: boolean }): React.JSX.Element | null {
   const [summary, setSummary] = useState<WorktreeSetupSummary | null>(conversation.worktreeSetup ?? null);
   const [output, setOutput] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -21,6 +21,7 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
   const ready = summary?.status === "succeeded" || summary?.status === "skipped";
 
   useEffect(() => {
+    if (!online) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async (): Promise<void> => {
@@ -30,11 +31,11 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
         setSummary(event.result.summary);
         setOutput(event.result.output);
         if (["pending", "running"].includes(event.result.summary?.status ?? "")) timer = setTimeout(() => { void read(); }, 1_000);
-      } catch { /* Snapshot updates trigger a fresh read after reconnect. */ }
+      } catch { /* Reconnection or an owner snapshot change triggers a fresh read. */ }
     };
     void read();
     return () => { disposed = true; if (timer) clearTimeout(timer); };
-  }, [conversation.id, conversation.worktreeSetup, refresh]);
+  }, [conversation.id, conversation.worktreeSetup, online, refresh]);
 
   async function act(operation: Operation): Promise<void> {
     setBusy(true);
@@ -63,8 +64,8 @@ export function WorktreeSetupCard({ conversation, request }: { conversation: Con
     </div>
     <p>{summary.detail}</p>
     {expanded && <pre tabIndex={0} aria-label="Setup output">{output || (active ? "The command is running. Output is available when it finishes." : "No output was recorded.")}</pre>}
-    {active && <div className="worktree-setup-actions"><button type="button" disabled={busy} onClick={() => { void act("cancel"); }}>Stop setup</button><span>Your first prompt will wait.</span></div>}
-    {!active && !ready && <div className="worktree-setup-actions"><button type="button" disabled={busy} onClick={() => { void act("retry"); }}>Retry setup</button><button type="button" className="subtle-button" disabled={busy} onClick={() => { void act("skip"); }}>Continue without setup</button></div>}
+    {active && <div className="worktree-setup-actions"><button type="button" disabled={busy || !online} onClick={() => { void act("cancel"); }}>Stop setup</button><span>Your first prompt will wait.</span></div>}
+    {!active && !ready && <div className="worktree-setup-actions"><button type="button" disabled={busy || !online} onClick={() => { void act("retry"); }}>Retry setup</button><button type="button" className="subtle-button" disabled={busy || !online} onClick={() => { void act("skip"); }}>Continue without setup</button></div>}
     {error && <p role="alert">{error}</p>}
   </section>;
 }

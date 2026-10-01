@@ -114,3 +114,34 @@ it("frees a slot after a visible read stalls for 15 seconds and keeps the tile r
   act(() => { setVisible(view.container, 0, false); setVisible(view.container, 0, true); });
   expect(readIssued(0)).toBe(true);
 });
+
+it("retries a stalled read while its tile stays visible, with backoff and a bounded number of attempts", () => {
+  vi.useFakeTimers();
+  const view = render(<SentMessageAttachmentList attachments={attachments.slice(0, 1)} />);
+  const reads = () => created.filter((image) => image.getAttribute("src") === "inertia://bundle/attachment-preview/image-0").length;
+  act(() => setVisible(view.container, 0, true));
+  expect(reads()).toBe(1);
+  act(() => { vi.advanceTimersByTime(15_000); });
+  expect(reads()).toBe(0);
+  act(() => { vi.advanceTimersByTime(1_000); });
+  expect(reads()).toBe(1);
+  act(() => { vi.advanceTimersByTime(15_000); });
+  act(() => { vi.advanceTimersByTime(2_000); });
+  expect(reads()).toBe(1);
+  fireEvent.load(created.at(-1)!);
+  expect(tile(view.container, 0)).toHaveAttribute("data-thumbnail-state", "ready");
+  expect(created).toHaveLength(3);
+});
+
+it("stops retrying a visible tile after three stalled reads until it becomes visible again", () => {
+  vi.useFakeTimers();
+  const view = render(<SentMessageAttachmentList attachments={attachments.slice(0, 1)} />);
+  act(() => setVisible(view.container, 0, true));
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    act(() => { vi.advanceTimersByTime(20_000); });
+  }
+  expect(created).toHaveLength(3);
+  expect(tile(view.container, 0)).toHaveAttribute("data-thumbnail-state", "loading");
+  act(() => { setVisible(view.container, 0, false); setVisible(view.container, 0, true); });
+  expect(created).toHaveLength(4);
+});

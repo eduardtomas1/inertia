@@ -28,5 +28,42 @@
       "implementationBytes": 2228183,
       "deltaBytes": 2138
     }
+  },
+  "uiPolish": {
+    "baseline": "7f89361c",
+    "runtime": "Node 22.23.2, macOS arm64",
+    "method": "npm run build:bundle on the branch before and after the UI polish, with the same package-lock and installed dependencies. The continuation preview cap is the previous 5 KiB plus the exact measured growth.",
+    "measurements": {
+      "deferredProviderContinuationJavaScript": {
+        "baselineBytes": 4818,
+        "implementationBytes": 5415,
+        "deltaBytes": 597
+      },
+      "preMergeConfidenceJavaScript": {
+        "baselineBytes": 27064,
+        "implementationBytes": 27155,
+        "deltaBytes": 91
+      },
+      "mainWorkbenchFirstLoadJavaScript": {
+        "baselineBytes": 855435,
+        "implementationBytes": 855440,
+        "deltaBytes": 5
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "baselineBytes": 661287,
+        "implementationBytes": 661292,
+        "deltaBytes": 5
+      },
+      "coreJavaScript": {
+        "baselineBytes": 2228183,
+        "implementationBytes": 2228188,
+        "deltaBytes": 5
+      },
+      "entryCss": {
+        "baselineBytes": 354742,
+        "implementationBytes": 354742,
+        "deltaBytes": 0
+      }
+    }
   }
 }

@@ -110,16 +110,11 @@ function surface(overrides: Partial<BackgroundTasksSurfaceProps> = {}): React.JS
 }
 
 function card(title: string): HTMLElement {
-  return screen.getByRole("button", { name: new RegExp(`^${title}`, "u") }).closest("li")!;
+  return screen.getByText(title, { selector: ".background-task-title" }).closest("li")!;
 }
 
-function detail(list: HTMLElement, term: string): HTMLElement | null {
-  const label = within(list).queryByText(term, { selector: "dt" });
-  return label?.nextElementSibling instanceof HTMLElement ? label.nextElementSibling : null;
-}
-
-async function openDetails(title: string): Promise<HTMLElement> {
-  const toggle = screen.getByRole("button", { name: new RegExp(`^${title}`, "u") });
+async function openTranscript(title: string): Promise<HTMLElement> {
+  const toggle = screen.getByRole("button", { name: `View transcript for ${title}` });
   await userEvent.setup().click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   return document.getElementById(toggle.getAttribute("aria-controls")!)!;
@@ -128,6 +123,10 @@ async function openDetails(title: string): Promise<HTMLElement> {
 async function openFinished(): Promise<HTMLElement> {
   await userEvent.setup().click(screen.getByRole("button", { name: /^Finished/u }));
   return screen.getByRole("list", { name: "Finished" });
+}
+
+function paragraphs(element: HTMLElement): string[] {
+  return [...element.querySelectorAll("p")].map((paragraph) => paragraph.textContent ?? "");
 }
 
 beforeEach(() => {
@@ -149,13 +148,12 @@ afterEach(() => {
 });
 
 describe("Background tasks surface", () => {
-  it("lists running work as plain cards under one quiet label, without a summary header", () => {
+  it("lists running work as plain cards whose body is not a control", () => {
     render(surface());
     const region = screen.getByRole("region", { name: "Background tasks" });
     const running = within(region).getByRole("list", { name: "Running" });
     expect(within(running).getAllByRole("listitem")).toHaveLength(2);
     expect(within(region).queryByRole("heading")).toBeNull();
-    expect(within(region).queryByText(/tokens reported/u)).toBeNull();
     const explorer = card("Explorer");
     expect(explorer).toHaveTextContent("Agent");
     expect(within(explorer).getByText("1m")).toBeVisible();
@@ -163,14 +161,78 @@ describe("Background tasks surface", () => {
     expect(explorer).toHaveTextContent("128.4K tokens");
     expect(explorer).toHaveTextContent("14 tool uses");
     expect(within(explorer).getByText("Running rg subagent")).toBeVisible();
-    expect(within(explorer).getByRole("button", { name: "View turn for Explorer" })).toBeVisible();
+    expect(screen.getByText("Explorer", { selector: ".background-task-title" }).closest("button")).toBeNull();
+    expect(within(explorer).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
+      .toEqual(["View transcript for Explorer"]);
+  });
+
+  it("keeps the transcript collapsed until asked and wires it to the card", async () => {
+    render(surface());
+    const toggle = screen.getByRole("button", { name: "View transcript for Explorer" });
+    expect(toggle).toHaveTextContent("View transcript");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).not.toHaveAttribute("aria-controls");
+    expect(card("Explorer").querySelector(".background-task-transcript")).toBeNull();
+    const transcript = await openTranscript("Explorer");
+    expect(card("Explorer")).toContainElement(transcript);
+  });
+
+  it("reads like a short transcript: task, progress, one meta line and quiet links", async () => {
+    render(surface({ onFollowUpSubagent: vi.fn(), canFollowUpSubagent: () => true }));
+    const transcript = await openTranscript("Explorer");
+    expect(paragraphs(transcript)).toEqual([
+      "Inspect the provider lifecycle.",
+      "Searching the persistence layer",
+      "Input 120K · Cached 96K · Output 8K · Reasoning 400 · 75% context left",
+    ]);
+    expect(within(transcript).getByRole("button", { name: "View turn for Explorer" })).toBeVisible();
+    expect(within(transcript).getByRole("button", { name: "Guide parent about Explorer" })).toBeVisible();
+    expect(transcript.querySelector("dl, [role='meter']")).toBeNull();
+    expect(transcript).not.toHaveTextContent(/Route|Tool uses|Total tokens|Provider state|Runtime/u);
+  });
+
+  it("puts the outcome first in a finished task's transcript", async () => {
+    render(surface());
+    await openFinished();
+    const transcript = await openTranscript("Reviewer");
+    expect(paragraphs(transcript)).toEqual([
+      "No regressions found in the adapter.",
+      "Inspect the provider lifecycle.",
+    ]);
+    expect(within(card("Reviewer")).getAllByText("No regressions found in the adapter.")).toHaveLength(1);
+  });
+
+  it("names a harness that never reports tokens only inside the transcript", async () => {
+    render(surface());
+    await openFinished();
+    const cursor = card("Summarize the open review threads");
+    expect(cursor).not.toHaveTextContent(/tokens/u);
+    const transcript = await openTranscript("Summarize the open review threads");
+    expect(paragraphs(transcript)).toContain("Tokens not reported by Cursor");
+  });
+
+  it("clamps long text and offers Show more", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function scrollHeight(this: HTMLElement) {
+      return this.classList.contains("background-task-clamp") && this.dataset.open !== "true" ? 200 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(80);
+    render(surface({ subagents: [{ ...codexTask, description: "A long task ".repeat(80) }] }));
+    const transcript = await openTranscript("Explorer");
+    const clamps = [...transcript.querySelectorAll<HTMLElement>(".background-task-clamp")];
+    expect(clamps.map((clamp) => clamp.style.getPropertyValue("--clamp-lines"))).toEqual(["4", "6"]);
+    const more = within(transcript).getAllByRole("button", { name: /^Show more/u })[0]!;
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(more).toHaveAttribute("aria-controls", clamps[0]!.id);
+    await user.click(more);
+    expect(clamps[0]).toHaveAttribute("data-open", "true");
+    expect(within(transcript).getAllByRole("button", { name: /^Show less/u })[0]).toHaveAttribute("aria-expanded", "true");
   });
 
   it("names a child agent's parent instead of indenting it", () => {
     render(surface());
     const child = card("Fixture writer");
     expect(child).toHaveTextContent("Agent · from Explorer");
-    expect(child).not.toHaveAttribute("data-depth");
     expect(child.closest("ol")).toBe(card("Explorer").closest("ol"));
   });
 
@@ -178,9 +240,7 @@ describe("Background tasks surface", () => {
     render(surface());
     const toggle = screen.getByRole("button", { name: "Finished 3 · 1 failed" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("list", { name: "Finished" })).toBeNull();
     const finished = await openFinished();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(toggle).toHaveAttribute("aria-controls", finished.id);
     expect(within(finished).getAllByRole("listitem").map((item) => item.dataset.focusRow))
       .toEqual(["agent:claude-failed", "agent:cursor-task", "agent:claude-reviewer"]);
@@ -189,52 +249,21 @@ describe("Background tasks surface", () => {
     expect(failed).toHaveTextContent("Agent · Failed");
   });
 
-  it("shows tokens on a card only when reported and explains Cursor only in Details", async () => {
-    render(surface());
-    await openFinished();
-    const cursor = card("Summarize the open review threads");
-    expect(cursor).not.toHaveTextContent(/tokens/u);
-    expect(cursor).toHaveTextContent("gpt-5");
-    const details = await openDetails("Summarize the open review threads");
-    expect(detail(details, "Tokens")).toHaveTextContent(/^Not reported by Cursor$/u);
-    expect(detail(details, "Total tokens")).toBeNull();
-  });
-
-  it("expands a card in place into plain label and value rows", async () => {
-    render(surface());
-    const details = await openDetails("Explorer");
-    expect(detail(details, "Task")).toHaveTextContent("Inspect the provider lifecycle.");
-    expect(detail(details, "Progress")).toHaveTextContent(/^Searching the persistence layer$/u);
-    expect(detail(details, "Total tokens")).toHaveTextContent(/^128,400$/u);
-    expect(detail(details, "Latest step"))
-      .toHaveTextContent(/^Input 120K · Cached 96K · Output 8K · Reasoning 400$/u);
-    const context = detail(details, "Context")!;
-    expect(within(context).getByRole("meter", { name: "Context window remaining" }))
-      .toHaveAttribute("aria-valuenow", "75");
-    expect(within(context).getByText("75% of 200K remaining")).toBeVisible();
-    expect(detail(details, "Tool uses")).toHaveTextContent(/^14$/u);
-    expect(detail(details, "Route")).toHaveTextContent("Codex · App Server");
-    expect(detail(details, "Provider state")).toBeNull();
-    expect(detail(details, "Runtime")).toBeNull();
-  });
-
-  it("shows a waiting task's state and provider state instead of its last tool", async () => {
+  it("animates the line of running work only, with the timeline's thinking sweep", () => {
     const waiting = taskTrace({
       id: "waiting",
-      turnId: "turn-opencode",
-      providerId: "opencode",
       providerName: "Schema checker",
       status: "waiting",
-      providerStatus: "idle",
       activity: "Edit tests/fixture.ts",
-      progress: null,
+      progress: "Waiting for review",
     });
-    render(surface({ subagents: [waiting] }));
-    const item = card("Schema checker");
-    expect(item).toHaveTextContent("Agent · Waiting");
-    expect(item).not.toHaveTextContent("Edit tests/fixture.ts");
-    const details = await openDetails("Schema checker");
-    expect(detail(details, "Provider state")).toHaveTextContent(/^idle$/u);
+    render(surface({ subagents: [codexTask, waiting, claudeTask] }));
+    expect(within(card("Explorer")).getByText("Running rg subagent")).toHaveClass("background-task-live");
+    const waitingCard = card("Schema checker");
+    expect(waitingCard).toHaveTextContent("Agent · Waiting");
+    expect(waitingCard).not.toHaveTextContent("Edit tests/fixture.ts");
+    expect(within(waitingCard).getByText("Waiting for review")).not.toHaveClass("background-task-live");
+    expect(screen.getByText("Explorer", { selector: ".background-task-title" })).not.toHaveClass("background-task-live");
   });
 
   it("omits the runtime of a lost task instead of counting the downtime", async () => {
@@ -250,11 +279,9 @@ describe("Background tasks surface", () => {
     const item = card("Recovered");
     expect(item).toHaveTextContent("Agent · Lost");
     expect(item.querySelector(".subagent-elapsed")).toBeNull();
-    const details = await openDetails("Recovered");
-    expect(detail(details, "Runtime")).toHaveTextContent(/^Not reported$/u);
   });
 
-  it("wires View turn, Guide parent and Stop without toggling the card", async () => {
+  it("wires View turn, Guide parent and Stop without opening or closing the transcript", async () => {
     const user = userEvent.setup();
     const onOpenSubagent = vi.fn();
     const onFollowUpSubagent = vi.fn();
@@ -270,22 +297,22 @@ describe("Background tasks surface", () => {
       canStopSubagent: () => true,
     }));
     expect(screen.queryByRole("button", { name: "Stop Explorer" })).toBeNull();
+    await openTranscript("Explorer");
     await user.click(screen.getByRole("button", { name: "View turn for Explorer" }));
     expect(onOpenSubagent).toHaveBeenCalledWith(codexTask);
-    expect(screen.getByRole("button", { name: /^Explorer/u })).toHaveAttribute("aria-expanded", "false");
-    await openDetails("Claude helper");
+    expect(screen.getByRole("button", { name: "View transcript for Explorer" })).toHaveAttribute("aria-expanded", "true");
+    await openTranscript("Claude helper");
     await user.click(screen.getByRole("button", { name: "Guide parent about Claude helper" }));
     expect(onFollowUpSubagent).toHaveBeenCalledWith(helper);
-    const toggle = screen.getByRole("button", { name: /^Claude helper/u });
     await user.click(screen.getByRole("button", { name: "Stop Claude helper" }));
     expect(onStopSubagent).toHaveBeenCalledOnce();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "View transcript for Claude helper" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Stopping Claude helper" })).toBeDisabled();
     resolveStop();
     expect(await screen.findByRole("button", { name: "Stop Claude helper" })).toBeEnabled();
   });
 
-  it("shows commands as short cards and dismisses finished ones from the Finished row", async () => {
+  it("shows commands as short cards without a transcript and dismisses finished ones", async () => {
     const user = userEvent.setup();
     const onStopCommand = vi.fn();
     const onDismissCommand = vi.fn();
@@ -308,22 +335,17 @@ describe("Background tasks surface", () => {
       finishedAt: "2030-01-01T00:00:40.000Z",
     });
     const view = render(surface({ subagents: [], runs: [dev, lint, build], onStopCommand, onDismissCommand }));
-    const devCard = screen.getByText("npm run dev").closest("li")!;
+    const devCard = card("npm run dev");
     expect(devCard).toHaveTextContent("Command");
     expect(within(devCard).getByText("50s")).toBeVisible();
     expect(within(devCard).getByText("http://localhost:5173")).toBeVisible();
-    expect(devCard).not.toHaveTextContent(/tokens/u);
+    expect(within(devCard).queryByRole("button", { name: /View transcript/u })).toBeNull();
     await user.click(within(devCard).getByRole("button", { name: "Stop npm run dev" }));
     expect(onStopCommand).toHaveBeenCalledWith(dev);
     expect(screen.getByRole("button", { name: "Finished 2 · 1 failed" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Dismiss finished commands" }));
     expect(onDismissCommand.mock.calls.map(([run]) => run.id)).toEqual(["build", "lint"]);
-    view.rerender(surface({
-      subagents: [claudeTask],
-      runs: [dev],
-      onStopCommand,
-      onDismissCommand,
-    }));
+    view.rerender(surface({ subagents: [claudeTask], runs: [dev], onStopCommand, onDismissCommand }));
     expect(screen.queryByRole("button", { name: "Dismiss finished commands" })).toBeNull();
   });
 
@@ -346,7 +368,6 @@ describe("Background tasks surface", () => {
   it("says only that there are no background tasks when the chat has none", () => {
     render(surface({ subagents: [], runs: [], turns: [taskTurn({ providerId: "kimi" })] }));
     expect(screen.getByText("No background tasks.")).toBeVisible();
-    expect(screen.queryByText(/Kimi/u)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -361,7 +382,7 @@ describe("Background tasks surface", () => {
 
   it("never nests a control inside another and labels every control", async () => {
     const view = render(<>{surface({ runs: [workspaceRun()] })}{surface({ runs: [workspaceRun()] })}</>);
-    for (const toggle of screen.getAllByRole("button", { name: /^Explorer/u })) {
+    for (const toggle of screen.getAllByRole("button", { name: "View transcript for Explorer" })) {
       await userEvent.setup().click(toggle);
     }
     for (const button of screen.getAllByRole("button")) {
@@ -376,8 +397,9 @@ describe("Background tasks surface", () => {
   });
 });
 
-describe("Background tasks stylesheet", () => {
+describe("Background tasks stylesheets", () => {
   const css = readFileSync("src/renderer/src/components/BackgroundTasksSurface.css", "utf8");
+  const shared = readFileSync("src/renderer/src/styles.css", "utf8");
 
   it("uses semantic colour tokens only so preset and custom themes apply", () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/iu);
@@ -392,5 +414,16 @@ describe("Background tasks stylesheet", () => {
     expect(css).toMatch(/@container background-tasks \(max-width: 360px\)/u);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/u);
     expect(css).toMatch(/@media \(forced-colors: active\)/u);
+  });
+
+  it("reuses the timeline's thinking sweep for running work, including its motion and visibility guards", () => {
+    const rulesWith = (selector: string) => shared.split("}").filter((rule) => rule.includes(selector));
+    expect(rulesWith(".background-task-live").some((rule) => rule.includes(".turn-thinking-pulse") && rule.includes("animation: turn-thinking-sweep"))).toBe(true);
+    const reduced = shared.slice(shared.indexOf("@media (prefers-reduced-motion: reduce) {\n  .turn-thinking-line > span"));
+    expect(reduced.slice(0, reduced.indexOf("@media (forced-colors"))).toMatch(/\.background-task-live/u);
+    const forced = reduced.slice(reduced.indexOf("@media (forced-colors"));
+    expect(forced.slice(0, forced.indexOf("}\n}"))).toMatch(/\.background-task-live/u);
+    expect(shared).toMatch(/\.app-shell\[data-document-visible="false"\] \.background-task-live/u);
+    expect(css).not.toMatch(/@keyframes/u);
   });
 });

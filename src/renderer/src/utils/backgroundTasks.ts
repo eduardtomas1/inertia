@@ -9,7 +9,6 @@ import {
   isLiveSubagentTrace,
   subagentElapsedMs,
   subagentMissionSummary,
-  subagentStatusLabel,
   subagentTraceLabel,
 } from "./subagentDisclosure";
 import { backgroundCommandIsLive } from "./backgroundTaskRuns";
@@ -97,13 +96,6 @@ export function backgroundCommandStateWord(run: WorkspaceRun): BackgroundTaskSta
   return COMMAND_STATE_WORDS[run.status] ?? null;
 }
 
-export function backgroundTaskProviderState(trace: SubagentTrace): string | null {
-  return trace.providerStatus
-    && subagentStatusLabel(trace) !== subagentStatusLabel({ ...trace, providerStatus: null })
-    ? trace.providerStatus
-    : null;
-}
-
 export function backgroundTaskTokensNotReported(
   trace: SubagentTrace,
   turns: readonly AgentTurn[],
@@ -111,7 +103,7 @@ export function backgroundTaskTokensNotReported(
   if (trace.usage?.totalTokens != null) return null;
   const harnessId = turns.find(({ id }) => id === trace.turnId)?.harnessId;
   const provider = harnessId ? PROVIDERS_WITHOUT_TASK_TOKENS[harnessId] : undefined;
-  return provider ? `Not reported by ${provider}` : null;
+  return provider ? `Tokens not reported by ${provider}` : null;
 }
 
 export function backgroundTaskTitle(trace: SubagentTrace): string {
@@ -161,20 +153,25 @@ export function backgroundTaskLatestStep(
   return parts.length > 0 ? parts : null;
 }
 
-export function backgroundTaskContextUsage(
-  usage: SubagentTaskUsage | null,
-): { remainingPercent: number; label: string } | null {
+export function backgroundTaskContextLeft(usage: SubagentTaskUsage | null): string | null {
   if (!usage || usage.contextTokens === null || !usage.maxContextTokens) return null;
   const remaining = Math.min(100, Math.max(0,
     100 - (usage.contextTokens / usage.maxContextTokens) * 100));
-  const remainingPercent = Math.round(remaining);
   const percent = remaining > 0 && remaining < 1
     ? "<1"
     : remaining > 99 && remaining < 100
       ? ">99"
-      : String(remainingPercent);
-  return {
-    remainingPercent,
-    label: `${percent}% of ${formatCompact(usage.maxContextTokens)} remaining`,
-  };
+      : String(Math.round(remaining));
+  return `${percent}% context left`;
+}
+
+export function backgroundTaskTranscriptMeta(
+  trace: SubagentTrace,
+  turns: readonly AgentTurn[],
+): string | null {
+  const notReported = backgroundTaskTokensNotReported(trace, turns);
+  if (notReported) return notReported;
+  const context = backgroundTaskContextLeft(trace.usage);
+  const parts = [...backgroundTaskLatestStep(trace.usage) ?? [], ...context ? [context] : []];
+  return parts.length > 0 ? parts.join(" · ") : null;
 }

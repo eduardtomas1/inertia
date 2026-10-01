@@ -12333,6 +12333,7 @@ button.sent-attachment-open:focus-visible {
   color: var(--text-soft);
 }
 
+.background-task-live,
 .composer-compact-notice.is-working,
 .context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,
 .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
@@ -12406,6 +12407,7 @@ button.sent-attachment-open:focus-visible {
     visibility: hidden;
   }
 
+  .background-task-live,
   .composer-compact-notice.is-working,
   .context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,
   .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
@@ -12416,6 +12418,7 @@ button.sent-attachment-open:focus-visible {
 }
 
 @media (forced-colors: active) {
+  .background-task-live,
   .composer-compact-notice.is-working,
   .context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,
   .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
@@ -12425,6 +12428,7 @@ button.sent-attachment-open:focus-visible {
   }
 }
 
+.app-shell[data-document-visible="false"] .background-task-live,
 .app-shell[data-document-visible="false"] .composer-compact-notice,
 .app-shell[data-document-visible="false"] .context-compaction-marker,
 .app-shell[data-document-visible="false"] .turn-thinking-pulse {

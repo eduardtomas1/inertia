@@ -3,16 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   backgroundCommandElapsedMs,
   backgroundCommandStateWord,
-  backgroundTaskContextUsage,
+  backgroundTaskContextLeft,
   backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
   backgroundTaskItems,
   backgroundTaskLatestStep,
-  backgroundTaskProviderState,
   backgroundTaskStateWord,
   backgroundTaskTitle,
   backgroundTaskTokensNotReported,
+  backgroundTaskTranscriptMeta,
 } from "../../src/renderer/src/utils/backgroundTasks";
 import {
   activeBackgroundTaskCount,
@@ -127,14 +127,44 @@ describe("background task rows", () => {
 
   it("reports the context window remaining like the Usage surface, never rounding to an edge", () => {
     const context = (contextTokens: number, maxContextTokens = 200_000) =>
-      backgroundTaskContextUsage(taskUsage({ contextTokens, maxContextTokens }));
-    expect(backgroundTaskContextUsage(taskUsage({ contextTokens: 50_000 }))).toBeNull();
+      backgroundTaskContextLeft(taskUsage({ contextTokens, maxContextTokens }));
+    expect(backgroundTaskContextLeft(null)).toBeNull();
+    expect(backgroundTaskContextLeft(taskUsage({ contextTokens: 50_000 }))).toBeNull();
     expect(context(50_000, 0)).toBeNull();
-    expect(context(50_000)).toEqual({ remainingPercent: 75, label: "75% of 200K remaining" });
-    expect(context(799)).toEqual({ remainingPercent: 100, label: ">99% of 200K remaining" });
-    expect(context(199_200)).toEqual({ remainingPercent: 0, label: "<1% of 200K remaining" });
-    expect(context(0)?.label).toBe("100% of 200K remaining");
-    expect(context(200_000)?.label).toBe("0% of 200K remaining");
+    expect(context(50_000)).toBe("75% context left");
+    expect(context(799)).toBe(">99% context left");
+    expect(context(199_200)).toBe("<1% context left");
+    expect(context(0)).toBe("100% context left");
+    expect(context(200_000)).toBe("0% context left");
+  });
+
+  it("sums up the latest step and context in one compact transcript line", () => {
+    const turns = [
+      taskTurn({ id: "turn-cursor", providerId: "cursor" }),
+      taskTurn({ id: "turn-codex", providerId: "codex" }),
+    ];
+    expect(backgroundTaskTranscriptMeta(taskTrace({
+      turnId: "turn-codex",
+      usage: taskUsage({
+        totalTokens: 128_400,
+        inputTokens: 18_200,
+        cachedInputTokens: 12_800,
+        outputTokens: 1_900,
+        reasoningOutputTokens: 640,
+        contextTokens: 50_000,
+        maxContextTokens: 200_000,
+      }),
+    }), turns)).toBe("Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640 · 75% context left");
+    expect(backgroundTaskTranscriptMeta(taskTrace({
+      turnId: "turn-codex",
+      usage: taskUsage({ contextTokens: 50_000, maxContextTokens: 200_000 }),
+    }), turns)).toBe("75% context left");
+    expect(backgroundTaskTranscriptMeta(taskTrace({
+      turnId: "turn-codex",
+      usage: taskUsage({ totalTokens: 9_000 }),
+    }), turns)).toBeNull();
+    expect(backgroundTaskTranscriptMeta(taskTrace({ turnId: "turn-cursor", providerId: "cursor" }), turns))
+      .toBe("Tokens not reported by Cursor");
   });
 
   it("labels a delegated task's reported tokens for the timeline and Goal panel", () => {
@@ -161,19 +191,13 @@ describe("background task rows", () => {
     expect(backgroundCommandStateWord(workspaceRun({ status: "failed" }))).toEqual({ word: "Failed", danger: true });
   });
 
-  it("shows the provider state only when it says more than the status", () => {
-    expect(backgroundTaskProviderState(taskTrace({ providerStatus: null }))).toBeNull();
-    expect(backgroundTaskProviderState(taskTrace({ status: "running", providerStatus: "inProgress" }))).toBeNull();
-    expect(backgroundTaskProviderState(taskTrace({ status: "waiting", providerStatus: "idle" }))).toBe("idle");
-  });
-
   it("says a harness does not report tokens only when it never does", () => {
     const turns = [
       taskTurn({ id: "turn-cursor", providerId: "cursor" }),
       taskTurn({ id: "turn-claude", providerId: "claude" }),
     ];
     expect(backgroundTaskTokensNotReported(taskTrace({ turnId: "turn-cursor", providerId: "cursor" }), turns))
-      .toBe("Not reported by Cursor");
+      .toBe("Tokens not reported by Cursor");
     expect(backgroundTaskTokensNotReported(taskTrace({ turnId: "turn-claude" }), turns)).toBeNull();
     expect(backgroundTaskTokensNotReported(taskTrace({
       turnId: "turn-cursor",

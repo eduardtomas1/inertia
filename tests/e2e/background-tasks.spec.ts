@@ -365,7 +365,7 @@ function card(region: Locator, title: string): Locator {
 }
 
 function toggle(region: Locator, title: string): Locator {
-  return card(region, title).getByRole("button", { name: new RegExp(`^${title}`, "u") });
+  return card(region, title).getByRole("button", { name: `View transcript for ${title}` });
 }
 
 async function openFinished(region: Locator): Promise<Locator> {
@@ -439,7 +439,10 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     await expect(explorer).toContainText("128.4K tokens");
     await expect(explorer).toContainText("14 tool uses");
     await expect(explorer).toContainText("Searching src/server for usage parsers");
-    await expect(explorer.getByRole("button", { name: "View turn for Explorer" })).toBeVisible();
+    await expect(toggle(region, "Explorer")).toHaveAttribute("aria-expanded", "false");
+    await expect(explorer.getByText("Searching src/server for usage parsers", { exact: true })).toHaveClass(/background-task-live/u);
+    await expect(explorer.locator(".background-task-title")).not.toHaveClass(/background-task-live/u);
+    const collapsedHeight = await explorer.evaluate((element) => element.getBoundingClientRect().height);
     await expect(card(region, "Fixture writer")).toContainText("Agent · from Explorer");
     const devServer = card(region, "npm run dev");
     await expect(devServer).toContainText("Command");
@@ -464,11 +467,16 @@ test("lists a chat's running work as plain cards with keyboard access", async ({
     await expect(explorerToggle).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(explorerToggle).toHaveAttribute("aria-expanded", "true");
-    const details = explorer.locator(".background-task-details");
-    await expect(details.getByText("Latest step", { exact: true })).toBeVisible();
-    await expect(details.getByText("Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640", { exact: true })).toBeVisible();
-    await expect(details.getByRole("meter", { name: "Context window remaining" })).toHaveAttribute("aria-valuenow", "75");
-    await expect(details.getByText("Mapping the token usage pipeline", { exact: true })).toBeVisible();
+    const details = explorer.locator(".background-task-transcript");
+    await expect(details.locator("p")).toHaveText([
+      "Map every place that parses provider token usage.",
+      "Mapping the token usage pipeline",
+      "Input 18.2K · Cached 12.8K · Output 1.9K · Reasoning 640 · 75% context left",
+    ]);
+    await expect(details.getByRole("button", { name: "View turn for Explorer" })).toBeVisible();
+    await expect(details.locator("dl, [role='meter']")).toHaveCount(0);
+    const expandedHeight = await explorer.evaluate((element) => element.getBoundingClientRect().height);
+    expect(expandedHeight - collapsedHeight).toBeLessThan(110);
     await expectLayoutHolds(app, region);
     await page.keyboard.press("Enter");
     await expect(explorerToggle).toHaveAttribute("aria-expanded", "false");
@@ -527,10 +535,10 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     await expect(reviewer.getByRole("button", { name: "Stop Code reviewer" })).toBeVisible();
     await openFinished(region);
     await toggle(region, "Test runner").click();
-    const runnerDetails = card(region, "Test runner").locator(".background-task-details");
-    await expect(runnerDetails.getByText("9,000", { exact: true })).toBeVisible();
-    await expect(runnerDetails.getByText("Latest step", { exact: true })).toHaveCount(0);
-    await expect(runnerDetails.getByText("1m 23s", { exact: true })).toBeVisible();
+    const runnerDetails = card(region, "Test runner").locator(".background-task-transcript");
+    await expect(runnerDetails.locator("p")).toHaveText(["All 214 tests passed.", "Run the focused unit tests."]);
+    await expect(card(region, "Test runner")).toContainText("1m 23s");
+    await expect(card(region, "Test runner")).toContainText("9K tokens");
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-claude-wide-dark");
 
@@ -538,7 +546,7 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     const sweep = card(region, "Schema sweep");
     await expect(sweep).toContainText("read src/shared/contracts/agent.ts");
     await toggle(region, "Schema sweep").click();
-    await expect(sweep.locator(".background-task-details").getByText(
+    await expect(sweep.locator(".background-task-transcript").getByText(
       "Input 4.8K · Cached 2.05K · Cache write 512 · Output 610 · Reasoning 120",
       { exact: true },
     )).toBeVisible();
@@ -555,7 +563,7 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     await expect(summary).toContainText("gpt-5");
     await expect(summary).not.toContainText("tokens");
     await toggle(region, "Summarize the open review threads").click();
-    await expect(summary.locator(".background-task-details").getByText("Not reported by Cursor", { exact: true }))
+    await expect(summary.locator(".background-task-transcript").getByText("Tokens not reported by Cursor", { exact: true }))
       .toBeVisible();
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-cursor-wide-dark");

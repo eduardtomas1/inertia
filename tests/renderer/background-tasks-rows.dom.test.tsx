@@ -39,7 +39,7 @@ function surface(overrides: Partial<BackgroundTasksSurfaceProps>): React.JSX.Ele
 }
 
 function toggle(title: string): HTMLElement {
-  return screen.getByRole("button", { name: new RegExp(`^${title}`, "u") });
+  return screen.getByRole("button", { name: `View transcript for ${title}` });
 }
 
 beforeEach(() => {
@@ -122,7 +122,19 @@ describe("Background task cards", () => {
     expect(document.activeElement).toBe(toggle("Alpha"));
   });
 
-  it("moves focus to the card itself when its focused Stop disappears", () => {
+  it("moves focus to the Finished row when a card with an open transcript settles into it while collapsed", () => {
+    const live = taskTrace({ id: "a", providerName: "Alpha" });
+    const view = render(surface({ subagents: [live] }));
+    act(() => toggle("Alpha").click());
+    expect(toggle("Alpha")).toHaveAttribute("aria-expanded", "true");
+    toggle("Alpha").focus();
+    view.rerender(surface({ subagents: [{ ...live, status: "completed", isLive: false }] }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Finished 1/u }));
+    act(() => screen.getByRole("button", { name: /^Finished 1/u }).click());
+    expect(toggle("Alpha")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("moves focus to the card's transcript toggle when its focused Stop disappears", () => {
     const live = taskTrace({ id: "a", providerName: "Alpha", providerTaskId: "task-a" });
     const view = render(surface({
       subagents: [live],

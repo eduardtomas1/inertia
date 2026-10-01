@@ -1,5 +1,13 @@
-import { memo, useEffect, useRef, type CSSProperties } from "react";
-import { Square } from "lucide-react";
+import {
+  memo,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { ChevronDown, Square } from "lucide-react";
 
 import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
 import { useDocumentVisibility } from "../hooks/useDocumentPresence";
@@ -9,18 +17,15 @@ import { backgroundCommandIsLive } from "../utils/backgroundTaskRuns";
 import {
   backgroundCommandElapsedMs,
   backgroundCommandStateWord,
-  backgroundTaskContextUsage,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
-  backgroundTaskLatestStep,
-  backgroundTaskProviderState,
   backgroundTaskStateWord,
   backgroundTaskTitle,
-  backgroundTaskTokensNotReported,
+  backgroundTaskTranscriptMeta,
   type BackgroundTaskStateWord,
 } from "../utils/backgroundTasks";
 import { formatElapsed } from "../utils/responseTimeline";
-import { isLiveSubagentTrace, subagentRouteLabel } from "../utils/subagentDisclosure";
+import { isLiveSubagentTrace } from "../utils/subagentDisclosure";
 import { SubagentElapsed, subscribeLiveElapsed } from "./SubagentElapsed";
 
 function KindLine({
@@ -71,57 +76,114 @@ function StopButton({
   );
 }
 
-function TaskDetails({
+function ClampedText({
+  text,
+  lines,
+  label,
+}: {
+  text: string;
+  lines: number;
+  label: string;
+}): React.JSX.Element {
+  const id = useId();
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  useLayoutEffect(() => {
+    const element = textRef.current;
+    if (!element || open) return;
+    const measure = (): void => setOverflowing(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [open, text]);
+  return (
+    <>
+      <p
+        ref={textRef}
+        id={id}
+        className="background-task-clamp"
+        data-open={open ? "true" : undefined}
+        style={{ "--clamp-lines": lines } as CSSProperties}
+      >
+        {text}
+      </p>
+      {(overflowing || open) && (
+        <button
+          type="button"
+          className="background-task-link"
+          aria-expanded={open}
+          aria-controls={id}
+          aria-label={`${open ? "Show less" : "Show more"} of ${label}`}
+          onClick={() => setOpen((current) => !current)}
+        >
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function Transcript({
   id,
   trace,
   turns,
-  now,
+  title,
+  canOpen,
+  canFollowUp,
+  onOpen,
+  onFollowUp,
 }: {
   id: string;
   trace: SubagentTrace;
   turns: readonly AgentTurn[];
-  now?: number;
+  title: string;
+  canOpen: boolean;
+  canFollowUp: boolean;
+  onOpen: () => void;
+  onFollowUp: () => void;
 }): React.JSX.Element {
-  const total = trace.usage?.totalTokens ?? null;
-  const context = backgroundTaskContextUsage(trace.usage);
-  const runtime = isLiveSubagentTrace(trace) ? undefined : backgroundTaskElapsedMs(trace, now ?? Date.now());
-  const rows: [string, React.ReactNode][] = [
-    ["Task", trace.description],
-    ["Progress", trace.progress],
-    ["Outcome", trace.result],
-    ["Total tokens", total === null ? null : formatCount(total)],
-    ["Tokens", backgroundTaskTokensNotReported(trace, turns)],
-    ["Latest step", backgroundTaskLatestStep(trace.usage)?.join(" · ") ?? null],
-    ["Context", context && (
-      <span key="context" className="background-task-context">
-        <span
-          className="usage-surface-track is-context"
-          role="meter"
-          aria-label="Context window remaining"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={context.remainingPercent}
-          aria-valuetext={context.label}
-        >
-          <i style={{ "--usage-remaining": `${context.remainingPercent}%` } as CSSProperties} />
-        </span>
-        {context.label}
-      </span>
-    )],
-    ["Tool uses", trace.toolUseCount === null ? null : formatCount(trace.toolUseCount)],
-    ["Runtime", runtime === undefined ? null : runtime === null ? "Not reported" : formatElapsed(runtime)],
-    ["Route", subagentRouteLabel(trace, turns)],
-    ["Provider state", backgroundTaskProviderState(trace)],
-  ];
+  const live = isLiveSubagentTrace(trace);
+  const update = live ? trace.progress : trace.result;
+  const texts = live
+    ? [[trace.description, 4, "the task"], [update, 6, "the progress"]] as const
+    : [[update, 6, "the outcome"], [trace.description, 4, "the task"]] as const;
+  const meta = backgroundTaskTranscriptMeta(trace, turns);
   return (
-    <dl id={id} className="background-task-details">
-      {rows.map(([label, value]) => value !== null && value !== "" && (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
+    <div id={id} className="background-task-transcript">
+      {texts.map(([text, lines, label]) => text && (
+        <ClampedText key={label} text={text} lines={lines} label={`${label} for ${title}`} />
       ))}
-    </dl>
+      {meta && <p>{meta}</p>}
+      {(canOpen || canFollowUp) && (
+        <div className="background-task-links">
+          {canOpen && (
+            <button
+              type="button"
+              className="background-task-link"
+              data-focus-key="open"
+              aria-label={`View turn for ${title}`}
+              onClick={onOpen}
+            >
+              View turn
+            </button>
+          )}
+          {canFollowUp && (
+            <button
+              type="button"
+              className="background-task-link"
+              data-focus-key="guide"
+              aria-label={`Guide parent about ${title}`}
+              onClick={onFollowUp}
+            >
+              Guide parent
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -129,7 +191,7 @@ export interface AgentCardProps {
   trace: SubagentTrace;
   turns: readonly AgentTurn[];
   parentTitle: string | null;
-  detailsId: string;
+  transcriptId: string;
   expanded: boolean;
   stopping: boolean;
   now?: number;
@@ -146,7 +208,7 @@ export const AgentCard = memo(function AgentCard({
   trace,
   turns,
   parentTitle,
-  detailsId,
+  transcriptId,
   expanded,
   stopping,
   now,
@@ -161,19 +223,14 @@ export const AgentCard = memo(function AgentCard({
   const title = backgroundTaskTitle(trace);
   const doing = backgroundTaskDoingNow(trace);
   const live = isLiveSubagentTrace(trace);
+  const running = live && (trace.status === "running" || trace.status === "spawned");
+  const line = expanded && doing === (live ? trace.progress : trace.result) ? null : doing;
   const elapsed = live ? 0 : backgroundTaskElapsedMs(trace, now ?? Date.now());
   const total = trace.usage?.totalTokens ?? null;
   const facts = trace.model !== null || total !== null || trace.toolUseCount !== null;
   return (
     <li className="background-task-card" data-focus-row={`agent:${trace.id}`}>
-      <button
-        type="button"
-        className="background-task-toggle"
-        data-focus-key="details"
-        aria-expanded={expanded}
-        aria-controls={expanded ? detailsId : undefined}
-        onClick={() => onToggle(trace.id)}
-      >
+      <div className="background-task-body">
         <span className="background-task-title">{title}</span>
         <KindLine
           kind={parentTitle ? `Agent · from ${parentTitle}` : "Agent"}
@@ -197,39 +254,34 @@ export const AgentCard = memo(function AgentCard({
             )}
           </span>
         )}
-      </button>
+      </div>
       {canStop && <StopButton title={title} stopping={stopping} onStop={() => onStop(trace.id)} />}
-      {(doing || canOpen) && (
-        <p className="background-task-doing">
-          {doing && <span>{doing}</span>}
-          {canOpen && (
-            <button
-              type="button"
-              className="background-task-link"
-              data-focus-key="open"
-              aria-label={`View turn for ${title}`}
-              onClick={() => onOpen(trace.id)}
-            >
-              View turn
-            </button>
-          )}
-        </p>
-      )}
+      <p className="background-task-doing">
+        {line && <span className={running ? "background-task-line background-task-live" : "background-task-line"}>{line}</span>}
+        <button
+          type="button"
+          className="background-task-link background-task-transcript-toggle"
+          data-focus-key="transcript"
+          aria-expanded={expanded}
+          aria-controls={expanded ? transcriptId : undefined}
+          aria-label={`View transcript for ${title}`}
+          onClick={() => onToggle(trace.id)}
+        >
+          View transcript
+          <ChevronDown size={12} aria-hidden="true" />
+        </button>
+      </p>
       {expanded && (
-        <div className="background-task-expanded">
-          <TaskDetails id={detailsId} trace={trace} turns={turns} now={now} />
-          {canFollowUp && (
-            <button
-              type="button"
-              className="background-task-link"
-              data-focus-key="guide"
-              aria-label={`Guide parent about ${title}`}
-              onClick={() => onFollowUp(trace.id)}
-            >
-              Guide parent
-            </button>
-          )}
-        </div>
+        <Transcript
+          id={transcriptId}
+          trace={trace}
+          turns={turns}
+          title={title}
+          canOpen={canOpen}
+          canFollowUp={canFollowUp}
+          onOpen={() => onOpen(trace.id)}
+          onFollowUp={() => onFollowUp(trace.id)}
+        />
       )}
     </li>
   );

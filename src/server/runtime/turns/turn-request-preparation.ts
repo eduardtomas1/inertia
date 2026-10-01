@@ -91,6 +91,7 @@ export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
 ): ResolvedTurnRequest {
+  dependencies.store.worktreeSetups.assertReady(request.conversationId);
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
   const providerInfo = dependencies.hooks.providerInfo();

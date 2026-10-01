@@ -18,7 +18,7 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
+import { RuntimeCommandError, messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
 
 export interface AppRuntimeActions {
@@ -159,6 +159,17 @@ export function useAppRuntimeActions(options: {
     let handoffPrepared = false;
     let preserveAmbiguousHandoff = false;
     try {
+      try {
+        for (;;) {
+          const setup = await sendCommand(withRequestId({ type: "worktree.setup.wait", payload: { conversationId: targetConversationId } }));
+          if (setup.type !== "request.result" || setup.result.kind !== "worktree.setup") throw new Error("Unable to check worktree setup.");
+          const status = setup.result.summary?.status;
+          if (!status || status === "succeeded" || status === "skipped") break;
+          if (status !== "pending" && status !== "running") throw new Error("Worktree setup needs attention. Retry setup or continue without it, then send your prompt again.");
+        }
+      } catch (error) {
+        throw new RuntimeCommandError(error instanceof Error ? error.message : "Unable to check worktree setup.", "not-sent");
+      }
       if (attachments.length > 0) {
         await window.inertia.prepareAttachmentHandoff({
           requestId: command.requestId,

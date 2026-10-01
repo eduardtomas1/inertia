@@ -19,6 +19,25 @@ function setup(extra: Partial<React.ComponentProps<typeof ProjectSettings>> = {}
   return { ...view, request, props };
 }
 describe("project settings", () => {
+  it("selects setup without executing it and clears setup when its saved action is removed", async () => {
+    const action = { id: "22222222-2222-4222-8222-222222222222", name: "Install dependencies", executable: "npm", args: ["ci"] };
+    const preferences = { ...defaultProjectPreferences(), actions: [action] };
+    const view = setup({ projects: [{ ...project, preferences }] });
+    const selector = screen.getByRole("combobox", { name: "Worktree setup action" });
+    expect(selector).toHaveValue("");
+    fireEvent.change(selector, { target: { value: action.id } });
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: {
+      projectId: project.id, expectedUpdatedAt: project.updatedAt, preferences: { ...preferences, worktreeSetupActionId: action.id },
+    } }));
+    await waitFor(() => expect(selector).toBeEnabled());
+    view.rerender(<ProjectSettings {...view.props} projects={[{ ...project, preferences: { ...preferences, worktreeSetupActionId: action.id } }]} />);
+    view.request.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Install dependencies" }));
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: {
+      projectId: project.id, expectedUpdatedAt: project.updatedAt, preferences: defaultProjectPreferences(),
+    } }));
+  });
+
   it("saves against the original project revision, without a machine selector or automatic command execution", async () => {
     const { request } = setup();
     expect(screen.queryByText("All machines")).not.toBeInTheDocument();

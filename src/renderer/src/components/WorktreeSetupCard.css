@@ -1,0 +1,20 @@
+.worktree-setup-card { width: 100%; box-sizing: border-box; margin: 12px 0 20px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); font-size: 12px; }
+.worktree-setup-heading { display: flex; align-items: center; gap: 10px; }
+.worktree-setup-heading > div { display: grid; gap: 4px; flex: 1; }
+.worktree-setup-heading strong { font-size: 13px; color: var(--text); font-weight: 600; }
+.worktree-setup-heading span, .worktree-setup-card > p, .worktree-setup-actions > span { color: var(--text-muted); }
+.worktree-setup-heading > button { display: flex; align-items: center; gap: 6px; }
+.worktree-setup-card > p { margin: 12px 0 0; line-height: 1.6; }
+.worktree-setup-card pre { margin: 14px 0 0; padding: 12px; max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.7 var(--font-mono); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; }
+.worktree-setup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.worktree-setup-actions button { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; }
+.worktree-setup-spinner { animation: worktree-setup-spin 1.2s linear infinite; }
+@keyframes worktree-setup-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .worktree-setup-spinner { animation: none; } }
+.worktree-setup-card[data-state="attention"] { border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); background: var(--warning-surface); }
+.worktree-setup-card[data-state="attention"] .worktree-setup-heading > svg { color: var(--warning); }
+.worktree-setup-card[data-state="ready"] .worktree-setup-heading > svg { color: var(--success); }
+.worktree-setup-card[data-state="running"] .worktree-setup-heading > svg { color: var(--accent); }
+/* Setup output can be taller than the centered empty-chat introduction. */
+.chat-workspace.is-empty-thread:has(.worktree-setup-card) { grid-template-rows: minmax(0, 1fr) auto; }
+.chat-workspace.is-empty-thread:has(.worktree-setup-card) .message-scroll { align-items: flex-start; overflow-y: auto; }

@@ -268,6 +268,18 @@ jobs:
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
+      - name: Keep worktree setup screenshots
+        if: always() && needs.classify.outputs.renderer == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worktree-setup-screenshots
+          path: |
+            test-results/**/worktree-setup-*.png
+            test-results/**/worktree-setup-diagnostics.json
+            test-results/**/worktree-setup-*/trace.zip
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Keep Linux sentinel failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -879,6 +891,18 @@ jobs:
       - name: Run destructive runtime-recovery tests sequentially under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Keep worktree setup screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worktree-setup-screenshots-${{ matrix.evidence_artifact }}
+          path: |
+            test-results/**/worktree-setup-*.png
+            test-results/**/worktree-setup-diagnostics.json
+            test-results/**/worktree-setup-*/trace.zip
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Keep provider settings visual evidence
         if: runner.os == 'Linux' && matrix.arch == 'x64'

@@ -6,6 +6,7 @@ import {
 
 import { environmentValue } from "./environment";
 import {
+  awaitRuntimeOwnedProcessStopped,
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../node/runtime-owned-processes";
@@ -51,6 +52,7 @@ export interface RestrictedCliOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   failureMessage: string;
+  onOutput?: (chunk: Buffer) => void;
 }
 
 export interface RestrictedCliDependencies {
@@ -191,6 +193,7 @@ export async function runRestrictedCli(
     const append = (target: Buffer[], chunk: Buffer): void => {
       if (settled || termination) return;
       const remaining = maxOutputBytes - outputBytes;
+      options.onOutput?.(chunk.subarray(0, Math.max(0, remaining)));
       if (chunk.length <= remaining) {
         target.push(chunk);
         outputBytes += chunk.length;
@@ -231,8 +234,11 @@ export async function runRestrictedCli(
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
       };
-      if (code === 0) finish(undefined, result);
-      else finish(new RestrictedCliError("failed", options.failureMessage));
+      void awaitRuntimeOwnedProcessStopped(child).then((stopped) => {
+        if (!stopped) finish(new RestrictedCliError("cleanup", "The command process tree could not be confirmed stopped."));
+        else if (code === 0) finish(undefined, result);
+        else finish(new RestrictedCliError("failed", options.failureMessage));
+      }).catch(() => finish(new RestrictedCliError("cleanup", "The command process tree could not be confirmed stopped.")));
     });
     child.stdin.on("error", () => undefined);
     child.stdin.end(options.input ?? "");

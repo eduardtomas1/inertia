@@ -59,6 +59,11 @@ export function detachedChatCommandRejection(
         : REJECTION;
     case "conversation.detail.load":
       return owns(command.payload.conversationId) ? null : REJECTION;
+    case "worktree.setup.read":
+    case "worktree.setup.wait":
+    case "worktree.setup.retry":
+    case "worktree.setup.cancel":
+    case "worktree.setup.skip":
     case "agent.workflow.load":
     case "agent.workflow.saved.load":
     case "agent.skills.list":

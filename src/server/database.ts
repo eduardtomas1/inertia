@@ -1,3 +1,4 @@
+import { WorktreeSetupRepository } from "./persistence/worktree-setup-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
@@ -117,6 +118,7 @@ export class RuntimeStore {
   readonly agentThreadManagement: AgentThreadManagementRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
+  readonly worktreeSetups: WorktreeSetupRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
@@ -264,6 +266,7 @@ export class RuntimeStore {
       requireConversation: (conversationId) => this.requireConversation(conversationId),
       touchProject: (projectId, timestamp) => this.projectRepository.touch(projectId, timestamp),
     });
+    this.worktreeSetups = new WorktreeSetupRepository(this.database);
     this.workspaceRunRepository = new WorkspaceRunRepository({
       database: this.database,
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -1148,13 +1151,9 @@ export class RuntimeStore {
   hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }
   hasActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.conversationWork.hasConversation(conversationId) || this.hasRecordedActiveWorkspaceRunForConversation(conversationId); }
 
-  markWorkspaceRunSeen(id: string): WorkspaceRun {
-    return this.workspaceRunRepository.markSeen(id);
-  }
+  markWorkspaceRunSeen(id: string): WorkspaceRun { return this.workspaceRunRepository.markSeen(id); }
 
-  acknowledgeWorkspaceRun(id: string): WorkspaceRun {
-    return this.workspaceRunRepository.acknowledge(id);
-  }
+  acknowledgeWorkspaceRun(id: string): WorkspaceRun { return this.workspaceRunRepository.acknowledge(id); }
 
   dismissWorkspaceRun(id: string): void {
     this.workspaceRunRepository.dismiss(id);
@@ -1244,6 +1243,7 @@ export class RuntimeStore {
   }
 
   recoverInterruptedRuns(): void {
+    this.worktreeSetups.recoverInterrupted();
     this.recoveryRepository.recoverInterruptedRuns();
   }
 }

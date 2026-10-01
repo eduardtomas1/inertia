@@ -245,6 +245,7 @@ export interface Project {
 }
 
 export interface Conversation {
+  worktreeSetup?: import("../worktree-setup").WorktreeSetupSummary | null;
   id: string;
   projectId: string;
   title: string;

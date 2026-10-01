@@ -1,6 +1,11 @@
 import type Database from "better-sqlite3";
 
+export function removeWorktreeSetupFromLegacyFixture(database: Database.Database): void {
+  database.exec("DROP TABLE IF EXISTS worktree_setups; ALTER TABLE conversations DROP COLUMN worktree_setup_json");
+}
+
 export function removeProjectSettingsFromLegacyFixture(database: Database.Database): void {
+  removeWorktreeSetupFromLegacyFixture(database);
   database.exec(`
     DROP TABLE IF EXISTS queued_messages;
     ALTER TABLE projects DROP COLUMN preferences_json;

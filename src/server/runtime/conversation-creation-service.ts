@@ -35,6 +35,7 @@ export interface ConversationCreationDependencies {
     WorkspaceRunController<never>,
     "trackSourceControl"
   >;
+  worktreeSetups?: Pick<import("./worktree-setup-controller").WorktreeSetupController, "initialize">;
   dataDirectory: string;
   broadcastSnapshot(): void;
   testHooks?: {
@@ -255,10 +256,12 @@ export class ConversationCreationService {
             },
           },
         );
-      return this.dependencies.store.updateConversation(conversation.id, {
+      this.dependencies.store.updateConversation(conversation.id, {
         worktreePath: createdStatus.root,
         branch: createdStatus.branch ?? branch,
       });
+      this.dependencies.worktreeSetups?.initialize(conversation.id);
+      return this.dependencies.store.conversation(conversation.id);
     } catch (error) {
       const ownership = this.dependencies.store.conversationWorktrees
         .get(conversation.id);

@@ -995,6 +995,36 @@ describe("useDraftConversation", () => {
     expect(values.has(promptStorageKey)).toBe(false);
   });
 
+  it("shows setup when the saved checkout snapshot precedes the creation response", async () => {
+    let resolveCreation!: (event: ServerEvent) => void;
+    const creation = new Promise<ServerEvent>((resolve) => { resolveCreation = resolve; });
+    const run = vi.fn().mockReturnValueOnce(creation).mockResolvedValue({ type: "request.ok", requestId: "setup" });
+    let finishSend!: () => void;
+    const sendMessage = vi.fn(() => new Promise<null>((resolve) => { finishSend = () => resolve(null); }));
+    const hook = renderHook(({ current }) => useDraftConversation({
+      snapshot: current, settings: { ...defaultSettings, newThreadMode: "worktree" }, run, sendMessage,
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }), { initialProps: { current: snapshot } });
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation!.id;
+    let sending!: Promise<unknown>;
+    await act(async () => { sending = hook.result.current.sendFromComposer("Wait for setup", []); });
+    const saved = materializedSnapshot();
+    saved.conversations[0] = { ...saved.conversations[0]!, worktreePath: "/workspace/isolated", worktreeSetup: {
+      actionName: "Install dependencies", status: "running", attempt: 1, startedAt: now, finishedAt: null, detail: "Preparing checkout",
+    } };
+    hook.rerender({ current: saved });
+    try {
+      await act(async () => { resolveCreation({ type: "request.result", requestId: "create", result: { kind: "conversation.created", conversationId } }); });
+      expect(hook.result.current.conversation).toMatchObject({ id: draftId, worktreePath: "/workspace/isolated", worktreeSetup: { status: "running" } });
+      expect(hook.result.current.requiresWorkspaceMaterialization).toBe(false);
+      await hook.result.current.runWorktreeSetupCommand("stop", { type: "worktree.setup.cancel", payload: { conversationId: draftId } });
+      expect(run).toHaveBeenLastCalledWith("stop", { type: "worktree.setup.cancel", payload: { conversationId } }, undefined);
+    } finally {
+      await act(async () => { finishSend(); await sending; });
+    }
+  });
+
   it.each(["before", "after"])("refreshes the saved checkout and model when its snapshot arrives %s first-send rejection", async (order) => {
     const settings = { ...defaultSettings, newThreadMode: "worktree" as const };
     const run = vi.fn(async (): Promise<ServerEvent> => ({

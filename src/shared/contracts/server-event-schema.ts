@@ -184,20 +184,13 @@ function latestTurn(value: unknown): boolean {
     && modelRouteIdentityCoherent(value);
 }
 
+import { worktreeSetupSummarySchema, WORKTREE_SETUP_OUTPUT_LIMIT } from "../worktree-setup";
+
 function conversation(value: unknown): value is UnknownRecord {
   return recordWithStrings(
     value,
-    "id",
-    "projectId",
-    "title",
-    "providerId",
-    "model",
-    "reasoningEffort",
-    "interactionMode",
-    "accessMode",
-    "status",
-    "createdAt",
-    "updatedAt",
+    "id", "projectId", "title", "providerId", "model", "reasoningEffort",
+    "interactionMode", "accessMode", "status", "createdAt", "updatedAt",
   )
     && providerId(value, "providerId")
     && oneOf(value, "interactionMode", INTERACTION_MODES)
@@ -210,6 +203,7 @@ function conversation(value: unknown): value is UnknownRecord {
     && (value.attentionKind === null || oneOf(value, "attentionKind", ["approval", "input"]))
     && nullableStringField(value, "branch")
     && nullableStringField(value, "worktreePath")
+    && (value.worktreeSetup === undefined || value.worktreeSetup === null || worktreeSetupSummarySchema.safeParse(value.worktreeSetup).success)
     && nullableStringField(value, "providerSessionId")
     && nullableStringField(value, "archivedAt")
     && nullableStringField(value, "settledAt")
@@ -1110,6 +1104,7 @@ import { messageQueueResultSchema } from "../queued-messages";
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  "worktree.setup": (value) => (value.summary === null || worktreeSetupSummarySchema.safeParse(value.summary).success) && typeof value.output === "string" && value.output.length <= WORKTREE_SETUP_OUTPUT_LIMIT,
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,

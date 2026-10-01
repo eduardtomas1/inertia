@@ -1,0 +1,51 @@
+{
+  "baseCommit": "2364d768a71214bfbff7481bb5545cf19906a78f",
+  "node": "22.23.3",
+  "platform": "Linux x64",
+  "dependencyGraph": "Unchanged package-lock.json; both checkouts used the identical installed dependency tree.",
+  "reason": "Opt-in worktree setup adds readiness/IPC validation and first-prompt waiting; the status/recovery card remains deferred. Project settings adds a saved-action selector; shared preference validation also grows the deferred customization closure.",
+  "allocation": "Only measured feature deltas are added to the existing ceilings, preserving their prior headroom. The new deferred card has its own ceiling and a gate preventing eager inclusion.",
+  "measurements": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "baseBytes": 853542,
+      "candidateBytes": 855208,
+      "deltaBytes": 1666,
+      "previousCeilingBytes": 853557.8,
+      "newCeilingBytes": 855223.8
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "baseBytes": 660072,
+      "candidateBytes": 661438,
+      "deltaBytes": 1366,
+      "previousCeilingBytes": 660155.2,
+      "newCeilingBytes": 661521.2
+    },
+    "coreJavaScript": {
+      "baseBytes": 2226045,
+      "candidateBytes": 2227954,
+      "deltaBytes": 1909,
+      "previousCeilingBytes": 2226119.4,
+      "newCeilingBytes": 2228028.4
+    },
+    "deferredProjectSettingsJavaScript": {
+      "baseBytes": 13271,
+      "candidateBytes": 14223,
+      "deltaBytes": 952,
+      "previousCeilingBytes": 13367,
+      "newCeilingBytes": 14319
+    },
+    "deferredProjectCustomizeJavaScript": {
+      "baseBytes": 11256,
+      "candidateBytes": 11490,
+      "deltaBytes": 234,
+      "previousCeilingBytes": 11392,
+      "newCeilingBytes": 11626
+    },
+    "deferredWorktreeSetupJavaScript": {
+      "baseBytes": 0,
+      "candidateBytes": 3033,
+      "newCeilingBytes": 3328
+    }
+  },
+  "reproduce": "Build base and candidate with electron-vite build; scripts/check-renderer-bundle.mjs measures byte sizes and static import closures. No dependencies or minifier settings changed."
+}

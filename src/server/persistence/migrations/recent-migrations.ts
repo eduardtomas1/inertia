@@ -1,3 +1,4 @@
+import { worktreeSetupMigration } from "./worktree-setup";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
 import { attachmentStorageSettingsMigration } from "./attachment-storage-settings";
@@ -21,4 +22,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   completionSoundMigration,
   turnSessionRecoveryMigration,
   customAppearanceColorsMigration,
+  worktreeSetupMigration,
 ];

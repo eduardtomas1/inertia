@@ -43,7 +43,7 @@ test("curates a message, inspects its source and context, and persists chat excl
   await app.resizeWindow(1280, 920);
   let page = app.page;
   await page.getByRole("button", { name: "Remember for this project", exact: true }).first().click();
-  let dialog = page.getByRole("dialog", { name: "Project memory", exact: true });
+  let dialog = page.getByRole("dialog", { name: "Rules & decisions", exact: true });
   await dialog.getByLabel("Title", { exact: true }).fill("Preserve billing history");
   await dialog.getByLabel("Rule or decision", { exact: true }).fill("Use the saved proration snapshot when calculating invoices.");
   await dialog.getByLabel("Why it matters", { exact: true }).fill("Querying billing events directly misses previous-cycle plan changes. Keep the regression test for mid-cycle upgrades.");
@@ -65,11 +65,11 @@ test("curates a message, inspects its source and context, and persists chat excl
   await dialog.getByRole("checkbox", { name: "Use in this chat", exact: true }).click();
   await expect(dialog.getByRole("checkbox", { name: "Use in this chat", exact: true })).not.toBeChecked();
   await expect(dialog.getByLabel("Included project context")).not.toContainText("previous-cycle plan changes");
-  await dialog.getByRole("button", { name: "Close project memory", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close rules & decisions", exact: true }).click();
   await app.restart();
   page = app.page;
   await page.getByRole("button", { name: "Rules & decisions", exact: true }).click();
-  dialog = page.getByRole("dialog", { name: "Project memory", exact: true });
+  dialog = page.getByRole("dialog", { name: "Rules & decisions", exact: true });
   await expect(dialog.getByRole("checkbox", { name: "Use in this chat", exact: true })).not.toBeChecked();
   await dialog.getByRole("button", { name: "Edit Preserve billing history", exact: true }).click();
   await dialog.getByLabel("Why it matters", { exact: true }).fill("The mid-cycle upgrade regression test documents this choice.");

@@ -27,7 +27,58 @@ describe("project memory panel", () => {
     const trigger = screen.getByRole("button", { name: "Rules & decisions" });
     expect(screen.getByRole("region", { name: "Message composer" })).toContainElement(trigger);
     fireEvent.click(trigger);
-    expect(await screen.findByRole("dialog", { name: "Project memory" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Rules & decisions" })).toBeInTheDocument();
+  });
+
+  it("keeps focus inside the dialog when the editor closes", async () => {
+    const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(empty));
+    render(<ProjectMemoryDialog {...props} request={request} sourceMessage={message} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole("dialog");
+    await screen.findByRole("textbox", { name: "Title" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add entry" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Billing history" } });
+    fireEvent.change(screen.getByLabelText("Rule or decision"), { target: { value: "Use the snapshot." } });
+    fireEvent.change(screen.getByLabelText("Why it matters"), { target: { value: "Events omit prior-cycle changes." } });
+    request.mockResolvedValueOnce(result(populated));
+    const save = screen.getByRole("button", { name: "Save entry" });
+    save.focus();
+    fireEvent.click(save);
+    await screen.findByRole("heading", { name: "Billing history" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add entry" })).toHaveFocus());
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("keeps a focused chat toggle focusable while its change is saved", async () => {
+    const save = deferred<ServerEvent>();
+    const request = vi.fn<ProjectMemoryCommandRunner>().mockResolvedValue(result(populated));
+    render(<ProjectMemoryPanel {...props} request={request} />);
+    const toggle = await screen.findByRole("checkbox", { name: "Use in this chat" });
+    request.mockReturnValueOnce(save.promise);
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeDisabled();
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(toggle);
+    expect(request).toHaveBeenCalledTimes(2);
+    const excluded = { ...populated, chatRevision: 1, disabledIds: [populated.entries[0].id] };
+    await act(async () => { save.resolve(result(excluded)); });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveFocus();
+  });
+
+  it("reports a failed load passively and a failed save as an alert, without diagnostic suffixes", async () => {
+    const request = vi.fn<ProjectMemoryCommandRunner>().mockRejectedValueOnce(new Error("Rules and decisions could not be loaded."));
+    render(<ProjectMemoryPanel {...props} request={request} />);
+    expect(await screen.findByText("Rules and decisions could not be loaded.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    request.mockResolvedValueOnce(result(populated));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh rules & decisions" }));
+    const toggle = await screen.findByRole("checkbox", { name: "Use in this chat" });
+    request.mockRejectedValueOnce(new Error("This entry no longer exists. [incident:3f2b6a1c-2a4b-4c8d-9e0f-1a2b3c4d5e6f]"));
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^This entry no longer exists\.$/u);
   });
 
   it("requires curation and retains a failed draft across refresh, saving against the new revision", async () => {
@@ -35,14 +86,16 @@ describe("project memory panel", () => {
     render(<ProjectMemoryPanel {...props} request={request} sourceMessage={message} />);
     await screen.findByRole("textbox", { name: "Title" });
     expect(screen.getByLabelText("Rule or decision")).toHaveValue(message.content);
-    expect(screen.getByRole("button", { name: "Save entry" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save entry" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
+    expect(request).toHaveBeenCalledTimes(1);
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Billing history" } });
     fireEvent.change(screen.getByLabelText("Why it matters"), { target: { value: "Preserves previous-cycle changes" } });
     request.mockRejectedValueOnce(new Error("Project memory changed in another window."));
     fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("another window");
     request.mockResolvedValueOnce(result({ ...empty, revision: 2 }));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh project memory" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh rules & decisions" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Why it matters")).toHaveValue("Preserves previous-cycle changes");
     fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
@@ -72,7 +125,7 @@ describe("project memory panel", () => {
     render(<ProjectMemoryPanel {...props} request={request} />);
     await screen.findByText("Billing history");
     request.mockReturnValueOnce(read.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Refresh project memory" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh rules & decisions" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit Billing history" }));
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Updated decision" } });
     request.mockResolvedValueOnce(result({ ...populated, revision: 2, entries: [{ ...populated.entries[0], title: "Updated decision" }] }));
@@ -105,11 +158,11 @@ describe("project memory panel", () => {
     const view = render(<ProjectMemoryDialog {...props} request={request} sourceMessage={message} onClose={onClose} />);
     await screen.findByLabelText("Title");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-    expect(confirm).toHaveBeenCalledWith("Discard this unsaved project memory draft?");
+    expect(confirm).toHaveBeenCalledWith("Discard this unsaved rule or decision?");
     expect(onClose).not.toHaveBeenCalled();
     view.unmount(); expect(trigger).toHaveFocus(); trigger.remove(); vi.unstubAllGlobals();
     render(<ProjectMemoryPanel {...props} request={request} sourceMessage={message} disabled />);
-    expect(screen.getByRole("button", { name: "Refresh project memory" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh rules & decisions" })).toBeDisabled();
     expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
   });
 });

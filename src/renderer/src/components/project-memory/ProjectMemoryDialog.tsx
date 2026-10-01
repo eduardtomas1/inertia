@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
+import { IconButton } from "../ui";
 import ProjectMemoryPanel from "./ProjectMemoryPanel";
 import type { ProjectMemoryPanelProps } from "./types";
 
@@ -11,6 +12,7 @@ export default function ProjectMemoryDialog({ turnId, onClose, ...props }: Proje
   onClose(): void;
 }): React.JSX.Element {
   const titleId = useId();
+  const descriptionId = useId();
   const root = useRef<HTMLDivElement>(null);
   const [context, setContext] = useState<string | null | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -42,22 +44,34 @@ export default function ProjectMemoryDialog({ turnId, onClose, ...props }: Proje
   }, [request, projectId, conversationId, turnId]);
   const close = (): void => {
     if (busy) return;
-    if (hasDraft && !window.confirm("Discard this unsaved project memory draft?")) return;
+    if (hasDraft && !window.confirm("Discard this unsaved rule or decision?")) return;
     onClose();
   };
+  const title = turnId ? "Project context" : "Rules & decisions";
   return createPortal(<div className="dialog-backdrop">
-    <div ref={root} tabIndex={-1} className="project-memory-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}
+    <div ref={root} tabIndex={-1} className="commit-dialog project-memory-dialog" role="dialog" aria-modal="true"
+      aria-labelledby={titleId} aria-describedby={descriptionId}
       onKeyDown={(event) => {
         trapModalFocus(event, event.currentTarget);
         if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
       }}>
-      <div className="project-memory-dialog-bar"><span id={titleId}>{turnId ? "Project context for this turn" : "Project memory"}</span>
-        <button type="button" className="icon-button" aria-label="Close project memory" disabled={busy} onClick={close}><X size={16} /></button></div>
-      {turnId ? <section className="project-memory">
-        <h2>Included when this turn started</h2><p className="project-memory-help">This is the saved context for this turn. Later project edits do not change it.</p>
-        {error ? <p role="alert">{error}</p> : context === undefined ? <p role="status">Loading saved context…</p>
-          : <pre className="project-memory-sent-context" aria-label="Saved project context">{context ?? "No project rules or decisions were included in this turn."}</pre>}
-      </section> : <ProjectMemoryPanel {...props} onBusyChange={setBusy} onDraftChange={setHasDraft} />}
+      <header>
+        <div>
+          <h2 id={titleId}>{title}</h2>
+          <p id={descriptionId}>{turnId ? "Saved when this turn started. Later edits do not change it." : props.projectName}</p>
+        </div>
+        <IconButton label={`Close ${turnId ? "project context" : "rules & decisions"}`} disabled={busy} onClick={close}>
+          <X size={16} aria-hidden="true" />
+        </IconButton>
+      </header>
+      <div className="project-memory-dialog-body">
+        {turnId
+          ? error ? <p className="project-memory-error" role="status">{error}</p>
+            : context === undefined ? <p className="project-memory-help" role="status">Loading saved context…</p>
+              : context === null ? <p className="project-memory-empty">No rules or decisions were included in this turn.</p>
+                : <pre className="project-memory-code" tabIndex={0} aria-label="Saved project context">{context}</pre>
+          : <ProjectMemoryPanel {...props} onBusyChange={setBusy} onDraftChange={setHasDraft} />}
+      </div>
     </div>
   </div>, document.body);
 }

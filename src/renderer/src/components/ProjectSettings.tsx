@@ -171,9 +171,9 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
     </section>
     {request && <section className="project-settings-card">
       <Row title="Rules & decisions" description="Shared project context for every provider, with the reasons behind your choices.">
-        <button type="button" className="secondary-button" aria-expanded={memoryOpen} onClick={() => setMemoryOpen(!memoryOpen)}>{memoryOpen ? "Hide project memory" : "Manage project memory"}</button>
+        <button type="button" className="secondary-button" aria-expanded={memoryOpen} onClick={() => setMemoryOpen(!memoryOpen)}>{memoryOpen ? "Hide rules & decisions" : "Show rules & decisions"}</button>
       </Row>
-      {memoryOpen && <Suspense fallback={<p role="status">Loading project memory…</p>}><ProjectMemoryPanel key={project.id} projectId={project.id} projectName={project.name} request={request} disabled={disabled} /></Suspense>}
+      {memoryOpen && <Suspense fallback={<p className="project-actions-empty" role="status">Loading rules and decisions…</p>}><ProjectMemoryPanel key={project.id} projectId={project.id} projectName={project.name} request={request} disabled={disabled} /></Suspense>}
     </section>}
     <h2 className="project-settings-group-title">Danger zone</h2>
     <section className="project-settings-card"><Row title="Remove project" description="Remove this project and its threads from Inertia. Files on disk are not touched.">

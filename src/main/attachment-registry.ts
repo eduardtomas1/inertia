@@ -909,7 +909,7 @@ export class AttachmentRegistry {
     path: string,
     attachment: PreparedAttachmentMetadata,
     signal: AbortSignal,
-    allowTestDelay: boolean,
+    initialImport: boolean,
   ): Promise<AttachmentImportValidationReceipt> {
     signal.throwIfAborted();
     const root = await this.verifiedDirectory();
@@ -938,8 +938,8 @@ export class AttachmentRegistry {
       name: attachment.displayName,
       mimeType: attachment.mimeType,
       size: attachment.size,
-      normalizeImage: allowTestDelay,
-      stallBeforeValidationMs: allowTestDelay
+      normalizeImage: initialImport && attachment.mimeType.startsWith("image/"),
+      stallBeforeValidationMs: initialImport
         ? this.validationDelayMs
         : 0,
     };
@@ -960,7 +960,7 @@ export class AttachmentRegistry {
       before,
       expectedRoot: root,
       expectedSize: receipt.size,
-      normalized: receipt.normalized === true && allowTestDelay && attachment.mimeType.startsWith("image/") && receipt.mimeType === "image/jpeg" && receipt.size <= 10 * 1024 * 1024,
+      normalized: receipt.normalized === true && operation.normalizeImage === true && receipt.mimeType === "image/jpeg" && receipt.size <= 10 * 1024 * 1024,
       path,
       receipt,
       resolveVerifiedRoot: async () =>

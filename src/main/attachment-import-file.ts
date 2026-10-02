@@ -282,7 +282,7 @@ export async function validateAttachmentImportFile(
 
   const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
   const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
-  const file = await open(path, (operation.normalizeImage ? constants.O_RDWR : constants.O_RDONLY) | noFollow | nonBlocking);
+  const file = await open(path, constants.O_RDONLY | noFollow | nonBlocking);
   try {
     const before = await file.stat({ bigint: true });
     if (
@@ -378,14 +378,23 @@ export async function validateAttachmentImportFile(
     await assertRoot(operation, options.requirePinnedCwd === true);
     if (normalized) {
       signal?.throwIfAborted();
-      let offset = 0;
-      while (offset < normalized.length) {
-        const { bytesWritten } = await file.write(normalized, offset, normalized.length - offset, offset);
-        if (bytesWritten === 0) throw new AttachmentImportValidationError("unsafe");
-        offset += bytesWritten;
+      const writer = await open(path, constants.O_WRONLY | noFollow | nonBlocking);
+      try {
+        const target = await writer.stat({ bigint: true });
+        if (!target.isFile() || target.nlink !== 1n || !sameIdentity(finalPinned, target)) {
+          throw new AttachmentImportValidationError("unsafe");
+        }
+        let offset = 0;
+        while (offset < normalized.length) {
+          const { bytesWritten } = await writer.write(normalized, offset, normalized.length - offset, offset);
+          if (bytesWritten === 0) throw new AttachmentImportValidationError("unsafe");
+          offset += bytesWritten;
+        }
+        await writer.truncate(normalized.length);
+        await writer.sync();
+      } finally {
+        await writer.close();
       }
-      await file.truncate(normalized.length);
-      await file.sync();
     }
     return {
       displayName: validated.displayName,

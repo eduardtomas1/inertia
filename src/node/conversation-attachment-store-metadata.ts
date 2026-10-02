@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_BYTES,
-  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName, chatAttachmentStorageExtension,
+  storedAttachmentTypeMatchesName, chatAttachmentStorageExtension,
   type ChatAttachmentMimeType } from "../shared/attachments.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -46,7 +46,7 @@ export function metadataFromUnknown(value: unknown): PersistedAttachmentMetadata
     || typeof candidate.mimeType !== "string"
     || !(ACCEPTED_ATTACHMENT_MIME_TYPES as readonly string[])
       .includes(candidate.mimeType)
-    || chatAttachmentMimeTypeForName(candidate.name) !== candidate.mimeType
+    || !storedAttachmentTypeMatchesName(candidate.name, candidate.mimeType)
     || !Number.isSafeInteger(candidate.size)
     || (candidate.size ?? 0) < 1
     || (candidate.size ?? 0) > MAX_ATTACHMENT_BYTES
@@ -73,7 +73,7 @@ export function metadataFor(payload: { readonly attachment: ChatAttachment; read
     || (source ? source.path !== attachment.path || !DIGEST_PATTERN.test(source.digest) : bytes.byteLength !== attachment.size)
     || attachment.size < 1
     || attachment.size > MAX_ATTACHMENT_BYTES
-    || chatAttachmentMimeTypeForName(attachment.name) !== attachment.mimeType
+    || !storedAttachmentTypeMatchesName(attachment.name, attachment.mimeType)
   ) {
     throw new Error("The retained conversation attachment is invalid.");
   }

@@ -269,6 +269,10 @@ export function safeChatAttachmentMimeTypeForName(
     || PLAIN_TEXT_ATTACHMENT_NAMES.has(leaf) ? "text/plain" : "application/octet-stream";
 }
 
+export function storedAttachmentTypeMatchesName(name: string, mimeType: string): boolean {
+  return mimeType === "application/octet-stream" || safeChatAttachmentMimeTypeForName(name) === mimeType;
+}
+
 export function isPotentialChatAttachment(
   name: string,
   declaredMimeType: string,

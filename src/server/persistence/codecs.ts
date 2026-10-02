@@ -35,7 +35,7 @@ import {
   ACCEPTED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_BYTES,
   chatAttachmentMimeTypeForName,
-  safeChatAttachmentMimeTypeForName,
+  storedAttachmentTypeMatchesName,
 } from "../../shared/attachments";
 import {
   isContinuationReasonCode,
@@ -693,7 +693,7 @@ function isStoredChatAttachment(
     && !/[\\/]/u.test(candidate.name)
     && typeof candidate.mimeType === "string"
     && (ACCEPTED_ATTACHMENT_MIME_TYPES as readonly string[]).includes(candidate.mimeType)
-    && safeChatAttachmentMimeTypeForName(candidate.name) === candidate.mimeType
+    && storedAttachmentTypeMatchesName(candidate.name, candidate.mimeType)
     && typeof candidate.path === "string"
     && candidate.path.length >= 1
     && candidate.path.length <= 4_096

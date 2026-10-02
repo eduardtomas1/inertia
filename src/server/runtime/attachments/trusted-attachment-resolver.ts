@@ -20,7 +20,7 @@ import {
   attachmentLimitError,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_TOTAL_BYTES,
-  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
+  storedAttachmentTypeMatchesName,
   chatAttachmentStorageExtension,
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";
@@ -153,7 +153,7 @@ export class TrustedAttachmentResolver {
         trusted.size < 1
         || trusted.size > MAX_ATTACHMENT_BYTES
         || !/^[0-9a-f]{64}$/u.test(trusted.digest)
-        || chatAttachmentMimeTypeForName(trusted.name) !== trusted.mimeType
+        || !storedAttachmentTypeMatchesName(trusted.name, trusted.mimeType)
       ) throw publicAttachmentError();
       const pathInfo = await lstat(trusted.path);
       if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) throw publicAttachmentError();

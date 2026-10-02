@@ -10,6 +10,11 @@ import { LimitResetScheduler, type LimitResetDependencies } from "../../src/serv
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
 import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
 import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
+import { providerUsageLimitsMigration } from "../../src/server/persistence/migrations/provider-usage-limits";
+import { UsageLimitsRepository } from "../../src/server/persistence/usage-limits-repository";
+import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
+import { UsageLimitsService } from "../../src/server/usage/limits-service";
+import type { NativeUsageReader } from "../../src/server/usage/native";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
 
@@ -469,6 +474,38 @@ describe("scheduler isolation", () => {
     scheduler = makeScheduler();
     await scheduler.tick();
     expect(store.limitResets.get(conversationId)).toMatchObject({ state: "cancelled", turnId: null });
+  });
+});
+
+describe("cached reports for providers without a structured usage-limit signal", () => {
+  it.each([
+    ["cursor", "composer-2", "cursor:totalPercentUsed"],
+    ["kimi", "kimi-code/k2", "kimi:weekly"],
+    ["opencode", "opencode-go/m", "opencode:go_rolling"],
+  ] as const)("offers %s after the Limits page reported its exhausted quota", async (providerId, model, windowId) => {
+    const db = new Database(":memory:");
+    db.exec(providerUsageLimitsMigration.up as string);
+    const exhausted = { ...usage(), id: `native:${providerId}`, providerId, identityKey: null, email: null,
+      windows: [{ id: windowId, label: "Window", remainingPercent: 0, windowMinutes: null, resetsAt: reset }] };
+    const read = vi.fn<NativeUsageReader["read"]>(async () => ({ ...exhausted, credentialFingerprint: "f".repeat(64),
+      updatedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }));
+    const info = { ...initialProviderSnapshots(false).find(({ id }) => id === providerId)!, available: true, canRun: true };
+    const limits = new UsageLimitsService({ repository: new UsageLimitsRepository(db), native: { read, consume: vi.fn() },
+      providers: () => [info], customProfiles: () => [], signal: abort.signal, enabled: true });
+    dependencies.readAccount = (id, force, chatModel, cwd, interactive) => limits.nativeAccount(id, force, chatModel, cwd, interactive);
+    dependencies.cachedAccount = (id, chatModel, cwd) => limits.cachedNativeAccount(id, chatModel, cwd);
+    const projectId = store.conversation(conversationId).projectId;
+    conversationId = store.createConversation(projectId, "Untagged failure", { providerId, model }).id;
+    const turn = begin();
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    try {
+      expect((await scheduler.get(conversationId)).offer).toBeNull();
+      expect(read).not.toHaveBeenCalled();
+      await limits.refresh(true);
+      expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId: turn.id, canResume: true });
+      expect(read).toHaveBeenCalledOnce();
+    } finally { db.close(); }
   });
 });
 

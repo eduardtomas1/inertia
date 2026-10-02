@@ -12,7 +12,6 @@ import type { NativeUsageAccount } from "./subscription-io";
 
 type AccountRoute = { source: UsageSource; auth: Awaited<ReturnType<CliproxyUsageClient["accounts"]>>[number] };
 const CHAT_ACCOUNT_LIMIT = 32;
-const MODEL_INDEPENDENT_ACCOUNTS = new Set(["codex", "claude", "cursor"]);
 function staleProjection(account: NativeUsageAccount, now: number): { status?: "stale"; canReset?: false } {
   if (account.status !== "ready") return {};
   const old = now - Date.parse(account.updatedAt ?? "") > 180_000;
@@ -123,8 +122,7 @@ export class UsageLimitsService {
   }
   cachedNativeAccount(providerId: ProviderInfo["id"], model?: string, cwd?: string): NativeUsageAccount | null {
     const chat = this.chatAccounts.get(JSON.stringify([providerId, model ?? null, cwd ?? null]));
-    const limits = MODEL_INDEPENDENT_ACCOUNTS.has(providerId)
-      ? this.accounts.find((account) => account.id === `native:${providerId}`) : undefined;
+    const limits = this.accounts.find((account) => account.id === `native:${providerId}`);
     const account = [chat, limits].filter((entry) => entry !== undefined)
       .sort((left, right) => Date.parse(right.checkedAt ?? "") - Date.parse(left.checkedAt ?? ""))[0];
     return account ? { ...account, ...staleProjection(account, Date.now()) } : null;

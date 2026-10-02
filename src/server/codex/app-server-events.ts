@@ -1,4 +1,5 @@
 import {
+  codexApprovalResult,
   isCodexApprovalRequestMethod,
   parseCodexApprovalRequest,
 } from "./approvals";
@@ -52,10 +53,7 @@ import {
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
 import { codexTurnInterruptionFailure } from "./app-server-status";
-import {
-  MAX_PRE_RESPONSE_TURN_NOTIFICATIONS,
-  PreResponseTurnNotifications,
-} from "./pre-response-turn-notifications";
+import { CodexApprovalAuthority } from "./app-server-approval-authority";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -82,6 +80,8 @@ interface PendingApproval {
   request: AgentApprovalRequest;
   protocol: "decision" | "permissions" | "legacy-review";
   requestedPermissions?: JsonObject;
+  providerThreadId: string;
+  providerTurnId?: string;
 }
 
 interface PendingInput {
@@ -140,7 +140,7 @@ export class CodexAppServerEvents {
   private readonly itemActivities = new Map<string, CodexItemActivity>();
   private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
-  private readonly preResponseTurnNotifications = new PreResponseTurnNotifications();
+  private readonly approvalAuthority: CodexApprovalAuthority;
   private readonly subagentProjection = new Map<
     string,
     CodexSubagentProjection
@@ -183,12 +183,32 @@ export class CodexAppServerEvents {
       projection: (providerAgentId) =>
         this.subagentProjection.get(providerAgentId),
       rejectMalformed: (message) => this.rejectMalformedSubagent(message),
+      retireTurn: (threadId, turnId) => this.retireApprovals(threadId, turnId),
+    });
+    this.approvalAuthority = new CodexApprovalAuthority({
+      providerThreadId: host.providerThreadId,
+      activeTurnId: host.activeTurnId,
+      phase: host.phase,
+      requestedTurnId: host.requestedTurnId,
+      cancelRequested: host.cancelRequested,
+      completedTurnIds: this.completedTurnIds,
+      subagents: this.subagents,
+      reserveServerRequest: (id) => this.reserveServerRequest(id),
+      releaseServerRequest: (id) => { this.pendingServerRequestIds.delete(rpcRequestKey(id)); },
+      handleServerRequest: (id, method, params) => this.handleServerRequest(id, method, params),
+      handleNotification: (method, params) => this.handleNotification(method, params),
+      writeMessage: host.writeMessage,
+      failMalformedProtocol: (summary, message) => this.failMalformedProtocol(summary, message),
     });
     this.hostTools = new CodexHostToolRuntime({
       options: host.options,
       isSettled: host.isSettled,
       providerThreadId: host.providerThreadId,
       activeTurnId: host.activeTurnId,
+      isOwnedTurn: (providerThreadId, providerTurnId) => (
+        !host.cancelRequested()
+        && this.approvalAuthority.owns({ providerThreadId, providerTurnId })
+      ),
       reserveServerRequest: (id) => this.reserveServerRequest(id),
       releaseServerRequest: (id) => {
         this.pendingServerRequestIds.delete(rpcRequestKey(id));
@@ -199,6 +219,7 @@ export class CodexAppServerEvents {
   }
 
   dispose(): void {
+    this.approvalAuthority.clear();
     this.subagentContinuation.dispose();
     if (this.goalContinuationTimer) {
       clearTimeout(this.goalContinuationTimer);
@@ -233,9 +254,7 @@ export class CodexAppServerEvents {
 
   /** Replays the held notifications of the turn that turn/start returned. */
   replayPreResponseTurnNotifications(turnId: string): void {
-    for (const { method, params } of this.preResponseTurnNotifications.take(turnId)) {
-      this.handleNotification(method, params);
-    }
+    this.approvalAuthority.replayPreResponse(turnId);
   }
 
   goalProjectionSequence(): number {
@@ -294,6 +313,7 @@ export class CodexAppServerEvents {
   }
 
   settleInteractions(): void {
+    this.approvalAuthority.clear();
     this.hostTools.settle("cancel");
     for (const { rpcId: id, request, protocol } of
       this.pendingApprovals.values()) {
@@ -329,28 +349,11 @@ export class CodexAppServerEvents {
       || this.host.isSettled()
       || !pending.request.availableDecisions.includes(decision)
     ) return false;
-    const result: JsonObject = pending.protocol === "permissions"
-      ? {
-          permissions: decision === "approve"
-            ? pending.requestedPermissions ?? {}
-            : {},
-          scope: "turn",
-        }
-      : pending.protocol === "legacy-review"
-        ? {
-            decision: decision === "approve"
-              ? "approved"
-              : decision === "deny"
-                ? { denied: { rejection: "Denied by the user in Inertia." } }
-                : "abort",
-          }
-        : {
-          decision: decision === "approve"
-            ? "accept"
-            : decision === "deny"
-              ? "decline"
-              : "cancel",
-        };
+    if (this.host.cancelRequested() || !this.approvalAuthority.owns(pending)) {
+      this.retireApproval(requestId, pending);
+      return true;
+    }
+    const result = codexApprovalResult(pending.protocol, decision, pending.requestedPermissions);
     if (!this.host.writeMessage({ id: pending.rpcId, result })) return false;
     this.pendingApprovals.delete(requestId);
     this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
@@ -405,17 +408,8 @@ export class CodexAppServerEvents {
     }
     const parsedApproval = parseCodexApprovalRequest(method, params);
     if (parsedApproval) {
-      if (
-        parsedApproval.providerThreadId
-        && !this.isOwnedProviderThread(parsedApproval.providerThreadId)
-      ) {
-        const message = "Codex sent an approval for a different provider thread.";
-        this.host.writeMessage({ id, error: { code: -32602, message } });
-        this.host.setLastError(message);
-        this.emitActivity("system", "failed", message);
-        this.host.cancel("malformed-protocol");
-        return;
-      }
+      if (!this.approvalAuthority.admit(id, method, params, parsedApproval)) return;
+      const { providerThreadId, providerTurnId } = parsedApproval;
       const { request: approval } = parsedApproval;
       if (isHostToolApprovalId(approval.requestId)) {
         const message = "Codex reused a reserved Inertia approval identity.";
@@ -445,6 +439,8 @@ export class CodexAppServerEvents {
         rpcId: id,
         request: approval,
         protocol: parsedApproval.protocol,
+        providerThreadId,
+        ...(providerTurnId ? { providerTurnId } : {}),
         ...(parsedApproval.requestedPermissions
           ? { requestedPermissions: parsedApproval.requestedPermissions }
           : {}),
@@ -555,6 +551,23 @@ export class CodexAppServerEvents {
     this.host.cancel("malformed-protocol");
   }
 
+  private retireApprovals(threadId: string, turnId: string): void {
+    for (const [requestId, pending] of this.pendingApprovals) {
+      if (pending.providerThreadId === threadId && pending.providerTurnId === turnId) {
+        this.retireApproval(requestId, pending);
+      }
+    }
+  }
+
+  private retireApproval(requestId: string, pending: PendingApproval): void {
+    this.pendingApprovals.delete(requestId);
+    this.pendingServerRequestIds.delete(rpcRequestKey(pending.rpcId));
+    if (this.host.cancelRequested()) {
+      this.host.writeMessage({ id: pending.rpcId, result: codexApprovalResult(pending.protocol, "cancel") });
+    } else this.approvalAuthority.refuse(pending.rpcId);
+    this.host.options.onApprovalResolved?.(requestId, "cancelled");
+  }
+
   private isOwnedProviderThread(threadId: string): boolean {
     return this.subagents.isOwnedProviderThread(threadId);
   }
@@ -593,7 +606,10 @@ export class CodexAppServerEvents {
     const notificationThreadId = boundedText(params.threadId, 512);
     const notificationTurnId = boundedText(params.turnId, 512)
       ?? boundedText(objectValue(params.turn)?.id, 512);
-    if (this.subagents.handleNotification(method, params)) return;
+    if (this.subagents.handleNotification(method, params)) {
+      this.approvalAuthority.replayChildApprovals();
+      return;
+    }
 
     const runtimeProjection = projectCodexRuntimeNotification({
       providerThreadId: this.host.providerThreadId,
@@ -635,22 +651,9 @@ export class CodexAppServerEvents {
       return;
     }
 
-    if (
-      notificationTurnId
-      && this.host.phase() === "starting-turn"
-      && this.host.requestedTurnId?.() === null
-      && notificationThreadId === this.host.providerThreadId()
-      && !this.completedTurnIds.has(notificationTurnId)
-      && notificationTurnId !== this.host.activeTurnId()
-    ) {
-      if (!this.preResponseTurnNotifications.hold(method, notificationTurnId, params)) {
-        this.failMalformedProtocol(
-          "Codex sent too many notifications before the turn/start response.",
-          `Codex exceeded the ${MAX_PRE_RESPONSE_TURN_NOTIFICATIONS}-notification limit before the turn/start response.`,
-        );
-      }
-      return;
-    }
+    if (this.approvalAuthority.holdNotification(
+      method, notificationThreadId, notificationTurnId, params,
+    )) return;
 
     if (method === "turn/started") {
       const phase = this.host.phase();
@@ -895,6 +898,7 @@ export class CodexAppServerEvents {
     if (method === "turn/completed") {
       if (!notificationTurnId) return;
       this.completedTurnIds.add(notificationTurnId);
+      this.hostTools.retireTurn(notificationTurnId);
       const turn = objectValue(params.turn);
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);
@@ -1202,6 +1206,7 @@ export class CodexAppServerEvents {
   private handleResolvedRequest(params: JsonObject): void {
     const resolvedRpcId = rpcId(params.requestId);
     if (resolvedRpcId === undefined) return;
+    if (this.approvalAuthority.resolveRequest(resolvedRpcId)) return;
     for (const [requestId, pending] of this.pendingApprovals) {
       if (pending.rpcId !== resolvedRpcId) continue;
       this.pendingApprovals.delete(requestId);
@@ -1240,5 +1245,4 @@ export class CodexAppServerEvents {
     items.add(itemId);
     return true;
   }
-
 }

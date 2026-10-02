@@ -101,6 +101,7 @@ interface AppLayoutActions {
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
   openGlobalChat: () => void;
+  openNoProjectChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
@@ -228,6 +229,18 @@ export function paletteCurrentProjectId(
 ): string | null {
   const scoped = projectScopeId && snapshot?.projects.some(({ id }) => id === projectScopeId) ? projectScopeId : null;
   return scoped ?? snapshot?.activeProjectId ?? null;
+}
+
+export function conversationDeletionPrompt(
+  thread: Pick<Conversation, "title" | "projectId" | "worktreePath">,
+  snapshot: AppSnapshot | null,
+): string {
+  const prompt = `Delete “${thread.title}”? This cannot be undone.`;
+  const scratch = snapshot?.projects.some(({ id, workspaceKind }) => (
+    id === thread.projectId && workspaceKind === "scratch"
+  ));
+  if (!scratch || !thread.worktreePath) return prompt;
+  return `${prompt} Its chat folder is kept at ${thread.worktreePath}.`;
 }
 
 export function activeConversationIsVisible(input: {
@@ -391,7 +404,7 @@ export const AppLayout = memo(function AppLayout({
     },
     deleteConversation: (thread: Conversation) => {
       const confirmed = !settings.confirmDestructiveActions
-        || window.confirm(`Delete “${thread.title}”? This cannot be undone.`);
+        || window.confirm(conversationDeletionPrompt(thread, connection.snapshot));
       if (confirmed) {
         void actions.run("conversation.delete", {
           type: "conversation.delete",
@@ -895,6 +908,7 @@ export const AppLayout = memo(function AppLayout({
         sendCommand={connection.sendCommand}
         createConversation={() => actions.createConversation()}
         createConversationIn={(project) => actions.createConversation(project)}
+        openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}
       />

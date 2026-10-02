@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
+  Folder,
   FolderGit2,
   LoaderCircle,
   MessagesSquare,
@@ -131,6 +132,7 @@ export interface ComposerToolbarProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext: boolean;
+  scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   onUpdateConversation: (
     update: Partial<Pick<
@@ -209,6 +211,7 @@ export function ComposerToolbar({
   conversation,
   checkoutBranch,
   showCheckoutContext,
+  scratchWorkspace = false,
   newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
@@ -549,11 +552,11 @@ export function ComposerToolbar({
             <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
-              <FolderGit2 size={12} aria-hidden="true" />
-              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+              {scratchWorkspace ? <Folder size={12} aria-hidden="true" /> : <FolderGit2 size={12} aria-hidden="true" />}
+              <span>{scratchWorkspace ? "Chat folder" : conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}
-          <CheckoutBranchSlot branch={visibleCheckoutBranch} />
+          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
         </div>
       )}
     </div>

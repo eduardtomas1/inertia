@@ -201,7 +201,7 @@ export function visibleConversationLatestTurnSummary(
 
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
-  selectGlobalChatProject?: (project: Project) => void;
+  selectGlobalChatProject?: (project: Project | null) => void;
   createConversation: (
     targetProject?: Project | null,
     location?: NewConversationLocation,
@@ -451,7 +451,7 @@ export function createWorkspaceSceneModel({
   if (workspaceToolsUnavailable) {
     for (const surface of WORKSPACE_BOUND_SURFACES) {
       unavailableSurfaces[surface] =
-        "Available after the first message creates this isolated worktree.";
+        "Available after the first message creates this chat's workspace.";
     }
   }
   if (!conversation) {

@@ -85,12 +85,12 @@ describe("mascot sprite validation", () => {
     expect(await rejection(spriteFolder({ "pickup.webp": readFileSync(join(assets, "pickup.webp")), "pickup.gif": Buffer.from("GIF89a") })))
       .toBe("Keep one animation for pickup: pickup.webp or pickup.gif.");
     expect(await rejection(spriteFolder({ "idle.gif": Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1) }))).toBe("idle.gif is larger than 512 KB. Each image must be 512 KB or smaller.");
-    expect(() => validateMascotSprite("idle.jpg", png())).toThrow("idle.jpg must be a PNG, WebP or GIF image.");
-    expect(() => validateMascotSprite("idle.png", Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1))).toThrow("larger than 512 KB");
+    await expect(validateMascotSprite("idle.jpg", png())).rejects.toThrow("idle.jpg must be a PNG, WebP or GIF image.");
+    await expect(validateMascotSprite("idle.png", Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1))).rejects.toThrow("larger than 512 KB");
     const truncated = png();
-    expect(() => validateMascotSprite("idle.png", truncated.subarray(0, truncated.byteLength - 20))).toThrow("idle.png is not a valid PNG image.");
-    expect(() => validateMascotSprite("idle.png", corruptPixels(png()))).toThrow("idle.png could not be decoded. Save it again as a standard PNG.");
-    expect(() => validateMascotSprite("idle.png", corruptPixels(readFileSync(join(assets, "idle.png"))))).toThrow("idle.png could not be decoded.");
+    await expect(validateMascotSprite("idle.png", truncated.subarray(0, truncated.byteLength - 20))).rejects.toThrow("idle.png is not a valid PNG image.");
+    await expect(validateMascotSprite("idle.png", corruptPixels(png()))).rejects.toThrow("idle.png could not be decoded. Save it again as a standard PNG.");
+    await expect(validateMascotSprite("idle.png", corruptPixels(readFileSync(join(assets, "idle.png"))))).rejects.toThrow("idle.png could not be decoded.");
     const folder = spriteFolder();
     rmSync(join(folder, "idle.png"));
     mkdirSync(join(folder, "idle.png"));

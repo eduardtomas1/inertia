@@ -2,7 +2,7 @@ import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import * as XLSX from "xlsx";
-import { pngChunk, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
+import { pngChunk, pngWithoutPalette, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
 import {
   attachmentPickerConfiguration,
@@ -315,8 +315,8 @@ describe("privileged attachment import validation", () => {
       xlsx,
     ],
     ["forecast.xls", "application/vnd.ms-excel", xls],
-  ])("accepts verified %s content", (name, mimeType, data) => {
-    const result = validateAttachmentImport({ name, mimeType, data });
+  ])("accepts verified %s content", async (name, mimeType, data) => {
+    const result = await validateAttachmentImport({ name, mimeType, data });
 
     expect(result).toMatchObject({
       displayName: name,
@@ -327,21 +327,21 @@ describe("privileged attachment import validation", () => {
     expect(result.bytes).not.toBe(data);
   });
 
-  it("sanitizes display names without retaining a supplied local path", () => {
-    expect(validateAttachmentImport({
+  it("sanitizes display names without retaining a supplied local path", async () => {
+    expect((await validateAttachmentImport({
       name: "/Users/person/private/preview.png",
       mimeType: "image/png",
       data: png,
-    }).displayName).toBe("preview.png");
-    expect(validateAttachmentImport({
+    })).displayName).toBe("preview.png");
+    expect((await validateAttachmentImport({
       name: "unsafe\n.png",
       mimeType: "image/png",
       data: png,
-    }).displayName).toBe("image.png");
+    })).displayName).toBe("image.png");
   });
 
-  it("accepts a Linux clipboard PDF with an empty declared MIME after byte verification", () => {
-    expect(validateAttachmentImport({
+  it("accepts a Linux clipboard PDF with an empty declared MIME after byte verification", async () => {
+    expect(await validateAttachmentImport({
       name: "linux-clipboard.pdf",
       mimeType: "",
       data: pdf,
@@ -371,18 +371,18 @@ describe("privileged attachment import validation", () => {
     ["forecast.xls", "application/x-msexcel", xls],
     ["forecast.xls", "application/x-ms-excel", xls],
     ["forecast.xls", "application/octet-stream", xls],
-  ])("accepts verified %s content with platform MIME %s", (
+  ])("accepts verified %s content with platform MIME %s", async (
     name,
     mimeType,
     data,
   ) => {
-    expect(validateAttachmentImport({ name, mimeType, data })).toMatchObject({
+    expect(await validateAttachmentImport({ name, mimeType, data })).toMatchObject({
       displayName: name,
       size: data.length,
     });
   });
 
-  it("rejects an XLSX container whose directory advertises an unsafe expansion", () => {
+  it("rejects an XLSX container whose directory advertises an unsafe expansion", async () => {
     const expanded = Buffer.from(xlsx);
     const centralDirectory = expanded.indexOf(Buffer.from([
       0x50, 0x4b, 0x01, 0x02,
@@ -393,43 +393,43 @@ describe("privileged attachment import validation", () => {
       centralDirectory + 24,
     );
 
-    expect(() => validateAttachmentImport({
+    await expect(validateAttachmentImport({
       name: "expanded.xlsx",
       mimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       data: expanded,
-    })).toThrow(/content does not match/u);
+    })).rejects.toThrow(/content does not match/u);
   });
 
-  it("rejects XLSX entries that inflate beyond their claimed size", () => {
+  it("rejects XLSX entries that inflate beyond their claimed size", async () => {
     const deceptive = Buffer.from(xlsx);
     const entry = xlsxEntryLocation(deceptive, "xl/theme/theme1.xml");
     expect(deceptive.readUInt16LE(entry.centralOffset + 10)).toBe(8);
     deceptive.writeUInt32LE(1, entry.centralOffset + 24);
     deceptive.writeUInt32LE(1, entry.localOffset + 22);
 
-    expect(() => validateAttachmentImport({
+    await expect(validateAttachmentImport({
       name: "deceptive.xlsx",
       mimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       data: deceptive,
-    })).toThrow(/content does not match/u);
+    })).rejects.toThrow(/content does not match/u);
   });
 
-  it("rejects XLSX entries whose local and central names disagree", () => {
+  it("rejects XLSX entries whose local and central names disagree", async () => {
     const mismatched = Buffer.from(xlsx);
     const entry = xlsxEntryLocation(mismatched, "xl/workbook.xml");
     mismatched[entry.localNameOffset] = "y".charCodeAt(0);
 
-    expect(() => validateAttachmentImport({
+    await expect(validateAttachmentImport({
       name: "mismatched.xlsx",
       mimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       data: mismatched,
-    })).toThrow(/content does not match/u);
+    })).rejects.toThrow(/content does not match/u);
   });
 
-  it("rejects an XLSX archive containing a VBA project part", () => {
+  it("rejects an XLSX archive containing a VBA project part", async () => {
     const macro = Buffer.from(xlsx);
     const originalName = "docProps/core.xml";
     const macroName = "xl/vbaProject.bin";
@@ -438,15 +438,23 @@ describe("privileged attachment import validation", () => {
     macro.write(macroName, entry.centralOffset + 46, "utf8");
     macro.write(macroName, entry.localNameOffset, "utf8");
 
-    expect(() => validateAttachmentImport({
+    await expect(validateAttachmentImport({
       name: "macro.xlsx",
       mimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       data: macro,
-    })).toThrow(/content does not match/u);
+    })).rejects.toThrow(/content does not match/u);
   });
 
-  it("rejects image headers, truncation, corrupt checksums, and trailing payloads", () => {
+  it("rejects an image whose readable dimensions precede native decoder failure", async () => {
+    await expect(validateAttachmentImport({
+      name: "missing-palette.png",
+      mimeType: "image/png",
+      data: pngWithoutPalette(),
+    })).rejects.toThrow("Attachment content does not match its safe file type.");
+  });
+
+  it("rejects image headers, truncation, corrupt checksums, and trailing payloads", async () => {
     const corruptPng = Buffer.from(png);
     const idat = corruptPng.indexOf(Buffer.from("IDAT", "ascii"));
     expect(idat).toBeGreaterThanOrEqual(0);
@@ -461,23 +469,23 @@ describe("privileged attachment import validation", () => {
       { name: "trailing.png", data: Buffer.concat([png, Buffer.from("x")]) },
     ];
     for (const candidate of malformed) {
-      expect(() => validateAttachmentImport({
+      await expect(validateAttachmentImport({
         ...candidate,
         mimeType: chatMimeForTestName(candidate.name),
-      }), candidate.name).toThrow(/content does not match/u);
+      }), candidate.name).rejects.toThrow(/content does not match/u);
     }
   });
 
-  it("accepts valid PNG data split around empty IDAT chunks without altering bytes", () => {
+  it("accepts valid PNG data split around empty IDAT chunks without altering bytes", async () => {
     // PNG allows zero-length IDAT records; the concatenated stream still
     // carries exactly the original pixels and must be decoded and verified.
     const bytes = withEmptyPngDataChunks(png);
-    expect(validateAttachmentImport({
+    expect(await validateAttachmentImport({
       name: "clipboard.png", mimeType: "image/png", data: bytes,
     })).toMatchObject({ bytes, size: bytes.length, mimeType: "image/png" });
   });
 
-  it("still rejects empty, non-contiguous, and excessive PNG data chunks", () => {
+  it("still rejects empty, non-contiguous, and excessive PNG data chunks", async () => {
     const headerEnd = 8 + 12 + png.readUInt32BE(8);
     const header = png.subarray(0, headerEnd);
     const end = pngChunk("IEND");
@@ -491,13 +499,13 @@ describe("privileged attachment import validation", () => {
       Buffer.concat([header, validData, interrupted, empty, end]),
       Buffer.concat([header, ...Array<Buffer>(4_096).fill(empty), validData, end]),
     ]) {
-      expect(() => validateAttachmentImport({
+      await expect(validateAttachmentImport({
         name: "unsafe.png", mimeType: "image/png", data,
-      })).toThrow(/content does not match/u);
+      })).rejects.toThrow(/content does not match/u);
     }
   });
 
-  it("allows empty APNG data chunks without relaxing animation ordering or frame payloads", () => {
+  it("allows empty APNG data chunks without relaxing animation ordering or frame payloads", async () => {
     const header = png.subarray(0, 8 + 12 + png.readUInt32BE(8));
     const idatOffset = png.indexOf(Buffer.from("IDAT")) - 4;
     const validData = png.subarray(idatOffset, idatOffset + 12 + png.readUInt32BE(idatOffset));
@@ -512,7 +520,7 @@ describe("privileged attachment import validation", () => {
     const end = pngChunk("IEND");
     const bytes = Buffer.concat([header, animation, frame, empty, validData, empty, end]);
 
-    expect(validateAttachmentImport({
+    expect(await validateAttachmentImport({
       name: "animation.png", mimeType: "image/png", data: bytes,
     })).toMatchObject({ bytes, size: bytes.length, mimeType: "image/png" });
 
@@ -522,24 +530,24 @@ describe("privileged attachment import validation", () => {
       // Even an empty IDAT must follow the animation header.
       Buffer.concat([header, empty, animation, frame, validData, end]),
     ]) {
-      expect(() => validateAttachmentImport({
+      await expect(validateAttachmentImport({
         name: "unsafe-animation.png", mimeType: "image/png", data,
-      })).toThrow(/content does not match/u);
+      })).rejects.toThrow(/content does not match/u);
     }
   });
 
-  it("reports a well-formed image beyond the safe dimension bound as too large", () => {
+  it("reports a well-formed image beyond the safe dimension bound as too large", async () => {
     const oversizedGif = Buffer.from(gif);
     oversizedGif.writeUInt16LE(8_193, 6);
 
-    expect(() => validateAttachmentImport({
+    await expect(validateAttachmentImport({
       name: "oversized.gif",
       mimeType: "image/gif",
       data: oversizedGif,
-    })).toThrow("This image is too large (8193×1 pixels, 0.1 MP).");
+    })).rejects.toThrow("This image is too large (8193×1 pixels, 0.1 MP).");
   });
 
-  it("rejects PDFs with deceptive cross-references, trailers, or page trees", () => {
+  it("rejects PDFs with deceptive cross-references, trailers, or page trees", async () => {
     const source = pdf.toString("ascii");
     const malformed = [
       Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "ascii"),
@@ -561,11 +569,11 @@ describe("privileged attachment import validation", () => {
       Buffer.concat([pdf, Buffer.from("payload", "ascii")]),
     ];
     for (const data of malformed) {
-      expect(() => validateAttachmentImport({
+      await expect(validateAttachmentImport({
         name: "unsafe.pdf",
         mimeType: "application/pdf",
         data,
-      })).toThrow(/content does not match/u);
+      })).rejects.toThrow(/content does not match/u);
     }
   });
 
@@ -574,8 +582,8 @@ describe("privileged attachment import validation", () => {
     { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
     { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
     { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
-  ])("stores unknown formats as opaque files: $name", (candidate) => {
-    expect(validateAttachmentImport(candidate)).toMatchObject({ mimeType: "application/octet-stream", extension: "bin" });
+  ])("stores unknown formats as opaque files: $name", async (candidate) => {
+    await expect(validateAttachmentImport(candidate)).resolves.toMatchObject({ mimeType: "application/octet-stream", extension: "bin" });
   });
 
   it.each([
@@ -607,8 +615,8 @@ describe("privileged attachment import validation", () => {
       mimeType: "image/png",
       data: Buffer.alloc(MAX_ATTACHMENT_BYTES + 1),
     },
-  ])("rejects malformed or unsupported imports %#", (candidate) => {
-    expect(() => validateAttachmentImport(candidate)).toThrow();
+  ])("rejects malformed or unsupported imports %#", async (candidate) => {
+    await expect(validateAttachmentImport(candidate)).rejects.toThrow();
   });
 });
 

@@ -58,6 +58,7 @@ function classifyingTermination(table: ProcessTable): ProcessTreeTerminator {
       platform: "linux",
       killProcess: vi.fn(() => true) as never,
       spawnProcessSync: vi.fn(() => table(++reads)) as never,
+      pauseSync: () => undefined,
       processCanExecute: () => null,
       processGroupCanExecute: () => null,
       waitMs: 20,

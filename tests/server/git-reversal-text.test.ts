@@ -24,6 +24,30 @@ function deletion() {
 }
 
 describe("selected line reversal text", () => {
+  it.each([
+    { change: "preserved BOM", originalFirst: "\uFEFFalpha", currentFirst: "\uFEFFALPHA" },
+    { change: "added BOM", originalFirst: "alpha", currentFirst: "\uFEFFalpha" },
+    { change: "removed BOM", originalFirst: "\uFEFFalpha", currentFirst: "alpha" },
+  ])("reverses the exact selected first-line bytes ($change)", ({ originalFirst, currentFirst }) => {
+    const firstLinePatch = [
+      "diff --git a/example.txt b/example.txt",
+      "--- a/example.txt",
+      "+++ b/example.txt",
+      "@@ -1,2 +1,2 @@",
+      `-${originalFirst}`,
+      `+${currentFirst}`,
+      " beta",
+      "",
+    ].join("\n");
+    const selected = parseUnifiedDiff(firstLinePatch).files[0]!.hunks[0]!.lines
+      .filter(({ kind }) => kind === "addition" || kind === "deletion");
+    const originalBytes = Buffer.from(`${originalFirst}\nbeta\n`);
+
+    expect(reversalText(
+      Buffer.from(`${currentFirst}\nbeta\n`), selected, new Map(), originalBytes,
+    )).toEqual(originalBytes);
+  });
+
   it("restores a deletion after its preceding hunk line", () => {
     const line = deletion();
 

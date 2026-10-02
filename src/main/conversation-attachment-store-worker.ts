@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import {
   CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE,
 } from "../node/conversation-attachment-store-child.js";
+import { metadataFromUnknown } from "../node/conversation-attachment-store-metadata.js";
+import { ATTACHMENT_PREVIEW_BYTES } from "../shared/attachments.js";
 import {
   parseConversationAttachmentStoreWorkerRequest,
   type ConversationAttachmentStoreWorkerEvent,
@@ -11,7 +13,11 @@ import {
 type StoreOperationExecutor = (
   operation: unknown,
   onReadReady?: () => void,
-) => Promise<unknown>;
+) => Promise<undefined | { readonly missing: true } | {
+  readonly missing: false;
+  readonly metadata: string;
+  readonly bytesBase64: string;
+}>;
 
 // This compiles only the checked-in static source shared with the standalone
 // Node helper. No message or filesystem content can contribute executable
@@ -23,6 +29,12 @@ const compileStoreOperation = new Function(
 ) as (require: NodeJS.Require) => StoreOperationExecutor;
 const performStoreOperation = compileStoreOperation(createRequire(import.meta.url));
 const parentPort = process.parentPort;
+
+function contentValidated(operation: unknown): boolean {
+  return typeof operation !== "object"
+    || operation === null
+    || Reflect.get(operation, "validateContent") !== false;
+}
 
 if (parentPort) {
   parentPort.once("message", (event) => {
@@ -59,6 +71,33 @@ if (parentPort) {
         type: "conversation-attachment-store.ready",
         operationId: request.operationId,
       } satisfies ConversationAttachmentStoreWorkerEvent);
+    }).then(async (receipt) => {
+      if (receipt && !receipt.missing && contentValidated(operation)) {
+        const metadata = metadataFromUnknown(JSON.parse(receipt.metadata));
+        if (!metadata) return { missing: true };
+        const data = Buffer.from(receipt.bytesBase64, "base64");
+        if (
+          typeof operation === "object"
+          && operation !== null
+          && Reflect.get(operation, "preview") === true
+          && (metadata.mimeType.startsWith("text/") || metadata.mimeType === "application/json")
+          && data.byteLength === ATTACHMENT_PREVIEW_BYTES
+          && metadata.size > ATTACHMENT_PREVIEW_BYTES
+        ) return receipt;
+        const { validateAttachmentImport } = await import("./attachment-import.js");
+        const validated = await validateAttachmentImport({
+          name: metadata.name,
+          mimeType: metadata.mimeType,
+          data,
+        });
+        if (
+          validated.displayName !== metadata.name
+          || validated.mimeType !== metadata.mimeType
+          || validated.size !== metadata.size
+          || validated.digest !== metadata.digest
+        ) throw new Error("Invalid attachment content.");
+      }
+      return receipt;
     }).then(
       (receipt) => {
         finish({

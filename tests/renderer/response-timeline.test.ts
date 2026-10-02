@@ -288,7 +288,9 @@ describe("authoritative response timeline", () => {
 
     expect(html).toContain('aria-label="Follow-up attachments"');
     expect(html).toContain("follow-up.png");
-    expect(html).toContain("attachment-preview/attachment-follow-up");
+    expect(html).toContain('aria-label="Preview attachment follow-up.png"');
+    expect(html).toContain('class="sent-attachment-thumbnail"');
+    expect(html).not.toContain("<img");
   });
 
   it("places context compaction where it happened and merges its adjacent provider records", () => {

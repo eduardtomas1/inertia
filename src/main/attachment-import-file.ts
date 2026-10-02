@@ -326,7 +326,7 @@ export async function validateAttachmentImportFile(
       if (operation.normalizeImage && metadata.mimeType.startsWith("image/")) {
         normalized = await compressAttachmentImage(bytes, metadata.mimeType as ImageAttachmentMimeType);
       }
-      validated = text ? { ...metadata, digest } : validateAttachmentImport({
+      validated = text ? { ...metadata, digest } : await validateAttachmentImport({
         name: normalized ? operation.name.replace(/\.[^.]+$/u, "") + ".jpg" : operation.name,
         mimeType: normalized ? "image/jpeg" : operation.mimeType,
         data: normalized ?? bytes,

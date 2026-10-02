@@ -71,6 +71,7 @@ describe("shared contracts boundary", () => {
       "provider.maintenance.refresh",
       "provider.maintenance.update",
       "provider.maintenance.cancel",
+      "project.ensure-scratch",
       "project.create",
       "project.select",
       "project.remove",

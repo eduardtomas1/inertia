@@ -163,6 +163,13 @@ export const appCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("project.ensure-scratch"),
+      payload: z.object({}).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("project.create"),
       payload: z.object({
         name: z.string().trim().min(1).max(80),

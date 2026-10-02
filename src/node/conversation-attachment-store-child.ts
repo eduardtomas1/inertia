@@ -55,6 +55,7 @@ export interface ConversationAttachmentStoreReadOperation {
   readonly rootUid: string | null;
   readonly id: string;
   readonly stallBeforeRecordRevalidateMs: number;
+  readonly validateContent: boolean;
 }
 
 export type ConversationAttachmentStoreReadReceipt = {

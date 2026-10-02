@@ -307,12 +307,20 @@ function monitorLinuxGuardian(
     },
     {
       release: async (abortSignal) => {
-        if (await signalLinuxGuardianExactAsync(
+        const helper = signalLinuxGuardianExactAsync(
           durableClaim.process as LinuxProcessIdentity,
           registry.darwinGuardianPath!,
           "release",
           abortSignal,
-        )) return true;
+        );
+        claim.linuxReleaseHelper = helper;
+        registry.pendingReleaseConfirmations.add(helper);
+        const closed = (): void => {
+          registry.pendingReleaseConfirmations.delete(helper);
+          if (claim.linuxReleaseHelper === helper) claim.linuxReleaseHelper = undefined;
+        };
+        void helper.then(closed, closed);
+        if (await helper) return true;
         if (exactProcessGroupTerminal(durableClaim.process.pid, "linux") !== true) return false;
         try { return releaseActiveClaim(registry, claim); } catch { return false; }
       },
@@ -840,7 +848,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       let stopBarrier = admission;
       return {
         process: confirmedOwned,
-        confirmStopped: () => claim.released,
+        confirmStopped: () => claim.released && !claim.linuxReleaseHelper,
         requestPayloadExit: () => false,
         requestGuardianStop: () => {
           if (claim.released) return true;
@@ -960,7 +968,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
   return {
     process: confirmedOwned,
     confirmStopped: () => registry.platform === "linux"
-      ? claim.released
+      ? claim.released && !claim.linuxReleaseHelper
       : releaseActiveClaim(registry, claim),
     requestPayloadExit: () => false,
     requestGuardianStop: () => {
@@ -1008,6 +1016,7 @@ export function confirmRuntimeOwnedProcessStopped(child: ChildProcess): boolean 
   const registry = activeRegistry;
   const claim = registry?.claims.get(child);
   if (claim && !claim.released) claim.intentRetirement?.attempt();
+  if (claim?.linuxReleaseHelper) return false;
   return registry && claim
     ? (registry.platform === "linux"
         ? claim.released
@@ -1027,7 +1036,7 @@ export function runtimeOwnedProcessStopConfirmation(
   child: ChildProcess,
 ): boolean | null {
   const claim = activeRegistry?.claims.get(child);
-  return claim ? claim.released : null;
+  return claim ? claim.released && !claim.linuxReleaseHelper : null;
 }
 
 /** Joins the exact claim's existing admission/retirement work after child close. */
@@ -1041,6 +1050,7 @@ export async function awaitRuntimeOwnedProcessStopped(child: ChildProcess): Prom
     if (!await release && claim.releaseConfirmation === release) break;
   }
   if (claim.intentRetirement) await claim.intentRetirement.settled;
+  if (claim.linuxReleaseHelper) await claim.linuxReleaseHelper;
   return activeRegistry === registry && confirmRuntimeOwnedProcessStopped(child);
 }
 
@@ -1053,6 +1063,7 @@ export function runtimeOwnedProcessCleanupConfirmed(): boolean {
     activeRegistry.runtimeGenerationId,
   );
   return activeRegistry.pendingAdmissions.size === 0
+    && activeRegistry.pendingReleaseConfirmations.size === 0
     && records !== null
     && records.length === 0;
 }

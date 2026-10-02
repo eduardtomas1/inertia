@@ -23,6 +23,7 @@ import { INERTIA_VERSION } from "../../shared/version";
 import { runtimeOwnedProcessInvocation, spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import {
   createOwnedProcessTreeTermination,
+  posixCleanupDiagnosticOf,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import {
@@ -694,8 +695,10 @@ function startCursorRun(
       // ACP has already produced its terminal response, so no graceful wait
       // window remains useful. Reuse any earlier cancellation request.
       await terminateOwnedProcessTree(true);
-    } catch {
-      const failed = cursorCleanupResult(outcome, child, options.input.cwd, "process-tree");
+    } catch (error) {
+      const failed = cursorCleanupResult(
+        outcome, child, options.input.cwd, "process-tree", posixCleanupDiagnosticOf(error),
+      );
       emitter.status("failed", failed.error);
       return failed;
     }

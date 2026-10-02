@@ -890,6 +890,7 @@ export function ChatWorkspace({
           <h2 id="welcome-title">Bring a project into focus.</h2>
           <p>Inertia keeps conversations, your project, and a real local terminal together—without turning the workspace into noise.</p>
           <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span><ArrowRight size={15} /></button>
+          <button type="button" className="secondary-button welcome-scratch-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>Start without a project</span></button>
           <div className="welcome-features"><div><Code2 size={17} /><span>Project-aware</span></div><div><TerminalSquare size={17} /><span>Local terminal</span></div><div><ShieldCheck size={17} /><span>Local by default</span></div></div>
         </section>
       </Root>
@@ -969,8 +970,8 @@ export function ChatWorkspace({
           {detailLoading && <LoadingMark label="Loading conversation" />}
           {isEmptyThread && (
             <div className="empty-thread">
-              {newChatProjectPicker ? (
-                <h3>What should we build today?</h3>
+              {newChatProjectPicker || project.workspaceKind === "scratch" ? (
+                <h3>{project.workspaceKind === "scratch" ? "What should we work on?" : "What should we build today?"}</h3>
               ) : (
                 <h3 aria-label={emptyThreadTitle}>
                   What should we build in{" "}
@@ -1083,6 +1084,7 @@ export function ChatWorkspace({
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
+          scratchWorkspace={project.workspaceKind === "scratch"}
           newChatProjectPicker={newChatProjectPicker}
           providers={providers}
           actions={actions}

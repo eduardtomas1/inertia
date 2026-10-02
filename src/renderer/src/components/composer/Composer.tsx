@@ -74,6 +74,7 @@ export const Composer = memo(function Composer({
   conversation,
   checkoutBranch,
   showCheckoutContext = true,
+  scratchWorkspace = false,
   newChatProjectPicker,
   providers,
   actions,
@@ -1117,6 +1118,7 @@ export const Composer = memo(function Composer({
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
+          scratchWorkspace={scratchWorkspace}
           newChatProjectPicker={newChatProjectPicker}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}

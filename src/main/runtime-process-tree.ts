@@ -175,6 +175,8 @@ export async function forceKillRuntimeProcessTree(
     now,
   });
   return killed.snapshotConfirmed
+    && killed.scanStabilized
+    && killed.rootState === "stopped"
     && await waitForDescendantsExit(
       [runtimePid, ...killed.descendants],
       platform,

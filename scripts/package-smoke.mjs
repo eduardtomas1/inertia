@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { parseDocument } from "yaml";
 import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { packageSmokePath } from "./package-smoke-path.mjs";
+import { packageSmokeImageBytes } from "./package-smoke-image.mjs";
 import { verifyPackagedLegalResources } from "./package-smoke-legal-resources.mjs";
 import { verifyMacosDeploymentTarget } from "./native-binary-architecture.mjs";
 
@@ -819,12 +820,7 @@ async function createPdfFixture(root) {
 async function createImageFixture(root) {
   const inputPath = join(root, "package-smoke.png");
   const resultPath = join(root, "package-smoke-image-result.json");
-  // Different bytes per launch prevent a candidate's ordinary image fixture
-  // from coincidentally matching the predecessor's historical attachment.
-  const bytes = Buffer.concat([Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  ]), Buffer.from(randomUUID(), "utf8")]);
-  await writeFile(inputPath, bytes);
+  await writeFile(inputPath, packageSmokeImageBytes());
   return { inputPath, resultPath };
 }
 

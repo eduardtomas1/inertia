@@ -487,6 +487,7 @@ export function TerminalSession({
         };
       }
       for (let attempt = 0; ; attempt += 1) {
+        if (cancelled) return;
         try {
           if (reattachId) {
             terminal?.clear();

@@ -174,12 +174,37 @@ describe("runtime process-tree termination", () => {
     })).resolves.toBe(false);
   });
 
+  it.each((["linux", "darwin"] as const).flatMap((platform) =>
+    ["R", "S", "D"].map((state) => ({ platform, state }))))(
+    "does not confirm a $platform tree whose root stayed $state before the kill",
+    async ({ platform, state }) => {
+      const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {
+        if (signal === 0) throw processError("ESRCH");
+        return true;
+      });
+      const spawnProcessSync = vi.fn(() => ({
+        stdout: `100 1 ${state}\n`,
+        status: 0,
+      }));
+
+      await expect(forceKillRuntimeProcessTree(100, {
+        platform,
+        kill,
+        readFile: () => processStat(100, "Z"),
+        spawnProcessSync: spawnProcessSync as never,
+      })).resolves.toBe(false);
+
+      expect(spawnProcessSync).toHaveBeenCalledTimes(9);
+      expect(kill).toHaveBeenCalledWith(100, "SIGKILL");
+    },
+  );
+
   it.each(["Z", "X", "x"])(
     "confirms a post-kill Linux %s state without waiting for external reaping",
     async (state) => {
       const kill = vi.fn(() => true as const);
       const spawnProcessSync = vi.fn(() => ({
-        stdout: "100 1 S\n",
+        stdout: "100 1 T\n",
         status: 0,
       }));
 
@@ -210,7 +235,7 @@ describe("runtime process-tree termination", () => {
         kill,
         readFile: () => { throw processError("EPERM"); },
         spawnProcessSync: vi.fn(() => ({
-          stdout: "100 1 S\n",
+          stdout: "100 1 T\n",
           status: 0,
         })) as never,
         deadlineAt,
@@ -235,7 +260,7 @@ describe("runtime process-tree termination", () => {
         kill,
         readFile: () => processStat(100, "?"),
         spawnProcessSync: vi.fn(() => ({
-          stdout: "100 1 S\n",
+          stdout: "100 1 T\n",
           status: 0,
         })) as never,
         deadlineAt,

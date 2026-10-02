@@ -17,7 +17,7 @@ vi.mock("node:fs", async (importOriginal) => {
     { native },
   );
   const statSync = ((path: fs.PathLike, options?: never) => {
-    const stats = actual.statSync(windows.aliases.get(String(path)) ?? path, options) as fs.BigIntStats;
+    const stats = actual.statSync(windows.aliases.get(String(path)) ?? path, options) as unknown as fs.BigIntStats;
     if (windows.zeroIdentity) {
       stats.dev = 0n;
       stats.ino = 0n;

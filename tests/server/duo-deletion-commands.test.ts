@@ -98,6 +98,7 @@ function conversationDependencies(
 ): ConversationCommandDependencies {
   return {
     store: {
+      project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),
       attachments: vi.fn(() => []),
       referencedAttachmentIds: vi.fn(() => new Set<string>()),
       providerRunOwnership: { forConversation: vi.fn(() => []) },

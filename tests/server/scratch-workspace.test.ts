@@ -37,7 +37,7 @@ describe("chats without a project", () => {
     expect(readdirSync(first.path)).toEqual([]);
   });
 
-  it("gives each chat a distinct persistent folder and keeps files when a chat is deleted", async () => {
+  it("gives each chat a distinct persistent folder that survives a restart", async () => {
     const project = await scratch.ensureProject();
     const first = await scratch.createConversation(project.id, "Plan a trip", {});
     const second = await scratch.createConversation(project.id, "Plan a trip", {});
@@ -51,7 +51,6 @@ describe("chats without a project", () => {
     store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
     expect(store.project(project.id).workspaceKind).toBe("scratch");
     expect(store.conversationPath(first.id)).toBe(first.worktreePath);
-    store.deleteConversation(first.id);
     expect(readFileSync(join(first.worktreePath!, "notes.txt"), "utf8")).toBe("keep these notes");
     expect(store.conversationPath(second.id)).toBe(second.worktreePath);
   });

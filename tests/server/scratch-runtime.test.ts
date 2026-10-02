@@ -1,15 +1,21 @@
 import { execFileSync } from "node:child_process";
+import { deleteCheckpoints } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import { startTestRuntime } from "../support/test-runtime";
 import { connectRuntime } from "../support/runtime-event-queue";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
+
+vi.mock("../../src/server/checkpoints", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/server/checkpoints")>();
+  return { ...actual, deleteCheckpoints: vi.fn(actual.deleteCheckpoints) };
+});
 
 type CommandWithoutId = ClientCommand extends infer Command
   ? Command extends ClientCommand ? Omit<Command, "requestId"> : never : never;
@@ -87,6 +93,29 @@ it("refuses project management commands that would remove, rename or duplicate t
     expect(latest.snapshot.conversations.map(({ id }) => id)).toContain(conversationId);
     expect(latest.snapshot.projects.filter(({ name }) => name === "Duplicate")).toEqual([]);
     expect(latest.snapshot.projects.find(({ id }) => id === projectId)).toMatchObject({ name: "No project", workspaceKind: "scratch" });
+  } finally {
+    await close();
+  }
+});
+
+it("deletes a chat through the runtime command without Git checkpoint cleanup and keeps its folder", async () => {
+  const { client, request, mutate, close } = await startScratchRuntime("inertia-scratch-delete-");
+  try {
+    const created = await request({ type: "project.ensure-scratch", payload: {} });
+    if (created.result.kind !== "project.created") throw new Error("Missing project");
+    const projectId = created.result.projectId;
+    const chat = await request({ type: "conversation.create", payload: { projectId, title: "Delete me", activate: false } });
+    if (chat.result.kind !== "conversation.created") throw new Error("Missing chat");
+    const conversationId = chat.result.conversationId;
+    const snapshot = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && event.snapshot.conversations.some(({ id }) => id === conversationId));
+    const folder = snapshot.snapshot.conversations.find(({ id }) => id === conversationId)!.worktreePath!;
+    writeFileSync(join(folder, "notes.txt"), "keep these notes");
+    vi.mocked(deleteCheckpoints).mockClear();
+    await mutate({ type: "conversation.delete", payload: { conversationId } });
+    const latest = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && !event.snapshot.conversations.some(({ id }) => id === conversationId));
+    expect(latest.snapshot.projects.some(({ id }) => id === projectId)).toBe(true);
+    expect(readFileSync(join(folder, "notes.txt"), "utf8")).toBe("keep these notes");
+    expect(deleteCheckpoints).not.toHaveBeenCalled();
   } finally {
     await close();
   }

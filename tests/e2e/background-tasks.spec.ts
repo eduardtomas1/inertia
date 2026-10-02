@@ -13,6 +13,7 @@ import {
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { expectComposerEndsAtDock } from "./support/layout-assertions";
+import { seedLongChat } from "./support/background-task-history";
 import {
   closeWorkspaceTools,
   ensureWorkspaceTools,
@@ -689,6 +690,66 @@ test("shows each turn's agents as one line that opens Background tasks", async (
       try {
         store.selectConversation(seed.codex.conversationId);
         store.deleteConversation(settledConversationId);
+      } finally {
+        store.close();
+      }
+    }
+  }
+});
+
+test("keeps the whole chat's tasks in the panel when the transcript loads only its newest turns", async ({ browserName: _browserName }, info) => {
+  let longConversationId: string | null = null;
+  try {
+    await app.resizeWindow(1000, 700);
+    const page = app.page;
+    const store = openStore(app);
+    let chat: SeededChat;
+    try {
+      const projectId = store.shellSnapshot().activeProjectId;
+      if (!projectId) throw new Error("Long history fixture setup failed.");
+      chat = seedLongChat(store, projectId, ago);
+      longConversationId = chat.conversationId;
+    } finally {
+      store.close();
+    }
+    const region = await showChat(app, chat);
+    await expect(page.getByRole("button", { name: "Open Background tasks, 12 agents finished" })).toBeVisible();
+    await expect(page.getByText("Step 1 of the long delegated history.", { exact: true })).toHaveCount(0);
+    const finished = region.getByRole("button", { name: "Finished 38 · 2 failed" });
+    await expect(finished).toBeVisible();
+    const list = await openFinished(region);
+    await expect(list.getByRole("listitem")).toHaveCount(20);
+    const scroller = region.locator(".workspace-surface-scroll");
+    await scroller.evaluate((element) => { element.scrollTop = 0; });
+    await expect(card(region, "Newest helper 11")).toBeInViewport();
+    await expect(card(region, "Target writer")).not.toBeInViewport();
+
+    const line = page.getByRole("button", { name: "Open Background tasks, 2 agents finished" });
+    await line.scrollIntoViewIfNeeded();
+    await line.click();
+    await expect(card(region, "Target writer")).toBeInViewport();
+    expect(await scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    await region.getByRole("button", { name: "Show 18 more finished tasks" }).click();
+    await expect(list.getByRole("listitem")).toHaveCount(38);
+    await expect(card(region, "Archived reader 0")).toContainText("Agent · Failed");
+    await toggle(region, "Archived reader 0").click();
+    await expect(card(region, "Archived reader 0")).toContainText("Stopped early.");
+    await expect(card(region, "Archived reader 0").getByRole("button", { name: /^View turn/u })).toHaveCount(0);
+    await expect(region.getByRole("button", { name: "Show fewer finished tasks" })).toBeVisible();
+    await expectLayoutHolds(app, region);
+    await capture(page, info, "background-tasks-long-history-dark");
+    expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    await attachFailure(info);
+    throw error;
+  } finally {
+    await app.resizeWindow(1440, 1100);
+    if (longConversationId) {
+      const store = openStore(app);
+      try {
+        store.selectConversation(seed.codex.conversationId);
+        store.deleteConversation(longConversationId);
       } finally {
         store.close();
       }

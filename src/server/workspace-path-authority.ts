@@ -327,6 +327,16 @@ export class WorkspacePathAuthority {
     `).run(projectId, resolve(path), serializeReceipt(receipt));
   }
 
+  reenrollProject(projectId: string, path: string): void {
+    this.database.prepare("DELETE FROM project_path_authorities WHERE project_id = ?").run(projectId);
+    this.enrollProject(projectId, path, null, null);
+  }
+
+  reenrollConversation(conversationId: string, projectId: string, path: string): void {
+    this.database.prepare("DELETE FROM conversation_path_authorities WHERE conversation_id = ?").run(conversationId);
+    this.enrollConversation(conversationId, projectId, path);
+  }
+
   promoteProjectRepository(
     projectId: string,
     path: string,
@@ -422,6 +432,27 @@ export class WorkspacePathAuthority {
   }
 
   resolveConversation(row: ConversationRow, project: ProjectRow): string {
+    if (project.workspace_kind !== "scratch") {
+      return this.resolveAuthorizedConversation(row, project);
+    }
+    if (row.worktree_path === null) {
+      throw new WorkspacePathAuthorityError([
+        "This chat does not have its own folder yet, so it can be read but not continued.",
+        "Inertia sets one up when the folder for chats without a project is available.",
+      ].join(" "));
+    }
+    try {
+      return this.resolveAuthorizedConversation(row, project);
+    } catch (error) {
+      if (!(error instanceof WorkspacePathAuthorityError)) throw error;
+      throw new WorkspacePathAuthorityError([
+        `This chat's folder (${row.worktree_path}) is missing or was replaced, so the chat can be read but not continued.`,
+        "Start a new chat without a project to keep working.",
+      ].join(" "));
+    }
+  }
+
+  private resolveAuthorizedConversation(row: ConversationRow, project: ProjectRow): string {
     const projectPath = this.resolveProject(project);
     if (row.worktree_path === null) return projectPath;
     try {

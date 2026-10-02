@@ -102,7 +102,7 @@ describe("runtime conversation references", () => {
   it("keeps unmaterialized isolated-worktree drafts away from project tools", () => {
     expect(draftWorkspaceToolsUnavailableReason(false)).toBeNull();
     expect(draftWorkspaceToolsUnavailableReason(true)).toBe(
-      "Workspace tools are available after the first message creates this isolated worktree.",
+      "Workspace tools are available after the first message creates this chat's workspace.",
     );
     expect(appSource).toContain("enabled: !workspaceToolsUnavailable");
     expect(appSource).toContain(
@@ -112,7 +112,7 @@ describe("runtime conversation references", () => {
     expect(sceneSource).toContain("tools: project ?");
     expect(sceneSource).toContain("for (const surface of WORKSPACE_BOUND_SURFACES) {");
     expect(sceneSource).toContain(
-      '"Available after the first message creates this isolated worktree."',
+      `"Available after the first message creates this chat's workspace."`,
     );
     expect(sceneSource).toContain("gitLoading: workspaceTools.gitLoading");
     expect(sceneSource).toContain("gitError: workspaceTools.gitError");

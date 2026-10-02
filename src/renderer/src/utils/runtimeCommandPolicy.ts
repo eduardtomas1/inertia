@@ -182,6 +182,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "project.action.run": shortMutation,
   "project.actions": shortRetrySafe,
   "project.create": longMutation,
+  "project.ensure-scratch": longMutation,
   "project.remove": shortMutation,
   "project.select": shortMutation,
   "project.update": shortMutation,

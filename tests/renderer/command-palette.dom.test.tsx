@@ -358,6 +358,51 @@ describe("CommandPalette behavior", () => {
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps Enter scoped to the current project while offering No project", async () => {
+    const user = userEvent.setup();
+    const onNewThreadIn = vi.fn();
+    const onNewThreadWithoutProject = vi.fn();
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    const view = render(
+      <CommandPalette open initialView="new-chat" currentProjectId={project.id} projects={[scratch, project]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={noOp} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={onNewThreadIn}
+        onNewThreadWithoutProject={onNewThreadWithoutProject} onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    expect(screen.getAllByRole("option").map((option) => option.querySelector("strong")?.textContent)).toEqual(["Inertia", "No project"]);
+    await user.keyboard("{Enter}");
+    expect(onNewThreadIn).toHaveBeenCalledExactlyOnceWith(project);
+    expect(onNewThreadWithoutProject).not.toHaveBeenCalled();
+    view.rerender(
+      <CommandPalette open initialView="new-chat" currentProjectId={scratch.id} projects={[scratch, project]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={noOp} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={onNewThreadIn}
+        onNewThreadWithoutProject={onNewThreadWithoutProject} onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    expect(screen.getAllByRole("option").map((option) => option.querySelector("strong")?.textContent)).toEqual(["No project", "Inertia"]);
+    await user.keyboard("{Enter}");
+    expect(onNewThreadWithoutProject).toHaveBeenCalledOnce();
+    expect(onNewThreadIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps New chat as the default action and lists Start without a project with the new chat actions", async () => {
+    const user = userEvent.setup();
+    const onNewThread = vi.fn();
+    const onNewThreadWithoutProject = vi.fn();
+    const studio = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };
+    render(
+      <CommandPalette open currentProjectId={project.id} projects={[project, studio]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={noOp} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={onNewThread} onNewThreadIn={noOp}
+        onNewThreadWithoutProject={onNewThreadWithoutProject} onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    expect(screen.getAllByRole("option").slice(0, 4).map((option) => option.querySelector("strong")?.textContent))
+      .toEqual(["New chat", "New chat in…", "Start without a project", "Add project"]);
+    await user.keyboard("{Enter}");
+    expect(onNewThread).toHaveBeenCalledOnce();
+    expect(onNewThreadWithoutProject).not.toHaveBeenCalled();
+  });
+
   it("reaches the new chat project choice from search and steps back to it", async () => {
     const user = userEvent.setup();
     const studio = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };

@@ -35,6 +35,7 @@ interface AppNavigationOverlaysProps {
   sendCommand: MessageSearchCommand;
   createConversation: () => void;
   createConversationIn: (project: Project) => void;
+  openNoProjectChat: () => void;
   importProject: () => Promise<void>;
   openSettings: () => void;
 }
@@ -53,6 +54,7 @@ export function AppNavigationOverlays({
   sendCommand,
   createConversation,
   createConversationIn,
+  openNoProjectChat,
   importProject,
   openSettings,
 }: AppNavigationOverlaysProps): React.JSX.Element {
@@ -87,6 +89,7 @@ export function AppNavigationOverlays({
             }}
             onNewThread={createConversation}
             onNewThreadIn={createConversationIn}
+            onNewThreadWithoutProject={openNoProjectChat}
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
           />

@@ -80,12 +80,14 @@ export interface SidebarThreadView {
   settled: boolean;
 }
 
-export type SidebarWorkSectionId = "recent" | "yesterday" | "earlier" | "done" | "snoozed";
+export type SidebarWorkSectionId = "recent" | "yesterday" | "earlier" | "done" | "snoozed"
+  | "no-project" | "no-project-done" | "no-project-snoozed";
 
 export interface SidebarWorkSection {
   id: SidebarWorkSectionId;
   label: string;
   threads: SidebarThreadView[];
+  totalCount?: number;
 }
 
 export interface LogicalProjectGroup {
@@ -279,7 +281,29 @@ function localCalendarDayOffset(value: string, now: number): number {
 export function groupWorkThreads(
   threads: readonly SidebarThreadView[],
   now = Date.now(),
+  scratchProjectIds: ReadonlySet<string> = new Set(),
 ): SidebarWorkSection[] {
+  if (scratchProjectIds.size > 0) {
+    const scratch = groupWorkThreads(threads.filter(({ conversation }) => (
+      scratchProjectIds.has(conversation.projectId)
+    )), now);
+    const projects = groupWorkThreads(threads.filter(({ conversation }) => (
+      !scratchProjectIds.has(conversation.projectId)
+    )), now);
+    const totalCount = scratch.reduce((total, section) => total + section.threads.length, 0);
+    if (totalCount === 0) return projects;
+    return [...projects, {
+      id: "no-project",
+      label: "No project",
+      totalCount,
+      threads: scratch.filter(({ id }) => id !== "done" && id !== "snoozed")
+        .flatMap(({ threads }) => threads),
+    }, ...scratch.filter(({ id }) => id === "done" || id === "snoozed")
+      .map((section): SidebarWorkSection => ({
+        ...section,
+        id: section.id === "done" ? "no-project-done" : "no-project-snoozed",
+      }))];
+  }
   const isOrdinarilySnoozed = ({
     conversation,
     needsAttention,

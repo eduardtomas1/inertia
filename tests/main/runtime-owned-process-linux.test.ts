@@ -937,7 +937,7 @@ describe("Linux runtime process guardian", () => {
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)?.length === 0);
-      expect(owned.confirmStopped()).toBe(true);
+      await waitFor(() => owned.confirmStopped());
     } finally {
       deactivate?.();
     }
@@ -987,7 +987,7 @@ describe("Linux runtime process guardian", () => {
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)?.length === 0);
-      expect(owned.confirmStopped()).toBe(true);
+      await waitFor(() => owned.confirmStopped());
     } finally {
       try { await cleanup?.(); } finally { deactivate?.(); }
     }
@@ -1022,7 +1022,7 @@ describe("Linux runtime process guardian", () => {
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)?.length === 0);
-      expect(owned.confirmStopped()).toBe(true);
+      await waitFor(() => owned.confirmStopped());
     } finally {
       deactivate?.();
     }

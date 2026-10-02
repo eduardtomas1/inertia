@@ -68,6 +68,11 @@ interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
 }
 
+interface StagedAttachment {
+  readonly id: string;
+  readonly path: string;
+}
+
 interface PendingAttachmentRelease {
   readonly promise: Promise<boolean>;
   begin(): boolean;
@@ -151,6 +156,7 @@ export class AttachmentRegistry {
   private readonly pendingPaths = new Map<string, number>();
   private pendingImportBytes = 0;
   private importTail: Promise<void> = Promise.resolve();
+  private readonly stagingWrites = new Set<Promise<unknown>>();
   private directoryAuthority: { root: string; identity: BigIntStats } | null = null;
   private disposed = false;
   private disposal: Promise<void> | null = null;
@@ -310,14 +316,35 @@ export class AttachmentRegistry {
     batchDigests?: Set<string>,
   ): Promise<ChatAttachment | null> {
     const prepared = prepareAttachmentImportMetadata(source);
-    const imported = await this.serializeImport(
-      prepared.size,
-      async (operationSignal) => await this.importPreparedWriters([{
-        prepared,
-        write: source.write,
-      }], operationSignal, batchDigests),
-      signal,
+    if (this.disposed || signal?.aborted) {
+      throw new Error("Temporary attachment storage is no longer available.");
+    }
+    const staging = this.stageAttachment(
+      prepared,
+      source.write,
+      signal ? AbortSignal.any([signal, this.lifecycle.signal]) : this.lifecycle.signal,
     );
+    this.stagingWrites.add(staging);
+    let staged: StagedAttachment;
+    try {
+      staged = await staging;
+    } finally {
+      this.stagingWrites.delete(staging);
+    }
+    let imported: ChatAttachment[];
+    try {
+      imported = await this.serializeImport(
+        prepared.size,
+        async (operationSignal) => await this.importPreparedWriters([{
+          prepared,
+          staged,
+        }], operationSignal, batchDigests),
+        signal,
+      );
+    } catch (error) {
+      await this.discardStaged(staged.path);
+      throw error;
+    }
     const attachment = imported[0];
     if (!attachment && batchDigests) return null;
     if (!attachment) throw new Error("Attachment import did not complete.");
@@ -375,13 +402,13 @@ export class AttachmentRegistry {
   }
 
   private async importPreparedWriters(
-    sources: readonly {
+    sources: readonly ({
       readonly prepared: PreparedAttachmentMetadata;
-      readonly write: (
-        destination: FileHandle,
-        signal: AbortSignal,
-      ) => Promise<void>;
-    }[],
+    } & ({
+      readonly write: AttachmentImportWriter["write"];
+    } | {
+      readonly staged: StagedAttachment;
+    }))[],
     signal: AbortSignal,
     digests = new Set<string>(),
   ): Promise<ChatAttachment[]> {
@@ -390,10 +417,11 @@ export class AttachmentRegistry {
     try {
       for (const source of sources) {
         signal.throwIfAborted();
-        this.assertStorageCapacity(source.prepared.size);
-        const attachment = await this.persistAndValidate(
+        const attachment = await this.publishStaged(
           source.prepared,
-          source.write,
+          "staged" in source
+            ? source.staged
+            : await this.stageAttachment(source.prepared, source.write, signal),
           signal,
         );
         if (digests.has(attachment.digest)) {
@@ -660,6 +688,7 @@ export class AttachmentRegistry {
 
   private async disposeExclusive(): Promise<void> {
     await this.importTail;
+    await Promise.allSettled(this.stagingWrites);
     const validationStopped = await this.validationRunner.shutdown?.() ?? true;
     if (!validationStopped) {
       throw new Error("Attachment validation utility shutdown is unconfirmed.");
@@ -784,23 +813,28 @@ export class AttachmentRegistry {
     this.pendingPaths.set(record.path, record.size);
   }
 
-  private async persistAndValidate(
+  private async stageAttachment(
     attachment: PreparedAttachmentMetadata,
-    write: (
-      destination: FileHandle,
-      signal: AbortSignal,
-    ) => Promise<void>,
+    write: AttachmentImportWriter["write"],
     signal: AbortSignal,
-  ): Promise<AttachmentRegistryRecord> {
+  ): Promise<StagedAttachment> {
     await this.verifiedDirectory();
+    signal.throwIfAborted();
+    this.assertStorageCapacity(attachment.size);
     const id = randomUUID();
-    let path = join(this.directory, `${id}.${attachment.extension}`);
-    const file = await open(
-      path,
-      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-      0o600,
-    );
+    const path = join(this.directory, `${id}.${attachment.extension}`);
     this.pendingPaths.set(path, attachment.size);
+    let file: FileHandle;
+    try {
+      file = await open(
+        path,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+        0o600,
+      );
+    } catch (error) {
+      this.pendingPaths.delete(path);
+      throw error;
+    }
     try {
       try {
         await this.verifiedDirectory();
@@ -808,6 +842,22 @@ export class AttachmentRegistry {
       } finally {
         await file.close();
       }
+      signal.throwIfAborted();
+      return { id, path };
+    } catch (error) {
+      await this.discardStaged(path);
+      throw error;
+    }
+  }
+
+  private async publishStaged(
+    attachment: PreparedAttachmentMetadata,
+    staged: StagedAttachment,
+    signal: AbortSignal,
+  ): Promise<AttachmentRegistryRecord> {
+    const { id } = staged;
+    let path = staged.path;
+    try {
       signal.throwIfAborted();
       const receipt = await this.validateStoredFile(
         path,
@@ -838,17 +888,21 @@ export class AttachmentRegistry {
       this.pendingPaths.delete(path);
       return record;
     } catch (error) {
-      const removed = await unlinkWithRetry(
-        path,
-        async (path) => {
-          await this.verifiedDirectory();
-          await this.unlinkFile(path);
-        },
-        this.waitForRetry,
-      ).then(() => true, () => false);
-      if (removed) this.pendingPaths.delete(path);
+      await this.discardStaged(path);
       throw error;
     }
+  }
+
+  private async discardStaged(path: string): Promise<void> {
+    const removed = await unlinkWithRetry(
+      path,
+      async (path) => {
+        await this.verifiedDirectory();
+        await this.unlinkFile(path);
+      },
+      this.waitForRetry,
+    ).then(() => true, () => false);
+    if (removed) this.pendingPaths.delete(path);
   }
 
   private async validateStoredFile(

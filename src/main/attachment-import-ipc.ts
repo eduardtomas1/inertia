@@ -251,11 +251,16 @@ export class RendererAttachmentImportCoordinator {
         }
         const stream = new AttachmentUploadStream(metadata.size, batch.controller.signal);
         const result = this.importIntoBatch(batch, async (signal) => {
-          const attachment = await batch.registry.importFromWriter!({
-            name: metadata.displayName, mimeType: metadata.mimeType, size: metadata.size,
-            write: async (destination) => await stream.write(destination),
-          }, signal, batch.digests);
-          return attachment ? [attachment] : [];
+          try {
+            const attachment = await batch.registry.importFromWriter!({
+              name: metadata.displayName, mimeType: metadata.mimeType, size: metadata.size,
+              write: async (destination, writeSignal) => await stream.write(destination, writeSignal),
+            }, signal, batch.digests);
+            return attachment ? [attachment] : [];
+          } catch (error) {
+            stream.cancel(error);
+            throw error;
+          }
         });
         void result.catch((error: unknown) => stream.cancel(error));
         batch.upload = { stream, result, name: metadata.displayName, mimeType: metadata.mimeType };

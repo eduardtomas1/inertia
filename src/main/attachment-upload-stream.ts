@@ -32,15 +32,23 @@ export class AttachmentUploadStream {
     this.fail(error);
   }
 
-  async write(destination: FileHandle): Promise<void> {
+  async write(destination: FileHandle, signal: AbortSignal): Promise<void> {
+    const abort = (): void => this.cancel(new Error("Attachment import was cancelled."));
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
     this.destination = destination;
     this.ready();
-    await this.completed;
+    try {
+      await this.completed;
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
   }
 
   async chunk(data: unknown, offset: number, final: boolean): Promise<void> {
     if (!(data instanceof ArrayBuffer) || data.byteLength < 1
       || data.byteLength > ATTACHMENT_UPLOAD_CHUNK_BYTES || this.writing
+      || (!final && data.byteLength !== ATTACHMENT_UPLOAD_CHUNK_BYTES)
       || offset !== this.offset || offset + data.byteLength > this.size
       || final !== (offset + data.byteLength === this.size)) {
       throw new Error("Invalid attachment upload chunk.");

@@ -26,6 +26,23 @@ async function fixture() {
   return { root, registry, coordinator, document: { owner, processId: 1, frameId: 1, frameToken: "document" } };
 }
 
+function partialChunk(size: number) {
+  return {
+    name: "partial.log", mimeType: "text/plain", data: new Uint8Array(ATTACHMENT_UPLOAD_CHUNK_BYTES).fill(65).buffer,
+    stream: { size, offset: 0, final: false },
+  };
+}
+
+async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = await Promise.race([
+    promise.then(() => true, () => true),
+    new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms); }),
+  ]);
+  clearTimeout(timer);
+  return settled;
+}
+
 describe("file-backed attachments", () => {
   it("streams a large upload, retains full content across restart, and sends only its path", async () => {
     const { root, registry, coordinator, document } = await fixture();
@@ -77,19 +94,95 @@ describe("file-backed attachments", () => {
   it("rejects out-of-order chunks and reclaims partial files", async () => {
     const { root, registry, coordinator, document } = await fixture();
     const batch = coordinator.begin(document);
-    const input = { name: "partial.txt", mimeType: "text/plain", data: Uint8Array.of(65).buffer };
-    await coordinator.importOne(document, batch, [{ ...input, stream: { size: 3, offset: 0, final: false } }]);
-    await expect(coordinator.importOne(document, batch, [{ ...input, stream: { size: 3, offset: 2, final: true } }])).rejects.toThrow("Invalid attachment upload chunk");
+    const size = ATTACHMENT_UPLOAD_CHUNK_BYTES * 2 + 1;
+    await coordinator.importOne(document, batch, [partialChunk(size)]);
+    await expect(coordinator.importOne(document, batch, [{ ...partialChunk(size), stream: { size, offset: size - 1, final: true }, data: Uint8Array.of(65).buffer }])).rejects.toThrow("Invalid attachment upload chunk");
     expect(await readdir(join(root, "uploads"))).toEqual([]);
     expect(registry.usage().records).toBe(0);
+  });
+
+  it("requires every chunk before the last to fill the chunk size", async () => {
+    const { root, registry, coordinator, document } = await fixture();
+    const batch = coordinator.begin(document);
+    await expect(coordinator.importOne(document, batch, [{
+      name: "trickle.log", mimeType: "text/plain", data: Uint8Array.of(65).buffer,
+      stream: { size: 2, offset: 0, final: false },
+    }])).rejects.toThrow("Invalid attachment upload chunk");
+    expect(await readdir(join(root, "uploads"))).toEqual([]);
+    expect(registry.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
   it("cancels a partial upload when its originating document is destroyed", async () => {
     const { root, coordinator, document } = await fixture();
     const batch = coordinator.begin(document);
-    await coordinator.importOne(document, batch, [{ name: "partial.txt", mimeType: "text/plain", data: Uint8Array.of(65).buffer, stream: { size: 2, offset: 0, final: false } }]);
+    await coordinator.importOne(document, batch, [partialChunk(ATTACHMENT_UPLOAD_CHUNK_BYTES + 1)]);
     (document.owner as unknown as EventEmitter).emit("destroyed");
     await coordinator.dispose();
+    expect(await readdir(join(root, "uploads"))).toEqual([]);
+  });
+
+  it("does not let one window's unfinished upload block other imports or send handoffs", async () => {
+    const { registry, coordinator, document } = await fixture();
+    const other = { ...document, owner: Object.assign(new EventEmitter(), { isDestroyed: () => false }) as AttachmentImportBatchOwner, processId: 2, frameToken: "other" };
+    const ready = coordinator.begin(other);
+    const [sendable] = await coordinator.importOne(other, ready, [{ name: "ready.txt", mimeType: "text/plain", data: new TextEncoder().encode("ready").buffer }]);
+    await coordinator.commit(other, ready, [sendable!.id]);
+    const stalled = coordinator.begin(document);
+    await coordinator.importOne(document, stalled, [partialChunk(ATTACHMENT_UPLOAD_CHUNK_BYTES + 1)]);
+
+    const later = coordinator.begin(other);
+    const imported = coordinator.importOne(other, later, [{ name: "other.txt", mimeType: "text/plain", data: new TextEncoder().encode("other").buffer }]);
+    const handoff = registry.prepareHandoff(randomUUID(), [sendable!.id], () => false);
+    const settled = { imported: await settlesWithin(imported, 5_000), handoff: await settlesWithin(handoff, 1_000) };
+    await coordinator.cancel(document, stalled);
+    await Promise.allSettled([imported, handoff]);
+    expect(settled).toEqual({ imported: true, handoff: true });
+    await expect(imported).resolves.toHaveLength(1);
+  });
+
+  it("keeps concurrent unfinished uploads within the temporary storage quota", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-stream-quota-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const size = ATTACHMENT_UPLOAD_CHUNK_BYTES + 1;
+    const registry = new AttachmentRegistry(join(root, "uploads"), { maxBytes: size * 2 });
+    const coordinator = new RendererAttachmentImportCoordinator(() => registry);
+    cleanups.push(() => coordinator.dispose());
+    const windows = [1, 2, 3].map((processId) => ({
+      owner: Object.assign(new EventEmitter(), { isDestroyed: () => false }) as AttachmentImportBatchOwner,
+      processId, frameId: 1, frameToken: `window-${processId}`,
+    }));
+    const batches = windows.map((window) => coordinator.begin(window));
+    const results = await Promise.allSettled(windows.map(async (window, index) =>
+      await coordinator.importOne(window, batches[index]!, [partialChunk(size)])));
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(2);
+    expect(results.find(({ status }) => status === "rejected")).toMatchObject({
+      reason: { message: "Temporary attachment storage is full. Remove an attachment and try again." },
+    });
+    expect(registry.usage()).toEqual({ records: 2, bytes: size * 2 });
+    await Promise.all(windows.map(async (window, index) => await coordinator.cancel(window, batches[index]!)));
+    expect(registry.usage()).toEqual({ records: 0, bytes: 0 });
+    expect(await readdir(join(root, "uploads"))).toEqual([]);
+  });
+
+  it("reports a full temporary store to the uploading window instead of a cancellation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-stream-full-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const registry = new AttachmentRegistry(join(root, "uploads"), { maxBytes: 4 });
+    const coordinator = new RendererAttachmentImportCoordinator(() => registry);
+    cleanups.push(() => coordinator.dispose());
+    const document = { owner: Object.assign(new EventEmitter(), { isDestroyed: () => false }) as AttachmentImportBatchOwner, processId: 1, frameId: 1, frameToken: "document" };
+    const batch = coordinator.begin(document);
+    await expect(coordinator.importOne(document, batch, [{
+      name: "big.log", mimeType: "text/plain", data: new TextEncoder().encode("12345678").buffer,
+      stream: { size: 8, offset: 0, final: true },
+    }])).rejects.toThrow("Temporary attachment storage is full. Remove an attachment and try again.");
+  });
+
+  it("ends a waiting upload and reclaims its staged file when the registry is disposed", async () => {
+    const { root, registry, coordinator, document } = await fixture();
+    const batch = coordinator.begin(document);
+    await coordinator.importOne(document, batch, [partialChunk(ATTACHMENT_UPLOAD_CHUNK_BYTES + 1)]);
+    expect(await settlesWithin(registry.dispose(), 2_000)).toBe(true);
     expect(await readdir(join(root, "uploads"))).toEqual([]);
   });
 

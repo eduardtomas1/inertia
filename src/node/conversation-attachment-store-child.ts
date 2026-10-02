@@ -320,14 +320,15 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
       || parsed.size < 1
       || parsed.size > MAX_ATTACHMENT_BYTES
     ) return { missing: true };
-    const textPreview = parsed.mimeType.startsWith("text/") || parsed.mimeType === "application/json";
-    if (input.preview && !textPreview && parsed.size > MAX_FILE_PREVIEW_BYTES) return { missing: true };
+    const textPreview = input.preview === true && typeof parsed.mimeType === "string"
+      && (parsed.mimeType.startsWith("text/") || parsed.mimeType === "application/json");
+    if (input.preview === true && !textPreview && parsed.size > MAX_FILE_PREVIEW_BYTES) return { missing: true };
     const contentPath = input.id + "." + parsed.extension;
     const contentRead = await readBoundedFile(
       contentPath,
       MAX_ATTACHMENT_BYTES,
       true, 1,
-      input.metadataOnly ? 0 : input.preview && textPreview ? ${ATTACHMENT_PREVIEW_BYTES} : MAX_ATTACHMENT_BYTES,
+      input.metadataOnly ? 0 : textPreview ? ${ATTACHMENT_PREVIEW_BYTES} : MAX_ATTACHMENT_BYTES,
     );
     const bytes = contentRead.bytes;
     if (contentRead.size !== parsed.size || contentRead.digest !== parsed.digest) {

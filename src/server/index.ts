@@ -1,4 +1,3 @@
-import { createLimitResetRuntime } from "./runtime/limit-reset-runtime";
 import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
@@ -685,16 +684,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
   queuedMessages.start();
-  const usageLimits = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send);
-  const limitReset = createLimitResetRuntime(turnInteractionDependencies, usageLimits.service, {
-    signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+  const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
+    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
-  limitReset.start();
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       queuedMessages.handler,
-      usageLimits.handler,
-      limitReset.handler,
+      ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,

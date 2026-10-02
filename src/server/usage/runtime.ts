@@ -8,8 +8,16 @@ import { UsageLimitsService } from "./limits-service";
 import { NativeUsageReader } from "./native";
 import { NativeSubscriptionReader } from "./native-subscriptions";
 import { USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE } from "../../node/backend-secret-reference";
+import { createLimitResetRuntime } from "../runtime/limit-reset-runtime";
+import type { TurnInteractionCommandDependencies } from "../runtime/commands/turn-interaction-commands";
 
-export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManager, backends: BackendProfileController, providerInfo: () => ProviderInfo[], cwd: string, signal: AbortSignal, enabled: boolean, credentials: BackendCredentialBroker | undefined, send: (socket: WebSocket, event: ServerEvent) => void) {
+interface ResumeRuntimeOptions {
+  dependencies: TurnInteractionCommandDependencies;
+  track<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManager, backends: BackendProfileController, providerInfo: () => ProviderInfo[], cwd: string, signal: AbortSignal, enabled: boolean, credentials: BackendCredentialBroker | undefined, send: (socket: WebSocket, event: ServerEvent) => void,
+  resume: ResumeRuntimeOptions) {
   const service = new UsageLimitsService({
     repository: store.usageLimits, credentials,
     native: new NativeUsageReader(providers, cwd, signal, new NativeSubscriptionReader({
@@ -19,5 +27,7 @@ export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManag
     customProfiles: () => backends.profiles(providerInfo()).filter((profile) => profile.preset !== "native").map((profile) => ({ id: profile.id, label: profile.displayName })),
     signal, enabled,
   });
-  return { service, handler: createUsageLimitCommandHandler(service, send) };
+  const limitReset = createLimitResetRuntime(resume.dependencies, service, { signal, track: resume.track });
+  limitReset.start();
+  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler] };
 }

@@ -52,6 +52,7 @@ import {
 } from "./app-server-item-events";
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
+import { projectCodexErrorNotification } from "./app-server-error-events";
 import { codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
 import { CodexApprovalAuthority } from "./app-server-approval-authority";
 import { parseCodexTokenUsage } from "./usage";
@@ -812,42 +813,7 @@ export class CodexAppServerEvents {
       return;
     }
     if (method === "error") {
-      const error = objectValue(params.error);
-      const message =
-        boundedText(error?.message, 4_000) ?? "Codex reported an error.";
-      this.host.setLastError(message);
-      if (params.willRetry === true) {
-        this.host.options.onStatus?.("retrying", "error/willRetry");
-        this.emitActivity(
-          "system",
-          "info",
-          "Codex is retrying after an error",
-          {
-            ...(boundedText(params.itemId, 1_000)
-              ? { activityId: boundedText(params.itemId, 1_000)! }
-              : {}),
-            detail: providerActivityDetailSections({ error: message })!,
-          },
-        );
-      } else {
-        this.host.rememberFailure(
-          "codex-error",
-          "Codex reported an error.",
-          message,
-          codexUsageLimited(error?.codexErrorInfo),
-        );
-        this.emitActivity(
-          "system",
-          "failed",
-          "Codex reported an error",
-          {
-            ...(boundedText(params.itemId, 1_000)
-              ? { activityId: boundedText(params.itemId, 1_000)! }
-              : {}),
-            detail: providerActivityDetailSections({ error: message })!,
-          },
-        );
-      }
+      projectCodexErrorNotification(this.host, params);
       return;
     }
     if (method === "model/rerouted") {

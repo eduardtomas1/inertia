@@ -298,15 +298,35 @@ export async function validateAttachmentImportFile(
     }
     const metadata = prepareAttachmentImportMetadata(operation);
     const text = metadata.mimeType.startsWith("text/") || metadata.mimeType === "application/json" || metadata.mimeType === "application/octet-stream";
-    const validator = text && metadata.mimeType !== "application/octet-stream" ? attachmentTextValidator() : undefined;
+    const opaqueRecord = operation.mimeType === "application/octet-stream";
+    const validator = text && metadata.mimeType !== "application/octet-stream" && !opaqueRecord
+      ? attachmentTextValidator()
+      : undefined;
+    let readable = validator !== undefined;
+    const inspect = validator
+      ? (chunk: Buffer): void => {
+          if (!readable) return;
+          try {
+            validator.chunk(chunk);
+          } catch {
+            readable = false;
+          }
+        }
+      : undefined;
     let read: Awaited<ReturnType<typeof readAttachment>>;
     try {
-      read = await readAttachment(file, operation.size, text ? 0 : operation.size, signal, validator?.chunk);
-      validator?.finish();
-    } catch (error) {
-      if (error instanceof TextAttachmentError) throw new AttachmentImportValidationError(error.code);
+      read = await readAttachment(file, operation.size, text ? 0 : operation.size, signal, inspect);
+    } catch {
       throw new AttachmentImportValidationError("unsafe");
     }
+    if (validator && readable) {
+      try {
+        validator.finish();
+      } catch {
+        readable = false;
+      }
+    }
+    const opaque = text && (opaqueRecord || (validator !== undefined && !readable));
     const { bytes, digest } = read;
     const after = await file.stat({ bigint: true });
     signal?.throwIfAborted();
@@ -326,7 +346,11 @@ export async function validateAttachmentImportFile(
       if (operation.normalizeImage && metadata.mimeType.startsWith("image/")) {
         normalized = await compressAttachmentImage(bytes, metadata.mimeType as ImageAttachmentMimeType);
       }
-      validated = text ? { ...metadata, digest } : await validateAttachmentImport({
+      validated = text ? {
+        ...metadata,
+        ...(opaque ? { mimeType: "application/octet-stream" as const, extension: "bin" } : {}),
+        digest,
+      } : await validateAttachmentImport({
         name: normalized ? operation.name.replace(/\.[^.]+$/u, "") + ".jpg" : operation.name,
         mimeType: normalized ? "image/jpeg" : operation.mimeType,
         data: normalized ?? bytes,
@@ -349,7 +373,7 @@ export async function validateAttachmentImportFile(
     }
     if (
       !normalized && (validated.size !== operation.size
-      || operation.fileName !== `${operation.fileName.slice(0, 36)}.${validated.extension}`)
+      || (!opaque && operation.fileName !== `${operation.fileName.slice(0, 36)}.${validated.extension}`))
     ) throw new AttachmentImportValidationError("unsafe");
     signal?.throwIfAborted();
     const [finalPinned, finalNamed, finalCanonical] = await Promise.all([

@@ -204,6 +204,27 @@ describe("file-backed attachments", () => {
     expect(await readdir(join(root, "uploads"))).toEqual([]);
   });
 
+  it("keeps a text file that fails text validation as an opaque file without a preview", async () => {
+    const { root, registry } = await fixture();
+    const log = Buffer.from("Step 1/9 : FROM node:22\n\x1b[1A\x1b[2K => [internal] load build definition 0.1s\n\x1b[KDone\n");
+    const [opaque] = await registry.import([{ name: "docker-build.out", mimeType: "", data: log }]);
+    expect(opaque?.mimeType).toBe("application/octet-stream");
+    const [textLog] = await registry.import([{ name: "docker-build.log", mimeType: "text/plain", data: log }]);
+    expect(textLog).toMatchObject({ name: "docker-build.log", mimeType: "application/octet-stream", size: log.length });
+    const trusted = (await registry.resolve(textLog!.id))!;
+    expect(trusted.path).toMatch(/\.bin$/u);
+    expect(await readFile(trusted.path)).toEqual(log);
+    const resolver = new TrustedAttachmentResolver(join(root, "uploads"), {
+      resolve: async (id) => await registry.resolve(id), release: async () => true,
+      cleanup: async () => true, relinquish: async () => true,
+    });
+    const store = await ConversationAttachmentStore.open(root);
+    cleanups.push(() => store.close());
+    const [retained] = await store.retain(await resolver.resolvePayloads([textLog!], randomUUID()));
+    expect(retained).toMatchObject({ name: "docker-build.log", mimeType: "application/octet-stream" });
+    expect(retained!.path).toMatch(/\.bin$/u);
+  });
+
   it("detects content changes before copying a retained source", async () => {
     const { root, registry } = await fixture();
     const [file] = await registry.import([{ name: "file.txt", mimeType: "text/plain", data: Buffer.from("original") }]);

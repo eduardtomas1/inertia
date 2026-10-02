@@ -33,9 +33,10 @@ follow-ups still accept images only; text pastes stay inline.
 stay out of attachment storage, which agents can read.
 
 Text accepts UTF-8 or BOM-marked UTF-16 LE/BE. ANSI color sequences are stripped
-from previews; binary data and terminal control commands in text formats are
-rejected. Preview truncation never changes the stored file. JSON prefixes that
-are not complete JSON are shown as raw text. PDF and spreadsheet previews keep
+from previews. A text-format file with binary data, terminal control commands, or
+another encoding is kept as an opaque file: no preview, delivered by path.
+Preview truncation never changes the stored file. JSON that does not parse,
+including a truncated prefix, is shown as raw text. PDF and spreadsheet previews keep
 their structural validation, including rejection of spreadsheet macros.
 
 Images accept source files up to **50 MiB**. The import utility compresses or

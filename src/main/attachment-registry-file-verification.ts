@@ -116,7 +116,10 @@ export function assertAttachmentImportReceipt(
   const normalized = receipt.normalized === true && attachment.mimeType.startsWith("image/") && receipt.mimeType === "image/jpeg"
     && receipt.extension === "jpg" && receipt.size <= 10 * 1024 * 1024
     && receipt.displayName === attachment.displayName.replace(/\.[^.]+$/u, "") + ".jpg";
-  if (!normalized && (receipt.displayName !== attachment.displayName || receipt.mimeType !== attachment.mimeType
+  const opaque = receipt.normalized !== true && receipt.mimeType === "application/octet-stream" && receipt.extension === "bin"
+    && (attachment.mimeType.startsWith("text/") || attachment.mimeType === "application/json")
+    && receipt.displayName === attachment.displayName && receipt.size === attachment.size;
+  if (!normalized && !opaque && (receipt.displayName !== attachment.displayName || receipt.mimeType !== attachment.mimeType
     || receipt.extension !== attachment.extension || receipt.size !== attachment.size)) throw new Error(VERIFICATION_ERROR);
 }
 

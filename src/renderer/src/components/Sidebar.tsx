@@ -999,7 +999,7 @@ function SidebarView({
               {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
                   <Activity size={19} />
-                  <span>{query ? "No matching work" : snapshot.projects.length === 0 ? "No projects yet" : "No work yet"}</span>
+                  <span>{query ? "No matching work" : regularProjects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
               {renderedWorkItems.map((rendered) => {

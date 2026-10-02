@@ -276,6 +276,12 @@ describe("compact Work sidebar", () => {
     expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(11);
   });
 
+  it("says there are no projects when only the folder for chats without a project exists", () => {
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    renderSidebar([], undefined, [], { projects: [scratch] });
+    expect(screen.getByText("No projects yet")).toBeInTheDocument();
+  });
+
   it("pages project Done and project-free Done separately", () => {
     const now = new Date();
     const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };

@@ -25,10 +25,21 @@ export function formatWorkAge(value: string): string {
   return formatRelativeTime(value);
 }
 
-export function formatClockTime(value: string): string {
+export function formatMessageTime(value: string, now = new Date()): string {
+  const date = new Date(value);
+  const sameDay = date.toDateString() === now.toDateString();
+  const sameYear = date.getFullYear() === now.getFullYear();
   return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
+    ...(sameDay ? {} : { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }),
     hour: "numeric",
     minute: "2-digit",
+  }).format(date);
+}
+
+export function formatFullDateTime(value: string): string {
+  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
+    dateStyle: "full",
+    timeStyle: "short",
   }).format(new Date(value));
 }
 

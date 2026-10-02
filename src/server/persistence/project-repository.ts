@@ -10,7 +10,12 @@ import type { PersistenceContext } from "./context";
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
 
 type ProjectPersistenceContext = Pick<PersistenceContext, "database" | "requireProject">;
-export type NewProjectOptions = Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "workspaceKind">> & { activate?: boolean; enroll?: boolean };
+type ProjectIdentityFields = "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "workspaceKind";
+
+export type NewProjectOptions = Partial<Pick<Project, ProjectIdentityFields>> & {
+  activate?: boolean;
+  enroll?: boolean;
+};
 
 export class ProjectRepository {
   private readonly pathAuthority: WorkspacePathAuthority;
@@ -125,7 +130,8 @@ export class ProjectRepository {
       throw new Error("Only the folder for chats without a project can move.");
     }
     const path = resolve(projectPath);
-    const next = { ...current, path, normalizedPath: path, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
+    const updatedAt = new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString();
+    const next = { ...current, path, normalizedPath: path, updatedAt };
     this.context.database.transaction(() => {
       this.context.database.prepare("UPDATE projects SET path = ?, normalized_path = ?, updated_at = ? WHERE id = ?")
         .run(next.path, next.normalizedPath, next.updatedAt, projectId);

@@ -436,17 +436,19 @@ export class WorkspacePathAuthority {
       return this.resolveAuthorizedConversation(row, project);
     }
     if (row.worktree_path === null) {
-      throw new WorkspacePathAuthorityError(
-        "This chat does not have its own folder yet, so it can be read but not continued. Inertia sets one up when the folder for chats without a project is available.",
-      );
+      throw new WorkspacePathAuthorityError([
+        "This chat does not have its own folder yet, so it can be read but not continued.",
+        "Inertia sets one up when the folder for chats without a project is available.",
+      ].join(" "));
     }
     try {
       return this.resolveAuthorizedConversation(row, project);
     } catch (error) {
       if (!(error instanceof WorkspacePathAuthorityError)) throw error;
-      throw new WorkspacePathAuthorityError(
-        `This chat's folder (${row.worktree_path}) is missing or was replaced, so the chat can be read but not continued. Start a new chat without a project to keep working.`,
-      );
+      throw new WorkspacePathAuthorityError([
+        `This chat's folder (${row.worktree_path}) is missing or was replaced, so the chat can be read but not continued.`,
+        "Start a new chat without a project to keep working.",
+      ].join(" "));
     }
   }
 

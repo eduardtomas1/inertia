@@ -578,7 +578,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   backendProfileController.attachProviderMutationGuard((providerId) => providerMaintenance.hasBlockingAuthority(providerId));
   if (!runtimeSafetyLock && providerMaintenanceRecovery.length === 0) await backendProfileController.initialize();
   const workspacePath = (projectId: string, conversationId?: string): string => {
-    if (!conversationId && store.project(projectId).workspaceKind === "scratch") throw new RequestError("Choose a chat to use its own workspace folder.");
+    if (!conversationId && store.project(projectId).workspaceKind === "scratch") {
+      throw new RequestError("Choose a chat to use its own workspace folder.");
+    }
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);
     if (conversation.projectId !== projectId) throw new RequestError("The thread does not belong to this project.");

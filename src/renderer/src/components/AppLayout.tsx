@@ -236,8 +236,11 @@ export function conversationDeletionPrompt(
   snapshot: AppSnapshot | null,
 ): string {
   const prompt = `Delete “${thread.title}”? This cannot be undone.`;
-  const scratch = snapshot?.projects.some(({ id, workspaceKind }) => id === thread.projectId && workspaceKind === "scratch");
-  return scratch && thread.worktreePath ? `${prompt} Its chat folder is kept at ${thread.worktreePath}.` : prompt;
+  const scratch = snapshot?.projects.some(({ id, workspaceKind }) => (
+    id === thread.projectId && workspaceKind === "scratch"
+  ));
+  if (!scratch || !thread.worktreePath) return prompt;
+  return `${prompt} Its chat folder is kept at ${thread.worktreePath}.`;
 }
 
 export function activeConversationIsVisible(input: {

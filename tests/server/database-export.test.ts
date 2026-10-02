@@ -1291,6 +1291,10 @@ describe("safe database recovery exports", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "recovery.json");
     const cancellation = new AbortController();
+    let writeStarted!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      writeStarted = resolve;
+    });
     const injectedOpen = (async (...args: Parameters<typeof open>) => {
       const handle = await open(...args);
       return new Proxy(handle, {
@@ -1305,20 +1309,40 @@ describe("safe database recovery exports", () => {
               () => reject(cancellation.signal.reason),
               { once: true },
             );
+            writeStarted();
           });
         },
       });
     }) as typeof open;
-    const writing = writeDatabaseRecoveryExportFile(path, "secret transcript", {
+    const exporting = writeDatabaseRecoveryExportFile(path, "secret transcript", {
       signal: cancellation.signal,
       operations: { open: injectedOpen },
     });
-    await vi.waitFor(() => expect(
-      readdirSync(directory).some((entry) => entry.endsWith(".partial")),
-    ).toBe(true));
+    await writing;
+    expect(readdirSync(directory).some((entry) => entry.endsWith(".partial"))).toBe(true);
     cancellation.abort(new Error("injected shutdown cancellation"));
 
-    await expect(writing).rejects.toThrow("injected shutdown cancellation");
+    await expect(exporting).rejects.toThrow("injected shutdown cancellation");
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(directory).filter((entry) => entry.endsWith(".partial")))
+      .toEqual([]);
+  });
+
+  it("removes a partial when cancellation lands before the write starts", async () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "recovery.json");
+    const cancellation = new AbortController();
+    const injectedOpen = (async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      expect(readdirSync(directory).some((entry) => entry.endsWith(".partial"))).toBe(true);
+      cancellation.abort(new Error("injected shutdown cancellation"));
+      return handle;
+    }) as typeof open;
+
+    await expect(writeDatabaseRecoveryExportFile(path, "secret transcript", {
+      signal: cancellation.signal,
+      operations: { open: injectedOpen },
+    })).rejects.toThrow();
     expect(existsSync(path)).toBe(false);
     expect(readdirSync(directory).filter((entry) => entry.endsWith(".partial")))
       .toEqual([]);

@@ -403,6 +403,75 @@ describe("macOS Keychain access", () => {
   });
 });
 
+describe("scheduler isolation", () => {
+  const within = <T>(id: string, run: () => T): T => {
+    const previous = conversationId;
+    conversationId = id;
+    try { return run(); } finally { conversationId = previous; }
+  };
+  function failedChat() {
+    const projectId = store.conversation(conversationId).projectId;
+    const id = store.createConversation(projectId, "Another paused task", { model: "gpt-test" }).id;
+    const turn = within(id, () => begin());
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
+    return { conversationId: id, failedTurnId: turn.id };
+  }
+  beforeEach(() => {
+    dependencies.dispatch = vi.fn(async (plan, guard) => { guard(); within(plan.conversationId, () => begin(plan.id)); });
+    scheduler = makeScheduler();
+  });
+  it("keeps plans waiting, without an attention state, while runtime admission keeps refusing", async () => {
+    await schedule();
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    const refusals = vi.fn();
+    dependencies.track = async () => { refusals(); throw new Error("Import in progress"); };
+    scheduler = makeScheduler(); scheduler.start();
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    expect(refusals.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    dependencies.track = async (operation) => operation();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+  });
+  it("keeps a healthy plan running while another plan's row cannot be updated", async () => {
+    const healthy = failedChat();
+    const broken = failedChat();
+    await scheduler.schedule({ id: randomUUID(), ...healthy, resetsAt: reset });
+    await scheduler.schedule({ id: randomUUID(), ...broken, resetsAt: reset });
+    store.limitResets.save({ ...store.limitResets.get(broken.conversationId)!, nextAttemptAt: new Date(instant - 3 * 3_600_000).toISOString() });
+    const settle = store.limitResets.settle.bind(store.limitResets);
+    vi.spyOn(store.limitResets, "settle").mockImplementation((plan, state, error) => {
+      if (plan.conversationId === broken.conversationId && state === "missed") throw new Error("row-specific failure");
+      settle(plan, state, error);
+    });
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(store.limitResets.get(healthy.conversationId)).toMatchObject({ state: "completed" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(store.limitResets.get(broken.conversationId)).toMatchObject({ state: "blocked", error: expect.stringContaining("could not update") });
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+  });
+  it("keeps exactly one continuation when a newer turn races the dispatch", async () => {
+    await schedule();
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    dependencies.dispatch = vi.fn(async (plan, guard) => {
+      await scheduler.get(plan.conversationId);
+      expect(store.limitResets.get(plan.conversationId)?.state).toBe("dispatching");
+      begin();
+      await scheduler.get(plan.conversationId);
+      guard(); begin(plan.id);
+    });
+    scheduler = makeScheduler();
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "cancelled", turnId: null });
+  });
+});
+
 describe("reported quota windows", () => {
   it.each([null, "invalid", "2026-10-01T12:00:01.000Z", "2026-10-01T11:56:59.000Z"])("rejects unknown, future, or stale account freshness: %s", (updatedAt) => {
     expect(resetQuota({ ...usage(), updatedAt }, "gpt-test")).toEqual({ kind: "unknown" });

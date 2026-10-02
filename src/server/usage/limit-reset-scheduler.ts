@@ -38,7 +38,8 @@ export interface LimitResetDependencies {
 export class LimitResetScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
-  private failures = 0;
+  private admissionFailures = 0;
+  private readonly planFailures = new Map<string, { count: number; retryAt: number }>();
   private readonly offers = new Map<string, Promise<Offer | null>>();
   constructor(private readonly dependencies: LimitResetDependencies) {}
   private get store(): RuntimeStore {
@@ -185,7 +186,6 @@ export class LimitResetScheduler {
       turnId: null,
     });
     this.dependencies.changed(input.conversationId);
-    this.failures = 0;
     this.arm();
     return this.get(input.conversationId);
   }
@@ -196,7 +196,6 @@ export class LimitResetScheduler {
       && this.store.limitResets.rearm(plan, new Date().toISOString());
     if (!rearmed) throw new RuntimeRequestError("This resume is no longer waiting. Check the chat before sending again.");
     this.dependencies.changed(input.conversationId);
-    this.failures = 0;
     this.arm();
     return this.get(input.conversationId);
   }
@@ -231,54 +230,63 @@ export class LimitResetScheduler {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.dependencies.signal.aborted || !this.dependencies.enabled || this.running) return;
-    let delay: number;
-    if (this.failures > 0) {
-      delay = Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** this.failures);
-    } else {
-      const first = this.store.limitResets.pending()[0];
-      if (!first) return;
-      delay = Math.min(60_000, Math.max(1_000, Date.parse(first.nextAttemptAt) - Date.now()));
-    }
+    const delay = this.admissionFailures > 0
+      ? Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** this.admissionFailures)
+      : this.nextDelay();
+    if (delay === null) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.tick();
     }, delay);
     this.timer.unref();
   }
+  private nextDelay(): number | null {
+    let pending: StoredLimitResetPlan[];
+    try {
+      pending = this.store.limitResets.pending();
+    } catch {
+      return MAX_BACKOFF_MS;
+    }
+    const due = pending.map((plan) => Math.max(Date.parse(plan.nextAttemptAt), this.planFailures.get(plan.id)?.retryAt ?? 0));
+    if (!due.length) return null;
+    return Math.min(60_000, Math.max(1_000, Math.min(...due) - Date.now()));
+  }
   async tick(): Promise<void> {
     if (this.running || this.dependencies.signal.aborted || !this.dependencies.enabled) return;
     this.running = true;
     try {
       await this.dependencies.track(async () => {
-        for (const plan of this.store.limitResets.pending()) {
+        const pending = this.store.limitResets.pending();
+        const ids = new Set(pending.map((plan) => plan.id));
+        for (const id of this.planFailures.keys()) if (!ids.has(id)) this.planFailures.delete(id);
+        for (const plan of pending) {
           if (this.dependencies.signal.aborted) break;
-          await this.advance(plan);
+          if ((this.planFailures.get(plan.id)?.retryAt ?? 0) > Date.now()) continue;
+          try {
+            await this.advance(plan);
+            this.planFailures.delete(plan.id);
+          } catch {
+            this.planFailed(plan);
+          }
         }
       });
-      this.failures = 0;
+      this.admissionFailures = 0;
     } catch {
-      this.failures += 1;
-      if (this.failures >= STALLED_AFTER_FAILURES) this.stall();
+      this.admissionFailures += 1;
     } finally {
       this.running = false;
       this.arm();
     }
   }
-  private stall(): void {
-    for (const plan of this.dueSafely()) {
-      try {
-        this.store.limitResets.settle(plan, "blocked", STALLED);
-        this.dependencies.changed(plan.conversationId);
-      } catch {
-        continue;
-      }
-    }
-  }
-  private dueSafely(): StoredLimitResetPlan[] {
+  private planFailed(plan: StoredLimitResetPlan): void {
+    const count = (this.planFailures.get(plan.id)?.count ?? 0) + 1;
+    this.planFailures.set(plan.id, { count, retryAt: Date.now() + Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** count) });
+    if (count < STALLED_AFTER_FAILURES) return;
     try {
-      return this.store.limitResets.pending().filter((plan) => Date.parse(plan.nextAttemptAt) <= Date.now());
+      this.store.limitResets.settle(plan, "blocked", STALLED);
+      this.dependencies.changed(plan.conversationId);
     } catch {
-      return [];
+      return;
     }
   }
   private async advance(plan: StoredLimitResetPlan): Promise<void> {

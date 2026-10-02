@@ -30,6 +30,9 @@ async function workspace() {
 const tableInfo = (database: Database.Database) =>
   database.prepare("PRAGMA table_info(subagent_traces)").all() as Array<{ name: string }>;
 const columnNames = (database: Database.Database) => tableInfo(database).map(({ name }) => name);
+const runIndex = (database: Database.Database) => database.prepare(
+  "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'workspace_runs_conversation_started_idx'",
+).all();
 const schemaVersion = (database: Database.Database) =>
   (database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version;
 
@@ -96,6 +99,7 @@ describe("subagent task telemetry migration", () => {
       for (const column of TELEMETRY_COLUMNS) {
         database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
       }
+      database.exec("DROP INDEX workspace_runs_conversation_started_idx");
       database.prepare("DELETE FROM schema_migrations WHERE version = 88").run();
       expect(tableInfo(database)).toEqual(tableInfo(reference));
       expect(schemaVersion(database)).toBe(87);
@@ -141,6 +145,7 @@ describe("subagent task telemetry migration", () => {
     const migrated = new Database(databasePath);
     try {
       expect(schemaVersion(migrated)).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+      expect(runIndex(migrated)).toEqual([{ name: "workspace_runs_conversation_started_idx" }]);
       expect(migrated.pragma("foreign_key_check")).toEqual([]);
       expect(migrated.pragma("quick_check", { simple: true })).toBe("ok");
     } finally {
@@ -158,6 +163,7 @@ describe("subagent task telemetry migration", () => {
       for (const column of TELEMETRY_COLUMNS) {
         expect(columnNames(database).filter((name) => name === column)).toHaveLength(1);
       }
+      expect(runIndex(database)).toHaveLength(1);
       expect(schemaVersion(database)).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect(database.pragma("quick_check", { simple: true })).toBe("ok");
     } finally {

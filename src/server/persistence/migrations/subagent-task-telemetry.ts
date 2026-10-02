@@ -30,5 +30,9 @@ export const subagentTaskTelemetryMigration: DatabaseMigrationDefinition = {
     for (const [column, statement] of statements) {
       if (!columns.some(({ name }) => name === column)) database.exec(statement);
     }
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS workspace_runs_conversation_started_idx
+        ON workspace_runs(conversation_id, started_at DESC);
+    `);
   },
 };

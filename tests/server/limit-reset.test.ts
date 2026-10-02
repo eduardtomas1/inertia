@@ -538,6 +538,7 @@ describe("schema 87 usage-limit tags", () => {
     for (const column of ["model", "activity", "usage_json", "tool_use_count", "duration_ms"]) {
       raw.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
     }
+    raw.exec("DROP INDEX workspace_runs_conversation_started_idx");
     raw.close();
     store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
     dependencies.store = store;

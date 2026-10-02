@@ -4,6 +4,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
 import { usageResultValidators } from "./usage-results-schema";
+import { backgroundTasksResult } from "../background-tasks";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
@@ -1103,6 +1104,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
+  "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),

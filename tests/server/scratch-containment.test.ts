@@ -110,7 +110,9 @@ describe("managed folder containment", () => {
     vi.mocked(runGitInspection).mockRejectedValue(new GitError("git-unavailable", "missing"));
     const markers = [
       (parent: string) => fs.writeFileSync(join(parent, ".git"), "gitdir: /nowhere\n"),
-      (parent: string) => fs.symlinkSync(join(parent, "missing"), join(parent, ".git")),
+      ...(process.platform === "win32" ? [] : [
+        (parent: string) => fs.symlinkSync(join(parent, "missing"), join(parent, ".git")),
+      ]),
     ];
     for (const make of markers) {
       const parent = fs.mkdtempSync(join(directory, "parent-"));

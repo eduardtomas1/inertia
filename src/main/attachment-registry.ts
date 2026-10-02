@@ -39,12 +39,16 @@ import {
   type AttachmentImportValidationRunner,
 } from "./attachment-import-file.js";
 import { RendererAttachmentImportHolds } from "./attachment-import-holds.js";
+import { availableAttachmentDiskBytes } from "../node/conversation-attachment-storage-management.js";
+import { ATTACHMENT_DISK_RESERVE_BYTES } from "../shared/attachment-storage.js";
 import {
   MAX_SESSION_ATTACHMENT_BYTES,
   MAX_SESSION_ATTACHMENT_RECORDS,
+  TEMPORARY_ATTACHMENT_STORAGE_FULL,
   isContained,
   sameIdentity,
   securePrivateDirectory,
+  temporaryStorageWriteError,
   unlinkWithRetry,
   waitForReleaseRetry,
   type AttachmentStorageReservation,
@@ -452,13 +456,14 @@ export class AttachmentRegistry {
     }
   }
 
-  private assertStorageCapacity(additionalBytes: number): void {
+  private assertStorageCapacity(additionalBytes: number, availableDiskBytes = Infinity): void {
+    const pendingBytes = [...this.pendingPaths.values()].reduce(
+      (total, size) => total + size,
+      0,
+    );
     const retainedBytes = [...this.records.values()].reduce(
       (total, { size }) => total + size,
-      [...this.pendingPaths.values()].reduce(
-        (total, size) => total + size,
-        0,
-      ),
+      pendingBytes,
     );
     if (
       this.reservedRecords
@@ -466,10 +471,9 @@ export class AttachmentRegistry {
         + this.pendingPaths.size
         + 1 > this.maxRecords
       || this.reservedBytes + retainedBytes + additionalBytes > this.maxBytes
+      || availableDiskBytes < pendingBytes + additionalBytes + ATTACHMENT_DISK_RESERVE_BYTES
     ) {
-      throw new Error(
-        "Temporary attachment storage is full. Remove an attachment and try again.",
-      );
+      throw new Error(TEMPORARY_ATTACHMENT_STORAGE_FULL);
     }
   }
 
@@ -823,7 +827,9 @@ export class AttachmentRegistry {
   ): Promise<StagedAttachment> {
     await this.verifiedDirectory();
     signal.throwIfAborted();
-    this.assertStorageCapacity(attachment.size);
+    const availableDiskBytes = await availableAttachmentDiskBytes(this.directory);
+    signal.throwIfAborted();
+    this.assertStorageCapacity(attachment.size, availableDiskBytes);
     const id = randomUUID();
     const path = join(this.directory, `${id}.${attachment.extension}`);
     this.pendingPaths.set(path, attachment.size);
@@ -849,7 +855,7 @@ export class AttachmentRegistry {
       return { id, path };
     } catch (error) {
       await this.discardStaged(path);
-      throw error;
+      throw temporaryStorageWriteError(error);
     }
   }
 

@@ -19,6 +19,8 @@ import {
 } from "../node/platform-file-open-flags.js";
 
 export const MAX_SESSION_ATTACHMENT_RECORDS = 1_024;
+export const TEMPORARY_ATTACHMENT_STORAGE_FULL =
+  "Temporary attachment storage is full. Remove an attachment and try again.";
 export const MAX_SESSION_ATTACHMENT_BYTES = 16 * 1024 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
@@ -319,6 +321,13 @@ function errorCode(error: unknown): string | null {
     && typeof error.code === "string"
     ? error.code
     : null;
+}
+
+export function temporaryStorageWriteError(error: unknown): unknown {
+  const code = errorCode(error);
+  return code === "ENOSPC" || code === "EDQUOT"
+    ? new Error(TEMPORARY_ATTACHMENT_STORAGE_FULL)
+    : error;
 }
 
 export function waitForReleaseRetry(delayMs: number): Promise<void> {

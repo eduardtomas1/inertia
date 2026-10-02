@@ -1,5 +1,6 @@
 import type { FileHandle } from "node:fs/promises";
 import { ATTACHMENT_UPLOAD_CHUNK_BYTES } from "../shared/attachments.js";
+import { temporaryStorageWriteError } from "./attachment-storage-session.js";
 
 export class AttachmentUploadStream {
   private offset = 0;
@@ -59,7 +60,8 @@ export class AttachmentUploadStream {
       const bytes = Buffer.from(data);
       let written = 0;
       while (written < bytes.length) {
-        const result = await this.destination!.write(bytes, written, bytes.length - written, offset + written);
+        const result = await this.destination!.write(bytes, written, bytes.length - written, offset + written)
+          .catch((error: unknown) => { throw temporaryStorageWriteError(error); });
         if (result.bytesWritten === 0) throw new Error("Attachment upload could not be written.");
         written += result.bytesWritten;
       }

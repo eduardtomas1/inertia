@@ -1,4 +1,5 @@
 // @inertia-test-suite portable
+import { MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES } from "../../src/node/conversation-attachment-store-child";
 import { describe, expect, it } from "vitest";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -175,7 +176,7 @@ describe("runtime process protocol", () => {
     expect(parseRuntimeWorkerEvent(request)).toEqual(request);
     expect(parseRuntimeWorkerEvent({
       ...request,
-      encodedOperation: "x".repeat(16 * 1024 * 1024 + 1),
+      encodedOperation: "x".repeat(MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES + 1),
     })).toBeNull();
     expect(parseRuntimeWorkerEvent({
       type: "runtime.conversation-attachment-store-cancel",

@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
-  MAX_CHAT_ATTACHMENT_BYTES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  ATTACHMENT_PREVIEW_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  MAX_FILE_PREVIEW_BYTES,
   chatAttachmentStorageExtension,
 } from "../shared/attachments.js";
 import {
@@ -14,13 +16,13 @@ import {
 const STORE_CHILD_TIMEOUT_MS = 30_000;
 const MAX_METADATA_BYTES = 4 * 1024;
 const MAX_MUTATION_CHILD_OUTPUT_BYTES = 4_096;
-const MAX_READ_CHILD_OUTPUT_BYTES = Math.ceil(MAX_CHAT_ATTACHMENT_BYTES / 3)
+const MAX_READ_CHILD_OUTPUT_BYTES = Math.ceil(MAX_ATTACHMENT_BYTES / 3)
   * 4 + MAX_METADATA_BYTES * 2 + 1_024;
 export const MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES =
-  16 * 1024 * 1024;
+  70 * 1024 * 1024;
 const METADATA_FILE = "metadata.json";
 const ATTACHMENT_STORAGE_EXTENSIONS = [...new Set(
-  CHAT_ATTACHMENT_MIME_TYPES.map(chatAttachmentStorageExtension),
+  ACCEPTED_ATTACHMENT_MIME_TYPES.map(chatAttachmentStorageExtension),
 )];
 
 export type ConversationAttachmentStoreOperation = {
@@ -33,6 +35,7 @@ export type ConversationAttachmentStoreOperation = {
   readonly stagingName: string;
   readonly extension: string;
   readonly bytes: Uint8Array;
+  readonly source?: import("./read-attachment.js").AttachmentFileSource;
   readonly metadata: string;
   readonly stallBeforePublishMs: number;
 } | {
@@ -46,6 +49,8 @@ export type ConversationAttachmentStoreOperation = {
 
 export interface ConversationAttachmentStoreReadOperation {
   readonly operation: "read";
+  readonly metadataOnly?: boolean;
+  readonly preview?: boolean;
   readonly root: string;
   readonly rootDev: string;
   readonly rootIno: string;
@@ -101,12 +106,14 @@ export interface ConversationAttachmentStoreAuthority {
 }
 
 export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
+  const { createHash } = require("node:crypto");
   const { constants } = require("node:fs");
   const { chmod, lstat, mkdir, open, realpath, rename, rm } = require("node:fs/promises");
   const { join } = require("node:path");
 
   const MAX_INPUT_BYTES = ${MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES};
-  const MAX_ATTACHMENT_BYTES = ${MAX_CHAT_ATTACHMENT_BYTES};
+  const MAX_ATTACHMENT_BYTES = ${MAX_ATTACHMENT_BYTES};
+  const MAX_FILE_PREVIEW_BYTES = ${MAX_FILE_PREVIEW_BYTES};
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
   const PENDING = /^\\.pending-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
   const EXTENSIONS = new Set(${JSON.stringify(ATTACHMENT_STORAGE_EXTENSIONS)});
@@ -158,11 +165,15 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
     maximum,
     nonBlocking = false,
     minimum = 1,
+    capture = maximum,
+    destination = null,
   ) {
+    const canonical = await realpath(path);
     const named = await lstat(path, { bigint: true });
     if (
       !named.isFile()
       || named.isSymbolicLink()
+      || (destination && (canonical !== path || named.nlink !== 1n))
       || !privateEntry(named, 0o600)
       || named.size < BigInt(minimum)
       || named.size > BigInt(maximum)
@@ -176,6 +187,7 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
       const before = await file.stat({ bigint: true });
       if (
         !before.isFile()
+        || (destination && before.nlink !== 1n)
         || before.dev !== named.dev
         || before.ino !== named.ino
         || before.size !== named.size
@@ -186,16 +198,24 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
         || !privateEntry(before, 0o600)
       ) throw new Error("The attachment file changed.");
       const expectedSize = Number(before.size);
-      const bytes = Buffer.alloc(expectedSize);
+      const bytes = Buffer.alloc(Math.min(expectedSize, capture));
+      const chunk = Buffer.allocUnsafe(256 * 1024);
+      const hash = createHash("sha256");
       let offset = 0;
       while (offset < expectedSize) {
-        const { bytesRead } = await file.read(
-          bytes,
-          offset,
-          expectedSize - offset,
-          offset,
-        );
+        const { bytesRead } = await file.read(chunk, 0, Math.min(chunk.length, expectedSize - offset), offset);
         if (bytesRead === 0) break;
+        const data = chunk.subarray(0, bytesRead);
+        hash.update(data);
+        if (offset < bytes.length) data.copy(bytes, offset, 0, Math.min(data.length, bytes.length - offset));
+        if (destination) {
+          let written = 0;
+          while (written < data.length) {
+            const result = await destination.write(data, written, data.length - written, offset + written);
+            if (result.bytesWritten === 0) throw new Error("Attachment copy stopped.");
+            written += result.bytesWritten;
+          }
+        }
         offset += bytesRead;
       }
       const overflow = Buffer.alloc(1);
@@ -218,7 +238,9 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
         || after.ctimeNs !== before.ctimeNs
         || !privateEntry(after, 0o600)
       ) throw new Error("The attachment file changed.");
-      return { bytes, named };
+      await verifyNamedFile(path, named);
+      if (await realpath(path) !== canonical) throw new Error("The attachment path changed.");
+      return { bytes, named, digest: hash.digest("hex"), size: expectedSize };
     } finally {
       await file.close();
     }
@@ -298,14 +320,18 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
       || parsed.size < 1
       || parsed.size > MAX_ATTACHMENT_BYTES
     ) return { missing: true };
+    const textPreview = input.preview === true && typeof parsed.mimeType === "string"
+      && (parsed.mimeType.startsWith("text/") || parsed.mimeType === "application/json");
+    if (input.preview === true && !textPreview && parsed.size > MAX_FILE_PREVIEW_BYTES) return { missing: true };
     const contentPath = input.id + "." + parsed.extension;
     const contentRead = await readBoundedFile(
       contentPath,
       MAX_ATTACHMENT_BYTES,
-      true,
+      true, 1,
+      input.metadataOnly ? 0 : textPreview ? ${ATTACHMENT_PREVIEW_BYTES} : MAX_ATTACHMENT_BYTES,
     );
     const bytes = contentRead.bytes;
-    if (bytes.length !== parsed.size) {
+    if (contentRead.size !== parsed.size || contentRead.digest !== parsed.digest) {
       throw new Error("The attachment content changed.");
     }
     if (input.stallBeforeRecordRevalidateMs > 0) {
@@ -352,7 +378,7 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
     ) throw new Error("The persistence request is invalid.");
     const bytes = Buffer.from(input.bytesBase64, "base64");
     if (
-      bytes.length < 1
+      (!input.source && bytes.length < 1)
       || bytes.length > MAX_ATTACHMENT_BYTES
       || bytes.toString("base64") !== input.bytesBase64
     ) throw new Error("The persistence bytes are invalid.");
@@ -375,7 +401,16 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
         0o600,
       );
       try {
-        await content.writeFile(bytes);
+        if (input.source) {
+          if (typeof input.source.path !== "string" || input.source.path.length > 4096
+            || input.source.digest !== metadata.digest
+            || await realpath(input.source.path) !== input.source.path) throw new Error("Invalid attachment source.");
+          const copied = await readBoundedFile(input.source.path, MAX_ATTACHMENT_BYTES, true, 1, 0, content);
+          if (copied.size !== metadata.size || copied.digest !== metadata.digest) throw new Error("Attachment source changed.");
+        } else {
+          if (bytes.length !== metadata.size || createHash("sha256").update(bytes).digest("hex") !== metadata.digest) throw new Error("Attachment content changed.");
+          await content.writeFile(bytes);
+        }
         await content.sync();
       } finally {
         await content.close();
@@ -537,8 +572,8 @@ export function decodeConversationAttachmentStoreOperation(
   if (typeof operation.bytesBase64 !== "string") return null;
   const bytes = Buffer.from(operation.bytesBase64, "base64");
   if (
-    bytes.length < 1
-    || bytes.length > MAX_CHAT_ATTACHMENT_BYTES
+    (!operation.source && bytes.length < 1)
+    || bytes.length > MAX_ATTACHMENT_BYTES
     || bytes.toString("base64") !== operation.bytesBase64
   ) return null;
   const { bytesBase64: _bytesBase64, ...rest } = operation;
@@ -734,8 +769,7 @@ export function runConversationAttachmentStoreChild(
       }
       const bytes = Buffer.from(receipt.bytesBase64, "base64");
       if (
-        bytes.length < 1
-        || bytes.length > MAX_CHAT_ATTACHMENT_BYTES
+        bytes.length > MAX_ATTACHMENT_BYTES
         || bytes.toString("base64") !== receipt.bytesBase64
       ) {
         finish(new Error("Conversation attachment read returned invalid bytes."));

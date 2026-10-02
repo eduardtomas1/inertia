@@ -685,8 +685,18 @@
     },
     {
       "version": 86,
+      "name": "PersistScratchProject",
+      "digest": "7c8ba44e6070963b0985107f6d392502cb30fa72f808717e7a73ab09ea114836"
+    },
+    {
+      "version": 87,
+      "name": "PersistUsageLimitResumePlans",
+      "digest": "dde1188240bdcdcd416fc47ba366d27b25565871b9f2460e06eeefe029918a5b"
+    },
+    {
+      "version": 88,
       "name": "PersistSubagentTaskTelemetry",
-      "digest": "cdf61c1d2c3f405676453cb09e7cd19a25c32bc9a49e032d6a6b2d771954c2f2"
+      "digest": "73077b94b55e8400e85106f47a09dc854d70377c0fa9fdda257e29822842329d"
     }
   ]
 }

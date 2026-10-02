@@ -1,6 +1,6 @@
 import { snapshotSourceSchema } from "../snapshots";
 import { isContextCompaction } from "../context-compaction";
-import { CHAT_ATTACHMENT_MIME_TYPES } from "../attachments";
+import { ACCEPTED_ATTACHMENT_MIME_TYPES } from "../attachments";
 import type { ChatMessage } from "./agent";
 
 type UnknownRecord = Record<string, unknown>;
@@ -24,8 +24,8 @@ function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownR
 
 function attachment(value: unknown): boolean {
   return recordWithStrings(value, "id", "name", "path", "mimeType")
-    && CHAT_ATTACHMENT_MIME_TYPES.includes(
-      value.mimeType as (typeof CHAT_ATTACHMENT_MIME_TYPES)[number],
+    && ACCEPTED_ATTACHMENT_MIME_TYPES.includes(
+      value.mimeType as (typeof ACCEPTED_ATTACHMENT_MIME_TYPES)[number],
     )
     && (value.snapshot === undefined || snapshotSourceSchema.safeParse(value.snapshot).success)
     && typeof value.size === "number"

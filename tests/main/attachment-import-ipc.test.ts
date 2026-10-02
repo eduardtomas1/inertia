@@ -381,6 +381,40 @@ describe("renderer attachment import ownership", () => {
     expect((page.owner as FakeOwner).listenerCount("did-start-navigation")).toBe(0);
   });
 
+  it("keeps an active batch open past the idle interval and cancels it once imports stop", async () => {
+    vi.useFakeTimers();
+    const page = document();
+    const storage = registry();
+    const coordinator = new RendererAttachmentImportCoordinator(() => storage);
+    const batchId = coordinator.begin(page);
+    for (let step = 0; step < 3; step += 1) {
+      await coordinator.importOne(page, batchId, [candidate]);
+      await vi.advanceTimersByTimeAsync(200_000);
+    }
+    await expect(coordinator.importOne(page, batchId, [candidate])).resolves.toHaveLength(1);
+    expect(storage.rendererImports.rollback).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(210_000);
+    expect(storage.rendererImports.rollback).toHaveBeenCalledWith(batchId, expect.any(Function));
+    await expect(coordinator.importOne(page, batchId, [candidate])).rejects.toThrow("unavailable");
+    await coordinator.dispose();
+  });
+
+  it("cancels a batch that stays active beyond its overall deadline", async () => {
+    vi.useFakeTimers();
+    const page = document();
+    const storage = registry();
+    const coordinator = new RendererAttachmentImportCoordinator(() => storage);
+    const batchId = coordinator.begin(page);
+    for (let elapsed = 0; elapsed < 1_200_000; elapsed += 200_000) {
+      await coordinator.importOne(page, batchId, [candidate]);
+      await vi.advanceTimersByTimeAsync(200_000);
+    }
+    expect(storage.rendererImports.rollback).toHaveBeenCalledWith(batchId, expect.any(Function));
+    await expect(coordinator.importOne(page, batchId, [candidate])).rejects.toThrow("unavailable");
+    await coordinator.dispose();
+  });
+
   it("binds IPC lifecycle operations to the exact sender, frame, and subset", async () => {
     const owner = new FakeOwner();
     const storage = registry();

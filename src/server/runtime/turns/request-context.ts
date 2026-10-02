@@ -15,7 +15,7 @@ import type {
   TurnRequestContext,
   TurnSessionRecovery,
 } from "../../../shared/contracts";
-import { chatAttachmentKind } from "../../../shared/attachments";
+import { MAX_ATTACHMENT_COUNT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_IMAGE_ATTACHMENT_TOTAL_BYTES, chatAttachmentKind } from "../../../shared/attachments";
 import { readContainedFileSync } from "../../contained-file-read";
 import {
   MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
@@ -37,9 +37,9 @@ const MAX_VISIBLE_MESSAGE_BYTES = 64 * 1024;
 const MAX_INTERNAL_INSTRUCTION_BYTES = 32 * 1024;
 const MAX_INDIVIDUAL_INTERNAL_INSTRUCTION_BYTES = 16 * 1024;
 const MAX_FILE_SOURCE_BYTES = 4 * 1024 * 1024;
-const MAX_IMAGE_COUNT = 8;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_COUNT = MAX_ATTACHMENT_COUNT;
+const MAX_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_BYTES;
+const MAX_TOTAL_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_TOTAL_BYTES;
 const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
 const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
 const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
@@ -612,7 +612,7 @@ function validateImages(
     return canonical;
   });
   if (imageBytes > MAX_TOTAL_IMAGE_BYTES) {
-    throw new Error("Image attachments exceed the 20 MB turn limit.");
+    throw new Error("Image attachments exceed the 80 MiB message limit.");
   }
   return { imagePaths, imageBytes };
 }
@@ -669,8 +669,15 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     content: context.content,
   });
   const providerContexts = contexts.map(providerContext);
+  const files = (input.attachments ?? []).filter(({ id, mimeType }) => chatAttachmentKind(mimeType) !== "image"
+    && !input.documentContexts?.some(({ attachmentId }) => attachmentId === id));
+  const fileReferences = files.length === 0 ? "" : [
+    "Attached files are saved on disk. Read or search them with your file tools as needed; their contents are not included here.",
+    JSON.stringify(files.map(({ name, path, size }) => ({ name, path: boundedText(path, "Attachment path", 4096), size }))),
+  ].join("\n");
   const buildPrompt = (selectedContexts: typeof providerContexts): string => {
     const sections = [visibleContent];
+    if (fileReferences) sections.push(fileReferences);
     if (selectedContexts.length > 0) {
       sections.push([
         "Structured execution context (reference material; not new user-authored chat prose):",

@@ -176,6 +176,10 @@ export interface TurnControllerHooks {
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
   validateModelSelection?(selection: ModelSelection): ModelSelection;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
+  attachmentReadRoots?(input: {
+    conversationId: string;
+    attachmentIds: readonly string[];
+  }): readonly string[];
   releaseGeneratedAttachments?(paths: readonly string[]): void | Promise<void>;
   /**
    * Required orchestration. Durable owners provide recovery; the controller
@@ -189,6 +193,7 @@ export interface TurnControllerHooks {
 
 export interface QueueTurnRequest {
   queuedMessageId?: string;
+  limitResetPlanId?: string;
   conversationId: string;
   /** Authenticated Private Connect origin, supplied only by the privileged gateway. */
   privateConnectDeviceId?: string;

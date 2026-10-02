@@ -8,7 +8,8 @@ import { metadataFor } from "../../src/node/conversation-attachment-store-metada
 import type { ChatAttachmentMimeType } from "../../src/shared/attachments";
 import { pngWithoutPalette } from "../fixtures/attachments/png-chunks";
 
-vi.mock("../../src/node/conversation-attachment-store-child.js", () => ({
+vi.mock("../../src/node/conversation-attachment-store-child.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/node/conversation-attachment-store-child.js")>(),
   CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE: `
     async function performConversationAttachmentStoreOperation(operation) {
       return operation.receipt;
@@ -133,6 +134,19 @@ describe("retained attachment utility validation", () => {
   });
 
   it.each([
+    { preview: true, ok: true },
+    { preview: false, ok: false },
+  ])("accepts a truncated text prefix only for previews (%j)", async ({ preview, ok }) => {
+    const text = Buffer.alloc(1024 * 1024 + 16, 0x61);
+    const receipt = {
+      ...receiptFor(text, "notes.txt", "text/plain"),
+      bytesBase64: text.subarray(0, 1024 * 1024).toString("base64"),
+    };
+    const parentPort = await perform(receipt, { preview });
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok }));
+  });
+
+  it.each([
     ["reference.png", "image/png", png.subarray(0, 33)],
     ["missing-palette.png", "image/png", pngWithoutPalette()],
     ["reference.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Buffer.from("PK\x03\x04invalid")],
@@ -180,6 +194,17 @@ describe("retained attachment utility validation", () => {
       ok: true,
       receipt: { missing: true },
     });
+  });
+
+  it("previews retained JSON that import accepted as readable text", async () => {
+    const receipt = receiptFor(Buffer.from("{bad}"), "notes.json", "application/json");
+    const parentPort = await perform(receipt, { preview: true });
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: true, receipt }));
+  });
+
+  it("still rejects retained text that import would not accept", async () => {
+    const parentPort = await perform(receiptFor(Buffer.from("safe\0unsafe"), "notes.txt", "text/plain"), { preview: true });
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
   });
 
   it("returns a stored record without parsing its content for maintenance reads", async () => {

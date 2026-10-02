@@ -174,20 +174,19 @@ describe("runtime process-tree termination", () => {
     })).resolves.toBe(false);
   });
 
-  it.each(["linux", "darwin"] as const)(
-    "does not confirm a %s tree whose root never stopped before the kill",
-    async (platform) => {
+  it.each((["linux", "darwin"] as const).flatMap((platform) =>
+    ["R", "S", "D"].map((state) => ({ platform, state }))))(
+    "does not confirm a $platform tree whose root stayed $state before the kill",
+    async ({ platform, state }) => {
       const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {
         if (signal === 0) throw processError("ESRCH");
         return true;
       });
       const spawnProcessSync = vi.fn(() => ({
-        stdout: "100 1 R\n",
+        stdout: `100 1 ${state}\n`,
         status: 0,
       }));
 
-      // The known root exits after SIGKILL, but it could have forked an
-      // unobserved descendant while every pre-kill snapshot showed it running.
       await expect(forceKillRuntimeProcessTree(100, {
         platform,
         kill,

@@ -37,7 +37,9 @@ export function WelcomeGuideHost({
 }): React.JSX.Element {
   const open = useSyncExternalStore(subscribeWelcomeGuide, welcomeGuideIsOpen);
   const helpOpen = useHelpGuideOpen();
-  const projectCount = snapshot ? snapshot.projects.length : null;
+  const projectCount = snapshot
+    ? snapshot.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch").length
+    : null;
   useNativePreviewSuspension(useDialogPresence(open));
 
   useEffect(() => {

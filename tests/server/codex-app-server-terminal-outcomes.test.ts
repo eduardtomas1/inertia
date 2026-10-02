@@ -309,6 +309,35 @@ describe("Codex App Server terminal outcomes", () => {
     expect("diagnostic" in result ? result.diagnostic?.length : undefined).toBeLessThanOrEqual(4_000);
   });
 
+  it.each([
+    ["a final error notification", true, "usageLimitExceeded", true],
+    ["a failed turn", false, "usageLimitExceeded", true],
+    ["a final error notification", true, "contextWindowExceeded", false],
+    ["a failed turn", false, { httpConnectionFailed: { httpStatusCode: 429 } }, false],
+  ] as const)("tags a usage-limit failure only from Codex's structured error info (%s, %j)", async (_label, notified, codexErrorInfo, limited) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    if (notified) {
+      app.notification("error", { threadId: "thread-test", turnId: "turn-test", willRetry: false,
+        error: { message: "You've hit your usage limit.", codexErrorInfo } });
+      app.terminal("failed", { message: "You've hit your usage limit." });
+    } else {
+      app.terminal("failed", { message: "You've hit your usage limit.", codexErrorInfo });
+    }
+    app.finishCleanup(true);
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.usageLimited).toBe(limited ? true : undefined);
+  });
+
+  it("does not tag usage-limit text without Codex's structured error info", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("failed", { message: "You've hit your usage limit. Try again later." });
+    app.finishCleanup(true);
+    expect((await app.run.result).failure?.usageLimited).toBeUndefined();
+  });
+
   it("keeps a plain interrupted turn cancelled after an earlier retryable provider error", async () => {
     const app = fixture();
     await vi.advanceTimersByTimeAsync(0);

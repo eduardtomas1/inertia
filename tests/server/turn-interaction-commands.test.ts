@@ -617,6 +617,86 @@ describe("new-turn admission recovery", () => {
   });
 });
 
+describe("provider image request budgets", () => {
+  function images(count: number, size: number): ChatAttachment[] {
+    return Array.from({ length: count }, (_, index) => ({
+      ...trustedAttachment,
+      id: `77777777-7777-4777-8777-${String(index).padStart(12, "0")}`,
+      name: `image-${index}.png`,
+      path: `/private/runtime/image-${index}.png`,
+      size,
+    }));
+  }
+
+  it.each([
+    ["claude", "Claude"],
+    ["cursor", "Cursor"],
+    ["kimi", "Kimi Code"],
+  ] as const)("refuses more than 20 MiB of images for %s before any turn or retention", async (providerId, name) => {
+    const selected = images(3, 8 * 1024 * 1024);
+    const queue = vi.fn(() => queuedTurn());
+    const relinquishAll = vi.fn(async () => undefined);
+    const runtime = dependencies({
+      queue, relinquishAll, providerId,
+      resolvedPayloads: selected.map((attachment) => ({ attachment, bytes: new Uint8Array() })),
+    });
+    const command = messageCommand();
+    command.payload.attachments = selected;
+
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command)).rejects.toThrow(
+      `${name} accepts at most 20 MiB of images per message. Remove some images and send again.`,
+    );
+    expect(queue).not.toHaveBeenCalled();
+    expect(runtime.conversationAttachments.retain).not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalledWith(selected.map(({ id }) => id));
+  });
+
+  it("refuses a Claude follow-up above 20 MiB of images before retaining or steering", async () => {
+    const selected = images(3, 8 * 1024 * 1024);
+    const relinquishAll = vi.fn(async () => undefined);
+    const runtime = dependencies({
+      queue: vi.fn(), relinquishAll, providerId: "claude",
+      resolvedPayloads: selected.map((attachment) => ({ attachment, bytes: new Uint8Array() })),
+    });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(true);
+    const command = messageCommand();
+    command.payload.attachments = selected;
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command)).rejects.toThrow(
+      "Claude accepts at most 20 MiB of images per message. Remove some images and send again.",
+    );
+    expect(runtime.turns.steer).not.toHaveBeenCalled();
+    expect(runtime.conversationAttachments.retain).not.toHaveBeenCalled();
+  });
+
+  it("lets Codex take the same images by path", async () => {
+    const selected = images(3, 8 * 1024 * 1024);
+    const queue = vi.fn(() => queuedTurn());
+    const runtime = dependencies({
+      queue, relinquishAll: vi.fn(async () => undefined), providerId: "codex",
+      resolvedPayloads: selected.map((attachment) => ({ attachment, bytes: new Uint8Array() })),
+    });
+    const command = messageCommand();
+    command.payload.attachments = selected;
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command)).resolves.toBe("handled");
+    expect(queue).toHaveBeenCalledOnce();
+  });
+
+  it("refuses more images than any provider request accepts", async () => {
+    const selected = images(33, 1);
+    const queue = vi.fn(() => queuedTurn());
+    const runtime = dependencies({
+      queue, relinquishAll: vi.fn(async () => undefined), providerId: "codex",
+      resolvedPayloads: selected.map((attachment) => ({ attachment, bytes: new Uint8Array() })),
+    });
+    const command = messageCommand();
+    command.payload.attachments = selected;
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command)).rejects.toThrow(
+      "Codex accepts at most 32 images per message. Remove some images and send again.",
+    );
+    expect(queue).not.toHaveBeenCalled();
+  });
+});
+
 describe("attachment send handoff", () => {
   it.each([
     ["New\nchat", "New chat", false],

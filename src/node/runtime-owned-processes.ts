@@ -313,9 +313,6 @@ function monitorLinuxGuardian(
           "release",
           abortSignal,
         );
-        // Durable retirement may abort this helper before its close event.
-        // Keep its drain separate so the helper's fallback can retire the
-        // claim without waiting on itself, while callers retain their slots.
         claim.linuxReleaseHelper = helper;
         registry.pendingReleaseConfirmations.add(helper);
         const closed = (): void => {

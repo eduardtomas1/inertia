@@ -69,7 +69,7 @@ function PaletteAndHelp({ props }: { props: ReturnType<typeof hostProps> }): Rea
   const [paletteOpen, setPaletteOpen] = useState(true);
   return (
     <>
-      <AppNavigationOverlays
+      <AppNavigationOverlays openNoProjectChat={vi.fn()}
         snapshot={{ projects: [], conversations: [] } as unknown as AppSnapshot}
         paletteOpen={paletteOpen}
         paletteView="search"

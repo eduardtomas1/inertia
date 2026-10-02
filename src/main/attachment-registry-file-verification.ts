@@ -1,13 +1,12 @@
 import type { BigIntStats } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import type { AttachmentImportValidationReceipt } from "./attachment-import-file.js";
-import {
-  identity,
-  type OpenedSecureFile,
-  openVerifiedFile,
-} from "./secure-file-io.js";
+import { constants } from "node:fs";
+import { FILE_OPEN_NO_FOLLOW } from "../node/platform-file-open-flags.js";
+import { readAttachment } from "../node/read-attachment.js";
+import { ATTACHMENT_PREVIEW_BYTES, MAX_FILE_PREVIEW_BYTES } from "../shared/attachments.js";
 
 const VERIFICATION_ERROR =
   "Temporary attachment storage could not be verified safely.";
@@ -63,6 +62,7 @@ export async function verifyStoredAttachmentAfterValidation(options: {
   readonly before: BigIntStats;
   readonly expectedRoot: string;
   readonly expectedSize: number;
+  readonly normalized?: boolean;
   readonly path: string;
   readonly receipt: AttachmentImportValidationReceipt;
   readonly resolveVerifiedRoot: () => Promise<string>;
@@ -78,35 +78,26 @@ export async function verifyStoredAttachmentAfterValidation(options: {
     signal,
   } = options;
   signal.throwIfAborted();
-  let verified: OpenedSecureFile;
+  const handle = await open(path, constants.O_RDONLY | FILE_OPEN_NO_FOLLOW | constants.O_NONBLOCK);
   try {
-    verified = await openVerifiedFile(path, expectedSize, identity(before));
-  } catch {
-    signal.throwIfAborted();
-    throw new Error(VERIFICATION_ERROR);
-  }
-  try {
-    signal.throwIfAborted();
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || opened.isSymbolicLink() || opened.dev !== before.dev || opened.ino !== before.ino
+      || opened.nlink !== 1n || Number(opened.size) !== expectedSize
+      || (!options.normalized && !isStablePrivateAttachment(before, opened))) throw new Error(VERIFICATION_ERROR);
+    const verified = await readAttachment(handle, expectedSize, 0, signal);
     const [verifiedRoot, pinnedAfter, namedAfter, verifiedPath] =
       await Promise.all([
         resolveVerifiedRoot(),
-        verified.handle.stat({ bigint: true }),
+        handle.stat({ bigint: true }),
         lstat(path, { bigint: true }),
         realpath(path),
       ]);
     signal.throwIfAborted();
     if (
-      verified.linkCount !== 1
-      || verified.content.byteLength !== expectedSize
-      || verified.metadata.size !== expectedSize
-      || verified.metadata.size !== receipt.size
-      || verified.metadata.digest !== receipt.digest
-      || (
-        process.platform !== "win32"
-        && verified.metadata.mode !== 0o600
-      )
+      verified.digest !== receipt.digest
+      || receipt.size !== expectedSize
       || verifiedRoot !== expectedRoot
-      || !isStablePrivateAttachment(before, pinnedAfter)
+      || !isStablePrivateAttachment(opened, pinnedAfter)
       || !isStablePrivateAttachment(pinnedAfter, namedAfter)
       || verifiedPath !== join(verifiedRoot, basename(path))
       || dirname(verifiedPath) !== verifiedRoot
@@ -114,7 +105,26 @@ export async function verifyStoredAttachmentAfterValidation(options: {
       throw new Error(VERIFICATION_ERROR);
     }
   } finally {
-    await verified.handle.close();
+    await handle.close();
   }
   signal.throwIfAborted();
+}
+
+export function assertAttachmentImportReceipt(
+  attachment: import("./attachment-import.js").PreparedAttachmentMetadata,
+  receipt: AttachmentImportValidationReceipt,
+): void {
+  const normalized = receipt.normalized === true && attachment.mimeType.startsWith("image/") && receipt.mimeType === "image/jpeg"
+    && receipt.extension === "jpg" && receipt.size <= 10 * 1024 * 1024
+    && receipt.displayName === attachment.displayName.replace(/\.[^.]+$/u, "") + ".jpg";
+  const opaque = receipt.normalized !== true && receipt.mimeType === "application/octet-stream" && receipt.extension === "bin"
+    && (attachment.mimeType.startsWith("text/") || attachment.mimeType === "application/json")
+    && receipt.displayName === attachment.displayName && receipt.size === attachment.size;
+  if (!normalized && !opaque && (receipt.displayName !== attachment.displayName || receipt.mimeType !== attachment.mimeType
+    || receipt.extension !== attachment.extension || receipt.size !== attachment.size)) throw new Error(VERIFICATION_ERROR);
+}
+
+export function attachmentPreviewLimit(mimeType: string, size: number): number | null {
+  if (mimeType.startsWith("text/") || mimeType === "application/json") return ATTACHMENT_PREVIEW_BYTES;
+  return size <= MAX_FILE_PREVIEW_BYTES ? size : null;
 }

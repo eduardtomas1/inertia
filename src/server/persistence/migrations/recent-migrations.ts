@@ -1,3 +1,4 @@
+import { limitResetMigration } from "./limit-reset";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
 import { attachmentStorageSettingsMigration } from "./attachment-storage-settings";
@@ -10,6 +11,7 @@ import { queuedMessagesMigration } from "./queued-messages";
 import { subagentTaskTelemetryMigration } from "./subagent-task-telemetry";
 import { turnSessionRecoveryMigration } from "./turn-session-recovery";
 import { workingIndicatorMigration } from "./working-indicator";
+import { scratchProjectMigration } from "./scratch-project";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -22,5 +24,7 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   completionSoundMigration,
   turnSessionRecoveryMigration,
   customAppearanceColorsMigration,
+  scratchProjectMigration,
+  limitResetMigration,
   subagentTaskTelemetryMigration,
 ];

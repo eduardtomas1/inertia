@@ -81,8 +81,8 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
         else void perform(() => onUpdate({ autoRemoveOldAttachments: false }));
       }} /> Automatically remove oldest stored files when full</label>
       <small>{settings.autoRemoveOldAttachments ? "Old attachments in finished chats can be removed when new ones need space." : "Existing attachments are kept when storage fills. Increase the budget or explicitly remove old files to make room."} Files used by running chats are protected. Deleting a chat also releases its unshared files.</small>
-      <small>Unsent attachments use a separate temporary disk budget of 1 GiB and 1,024 files. Removing a draft attachment frees it; abandoned temporary files are cleaned up after restart.</small>
-      <small>Per message: 8 attachments, 20 MiB total, 10 MiB per file. Images: 40 megapixels, 8,192 pixels per side, 256 frames within the same 40-megapixel decode budget. Your provider may impose lower limits.</small>
+      <small>Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Removing a draft attachment frees it; abandoned temporary files are cleaned up after restart.</small>
+      <small>Per message: 100 files, 50 MiB each. Images up to 50 MiB, 40 megapixels and 8,192 pixels per side are resized to 10 MiB each, 80 MiB combined; animated images share the 40-megapixel decode budget across at most 256 frames. Your provider may impose lower limits.</small>
       {confirm && <div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm attachment deletion">
         <strong>{confirm === "cleanup" ? `Permanently remove up to ${ATTACHMENT_CLEANUP_BATCH_RECORDS} oldest files?` : "Allow automatic removal of old files?"}</strong>
         <small>This removes original images and documents from finished chats across the app, including archived chats. Messages remain, but those attachments will no longer open. Running chats are protected.</small>

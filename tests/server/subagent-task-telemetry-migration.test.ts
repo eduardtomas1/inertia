@@ -43,12 +43,12 @@ function runMigrationAgain(database: Database.Database): void {
 }
 
 describe("subagent task telemetry migration", () => {
-  it("is schema version 86", () => {
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(86);
+  it("is schema version 88", () => {
+    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(88);
     expect(subagentTaskTelemetryMigration.name).toBe("PersistSubagentTaskTelemetry");
   });
 
-  it("upgrades a schema-85 database and keeps existing delegated traces readable", async () => {
+  it("upgrades a schema-87 database and keeps existing delegated traces readable", async () => {
     const { workspacePath, databasePath } = await workspace();
     const store = new RuntimeStore(databasePath, workspacePath, { recoverInterruptedRuns: false });
     const project = store.createProject("Upgrade", workspacePath);
@@ -92,13 +92,13 @@ describe("subagent task telemetry migration", () => {
     const reference = new Database(":memory:");
     const database = new Database(databasePath);
     try {
-      migrateRuntimeDatabase(reference, 85);
+      migrateRuntimeDatabase(reference, 87);
       for (const column of TELEMETRY_COLUMNS) {
         database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
       }
-      database.prepare("DELETE FROM schema_migrations WHERE version = 86").run();
+      database.prepare("DELETE FROM schema_migrations WHERE version = 88").run();
       expect(tableInfo(database)).toEqual(tableInfo(reference));
-      expect(schemaVersion(database)).toBe(85);
+      expect(schemaVersion(database)).toBe(87);
     } finally {
       reference.close();
       database.close();
@@ -172,7 +172,7 @@ describe("subagent task telemetry migration", () => {
   ] as const)("tolerates %s already existing", (_label, existing) => {
     const database = new Database(":memory:");
     try {
-      migrateRuntimeDatabase(database, 85);
+      migrateRuntimeDatabase(database, 87);
       for (const column of existing) {
         database.exec(`ALTER TABLE subagent_traces ADD COLUMN ${column} ${column.endsWith("_count") || column.endsWith("_ms") ? "INTEGER" : "TEXT"}`);
       }

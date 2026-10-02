@@ -527,6 +527,62 @@ describe("document attachment execution context", () => {
   );
 
   it.skipIf(hostedWindowsCi)(
+    "rasterizes an embedded PDF image where PDF.js does not detect Node",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "inertia-utility-pdf-"));
+      temporaryDirectories.push(directory);
+      const bytes = await scannedPdfWithImage();
+      const pdf = attachment({
+        path: join(directory, "11111111-1111-4111-8111-111111111111.pdf"),
+        size: bytes.byteLength,
+      });
+      const canvas = await import("@napi-rs/canvas");
+      for (const name of ["DOMMatrix", "Path2D", "ImageData"] as const) {
+        if (typeof Reflect.get(globalThis, name) !== "function") vi.stubGlobal(name, canvas[name]);
+      }
+      const electronVersion = Object.getOwnPropertyDescriptor(process.versions, "electron");
+      Object.defineProperty(process.versions, "electron", { value: "44.0.0", configurable: true });
+      Reflect.set(process, "type", "utility");
+      let utilityPdfModule: typeof import("pdfjs-dist/legacy/build/pdf.mjs");
+      try {
+        const moduleUrl = new URL(
+          `../../node_modules/pdfjs-dist/legacy/build/pdf.mjs?utility=${Date.now()}`,
+          import.meta.url,
+        );
+        utilityPdfModule = await import(moduleUrl.href) as typeof import("pdfjs-dist/legacy/build/pdf.mjs");
+      } finally {
+        Reflect.deleteProperty(process, "type");
+        if (electronVersion) Object.defineProperty(process.versions, "electron", electronVersion);
+        else Reflect.deleteProperty(process.versions, "electron");
+      }
+      utilityPdfModule.GlobalWorkerOptions.workerSrc = new URL(
+        "../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+        import.meta.url,
+      ).href;
+      const store = await generatedStore(directory);
+
+      try {
+        const prepared = await prepareDocumentAttachments([{ attachment: pdf, bytes }], {
+          generatedAttachmentStore: store,
+          pdfModuleLoader: async () => utilityPdfModule,
+        });
+
+        expect(prepared.contexts).toEqual([expect.objectContaining({
+          attachmentId: pdf.id,
+          content: expect.stringMatching(/rasterized page 1 as provider image 1/u),
+        })]);
+        expect(prepared.generatedImagePaths).toHaveLength(1);
+        expect((await readFile(prepared.generatedImagePaths[0]!)).subarray(0, 2))
+          .toEqual(Buffer.from([0xff, 0xd8]));
+        await store.release(prepared.generatedImagePaths);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+    PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000,
+  );
+
+  it.skipIf(hostedWindowsCi)(
     "uses the image-aware pipeline for a fake blank scan and rejects the text-only wrapper",
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "inertia-blank-pdf-"));

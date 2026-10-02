@@ -32,6 +32,9 @@ export async function resolveAuthoritativeProjectPath(
   authority?: ProjectIdentityAuthority,
 ): Promise<ResolvedWorkspacePath> {
   const project = store.project(request.projectId);
+  if (project.workspaceKind === "scratch" && !request.conversationId) {
+    throw new RuntimeRequestError("Choose a chat to open its own folder.");
+  }
   let root = store.projectPath(project.id);
   await assertProjectIdentityAuthority(authority, project.id, root);
   if (request.conversationId) {

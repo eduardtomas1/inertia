@@ -27,6 +27,9 @@ describe("provider adapter seams", () => {
     expect(validateProviderRunInput(input("claude"))).toBe("conversation-1");
     expect(() => validateProviderRunInput(input("claude", { prompt: "" }))).toThrow("A prompt is required.");
     expect(() => validateProviderRunInput(input("claude", { imagePaths: ["bad\0path"] }))).toThrow("An image path is invalid.");
+    const imagePaths = Array.from({ length: 33 }, (_, index) => `/workspace/${index}.png`);
+    expect(validateProviderRunInput(input("claude", { imagePaths: imagePaths.slice(0, 32) }))).toBe("conversation-1");
+    expect(() => validateProviderRunInput(input("claude", { imagePaths }))).toThrow("Too many images were attached.");
   });
 
   it("owns a provider control operation with an explicit correlation identity", () => {

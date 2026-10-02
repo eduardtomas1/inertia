@@ -73,7 +73,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Attachments",
-        detail: "Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets with the paperclip, or drop them on the composer. Up to 8 files, 10 MB each and 20 MB in total.",
+        detail: "Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets with the paperclip, or drop them on the composer. Up to 100 files, 50 MiB each. Images are resized to 10 MiB each (80 MiB combined). Text pasted at 32 KiB becomes a file; Shift-paste keeps it inline. Agents receive file paths and read the contents as needed.",
       },
       {
         name: "Mentions and skills",

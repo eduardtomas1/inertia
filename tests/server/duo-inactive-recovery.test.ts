@@ -368,6 +368,7 @@ function projectHandler(
   ),
 ) {
   const dependencies: ProjectWorkspaceCommandDependencies = {
+    dataDirectory: "/data",
     store: runtime.store,
     conversationAttachments: {
       release: vi.fn(async () => undefined),

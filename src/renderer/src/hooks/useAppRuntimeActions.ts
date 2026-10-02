@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "../components/composer/limitResetClient";
 import {
   useCallback,
   useState,
@@ -23,6 +24,7 @@ import type { QueueCommandRunner } from "../components/composer/runtimeQueueClie
 
 export interface AppRuntimeActions {
   runQueueCommand: QueueCommandRunner;
+  runLimitResetCommand: LimitResetCommandRunner;
   sendingConversationIds: ReadonlySet<string>;
   run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
   openProjectPath: (
@@ -70,6 +72,11 @@ export function useAppRuntimeActions(options: {
   const [sendingConversationIds, setSendingConversationIds] = useState(
     () => new Set<string>(),
   );
+  const runLimitResetCommand = useCallback<LimitResetCommandRunner>(async (command) => {
+    const event = await sendCommand(withRequestId(command));
+    if (event.type !== "request.result" || event.result.kind !== "conversation.limit-reset") throw new Error("The local service returned an unexpected reset response.");
+    return event.result;
+  }, [sendCommand]);
   const runQueueCommand = useCallback<QueueCommandRunner>(async (command) => {
     const request = { ...command, requestId: command.type === "message.queue.enqueue" ? command.payload.id : crypto.randomUUID() };
     const attachments = command.type === "message.queue.enqueue" ? command.payload.attachments : [];
@@ -240,6 +247,7 @@ export function useAppRuntimeActions(options: {
 
   return {
     runQueueCommand,
+    runLimitResetCommand,
     sendingConversationIds,
     run,
     openProjectPath,

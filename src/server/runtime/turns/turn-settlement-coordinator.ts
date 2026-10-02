@@ -171,7 +171,7 @@ export class TurnSettlementCoordinator {
   ): boolean {
     let settlement: CommittedSettlement;
     try {
-      settlement = this.commit(active, status, terminalReason, message);
+      settlement = this.commit(active, status, terminalReason, message, status === "failed" && failure?.usageLimited === true);
     } catch {
       try {
         active.runState.repairSettlementFailure("stream-persistence-failed");
@@ -212,6 +212,7 @@ export class TurnSettlementCoordinator {
     status: AgentTurnTerminalStatus,
     terminalReason: string,
     message?: string,
+    usageLimited = false,
   ): CommittedSettlement {
     const completedAt = this.options.now();
     try {
@@ -231,6 +232,7 @@ export class TurnSettlementCoordinator {
         projection: {
           workspaceRunCreated: active.workspaceRunCreated,
           detail: message ?? active.conversation.title,
+          ...(usageLimited ? { usageLimited: true as const } : {}),
         },
       });
     } catch (error) {

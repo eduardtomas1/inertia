@@ -1,6 +1,7 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   ExternalLink,
+  File,
   FileSpreadsheet,
   FileText,
   LoaderCircle,
@@ -18,12 +19,13 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import "./DocumentAttachmentPreview.css";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 import {
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_TEXT_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  ATTACHMENT_PREVIEW_BYTES as MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentTypeLabel,
   isSpreadsheetAttachmentMimeType,
   type ChatAttachmentMimeType,
@@ -106,6 +108,14 @@ function isSpreadsheetPreview(mimeType: ChatAttachmentMimeType): boolean {
     || isSpreadsheetAttachmentMimeType(mimeType);
 }
 
+function trimIncompleteText(bytes: Uint8Array): Uint8Array {
+  for (let omitted = 0; omitted <= 4; omitted += 1) {
+    const prefix = bytes.subarray(0, bytes.length - omitted);
+    try { decodeTextAttachment(prefix); return prefix; } catch { continue; }
+  }
+  return bytes;
+}
+
 function boundedPrettyJson(text: string): string {
   try {
     const formatted = JSON.stringify(JSON.parse(text), null, 2);
@@ -128,12 +138,16 @@ function columnName(column: number): string {
   return output;
 }
 
+const TRUNCATED_PREVIEW_NOTICE = "Showing the first 1 MiB. The complete file is saved and available to the agent.";
+
 function SpreadsheetPreview({
   title,
   workbook,
+  sourceTruncated,
 }: {
   title: string;
   workbook: SpreadsheetPreviewWorkbook;
+  sourceTruncated: boolean;
 }): React.JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0);
   const activeSheet = workbook.sheets[activeIndex] ?? workbook.sheets[0];
@@ -226,11 +240,13 @@ function SpreadsheetPreview({
               </table>
             )}
       </div>
-      {(truncated || workbook.sheetsTruncated) && (
-        <p className="spreadsheet-attachment-limit-note">
-          Preview is bounded for responsiveness. The original workbook remains attached.
-        </p>
-      )}
+      {sourceTruncated
+        ? <p className="spreadsheet-attachment-limit-note" role="status">{TRUNCATED_PREVIEW_NOTICE}</p>
+        : (truncated || workbook.sheetsTruncated) && (
+            <p className="spreadsheet-attachment-limit-note">
+              Preview is bounded for responsiveness. The original workbook remains attached.
+            </p>
+          )}
     </div>
   );
 }
@@ -241,11 +257,13 @@ export function DocumentAttachmentPreview({
   mimeType,
   onFailure,
 }: DocumentAttachmentPreviewProps): React.JSX.Element {
+  const [truncated, setTruncated] = useState(false);
   const [content, setContent] = useState<PreviewContent | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     setContent(null);
+    setTruncated(false);
     void fetch(source, {
       cache: "no-store",
       signal: controller.signal,
@@ -259,7 +277,7 @@ export function DocumentAttachmentPreview({
         throw new Error("Attachment preview type does not match the attachment.");
       }
       const maximumBytes = isSpreadsheetPreview(mimeType)
-        ? MAX_CHAT_ATTACHMENT_BYTES
+        ? MAX_ATTACHMENT_BYTES
         : MAX_TEXT_ATTACHMENT_BYTES;
       const contentLength = response.headers.get("content-length");
       const declaredBytes = contentLength === null ? null : Number(contentLength);
@@ -275,19 +293,22 @@ export function DocumentAttachmentPreview({
       if (bytes.byteLength < 1 || bytes.byteLength > maximumBytes) {
         throw new Error("Attachment preview exceeds the safe size limit.");
       }
+      const truncated = response.headers.get("x-attachment-truncated") === "true";
+      setTruncated(truncated);
+      const previewBytes = truncated ? trimIncompleteText(bytes) : bytes;
       const next: PreviewContent = isSpreadsheetPreview(mimeType)
         ? {
             kind: "spreadsheet",
             workbook: await readSpreadsheetWorkbook(
               mimeType === "text/csv"
-                ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(bytes)}`)
+                ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(previewBytes)}`)
                 : bytes,
               SPREADSHEET_PREVIEW_LIMITS,
             ),
           }
         : {
             kind: "text",
-            text: decodeTextAttachment(bytes),
+            text: decodeTextAttachment(previewBytes),
           };
       if (controller.signal.aborted) return;
       startTransition(() => setContent(next.kind === "text" && mimeType === "application/json"
@@ -311,17 +332,26 @@ export function DocumentAttachmentPreview({
       </div>
     );
   }
-  return content.kind === "spreadsheet"
-    ? <SpreadsheetPreview title={title} workbook={content.workbook} />
-    : (
-        <pre
-          className="text-attachment-preview"
-          tabIndex={0}
-          aria-label={`Text preview of ${title}`}
-        >
-          {content.text}
-        </pre>
-      );
+  if (content.kind === "spreadsheet") {
+    return <SpreadsheetPreview title={title} workbook={content.workbook} sourceTruncated={truncated} />;
+  }
+  const preview = (
+    <pre
+      className="text-attachment-preview"
+      tabIndex={0}
+      aria-label={`Text preview of ${title}`}
+    >
+      {content.text}
+    </pre>
+  );
+  return truncated
+    ? (
+        <div className="text-attachment-preview-frame">
+          {preview}
+          <p className="text-attachment-preview-notice" role="status">{TRUNCATED_PREVIEW_NOTICE}</p>
+        </div>
+      )
+    : preview;
 }
 
 type AttachmentPreviewDialogProps = {
@@ -385,9 +415,11 @@ export function AttachmentPreviewDialog({
           <span className="attachment-preview-identity">
             {previewKind === "spreadsheet"
               ? <FileSpreadsheet size={16} aria-hidden="true" />
-              : previewKind !== "image"
-                ? <FileText size={16} aria-hidden="true" />
-                : null}
+              : previewKind === "file"
+                ? <File size={16} aria-hidden="true" />
+                : previewKind !== "image"
+                  ? <FileText size={16} aria-hidden="true" />
+                  : null}
             <span>
               <strong id={titleId}>{attachment.name}</strong>
               <small id={descriptionId}>
@@ -415,13 +447,19 @@ export function AttachmentPreviewDialog({
                   <FileText size={28} aria-hidden="true" />
                   <strong>Preview unavailable</strong>
                   <span>
-                    This attachment is no longer stored: it was removed to free
-                    space, or its file changed after upload. Re-add the file to
-                    send it again.
+                    This file could not be previewed. It may use an unsupported format, have changed, or have been removed from storage.
                   </span>
                 </div>
               )
-            : previewKind === "image"
+            : previewKind === "file"
+              ? (
+                  <div className="attachment-preview-unavailable">
+                    <File size={28} aria-hidden="true" />
+                    <strong>No preview for this file type</strong>
+                    <span>The complete file is saved. The agent can read or search it with file tools.</span>
+                  </div>
+                )
+              : previewKind === "image"
               ? (
                   <ZoomableAttachmentImage
                     source={previewUrl}

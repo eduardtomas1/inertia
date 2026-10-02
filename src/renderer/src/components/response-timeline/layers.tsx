@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
-import { formatClockTime } from "../../lib/format";
+import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { sessionRecoveryDetail } from "../../utils/sessionRecovery";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
@@ -114,7 +114,7 @@ export function UserRequestLayer({
       <div className="message-meta">
         <span>You</span>
         <MessageOrigin message={turn.userMessage} />
-        {props.showTimestamps && <time dateTime={turn.userMessage.createdAt}>{formatClockTime(turn.userMessage.createdAt)}</time>}
+        {props.showTimestamps && <time dateTime={turn.userMessage.createdAt} title={formatFullDateTime(turn.userMessage.createdAt)}>{formatMessageTime(turn.userMessage.createdAt)}</time>}
         {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
       </div>
       <div
@@ -334,7 +334,7 @@ export function AgentExecutionLayer({
         >
           <div className="message-meta">
             <span>System</span>
-            {props.showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}
+            {props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}
           </div>
           <div className="message-body">{message.content}</div>
         </article>

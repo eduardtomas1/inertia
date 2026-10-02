@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { sessionRecoveryDetail } from "../../src/renderer/src/utils/sessionRecovery";
@@ -142,6 +142,8 @@ function renderRequest(
 }
 
 describe("Quiet Ledger user request layer", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("shows the durable remote device origin beside the user request", () => {
     const deviceId = "11111111-1111-4111-8111-111111111111";
     const html = renderRequest("Sent remotely", { privateConnectDeviceId: deviceId });
@@ -150,6 +152,8 @@ describe("Quiet Ledger user request layer", () => {
     expect(renderRequest("Sent locally")).not.toContain("Private Connect");
   });
   it("keeps request metadata and attachments beneath a content-width request", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-24T12:00:00.000Z"));
     const checkpoint: CheckpointSummary = {
       id: "checkpoint-1",
       conversationId,
@@ -177,7 +181,7 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain('class="message is-user turn-user-request"');
     expect(html).toContain('data-turn-layer="user-request"');
     expect(html).toContain('data-request-layout="content"');
-    expect(html).toContain(`<time dateTime="${requestedAt}">`);
+    expect(html).toMatch(new RegExp(`<time dateTime="${requestedAt}" title="[^"]+ 2026 at [^"]+">Jul 23, 10:00\\sAM</time>`, "u"));
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
     expect(html).toContain('aria-label="Request attachments"');

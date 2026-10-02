@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 
 import {
   CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE,
 } from "../node/conversation-attachment-store-child.js";
+import { attachmentTextValidator } from "../node/attachment-text-validation.js";
 import { metadataFromUnknown } from "../node/conversation-attachment-store-metadata.js";
+import { ATTACHMENT_PREVIEW_BYTES } from "../shared/attachments.js";
 import {
   parseConversationAttachmentStoreWorkerRequest,
   type ConversationAttachmentStoreWorkerEvent,
@@ -74,11 +77,29 @@ if (parentPort) {
       if (receipt && !receipt.missing && contentValidated(operation)) {
         const metadata = metadataFromUnknown(JSON.parse(receipt.metadata));
         if (!metadata) return { missing: true };
+        const data = Buffer.from(receipt.bytesBase64, "base64");
+        if (metadata.mimeType.startsWith("text/") || metadata.mimeType === "application/json") {
+          if (
+            typeof operation === "object"
+            && operation !== null
+            && Reflect.get(operation, "preview") === true
+            && data.byteLength === ATTACHMENT_PREVIEW_BYTES
+            && metadata.size > ATTACHMENT_PREVIEW_BYTES
+          ) return receipt;
+          const validator = attachmentTextValidator();
+          validator.chunk(data);
+          validator.finish();
+          if (
+            data.byteLength !== metadata.size
+            || createHash("sha256").update(data).digest("hex") !== metadata.digest
+          ) throw new Error("Invalid attachment content.");
+          return receipt;
+        }
         const { validateAttachmentImport } = await import("./attachment-import.js");
         const validated = await validateAttachmentImport({
           name: metadata.name,
           mimeType: metadata.mimeType,
-          data: Buffer.from(receipt.bytesBase64, "base64"),
+          data,
         });
         if (
           validated.displayName !== metadata.name

@@ -109,6 +109,7 @@ function dependencies(input: {
   const activeCheckoutChecks = [...(input.activeCheckoutChecks ?? [])];
   const workspaceRunChecks = [...(input.workspaceRunChecks ?? [])];
   const value: ProjectWorkspaceCommandDependencies = {
+    dataDirectory: "/data",
     store: {
       conversation: vi.fn(() => current),
       hasActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),

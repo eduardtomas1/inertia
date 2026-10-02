@@ -188,6 +188,27 @@ describe("POSIX process tree root observation", () => {
     expect(kill).toHaveBeenCalledWith(5_000, "SIGKILL");
   });
 
+  it.each([
+    ["ENOBUFS", { status: 0, signal: null, stdout: "4242 1 Ts\n", error: error("ENOBUFS") }],
+    ["ENOENT", { status: null, signal: null, stdout: undefined, error: error("ENOENT") }],
+    ["EAGAIN", { status: null, signal: null, stdout: "", error: error("EAGAIN") }],
+  ])("never takes a read that failed with %s as the process table", (_code, read) => {
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: vi.fn(() => read) as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "unknown",
+      snapshotConfirmed: false,
+      scanStabilized: false,
+      snapshotReads: 8,
+      snapshotTimeouts: 0,
+      descendants: [],
+    });
+  });
+
   it("stops re-reading at the deadline", () => {
     let clock = 0;
     const spawnProcessSync = vi.fn(() => {

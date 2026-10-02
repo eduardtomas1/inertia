@@ -13,3 +13,5 @@ export function backendSecretReferenceForProfile(profileId: string): string {
   }
   return `secret:backend:${createHash("sha256").update(profileId).digest("hex")}`;
 }
+
+export const USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE = "secret:usage:account-identity";

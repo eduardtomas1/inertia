@@ -10,7 +10,7 @@ export function useProjectScope(
   useEffect(() => {
     if (!snapshot) return;
     const known = knownProjectIdsRef.current;
-    const current = new Set(snapshot.projects.map(({ id }) => id));
+    const current = new Set(snapshot.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch").map(({ id }) => id));
     knownProjectIdsRef.current = current;
     const activeId = snapshot.activeProjectId;
     if (known && activeId && current.has(activeId) && !known.has(activeId)) setProjectScopeId(activeId);

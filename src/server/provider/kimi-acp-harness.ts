@@ -1,5 +1,6 @@
 import { AcpSecretRedactor } from "./acp-redaction";
 import { acpPermissionDetail } from "./acp-permission-detail";
+import { acpAttachmentReadAllowed } from "./attachment-read-grant";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
@@ -809,10 +810,13 @@ async function kimiPermission(
     );
   }
 
+  const allow = oneShotPermissionOption(params.options, true);
+  if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
+    return { outcome: { outcome: "selected", optionId: allow.optionId } };
+  }
   if (options.input.interactionMode === "plan") {
     return { outcome: { outcome: "cancelled" } };
   }
-  const allow = oneShotPermissionOption(params.options, true);
   const fileMutation = isFileMutationKind(params.toolCall.kind);
   if (
     options.input.access === "full"

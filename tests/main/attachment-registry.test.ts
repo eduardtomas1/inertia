@@ -367,7 +367,7 @@ describe("main-owned attachment registry", () => {
 
   it("enforces the authoritative cumulative count across one-file imports", async () => {
     const { registry: attachments } = await registry();
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 100; index += 1) {
       const [imported] = await attachments.import([{
         name: `accepted-${index}.png`,
         mimeType: "image/png",
@@ -391,7 +391,7 @@ describe("main-owned attachment registry", () => {
     expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
-  it("enforces the authoritative cumulative byte limit across one-file imports", async () => {
+  it("retains multiple files beyond the former 20 MiB aggregate cap", async () => {
     const { registry: attachments } = await registry();
     const chunks = [
       largeReadablePdf(8 * 1024 * 1024, "a"),
@@ -405,17 +405,11 @@ describe("main-owned attachment registry", () => {
         mimeType: "application/pdf",
         data: chunks[index],
       }]);
-      if (index < 2) {
-        attachments.rendererImports.hold(importBatchId, [imported!.id]);
-        heldIds.push(imported!.id);
-      } else {
-        expect(() => attachments.rendererImports.hold(importBatchId, [imported!.id]))
-          .toThrow("batch is unavailable");
-        await attachments.rollback(imported!.id);
-      }
+      attachments.rendererImports.hold(importBatchId, [imported!.id]);
+      heldIds.push(imported!.id);
     }
 
-    expect(heldIds).toHaveLength(2);
+    expect(heldIds).toHaveLength(3);
     await attachments.rendererImports.rollback(
       importBatchId,
       async (id) => await attachments.rollback(id),
@@ -1097,7 +1091,7 @@ describe("main-owned attachment registry", () => {
 
       expect(storage.reservation).toEqual({
         records: 1_024,
-        bytes: 1024 * 1024 * 1024,
+        bytes: 16 * 1024 * 1024 * 1024,
       });
       expect((await lstat(link)).isSymbolicLink()).toBe(true);
       expect((await lstat(previous)).isDirectory()).toBe(true);
@@ -1127,7 +1121,7 @@ describe("main-owned attachment registry", () => {
 
     expect(storage.reservation).toEqual({
       records: 1_024,
-      bytes: 1024 * 1024 * 1024,
+      bytes: 16 * 1024 * 1024 * 1024,
     });
     const registry = new AttachmentRegistry(storage.directory, {
       reservedRecords: storage.reservation.records,

@@ -34,8 +34,6 @@ function fixture() {
   let liveHelpers = 0;
   let peakHelpers = 0;
   let pid = 42_000;
-  // Native admission and journal I/O are boundaries here. The real registry,
-  // claim retirement, cleanup APIs and Git process slots retain their ordering.
   vi.spyOn(linux, "linuxGuardianExecutableMatches").mockReturnValue(true);
   vi.spyOn(posix, "exactProcessGroupTerminal").mockReturnValue(true);
   vi.spyOn(linux, "readLinuxGuardianReadyWithRetriesAsync").mockImplementation(async (pid) => ({

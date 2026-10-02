@@ -331,6 +331,10 @@ export function resolveTurnRequest(
         }
       : {}),
     imagePaths: assembled.imagePaths,
+    attachmentReadRoots: dependencies.hooks.attachmentReadRoots?.({
+      conversationId: conversation.id,
+      attachmentIds: attachments.map(({ id }) => id),
+    }) ?? [],
     skills: request.skills,
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
@@ -350,6 +354,7 @@ export function resolveTurnRequest(
   });
   const input: BeginAgentTurnInput = {
     queuedMessageId: request.queuedMessageId,
+    limitResetPlanId: request.limitResetPlanId,
     id: turnId,
     conversationId: conversation.id,
     runId,

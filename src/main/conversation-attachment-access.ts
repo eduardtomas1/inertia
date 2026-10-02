@@ -112,7 +112,9 @@ export async function resolveAttachmentPreviewResponse(
     status: 200,
     headers: {
       "Content-Type": preview.mimeType,
-      "Content-Length": String(preview.size),
+      "Content-Length": String(preview.bytes.byteLength),
+      "X-Attachment-Size": String(preview.size),
+      "X-Attachment-Truncated": String(preview.bytes.byteLength < preview.size),
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "no-store",
     },

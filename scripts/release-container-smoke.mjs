@@ -156,6 +156,16 @@ export function unversionedAppImageDependencies(dynamicSection) {
     .filter((name) => name === "libz.so");
 }
 
+async function requireAbsent(path) {
+  try {
+    await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(`Release container unexpectedly contains ${path}.`);
+}
+
 async function requireNativeFiles(paths, platform) {
   for (const path of paths) {
     await requireRegularFile(path);
@@ -230,6 +240,9 @@ function nativeModulePaths(resources, platform, productName, app) {
         ? `@napi-rs/canvas-${canvasPlatform}-${process.arch}/skia.${canvasPlatform}-${process.arch}.node`
         : `@napi-rs/canvas-${canvasPlatform}-${process.arch}-gnu/skia.${canvasPlatform}-${process.arch}-gnu.node`,
     ),
+    ...(platform === "darwin"
+      ? [join(unpacked, `@napi-rs/keyring-darwin-${process.arch}/keyring.darwin-${process.arch}.node`)]
+      : []),
     join(unpacked, `better-sqlite3/prebuilds/${platform === "darwin" ? "darwin" : "linux"}-${process.arch}.node`),
     join(unpacked, "node-pty", "build", "Release", "pty.node"),
     ...(platform === "darwin"
@@ -387,6 +400,7 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       [embeddedExecutable, ...nativeModulePaths(resources, "linux", productName, app)],
       "linux",
     );
+    await requireAbsent(join(resources, "app.asar.unpacked", "node_modules", "@napi-rs", `keyring-linux-${process.arch}-gnu`));
     const installedAppImage = join(temporaryRoot, names.installedAppImage);
     await copyFile(appImage, installedAppImage, constants.COPYFILE_EXCL);
     await chmod(installedAppImage, 0o755);

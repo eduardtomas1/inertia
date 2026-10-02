@@ -45,8 +45,11 @@ export type WorkIndexItem =
   | {
       id: "show-more:done" | "show-more:no-project-done";
       kind: "show-more";
+      sectionId: PaginatedWorkSectionId;
       remaining: number;
     };
+
+export type PaginatedWorkSectionId = "done" | "no-project-done";
 
 export function sidebarWorkLayoutKey(
   compact: boolean,
@@ -58,7 +61,7 @@ export function sidebarWorkLayoutKey(
 interface SidebarWorkIndexOptions {
   activeConversationId: string | null;
   compact: boolean;
-  doneVisible: number;
+  doneVisible: Readonly<Record<PaginatedWorkSectionId, number>>;
   enabled: boolean;
   expandedSections: ReadonlySet<SidebarWorkSectionId>;
   motionEnabled: boolean;
@@ -102,9 +105,9 @@ export function useSidebarWorkIndex({
         disclosure,
       });
       if (!expanded) continue;
-      const paginated = section.id === "done" || section.id === "no-project-done";
-      const visibleThreads = paginated
-        ? section.threads.slice(0, doneVisible)
+      const pageId = section.id === "done" || section.id === "no-project-done" ? section.id : null;
+      const visibleThreads = pageId
+        ? section.threads.slice(0, doneVisible[pageId])
         : section.threads;
       for (const { conversation } of visibleThreads) {
         threadPosition += 1;
@@ -116,10 +119,11 @@ export function useSidebarWorkIndex({
           sectionId: section.id,
         });
       }
-      if (paginated && visibleThreads.length < section.threads.length) {
+      if (pageId && visibleThreads.length < section.threads.length) {
         next.push({
-          id: section.id === "done" ? "show-more:done" : "show-more:no-project-done",
+          id: `show-more:${pageId}`,
           kind: "show-more",
+          sectionId: pageId,
           remaining: section.threads.length - visibleThreads.length,
         });
       }

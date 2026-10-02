@@ -17,6 +17,7 @@ import {
   Clock,
   ChevronDown,
   ChevronRight,
+  Folder,
   FolderOpen,
   FolderGit2,
   RefreshCw,
@@ -44,6 +45,7 @@ import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
   COLLAPSIBLE_WORK_SECTIONS,
   useSidebarWorkIndex,
+  type PaginatedWorkSectionId,
   type WorkIndexItem,
 } from "../hooks/useSidebarWorkIndex";
 import {
@@ -81,6 +83,10 @@ const SidebarUpdateControl = lazy(async () => ({
   default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
 }));
 const WORK_DONE_PAGE_SIZE = 10;
+const INITIAL_DONE_VISIBLE: Readonly<Record<PaginatedWorkSectionId, number>> = {
+  done: WORK_DONE_PAGE_SIZE,
+  "no-project-done": WORK_DONE_PAGE_SIZE,
+};
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
 
@@ -188,7 +194,7 @@ function SidebarView({
   const [renameDraft, setRenameDraft] = useState("");
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
-  const [doneVisible, setDoneVisible] = useState(WORK_DONE_PAGE_SIZE);
+  const [doneVisible, setDoneVisible] = useState(INITIAL_DONE_VISIBLE);
   const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(() => {
     try {
       const stored = (window.localStorage.getItem(WORK_SECTIONS_STORAGE_KEY) ?? "")
@@ -217,7 +223,7 @@ function SidebarView({
   const compact = snapshot?.settings.compactSidebar ?? false;
   const globalGrouping = snapshot?.settings.projectGrouping ?? "separate";
 
-  useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query]);
+  useEffect(() => setDoneVisible(INITIAL_DONE_VISIBLE), [query]);
   useLayoutEffect(() => {
     if (!projectMenu) return;
     sidebarRef.current?.querySelector<HTMLButtonElement>(
@@ -696,6 +702,7 @@ function SidebarView({
       ?? agentRequestProviderName(conversation.providerId);
     const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
+    const chatFolder = project?.workspaceKind === "scratch";
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
@@ -771,8 +778,9 @@ function SidebarView({
             onClick={() => activateConversation(conversation)}
           >
             <span className="activity-thread-projectline">
-              {project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
-              <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>
+              {chatFolder ? <Folder size={15} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
+              {chatFolder ? <span className="activity-thread-project-meta" title={conversation.worktreePath ?? undefined}>Chat folder</span>
+                : <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue
@@ -790,7 +798,7 @@ function SidebarView({
               {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
             </span>
             <span className="work-thread-meta">
-              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{repositoryLabel ?? "Local workspace"}</span>}
+              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{chatFolder ? null : repositoryLabel ?? "Local workspace"}</span>}
               <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={15} /></span>
             </span>
           </button>
@@ -825,7 +833,10 @@ function SidebarView({
           className="activity-show-more"
           data-sidebar-nav
           data-work-focus-id={item.id}
-          onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
+          onClick={() => setDoneVisible((current) => ({
+            ...current,
+            [item.sectionId]: current[item.sectionId] + WORK_DONE_PAGE_SIZE,
+          }))}
         >
           Show more <span>{item.remaining} older</span>
         </button>
@@ -845,7 +856,7 @@ function SidebarView({
               data-sidebar-nav
               data-work-focus-id={`section:${section.id}`}
               aria-expanded={expanded}
-              aria-label={section.id.startsWith("no-project-") ? `No project ${section.label} ${section.threads.length}` : undefined}
+              aria-label={section.id.startsWith("no-project-") ? `${section.label} ${section.threads.length}, No project` : undefined}
               onClick={() => {
                 dismissMenu("context-change");
                 setExpandedWorkSections((current) => {
@@ -988,7 +999,7 @@ function SidebarView({
               {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
                   <Activity size={19} />
-                  <span>{query ? "No matching work" : snapshot.projects.length === 0 ? "No projects yet" : "No work yet"}</span>
+                  <span>{query ? "No matching work" : regularProjects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
               {renderedWorkItems.map((rendered) => {

@@ -52,6 +52,7 @@ import { useTheme } from "./hooks/useTheme";
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
+import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
 import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationPayload } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
@@ -203,7 +204,7 @@ export default function App(): React.JSX.Element {
     [sendCommand],
   );
   const project = useMemo(
-    () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
+    () => activeWorkspaceProject(connection.snapshot),
     [connection.snapshot],
   );
   const conversationProjection = useStableController(

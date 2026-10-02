@@ -8,10 +8,6 @@ const kibibyte = 1024;
 // Route closures include their statically imported dependencies. Keeping the
 // bootstrap and both window surfaces separate makes a detached chat regression
 // visible even when Rollup moves shared modules between chunks.
-// Project-free chat route/selector guards: measured against main 2364d768.
-// Preserve previous headroom; see docs/pr-evidence/project-free-chats/renderer-bundle.json.
-// Reset-action routing and its deferred banner: measured delta, unchanged headroom.
-// See docs/pr-evidence/usage-limit-reset/renderer-bundle.json.
 const budgets = {
   // React 19.3 adds 29,322 emitted bytes on identical application source.
   // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.
@@ -67,13 +63,13 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 3_089 + 1_182 + 54 + 37,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 3_465,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_884 + 989,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_929,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte + 760,
@@ -171,7 +167,7 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 4_137 + 4_629 + 323 + 882,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 106 + 261 + 4_238,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

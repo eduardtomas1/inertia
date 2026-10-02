@@ -87,7 +87,6 @@ export interface SidebarWorkSection {
   id: SidebarWorkSectionId;
   label: string;
   threads: SidebarThreadView[];
-  /** Includes child sections when this heading introduces a separate workspace group. */
   totalCount?: number;
 }
 

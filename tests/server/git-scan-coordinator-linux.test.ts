@@ -74,6 +74,16 @@ interface LinuxProcessMetrics {
   finalDescendants: number[];
   forkRatePerSecond: number;
   peakControlHelpers: number;
+  peakControlHelperDetail: Array<{
+    pid: number;
+    mode?: string;
+    target?: number;
+    action?: string | null;
+    firstSeenMs?: number;
+    state: string | null;
+    targetState: string | null;
+    ageMs: number | null;
+  }>;
   peakDescendants: number;
   peakGuardedTreeDescendants: number;
   peakDescendantRssKb: number;
@@ -241,7 +251,10 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
       );
-      expect(metrics.peakControlHelpers).toBeLessThanOrEqual(
+      expect(
+        metrics.peakControlHelpers,
+        JSON.stringify(metrics.peakControlHelperDetail),
+      ).toBeLessThanOrEqual(
         GIT_SCAN_PROCESS_BUDGET_PER_KEY
           * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
       );
@@ -328,7 +341,10 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
       );
-      expect(metrics.peakControlHelpers).toBeLessThanOrEqual(
+      expect(
+        metrics.peakControlHelpers,
+        JSON.stringify(metrics.peakControlHelperDetail),
+      ).toBeLessThanOrEqual(
         GIT_SCAN_MAX_CONCURRENT_KEYS
           * GIT_SCAN_PROCESS_BUDGET_PER_KEY
           * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,

@@ -1026,7 +1026,7 @@ export function SettingsView({
                 ? target.profileId
                 : undefined}
               defaults={backendDefaults}
-              projects={projects}
+              projects={regularProjects}
               disabled={disabled}
               onLoadDetail={onLoadBackendProfile}
               onCreate={onCreateBackendProfile}
@@ -1120,7 +1120,7 @@ export function SettingsView({
             <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button></div>
           </section>
         )}
-        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={projects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
+        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={regularProjects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
 
         {section === "archive" && (
           <>

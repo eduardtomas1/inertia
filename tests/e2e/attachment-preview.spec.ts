@@ -7,10 +7,12 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { observeImagePreviewFailure } from "./support/image-preview-failure-evidence";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
 let page!: AppFixture["page"];
+let previewEvidence: ReturnType<typeof observeImagePreviewFailure> | undefined;
 
 function readablePdf(): Buffer {
   const stream = "BT /F1 22 Tf 72 720 Td (Inertia attachment preview) Tj ET";
@@ -50,6 +52,16 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await app.close();
+});
+
+test.beforeEach(() => {
+  previewEvidence = observeImagePreviewFailure(app);
+});
+
+test.afterEach(async ({ browserName: _browserName }, testInfo) => {
+  const evidence = previewEvidence;
+  previewEvidence = undefined;
+  await evidence?.finish(testInfo, false);
 });
 
 test("opens secure image and Linux-style clipboard PDF previews", async ({

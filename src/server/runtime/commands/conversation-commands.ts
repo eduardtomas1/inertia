@@ -675,10 +675,12 @@ export function createConversationCommandHandler(
               }
             }
           }
-          await deleteCheckpoints(
-            dependencies.store.projectPath(conversation.projectId),
-            conversation.id,
-          ).catch(() => undefined);
+          if (dependencies.store.project(conversation.projectId).workspaceKind !== "scratch") {
+            await deleteCheckpoints(
+              dependencies.store.projectPath(conversation.projectId),
+              conversation.id,
+            ).catch(() => undefined);
+          }
           const finalConversation = dependencies.store.conversation(
             command.payload.conversationId,
           );

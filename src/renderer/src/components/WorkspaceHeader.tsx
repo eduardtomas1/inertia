@@ -232,6 +232,7 @@ export function WorkspaceHeader({
         ? "Usage"
         : conversation?.title ?? project?.name ?? "Workspace";
   const showProjectCrumb = view === "workspace" && project !== null && conversation !== null;
+  const newChatInProjectLabel = project?.workspaceKind === "scratch" ? "New chat without a project" : `New chat in ${project?.name}`;
   const titleMenuAvailable = view === "workspace"
     && conversation !== null
     && isServerConversation
@@ -316,8 +317,8 @@ export function WorkspaceHeader({
                 <button
                   type="button"
                   className="header-breadcrumb-project"
-                  aria-label={`New chat in ${project.name}`}
-                  title={`New chat in ${project.name}`}
+                  aria-label={newChatInProjectLabel}
+                  title={newChatInProjectLabel}
                   onClick={onCreateConversationInProject}
                 >
                   <ProjectIcon project={project} size={14} />

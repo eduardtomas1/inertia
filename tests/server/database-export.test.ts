@@ -21,6 +21,8 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { parseDatabaseRecoveryExport } from "../../src/server/persistence/database-export";
 import {
   readDatabaseRecoveryExportFile,
   writeDatabaseRecoveryExportFile,
@@ -509,7 +511,7 @@ describe("safe database recovery exports", () => {
         }>;
       }>;
     };
-    expect(exported.version).toBe(2);
+    expect(exported.version).toBe(3);
     expect(exported.projects[0]?.conversations[0]?.messages.map(
       ({ role, content }) => ({ role, content }),
     )).toEqual(expected);
@@ -569,6 +571,140 @@ describe("safe database recovery exports", () => {
       ({ role, content }) => ({ role, content }),
     )).toEqual(expected);
     store.close();
+  });
+
+  it.each(["gemini", "antigravity"])("stores an imported %s chat without a model exactly like the Antigravity migration", async (providerId) => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false });
+    const archive = {
+      format: "inertia-recovery-export",
+      version: 2,
+      exportedAt: "2026-08-10T12:00:00.000Z",
+      projects: [{
+        name: "Gemini project",
+        path: "/informational/legacy",
+        conversations: [{
+          title: "Gemini chat",
+          providerId,
+          model: providerId === "gemini" ? "gemini-2.5-pro" : "",
+          reasoningEffort: providerId === "gemini" ? "high" : "",
+          interactionMode: "build",
+          accessMode: "supervised",
+          messages: [],
+        }],
+      }],
+    };
+    try {
+      await store.importRecoveryData(JSON.stringify(archive), temporaryDirectory());
+      const reader = new Database(databasePath, { readonly: true });
+      try {
+        const row = reader.prepare(`
+          SELECT provider_id, provider_session_id, model, reasoning_effort,
+                 model_selection_json, continuation_identity_json
+          FROM conversations WHERE title = 'Gemini chat'
+        `).get() as Record<string, string | null>;
+        expect(row).toMatchObject({
+          provider_id: "antigravity",
+          provider_session_id: null,
+          model: "",
+          reasoning_effort: "",
+          continuation_identity_json: null,
+        });
+        expect(JSON.parse(row.model_selection_json!)).toEqual(providerNativeModelSelection({ providerId: "antigravity" }));
+      } finally {
+        reader.close();
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each([1, 2])("recovers released Gemini version %i archives with current provider defaults", async (version) => {
+    const directory = temporaryDirectory();
+    const store = new RuntimeStore(
+      join(directory, "inertia.sqlite"),
+      directory,
+      { recoverInterruptedRuns: false },
+    );
+    const messages = [
+      { role: "user", content: "Recover this Gemini conversation." },
+      { role: "assistant", content: "Preserve the original transcript." },
+    ].map((message, ordinal) => ({
+      ...message,
+      createdAt: "2026-08-10T11:00:00.000Z",
+      ...(version === 2 ? { ordinal } : {}),
+    }));
+    const archive = {
+      format: "inertia-recovery-export",
+      version,
+      exportedAt: "2026-08-10T12:00:00.000Z",
+      projects: [{
+        name: "Released provider archive",
+        path: "/informational/legacy-project",
+        conversations: [{
+          title: "Retired Gemini chat",
+          providerId: "gemini",
+          model: "gemini-2.5-pro",
+          reasoningEffort: "high",
+          interactionMode: "plan",
+          accessMode: "full",
+          messages,
+        }, {
+          title: "Current provider chat",
+          providerId: "claude",
+          model: "claude-test",
+          reasoningEffort: "medium",
+          interactionMode: "build",
+          accessMode: "supervised",
+          messages: [],
+        }],
+      }],
+    };
+    try {
+      await expect(store.importRecoveryData(JSON.stringify(archive), temporaryDirectory()))
+        .resolves.toEqual({ projects: 1, conversations: 2, messages: 2, alreadyImported: false });
+      const conversations = store.shellSnapshot().conversations;
+      const recovered = conversations.find(({ title }) => title === "Retired Gemini chat")!;
+      expect(recovered).toMatchObject({
+        providerId: "antigravity",
+        model: "",
+        modelSelection: { modelId: "provider-default" },
+        reasoningEffort: "",
+        interactionMode: "plan",
+        accessMode: "supervised",
+      });
+      expect(store.conversationDetail(recovered.id)!.messages.map(
+        ({ role, content }) => ({ role, content }),
+      )).toEqual(messages.map(({ role, content }) => ({ role, content })));
+      expect(conversations.find(({ title }) => title === "Current provider chat"))
+        .toMatchObject({ providerId: "claude", model: "claude-test", reasoningEffort: "medium" });
+      const reexported = parseDatabaseRecoveryExport(store.exportRecoveryData());
+      expect(reexported.version).toBe(3);
+      expect(reexported.projects[0]!.conversations.find(
+        ({ title }) => title === "Retired Gemini chat",
+      )).toMatchObject({
+        providerId: "antigravity",
+        model: "",
+        reasoningEffort: "",
+        messages: messages.map((message, ordinal) => ({ ...message, ordinal })),
+      });
+
+      const before = store.shellSnapshot();
+      for (const invalid of [
+        { providerId: "unknown-provider" },
+        { providerSessionId: "unsupported-session" },
+        { model: "x".repeat(301) },
+      ]) {
+        const malformed = structuredClone(archive);
+        Object.assign(malformed.projects[0]!.conversations[0]!, invalid);
+        await expect(store.importRecoveryData(JSON.stringify(malformed), temporaryDirectory()))
+          .rejects.toThrow(/supported format/u);
+      }
+      expect(store.shellSnapshot()).toEqual(before);
+    } finally {
+      store.close();
+    }
   });
 
   it("rejects malformed or extended exports before changing the database", async () => {

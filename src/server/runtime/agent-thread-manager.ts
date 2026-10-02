@@ -855,6 +855,9 @@ export class AgentThreadManager {
         throw new Error("A managed chat cannot exceed its parent chat's access mode.");
       }
       const workspace = input.workspace ?? { kind: "project" as const };
+      if (workspace.kind === "reuse-current" && this.dependencies.store.project(current.projectId).workspaceKind === "scratch") {
+        throw new Error("A chat without a project cannot share its folder with another chat.");
+      }
       if (workspace.kind === "reuse-current" && !current.worktreePath) {
         throw new Error("The parent chat does not own an attached worktree to reuse.");
       }
@@ -906,12 +909,17 @@ export class AgentThreadManager {
       const input = createSchema.parse(args);
       const selection = this.resolveSelection(current, input.route);
       const workspace = input.workspace ?? { kind: "project" as const };
+      const title = `Create and start “${input.title}”`;
+      const detail = `${providerIdForHarness(selection.harnessId) ?? selection.harnessId} · ${selection.modelId} · ${input.interactionMode ?? current.interactionMode} · ${input.accessMode ?? current.accessMode} · ${workspace.kind}`;
+      if (this.dependencies.store.project(current.projectId).workspaceKind === "scratch") {
+        return { title, detail: `${detail} · in its own new folder`, permissionRoots: [] };
+      }
       const sourcePath = workspace.kind === "reuse-current"
         ? this.dependencies.store.conversationPath(current.id)
         : this.dependencies.store.projectPath(current.projectId);
       return {
-        title: `Create and start “${input.title}”`,
-        detail: `${providerIdForHarness(selection.harnessId) ?? selection.harnessId} · ${selection.modelId} · ${input.interactionMode ?? current.interactionMode} · ${input.accessMode ?? current.accessMode} · ${workspace.kind}`,
+        title,
+        detail,
         permissionRoots: [{ path: sourcePath, access: "write" }],
       };
     }

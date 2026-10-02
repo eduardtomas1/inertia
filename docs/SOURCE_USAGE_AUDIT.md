@@ -40,7 +40,9 @@ build configurations inside `src` are also tooling roots. Local untracked
 modules are included conservatively; symlinks are not followed. This answers
 whether source has any test/tool consumer, not whether each script or helper is
 itself invoked. Repository metadata, dependency directories, build/package/test
-output, caches and `resources/generated` are excluded explicitly; the JSON
+output, caches, `resources/generated` and separate agent checkouts under
+`.claude/worktrees` are excluded explicitly. Other `.claude` modules, including
+repository hooks, remain tooling roots. The JSON
 report lists the exact directory names and paths in `toolingExclusions`.
 Computed imports in tools and tests remain visible in
 `analysisLimitations`; there are 44 at the implementation checkpoint. The source

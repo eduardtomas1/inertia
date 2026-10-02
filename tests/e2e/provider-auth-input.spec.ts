@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
@@ -478,8 +478,6 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "provider-auth-input",
     initialState: "conversation",
-    // Native browser-return focus and menu paste share the OS display/clipboard.
-    windowDisplay: "primary",
     additionalEnvironment,
     codexAppServerSource: metadataCodex,
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {

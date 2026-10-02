@@ -14,6 +14,7 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
+import { publicRuntimeError } from "../../src/server/runtime-errors";
 import type { OwnedProviderStopResult } from "../../src/server/providers";
 import {
   providerRunTerminal,
@@ -409,9 +410,8 @@ describe("Duo third-model comparison", () => {
       if (target === "judge") payload.comparison!.projectId = scratch.id;
       else payload.sides[target === "left" ? 0 : 1].projectId = scratch.id;
 
-      await expect(comparisonCoordinator(runtime).prepare(payload)).rejects.toThrow(
-        "Choose a project for each Duo chat and comparison.",
-      );
+      const failure = await comparisonCoordinator(runtime).prepare(payload).then(() => null, (error: unknown) => error);
+      expect(publicRuntimeError(failure)).toBe("Choose a project for each Duo chat and comparison.");
       expect(runtime.store.shellSnapshot().conversations).toEqual([]);
       expect(runtime.store.findPairedLaunch(payload.launchId)).toBeNull();
       expect(runtime.provider.completions).toEqual([]);

@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
+  Folder,
   FolderGit2,
   LoaderCircle,
   MessagesSquare,
@@ -551,7 +552,7 @@ export function ComposerToolbar({
             <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
-              <FolderGit2 size={12} aria-hidden="true" />
+              {scratchWorkspace ? <Folder size={12} aria-hidden="true" /> : <FolderGit2 size={12} aria-hidden="true" />}
               <span>{scratchWorkspace ? "Chat folder" : conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}

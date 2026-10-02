@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SentMessageAttachmentList } from "../../src/renderer/src/components/SentMessageAttachmentList";
 import type { ChatAttachment } from "../../src/shared/contracts";
@@ -22,6 +22,17 @@ const text: ChatAttachment = {
 };
 
 describe("sent message attachments", () => {
+  beforeEach(() => {
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(target: Element): void {
+        this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+      disconnect(): void {}
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
   it("renders no attachment region for an empty projection", () => {
     const { container } = render(
       <SentMessageAttachmentList attachments={[]} />,
@@ -66,7 +77,7 @@ describe("sent message attachments", () => {
     // The row says so in readable text; the tile itself is aria-hidden.
     expect(thumbnail!.closest("li")).toHaveAttribute("data-attachment-unavailable", "true");
     expect(thumbnail!.closest("li")).toHaveTextContent("no longer stored");
-    expect(thumbnail?.querySelector(".lucide-image-off")).not.toBeNull();
+    expect(thumbnail?.querySelector(".lucide-triangle-alert")).not.toBeNull();
 
     trigger.focus();
     await user.keyboard("{Enter}");

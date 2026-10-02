@@ -14,6 +14,7 @@ import { cloneProject } from "../../project-clone";
 import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { isWithinScratchRoot } from "../../scratch-root";
 import type { TerminalManager } from "../../terminal";
 import { PROVIDER_INFO, type ProviderManager } from "../../providers";
 import type { ProviderInstallationUseTransfer } from
@@ -49,6 +50,7 @@ export interface TerminalProviderResumeRejectionDiagnostic {
 
 export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
+  dataDirectory: string;
   conversationAttachments: ConversationAttachmentStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
   turns: TurnController;
@@ -93,6 +95,12 @@ export function createProjectWorkspaceCommandHandler(
     switch (command.type) {
       case "project.create": {
         let path = requireRuntimeDirectory(command.payload.path);
+        const refuseScratchFolder = (): void => {
+          if (isWithinScratchRoot(dependencies.dataDirectory, path)) {
+            throw new RuntimeRequestError("Inertia manages this folder for chats without a project. Choose another folder.");
+          }
+        };
+        refuseScratchFolder();
         if (command.payload.clone) {
           const controller = new AbortController();
           const cancel = (): void => controller.abort();
@@ -102,6 +110,7 @@ export function createProjectWorkspaceCommandHandler(
           if (socket.readyState !== WebSocket.OPEN) return "handled";
         }
         const identity = await inspectProjectIdentity(path);
+        refuseScratchFolder();
         const project = dependencies.store.createProject(
           command.payload.name,
           path,
@@ -120,6 +129,9 @@ export function createProjectWorkspaceCommandHandler(
         return "mutation";
       case "project.remove": {
         const projectId = command.payload.projectId;
+        if (dependencies.store.project(projectId).workspaceKind === "scratch") {
+          throw new RuntimeRequestError("Delete chats without a project one at a time.");
+        }
         const conversations = dependencies.store.shellSnapshot().conversations
           .filter((conversation) => conversation.projectId === projectId);
         const storedWorkspaces = (items: typeof conversations) => {
@@ -246,6 +258,9 @@ export function createProjectWorkspaceCommandHandler(
       case "project.update": {
         const { projectId, expectedUpdatedAt, appearance, ...update } = command.payload;
         const current = dependencies.store.project(projectId);
+        if (current.workspaceKind === "scratch") {
+          throw new RuntimeRequestError("Chats without a project have no project settings.");
+        }
         if (expectedUpdatedAt !== undefined && current.updatedAt !== expectedUpdatedAt) {
           throw new RuntimeRequestError("This project changed in another view. Review the current settings and try again.");
         }

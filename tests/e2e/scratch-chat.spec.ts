@@ -67,10 +67,8 @@ test("starts without a project, runs in separate folders, and restores after res
     await expect.poll(() => chats().length).toBe(1);
     const first = chats()[0]!;
     expect(first.worktree_path).toContain(join("data", "scratch"));
-    // macOS exposes temporary folders through /var -> /private/var. Node's
-    // process.cwd() is canonical, while the requested workspace keeps its path.
     expect(JSON.parse(await readFile(join(first.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: await realpath(first.worktree_path), requestedCwd: first.worktree_path });
-    await expect(page.getByText("Chat folder", { exact: true })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveText("Chat folder");
     ({ page } = await app.restart());
     await expect(page.getByText("A calm weekend:", { exact: false }).first()).toBeVisible();
     expect(chats()[0]!.worktree_path).toBe(first.worktree_path);
@@ -88,7 +86,6 @@ test("starts without a project, runs in separate folders, and restores after res
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await app.expectNoViewportOverflow();
     await page.screenshot({ path: info.outputPath("scratch-chat-dark.png"), animations: "disabled" });
-    // Importing a real project keeps the existing draft text when choosing No project.
     await app.electronApp.evaluate(({ dialog }, path) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: false, filePaths: [path] }));
     }, app.workspaceDirectory);

@@ -45,6 +45,7 @@ describe("ProjectPicker", () => {
     const { onChange } = mount(managed, [...projects, managed]);
     expect(screen.getAllByRole("option", { name: "No project" })).toHaveLength(1);
     expect(screen.getByRole("option", { name: "No project" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: "No project" })).toHaveAccessibleDescription("Start in a separate local folder");
     expect(screen.queryByText(managed.path)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: "No project" }));
     expect(onChange).not.toHaveBeenCalled();

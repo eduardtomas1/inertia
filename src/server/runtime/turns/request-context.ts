@@ -15,7 +15,7 @@ import type {
   TurnRequestContext,
   TurnSessionRecovery,
 } from "../../../shared/contracts";
-import { MAX_ATTACHMENT_COUNT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_IMAGE_ATTACHMENT_TOTAL_BYTES, chatAttachmentKind } from "../../../shared/attachments";
+import { MAX_IMAGE_ATTACHMENT_BYTES, MAX_IMAGE_ATTACHMENT_COUNT, MAX_IMAGE_ATTACHMENT_TOTAL_BYTES, chatAttachmentKind } from "../../../shared/attachments";
 import { readContainedFileSync } from "../../contained-file-read";
 import {
   MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
@@ -37,7 +37,7 @@ const MAX_VISIBLE_MESSAGE_BYTES = 64 * 1024;
 const MAX_INTERNAL_INSTRUCTION_BYTES = 32 * 1024;
 const MAX_INDIVIDUAL_INTERNAL_INSTRUCTION_BYTES = 16 * 1024;
 const MAX_FILE_SOURCE_BYTES = 4 * 1024 * 1024;
-const MAX_IMAGE_COUNT = MAX_ATTACHMENT_COUNT;
+const MAX_IMAGE_COUNT = MAX_IMAGE_ATTACHMENT_COUNT;
 const MAX_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_BYTES;
 const MAX_TOTAL_IMAGE_BYTES = MAX_IMAGE_ATTACHMENT_TOTAL_BYTES;
 const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -612,7 +612,7 @@ function validateImages(
     return canonical;
   });
   if (imageBytes > MAX_TOTAL_IMAGE_BYTES) {
-    throw new Error("Image attachments exceed the 80 MiB message limit.");
+    throw new Error("Image attachments exceed the 20 MiB message limit.");
   }
   return { imagePaths, imageBytes };
 }

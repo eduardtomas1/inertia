@@ -1940,8 +1940,9 @@ describe("composer asynchronous ownership", () => {
   });
 
   it("reports count-limited drops and byte-limited picker adoption", async () => {
-    const full = ["first", "second", ...Array.from({ length: 6 }, (_, index) => `extra-${index}`)].map((id) => ({
+    const full = ["first", "second", ...Array.from({ length: 6 }, (_, index) => `extra-${index}`)].map((id, index) => ({
       ...attachment(id), size: 10 * 1024 * 1024,
+      ...(index < 2 ? {} : { name: `${id}.txt`, path: `/private/tmp/${id}.txt`, mimeType: "text/plain" as const }),
     }));
     const commit = vi.fn(async () => undefined);
     const cancel = vi.fn(async () => undefined);

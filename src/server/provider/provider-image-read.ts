@@ -40,7 +40,7 @@ export async function readBoundedProviderImage(
       throw new Error(`A ${providerName} image attachment exceeds the 10 MiB safety limit.`);
     }
     if (initial.size > BigInt(MAX_IMAGE_BYTES - accumulatedBytes)) {
-      throw new Error(`${providerName} image attachments exceed the 80 MiB safety limit.`);
+      throw new Error(`${providerName} image attachments exceed the 20 MiB safety limit.`);
     }
 
     // Allocate only after fstat proves both per-file and aggregate bounds. Read

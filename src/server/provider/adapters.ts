@@ -1,4 +1,3 @@
-import { MAX_ATTACHMENT_COUNT } from "../../shared/attachments";
 import { isAbsolute } from "node:path";
 
 import { PROVIDER_INFO } from "./catalog";
@@ -19,7 +18,7 @@ import {
 } from "./contracts";
 
 const MAX_PROMPT_CHARS = 256 * 1024;
-const MAX_IMAGE_COUNT = MAX_ATTACHMENT_COUNT;
+const MAX_IMAGE_COUNT = 32;
 const MAX_SKILL_COUNT = 8;
 
 function isProviderId(value: unknown): value is ProviderId {

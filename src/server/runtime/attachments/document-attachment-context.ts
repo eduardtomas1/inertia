@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
 import {
-  MAX_ATTACHMENT_COUNT,
+  MAX_IMAGE_ATTACHMENT_COUNT,
   MAX_IMAGE_ATTACHMENT_BYTES as MAX_ATTACHMENT_BYTES,
   MAX_IMAGE_ATTACHMENT_TOTAL_BYTES as MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
@@ -678,7 +678,7 @@ export async function prepareDocumentAttachments(
     0,
   );
   if (
-    existingImages.length > MAX_ATTACHMENT_COUNT
+    existingImages.length > MAX_IMAGE_ATTACHMENT_COUNT
     || existingImageBytes > MAX_ATTACHMENT_TOTAL_BYTES
   ) throw new DocumentAttachmentError("Image attachments exceed the shared turn limits.");
   const rasterBudget: PdfRasterBudget = {
@@ -900,7 +900,7 @@ export async function prepareDocumentAttachments(
     );
     if (unreadablePdf) {
       throw new ScannedPdfRasterizationError(
-        `${unreadablePdf.attachment.name} needs a page image, but the turn's 80 MiB image budget is exhausted.`,
+        `${unreadablePdf.attachment.name} needs a page image, but the turn's 20 MiB image budget is exhausted.`,
       );
     }
 

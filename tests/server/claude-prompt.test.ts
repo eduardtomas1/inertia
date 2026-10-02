@@ -28,7 +28,8 @@ afterEach(async () => {
 describe("Claude bounded image prompt preparation", () => {
   it("reserves enough queue capacity for the full image budget", () => {
     const reservationBytes = claudePromptReservationBytes("Describe", true);
-    expect(reservationBytes).toBeGreaterThan(80 * 1024 * 1024 * 4 / 3);
+    expect(reservationBytes).toBeGreaterThan(20 * 1024 * 1024 * 4 / 3);
+    expect(reservationBytes).toBeLessThanOrEqual(32 * 1024 * 1024);
     const channel = new ClaudePromptChannel();
     const reservation = channel.reserve(reservationBytes);
     expect(reservation).not.toBeNull();
@@ -57,8 +58,8 @@ describe("Claude bounded image prompt preparation", () => {
     const path = await imagePath();
     await writeFile(path, "retained bytes");
     await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES);
-    await expect(claudePrompt("Describe", Array.from({ length: 9 }, () => path)).then(() => undefined))
-      .rejects.toThrow("80 MiB safety limit");
+    await expect(claudePrompt("Describe", [path, path, path]).then(() => undefined))
+      .rejects.toThrow("20 MiB safety limit");
   });
 
   it.skipIf(process.platform === "win32")("refuses a replaced image symlink", async () => {

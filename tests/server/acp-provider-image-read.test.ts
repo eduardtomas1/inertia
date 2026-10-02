@@ -61,8 +61,8 @@ describe.each([
     const path = join(root, "bounded.png");
     await writeFile(path, "");
     await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES);
-    await expect(prompt("Describe", Array.from({ length: 9 }, () => path), initialized).then(() => undefined))
-      .rejects.toThrow("80 MiB safety limit");
+    await expect(prompt("Describe", [path, path, path], initialized).then(() => undefined))
+      .rejects.toThrow("20 MiB safety limit");
   });
 
   it("rejects a different regular file substituted between stat and open", async () => {

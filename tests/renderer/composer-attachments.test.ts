@@ -38,8 +38,9 @@ describe("composer attachment previews", () => {
       { ...current[0]! },
       ...Array.from({ length: 101 }, (_, index) =>
         attachment(`new-${index}`, {
-          name: `new-${index}.png`,
-          path: `/private/tmp/new-${index}.png`,
+          name: `new-${index}.txt`,
+          path: `/private/tmp/new-${index}.txt`,
+          mimeType: "text/plain",
           size: 2_000 + index,
         })),
     ];
@@ -49,6 +50,15 @@ describe("composer attachment previews", () => {
     expect(result.attachments).toHaveLength(100);
     expect(result.rejected).toHaveLength(4);
     expect(new Set(result.attachments.map(({ id }) => id)).size).toBe(100);
+  });
+
+  it("keeps at most 8 images within 20 MiB beside ordinary files", () => {
+    const images = Array.from({ length: 9 }, (_, index) => attachment(`image-${index}`, { size: 1_024 }));
+    const counted = mergeComposerAttachments([], images);
+    expect(counted.attachments).toHaveLength(8);
+    expect(counted.rejected.map(({ id }) => id)).toEqual(["image-8"]);
+    const heavy = Array.from({ length: 3 }, (_, index) => attachment(`heavy-${index}`, { size: 10 * 1024 * 1024 }));
+    expect(mergeComposerAttachments([], heavy).attachments).toHaveLength(2);
   });
 
   it("preserves distinct native IDs with identical names, types and sizes", () => {

@@ -23,7 +23,7 @@ describe("legacy delegated-task disclosure preferences", () => {
       "inertia:subagent-disclosure:v2:keep": "1",
     });
     removeLegacyDisclosurePreferences(() => storage);
-    expect([...Array.from({ length: storage.length }, (_, index) => storage.key(index))].sort())
+    expect(Array.from({ length: storage.length }, (_, index) => storage.key(index)).sort())
       .toEqual(["inertia:layout", "inertia:subagent-disclosure:v2:keep"]);
   });
 

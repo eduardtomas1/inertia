@@ -177,20 +177,24 @@ describe("subagent telemetry coalescing", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("flushes buffered telemetry before a lifecycle patch in sequence order", async () => {
+  it("flushes a task's buffered telemetry before its own lifecycle patch and keeps siblings held", async () => {
     const { writes, traceUpdates, emit, stored } = await projectorFixture();
     emit(1);
     emit(2, { activity: "Editing", usage: usage(40) });
     expect(writes).toHaveBeenCalledTimes(1);
     emit(3, { providerAgentId: "child-2", providerToolUseId: "spawn-2", providerName: "Second" });
-    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 2, 3]);
-    emit(4, { providerAgentId: "child-2", providerToolUseId: "spawn-2", providerName: "Second", activity: "Testing" });
-    expect(writes).toHaveBeenCalledTimes(3);
+    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 3]);
     expect(vi.getTimerCount()).toBe(1);
+    emit(4, { providerAgentId: "child-2", providerToolUseId: "spawn-2", providerName: "Second", activity: "Testing" });
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(2);
     emit(5, { progress: "Halfway there." });
-    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 3, 2, 5]);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(1_000);
+    expect(writes.mock.calls.map(([input]) => input.sequence)).toEqual([1, 3, 2, 5, 4]);
     expect(traceUpdates().map((event) => event.type === "agent.subagent.updated" && event.trace.sequence))
-      .toEqual([1, 2, 3, 4, 5]);
+      .toEqual([1, 3, 2, 5, 4]);
     expect(vi.getTimerCount()).toBe(0);
     expect(stored()).toHaveLength(2);
     expect(stored()).toEqual(expect.arrayContaining([

@@ -91,7 +91,7 @@ export class TurnSubagentTelemetry {
   project(event: ProviderSubagentEvent, updatedAt: string): void {
     const trace = this.closed ? null : this.coalescible(event);
     if (!trace) {
-      this.flush();
+      this.flushMatching(event);
       this.persist(event, updatedAt);
       return;
     }
@@ -151,6 +151,13 @@ export class TurnSubagentTelemetry {
       }
     }
     if (failures.length > 0) throw failures[0];
+  }
+
+  private flushMatching(event: ProviderSubagentEvent): void {
+    const matches = new Set(identityKeys(event.providerTaskId, event.providerAgentId)
+      .map((key) => this.identities.get(key))
+      .filter((trace): trace is TraceTelemetry => trace !== undefined));
+    for (const trace of matches) this.flushTrace(trace);
   }
 
   private flushTrace(trace: TraceTelemetry): void {

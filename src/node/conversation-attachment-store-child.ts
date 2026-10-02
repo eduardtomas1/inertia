@@ -3,7 +3,9 @@ import type { Readable, Writable } from "node:stream";
 
 import {
   ACCEPTED_ATTACHMENT_MIME_TYPES,
+  ATTACHMENT_PREVIEW_BYTES,
   MAX_ATTACHMENT_BYTES,
+  MAX_FILE_PREVIEW_BYTES,
   chatAttachmentStorageExtension,
 } from "../shared/attachments.js";
 import {
@@ -111,6 +113,7 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
 
   const MAX_INPUT_BYTES = ${MAX_CONVERSATION_ATTACHMENT_STORE_OPERATION_BYTES};
   const MAX_ATTACHMENT_BYTES = ${MAX_ATTACHMENT_BYTES};
+  const MAX_FILE_PREVIEW_BYTES = ${MAX_FILE_PREVIEW_BYTES};
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
   const PENDING = /^\\.pending-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
   const EXTENSIONS = new Set(${JSON.stringify(ATTACHMENT_STORAGE_EXTENSIONS)});
@@ -317,12 +320,14 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
       || parsed.size < 1
       || parsed.size > MAX_ATTACHMENT_BYTES
     ) return { missing: true };
+    const textPreview = parsed.mimeType.startsWith("text/") || parsed.mimeType === "application/json";
+    if (input.preview && !textPreview && parsed.size > MAX_FILE_PREVIEW_BYTES) return { missing: true };
     const contentPath = input.id + "." + parsed.extension;
     const contentRead = await readBoundedFile(
       contentPath,
       MAX_ATTACHMENT_BYTES,
       true, 1,
-      input.metadataOnly ? 0 : input.preview && (parsed.mimeType.startsWith("text/") || parsed.mimeType === "application/json") ? 1024 * 1024 : MAX_ATTACHMENT_BYTES,
+      input.metadataOnly ? 0 : input.preview && textPreview ? ${ATTACHMENT_PREVIEW_BYTES} : MAX_ATTACHMENT_BYTES,
     );
     const bytes = contentRead.bytes;
     if (contentRead.size !== parsed.size || contentRead.digest !== parsed.digest) {

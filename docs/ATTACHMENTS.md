@@ -24,9 +24,9 @@ follow-ups still accept images only; text pastes stay inline.
 | Format | Preview | Provider input |
 | --- | --- | --- |
 | PNG, JPEG, WebP, GIF | Image with zoom | Image input when the model supports it |
-| PDF | Page viewer | Saved file path |
+| PDF | Page viewer, files up to 10 MiB | Saved file path |
 | Text, logs, Markdown, JSON, source and configuration files | Inert text, first 1 MiB | Saved file path, complete original bytes |
-| CSV, XLSX, XLS | Bounded table / worksheet view | Saved file path |
+| CSV, XLSX, XLS | Bounded table / worksheet view; CSV first 1 MiB, workbooks up to 10 MiB | Saved file path |
 | Other files, including archives | File information; no active content | Saved file path |
 
 `.env`, `.pem`, and `.key` files are refused by name. Credentials and private keys

@@ -24,7 +24,7 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 import {
-  MAX_ATTACHMENT_BYTES,
+  MAX_FILE_PREVIEW_BYTES,
   ATTACHMENT_PREVIEW_BYTES as MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentTypeLabel,
   isSpreadsheetAttachmentMimeType,
@@ -277,7 +277,7 @@ export function DocumentAttachmentPreview({
         throw new Error("Attachment preview type does not match the attachment.");
       }
       const maximumBytes = isSpreadsheetPreview(mimeType)
-        ? MAX_ATTACHMENT_BYTES
+        ? MAX_FILE_PREVIEW_BYTES
         : MAX_TEXT_ATTACHMENT_BYTES;
       const contentLength = response.headers.get("content-length");
       const declaredBytes = contentLength === null ? null : Number(contentLength);

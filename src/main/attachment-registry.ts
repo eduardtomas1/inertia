@@ -474,7 +474,10 @@ export class AttachmentRegistry {
   }
 
   async preview(id: string, signal?: AbortSignal): Promise<ValidatedAttachmentPreview | null> {
-    const validated = await this.readValidated(id, signal, attachmentPreviewLimit(this.records.get(id)?.mimeType));
+    const record = this.records.get(id);
+    const limit = record ? attachmentPreviewLimit(record.mimeType, record.size) : 0;
+    if (limit === null) return null;
+    const validated = await this.readValidated(id, signal, limit);
     return validated
       ? {
           bytes: validated.bytes,

@@ -6,6 +6,7 @@ import type { AttachmentImportValidationReceipt } from "./attachment-import-file
 import { constants } from "node:fs";
 import { FILE_OPEN_NO_FOLLOW } from "../node/platform-file-open-flags.js";
 import { readAttachment } from "../node/read-attachment.js";
+import { ATTACHMENT_PREVIEW_BYTES, MAX_FILE_PREVIEW_BYTES } from "../shared/attachments.js";
 
 const VERIFICATION_ERROR =
   "Temporary attachment storage could not be verified safely.";
@@ -123,6 +124,7 @@ export function assertAttachmentImportReceipt(
     || receipt.extension !== attachment.extension || receipt.size !== attachment.size)) throw new Error(VERIFICATION_ERROR);
 }
 
-export function attachmentPreviewLimit(mimeType: string | undefined): number {
-  return mimeType?.startsWith("text/") || mimeType === "application/json" ? 1024 * 1024 : 50 * 1024 * 1024;
+export function attachmentPreviewLimit(mimeType: string, size: number): number | null {
+  if (mimeType.startsWith("text/") || mimeType === "application/json") return ATTACHMENT_PREVIEW_BYTES;
+  return size <= MAX_FILE_PREVIEW_BYTES ? size : null;
 }

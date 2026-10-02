@@ -225,6 +225,44 @@ describe("file-backed attachments", () => {
     expect(retained!.path).toMatch(/\.bin$/u);
   });
 
+  it("does not read or send a non-text preview above main's 10 MiB preview bound", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-preview-bound-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const large = Buffer.alloc(10 * 1024 * 1024 + 1, 0x20);
+    const small = Buffer.alloc(1024, 0x20);
+    let validations = 0;
+    const registry = new AttachmentRegistry(join(root, "uploads"), {
+      validationRunner: (operation) => {
+        validations += 1;
+        const bytes = operation.size === large.length ? large : small;
+        return {
+          result: Promise.resolve({
+            displayName: operation.name, mimeType: "application/pdf", extension: "pdf",
+            size: bytes.length, digest: createHash("sha256").update(bytes).digest("hex"),
+          }),
+          stopped: Promise.resolve(),
+        };
+      },
+    });
+    const [bigPdf] = await registry.import([{ name: "large.pdf", mimeType: "application/pdf", data: large }]);
+    const [smallPdf] = await registry.import([{ name: "small.pdf", mimeType: "application/pdf", data: small }]);
+    validations = 0;
+    expect(await registry.preview(bigPdf!.id)).toBeNull();
+    expect(validations).toBe(0);
+    expect((await registry.preview(smallPdf!.id))?.bytes.length).toBe(small.length);
+    expect(await registry.resolve(bigPdf!.id)).not.toBeNull();
+
+    const store = await ConversationAttachmentStore.open(root);
+    cleanups.push(() => store.close());
+    const [retainedLarge, retainedSmall] = await store.retain([
+      { attachment: { id: randomUUID(), name: "large.pdf", path: "/unused", mimeType: "application/pdf", size: large.length }, bytes: large },
+      { attachment: { id: randomUUID(), name: "small.pdf", path: "/unused", mimeType: "application/pdf", size: small.length }, bytes: small },
+    ]);
+    expect(await store.preview(retainedLarge!.id)).toBeNull();
+    expect((await store.preview(retainedSmall!.id))?.bytes.length).toBe(small.length);
+    expect(await store.resolve(retainedLarge!.id)).not.toBeNull();
+  });
+
   it("detects content changes before copying a retained source", async () => {
     const { root, registry } = await fixture();
     const [file] = await registry.import([{ name: "file.txt", mimeType: "text/plain", data: Buffer.from("original") }]);

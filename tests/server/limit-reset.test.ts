@@ -250,7 +250,10 @@ describe("quota reset actions", () => {
   });
 
   it("rejects stale reset times and routes changed before scheduling", async () => {
-    await expect(scheduler.schedule({ conversationId, id: randomUUID(), failedTurnId, resetsAt: new Date(instant + 120_000).toISOString() })).rejects.toThrow("limit changed");
+    const stale = new Date(instant + 120_000).toISOString();
+    const changed = "The reported limit changed. Check the new reset time and try again.";
+    await expect(scheduler.schedule({ conversationId, id: randomUUID(), failedTurnId, resetsAt: stale })).rejects.toThrow(changed);
+    await expect(scheduler.snooze({ conversationId, failedTurnId, resetsAt: stale })).rejects.toThrow(changed);
     store.updateConversation(conversationId, { accessMode: "full" });
     expect((await scheduler.get(conversationId)).offer).toBeNull();
     await expect(schedule()).rejects.toThrow("limit changed");

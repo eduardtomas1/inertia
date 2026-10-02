@@ -202,7 +202,7 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await resume.focus();
     await page.keyboard.press("Enter");
     const alert = row.getByRole("alert");
-    await expect(alert).toHaveText("The reported limit changed. Refresh this chat before scheduling a resume.");
+    await expect(alert).toHaveText("The reported limit changed. Check the new reset time and try again.");
     await expect(resume).not.toHaveAttribute("aria-disabled", "true");
     await expect(resume).toBeFocused();
     await expectLayoutHolds(app, row);

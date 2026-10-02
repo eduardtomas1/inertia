@@ -7,6 +7,7 @@ import { publicLimitResetPlan, type StoredLimitResetPlan } from "../persistence/
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
 import { MISSED_RESUME_AFTER_MS, matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
 
+const LIMIT_CHANGED = "The reported limit changed. Check the new reset time and try again.";
 export interface LimitResetDependencies {
   store: RuntimeStore;
   signal: AbortSignal;
@@ -87,7 +88,7 @@ export class LimitResetScheduler {
       return this.get(input.conversationId);
     }
     const offer = await this.offer(input.conversationId, true, true);
-    if (!offer || offer === "check" || !offer.accountIdentity || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt)) throw new RuntimeRequestError("The reported limit changed. Refresh this chat before scheduling a resume.");
+    if (!offer || offer === "check" || !offer.accountIdentity || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt)) throw new RuntimeRequestError(LIMIT_CHANGED);
     const current = this.dependencies.store.limitResets.get(input.conversationId);
     if (current && ["waiting", "dispatching"].includes(current.state)) return this.get(input.conversationId);
     this.dependencies.store.limitResets.save({ ...input, ...offer, accountIdentity: offer.accountIdentity,
@@ -117,7 +118,7 @@ export class LimitResetScheduler {
   }
   async snooze(input: { conversationId: string; failedTurnId: string; resetsAt: string }): Promise<void> {
     const offer = await this.offer(input.conversationId, true, true);
-    if (!offer || offer === "check" || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt) || this.dependencies.busy(input.conversationId)) throw new RuntimeRequestError("The reported limit changed. Refresh this chat before snoozing.");
+    if (!offer || offer === "check" || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt) || this.dependencies.busy(input.conversationId)) throw new RuntimeRequestError(LIMIT_CHANGED);
     const turn = this.dependencies.store.latestAgentTurnForConversation(input.conversationId)!;
     if (this.dependencies.store.findWorkspaceRun(turn.runId)) this.dependencies.store.acknowledgeWorkspaceRun(turn.runId);
     this.dependencies.store.updateConversation(input.conversationId, { snoozedUntil: offer.resetsAt });

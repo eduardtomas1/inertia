@@ -123,6 +123,9 @@ describe("native subscription adapters", () => {
 });
 
 describe("provider quota attribution", () => {
+  it("labels Cursor's windows in sentence case", () => {
+    expect(cursorSubscriptionWindows(cursor).map(({ label }) => label)).toEqual(["Overall", "Cursor models", "Other models"]);
+  });
   it("uses the relevant Cursor bucket without applying another model family's exhaustion", () => {
     const account = { ...base("cursor"), status: "ready" as const, updatedAt: new Date().toISOString(), windows: cursorSubscriptionWindows(cursor) };
     expect(resetQuota(account, "composer-2").kind).toBe("exhausted");

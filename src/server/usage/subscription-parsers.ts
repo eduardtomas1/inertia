@@ -11,7 +11,7 @@ export function cursorSubscriptionWindows(raw: unknown): UsageWindow[] {
     planUsage: z.object({ totalPercentUsed: finite.nonnegative().optional(), autoPercentUsed: finite.nonnegative().optional(), apiPercentUsed: finite.nonnegative().optional() }).optional() }).parse(raw);
   const end = Number(value.billingCycleEnd);
   const resetsAt = end > 0 && Number.isFinite(end) && end < 8.64e15 ? new Date(end).toISOString() : null;
-  return ([ ["totalPercentUsed", "Overall"], ["autoPercentUsed", "Cursor Models"], ["apiPercentUsed", "Other Models"] ] as const)
+  return ([ ["totalPercentUsed", "Overall"], ["autoPercentUsed", "Cursor models"], ["apiPercentUsed", "Other models"] ] as const)
     .flatMap(([id, label]) => value.planUsage?.[id] === undefined ? [] : [{ id: `cursor:${id}`, label,
       remainingPercent: percent(value.planUsage[id]), resetsAt, windowMinutes: null }]);
 }

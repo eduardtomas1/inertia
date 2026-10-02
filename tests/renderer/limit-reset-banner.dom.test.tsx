@@ -174,11 +174,11 @@ describe("quota reset row inside the composer", () => {
   });
   it("reports a failed action as an alert without the diagnostic reference", async () => {
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result()).mockResolvedValueOnce(result())
-      .mockRejectedValueOnce(new Error("The reported limit changed. Refresh this chat before scheduling a resume. [incident:21feb702-c9bc-4896-a470-8cb97fd58d25]"));
+      .mockRejectedValueOnce(new Error("The reported limit changed. Check the new reset time and try again. [incident:21feb702-c9bc-4896-a470-8cb97fd58d25]"));
     render(banner(run));
     fireEvent.click(await screen.findByRole("button", { name: "Resume at reset" }));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/^The reported limit changed\. Refresh this chat before scheduling a resume\.$/u);
+    expect(alert).toHaveTextContent(/^The reported limit changed\. Check the new reset time and try again\.$/u);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

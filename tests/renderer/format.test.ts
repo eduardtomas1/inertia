@@ -20,6 +20,19 @@ describe("renderer time labels", () => {
     expect(INTERFACE_LOCALE).toBe("en");
   });
 
+  it("dates message times by the local calendar day outside UTC", () => {
+    const original = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const now = new Date("2026-07-22T12:00:00.000Z");
+      expect(formatMessageTime("2026-07-22T03:00:00.000Z", now)).toMatch(/^Jul 21, 8:00\sPM$/u);
+      expect(formatMessageTime("2026-07-22T08:00:00.000Z", now)).toMatch(/^1:00\sAM$/u);
+    } finally {
+      process.env.TZ = original;
+    }
+    expect(formatMessageTime("2026-07-22T03:00:00.000Z", new Date("2026-07-22T12:00:00.000Z"))).toMatch(/^3:00\sAM$/u);
+  });
+
   it("dates message times from earlier days and years", () => {
     const now = new Date("2026-07-22T12:00:00.000Z");
 

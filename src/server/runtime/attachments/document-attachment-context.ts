@@ -309,8 +309,52 @@ function checkExtractionPending(
   if (now() >= deadlineAt) throw new DocumentExtractionDeadlineError();
 }
 
+interface PdfCanvasAndContext {
+  canvas: { width: number; height: number } | null;
+  context: unknown;
+}
+
+class PdfNodeCanvasFactory {
+  create(width: number, height: number): PdfCanvasAndContext {
+    if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");
+    const canvas = (require("@napi-rs/canvas") as typeof import("@napi-rs/canvas"))
+      .createCanvas(width, height);
+    return { canvas, context: canvas.getContext("2d") };
+  }
+
+  reset(target: PdfCanvasAndContext, width: number, height: number): void {
+    if (!target.canvas) throw new Error("Canvas is not specified");
+    if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");
+    target.canvas.width = width;
+    target.canvas.height = height;
+  }
+
+  destroy(target: PdfCanvasAndContext): void {
+    if (!target.canvas) throw new Error("Canvas is not specified");
+    target.canvas.width = 0;
+    target.canvas.height = 0;
+    target.canvas = null;
+    target.context = null;
+  }
+}
+
+class PdfNodeFilterFactory {
+  addFilter(): string { return "none"; }
+  addHCMFilter(): string { return "none"; }
+  addAlphaFilter(): string { return "none"; }
+  addLuminosityFilter(): string { return "none"; }
+  addKnockoutFilter(): string { return "none"; }
+  addHighlightHCMFilter(): string { return "none"; }
+  addSelectionHCMFilter(): string { return "none"; }
+  addSelectionFilter(): string { return "none"; }
+  createSelectionStyle(): null { return null; }
+  destroy(): void {}
+}
+
 function pdfDocumentOptions(bytes: Uint8Array): Parameters<PdfTextModule["getDocument"]>[0] {
   return {
+    CanvasFactory: PdfNodeCanvasFactory,
+    FilterFactory: PdfNodeFilterFactory,
     data: new Uint8Array(bytes),
     disableFontFace: true,
     isImageDecoderSupported: false,

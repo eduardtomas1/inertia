@@ -214,7 +214,6 @@ describe("Background task cards", () => {
     screen.getByRole("button", { name: "Show more of the progress for Alpha" }).focus();
     view.rerender(surface({ ...props, subagents: [{ ...live, progress: "Short.", sequence: 2 }] }));
     expect(screen.queryByRole("button", { name: /^Show more/u })).toBeNull();
-    view.rerender(surface({ ...props, subagents: [{ ...live, progress: "Short.", toolUseCount: 2, sequence: 3 }] }));
     expect(document.activeElement).toBe(toggle("Alpha"));
   });
 

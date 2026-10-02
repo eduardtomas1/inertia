@@ -87,8 +87,10 @@ function ClampedText({
 }): React.JSX.Element {
   const id = useId();
   const textRef = useRef<HTMLParagraphElement>(null);
+  const toggleFocused = useRef(false);
   const [open, setOpen] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  const shown = overflowing || open;
   useLayoutEffect(() => {
     const element = textRef.current;
     if (!element || open) return;
@@ -99,6 +101,13 @@ function ClampedText({
     observer.observe(element);
     return () => observer.disconnect();
   }, [open, text]);
+  useLayoutEffect(() => {
+    if (shown || !toggleFocused.current) return;
+    toggleFocused.current = false;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    textRef.current?.closest("[data-focus-row]")
+      ?.querySelector<HTMLElement>('[data-focus-key="transcript"]')?.focus();
+  }, [shown]);
   return (
     <>
       <p
@@ -110,12 +119,19 @@ function ClampedText({
       >
         {text}
       </p>
-      {(overflowing || open) && (
+      {shown && (
         <button
           type="button"
           className="background-task-link"
           aria-expanded={open}
           aria-controls={id}
+          onFocus={() => { toggleFocused.current = true; }}
+          onBlur={(event) => {
+            const target = event.currentTarget;
+            queueMicrotask(() => {
+              if (target.isConnected) toggleFocused.current = false;
+            });
+          }}
           aria-label={`${open ? "Show less" : "Show more"} of ${label}`}
           onClick={() => setOpen((current) => !current)}
         >

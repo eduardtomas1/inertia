@@ -5,10 +5,10 @@
   "changedBudgets": {
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 853545,
-      "implementationBytes": 856882,
-      "deltaBytes": 3337,
+      "implementationBytes": 857010,
+      "deltaBytes": 3465,
       "previousBudget": 853557,
-      "budget": 856894
+      "budget": 857022
     },
     "detachedChatFirstLoadJavaScript": {
       "baselineBytes": 660072,
@@ -19,10 +19,10 @@
     },
     "coreJavaScript": {
       "baselineBytes": 2226412,
-      "implementationBytes": 2230475,
-      "deltaBytes": 4063,
+      "implementationBytes": 2230650,
+      "deltaBytes": 4238,
       "previousBudget": 2226486,
-      "budget": 2230549
+      "budget": 2230724
     }
   },
   "otherChangedClosures": {
@@ -38,8 +38,8 @@
     },
     "settingsJavaScript": {
       "baselineBytes": 68586,
-      "implementationBytes": 68655,
-      "deltaBytes": 69
+      "implementationBytes": 68657,
+      "deltaBytes": 71
     },
     "transcriptJavaScript": {
       "baselineBytes": 552926,
@@ -101,7 +101,7 @@
   },
   "implementationMeasurements": {
     "colorThemesCss": 12470,
-    "coreJavaScript": 2230475,
+    "coreJavaScript": 2230650,
     "deferredAttachmentPreviewJavaScript": 17666,
     "deferredAttachmentStorageSettingsJavaScript": 5277,
     "deferredBrowserEvidenceJavaScript": 3746,
@@ -141,14 +141,14 @@
     "entryCss": 354855,
     "entryJavaScript": 222475,
     "filesFirstLoadJavaScript": 106138,
-    "mainWorkbenchFirstLoadJavaScript": 856882,
+    "mainWorkbenchFirstLoadJavaScript": 857010,
     "mascotFirstLoadJavaScript": 11067,
     "mascotJavaScript": 11067,
     "mascotSettingsJavaScript": 6642,
     "morphiconsJavaScript": 15829,
     "morphingIconFeedbackJavaScript": 4392,
     "preMergeConfidenceJavaScript": 23040,
-    "settingsJavaScript": 68655,
+    "settingsJavaScript": 68657,
     "transcriptJavaScript": 552656
   }
 }

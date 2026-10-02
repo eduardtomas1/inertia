@@ -193,5 +193,39 @@
         "deltaBytes": 0
       }
     }
+  },
+  "mainIntegration": {
+    "baseline": "1113506e",
+    "method": "Node 22 production builds on macOS ARM64 of origin/main and of the branch merged with it. Main caps are kept; only exceeded ceilings rise, by the exact measured growth.",
+    "changedBudgets": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "baselineBytes": 857010,
+        "implementationBytes": 858262,
+        "deltaBytes": 1252,
+        "previousBudgetBytes": 857022,
+        "budgetBytes": 858274
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "baselineBytes": 662001,
+        "implementationBytes": 663060,
+        "deltaBytes": 1059,
+        "previousBudgetBytes": 662084,
+        "budgetBytes": 663143
+      },
+      "coreJavaScript": {
+        "baselineBytes": 2230650,
+        "implementationBytes": 2236463,
+        "deltaBytes": 5813,
+        "previousBudgetBytes": 2230724,
+        "budgetBytes": 2236537
+      }
+    },
+    "unchangedBudgets": {
+      "entryCss": {
+        "baselineBytes": 354855,
+        "implementationBytes": 354855,
+        "deltaBytes": 0
+      }
+    }
   }
 }

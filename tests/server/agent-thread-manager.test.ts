@@ -8,6 +8,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
+import { ConversationCreationService } from "../../src/server/runtime/conversation-creation-service";
 import { neutralizeUntrustedAgentText } from "../../src/server/runtime/untrusted-agent-text";
 import {
   ConversationContextRequestCoordinator,
@@ -133,7 +134,14 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
       return { id: `follow-up-${followUps}`, turnId: lease.turnId };
     },
   };
-  const creation = {
+  const creation = options.scratch ? new ConversationCreationService({
+    store,
+    providers: { resolveModelRoute: () => ({ providerId: "codex" }) } as never,
+    backendProfileController: { validateSelection: (selection: unknown) => selection } as never,
+    workspaceRuns: {} as never,
+    dataDirectory: root,
+    broadcastSnapshot: () => undefined,
+  }) : {
     create: async (payload: Parameters<RuntimeStore["createConversation"]>[2] & {
       projectId: string;
       title: string;
@@ -925,6 +933,26 @@ describe("AgentThreadManager", () => {
       expect(result).toMatchObject({ success: false });
       expect(result.text).toContain("A chat without a project cannot share its folder with another chat.");
       expect(toolCall.requestApproval).not.toHaveBeenCalled();
+      expect(store.shellSnapshot().conversations).toHaveLength(before);
+      expect(starts).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still refuses sharing a no-project chat's folder when the request reaches execution", async () => {
+    const { manager, source, sourceTurn, starts, store } = await runtime(undefined, { scratch: true });
+    try {
+      vi.spyOn(manager as unknown as { preflightMutation: () => Promise<void> }, "preflightMutation").mockResolvedValue(undefined);
+      const before = store.shellSnapshot().conversations.length;
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const toolCall = call("inertia_create_conversation", {
+        title: "Shared", prompt: "Work in the same folder", accessMode: "supervised", workspace: { kind: "reuse-current" },
+      });
+      const result = await bridge!.invoke(toolCall);
+      expect(toolCall.requestApproval).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ success: false });
+      expect(result.text).toContain("cannot reuse a branch or worktree");
       expect(store.shellSnapshot().conversations).toHaveLength(before);
       expect(starts).toEqual([]);
     } finally {

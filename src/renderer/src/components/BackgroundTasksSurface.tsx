@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Laptop, Trash2 } from "lucide-react";
 
 import type { AgentTurn, SubagentTrace, WorkspaceRun } from "@shared/contracts";
@@ -16,6 +16,7 @@ import {
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { canStopSubagentTrace } from "../utils/subagentDisclosure";
 import { useBackgroundTaskFeed, type BackgroundTasksLoader } from "../hooks/useBackgroundTaskFeed";
+import { removeLegacyDisclosurePreferences } from "../utils/legacyDisclosurePreferences";
 import { AgentCard, CommandCard } from "./BackgroundTaskCards";
 import "./WorkspaceSurfaces.css";
 import "./BackgroundTasksSurface.css";
@@ -38,6 +39,7 @@ export interface BackgroundTasksSurfaceProps {
 }
 
 const MAX_COMPACT_FINISHED = 20;
+let legacyPreferencesRemoved = false;
 
 function traceById(traces: readonly SubagentTrace[], id: string): SubagentTrace | undefined {
   return traces.find((trace) => trace.id === id);
@@ -157,6 +159,11 @@ export function BackgroundTasksSurface({
 }: BackgroundTasksSurfaceProps): React.JSX.Element {
   const surfaceId = useId();
   const focus = useFocusContinuity();
+  useEffect(() => {
+    if (legacyPreferencesRemoved) return;
+    legacyPreferencesRemoved = true;
+    removeLegacyDisclosurePreferences(() => window.localStorage);
+  }, []);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
   const [finishedOpen, setFinishedOpen] = useState(false);

@@ -125,7 +125,7 @@ export class LimitResetScheduler {
     }
     return plan;
   }
-  async get(conversationId: string, refresh = false): Promise<LimitResetResult> {
+  async get(conversationId: string): Promise<LimitResetResult> {
     this.store.conversation(conversationId);
     const plan = this.retireStalePlan(conversationId);
     if (plan && ["waiting", "dispatching"].includes(plan.state)) {
@@ -141,7 +141,7 @@ export class LimitResetScheduler {
         },
       };
     }
-    const offer = await this.offer(conversationId, refresh ? "explicit" : "automatic").catch(() => null);
+    const offer = await this.offer(conversationId, "automatic").catch(() => null);
     const latestPlan = this.store.limitResets.get(conversationId);
     return {
       kind: "conversation.limit-reset",

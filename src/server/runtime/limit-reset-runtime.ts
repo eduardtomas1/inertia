@@ -36,7 +36,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.limit-reset.get":
-        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: await scheduler.get(command.payload.conversationId, command.payload.refresh) });
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: await scheduler.get(command.payload.conversationId) });
         break;
       case "conversation.limit-reset.schedule":
         dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: await scheduler.schedule(command.payload) });

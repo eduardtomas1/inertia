@@ -14,6 +14,7 @@ import { providerUsageLimitsMigration } from "../../src/server/persistence/migra
 import { UsageLimitsRepository } from "../../src/server/persistence/usage-limits-repository";
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 import { UsageLimitsService } from "../../src/server/usage/limits-service";
+import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import type { NativeUsageReader } from "../../src/server/usage/native";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
@@ -392,9 +393,14 @@ describe("macOS Keychain access", () => {
   it("never reads the Keychain from the automatic chat refresh", async () => {
     expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null });
     expect(keychain).not.toHaveBeenCalled();
-    expect(await scheduler.get(conversationId, true)).toMatchObject({ offer: { failedTurnId, resetsAt: reset, canResume: false,
-      unavailableReason: expect.stringContaining("macOS Keychain") } });
+    await scheduler.snooze({ conversationId, failedTurnId, resetsAt: reset });
     expect(keychain).toHaveBeenCalledOnce();
+    expect(store.conversation(conversationId).snoozedUntil).toBe(reset);
+  });
+  it("accepts no client request for an explicit account read", () => {
+    const command = { type: "conversation.limit-reset.get", requestId: randomUUID(), payload: { conversationId } };
+    expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    expect(clientCommandSchema.safeParse({ ...command, payload: { conversationId, refresh: true } }).success).toBe(false);
   });
   it("never reads the Keychain from the scheduler", async () => {
     const route = queuedRouteIdentity(store.conversation(conversationId));

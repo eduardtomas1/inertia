@@ -40,6 +40,7 @@ import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import { providerImageRequestLimitError } from "../../provider/provider-image-read";
 import { pendingInteractionForConversation } from "../pending-interaction-registry";
 import {
   defineRuntimeCommandHandler,
@@ -267,6 +268,11 @@ export function createTurnInteractionCommandHandler(
               sourceAttachmentIds = resolvedAttachments.map(
                 ({ attachment }) => attachment.id,
               );
+              const imageLimit = providerImageRequestLimitError(
+                conversation.providerId,
+                resolvedAttachments.map(({ attachment }) => attachment),
+              );
+              if (imageLimit) throw new RuntimeRequestError(imageLimit);
             }
             attachments = resolvedAttachments.map(
               ({ attachment }) => attachment,
@@ -424,7 +430,7 @@ export function createTurnInteractionCommandHandler(
         if (dependencies.queuedMessage) {
           for (const attachment of dependencies.queuedMessage.attachments) {
             const preview = await awaitMessageSendPreparation(
-              dependencies.conversationAttachments.preview(attachment.id), preparationDeadlineAt,
+              dependencies.conversationAttachments.resolve(attachment.id), preparationDeadlineAt,
             );
             if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
             resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });
@@ -450,6 +456,13 @@ export function createTurnInteractionCommandHandler(
         const sourceAttachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );
+        const imageLimit = dependencies.enableProviders
+          ? providerImageRequestLimitError(conversation.providerId, sourceAttachments)
+          : null;
+        if (imageLimit) {
+          await dependencies.attachmentResolver?.relinquishAll(sourceAttachments.map(({ id }) => id));
+          throw new RuntimeRequestError(imageLimit);
+        }
         let attachments = sourceAttachments;
         const attachmentRetentionId = randomUUID();
         let attachmentRetentionStarted = false;

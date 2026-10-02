@@ -19,8 +19,8 @@ import {
   type ClaudeCompatibleBackendProfile,
 } from "../shared/claude-backend-profiles";
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
-  MAX_CHAT_ATTACHMENT_BYTES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_BYTES,
 } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
 import {
@@ -1112,13 +1112,13 @@ function parseRuntimeAttachmentResult(
     || attachment.name.length > 255
     || /[\0-\x1f\x7f]/u.test(attachment.name)
     || !runtimePath(attachment.path)
-    || !(CHAT_ATTACHMENT_MIME_TYPES as readonly unknown[]).includes(
+    || !(ACCEPTED_ATTACHMENT_MIME_TYPES as readonly unknown[]).includes(
       attachment.mimeType,
     )
     || typeof attachment.size !== "number"
     || !Number.isInteger(attachment.size)
     || attachment.size < 1
-    || attachment.size > MAX_CHAT_ATTACHMENT_BYTES
+    || attachment.size > MAX_ATTACHMENT_BYTES
     || typeof attachment.digest !== "string"
     || !/^[0-9a-f]{64}$/u.test(attachment.digest)
   ) return null;

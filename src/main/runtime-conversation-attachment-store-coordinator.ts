@@ -1,3 +1,4 @@
+import { basename, dirname } from "node:path";
 import type {
   ConversationAttachmentStoreOperation,
   ConversationAttachmentStoreAnyOperationRunner,
@@ -46,6 +47,7 @@ interface RuntimeConversationAttachmentStoreCoordinatorOptions {
   readonly retryUnconfirmedShutdown?: boolean;
   readonly runner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly authority?: ConversationAttachmentStoreAuthority;
+  readonly sourceRoot?: string;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
   readonly post: (
     record: RuntimeProcessRecord,
@@ -143,7 +145,11 @@ export class RuntimeConversationAttachmentStoreCoordinator {
       this.reply(record, event.requestId, publicFailure());
       return;
     }
-    if (!authorizedOperation(operation, this.options.authority)) {
+    const sourceAllowed = operation.operation !== "persist" || !operation.source
+      || (typeof operation.source.path === "string"
+        && basename(operation.source.path) === `${operation.id}.${operation.extension}`
+        && dirname(operation.source.path) === this.options.sourceRoot);
+    if (!sourceAllowed || !authorizedOperation(operation, this.options.authority)) {
       this.reply(record, event.requestId, publicFailure());
       return;
     }

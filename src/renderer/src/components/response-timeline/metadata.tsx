@@ -11,7 +11,7 @@ import type {
   AgentTurn,
   ChatMessage,
 } from "@shared/contracts";
-import { formatClockTime } from "../../lib/format";
+import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { useCopiedState } from "../../hooks/useCopiedState";
 import {
   formatElapsed,
@@ -221,7 +221,7 @@ export function TurnMetadata({
           <CopyAnswerButton content={terminalAnswer.content} ariaLabel="Copy final answer" />
         )}
         {showTimestamp && terminalAnswer && (
-          <time dateTime={terminalAnswer.createdAt}>{formatClockTime(terminalAnswer.createdAt)}</time>
+          <time dateTime={terminalAnswer.createdAt} title={formatFullDateTime(terminalAnswer.createdAt)}>{formatMessageTime(terminalAnswer.createdAt)}</time>
         )}
         <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>
         <span className="turn-duration">{presentation.durationLabel}</span>

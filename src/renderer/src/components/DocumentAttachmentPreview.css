@@ -1,0 +1,25 @@
+.text-attachment-preview-frame {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.text-attachment-preview-frame > .text-attachment-preview {
+  position: relative;
+  inset: auto;
+  min-height: 0;
+}
+
+.text-attachment-preview-notice {
+  min-width: 0;
+  margin: 0;
+  padding: 8px clamp(16px, 3vw, 30px);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-strong);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.4;
+}

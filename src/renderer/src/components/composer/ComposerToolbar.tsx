@@ -23,7 +23,7 @@ import type {
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
-import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
+import { MAX_ATTACHMENT_COUNT } from "@shared/attachments";
 import {
   modelSelectionUsesFastMode,
   routeSupportsNativeFastModeIdentity,
@@ -274,13 +274,13 @@ export function ComposerToolbar({
             onClick={() => void onChooseAttachments()}
             disabled={
               attachmentDisabled
-              || attachmentCount >= MAX_CHAT_ATTACHMENTS
+              || attachmentCount >= MAX_ATTACHMENT_COUNT
               || (running && imageInputUnavailableReason !== null)
             }
           >
             <Paperclip size={16} />
           </IconButton>
-          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_CHAT_ATTACHMENTS || imageInputUnavailableReason !== null} /></Suspense>
+          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_ATTACHMENT_COUNT || imageInputUnavailableReason !== null} /></Suspense>
         </div>
         <div
           className="composer-options"

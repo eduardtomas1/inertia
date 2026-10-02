@@ -1,3 +1,4 @@
+import { PASTED_TEXT_ATTACHMENT_BYTES } from "@shared/attachments";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
@@ -81,7 +82,7 @@ export interface ComposerInputZoneProps {
   onNavigatePromptHistory: (
     direction: ComposerPromptHistoryDirection,
   ) => boolean;
-  onImportAttachments: (files: File[]) => Promise<void>;
+  onImportAttachments: (files: File[]) => Promise<boolean>;
   onSubmit: () => Promise<void>;
   canQueue: boolean;
   onQueue: () => void;
@@ -186,6 +187,7 @@ export function ComposerInputZone({
   onOpenResume,
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
+  const pasteAsText = useRef(false);
   const currentDraft = useRef({ conversationId, message });
   currentDraft.current = { conversationId, message };
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
@@ -491,9 +493,29 @@ export function ComposerInputZone({
             if (event.clipboardData.files.length > 0) {
               event.preventDefault();
               void onImportAttachments([...event.clipboardData.files]);
+              return;
+            }
+            const text = event.clipboardData.getData("text/plain");
+            if (!running && !disabled && !attachmentsDisabled && !pasteAsText.current && text && (new TextEncoder().encode(text).byteLength >= PASTED_TEXT_ATTACHMENT_BYTES
+              || message.length - (event.currentTarget.selectionEnd - event.currentTarget.selectionStart) + text.length > MAX_CHAT_MESSAGE_CHARS)) {
+              event.preventDefault();
+              const start = event.currentTarget.selectionStart;
+              const end = event.currentTarget.selectionEnd;
+              const restorePaste = (): void => {
+                const current = currentDraft.current;
+                if (current.conversationId !== conversationId) return;
+                onMessageChange(current.message === message
+                  ? message.slice(0, start) + text + message.slice(end)
+                  : current.message + "\n" + text);
+              };
+              void onImportAttachments([new File([text], `pasted-text-${Date.now()}.txt`, { type: "text/plain" })])
+                .then((adopted) => { if (!adopted) restorePaste(); }, restorePaste);
             }
           }}
+          onKeyUp={() => { pasteAsText.current = false; }}
+          onBlur={() => { pasteAsText.current = false; }}
           onKeyDown={(event) => {
+            pasteAsText.current = event.shiftKey;
             if (skillOpen && handleComposerSuggestionKey(
               event,
               dismissSkills,

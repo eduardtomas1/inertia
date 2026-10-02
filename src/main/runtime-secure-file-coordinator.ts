@@ -58,6 +58,7 @@ interface RuntimeSecureFileCoordinatorOptions {
   readonly broker?: RuntimeSecureFileBroker;
   readonly conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
+  readonly conversationAttachmentSourceRoot?: string;
   readonly agentBrowserBroker?: RuntimeAgentBrowserBroker;
   readonly documentPreparationRunner?: DocumentPreparationRunner;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
@@ -90,6 +91,7 @@ export class RuntimeSecureFileCoordinator {
         retryUnconfirmedShutdown: options.retryUnconfirmedShutdown,
         runner: options.conversationAttachmentStoreRunner,
         authority: options.conversationAttachmentStoreAuthority,
+        sourceRoot: options.conversationAttachmentSourceRoot,
         accepts: options.accepts,
         post: options.post,
       });

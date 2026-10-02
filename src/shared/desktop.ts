@@ -175,6 +175,7 @@ export function parseAttachmentPickerMode(
 }
 
 export interface AttachmentImport {
+  stream?: { size: number; offset: number; final: boolean };
   name: string;
   /** Renderer-declared only; the privileged boundary verifies it against bytes and extension. */
   mimeType: string;

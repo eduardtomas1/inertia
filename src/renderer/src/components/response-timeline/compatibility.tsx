@@ -6,7 +6,7 @@ import {
 import clsx from "clsx";
 import { MessageOrigin } from "./MessageOrigin";
 import { useMemo, useState } from "react";
-import { formatClockTime } from "../../lib/format";
+import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import {
   estimateTimelineItemRenderWeight,
   TIMELINE_VIRTUALIZATION_MIN_ROWS,
@@ -92,7 +92,7 @@ function CompatibilityDisclosure({
             ))}
             {compatibility.messages.map((message) => (
               <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1}>
-                <div className="message-meta"><span>{message.role === "assistant" ? "Agent" : message.role === "user" ? "You" : "System"}</span><MessageOrigin message={message} />{props.showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
+                <div className="message-meta"><span>{message.role === "assistant" ? "Agent" : message.role === "user" ? "You" : "System"}</span><MessageOrigin message={message} />{props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}</div>
                 {message.role === "assistant"
                   ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />
                   : <div className="message-body">{message.content}</div>}

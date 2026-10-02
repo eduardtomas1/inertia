@@ -1027,6 +1027,7 @@ async function bootstrap(): Promise<void> {
     runtimeRecoveryBlocked,
     conversationAttachmentStoreRunner,
     documentPreparationRunner,
+    conversationAttachmentSourceRoot: attachmentDirectory(),
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),
     attachmentBroker: {

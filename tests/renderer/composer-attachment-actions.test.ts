@@ -42,23 +42,19 @@ function actions(overrides: { running?: boolean; imageInputUnavailableReason?: s
 }
 
 describe("composer attachment imports", () => {
-  it("names unsupported files and still imports the supported ones", async () => {
+  it("imports opaque files alongside images and source files", async () => {
     const { created, errors, onImportAttachments } = actions();
     await created.importAttachments([file("notes.docx"), file("shot.png"), file("logo.svg"), file("config.yaml")]);
     expect(onImportAttachments).toHaveBeenCalledOnce();
-    expect(onImportAttachments.mock.calls[0]![0].map((entry) => entry.name)).toEqual(["shot.png", "config.yaml"]);
-    expect(errors.at(-1)).toBe(
-      "Unsupported file type: notes.docx, logo.svg. "
-      + "Supported types: PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CSV, JSON, XLSX, XLS "
-      + "and plain-text source, markup or configuration files.",
-    );
+    expect(onImportAttachments.mock.calls[0]![0].map((entry) => entry.name)).toEqual(["notes.docx", "shot.png", "logo.svg", "config.yaml"]);
+    expect(errors.filter(Boolean)).toEqual([]);
   });
 
-  it("does not start an import when every file is unsupported", async () => {
+  it("stores formats without an image decoder as opaque files", async () => {
     const { created, errors, onImportAttachments } = actions();
     await created.importAttachments([file("a.heic"), file("b.tiff"), file("c.bmp"), file("d.avif"), file("e.ico")]);
-    expect(onImportAttachments).not.toHaveBeenCalled();
-    expect(errors.at(-1)).toContain("Unsupported file type: a.heic, b.tiff, c.bmp and 2 more.");
+    expect(onImportAttachments).toHaveBeenCalledOnce();
+    expect(errors.filter(Boolean)).toEqual([]);
   });
 
   it("explains that documents cannot follow up while the agent is working", async () => {

@@ -5,6 +5,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
+import type { createAgentHarnessEmitter } from "./agent-harness";
 import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,
@@ -50,6 +51,25 @@ export function claudeModels(
         : null,
     };
   });
+}
+
+export async function emitClaudeModelMetadata(
+  query: Query,
+  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), 2_000);
+      timer.unref();
+    });
+    const models = await Promise.race([query.supportedModels().catch(() => undefined), timeout]);
+    if (!models) return;
+    const mapped = claudeModels(models);
+    if (mapped.length > 0) emit({ type: "metadata", metadata: { models: mapped }, source: "provider", complete: true });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {

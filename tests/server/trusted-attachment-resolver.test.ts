@@ -97,6 +97,17 @@ describe("trusted runtime attachment resolution", () => {
     }]);
   });
 
+  it("resolves an opaque file whose name has a preview type", async () => {
+    const { root, trusted } = await fixture();
+    const path = join(root, `${id}.bin`);
+    await writeFile(path, png);
+    const opaque = { ...trusted, name: "build.log", mimeType: "application/octet-stream" as const, path: await realpath(path) };
+    const resolver = new TrustedAttachmentResolver(root, broker(opaque));
+    await expect(resolver.resolveAll([opaque], handoffId)).resolves.toEqual([{
+      id, name: "build.log", path: opaque.path, mimeType: "application/octet-stream", size: png.length,
+    }]);
+  });
+
   it("rejects a broker path outside the trusted root", async () => {
     const { root, trusted } = await fixture();
     const outside = join(root, "..", "outside.png");

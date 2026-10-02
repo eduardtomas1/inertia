@@ -1,10 +1,13 @@
+import { randomFillSync } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import * as XLSX from "xlsx";
 import { pngChunk, pngWithoutPalette, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
+import { privacySafeAttachmentImportError } from "../../src/main/attachment-selection-import";
 import {
+  CREDENTIAL_ATTACHMENT_ERROR,
   attachmentPickerConfiguration,
   validateAttachmentImport,
   validateSelectedAttachmentCount,
@@ -14,9 +17,9 @@ import {
   validateAttachmentPickerName,
 } from "../../src/main/attachment-import";
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
 } from "../../src/shared/attachments";
 
@@ -203,17 +206,11 @@ describe("privileged attachment import validation", () => {
       .not.toThrow();
     const all = attachmentPickerConfiguration("all");
     expect(all).toMatchObject({
-      title: "Attach images, documents, spreadsheets, or text files",
-      filterName: "Images, documents, spreadsheets, and text files",
+      title: "Attach files",
+      filterName: "All files",
     });
-    // The picker filter follows the live import allowlist: every pinned name
-    // plus the plain-text set, so a file the import accepts is selectable.
-    expect(all.extensions.slice(0, 13)).toEqual([
-      "png", "jpg", "jpeg", "webp", "gif",
-      "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
-    ]);
+    expect(all.extensions).toEqual(["*"]);
     for (const extension of ["ts", "py", "yaml", "toml", "sql", "log"]) {
-      expect(all.extensions, extension).toContain(extension);
       expect(attachmentPickerConfiguration("images").extensions, extension).not.toContain(extension);
       expect(() => validateAttachmentPickerName("images", `file.${extension}`))
         .toThrow("Follow-up attachments must be images.");
@@ -224,9 +221,9 @@ describe("privileged attachment import validation", () => {
     expect(new Set(all.extensions).size).toBe(all.extensions.length);
   });
   it("rejects an oversized selection instead of silently truncating it", () => {
-    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))
-      .toThrow(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
-    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS))
+    expect(() => validateSelectedAttachmentCount(MAX_ATTACHMENT_COUNT + 1))
+      .toThrow(`Select at most ${MAX_ATTACHMENT_COUNT} attachments.`);
+    expect(() => validateSelectedAttachmentCount(MAX_ATTACHMENT_COUNT))
       .not.toThrow();
   });
 
@@ -237,18 +234,18 @@ describe("privileged attachment import validation", () => {
       isSymbolicLink: true,
     }])).toThrow(/safe regular file/u);
     expect(() => validateSelectedAttachmentStats([{
-      size: MAX_CHAT_ATTACHMENT_BYTES + 1,
+      size: MAX_ATTACHMENT_BYTES + 1,
       isFile: true,
       isSymbolicLink: false,
-    }])).toThrow(/10 MB file limit/u);
+    }])).toThrow(/50 MiB file limit/u);
     expect(() => validateSelectedAttachmentStats([
       {
-        size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+        size: MAX_ATTACHMENT_TOTAL_BYTES / 2,
         isFile: true,
         isSymbolicLink: false,
       },
       {
-        size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+        size: MAX_ATTACHMENT_TOTAL_BYTES / 2,
         isFile: true,
         isSymbolicLink: false,
       },
@@ -257,7 +254,7 @@ describe("privileged attachment import validation", () => {
         isFile: true,
         isSymbolicLink: false,
       },
-    ])).toThrow(/20 MB turn limit/u);
+    ])).toThrow(/50 MiB file limit/u);
     expect(() => validateSelectedAttachmentStats([{
       size: 128,
       isFile: true,
@@ -491,6 +488,32 @@ describe("privileged attachment import validation", () => {
     })).toMatchObject({ bytes, size: bytes.length, mimeType: "image/png" });
   });
 
+  it("accepts a large PNG whose encoder wrote its data in more than 4,096 chunks", async () => {
+    const canvas = createCanvas(96, 96);
+    const context = canvas.getContext("2d");
+    const pixels = context.createImageData(96, 96);
+    randomFillSync(pixels.data);
+    context.putImageData(pixels, 0, 0);
+    const source = canvas.encodeSync("png");
+    const idatOffset = source.indexOf(Buffer.from("IDAT")) - 4;
+    const data: Buffer[] = [];
+    for (let offset = idatOffset; source.toString("ascii", offset + 4, offset + 8) === "IDAT";) {
+      const length = source.readUInt32BE(offset);
+      data.push(source.subarray(offset + 8, offset + 8 + length));
+      offset += 12 + length;
+    }
+    const idatData = Buffer.concat(data);
+    const pieceBytes = Math.ceil(idatData.length / 5_000);
+    const pieces: Buffer[] = [];
+    for (let offset = 0; offset < idatData.length; offset += pieceBytes) {
+      pieces.push(pngChunk("IDAT", idatData.subarray(offset, offset + pieceBytes)));
+    }
+    expect(pieces.length).toBeGreaterThan(4_096);
+    const bytes = Buffer.concat([source.subarray(0, idatOffset), ...pieces, pngChunk("IEND")]);
+    await expect(validateAttachmentImport({ name: "large.png", mimeType: "image/png", data: bytes }))
+      .resolves.toMatchObject({ mimeType: "image/png", size: bytes.length });
+  });
+
   it("still rejects empty, non-contiguous, and excessive PNG data chunks", async () => {
     const headerEnd = 8 + 12 + png.readUInt32BE(8);
     const header = png.subarray(0, headerEnd);
@@ -503,7 +526,7 @@ describe("privileged attachment import validation", () => {
     for (const data of [
       Buffer.concat([header, empty, end]),
       Buffer.concat([header, validData, interrupted, empty, end]),
-      Buffer.concat([header, ...Array<Buffer>(4_096).fill(empty), validData, end]),
+      Buffer.concat([header, ...Array<Buffer>(8_192).fill(empty), validData, end]),
     ]) {
       await expect(validateAttachmentImport({
         name: "unsafe.png", mimeType: "image/png", data,
@@ -585,11 +608,27 @@ describe("privileged attachment import validation", () => {
 
   it.each([
     { name: "script.svg", mimeType: "image/svg+xml", data: Buffer.from("<svg/>") },
+    { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
+    { name: "id_rsa.pub", mimeType: "", data: Buffer.from("ssh-ed25519 AAAA\n") },
+  ])("stores unknown formats as opaque files: $name", async (candidate) => {
+    await expect(validateAttachmentImport(candidate)).resolves.toMatchObject({ mimeType: "application/octet-stream", extension: "bin" });
+  });
+
+  it.each([
     { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
+    { name: ".env", mimeType: "", data: Buffer.from("TOKEN=safe\n") },
     { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
+    { name: "ID.KEY", mimeType: "", data: Buffer.from("-----BEGIN-----\n") },
+  ])("refuses credential and key files by name without naming them: $name", async (candidate) => {
+    const refusal = validateAttachmentImport(candidate);
+    await expect(refusal).rejects.toThrow(CREDENTIAL_ATTACHMENT_ERROR);
+    expect(privacySafeAttachmentImportError(await refusal.catch((error: unknown) => error)).message)
+      .toBe(CREDENTIAL_ATTACHMENT_ERROR);
+  });
+
+  it.each([
     { name: "config.yaml", mimeType: "application/pdf", data: Buffer.from("safe: true\n") },
     { name: "binary.yaml", mimeType: "application/x-yaml", data: Buffer.from([0x73, 0x00, 0x61]) },
-    { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
     { name: "preview.png", mimeType: "application/pdf", data: png },
     { name: "notes.pdf", mimeType: "application/pdf", data: png },
     { name: "notes.pdf", mimeType: "application/pdf", data: Buffer.from("%PDF-1.7\n") },
@@ -614,7 +653,7 @@ describe("privileged attachment import validation", () => {
     {
       name: "large.png",
       mimeType: "image/png",
-      data: Buffer.alloc(MAX_CHAT_ATTACHMENT_BYTES + 1),
+      data: Buffer.alloc(MAX_ATTACHMENT_BYTES + 1),
     },
   ])("rejects malformed or unsupported imports %#", async (candidate) => {
     await expect(validateAttachmentImport(candidate)).rejects.toThrow();

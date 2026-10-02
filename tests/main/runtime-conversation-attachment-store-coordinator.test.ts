@@ -89,6 +89,38 @@ describe("runtime conversation attachment store coordinator", () => {
     await expect(coordinator.shutdown()).resolves.toBe(true);
   });
 
+  it("rejects a file-copy source outside main-owned attachment roots", () => {
+    const runner = vi.fn();
+    const post = vi.fn();
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({ runner: runner as never, authority, sourceRoot: "/private/uploads", accepts: () => true, post });
+    coordinator.handle(peer(), request(crypto.randomUUID(), encodeConversationAttachmentStoreOperation({
+      operation: "persist", root: authority.root, rootDev: authority.dev, rootIno: authority.ino, rootUid: authority.uid,
+      id: operation.name, stagingName: `.pending-${operation.name}`, extension: "txt", bytes: new Uint8Array(),
+      metadata: "{}", stallBeforePublishMs: 0,
+      source: { path: `/private/foreign/${operation.name}.txt`, digest: "a".repeat(64) },
+    })));
+    expect(runner).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ok: false }));
+  });
+
+  it.each([
+    { label: "the upload session folder", folder: "/private/uploads", accepted: true },
+    { label: "the record's own store folder", folder: `${authority.root}/${operation.name}`, accepted: false },
+    { label: "the store root", folder: authority.root, accepted: false },
+  ])("accepts a file-copy source only from $label when accepted is $accepted", ({ folder, accepted }) => {
+    const runner = vi.fn(() => ({ result: new Promise(() => undefined), stopped: new Promise(() => undefined) }));
+    const post = vi.fn();
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({ runner: runner as never, authority, sourceRoot: "/private/uploads", accepts: () => true, post });
+    coordinator.handle(peer(), request(crypto.randomUUID(), encodeConversationAttachmentStoreOperation({
+      operation: "persist", root: authority.root, rootDev: authority.dev, rootIno: authority.ino, rootUid: authority.uid,
+      id: operation.name, stagingName: `.pending-${operation.name}`, extension: "txt", bytes: new Uint8Array(),
+      metadata: "{}", stallBeforePublishMs: 0,
+      source: { path: `${folder}/${operation.name}.txt`, digest: "a".repeat(64) },
+    })));
+    expect(runner).toHaveBeenCalledTimes(accepted ? 1 : 0);
+    if (!accepted) expect(post).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ok: false }));
+  });
+
   it("does not retain a generation state when runner startup throws", async () => {
     const record = peer();
     const post = vi.fn();

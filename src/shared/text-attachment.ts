@@ -3,7 +3,7 @@ import { MAX_TEXT_ATTACHMENT_BYTES } from "./attachments";
 export const TEXT_ATTACHMENT_CONTENT_ERROR =
   "Text attachments must contain readable UTF-8 or BOM-marked UTF-16 text, without binary data or terminal control commands. Convert the file to UTF-8 and try again.";
 export const TEXT_ATTACHMENT_SIZE_ERROR =
-  "Text attachments exceed the 2 MB text limit. Attach a smaller excerpt.";
+  "Text attachments exceed the 50 MiB text limit. Attach a smaller excerpt.";
 export const UNSUPPORTED_ATTACHMENT_TYPE_ERROR =
   "Unsupported attachment type. Attach images, PDF, Excel, or supported text/source/configuration files. Extract archives and convert other binary documents first.";
 export const ATTACHMENT_MIME_MISMATCH_ERROR =

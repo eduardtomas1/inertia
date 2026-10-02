@@ -18,7 +18,7 @@ import {
 
 const STORE_OPERATION_TIMEOUT_MS = 30_000;
 const STORE_OPERATION_KILL_GRACE_MS = 3_000;
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const MAX_METADATA_BYTES = 4 * 1024;
 const MAX_ACTIVE_OPERATIONS = 4;
 const MAX_PENDING_OPERATIONS = 64;
@@ -64,8 +64,7 @@ function parseReadReceipt(value: unknown): ConversationAttachmentStoreReadReceip
   ) return null;
   const bytes = Buffer.from(receipt.bytesBase64, "base64");
   if (
-    bytes.length < 1
-    || bytes.length > MAX_ATTACHMENT_BYTES
+    bytes.length > MAX_ATTACHMENT_BYTES
     || bytes.toString("base64") !== receipt.bytesBase64
   ) return null;
   return {

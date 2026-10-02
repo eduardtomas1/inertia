@@ -11,6 +11,14 @@ import type { NativeUsageReader } from "./native";
 import type { NativeUsageAccount } from "./subscription-io";
 
 type AccountRoute = { source: UsageSource; auth: Awaited<ReturnType<CliproxyUsageClient["accounts"]>>[number] };
+const CHAT_ACCOUNT_LIMIT = 32;
+const MODEL_INDEPENDENT_ACCOUNTS = new Set(["codex", "claude", "cursor"]);
+function staleProjection(account: NativeUsageAccount, now: number): { status?: "stale"; canReset?: false } {
+  if (account.status !== "ready") return {};
+  const old = now - Date.parse(account.updatedAt ?? "") > 180_000;
+  const reset = account.windows.some((window) => window.resetsAt && Date.parse(window.resetsAt) <= now);
+  return old || reset ? { status: "stale", canReset: false } : {};
+}
 export interface UsageLimitsDependencies {
   repository: UsageLimitsRepository;
   credentials?: BackendCredentialBroker;
@@ -23,11 +31,12 @@ export interface UsageLimitsDependencies {
 }
 export class UsageLimitsService {
   private accounts: NativeUsageAccount[] = [];
-  private nativeModels = new Map<string, string>();
+  private chatAccounts = new Map<string, NativeUsageAccount>();
+  private chatReads = new Map<string, Promise<NativeUsageAccount | null>>();
   private routes = new Map<string, AccountRoute>();
   private sourceErrors = new Map<string, string>();
   private checkedAt: string | null = null;
-  private refreshInFlight: Promise<UsageLimitsSnapshot> | null = null;
+  private refreshInFlight: { promise: Promise<UsageLimitsSnapshot>; interactive: boolean } | null = null;
   private operation: Promise<unknown> = Promise.resolve();
   private readonly hub: CliproxyUsageClient;
   constructor(private readonly dependencies: UsageLimitsDependencies) { this.hub = dependencies.hub ?? new CliproxyUsageClient(); }
@@ -39,13 +48,13 @@ export class UsageLimitsService {
         const publicAccount = { ...account };
         delete publicAccount.credentialFingerprint;
         delete publicAccount.keychain;
+        delete publicAccount.resumeUnavailable;
         const pending = account.identityKey ? this.dependencies.repository.pending(account.identityKey) : null;
         const incompatible = pending && pending.confirmation.creditId === null && account.id !== "native:codex";
         return { ...publicAccount,
         pendingReset: Boolean(pending && !incompatible),
         ...(incompatible ? { canReset: false, detail: "A server-selected reset is pending on this computer. Check it through the original native Codex connection." } : {}),
-        ...(account.status === "ready" && (now - Date.parse(account.updatedAt ?? "") > 180000 || account.windows.some((window) => window.resetsAt && Date.parse(window.resetsAt) <= now))
-          ? { status: "stale" as const, canReset: false } : {}),
+        ...staleProjection(account, now),
       }; }),
     };
   }
@@ -54,11 +63,16 @@ export class UsageLimitsService {
     this.operation = next.catch(() => undefined); return next;
   }
   refresh(force = false, interactive = true): Promise<UsageLimitsSnapshot> {
-    if (this.refreshInFlight) return this.refreshInFlight;
-    if (!force && this.checkedAt && Date.now() - Date.parse(this.checkedAt) < 60000) return Promise.resolve(this.snapshot());
+    const running = this.refreshInFlight;
+    if (running && (running.interactive || !interactive)) return running.promise;
+    if (!running && !force && this.checkedAt && Date.now() - Date.parse(this.checkedAt) < 60000) {
+      return Promise.resolve(this.snapshot());
+    }
     const operation = this.serial(() => this.read(interactive));
-    this.refreshInFlight = operation;
-    void operation.finally(() => { this.refreshInFlight = null; }).catch(() => undefined);
+    this.refreshInFlight = { promise: operation, interactive };
+    void operation.finally(() => {
+      if (this.refreshInFlight?.promise === operation) this.refreshInFlight = null;
+    }).catch(() => undefined);
     return operation;
   }
   async saveSource(input: UsageSource): Promise<UsageLimitsSnapshot> {
@@ -87,24 +101,40 @@ export class UsageLimitsService {
     });
   }
   async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string, interactive = false): Promise<NativeUsageAccount | null> {
-    const id = `native:${providerId}`;
-    const scope = JSON.stringify([model ?? null, cwd ?? null]);
-    const cached = this.snapshot().accounts.find((account) => account.id === id);
-    if (!force && this.nativeModels.get(id) === scope && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) {
-      return { ...this.accounts.find((account) => account.id === id), ...cached };
+    const scope = JSON.stringify([providerId, model ?? null, cwd ?? null]);
+    const cached = this.chatAccounts.get(scope);
+    if (!force && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) {
+      return { ...cached, ...staleProjection(cached, Date.now()) };
     }
-    return this.serial(async () => {
+    const key = `${scope}:${interactive}`;
+    const running = this.chatReads.get(key);
+    if (running) return running;
+    const read = this.serial(async () => {
       const info = this.dependencies.providers().find((provider) => provider.id === providerId);
       if (!info || !this.dependencies.enabled) return null;
       const account = await this.dependencies.native.read(info, model, cwd, interactive).catch(() => null);
-      if (!account || account.keychain === "deferred") return account;
-      this.accounts = [...this.accounts.filter((entry) => entry.id !== id), account];
-      this.nativeModels.set(id, scope);
+      if (account && account.keychain !== "deferred") this.rememberChatAccount(scope, account);
       return account;
+    }).finally(() => {
+      if (this.chatReads.get(key) === read) this.chatReads.delete(key);
     });
+    this.chatReads.set(key, read);
+    return read;
+  }
+  cachedNativeAccount(providerId: ProviderInfo["id"], model?: string, cwd?: string): NativeUsageAccount | null {
+    const chat = this.chatAccounts.get(JSON.stringify([providerId, model ?? null, cwd ?? null]));
+    const limits = MODEL_INDEPENDENT_ACCOUNTS.has(providerId)
+      ? this.accounts.find((account) => account.id === `native:${providerId}`) : undefined;
+    const account = [chat, limits].filter((entry) => entry !== undefined)
+      .sort((left, right) => Date.parse(right.checkedAt ?? "") - Date.parse(left.checkedAt ?? ""))[0];
+    return account ? { ...account, ...staleProjection(account, Date.now()) } : null;
+  }
+  private rememberChatAccount(scope: string, account: NativeUsageAccount): void {
+    this.chatAccounts.delete(scope);
+    this.chatAccounts.set(scope, account);
+    if (this.chatAccounts.size > CHAT_ACCOUNT_LIMIT) this.chatAccounts.delete(this.chatAccounts.keys().next().value!);
   }
   private async read(interactive: boolean): Promise<UsageLimitsSnapshot> {
-    this.nativeModels.clear();
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
     const next: NativeUsageAccount[] = [];
     this.routes.clear(); this.sourceErrors.clear();

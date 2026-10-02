@@ -5,7 +5,11 @@ import { createHmac } from "node:crypto";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 
-export type NativeUsageAccount = UsageAccount & { credentialFingerprint?: string; keychain?: "deferred" | "read" };
+export type NativeUsageAccount = UsageAccount & {
+  credentialFingerprint?: string;
+  keychain?: "deferred" | "read";
+  resumeUnavailable?: string;
+};
 
 const MAX_BYTES = 256 * 1024;
 export async function readSubscriptionFile(path: string): Promise<string | null> {

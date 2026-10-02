@@ -41,7 +41,7 @@ describe("privileged usage limits", () => {
     expect(await f.service.nativeAccount("codex", false, "model", "/chat"))
       .toMatchObject({ credentialFingerprint: account.credentialFingerprint, status: "stale", canReset: false });
     expect(f.read).toHaveBeenCalledOnce();
-    expect(f.service.snapshot().accounts[0]).not.toHaveProperty("credentialFingerprint");
+    expect(f.service.snapshot().accounts).toEqual([]);
   });
   it("reads Keychain-backed accounts only for explicit Limits refreshes and keeps the last explicit result", async () => {
     const f = setup();
@@ -59,6 +59,27 @@ describe("privileged usage limits", () => {
     expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toMatchObject({ keychain: "deferred" });
     expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
     expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
+  });
+  it("keeps chat-scoped reads out of the Limits page accounts", async () => {
+    const f = setup();
+    const ready = usageAccount();
+    f.read.mockImplementation(async (_info, model) => model ? { ...ready, status: "unsupported", windows: [], detail: "Other model." } : ready);
+    expect((await f.service.refresh(true)).accounts[0]).toMatchObject({ status: "ready" });
+    expect(await f.service.nativeAccount("codex", false, "another-model", "/chat")).toMatchObject({ status: "unsupported" });
+    expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: ready.windows });
+    expect(await f.service.nativeAccount("codex", false, "another-model", "/chat")).toMatchObject({ status: "unsupported" });
+    expect(f.read).toHaveBeenCalledTimes(2);
+  });
+  it("runs an explicit refresh pressed during a background refresh as its own explicit read", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    f.read.mockImplementationOnce(async () => { await gate; return usageAccount(); });
+    const background = f.service.refresh(true, false);
+    const explicit = f.service.refresh(true, true);
+    release();
+    await Promise.all([background, explicit]);
+    expect(f.read.mock.calls.map((call) => call[3])).toEqual([false, true]);
   });
   it("upgrades exact schema 73 transactionally without rewriting released migration records", () => {
     const db = new Database(":memory:"); databases.push(db); migrateRuntimeDatabase(db, 73);

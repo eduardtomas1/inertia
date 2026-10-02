@@ -65,6 +65,7 @@ import {
 import { selectAcpAgentAuthMethod } from "./acp-auth";
 import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import { AcpPromptFrames } from "./acp-prompt-frames";
 import {
   cursorQuestions,
   cursorTaskSubagentEvent,
@@ -262,6 +263,9 @@ function startCursorRun(
 
   const ownsActivePrompt = (): boolean =>
     Boolean(sessionId) && sessionReady && promptInFlight && !cancelRequested;
+  const promptFrames = new AcpPromptFrames();
+  const ownsPromptFrame = (params: unknown): boolean =>
+    Boolean(sessionId) && sessionReady && !cancelRequested && promptFrames.owns(params);
 
   const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
@@ -408,7 +412,7 @@ function startCursorRun(
       return { outcome: { outcome: decision.outcome.optionId === "accept-plan" ? "accepted" : "rejected" } };
     })
     .onNotification("cursor/update_todos", (value) => value, ({ params: rawParams }) => {
-      if (!ownsActivePrompt() || !sessionId) return;
+      if (!ownsPromptFrame(rawParams) || !sessionId) return;
       const todoSessionId = sessionId;
       handleCursorProviderEvent(() => {
         const params = parseCursorTodosRequest(redactHostMcpPayload(rawParams));
@@ -416,7 +420,7 @@ function startCursorRun(
       }, "Cursor ACP sent an invalid todo update.");
     })
     .onNotification("cursor/task", (value) => value, ({ params: rawParams }) => {
-      if (!ownsActivePrompt()) return;
+      if (!ownsPromptFrame(rawParams)) return;
       handleCursorProviderEvent(() => {
         const params = parseCursorTaskNotification(
           redactHostMcpPayload(rawParams),
@@ -430,7 +434,7 @@ function startCursorRun(
       "cursor/generate_image",
       (value) => value,
       ({ params: rawParams }) => {
-        if (!ownsActivePrompt()) return;
+        if (!ownsPromptFrame(rawParams)) return;
         handleCursorProviderEvent(() => {
           const params = parseCursorGenerateImageNotification(
             redactHostMcpPayload(rawParams),
@@ -487,10 +491,10 @@ function startCursorRun(
     (frame) => validateCursorVendorFrame(frame, ownsActivePrompt()),
   );
   child.stdout.pipe(wireGuard);
-  const stream = acp.ndJsonStream(
+  const stream = promptFrames.wrap(acp.ndJsonStream(
     Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
     Readable.toWeb(wireGuard) as ReadableStream<Uint8Array>,
-  );
+  ));
   const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
     child,
     "Cursor ACP process tree",

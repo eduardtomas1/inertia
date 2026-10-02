@@ -3,9 +3,9 @@ import { deleteCheckpoints } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import { startTestRuntime } from "../support/test-runtime";
@@ -42,7 +42,7 @@ async function startScratchRuntime(prefix: string) {
     await runtime.close();
     rmSync(root, { recursive: true, force: true });
   };
-  return { root, client, request, mutate, close };
+  return { root, runtime, client, request, mutate, close };
 }
 
 it("creates a managed chat through the runtime boundary and only lists its own files", async () => {
@@ -93,6 +93,32 @@ it("refuses project management commands that would remove, rename or duplicate t
     expect(latest.snapshot.conversations.map(({ id }) => id)).toContain(conversationId);
     expect(latest.snapshot.projects.filter(({ name }) => name === "Duplicate")).toEqual([]);
     expect(latest.snapshot.projects.find(({ id }) => id === projectId)).toMatchObject({ name: "No project", workspaceKind: "scratch" });
+  } finally {
+    await close();
+  }
+});
+
+it("opens or reveals only the chosen chat's own folder for chats without a project", async () => {
+  const { runtime, client, request, close } = await startScratchRuntime("inertia-scratch-open-");
+  try {
+    const created = await request({ type: "project.ensure-scratch", payload: {} });
+    if (created.result.kind !== "project.created") throw new Error("Missing project");
+    const projectId = created.result.projectId;
+    const chats = [];
+    for (const title of ["Chat A", "Chat B"]) {
+      const chat = await request({ type: "conversation.create", payload: { projectId, title, activate: false } });
+      if (chat.result.kind !== "conversation.created") throw new Error("Missing chat");
+      const conversationId = chat.result.conversationId;
+      const snapshot = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && event.snapshot.conversations.some(({ id }) => id === conversationId));
+      chats.push(snapshot.snapshot.conversations.find(({ id }) => id === conversationId)!);
+    }
+    const [a, b] = chats as [typeof chats[number], typeof chats[number]];
+    writeFileSync(join(b.worktreePath!, "secret.txt"), "b only");
+    await expect(runtime.resolveProjectPath({ projectId, relativePath: ".", action: "reveal" })).rejects.toThrow("Choose a chat");
+    await expect(runtime.resolveProjectPath({ projectId, relativePath: `${basename(b.worktreePath!)}/secret.txt`, action: "open-externally" })).rejects.toThrow("Choose a chat");
+    await expect(runtime.resolveProjectPath({ projectId, conversationId: a.id, relativePath: `../${basename(b.worktreePath!)}/secret.txt`, action: "open-externally" })).rejects.toThrow();
+    await expect(runtime.resolveProjectPath({ projectId, conversationId: b.id, relativePath: "secret.txt", action: "open-externally" }))
+      .resolves.toBe(join(realpathSync(b.worktreePath!), "secret.txt"));
   } finally {
     await close();
   }

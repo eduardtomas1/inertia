@@ -137,14 +137,25 @@ export class ProjectRepository {
     this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
     const activeProjectId = state?.active_project_id ?? null;
     if (activeProjectId !== null && activeProjectId !== projectId) return;
-    const next = this.context.database.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
-    if (next) this.select(next.id);
+    this.selectRegularProject();
   }
 
   select(projectId: string): void {
-    this.context.requireProject(projectId);
+    const project = this.context.requireProject(projectId);
     const conversation = this.context.database.prepare(`SELECT id FROM conversations WHERE project_id = ? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1`).get(projectId) as { id: string } | undefined;
+    if (!conversation && project.workspace_kind === "scratch") {
+      this.selectRegularProject();
+      return;
+    }
     this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation?.id ?? null);
+  }
+
+  private selectRegularProject(): void {
+    const next = this.context.database.prepare(
+      "SELECT id FROM projects WHERE workspace_kind IS NULL ORDER BY updated_at DESC LIMIT 1",
+    ).get() as { id: string } | undefined;
+    if (next) this.select(next.id);
+    else this.context.database.prepare("UPDATE app_state SET active_project_id = NULL, active_conversation_id = NULL WHERE id = 1").run();
   }
 
   get(projectId: string): Project {

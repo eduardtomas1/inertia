@@ -67,4 +67,9 @@ Sent files can be reopened from a message or **Open a surface → Attachments**,
 including after restart while the retained copy remains available. Removing a
 stored copy frees disk space; re-add the original if it is needed again.
 
+**Downgrading.** Inertia 0.0.65 and earlier read at most 8 attachments and 20 MiB
+per message, 10 MiB per file, and only the previewable file types. After a
+downgrade they hide the other attachments of existing messages and delete their
+stored files at startup as unreferenced. Upgrading again does not restore them.
+
 This storage and context model follows [T3 Code's composer](https://github.com/pingdotgg/t3code/blob/5cc99e1c23980d7995a13c47f969b47cb68ed1be/docs/user/composer.md).

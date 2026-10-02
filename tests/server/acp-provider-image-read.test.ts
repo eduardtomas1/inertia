@@ -53,7 +53,7 @@ describe.each([
     await writeFile(path, "retained bytes");
     await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES + 1);
     await expect(prompt("Describe", [path], initialized).then(() => undefined))
-      .rejects.toThrow("10 MB safety limit");
+      .rejects.toThrow("10 MiB safety limit");
   });
 
   it("keeps the aggregate limit while reading individually valid images", async () => {

@@ -50,7 +50,7 @@ describe("Claude bounded image prompt preparation", () => {
     await writeFile(path, "retained bytes");
     await truncate(path, MAX_IMAGE_ATTACHMENT_BYTES + 1);
     await expect(claudePrompt("Describe", [path]).then(() => undefined))
-      .rejects.toThrow("10 MB safety limit");
+      .rejects.toThrow("10 MiB safety limit");
   });
 
   it("keeps the aggregate image-byte limit", async () => {

@@ -327,6 +327,11 @@ export class WorkspacePathAuthority {
     `).run(projectId, resolve(path), serializeReceipt(receipt));
   }
 
+  reenrollProject(projectId: string, path: string): void {
+    this.database.prepare("DELETE FROM project_path_authorities WHERE project_id = ?").run(projectId);
+    this.enrollProject(projectId, path, null, null);
+  }
+
   promoteProjectRepository(
     projectId: string,
     path: string,

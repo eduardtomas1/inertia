@@ -83,6 +83,31 @@ describe("chats without a project", () => {
     await expect(scratch.ensureProject()).rejects.toThrow("authorization expired");
   });
 
+  it("rebinds the managed folder to a moved data directory after verifying the new folder", async () => {
+    const project = await scratch.ensureProject();
+    const moved = join(directory, "moved");
+    mkdirSync(moved);
+    const outside = join(directory, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, join(moved, "scratch"), "junction");
+    await expect(new ScratchWorkspace(store, moved).ensureProject()).rejects.toThrow("cannot be verified");
+    expect(store.project(project.id).path).toBe(project.path);
+    expect(readdirSync(outside)).toEqual([]);
+    rmSync(join(moved, "scratch"));
+    renameSync(project.path, join(moved, "scratch"));
+    const relocated = await new ScratchWorkspace(store, moved).ensureProject();
+    expect(relocated).toMatchObject({ id: project.id, workspaceKind: "scratch", path: join(moved, "scratch") });
+    expect(store.projectPath(project.id)).toBe(join(moved, "scratch"));
+    const chat = await new ScratchWorkspace(store, moved).createConversation(project.id, "After the move", {});
+    expect(dirname(chat.worktreePath!)).toBe(join(moved, "scratch"));
+    expect(store.shellSnapshot().projects.filter(({ workspaceKind }) => workspaceKind === "scratch")).toHaveLength(1);
+    const userFolder = join(directory, "user-project");
+    mkdirSync(userFolder);
+    const userProject = store.createProject("User project", userFolder);
+    expect(() => store.updateProject(userProject.id, { path: moved })).toThrow("Only the folder for chats without a project can move.");
+    expect(store.projectPath(userProject.id)).toBe(userFolder);
+  });
+
   it("bounds folder names and rejects identity traversal or duplicate identities", async () => {
     const project = await scratch.ensureProject();
     await expect(scratch.createConversation(project.id, "../escape", { id: "../../outside" })).rejects.toThrow("identity is invalid");

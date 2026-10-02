@@ -37,10 +37,8 @@ export class ScratchWorkspace {
   async ensureProject(): Promise<Project> {
     const root = resolve(this.dataDirectory, "scratch");
     const existing = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
-    if (existing) {
-      if (normalizeIdentityPath(this.store.projectPath(existing.id)) !== normalizeIdentityPath(root)) {
-        throw new RuntimeRequestError("The folder for chats without a project has moved.");
-      }
+    if (existing && normalizeIdentityPath(existing.path) === normalizeIdentityPath(root)) {
+      this.store.projectPath(existing.id);
     } else {
       try { mkdirSync(root, { mode: 0o700 }); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
@@ -59,6 +57,9 @@ export class ScratchWorkspace {
     this.verifyRoot(root);
     // No await between this lookup and insert: concurrent requests share one container.
     const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
+    if (current && normalizeIdentityPath(current.path) !== normalizeIdentityPath(root)) {
+      return this.store.updateProject(current.id, { path: root, normalizedPath: root });
+    }
     if (current) {
       this.store.projectPath(current.id);
       return current;

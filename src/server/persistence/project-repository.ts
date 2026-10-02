@@ -70,14 +70,18 @@ export class ProjectRepository {
 
   update(
     projectId: string,
-    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "preferences">>,
+    update: Partial<Pick<Project, "name" | "path" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "preferences">>,
   ): Project {
     const current = projectFromRow(this.context.requireProject(projectId));
     const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
     if (unchanged) return current;
     const next = { ...current, ...update, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
+    if (next.path !== current.path && (current.workspaceKind !== "scratch" || next.repositoryIdentity !== null || next.repositoryRoot !== null)) {
+      throw new Error("Only the folder for chats without a project can move.");
+    }
     const preferencesJson = JSON.stringify(projectPreferencesSchema.parse(next.preferences));
     this.context.database.transaction(() => {
+      if (next.path !== current.path) this.pathAuthority.reenrollProject(projectId, next.path);
       const repositoryChanged =
         next.repositoryIdentity !== current.repositoryIdentity
         || next.repositoryRoot !== current.repositoryRoot;
@@ -100,6 +104,7 @@ export class ProjectRepository {
       this.context.database.prepare(`
         UPDATE projects SET
           name = @name,
+          path = @path,
           normalized_path = @normalizedPath,
           repository_identity = @repositoryIdentity,
           repository_root = @repositoryRoot,

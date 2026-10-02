@@ -207,8 +207,6 @@ export class OpenCodeSubagentProjection {
     const seen = messageId === child.lastAssistantId
       || child.messageTotals.has(messageId)
       || child.recentAssistantIds.has(messageId);
-    // Usage accounting stops retaining new IDs at its cap. Track recent
-    // identities separately, with provider timestamps covering older replays.
     if (!seen) {
       child.recentAssistantIds.add(messageId);
       if (child.recentAssistantIds.size > MAX_RECENT_CHILD_MESSAGES) {
@@ -300,8 +298,6 @@ export class OpenCodeSubagentProjection {
     ) {
       if (!child.textParts.has(partId) && child.textParts.size >= MAX_CHILD_RESULT_PARTS) return;
       child.textParts.set(partId, part.text.slice(0, MAX_SUBAGENT_RESULT_CHARS));
-      // Keep each bounded snapshot so shortening an earlier part can reveal
-      // later text again, without requiring the provider to resend that part.
       let text = "";
       for (const snapshot of child.textParts.values()) {
         const remaining = MAX_SUBAGENT_RESULT_CHARS - text.length;

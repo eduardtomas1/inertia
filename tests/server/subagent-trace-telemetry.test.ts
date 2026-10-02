@@ -146,6 +146,17 @@ describe("subagent task telemetry persistence", () => {
     expect(store.snapshot().subagents).toEqual([enriched?.trace]);
   });
 
+  it("clears a live task's activity when its status changes without a new one", async () => {
+    const { patch } = await fixture();
+    expect(patch(1, { activity: "bash" })?.trace.activity).toBe("bash");
+    expect(patch(2, { providerStatus: "idle", status: "waiting" })?.trace)
+      .toMatchObject({ status: "waiting", activity: null });
+    expect(patch(3, { providerStatus: "busy" })?.trace).toMatchObject({ status: "running", activity: null });
+    expect(patch(4, { activity: "read" })?.trace.activity).toBe("read");
+    expect(patch(5, { providerStatus: "busy" })?.trace.activity).toBe("read");
+    expect(patch(6, { status: "waiting", activity: "Waiting on input" })?.trace.activity).toBe("Waiting on input");
+  });
+
   it("starts a trace reported as terminal without activity", async () => {
     const { patch } = await fixture();
     expect(patch(1, {

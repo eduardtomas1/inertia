@@ -357,7 +357,8 @@ export class ExecutionLedgerRepository {
             result = COALESCE(@result, result),
             model = COALESCE(@model, model),
             activity = CASE
-              WHEN @isLive = 1 THEN COALESCE(@activity, activity)
+              WHEN @isLive = 1 AND @status = status THEN COALESCE(@activity, activity)
+              WHEN @isLive = 1 THEN @activity
               ELSE NULL
             END,
             usage_json = @usageJson,

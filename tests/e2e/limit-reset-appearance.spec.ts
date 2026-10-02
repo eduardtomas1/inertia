@@ -3,9 +3,10 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import WebSocket from "ws";
 import { RuntimeStore } from "../../src/server/database";
 import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
-import type { Conversation } from "../../src/shared/contracts";
+import type { Conversation, ServerEvent } from "../../src/shared/contracts";
 import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
@@ -173,8 +174,50 @@ test.afterAll(async () => {
   await app?.close();
 });
 
+async function runtimeEvidence(): Promise<Record<string, unknown>> {
+  const { websocketUrl } = await app.runtimeSnapshot();
+  if (!websocketUrl) return { runtime: "unavailable" };
+  const chats = [seed.offer, seed.blocked, seed.missed];
+  const commands = [
+    ...chats.map(({ conversationId }) => ({ type: "conversation.limit-reset.get", payload: { conversationId } })),
+    { type: "usage.limits.get", payload: { refresh: false } },
+  ].map((command) => ({ ...command, requestId: randomUUID() }));
+  return await new Promise((resolve) => {
+    const evidence: Record<string, unknown> = {};
+    const socket = new WebSocket(websocketUrl, { origin: "inertia://bundle", maxPayload: 4 * 1024 * 1024 });
+    const finish = (): void => {
+      clearTimeout(timer);
+      socket.terminate();
+      resolve(evidence);
+    };
+    const timer = setTimeout(finish, 10_000);
+    socket.on("error", (error) => {
+      evidence.error = error.message;
+      finish();
+    });
+    socket.on("message", (data) => {
+      const frame = JSON.parse(data.toString()) as ServerEvent;
+      const event = frame.type === "runtime.event" ? frame.event : frame;
+      if (event.type === "server.welcome") {
+        evidence.codex = event.snapshot.providers.filter(({ id }) => id === "codex")
+          .map(({ installState, authState, canRun, available }) => ({ installState, authState, canRun, available }));
+        for (const command of commands) socket.send(JSON.stringify(command));
+        return;
+      }
+      if (!("requestId" in event) || typeof event.requestId !== "string") return;
+      const index = commands.findIndex(({ requestId }) => requestId === event.requestId);
+      if (index < 0) return;
+      evidence[index < chats.length ? chats[index]!.title : "limits"] = event.type === "request.result" ? event.result
+        : event.type === "request.error" ? { error: event.message } : event.type;
+      if (commands.every((_command, position) => (position < chats.length ? chats[position]!.title : "limits") in evidence)) finish();
+    });
+  });
+}
+
 async function attachFailure(info: TestInfo): Promise<void> {
   if (!app || app.page.isClosed()) return;
+  const evidence = await runtimeEvidence().catch((error: unknown) => ({ error: String(error) }));
+  await info.attach("Limit reset runtime evidence", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
   const path = info.outputPath("limit-reset-failure.png");
   await app.page.screenshot({ path, animations: "disabled" })
     .then(() => info.attach("Limit reset failure", { path, contentType: "image/png" }))

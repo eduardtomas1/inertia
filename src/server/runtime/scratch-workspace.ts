@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Conversation, Project } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { NewConversationOptions } from "../persistence/types";
@@ -20,6 +20,18 @@ export function isWithinScratchRoot(dataDirectory: string, path: string): boolea
     return false;
   }
   return isContained(root, candidate);
+}
+
+function hasRepositoryMarker(path: string): boolean {
+  for (let directory = realpathSync(path); ; directory = dirname(directory)) {
+    try {
+      lstatSync(join(directory, ".git"));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+    }
+    if (dirname(directory) === directory) return false;
+  }
 }
 
 /** A real project identity owns Scratch; each chat owns a separate plain folder. */
@@ -45,14 +57,17 @@ export class ScratchWorkspace {
     }
     this.verifyRoot(root);
     // A data directory inside a checkout must not lend that repository to Scratch.
+    const insideRepository = new RuntimeRequestError("Chats without a project need an Inertia data folder outside a Git repository.");
     try {
       await runGitInspection(root, ["rev-parse", "--is-inside-work-tree"], {
         timeoutMs: 3_000, maxOutputBytes: 4_096,
         failureMessage: "Could not check the folder for chats without a project.",
       });
-      throw new RuntimeRequestError("Chats without a project need an Inertia data folder outside a Git repository.");
+      throw insideRepository;
     } catch (error) {
-      if (!(error instanceof GitError && error.code === "not-repository")) throw error;
+      const gitUnavailable = error instanceof GitError && error.code === "git-unavailable";
+      if (gitUnavailable && hasRepositoryMarker(root)) throw insideRepository;
+      if (!gitUnavailable && !(error instanceof GitError && error.code === "not-repository")) throw error;
     }
     this.verifyRoot(root);
     // No await between this lookup and insert: concurrent requests share one container.

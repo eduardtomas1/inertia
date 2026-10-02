@@ -64,6 +64,23 @@ describe("chats without a project", () => {
     expect(store.shellSnapshot().projects).toEqual([]);
   });
 
+  it("works without Git and still refuses a data folder inside a repository", async () => {
+    vi.mocked(runGitInspection).mockRejectedValue(new GitError("git-unavailable", "Git is not installed or could not be started."));
+    const project = await scratch.ensureProject();
+    expect(project).toMatchObject({ workspaceKind: "scratch", path: join(directory, "scratch") });
+    const checkout = join(directory, "checkout");
+    mkdirSync(join(checkout, ".git"), { recursive: true });
+    const data = join(checkout, "data");
+    mkdirSync(data);
+    const nested = new RuntimeStore(join(data, "inertia.sqlite"), data);
+    try {
+      await expect(new ScratchWorkspace(nested, data).ensureProject()).rejects.toThrow("outside a Git repository");
+      expect(nested.shellSnapshot().projects).toEqual([]);
+    } finally {
+      nested.close();
+    }
+  });
+
   it("rejects a scratch symlink without touching its destination", async () => {
     const outside = join(directory, "outside");
     mkdirSync(outside);

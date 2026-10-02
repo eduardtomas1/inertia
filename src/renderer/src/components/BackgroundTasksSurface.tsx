@@ -63,10 +63,12 @@ function useFocusContinuity(): {
     const control = (current.key
       ? row?.querySelector<HTMLElement>(`[data-focus-key="${current.key}"]:not(:disabled)`)
       : null)
+      ?? row?.querySelector<HTMLElement>('[data-focus-key="transcript"], [data-focus-finished]')
       ?? row?.querySelector<HTMLElement>("button:not(:disabled)")
       ?? region.querySelector<HTMLElement>("[data-focus-finished]")
       ?? region.querySelector<HTMLElement>("button:not(:disabled)");
-    control?.focus();
+    if (control) control.focus();
+    else record.current = null;
   });
   return {
     regionRef,
@@ -257,7 +259,7 @@ export function BackgroundTasksSurface({
           </div>
         )}
         {items.finished.length > 0 && (
-          <div className="background-tasks-group">
+          <div className="background-tasks-group" data-focus-row="finished">
             <div className="background-tasks-finished">
               <button
                 type="button"
@@ -298,6 +300,7 @@ export function BackgroundTasksSurface({
               <button
                 type="button"
                 className="background-task-link"
+                aria-expanded={showAllFinished}
                 onClick={() => setShowAllFinished((current) => !current)}
               >
                 {showAllFinished

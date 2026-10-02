@@ -164,6 +164,18 @@ describe("quota reset account reads", () => {
   });
 });
 
+describe("quota reset row lifetime", () => {
+  it("produces no React warning when a read resolves after unmount", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let resolve!: (value: LimitResetResult) => void;
+    const run = vi.fn<LimitResetCommandRunner>(() => new Promise((done) => { resolve = done; }));
+    const view = render(banner(run));
+    view.unmount();
+    await act(async () => { resolve({ ...result(), offer: null }); });
+    expect(errors).not.toHaveBeenCalled();
+  });
+});
+
 describe("quota reset row inside the composer", () => {
   it("keeps focus on the action while busy and on its replacement after scheduling", async () => {
     let resolve!: (value: LimitResetResult) => void;

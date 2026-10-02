@@ -515,6 +515,31 @@ describe("cached reports for providers without a structured usage-limit signal",
   });
 });
 
+describe("schema 87 usage-limit tags", () => {
+  it("upgrades a schema-86 database and cascades tags with their chat", () => {
+    const path = join(directory, "inertia.sqlite");
+    store.close();
+    const raw = new Database(path);
+    raw.exec("DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version = 87;");
+    raw.close();
+    store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
+    dependencies.store = store;
+    expect(store.limitResets.usageLimited(failedTurnId)).toBe(false);
+    store.limitResets.markUsageLimited(failedTurnId);
+    store.limitResets.markUsageLimited(failedTurnId);
+    expect(store.limitResets.usageLimited(failedTurnId)).toBe(true);
+    store.deleteConversation(conversationId);
+    const check = new Database(path, { readonly: true });
+    try {
+      expect(check.prepare("SELECT count(*) AS n FROM usage_limited_turns").get()).toEqual({ n: 0 });
+      expect(check.prepare("SELECT max(version) AS v FROM schema_migrations").get()).toEqual({ v: 87 });
+    } finally { check.close(); }
+  });
+  it("cannot tag a turn that does not exist", () => {
+    expect(() => store.limitResets.markUsageLimited(randomUUID())).toThrow(/FOREIGN KEY/u);
+  });
+});
+
 describe("reported quota windows", () => {
   it.each([null, "invalid", "2026-10-01T12:00:01.000Z", "2026-10-01T11:56:59.000Z"])("rejects unknown, future, or stale account freshness: %s", (updatedAt) => {
     expect(resetQuota({ ...usage(), updatedAt }, "gpt-test")).toEqual({ kind: "unknown" });

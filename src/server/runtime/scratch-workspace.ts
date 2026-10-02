@@ -164,32 +164,39 @@ export class ScratchWorkspace {
     this.verifyRoot(root);
   }
 
-  reconcile(): Promise<void> {
-    return this.serialized(() => this.reconcileNow());
+  async reconcile(): Promise<void> {
+    const plan = await this.serialized(() => this.planProvisioning());
+    if (!plan) return;
+    for (let start = 0; start < plan.pending.length; start += SCRATCH_PROVISIONING_CHUNK) {
+      if (start > 0) await new Promise<void>((resume) => setImmediate(resume));
+      const chunk = plan.pending.slice(start, start + SCRATCH_PROVISIONING_CHUNK);
+      await this.serialized(async () => this.provisionChunk(plan.projectId, chunk, plan.leftovers));
+    }
   }
 
-  private async reconcileNow(): Promise<void> {
+  private async planProvisioning(): Promise<{ projectId: string; pending: Conversation[]; leftovers: Map<string, string> } | null> {
     const project = this.store.shellSnapshot().projects.find(({ workspaceKind }) => workspaceKind === "scratch");
-    if (!project) return;
+    if (!project) return null;
     const root = resolve(this.dataDirectory, "scratch");
     const chats = this.chatsOf(project.id);
     const hasPending = chats.some(({ worktreePath }) => worktreePath === null);
     const relocated = normalizeIdentityPath(project.path) !== normalizeIdentityPath(root)
       || chats.some(({ worktreePath }) => worktreePath !== null && dirname(resolve(worktreePath)) !== root);
-    if (!hasPending && !(relocated && pathExists(root))) return;
+    if (!hasPending && !(relocated && pathExists(root))) return null;
     const current = await this.ensureProjectNow();
-    const projectRoot = this.store.projectPath(current.id);
-    const leftovers = new Map(readdirSync(projectRoot).map((name) => [name.slice(-36), name]));
+    const leftovers = new Map(readdirSync(this.store.projectPath(current.id)).map((name) => [name.slice(-36), name]));
     const pending = this.chatsOf(current.id).filter(({ worktreePath }) => worktreePath === null);
-    for (let start = 0; start < pending.length; start += SCRATCH_PROVISIONING_CHUNK) {
-      if (start > 0) await new Promise<void>((resume) => setImmediate(resume));
-      for (const chat of pending.slice(start, start + SCRATCH_PROVISIONING_CHUNK)) {
+    return { projectId: current.id, pending, leftovers };
+  }
+
+  private provisionChunk(projectId: string, chunk: Conversation[], leftovers: Map<string, string>): void {
+    const root = this.store.projectPath(projectId);
+    for (const chat of chunk) {
+      try {
         if (this.store.conversation(chat.id).worktreePath !== null) continue;
-        try {
-          this.materializeFolder(current.id, projectRoot, chat, leftovers.get(chat.id));
-        } catch {
-          continue;
-        }
+        this.materializeFolder(projectId, root, chat, leftovers.get(chat.id));
+      } catch {
+        continue;
       }
     }
   }

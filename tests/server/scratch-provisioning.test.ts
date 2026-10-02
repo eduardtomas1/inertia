@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -207,6 +207,108 @@ describe("giving imported chats their folders", () => {
       conversations: [{ ...conversation("a"), worktreePath: "/etc" }] }]))).toThrow();
     expect(() => parseDatabaseRecoveryExport(archive([{ name: "x", path: "/x", workspaceKind: "workspace", conversations: [] }]))).toThrow();
     expect(parseDatabaseRecoveryExport(archive([{ name: "No project", path: "/x", conversations: [] }], 2)).projects[0]).not.toHaveProperty("workspaceKind");
+  });
+});
+
+describe("provisioning while other work runs", () => {
+  async function untilSomeBound(store: RuntimeStore, projectId: string): Promise<void> {
+    for (let tries = 0; tries < 1_000; tries += 1) {
+      await new Promise<void>((resume) => setImmediate(resume));
+      if (chatsOf(store, projectId).some(({ worktreePath }) => worktreePath !== null)) return;
+    }
+  }
+
+  it("keeps going when a pending chat is deleted between batches", async () => {
+    const { data, store, project } = await imported(SCRATCH_PROVISIONING_CHUNK * 2 + 50);
+    const victim = chatsOf(store, project.id)[SCRATCH_PROVISIONING_CHUNK + 50]!;
+    const run = new ScratchWorkspace(store, data).reconcile();
+    await untilSomeBound(store, project.id);
+    store.deleteConversation(victim.id);
+    await expect(run).resolves.toBeUndefined();
+    expect(chatsOf(store, project.id).filter(({ worktreePath }) => worktreePath === null)).toEqual([]);
+  });
+
+  it("lets a new chat's setup run between provisioning batches", async () => {
+    const { data, store, project } = await imported(SCRATCH_PROVISIONING_CHUNK * 3);
+    const run = new ScratchWorkspace(store, data).reconcile();
+    await untilSomeBound(store, project.id);
+    await new ScratchWorkspace(store, data).ensureProject();
+    const pendingWhenReady = chatsOf(store, project.id).filter(({ worktreePath }) => worktreePath === null).length;
+    await run;
+    expect(pendingWhenReady).toBeGreaterThan(0);
+    expect(chatsOf(store, project.id).filter(({ worktreePath }) => worktreePath === null)).toEqual([]);
+  });
+
+  it("releases the setup queue after a failed setup", async () => {
+    const data = directory();
+    const store = open(data);
+    vi.mocked(runGitInspection).mockRejectedValueOnce(new GitError("timeout", "Git timed out"));
+    const [first, second] = await Promise.allSettled([
+      new ScratchWorkspace(store, data).ensureProject(),
+      new ScratchWorkspace(store, data).ensureProject(),
+    ]);
+    expect(first.status).toBe("rejected");
+    expect(second.status).toBe("fulfilled");
+  });
+});
+
+describe("re-checking the managed folder", () => {
+  it("re-enrolls only the data directory's own folder and never a stale recorded path", async () => {
+    const data = directory();
+    const store = open(data);
+    const project = await new ScratchWorkspace(store, data).ensureProject();
+    const outside = directory();
+    const database = (store as unknown as { database: import("better-sqlite3").Database }).database;
+    database.prepare("UPDATE projects SET path = ?, normalized_path = ? WHERE id = ?").run(outside, outside, project.id);
+    database.prepare("DELETE FROM project_path_authorities WHERE project_id = ?").run(project.id);
+    const rebound = await new ScratchWorkspace(store, data).ensureProject();
+    expect(rebound.path).toBe(join(data, "scratch"));
+    expect(store.projectPath(project.id)).toBe(join(data, "scratch"));
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("refuses a symlinked managed folder and never removes a folder it did not create", async () => {
+    const data = directory();
+    const store = open(data);
+    const outside = directory();
+    symlinkSync(outside, join(data, "scratch"), "junction");
+    await expect(new ScratchWorkspace(store, data).ensureProject()).rejects.toThrow("cannot be verified");
+    expect(lstatSync(join(data, "scratch")).isSymbolicLink()).toBe(true);
+    rmSync(join(data, "scratch"));
+    mkdirSync(join(data, "scratch"));
+    vi.mocked(runGitInspection).mockRejectedValueOnce(new GitError("timeout", "Git timed out"));
+    await expect(new ScratchWorkspace(store, data).ensureProject()).rejects.toThrow("Git timed out");
+    expect(existsSync(join(data, "scratch"))).toBe(true);
+  });
+
+  it("never removes a symlink swapped in during the Git check", async () => {
+    const data = directory();
+    const store = open(data);
+    const outside = directory();
+    vi.mocked(runGitInspection).mockImplementationOnce(async () => {
+      rmSync(join(data, "scratch"), { recursive: true });
+      symlinkSync(outside, join(data, "scratch"), "junction");
+      throw new GitError("timeout", "Git timed out");
+    });
+    await expect(new ScratchWorkspace(store, data).ensureProject()).rejects.toThrow();
+    expect(lstatSync(join(data, "scratch")).isSymbolicLink()).toBe(true);
+    expect(existsSync(outside)).toBe(true);
+  });
+
+  it("adopts an empty leftover only by the exact chat ID at the end of its name", async () => {
+    const { data, store, project } = await imported(2);
+    await new ScratchWorkspace(store, data).ensureProject();
+    const [first, second] = chatsOf(store, project.id);
+    const middle = join(data, "scratch", `2026-10-01-x-${first!.id}-tail`);
+    const longer = join(data, "scratch", `2026-10-01-x-${second!.id}x`);
+    const upper = join(data, "scratch", `2026-10-01-x-${second!.id.toUpperCase()}`);
+    for (const path of [middle, longer, upper]) mkdirSync(path);
+    await new ScratchWorkspace(store, data).reconcile();
+    for (const chat of [first!, second!]) {
+      const bound = store.conversation(chat.id).worktreePath!;
+      expect([middle, longer, upper]).not.toContain(bound);
+      expect(basename(bound).endsWith(chat.id)).toBe(true);
+    }
   });
 });
 

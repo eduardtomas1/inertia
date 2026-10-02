@@ -175,6 +175,10 @@ export interface TurnControllerHooks {
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
   validateModelSelection?(selection: ModelSelection): ModelSelection;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
+  attachmentReadRoots?(input: {
+    conversationId: string;
+    attachmentIds: readonly string[];
+  }): readonly string[];
   releaseGeneratedAttachments?(paths: readonly string[]): void | Promise<void>;
   /**
    * Required orchestration. Durable owners provide recovery; the controller

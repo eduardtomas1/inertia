@@ -2,6 +2,7 @@ import { isAbsolute } from "node:path";
 
 import { PROVIDER_INFO } from "./catalog";
 import { MAX_PROVIDER_REQUEST_IMAGE_COUNT } from "./provider-image-read";
+import { MAX_ATTACHMENT_READ_ROOTS } from "./attachment-read-grant";
 import {
   versionedContinuationIdentitySchema,
   currentKnownHarnessIdSchema,
@@ -208,6 +209,13 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   }
   if (imagePaths.some((path) => !path.trim() || path.length > 4096 || path.includes("\0"))) {
     throw new ProviderRuntimeError("invalid_input", "An image path is invalid.");
+  }
+  const readRoots = input.attachmentReadRoots ?? [];
+  if (
+    readRoots.length > MAX_ATTACHMENT_READ_ROOTS
+    || readRoots.some((root) => !isAbsolute(root) || root.length > 4096 || root.includes("\0"))
+  ) {
+    throw new ProviderRuntimeError("invalid_input", "An attachment read root is invalid.");
   }
   const skills = input.skills ?? [];
   if (skills.length > MAX_SKILL_COUNT) {

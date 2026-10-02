@@ -23,7 +23,8 @@ import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,
 } from "./claude-owned-query";
-import { claudeModels } from "./claude-agent-sdk-metadata";
+import { emitClaudeModelMetadata } from "./claude-agent-sdk-metadata";
+import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ClaudeRunEventBudget } from "./claude-event-budget";
 import {
@@ -347,9 +348,10 @@ function startClaudeRun(
       return deny("The proposed plan was returned to the user for review.");
     }
 
-    if (options.input.access === "full" && options.input.interactionMode !== "plan") {
-      return { behavior: "allow", updatedInput: toolInput };
-    }
+    if (
+      (options.input.access === "full" && options.input.interactionMode !== "plan")
+      || claudeAttachmentReadAllowed(toolName, toolInput, callbackOptions.blockedPath, options.input.attachmentReadRoots)
+    ) return { behavior: "allow", updatedInput: toolInput };
     const approvalTitle = callbackOptions.title
       ?? `Claude wants to use ${toolName}`;
     const approvalDetail = callbackOptions.description
@@ -399,10 +401,7 @@ function startClaudeRun(
           cwd: options.input.cwd,
           ...(approvalReason ? { reason: bounded(approvalReason) } : {}),
           permissionRoots: approvalBlockedPath
-            ? [{
-                path: bounded(approvalBlockedPath),
-                access: /^(?:Read|Grep|Glob|LS|NotebookRead)$/u.test(toolName) ? "read" : "write",
-              }]
+            ? [{ path: bounded(approvalBlockedPath), access: claudePermissionAccess(toolName) }]
             : [],
           availableDecisions: ["approve", "deny", "cancel"],
         },
@@ -1089,25 +1088,6 @@ function startClaudeRun(
       },
     },
   };
-}
-
-async function emitClaudeModelMetadata(
-  query: Query,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const timeout = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), 2_000);
-      timer.unref();
-    });
-    const models = await Promise.race([query.supportedModels().catch(() => undefined), timeout]);
-    if (!models) return;
-    const mapped = claudeModels(models);
-    if (mapped.length > 0) emit({ type: "metadata", metadata: { models: mapped }, source: "provider", complete: true });
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 function planSteps(markdown: string): AgentPlanStep[] {

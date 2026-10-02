@@ -16,6 +16,15 @@ are not automatically extracted into the prompt. This includes PDFs and
 spreadsheets; their interpretation depends on the selected agent's tools.
 Images continue to use the provider's image input.
 
+Each turn passes the agent the directories of the attachments referenced by its
+own chat. Read requests for files inside them are answered without an approval
+prompt: Claude's Read, Grep, Glob, LS and NotebookRead, Cursor and Kimi Code
+`read` requests, and OpenCode `read` permissions. Everything else, including
+writes to those files, reads of another chat's attachments, and OpenCode's
+separate `external_directory` check, follows the selected access mode. Codex
+reads files through its own sandbox, and Antigravity's command-line protocol
+offers no per-request decision.
+
 Pasted text becomes a `.txt` attachment at **32 KiB of UTF-8**, or when inserting
 it would exceed the message limit. **Shift-paste** keeps text inline. If importing
 the paste fails, the text is restored to the draft. During an active turn,

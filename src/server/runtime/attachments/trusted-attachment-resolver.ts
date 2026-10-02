@@ -9,6 +9,7 @@ import {
 import {
   basename,
   isAbsolute,
+  join,
   relative,
   sep,
 } from "node:path";
@@ -26,6 +27,7 @@ import {
 import type { ChatAttachment } from "../../../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
 import { AttachmentResolutionError } from "./attachment-errors.js";
+import { MAX_ATTACHMENT_READ_ROOTS } from "../../provider/attachment-read-grant.js";
 
 export interface RuntimeAttachmentBroker {
   resolve(
@@ -209,4 +211,17 @@ export class TrustedAttachmentResolver {
       throw publicAttachmentError();
     }
   }
+}
+
+export function conversationAttachmentReadRoots(
+  store: { attachments(conversationId: string): readonly { readonly id: string }[] },
+  retained: { readonly directory: string },
+): (input: { conversationId: string; attachmentIds: readonly string[] }) => string[] {
+  return ({ conversationId, attachmentIds }) => [...new Set([
+    ...store.attachments(conversationId).map(({ id }) => id),
+    ...attachmentIds,
+  ])]
+    .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id))
+    .slice(-MAX_ATTACHMENT_READ_ROOTS)
+    .map((id) => join(retained.directory, id));
 }

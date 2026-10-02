@@ -104,6 +104,7 @@ interface ProviderRunRequest {
   /** Explicit native-session speed change; absent on first sessions. */
   performanceModeTransition?: "to-fast" | "to-standard";
   imagePaths?: readonly string[];
+  attachmentReadRoots?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   /**
    * Privileged Codex-only launch mode for a user-authored native goal. The

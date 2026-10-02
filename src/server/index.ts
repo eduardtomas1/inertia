@@ -101,9 +101,7 @@ import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/age
 import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
-import {
-  TrustedAttachmentResolver,
-} from "./runtime/attachments/trusted-attachment-resolver";
+import { TrustedAttachmentResolver, conversationAttachmentReadRoots } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import { unavailableSecureFileBroker } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
@@ -636,6 +634,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               options.attachments!.release(attachmentId))).then(() => undefined)
           : undefined,
       releaseGeneratedAttachments: (paths) => generatedAttachments.release(paths),
+      attachmentReadRoots: conversationAttachmentReadRoots(store, initializedConversationAttachments),
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),

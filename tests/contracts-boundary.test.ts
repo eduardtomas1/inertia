@@ -87,6 +87,7 @@ describe("shared contracts boundary", () => {
       "duo.comparison.cancel",
       "conversation.select",
       "conversation.detail.load",
+      "conversation.background-tasks.get",
       "conversation.detail.subscription",
       "conversation.context.source.load",
       "conversation.context.agent.source.load",

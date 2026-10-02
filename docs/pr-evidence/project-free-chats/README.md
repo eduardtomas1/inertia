@@ -97,5 +97,5 @@ chat still had the fixture's default title.
 ## Not exercised
 
 Linux and Windows rendering, forced colours and custom colour themes in a real
-window. Bundle measurements are in [renderer-bundle.json](renderer-bundle.json)
-under `uiPolish`; no ceiling changed.
+window. Bundle measurements against main `46cbe6c3` are in
+[renderer-bundle.json](renderer-bundle.json).

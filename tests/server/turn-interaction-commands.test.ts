@@ -651,6 +651,23 @@ describe("provider image request budgets", () => {
     expect(relinquishAll).toHaveBeenCalledWith(selected.map(({ id }) => id));
   });
 
+  it("refuses a Claude follow-up above 20 MiB of images before retaining or steering", async () => {
+    const selected = images(3, 8 * 1024 * 1024);
+    const relinquishAll = vi.fn(async () => undefined);
+    const runtime = dependencies({
+      queue: vi.fn(), relinquishAll, providerId: "claude",
+      resolvedPayloads: selected.map((attachment) => ({ attachment, bytes: new Uint8Array() })),
+    });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(true);
+    const command = messageCommand();
+    command.payload.attachments = selected;
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command)).rejects.toThrow(
+      "Claude accepts at most 20 MiB of images per message. Remove some images and send again.",
+    );
+    expect(runtime.turns.steer).not.toHaveBeenCalled();
+    expect(runtime.conversationAttachments.retain).not.toHaveBeenCalled();
+  });
+
   it("lets Codex take the same images by path", async () => {
     const selected = images(3, 8 * 1024 * 1024);
     const queue = vi.fn(() => queuedTurn());

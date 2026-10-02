@@ -12,6 +12,9 @@ import type { Provider } from "@opencode-ai/sdk/v2";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
 
 const reset = "2026-10-20T12:00:00.000Z";
+const jwt = (claims: Record<string, unknown>, nonce: string) => ["eyJhbGciOiJSUzI1NiJ9",
+  Buffer.from(JSON.stringify({ ...claims, jti: nonce })).toString("base64url"), `signature-${nonce}`].join(".");
+const CURSOR_TOKEN = jwt({ iss: "https://authentication.cursor.sh", sub: "auth0|cursor-account" }, "first");
 const base = (providerId: string): UsageAccount => ({ id: `native:${providerId}`, providerId, providerLabel: providerId, label: "Account",
   email: null, plan: null, identityKey: null, sources: ["This computer"], status: "unavailable", detail: null,
   updatedAt: null, checkedAt: new Date().toISOString(), credits: null, canReset: false, windows: [] });
@@ -24,16 +27,16 @@ afterEach(() => { vi.useRealTimers(); });
 describe("native subscription adapters", () => {
   it("reads Cursor using the CLI's explicit auth token without exposing it", async () => {
     const request = fetcher(cursor);
-    const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: "fake-cursor-token" }), fetch: request,
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: CURSOR_TOKEN }), fetch: request,
       readFile: vi.fn(async () => { throw new Error("Must not read another account"); }), accountKey: async () => "per-install-key" });
     const result = await read(reader);
     expect(result.status).toBe("ready");
     expect(result.windows).toHaveLength(3);
-    expect(request.mock.calls[0]).toMatchObject(["https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", { method: "POST", redirect: "error", headers: { Authorization: "Bearer fake-cursor-token" } }]);
-    expect(JSON.stringify(result)).not.toContain("fake-cursor-token");
+    expect(request.mock.calls[0]).toMatchObject(["https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", { method: "POST", redirect: "error", headers: { Authorization: `Bearer ${CURSOR_TOKEN}` } }]);
+    expect(JSON.stringify(result)).not.toContain(CURSOR_TOKEN);
     expect(result.identityKey).toBeNull(); expect(result.canReset).toBe(false);
     expect(resumeAccountIdentity(result)).toMatch(/^[a-f0-9]{64}$/u);
-    const unkeyed = await read(new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: "fake-cursor-token" }), fetch: fetcher(cursor) }));
+    const unkeyed = await read(new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: CURSOR_TOKEN }), fetch: fetcher(cursor) }));
     expect(unkeyed.status).toBe("ready"); expect(resumeAccountIdentity(unkeyed)).toBeNull();
   });
   it.each([
@@ -119,6 +122,36 @@ describe("native subscription adapters", () => {
     const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: "secret" }), fetch: fetcher({ planUsage: { totalPercentUsed: "secret" } }) });
     expect((await read(reader)).detail).not.toContain("secret");
     await expect(subscriptionJson(vi.fn(async () => new Response("x".repeat(300_000))), "https://example.test", "secret", new AbortController().signal)).rejects.toThrow("too large");
+  });
+});
+
+describe("stable resume identity", () => {
+  const identity = async (environment: NodeJS.ProcessEnv, files: Record<string, string> = {}) => {
+    const reader = new NativeSubscriptionReader({ platform: "linux", environment: async () => ({ HOME: "/home", ...environment }), fetch: fetcher(cursor),
+      accountKey: async () => "per-install-key", readFile: async (path) => Object.entries(files).find(([suffix]) => path.endsWith(suffix))?.[1] ?? null });
+    return read(reader);
+  };
+  it("keeps a renewed session's identity while its account claim is unchanged", async () => {
+    const first = await identity({ CURSOR_AUTH_TOKEN: CURSOR_TOKEN });
+    const renewed = await identity({ CURSOR_AUTH_TOKEN: jwt({ iss: "https://authentication.cursor.sh", sub: "auth0|cursor-account" }, "renewed") });
+    const other = await identity({ CURSOR_AUTH_TOKEN: jwt({ iss: "https://authentication.cursor.sh", sub: "auth0|another" }, "other") });
+    expect(resumeAccountIdentity(first)).toMatch(/^[0-9a-f]{64}$/u);
+    expect(resumeAccountIdentity(renewed)).toBe(resumeAccountIdentity(first));
+    expect(resumeAccountIdentity(other)).not.toBe(resumeAccountIdentity(first));
+  });
+  it("gives an opaque session token no resume identity and says why", async () => {
+    const result = await identity({}, { "auth.json": '{"accessToken":"opaque-session-token"}' });
+    expect(result.status).toBe("ready");
+    expect(resumeAccountIdentity(result)).toBeNull();
+    expect(result.resumeUnavailable).toContain("stable account");
+  });
+  it("keeps API keys as stable identities", async () => {
+    const config = `default_model = "k"\n[models.k]\nmodel = "k"\nprovider = "managed:kimi-code"\n[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\napi_key = "kimi-api-key"\n`;
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_SHARE_DIR: "/kimi" }), accountKey: async () => "per-install-key",
+      fetch: fetcher({ usage: { limit: 100, remaining: 0, resetAt: reset } }), readFile: async (path) => path.endsWith("config.toml") ? config : null });
+    const first = await read(reader, "kimi", "k");
+    expect(resumeAccountIdentity(first)).toMatch(/^[0-9a-f]{64}$/u);
+    expect(resumeAccountIdentity(await read(reader, "kimi", "k"))).toBe(resumeAccountIdentity(first));
   });
 });
 

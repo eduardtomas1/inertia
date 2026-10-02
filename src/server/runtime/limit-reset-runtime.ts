@@ -49,7 +49,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
         const plan = dependencies.store.limitResets.get(command.payload.conversationId);
         dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: {
           kind: "conversation.limit-reset", conversationId: command.payload.conversationId,
-          offer: null, needsCheck: false, plan: plan ? publicLimitResetPlan(plan) : null,
+          offer: null, plan: plan ? publicLimitResetPlan(plan) : null,
         } });
         break;
       }

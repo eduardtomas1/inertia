@@ -8,6 +8,8 @@ import { queuedRouteIdentity } from "../persistence/queued-message-repository";
 import { MISSED_RESUME_AFTER_MS, matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
 
 const LIMIT_CHANGED = "The reported limit changed. Check the new reset time and try again.";
+const RUNTIME_UNAVAILABLE = "Automatic resume requires an available provider runtime.";
+const ACCOUNT_UNCONFIRMED = "The provider did not report an account Inertia can confirm at the reset.";
 export interface LimitResetDependencies {
   store: RuntimeStore;
   signal: AbortSignal;
@@ -50,7 +52,6 @@ export class LimitResetScheduler {
     const route = queuedRouteIdentity(conversation);
     const account = await this.dependencies.readAccount(conversation.providerId, force, turn.model, store.conversationPath(conversationId), interactive);
     this.dependencies.signal.throwIfAborted();
-    if (account?.keychain === "deferred") return "check" as const;
     const current = store.conversation(conversationId);
     if (!account || account.providerId !== conversation.providerId || route !== queuedRouteIdentity(current)
       || store.latestAgentTurnForConversation(conversationId)?.id !== turn.id
@@ -59,6 +60,8 @@ export class LimitResetScheduler {
     return quota.kind === "exhausted" ? {
       failedTurnId: turn.id, resetsAt: quota.resetsAt,
       accountIdentity: resumeAccountIdentity(account), routeIdentity: route,
+      unavailableReason: !this.dependencies.enabled ? RUNTIME_UNAVAILABLE
+        : resumeAccountIdentity(account) ? null : account.resumeUnavailable ?? ACCOUNT_UNCONFIRMED,
     } : null;
   }
   async get(conversationId: string, refresh = false): Promise<LimitResetResult> {
@@ -77,27 +80,30 @@ export class LimitResetScheduler {
       plan = store.limitResets.get(conversationId);
     }
     if (plan && ["waiting", "dispatching"].includes(plan.state)) {
-      return { kind: "conversation.limit-reset", conversationId, plan: publicLimitResetPlan(plan), needsCheck: false,
-        offer: { failedTurnId: plan.failedTurnId, resetsAt: plan.resetsAt, canResume: this.dependencies.enabled } };
+      return { kind: "conversation.limit-reset", conversationId, plan: publicLimitResetPlan(plan),
+        offer: { failedTurnId: plan.failedTurnId, resetsAt: plan.resetsAt, canResume: this.dependencies.enabled,
+          unavailableReason: this.dependencies.enabled ? null : RUNTIME_UNAVAILABLE } };
     }
     const offer = await this.offer(conversationId, refresh, refresh).catch(() => null);
     plan = store.limitResets.get(conversationId);
-    return { kind: "conversation.limit-reset", conversationId, needsCheck: offer === "check",
-      offer: offer && offer !== "check" ? { failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt, canResume: this.dependencies.enabled && offer.accountIdentity !== null } : null,
+    return { kind: "conversation.limit-reset", conversationId,
+      offer: offer ? { failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt,
+        canResume: offer.unavailableReason === null, unavailableReason: offer.unavailableReason } : null,
       plan: plan ? publicLimitResetPlan(plan) : null };
   }
   async schedule(input: { conversationId: string; id: string; failedTurnId: string; resetsAt: string }): Promise<LimitResetResult> {
-    if (!this.dependencies.enabled) throw new RuntimeRequestError("Automatic resume requires an available provider runtime.");
+    if (!this.dependencies.enabled) throw new RuntimeRequestError(RUNTIME_UNAVAILABLE);
     const old = this.dependencies.store.limitResets.get(input.conversationId);
     if (old?.id === input.id) {
       if (old.failedTurnId !== input.failedTurnId || !sameReportedReset(old.resetsAt, input.resetsAt)) throw new RuntimeRequestError("This reset action identity was reused.");
       return this.get(input.conversationId);
     }
     const offer = await this.offer(input.conversationId, true, true);
-    if (!offer || offer === "check" || !offer.accountIdentity || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt)) throw new RuntimeRequestError(LIMIT_CHANGED);
+    if (!offer || !offer.accountIdentity || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt)) throw new RuntimeRequestError(LIMIT_CHANGED);
     const current = this.dependencies.store.limitResets.get(input.conversationId);
     if (current && ["waiting", "dispatching"].includes(current.state)) return this.get(input.conversationId);
-    this.dependencies.store.limitResets.save({ ...input, ...offer, accountIdentity: offer.accountIdentity,
+    this.dependencies.store.limitResets.save({ ...input, failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt,
+      routeIdentity: offer.routeIdentity, accountIdentity: offer.accountIdentity,
       nextAttemptAt: offer.resetsAt, attempts: 0, state: "waiting", error: null, turnId: null });
     this.dependencies.changed(input.conversationId);
     this.arm();
@@ -124,7 +130,7 @@ export class LimitResetScheduler {
   }
   async snooze(input: { conversationId: string; failedTurnId: string; resetsAt: string }): Promise<void> {
     const offer = await this.offer(input.conversationId, true, true);
-    if (!offer || offer === "check" || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt) || this.dependencies.busy(input.conversationId)) throw new RuntimeRequestError(LIMIT_CHANGED);
+    if (!offer || offer.failedTurnId !== input.failedTurnId || !sameReportedReset(offer.resetsAt, input.resetsAt) || this.dependencies.busy(input.conversationId)) throw new RuntimeRequestError(LIMIT_CHANGED);
     const turn = this.dependencies.store.latestAgentTurnForConversation(input.conversationId)!;
     if (this.dependencies.store.findWorkspaceRun(turn.runId)) this.dependencies.store.acknowledgeWorkspaceRun(turn.runId);
     this.dependencies.store.updateConversation(input.conversationId, { snoozedUntil: offer.resetsAt });

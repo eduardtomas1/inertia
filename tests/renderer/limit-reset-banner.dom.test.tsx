@@ -9,7 +9,7 @@ const failedTurnId = "22222222-2222-4222-8222-222222222222";
 const id = "33333333-3333-4333-8333-333333333333";
 const resetsAt = "2026-10-02T03:16:55.000Z";
 const result = (): LimitResetResult => ({ kind: "conversation.limit-reset", conversationId,
-  offer: { failedTurnId, resetsAt, canResume: true }, needsCheck: false, plan: null });
+  offer: { failedTurnId, resetsAt, canResume: true, unavailableReason: null }, plan: null });
 const pending = (): LimitResetResult => ({ ...result(), plan: { id, conversationId, failedTurnId, resetsAt, state: "waiting", error: null } });
 function banner(run: LimitResetCommandRunner, owner = conversationId) {
   return <LimitResetBanner conversationId={owner} latestTurnId={failedTurnId} snoozedUntil={null} disabled={false} onCommand={run} />;
@@ -129,21 +129,34 @@ describe("quota reset account reads", () => {
     expect(run).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
   });
-  it("reads a Keychain-backed account only after the explicit check", async () => {
-    const unchecked: LimitResetResult = { ...result(), offer: null, needsCheck: true };
-    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(unchecked)
-      .mockResolvedValueOnce({ ...result(), offer: { failedTurnId, resetsAt, canResume: false } }).mockResolvedValue(unchecked);
+  it("defers the reset-time read while the window is hidden or unfocused", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(Date.parse(resetsAt) - 5_000);
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result());
+    render(banner(run)); await flush();
+    expect(run).toHaveBeenCalledOnce();
+    focus.mockReturnValue(false);
+    await act(async () => { window.dispatchEvent(new Event("blur")); await vi.advanceTimersByTimeAsync(60_000); });
+    expect(run).toHaveBeenCalledOnce();
+    focus.mockReturnValue(true);
+    await act(async () => { window.dispatchEvent(new Event("focus")); await vi.advanceTimersByTimeAsync(30_000); });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it("shows why automatic resume is unavailable as text tied to the action", async () => {
+    const reason = "This login does not name a stable account, so Inertia cannot confirm it at the reset.";
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: { failedTurnId, resetsAt, canResume: false, unavailableReason: reason } });
     render(banner(run));
-    fireEvent.click(await screen.findByRole("button", { name: "Check reset time" }));
-    expect(run.mock.calls[1]![0]).toEqual({ type: "conversation.limit-reset.get", payload: { conversationId, refresh: true } });
-    expect(await screen.findByRole("button", { name: "Resume at reset" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Snooze until reset" })).not.toHaveAttribute("aria-disabled");
+    const resume = await screen.findByRole("button", { name: "Resume at reset" });
+    expect(resume).toHaveAttribute("aria-disabled", "true");
+    expect(resume).toHaveAccessibleDescription(reason);
+    expect(screen.getByText(reason)).toBeVisible();
+    expect(resume).not.toHaveAttribute("title");
   });
   it("shows the current limit after a rejected action", async () => {
     const moved = new Date(Date.parse(resetsAt) + 3_600_000).toISOString();
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(result())
       .mockRejectedValueOnce(new Error("The reported limit changed. Check the new reset time and try again."))
-      .mockResolvedValueOnce({ ...result(), offer: { failedTurnId, resetsAt: moved, canResume: true } });
+      .mockResolvedValueOnce({ ...result(), offer: { failedTurnId, resetsAt: moved, canResume: true, unavailableReason: null } });
     render(banner(run));
     fireEvent.click(await screen.findByRole("button", { name: "Resume at reset" }));
     await screen.findByRole("alert");
@@ -171,7 +184,7 @@ describe("quota reset row inside the composer", () => {
     expect(cancel).not.toHaveAttribute("aria-disabled");
   });
   it("marks unavailable actions without removing them from the focus order", async () => {
-    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: { failedTurnId, resetsAt, canResume: false } });
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: { failedTurnId, resetsAt, canResume: false, unavailableReason: "Secure storage is unavailable, so Inertia cannot confirm the account at the reset." } });
     render(<LimitResetBanner conversationId={conversationId} latestTurnId={failedTurnId} snoozedUntil={resetsAt} disabled={false} onCommand={run} />);
     const resume = await screen.findByRole("button", { name: "Resume at reset" });
     const snoozed = screen.getByRole("button", { name: "Snoozed until reset" });

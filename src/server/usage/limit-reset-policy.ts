@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { AgentTurn, Conversation } from "../../shared/contracts";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
@@ -20,10 +19,7 @@ export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentT
     && conversation.interactionMode === turn.interactionMode && conversation.accessMode === turn.accessMode;
 }
 export function resumeAccountIdentity(account: NativeUsageAccount): string | null {
-  if (account.credentialFingerprint) return account.credentialFingerprint;
-  if (account.identityKey) return account.identityKey;
-  if (!account.email) return null;
-  return createHash("sha256").update(JSON.stringify([account.providerId, account.email, account.organization ?? null, account.plan])).digest("hex");
+  return account.credentialFingerprint ?? account.identityKey ?? null;
 }
 export type ResetQuota = { kind: "unknown" } | { kind: "available" } | { kind: "exhausted"; resetsAt: string };
 export function resetQuota(account: UsageAccount, model: string, now = Date.now()): ResetQuota {

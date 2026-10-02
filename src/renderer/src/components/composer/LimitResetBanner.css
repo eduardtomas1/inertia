@@ -35,8 +35,7 @@
   line-height: 1.4;
 }
 
-.limit-reset-copy time,
-.limit-reset-detail {
+.limit-reset-copy time {
   overflow: hidden;
   color: var(--text-muted);
   font-size: max(calc(var(--ui-font-micro) - 1px), 8px);

@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -284,7 +284,7 @@ describe("quota reset actions", () => {
 });
 
 describe("resume account identity storage", () => {
-  const secret = "fake-cursor-session-token-0123456789";
+  const secret = ["eyJhbGciOiJSUzI1NiJ9", Buffer.from(JSON.stringify({ sub: "cursor-account" })).toString("base64url"), "signature-0123456789"].join(".");
   function cursorChat(accountKey: () => Promise<string | null>) {
     const projectId = store.conversation(conversationId).projectId;
     conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
@@ -331,10 +331,11 @@ describe("macOS Keychain access", () => {
     dependencies.readAccount = (_providerId, _force, model, cwd, interactive) => reader.read({ ...usage(), id: "native:cursor", providerId: "cursor",
       providerLabel: "Cursor", email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory, interactive);
   });
-  it("never reads the Keychain from the automatic chat refresh and asks for an explicit check", async () => {
-    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null, needsCheck: true });
+  it("never reads the Keychain from the automatic chat refresh", async () => {
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null });
     expect(keychain).not.toHaveBeenCalled();
-    expect(await scheduler.get(conversationId, true)).toMatchObject({ offer: { failedTurnId, resetsAt: reset, canResume: false }, needsCheck: false });
+    expect(await scheduler.get(conversationId, true)).toMatchObject({ offer: { failedTurnId, resetsAt: reset, canResume: false,
+      unavailableReason: expect.stringContaining("macOS Keychain") } });
     expect(keychain).toHaveBeenCalledOnce();
   });
   it("never reads the Keychain from the scheduler", async () => {
@@ -371,14 +372,61 @@ describe("reported quota windows", () => {
     const input = usage(); input.windows[0]!.remainingPercent = remainingPercent;
     expect(resetQuota(input, "gpt-test").kind).toBe("unknown");
   });
-  it("keeps reported account signatures separate from verified credit-redemption identities", () => {
+  it("keeps reported account signatures separate from verified credit-redemption identities", async () => {
     const input = usage(); input.identityKey = null;
-    expect(resumeAccountIdentity(input)).toMatch(/^[0-9a-f]{64}$/u);
-    expect(input.identityKey).toBeNull();
-    expect(input.canReset).toBe(false);
-    input.providerId = "claude"; input.organization = "Reported organization";
-    expect(resumeAccountIdentity(input)).toMatch(/^[0-9a-f]{64}$/u);
-    const identity = resumeAccountIdentity(input); input.organization = "Another organization";
-    expect(resumeAccountIdentity(input)).not.toBe(identity);
+    expect(resumeAccountIdentity(input)).toBeNull();
+    const reader = new NativeSubscriptionReader({ accountKey: async () => "per-install-identity-key" });
+    const keyed = await reader.withMetadataIdentity(input, abort.signal);
+    expect(keyed.credentialFingerprint).toBe(createHmac("sha256", "per-install-identity-key").update("inertia-subscription\0metadata:codex\0")
+      .update(JSON.stringify(["codex", input.email, null, input.plan])).digest("hex"));
+    expect(keyed.identityKey).toBeNull();
+    expect(keyed.canReset).toBe(false);
+    const claude = await reader.withMetadataIdentity({ ...input, providerId: "claude", organization: "Reported organization" }, abort.signal);
+    const moved = await reader.withMetadataIdentity({ ...input, providerId: "claude", organization: "Another organization" }, abort.signal);
+    expect(resumeAccountIdentity(claude)).not.toBe(resumeAccountIdentity(moved));
+    const unkeyed = await new NativeSubscriptionReader({ accountKey: async () => null }).withMetadataIdentity(input, abort.signal);
+    expect(resumeAccountIdentity(unkeyed)).toBeNull();
+    expect(unkeyed.resumeUnavailable).toContain("Secure storage");
+  });
+});
+
+describe("resume identity across credential renewal", () => {
+  const jwt = (claims: Record<string, unknown>, nonce: string) => ["eyJhbGciOiJSUzI1NiJ9",
+    Buffer.from(JSON.stringify({ ...claims, exp: 1_900_000_000, jti: nonce })).toString("base64url"), `signature-${nonce}`].join(".");
+  let accessToken: string;
+  beforeEach(() => {
+    const projectId = store.conversation(conversationId).projectId;
+    conversationId = store.createConversation(projectId, "Paused Kimi task", { providerId: "kimi", model: "k" }).id;
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    accessToken = jwt({ iss: "https://auth.kimi.com", sub: "account-one" }, "before");
+    let remaining = "0";
+    const config = `default_model = "k"\n[models.k]\nmodel = "k"\nprovider = "managed:kimi-code"\n[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\n[providers."managed:kimi-code".oauth]\nstorage = "file"\nkey = "oauth/kimi-code"\n`;
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_SHARE_DIR: "/k" }), accountKey: async () => "per-install-identity-key",
+      readFile: async (path) => path.endsWith("config.toml") ? config : path.endsWith("kimi-code.json")
+        ? JSON.stringify({ access_token: accessToken, expires_at: Date.now() / 1000 + 3600 }) : null,
+      fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ usage: { limit: "100", remaining, resetAt: reset } }))) });
+    dependencies.readAccount = (_providerId, _force, model, cwd) => {
+      remaining = Date.now() >= Date.parse(reset) ? "100" : "0";
+      return reader.read({ ...usage(), id: "native:kimi", providerId: "kimi", providerLabel: "Kimi",
+        email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory);
+    };
+  });
+  it.each([["the same account", "account-one", "completed"], ["another account", "account-two", "blocked"]] as const)(
+    "resumes only when a renewed OAuth token names %s", async (_label, sub, state) => {
+      expect((await scheduler.get(conversationId)).offer).toMatchObject({ canResume: true, unavailableReason: null });
+      await schedule();
+      vi.setSystemTime(instant + 61_000);
+      accessToken = jwt({ iss: "https://auth.kimi.com", sub }, "after");
+      await scheduler.tick();
+      expect(store.limitResets.get(conversationId)).toMatchObject({ state });
+      expect(dependencies.dispatch).toHaveBeenCalledTimes(state === "completed" ? 1 : 0);
+    });
+  it("offers snooze only, with the reason, for a session token without a stable account claim", async () => {
+    accessToken = "opaque-session-token-without-claims";
+    const offer = (await scheduler.get(conversationId)).offer;
+    expect(offer).toMatchObject({ failedTurnId, canResume: false, unavailableReason: expect.stringContaining("stable account") });
+    await expect(schedule()).rejects.toThrow("limit changed");
   });
 });

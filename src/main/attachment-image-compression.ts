@@ -11,9 +11,10 @@ export async function compressAttachmentImage(bytes: Buffer, mimeType: ImageAtta
   if (bytes.length <= MAX_IMAGE_ATTACHMENT_BYTES && metadata.width <= 8192 && metadata.height <= 8192) return null;
   const image = new Image();
   image.src = bytes;
-  const initialScale = Math.min(1, 8192 / metadata.width, 8192 / metadata.height);
+  await image.decode();
+  const initialScale = Math.min(1, 8192 / image.width, 8192 / image.height);
   for (const scale of [1, 0.75, 0.55, 0.4]) {
-    const canvas = createCanvas(Math.max(1, Math.floor(metadata.width * initialScale * scale)), Math.max(1, Math.floor(metadata.height * initialScale * scale)));
+    const canvas = createCanvas(Math.max(1, Math.floor(image.width * initialScale * scale)), Math.max(1, Math.floor(image.height * initialScale * scale)));
     const context = canvas.getContext("2d");
     context.fillStyle = "white";
     context.fillRect(0, 0, canvas.width, canvas.height);

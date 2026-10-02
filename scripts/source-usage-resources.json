@@ -29,8 +29,8 @@
     },
     {
       "owner": "src/server/usage/native-subscriptions.ts",
-      "resources": "@napi-rs/keyring native platform bindings for Cursor account access",
-      "review": "Loaded only by the privileged subscription reader. Keep platform binaries unpacked and covered by native architecture and installer checks; never treat this binding as renderer code."
+      "resources": "@napi-rs/keyring native macOS bindings for Cursor account access",
+      "review": "Loaded only by the privileged subscription reader on macOS after an explicit user check. Packaged only for macOS, unpacked and covered by native architecture and container checks; Linux and Windows packages exclude it. Never treat this binding as renderer code."
     },
     {
       "owner": "scripts/run-electron-builder.mjs",

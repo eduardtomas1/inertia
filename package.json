@@ -225,7 +225,8 @@
         "!node_modules/**/prebuilds/linux-*/**",
         "!node_modules/**/prebuilds/linux-*.node",
         "!node_modules/**/prebuilds/linuxmusl-*/**",
-        "!node_modules/**/prebuilds/linuxmusl-*.node"
+        "!node_modules/**/prebuilds/linuxmusl-*.node",
+        "!node_modules/@napi-rs/keyring*/**"
       ]
     },
     "nsis": {
@@ -261,7 +262,8 @@
         "!node_modules/**/prebuilds/darwin-*/**",
         "!node_modules/**/prebuilds/darwin-*.node",
         "!node_modules/**/prebuilds/linuxmusl-*/**",
-        "!node_modules/**/prebuilds/linuxmusl-*.node"
+        "!node_modules/**/prebuilds/linuxmusl-*.node",
+        "!node_modules/@napi-rs/keyring*/**"
       ]
     }
   },

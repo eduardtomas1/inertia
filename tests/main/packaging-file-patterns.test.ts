@@ -67,6 +67,16 @@ describe("packaging file selection with the pinned builder", () => {
     }
   });
 
+  it.each(PLATFORMS)("ships the Keychain binding only in macOS packages ($key)", ({ key }) => {
+    const excludes = matchers(key, "files")[0].patterns.filter((pattern) => pattern.startsWith("!"));
+    const filter = new FileMatcher(root, root, (pattern) => pattern, ["**/*", ...excludes]).createFilter();
+    for (const path of ["@napi-rs/keyring/index.js", "@napi-rs/keyring-darwin-arm64/keyring.darwin-arm64.node",
+      "@napi-rs/keyring-linux-x64-gnu/keyring.linux-x64-gnu.node", "@napi-rs/keyring-win32-x64-msvc/keyring.win32-x64-msvc.node"]) {
+      expect(filter(join(root, "node_modules", path), fileMetadata), path).toBe(key === "mac");
+    }
+    expect(filter(join(root, "node_modules", "smol-toml/dist/index.js"), fileMetadata)).toBe(true);
+  });
+
   it.each(PLATFORMS)("copies each shared resource once on $key", ({ key }) => {
     const resources = matchers(key, "extraResources");
     const destinations = resources.map(({ to }) => to);

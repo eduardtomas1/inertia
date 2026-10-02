@@ -417,9 +417,9 @@ test("gates the exact runtime-selected and fallback node-pty binaries per Window
     const releaseRoot = join(nodePtyRoot, "build", "Release");
     const prebuildRoot = join(nodePtyRoot, "prebuilds", `win32-${architecture}`);
 
-    expect(paths).toHaveLength(25);
-    expect(new Set(paths).size).toBe(25);
-    expect(paths).toContainEqual(expect.stringContaining(`keyring.win32-${architecture}-msvc.node`));
+    expect(paths).toHaveLength(24);
+    expect(new Set(paths).size).toBe(24);
+    expect(paths).not.toContainEqual(expect.stringContaining("keyring"));
     expect(paths.filter((path) => path.includes(releaseRoot))).toEqual(
       expect.arrayContaining([
         expect.stringContaining(join(releaseRoot, "pty.node")),

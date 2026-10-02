@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 
 import { createCanvas } from "@napi-rs/canvas";
 import Database from "better-sqlite3";
-import { AsyncEntry } from "@napi-rs/keyring";
 import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
 import { probeNativeExecutable } from "./native-executable-probe.mjs";
 
@@ -57,7 +56,14 @@ for (const packageName of ["@crowecawcaw/xa11y", "ffi-rs"]) {
   }
 }
 
-if (typeof AsyncEntry.prototype.getPassword !== "function") throw new Error("The native Keychain binding could not load.");
+if (process.platform === "darwin") {
+  const { AsyncEntry } = await import("@napi-rs/keyring");
+  if (typeof AsyncEntry.prototype.getPassword !== "function") throw new Error("The native Keychain binding could not load.");
+  await inspectNativeBinaryArchitecture(
+    join(root, "node_modules", "@napi-rs", `keyring-darwin-${process.arch}`, `keyring.darwin-${process.arch}.node`),
+    { expectedArchitecture, platform: process.platform },
+  );
+}
 
 const database = new Database(":memory:");
 try {

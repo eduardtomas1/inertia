@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 export function removeProjectSettingsFromLegacyFixture(database: Database.Database): void {
   database.exec(`
+    DROP TABLE IF EXISTS usage_limited_turns;
     DROP TABLE IF EXISTS usage_limit_resume_plans;
     DROP TABLE IF EXISTS queued_messages;
     ALTER TABLE projects DROP COLUMN preferences_json;

@@ -4,7 +4,8 @@ const finite = z.number().finite();
 const percent = (used: number) => Math.max(0, Math.min(100, 100 - used));
 const iso = (value: unknown): string | null => {
   if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/u.test(value)) return null;
-  const time = Date.parse(value); return Number.isFinite(time) ? new Date(time).toISOString() : null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
 };
 export function cursorSubscriptionWindows(raw: unknown): UsageWindow[] {
   const value = z.object({ billingCycleEnd: z.union([z.string(), finite]).optional(),

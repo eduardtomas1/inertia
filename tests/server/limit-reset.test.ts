@@ -50,11 +50,13 @@ beforeEach(() => {
   conversationId = store.createConversation(project.id, "Paused task", { model: "gpt-test" }).id;
   const turn = begin(); failedTurnId = turn.id;
   store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+  store.limitResets.markUsageLimited(turn.id);
   store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
   store.updateConversation(conversationId, { status: "failed" });
   abort = new AbortController(); account = usage();
   dependencies = { store, signal: abort.signal, enabled: true,
     readAccount: vi.fn(async () => ({ ...account, updatedAt: new Date().toISOString(), checkedAt: new Date().toISOString() })),
+    cachedAccount: vi.fn(() => null),
     busy: () => false, dispatch: vi.fn(async (plan, guard) => { guard(); begin(plan.id); }),
     track: async (operation) => operation(), changed: vi.fn() };
   scheduler = makeScheduler();
@@ -71,6 +73,7 @@ describe("quota reset actions", () => {
     conversationId = store.createConversation(projectId, "Paused provider task", { providerId, model }).id;
     const turn = begin(); failedTurnId = turn.id;
     store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
     account.providerId = providerId; account.windows[0]!.id = windowId;
     await schedule();
@@ -165,6 +168,7 @@ describe("quota reset actions", () => {
     vi.setSystemTime(instant + 1_000);
     const turn = begin(); failedTurnId = turn.id;
     store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
     await schedule();
     const database = new Database(join(directory, "inertia.sqlite"));
@@ -194,12 +198,59 @@ describe("quota reset actions", () => {
     vi.setSystemTime(instant + 5_000);
     const turn = begin();
     store.updateAgentTurnLifecycle(turn.id, { status: outcome, completedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: outcome === "failed" ? "failed" : "succeeded", finishedAt: new Date().toISOString() });
     const result = await scheduler.get(conversationId);
     expect(store.limitResets.get(conversationId)).toMatchObject({ id, state: "cancelled" });
     expect(result.plan).toMatchObject({ id, state: "cancelled" });
     if (outcome === "failed") expect(result.offer).toMatchObject({ failedTurnId: turn.id, canResume: true });
     else expect(result.offer).toBeNull();
+  });
+
+  it("reads the account automatically only for a failure its provider tagged as usage-limited", async () => {
+    vi.setSystemTime(instant + 1_000);
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    expect((await scheduler.get(conversationId)).offer).toBeNull();
+    expect(dependencies.readAccount).not.toHaveBeenCalled();
+    expect(dependencies.cachedAccount).toHaveBeenCalledOnce();
+    vi.mocked(dependencies.cachedAccount).mockReturnValue({ ...account, updatedAt: new Date().toISOString() });
+    expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId, canResume: true });
+    expect(dependencies.readAccount).not.toHaveBeenCalled();
+    store.limitResets.markUsageLimited(turn.id);
+    await scheduler.get(conversationId);
+    expect(dependencies.readAccount).toHaveBeenCalledOnce();
+    expect(vi.mocked(dependencies.readAccount).mock.calls[0]?.[1]).toBe(false);
+  });
+
+  it("backs off while a due plan cannot be updated and then marks it for attention", async () => {
+    await schedule();
+    vi.setSystemTime(Date.parse(reset) + 2 * 3_600_000);
+    const settle = store.limitResets.settle.bind(store.limitResets);
+    vi.spyOn(store.limitResets, "settle").mockImplementation((plan, state, error) => {
+      if (state === "missed") throw new Error("SQLITE_FULL");
+      settle(plan, state, error);
+    });
+    const track = vi.fn();
+    dependencies.track = async (operation) => { track(); return operation(); };
+    scheduler = makeScheduler(); scheduler.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(track.mock.calls.length).toBeLessThanOrEqual(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "blocked", error: expect.stringContaining("could not update") });
+    const calls = track.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(track.mock.calls.length - calls).toBeLessThanOrEqual(1);
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not read the provider again for repeated schedule requests while a plan waits", async () => {
+    await schedule();
+    const reads = vi.mocked(dependencies.readAccount).mock.calls.length;
+    for (let index = 0; index < 20; index += 1) await schedule();
+    await Promise.all(Array.from({ length: 5 }, () => scheduler.snooze({ conversationId, failedTurnId, resetsAt: reset }).catch(() => undefined)));
+    expect(vi.mocked(dependencies.readAccount).mock.calls.length - reads).toBe(1);
   });
 
   it("reports a pending plan from the database without another account read", async () => {
@@ -290,6 +341,7 @@ describe("resume account identity storage", () => {
     conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
     const turn = begin(); failedTurnId = turn.id;
     store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
     const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: secret }), accountKey,
       fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ billingCycleEnd: Date.parse(reset),
@@ -322,6 +374,7 @@ describe("macOS Keychain access", () => {
     conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
     const turn = begin(); failedTurnId = turn.id;
     store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
     keychain = vi.fn(async () => "keychain-session-token");
     const reader = new NativeSubscriptionReader({ platform: "darwin", environment: async () => ({ HOME: directory }), readCursorKeychain: keychain,
@@ -399,6 +452,7 @@ describe("resume identity across credential renewal", () => {
     conversationId = store.createConversation(projectId, "Paused Kimi task", { providerId: "kimi", model: "k" }).id;
     const turn = begin(); failedTurnId = turn.id;
     store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
     accessToken = jwt({ iss: "https://auth.kimi.com", sub: "account-one" }, "before");
     let remaining = "0";

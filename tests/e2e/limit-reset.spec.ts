@@ -68,6 +68,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
         store.updateAgentTurnLifecycle(turn.id, { status: "running", startedAt: turn.requestedAt });
         store.updateAgentTurnLifecycle(turn.id, { status: "failed", terminalReason: "provider-error", completedAt: new Date().toISOString() });
         store.updateWorkspaceRun(run.id, { status: "failed", finishedAt: new Date().toISOString() });
+        store.limitResets.markUsageLimited(turn.id);
         store.updateConversation(chat.id, { status: "failed" }); store.updateSettings({ codexBinaryPath: binary });
       } finally { store.close(); }
     },

@@ -17,5 +17,8 @@ export const limitResetMigration: DatabaseMigrationDefinition = {
       turn_id TEXT REFERENCES agent_turns(id) ON DELETE SET NULL
     );
     CREATE INDEX usage_limit_resume_due ON usage_limit_resume_plans(state, next_attempt_at);
+    CREATE TABLE usage_limited_turns (
+      turn_id TEXT PRIMARY KEY REFERENCES agent_turns(id) ON DELETE CASCADE
+    );
   `,
 };

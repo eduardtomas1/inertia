@@ -267,6 +267,9 @@ export class TurnSettlementCoordinator {
           },
         });
       } catch { /* Diagnostics cannot break settlement or trigger a retry. */ }
+      if (status === "failed" && failure?.usageLimited) {
+        effects.run("projection", () => this.options.store.limitResets.markUsageLimited(active.turn.id));
+      }
       const failureMessage = message ?? (
         status === "interrupted"
           ? "The agent turn was interrupted."

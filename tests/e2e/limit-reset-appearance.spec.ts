@@ -57,6 +57,7 @@ function failTurn(store: RuntimeStore, conversation: Conversation, content: stri
   store.updateAgentTurnLifecycle(turn.id, { status: "running", startedAt: requestedAt, updatedAt: requestedAt });
   store.updateAgentTurnLifecycle(turn.id, { status: "failed", terminalReason: "provider-error", completedAt: failedAt, updatedAt: failedAt });
   store.updateWorkspaceRun(run.id, { status: "failed", finishedAt: failedAt });
+  store.limitResets.markUsageLimited(turn.id);
   store.updateConversation(conversation.id, { status: "failed" });
   store.createTurnGitArtifact({ turnId: turn.id, status: "unavailable", completeness: "unavailable",
     failureReason: "This workspace is not a Git repository.", absenceReason: "not-repository" });

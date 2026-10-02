@@ -1277,6 +1277,7 @@ describe("database backup and startup recovery", () => {
     "agent_managed_conversations",
     "agent_thread_operations",
     "usage_limit_resume_plans",
+    "usage_limited_turns",
   ] as const)(
     "preserves all evidence and refuses startup when a current-schema primary lost %s",
     async (missingTable) => {

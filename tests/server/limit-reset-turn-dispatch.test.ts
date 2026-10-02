@@ -28,12 +28,27 @@ describe("reset dispatch through ordinary turn admission", () => {
     expect(steer).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])("records whether the provider tagged a failed turn as usage-limited (%s)", async (limited) => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const turn = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First task" });
+      runtime.controller.start(turn.turn.id);
+      await flushTurnControllerTestPromises();
+      runtime.provider.resolve({ status: "failed", text: "Usage limit reached",
+        failure: { reason: "codex-error", message: "Usage limit reached", ...(limited ? { usageLimited: true as const } : {}) } });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.waitForProviderCleanup([runtime.conversationId]);
+      expect(runtime.store.agentTurn(turn.turn.id).status).toBe("failed");
+      expect(runtime.store.limitResets.usageLimited(turn.turn.id)).toBe(limited);
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
+
   it.each([false, true])("keeps the durable reset claim and turn acceptance atomic (cancel=%s)", async (cancel) => {
     const runtime = await createTurnControllerTestRuntime();
     const attachments = await ConversationAttachmentStore.open(runtime.directory);
     const abort = new AbortController();
     const scheduler = new LimitResetScheduler({ store: runtime.store, signal: abort.signal, enabled: true,
-      busy: () => false, readAccount: async () => null, dispatch: async () => undefined,
+      busy: () => false, readAccount: async () => null, cachedAccount: () => null, dispatch: async () => undefined,
       changed: () => undefined, track: (operation) => operation() });
     let transitionHeld = false;
     try {

@@ -218,6 +218,7 @@ export function normalizedProviderRunFailure(
     phase: reported?.phase ?? active.turn.status,
     ...(reported?.terminalEvent ? { terminalEvent: reported.terminalEvent } : {}),
     ...(reported?.activityId ? { activityId: reported.activityId } : {}),
+    ...(reported?.usageLimited ? { usageLimited: true as const } : {}),
     technicalDetail,
   };
 }

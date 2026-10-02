@@ -51,6 +51,12 @@ export class LimitResetRepository {
     this.database.prepare("UPDATE usage_limit_resume_plans SET state='waiting', next_attempt_at=? WHERE id=? AND conversation_id=? AND state='dispatching'")
       .run(nextAttemptAt, plan.id, plan.conversationId);
   }
+  markUsageLimited(turnId: string): void {
+    this.database.prepare("INSERT OR IGNORE INTO usage_limited_turns (turn_id) VALUES (?)").run(turnId);
+  }
+  usageLimited(turnId: string): boolean {
+    return this.database.prepare("SELECT 1 FROM usage_limited_turns WHERE turn_id = ?").get(turnId) !== undefined;
+  }
   reconcile(): void {
     this.database.prepare("UPDATE usage_limit_resume_plans SET state='waiting' WHERE state='dispatching' AND turn_id IS NULL").run();
   }

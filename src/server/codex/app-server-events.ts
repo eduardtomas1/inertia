@@ -51,7 +51,7 @@ import {
 } from "./app-server-item-events";
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
-import { codexTurnInterruptionFailure } from "./app-server-status";
+import { codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
 import {
   MAX_PRE_RESPONSE_TURN_NOTIFICATIONS,
   PreResponseTurnNotifications,
@@ -116,6 +116,7 @@ export interface CodexAppServerEventHost {
     reason: ProviderRunFailure["reason"],
     message: string,
     technicalDetail?: string,
+    usageLimited?: boolean,
   ) => void;
 }
 
@@ -830,6 +831,7 @@ export class CodexAppServerEvents {
           "codex-error",
           "Codex reported an error.",
           message,
+          codexUsageLimited(error?.codexErrorInfo),
         );
         this.emitActivity(
           "system",
@@ -936,6 +938,7 @@ export class CodexAppServerEvents {
           "codex-error",
           interruptionFailure?.message ?? "Codex could not complete the turn.",
           interruptionFailure ? interruptionFailure.technicalDetail : lastError,
+          codexUsageLimited(turnError?.codexErrorInfo),
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {

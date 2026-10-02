@@ -511,7 +511,7 @@ describe("safe database recovery exports", () => {
         }>;
       }>;
     };
-    expect(exported.version).toBe(2);
+    expect(exported.version).toBe(3);
     expect(exported.projects[0]?.conversations[0]?.messages.map(
       ({ role, content }) => ({ role, content }),
     )).toEqual(expected);
@@ -680,7 +680,7 @@ describe("safe database recovery exports", () => {
       expect(conversations.find(({ title }) => title === "Current provider chat"))
         .toMatchObject({ providerId: "claude", model: "claude-test", reasoningEffort: "medium" });
       const reexported = parseDatabaseRecoveryExport(store.exportRecoveryData());
-      expect(reexported.version).toBe(2);
+      expect(reexported.version).toBe(3);
       expect(reexported.projects[0]!.conversations.find(
         ({ title }) => title === "Retired Gemini chat",
       )).toMatchObject({

@@ -22,6 +22,16 @@ export function isWithinScratchRoot(dataDirectory: string, path: string): boolea
   return isContained(root, candidate);
 }
 
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 function hasRepositoryMarker(path: string): boolean {
   for (let directory = realpathSync(path); ; directory = dirname(directory)) {
     try {
@@ -48,7 +58,8 @@ export class ScratchWorkspace {
   async ensureProject(): Promise<Project> {
     const root = resolve(this.dataDirectory, "scratch");
     const existing = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
-    if (existing && normalizeIdentityPath(existing.path) === normalizeIdentityPath(root)) {
+    const rootMissing = !pathExists(root);
+    if (existing && !rootMissing && normalizeIdentityPath(existing.path) === normalizeIdentityPath(root)) {
       this.store.projectPath(existing.id);
     } else {
       try { mkdirSync(root, { mode: 0o700 }); }
@@ -69,8 +80,8 @@ export class ScratchWorkspace {
     }
     this.verifyRoot(root);
     const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
-    if (current && normalizeIdentityPath(current.path) !== normalizeIdentityPath(root)) {
-      return this.store.updateProject(current.id, { path: root, normalizedPath: root });
+    if (current && (rootMissing || normalizeIdentityPath(current.path) !== normalizeIdentityPath(root))) {
+      return this.store.rebindScratchProject(current.id, root);
     }
     if (current) {
       this.store.projectPath(current.id);

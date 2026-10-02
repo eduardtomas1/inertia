@@ -42,9 +42,11 @@ export interface DatabaseRecoveryImportOptions {
 
 export interface DatabaseRecoveryImportWriters {
   createProject(project: RecoveryProject, path: string): string;
+  scratchProject(): string;
   createConversation(
     projectId: string,
     conversation: RecoveryConversation,
+    scratch: boolean,
   ): string;
   createMessage(
     id: string,
@@ -127,6 +129,7 @@ export function exportDatabaseRecoveryData(
           + length(CAST(reasoning_effort AS BLOB))
           + length(CAST(interaction_mode AS BLOB))
           + length(CAST(access_mode AS BLOB))
+          + COALESCE(length(CAST(worktree_path AS BLOB)), 0)
           + 64 AS bytes
       FROM conversations
       UNION ALL
@@ -210,10 +213,12 @@ export function exportDatabaseRecoveryData(
     version: DATABASE_RECOVERY_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
     projects: projects.map((project) => {
+      const scratch = project.workspaceKind === "scratch";
       account({ name: project.name, path: project.path });
       return {
         name: project.name,
         path: project.path,
+        ...(scratch ? { workspaceKind: "scratch" as const } : {}),
         conversations: (conversationsByProject.get(project.id) ?? [])
           .map((conversation) => {
             account({
@@ -223,6 +228,7 @@ export function exportDatabaseRecoveryData(
               reasoningEffort: conversation.reasoningEffort,
               interactionMode: conversation.interactionMode,
               accessMode: conversation.accessMode,
+              worktreePath: scratch ? conversation.worktreePath : null,
             });
             return {
               title: conversation.title,
@@ -231,6 +237,9 @@ export function exportDatabaseRecoveryData(
               reasoningEffort: conversation.reasoningEffort,
               interactionMode: conversation.interactionMode,
               accessMode: conversation.accessMode,
+              ...(scratch && conversation.worktreePath
+                ? { worktreePath: conversation.worktreePath }
+                : {}),
               messages: (messagesByConversation.get(conversation.id) ?? [])
                 .map((message, ordinal) => {
                   const exportedMessage = {
@@ -284,7 +293,7 @@ export async function importDatabaseRecoveryData(
     database,
     digest,
     authorizedRoot: resolvedRoot,
-    projectCount: recovery.projects.length,
+    projectCount: recovery.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch").length,
     operationId: options.operationId,
     signal: options.signal,
     operations: options.operations,
@@ -312,16 +321,20 @@ export async function importDatabaseRecoveryData(
       };
       let conversationCount = 0;
       let messageCount = 0;
-      for (const [projectIndex, importedProject] of recovery.projects.entries()) {
-        const remappedPath = verifyRecoveredProjectDirectory(
-          prepared.projectPath(projectIndex),
-          resolvedRoot,
-        );
-        const projectId = writers.createProject(importedProject, remappedPath);
+      let placeholderIndex = 0;
+      for (const importedProject of recovery.projects) {
+        const scratch = importedProject.workspaceKind === "scratch";
+        const projectId = scratch
+          ? writers.scratchProject()
+          : writers.createProject(importedProject, verifyRecoveredProjectDirectory(
+            prepared.projectPath(placeholderIndex++),
+            resolvedRoot,
+          ));
         for (const importedConversation of importedProject.conversations) {
           const conversationId = writers.createConversation(
             projectId,
             importedConversation,
+            scratch,
           );
           conversationCount += 1;
           const messageIdPrefix = randomUUID().slice(

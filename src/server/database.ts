@@ -51,9 +51,9 @@ import {
 import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
 import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
-  recoveredConversationModel,
   type DatabaseRecoveryImportResult,
 } from "./persistence/database-export";
+import { recoveryImportWriters } from "./persistence/recovery-import-writers";
 import {
   exportDatabaseRecoveryData,
   importDatabaseRecoveryData,
@@ -332,33 +332,13 @@ export class RuntimeStore {
     authorizedRoot: string,
     options: DatabaseRecoveryImportOptions = {},
   ): Promise<DatabaseRecoveryImportResult> {
-    return importDatabaseRecoveryData(
-      this.database,
-      serialized,
-      authorizedRoot,
-      {
-        createProject: (project, path) =>
-          this.createProject(project.name, path).id,
-        createConversation: (projectId, conversation) =>
-          this.createConversation(projectId, conversation.title, {
-            ...recoveredConversationModel(conversation),
-            interactionMode: conversation.interactionMode,
-            // Exported authorization is never authoritative on this device.
-            accessMode: "supervised",
-            activate: false,
-          }).id,
-        createMessage: (id, conversationId, message) => {
-          this.transcriptRepository.createRecoveredMessage(
-            id,
-            conversationId,
-            message.content,
-            message.role,
-            message.createdAt,
-          );
-        },
-      },
-      options,
-    );
+    return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, recoveryImportWriters({
+      database: this.database,
+      createProject: (name, path, identity) => this.createProject(name, path, identity),
+      createConversation: (projectId, title, conversation) => this.createConversation(projectId, title, conversation),
+      projectPath: (projectId) => this.projectPath(projectId),
+      createRecoveredMessage: (...message) => { this.transcriptRepository.createRecoveredMessage(...message); },
+    }), options);
   }
 
   reconcileRecoveryImport(): void {
@@ -409,6 +389,10 @@ export class RuntimeStore {
 
   updateProject(projectId: string, update: Parameters<ProjectRepository["update"]>[1]): Project {
     return this.projectRepository.update(projectId, update);
+  }
+
+  rebindScratchProject(projectId: string, path: string): Project {
+    return this.projectRepository.rebindScratch(projectId, path);
   }
 
   removeProject(projectId: string): void {

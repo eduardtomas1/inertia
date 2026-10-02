@@ -107,11 +107,13 @@ export class ConversationRepository {
           conversation.worktreePath,
           conversation.branch,
         );
-        this.pathAuthority.enrollConversation(
-          conversation.id,
-          conversation.projectId,
-          conversation.worktreePath,
-        );
+        if (options.enrollWorktree !== false) {
+          this.pathAuthority.enrollConversation(
+            conversation.id,
+            conversation.projectId,
+            conversation.worktreePath,
+          );
+        }
       }
       this.context.touchProject(projectId, now);
       if (options.activate !== false) {

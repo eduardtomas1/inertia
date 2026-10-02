@@ -94,10 +94,39 @@ describe("chats without a project", () => {
     const chat = await scratch.createConversation(project.id, "New chat", {});
     renameSync(chat.worktreePath!, `${chat.worktreePath}-old`);
     mkdirSync(chat.worktreePath!);
-    expect(() => store.conversationPath(chat.id)).toThrow("authorization expired");
+    expect(() => store.conversationPath(chat.id)).toThrow("is missing or was replaced, so the chat can be read but not continued");
     renameSync(project.path, `${project.path}-old`);
     mkdirSync(project.path);
     await expect(scratch.ensureProject()).rejects.toThrow("authorization expired");
+  });
+
+  it("explains that a chat whose folder is gone can be read but not continued", async () => {
+    const project = await scratch.ensureProject();
+    const chat = await scratch.createConversation(project.id, "Gone", {});
+    rmSync(chat.worktreePath!, { recursive: true });
+    expect(() => store.conversationPath(chat.id)).toThrow(
+      `This chat's folder (${chat.worktreePath}) is missing or was replaced, so the chat can be read but not continued. Start a new chat without a project to keep working.`,
+    );
+    const userFolder = join(directory, "user-project");
+    mkdirSync(userFolder);
+    const userProject = store.createProject("User project", userFolder);
+    const worktree = join(directory, "user-worktree");
+    mkdirSync(worktree);
+    const userChat = store.createConversation(userProject.id, "Project chat", { worktreePath: worktree });
+    rmSync(worktree, { recursive: true });
+    expect(() => store.conversationPath(userChat.id)).toThrow("Re-add the project");
+  });
+
+  it("sets the managed folder up again after it was deleted", async () => {
+    const project = await scratch.ensureProject();
+    const chat = await scratch.createConversation(project.id, "Before", {});
+    rmSync(project.path, { recursive: true });
+    const restored = await scratch.ensureProject();
+    expect(restored).toMatchObject({ id: project.id, path: project.path });
+    expect(store.projectPath(project.id)).toBe(project.path);
+    expect(() => store.conversationPath(chat.id)).toThrow("can be read but not continued");
+    const next = await scratch.createConversation(project.id, "After", {});
+    expect(store.conversationPath(next.id)).toBe(next.worktreePath);
   });
 
   it("rebinds the managed folder to a moved data directory after verifying the new folder", async () => {
@@ -121,7 +150,7 @@ describe("chats without a project", () => {
     const userFolder = join(directory, "user-project");
     mkdirSync(userFolder);
     const userProject = store.createProject("User project", userFolder);
-    expect(() => store.updateProject(userProject.id, { path: moved })).toThrow("Only the folder for chats without a project can move.");
+    expect(() => store.rebindScratchProject(userProject.id, moved)).toThrow("Only the folder for chats without a project can move.");
     expect(store.projectPath(userProject.id)).toBe(userFolder);
   });
 

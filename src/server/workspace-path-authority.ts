@@ -427,6 +427,20 @@ export class WorkspacePathAuthority {
   }
 
   resolveConversation(row: ConversationRow, project: ProjectRow): string {
+    if (project.workspace_kind !== "scratch" || row.worktree_path === null) {
+      return this.resolveAuthorizedConversation(row, project);
+    }
+    try {
+      return this.resolveAuthorizedConversation(row, project);
+    } catch (error) {
+      if (!(error instanceof WorkspacePathAuthorityError)) throw error;
+      throw new WorkspacePathAuthorityError(
+        `This chat's folder (${row.worktree_path}) is missing or was replaced, so the chat can be read but not continued. Start a new chat without a project to keep working.`,
+      );
+    }
+  }
+
+  private resolveAuthorizedConversation(row: ConversationRow, project: ProjectRow): string {
     const projectPath = this.resolveProject(project);
     if (row.worktree_path === null) return projectPath;
     try {

@@ -10,7 +10,7 @@ import type { PersistenceContext } from "./context";
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
 
 type ProjectPersistenceContext = Pick<PersistenceContext, "database" | "requireProject">;
-export type NewProjectOptions = Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "workspaceKind">> & { activate?: boolean };
+export type NewProjectOptions = Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "workspaceKind">> & { activate?: boolean; enroll?: boolean };
 
 export class ProjectRepository {
   private readonly pathAuthority: WorkspacePathAuthority;
@@ -58,30 +58,28 @@ export class ProjectRepository {
         )
       `).run({ ...project, workspaceKind: project.workspaceKind ?? null });
       if (identity.activate !== false) this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
-      this.pathAuthority.enrollProject(
-        project.id,
-        project.path,
-        project.repositoryRoot,
-        project.repositoryIdentity,
-      );
+      if (identity.enroll !== false) {
+        this.pathAuthority.enrollProject(
+          project.id,
+          project.path,
+          project.repositoryRoot,
+          project.repositoryIdentity,
+        );
+      }
     })();
     return project;
   }
 
   update(
     projectId: string,
-    update: Partial<Pick<Project, "name" | "path" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "preferences">>,
+    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "preferences">>,
   ): Project {
     const current = projectFromRow(this.context.requireProject(projectId));
     const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
     if (unchanged) return current;
     const next = { ...current, ...update, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
-    if (next.path !== current.path && (current.workspaceKind !== "scratch" || next.repositoryIdentity !== null || next.repositoryRoot !== null)) {
-      throw new Error("Only the folder for chats without a project can move.");
-    }
     const preferencesJson = JSON.stringify(projectPreferencesSchema.parse(next.preferences));
     this.context.database.transaction(() => {
-      if (next.path !== current.path) this.pathAuthority.reenrollProject(projectId, next.path);
       const repositoryChanged =
         next.repositoryIdentity !== current.repositoryIdentity
         || next.repositoryRoot !== current.repositoryRoot;
@@ -104,7 +102,6 @@ export class ProjectRepository {
       this.context.database.prepare(`
         UPDATE projects SET
           name = @name,
-          path = @path,
           normalized_path = @normalizedPath,
           repository_identity = @repositoryIdentity,
           repository_root = @repositoryRoot,
@@ -115,6 +112,21 @@ export class ProjectRepository {
           updated_at = @updatedAt
         WHERE id = @id
       `).run({ ...next, preferencesJson });
+    })();
+    return next;
+  }
+
+  rebindScratch(projectId: string, projectPath: string): Project {
+    const current = projectFromRow(this.context.requireProject(projectId));
+    if (current.workspaceKind !== "scratch" || current.repositoryIdentity !== null || current.repositoryRoot !== null) {
+      throw new Error("Only the folder for chats without a project can move.");
+    }
+    const path = resolve(projectPath);
+    const next = { ...current, path, normalizedPath: path, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
+    this.context.database.transaction(() => {
+      this.context.database.prepare("UPDATE projects SET path = ?, normalized_path = ?, updated_at = ? WHERE id = ?")
+        .run(next.path, next.normalizedPath, next.updatedAt, projectId);
+      this.pathAuthority.reenrollProject(projectId, path);
     })();
     return next;
   }

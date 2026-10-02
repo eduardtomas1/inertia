@@ -5,7 +5,7 @@ import type { ProviderId } from "../../shared/contracts";
 import type { NewConversationOptions } from "./types";
 
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
-export const DATABASE_RECOVERY_EXPORT_VERSION = 2;
+export const DATABASE_RECOVERY_EXPORT_VERSION = 3;
 export const DATABASE_RECOVERY_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
 export const DATABASE_RECOVERY_EXPORT_MAX_PROJECTS = 10_000;
 export const DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS = 100_000;
@@ -61,10 +61,10 @@ const legacyRecoveryConversationSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
 }).strict().transform(normalizeRecoveryConversation);
 
-const recoveryConversationSchema = z.object({
-  ...recoveryConversationFields,
-  messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
-}).strict().superRefine((value, context) => {
+function requireOrderedMessages(
+  value: { messages: Array<{ ordinal: number }> },
+  context: z.RefinementCtx,
+): void {
   for (const [index, message] of value.messages.entries()) {
     if (message.ordinal !== index) {
       context.addIssue({
@@ -74,14 +74,27 @@ const recoveryConversationSchema = z.object({
       });
     }
   }
-}).transform(normalizeRecoveryConversation);
+}
+
+const recoveryPathSchema = z.string().min(1).max(4_096).refine(
+  (value) => !value.includes("\0"),
+  "Expected a bounded project path identity without NUL bytes.",
+);
+
+const version2RecoveryConversationSchema = z.object({
+  ...recoveryConversationFields,
+  messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
+}).strict().superRefine(requireOrderedMessages).transform(normalizeRecoveryConversation);
+
+const recoveryConversationSchema = z.object({
+  ...recoveryConversationFields,
+  worktreePath: recoveryPathSchema.optional(),
+  messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
+}).strict().superRefine(requireOrderedMessages).transform(normalizeRecoveryConversation);
 
 const recoveryProjectFields = {
   name: z.string().max(1_000),
-  path: z.string().min(1).max(4_096).refine(
-    (value) => !value.includes("\0"),
-    "Expected a bounded project path identity without NUL bytes.",
-  ),
+  path: recoveryPathSchema,
 };
 
 const legacyRecoveryProjectSchema = z.object({
@@ -90,11 +103,26 @@ const legacyRecoveryProjectSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
 
-const recoveryProjectSchema = z.object({
+const version2RecoveryProjectSchema = z.object({
   ...recoveryProjectFields,
-  conversations: z.array(recoveryConversationSchema)
+  conversations: z.array(version2RecoveryConversationSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
+
+const recoveryProjectSchema = z.object({
+  ...recoveryProjectFields,
+  workspaceKind: z.literal("scratch").optional(),
+  conversations: z.array(recoveryConversationSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
+}).strict().superRefine((project, context) => {
+  if (project.workspaceKind !== "scratch" && project.conversations.some(({ worktreePath }) => worktreePath !== undefined)) {
+    context.addIssue({
+      code: "custom",
+      path: ["conversations"],
+      message: "Only chats without a project carry their own folder.",
+    });
+  }
+});
 
 interface RecoveryExportCounts {
   projects: Array<{
@@ -136,6 +164,14 @@ const legacyDatabaseRecoveryExportSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
 }).strict().superRefine(validateRecoveryExportCounts);
 
+const version2DatabaseRecoveryExportSchema = z.object({
+  format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
+  version: z.literal(2),
+  exportedAt: timestampSchema,
+  projects: z.array(version2RecoveryProjectSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
+}).strict().superRefine(validateRecoveryExportCounts);
+
 export const databaseRecoveryExportSchema = z.object({
   format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
   version: z.literal(DATABASE_RECOVERY_EXPORT_VERSION),
@@ -146,6 +182,7 @@ export const databaseRecoveryExportSchema = z.object({
 
 const supportedDatabaseRecoveryExportSchema = z.union([
   databaseRecoveryExportSchema,
+  version2DatabaseRecoveryExportSchema,
   legacyDatabaseRecoveryExportSchema,
 ]);
 
@@ -189,6 +226,9 @@ export function parseDatabaseRecoveryExport(
   }
   if (result.data.version === DATABASE_RECOVERY_EXPORT_VERSION) {
     return result.data;
+  }
+  if (result.data.version === 2) {
+    return { ...result.data, version: DATABASE_RECOVERY_EXPORT_VERSION };
   }
   return {
     ...result.data,

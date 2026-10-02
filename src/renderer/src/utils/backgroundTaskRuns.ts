@@ -21,7 +21,8 @@ export function backgroundCommandRuns(
     run.conversationId === conversationId
     && workspaceRunAttentionView(run).bucket !== "hidden"
     && (run.kind === "agent"
-      ? !turnRunIds.has(run.id) && earliestTurn !== null && run.startedAt >= earliestTurn
+      ? !turnRunIds.has(run.id) && earliestTurn !== null
+        && (backgroundCommandIsLive(run) || run.startedAt >= earliestTurn)
       : run.kind === "source-control" || run.actionId !== null));
 }
 

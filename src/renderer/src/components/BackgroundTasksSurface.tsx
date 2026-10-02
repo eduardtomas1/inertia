@@ -15,6 +15,7 @@ import {
 } from "../utils/backgroundTasks";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { canStopSubagentTrace } from "../utils/subagentDisclosure";
+import { useBackgroundTaskFeed, type BackgroundTasksLoader } from "../hooks/useBackgroundTaskFeed";
 import { AgentCard, CommandCard } from "./BackgroundTaskCards";
 import "./WorkspaceSurfaces.css";
 import "./BackgroundTasksSurface.css";
@@ -25,6 +26,7 @@ export interface BackgroundTasksSurfaceProps {
   turns: readonly AgentTurn[];
   runs: readonly WorkspaceRun[];
   conversationId: string | null;
+  loadTasks?: BackgroundTasksLoader;
   now?: number;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -100,6 +102,7 @@ function useTurnReveal(
   finishedOpen: boolean,
   showAllFinished: boolean,
   openFinished: (showAll: boolean) => void,
+  more: { hasMore: boolean; loadMore: () => void } | null,
 ): void {
   const [turnId, setTurnId] = useState<string | null>(null);
   useLayoutEffect(() => {
@@ -114,6 +117,10 @@ function useTurnReveal(
   useLayoutEffect(() => {
     if (!turnId) return;
     const index = finished.findIndex((item) => item.type === "agent" && item.trace.turnId === turnId);
+    if (index < 0 && more?.hasMore) {
+      more.loadMore();
+      return;
+    }
     const showAll = index >= MAX_COMPACT_FINISHED;
     if (index >= 0 && (!finishedOpen || (showAll && !showAllFinished))) {
       openFinished(showAll);
@@ -122,7 +129,7 @@ function useTurnReveal(
     const rows = regionRef.current?.querySelectorAll<HTMLElement>("[data-reveal-turn]") ?? [];
     [...rows].find((row) => row.dataset.revealTurn === turnId)?.scrollIntoView({ block: "nearest" });
     setTurnId(null);
-  }, [finished, finishedOpen, openFinished, regionRef, showAllFinished, turnId]);
+  }, [finished, finishedOpen, more, openFinished, regionRef, showAllFinished, turnId]);
 }
 
 function toggled(current: ReadonlySet<string>, id: string, on?: boolean): ReadonlySet<string> {
@@ -138,6 +145,7 @@ export function BackgroundTasksSurface({
   turns,
   runs,
   conversationId,
+  loadTasks,
   now,
   canFollowUpSubagent,
   onFollowUpSubagent,
@@ -153,19 +161,21 @@ export function BackgroundTasksSurface({
   const [stopping, setStopping] = useState<ReadonlySet<string>>(() => new Set());
   const [finishedOpen, setFinishedOpen] = useState(false);
   const [showAllFinished, setShowAllFinished] = useState(false);
+  const feed = useBackgroundTaskFeed(conversationId, loadTasks, subagents, runs, turns);
   const commands = useMemo(
-    () => backgroundCommandRuns(runs, conversationId, turns),
-    [conversationId, runs, turns],
+    () => feed?.runs ?? backgroundCommandRuns(runs, conversationId, turns),
+    [conversationId, feed, runs, turns],
   );
-  const items = useMemo(() => backgroundTaskItems(subagents, commands), [commands, subagents]);
+  const traces = feed?.subagents ?? subagents;
+  const items = useMemo(() => backgroundTaskItems(traces, commands), [commands, traces]);
   const openFinished = useCallback((showAll: boolean) => {
     setFinishedOpen(true);
     if (showAll) setShowAllFinished(true);
   }, []);
-  useTurnReveal(conversationId, focus.regionRef, items.finished, finishedOpen, showAllFinished, openFinished);
-  const latest = useRef({ subagents, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent });
+  useTurnReveal(conversationId, focus.regionRef, items.finished, finishedOpen, showAllFinished, openFinished, feed);
+  const latest = useRef({ subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent });
   useLayoutEffect(() => {
-    latest.current = { subagents, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent };
+    latest.current = { subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent };
   });
   const toggleDetails = useCallback((id: string) => setExpanded((current) => toggled(current, id)), []);
   const open = useCallback((id: string) => {
@@ -190,7 +200,7 @@ export function BackgroundTasksSurface({
       return <CommandCard key={item.key} run={item.run} now={now} onStop={onStopCommand} />;
     }
     const { trace } = item;
-    const parent = trace.parentTraceId ? traceById(subagents, trace.parentTraceId) : undefined;
+    const parent = trace.parentTraceId ? traceById(traces, trace.parentTraceId) : undefined;
     return (
       <AgentCard
         key={item.key}
@@ -219,10 +229,20 @@ export function BackgroundTasksSurface({
     ? items.finished.flatMap((item) =>
       item.type === "command" && workspaceRunAttentionView(item.run).canDismiss ? [item.run] : [])
     : [];
-  const hiddenFinished = Math.max(0, items.finished.length - MAX_COMPACT_FINISHED);
+  const finishedCount = Math.max(feed?.finishedCount ?? 0, items.finished.length);
+  const failedCount = Math.max(feed?.failedCount ?? 0, items.failed);
   const visibleFinished = showAllFinished
     ? items.finished
     : items.finished.slice(0, MAX_COMPACT_FINISHED);
+  const hiddenFinished = finishedCount - visibleFinished.length;
+  const showMoreFinished = (): void => {
+    if (hiddenFinished === 0) {
+      setShowAllFinished(false);
+      return;
+    }
+    setShowAllFinished(true);
+    if (showAllFinished || items.finished.length <= MAX_COMPACT_FINISHED) feed?.loadMore();
+  };
   const attention = runtimeStatus === "online"
     ? null
     : runtimeStatus === "connecting"
@@ -247,7 +267,7 @@ export function BackgroundTasksSurface({
             <span><strong>{attention.title}</strong><small>{attention.detail}</small></span>
           </div>
         )}
-        {items.active.length === 0 && items.finished.length === 0 && (
+        {items.active.length === 0 && finishedCount === 0 && (
           <p className="background-tasks-label">No background tasks.</p>
         )}
         {items.active.length > 0 && (
@@ -258,7 +278,7 @@ export function BackgroundTasksSurface({
             </ol>
           </div>
         )}
-        {items.finished.length > 0 && (
+        {finishedCount > 0 && (
           <div className="background-tasks-group" data-focus-row="finished">
             <div className="background-tasks-finished">
               <button
@@ -269,11 +289,11 @@ export function BackgroundTasksSurface({
                 aria-controls={finishedOpen ? `${surfaceId}-finished` : undefined}
                 onClick={() => setFinishedOpen((current) => !current)}
               >
-                Finished <span className="background-task-value">{items.finished.length}</span>
-                {items.failed > 0 && (
+                Finished <span className="background-task-value">{finishedCount}</span>
+                {failedCount > 0 && (
                   <>
                     {" · "}
-                    <span className="background-task-danger">{items.failed} failed</span>
+                    <span className="background-task-danger">{failedCount} failed</span>
                   </>
                 )}
                 <ChevronRight size={13} aria-hidden="true" />
@@ -296,14 +316,14 @@ export function BackgroundTasksSurface({
                 {visibleFinished.map(renderItem)}
               </ol>
             )}
-            {finishedOpen && hiddenFinished > 0 && (
+            {finishedOpen && (hiddenFinished > 0 || showAllFinished) && (
               <button
                 type="button"
                 className="background-task-link"
                 aria-expanded={showAllFinished}
-                onClick={() => setShowAllFinished((current) => !current)}
+                onClick={showMoreFinished}
               >
-                {showAllFinished
+                {hiddenFinished === 0
                   ? "Show fewer finished tasks"
                   : `Show ${hiddenFinished} more finished ${hiddenFinished === 1 ? "task" : "tasks"}`}
               </button>

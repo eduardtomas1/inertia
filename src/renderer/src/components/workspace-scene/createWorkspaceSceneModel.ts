@@ -1,3 +1,4 @@
+import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
@@ -268,6 +269,7 @@ export interface WorkspaceSceneActions {
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
+  loadBackgroundTasks?: ConversationBackgroundTasksLoader;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -877,6 +879,9 @@ export function createWorkspaceSceneModel({
         turns: projection.turns,
         runs: workspaceRuns,
         conversationId: persistedConversation?.id ?? null,
+        loadTasks: actions.loadBackgroundTasks && persistedConversation
+          ? (before) => actions.loadBackgroundTasks!(persistedConversation.id, before)
+          : undefined,
         onStopCommand: activityActions.stopWorkspaceRun,
         onDismissCommand: activityActions.dismissActivity,
         canFollowUpSubagent: canGuideParent,

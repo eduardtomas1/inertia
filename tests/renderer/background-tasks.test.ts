@@ -261,7 +261,7 @@ describe("background commands", () => {
       workspaceRun({ id: "run-1", kind: "agent", status: "succeeded" }),
       workspaceRun({ id: "run-2", kind: "agent" }),
       workspaceRun({ id: "review", kind: "agent", actionId: null, label: "Codex · read-only question", startedAt: "2030-01-01T00:06:00.000Z" }),
-      workspaceRun({ id: "older-agent", kind: "agent", actionId: null, startedAt: "2029-12-31T23:00:00.000Z" }),
+      workspaceRun({ id: "older-agent", kind: "agent", actionId: null, status: "succeeded", startedAt: "2029-12-31T23:00:00.000Z" }),
       workspaceRun({ id: "server", kind: "service", port: 5173, startedAt: "2030-01-01T00:02:00.000Z" }),
       workspaceRun({ id: "check-done", status: "succeeded", startedAt: "2030-01-01T00:07:00.000Z" }),
       workspaceRun({ id: "dismissed", status: "failed", attentionState: "dismissed" }),
@@ -291,6 +291,9 @@ describe("background commands", () => {
       workspaceRun({ id: "other", conversationId: "conversation-2" }),
     ];
     expect(activeBackgroundTaskCount(subagents, runs, "conversation-1", turns)).toBe(3);
+    const olderLiveReview = workspaceRun({ id: "older-review", kind: "agent", actionId: null, startedAt: "2029-12-31T23:00:00.000Z" });
+    expect(activeBackgroundTaskCount(subagents, [...runs, olderLiveReview], "conversation-1", turns)).toBe(4);
+    expect(activeBackgroundTaskCount([], [olderLiveReview], "conversation-1", [])).toBe(0);
     expect(activeBackgroundTasksLabel(1)).toBe("1 background task active");
     expect(activeBackgroundTasksLabel(3)).toBe("3 background tasks active");
   });

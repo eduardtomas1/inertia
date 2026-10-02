@@ -61,6 +61,7 @@ import {
 } from "./useStableController";
 import { useWorkspaceTools } from "./useWorkspaceTools";
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import type { ConversationBackgroundTasksLoader } from "./useAppRuntimeActions";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
@@ -70,6 +71,7 @@ type AppUpdate = ReturnType<typeof useAppUpdate>;
 const ignoreLatestContentVisibility = (): void => undefined;
 const unavailableLimitReset: LimitResetCommandRunner = async () => { throw new Error("Reset actions are unavailable."); };
 const unavailableQueue: QueueCommandRunner = async () => { throw new Error("Message queues are unavailable."); };
+const unavailableBackgroundTasks: ConversationBackgroundTasksLoader = async () => { throw new Error("Background tasks are unavailable."); };
 
 export interface SplitWorkspaceSceneController {
   pane: SplitPaneDetails | null;
@@ -81,6 +83,7 @@ interface SplitWorkspaceActions
     WorkspaceSceneActions,
     | "runQueueCommand"
     | "runLimitResetCommand"
+    | "loadBackgroundTasks"
     | "importProject"
     | "createConversation"
     | "respondToApproval"
@@ -370,6 +373,7 @@ export function useSplitWorkspaceScene({
     run,
     runQueueCommand: actions.runQueueCommand ?? unavailableQueue,
     runLimitResetCommand: actions.runLimitResetCommand ?? unavailableLimitReset,
+    loadBackgroundTasks: actions.loadBackgroundTasks ?? unavailableBackgroundTasks,
   });
   const model = useMemo(() => createWorkspaceSceneModel({
     view: "workspace",

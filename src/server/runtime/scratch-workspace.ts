@@ -34,7 +34,6 @@ function hasRepositoryMarker(path: string): boolean {
   }
 }
 
-/** A real project identity owns Scratch; each chat owns a separate plain folder. */
 export class ScratchWorkspace {
   constructor(private readonly store: RuntimeStore, private readonly dataDirectory: string) {}
 
@@ -56,7 +55,6 @@ export class ScratchWorkspace {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     }
     this.verifyRoot(root);
-    // A data directory inside a checkout must not lend that repository to Scratch.
     const insideRepository = new RuntimeRequestError("Chats without a project need an Inertia data folder outside a Git repository.");
     try {
       await runGitInspection(root, ["rev-parse", "--is-inside-work-tree"], {
@@ -70,7 +68,6 @@ export class ScratchWorkspace {
       if (!gitUnavailable && !(error instanceof GitError && error.code === "not-repository")) throw error;
     }
     this.verifyRoot(root);
-    // No await between this lookup and insert: concurrent requests share one container.
     const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
     if (current && normalizeIdentityPath(current.path) !== normalizeIdentityPath(root)) {
       return this.store.updateProject(current.id, { path: root, normalizedPath: root });
@@ -92,7 +89,6 @@ export class ScratchWorkspace {
       throw new RuntimeRequestError("The chat identity is invalid.");
     }
     const words = title.toLowerCase().match(/[a-z0-9]+/gu)?.slice(0, 5).join("-").slice(0, 48) || "chat";
-    // The full UUID avoids short-prefix collisions. Never reuse an existing leaf.
     const folder = join(root, `${new Date().toISOString().slice(0, 10)}-${words}-${id}`);
     mkdirSync(folder, { mode: 0o700 });
     const claimed = lstatSync(folder);
@@ -104,13 +100,14 @@ export class ScratchWorkspace {
       }
       return this.store.createConversation(project.id, title, { ...options, id, branch: null, worktreePath: folder });
     } catch (error) {
-      // Only remove the empty directory claimed by this attempt; never remove user files.
       try {
         this.verifyRoot(root);
         this.store.projectPath(project.id);
         const current = lstatSync(folder);
         if (!current.isSymbolicLink() && current.ino === claimed.ino && current.dev === claimed.dev && current.birthtimeMs === claimed.birthtimeMs) rmdirSync(folder);
-      } catch { /* Preserve anything we cannot safely remove. */ }
+      } catch {
+        throw error;
+      }
       throw error;
     }
   }

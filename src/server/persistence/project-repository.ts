@@ -84,6 +84,9 @@ export class ProjectRepository {
         next.repositoryIdentity !== current.repositoryIdentity
         || next.repositoryRoot !== current.repositoryRoot;
       if (repositoryChanged) {
+        if (current.workspaceKind === "scratch") {
+          throw new Error("The folder for chats without a project cannot become a Git repository.");
+        }
         if (
           current.repositoryIdentity !== null
           || current.repositoryRoot !== null

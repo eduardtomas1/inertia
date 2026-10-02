@@ -260,12 +260,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     },
   });
-  const projectIdentityCandidates = store.shellSnapshot().projects.map(
-    ({ id, path }) => ({ id, path }),
-  );
+  const projectIdentityCandidates = store.shellSnapshot().projects
+    .filter(({ workspaceKind }) => workspaceKind !== "scratch")
+    .map(({ id, path }) => ({ id, path }));
   let projectIdentityRefresh: Promise<void> = Promise.resolve();
   const projectIdentityAuthority = {
     revalidate: async (projectId: string, projectPath: string) => {
+      if (store.project(projectId).workspaceKind === "scratch") return true;
       if (projectIdentityIsUsable(projectIdentities.state(projectId))) {
         return true;
       }

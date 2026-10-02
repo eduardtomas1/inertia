@@ -27,7 +27,7 @@ export function bufferHash(content: Buffer): string {
 
 export function textBuffer(content: Buffer): string {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);
   } catch {
     throw new GitError(
       "invalid-input",

@@ -24,6 +24,7 @@ import {
 } from "../../src/node/conversation-attachment-store";
 import { runConversationAttachmentStoreChild } from
   "../../src/node/conversation-attachment-store-child";
+import { metadataFor } from "../../src/node/conversation-attachment-store-metadata";
 
 const roots: string[] = [];
 const png = Buffer.from(
@@ -120,6 +121,26 @@ afterEach(async () => {
 });
 
 describe("durable conversation attachment storage", () => {
+  it("rejects a preview when storage closes during asynchronous receipt validation", async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const validating = new Promise<void>((resolve) => { entered = resolve; });
+    const proceed = new Promise<void>((resolve) => { release = resolve; });
+    const store = await openTestStore(await root(), {
+      validate: async (value) => {
+        entered();
+        await proceed;
+        return await validateAttachmentImport(value);
+      },
+    });
+    const [retained] = await store.retain([image()]);
+    const preview = store.preview(retained!.id);
+    await validating;
+    await store.close();
+    release();
+    await expect(preview).rejects.toThrow("Conversation attachment storage is closing.");
+  });
+
   it("retains validated bytes across store and application restart", async () => {
     const dataDirectory = await root();
     const writer = await ConversationAttachmentStore.open(dataDirectory);
@@ -1101,7 +1122,7 @@ describe("durable conversation attachment storage", () => {
       .rejects.toThrow();
   });
 
-  it("keeps referenced records with invalid metadata until a retry repairs them", async () => {
+  it.each(["empty", "invalid version"])("keeps referenced records with %s metadata until a retry repairs them", async (invalidMetadata) => {
     const dataDirectory = await root();
     const reads: string[] = [];
     const store = await openTestStore(dataDirectory, {
@@ -1119,7 +1140,10 @@ describe("durable conversation attachment storage", () => {
       await writeFile(join(interruptedDirectory, `${attachment.id}.png`), png, {
         mode: 0o600,
       });
-      await writeFile(join(interruptedDirectory, "metadata.json"), "", {
+      const metadata = invalidMetadata === "empty"
+        ? ""
+        : JSON.stringify({ ...metadataFor({ attachment, bytes: png }), version: 2 });
+      await writeFile(join(interruptedDirectory, "metadata.json"), metadata, {
         mode: 0o600,
       });
     }

@@ -184,9 +184,8 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain('data-request-context-kind="image"');
     expect(html).toContain("PNG image · 1.0 KB");
     expect(html).toContain('aria-label="Preview attachment reference.png"');
-    expect(html).toContain(
-      'src="inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111"',
-    );
+    expect(html).toContain('class="sent-attachment-thumbnail"');
+    expect(html).not.toContain("<img");
     expect(html).toContain("1.0 KB");
     expect(html).not.toContain("/workspace/reference.png");
     expect(html.indexOf("reference.png"))

@@ -73,7 +73,7 @@ function pngPixelsDecode(bytes: Buffer): boolean {
   } catch { return false; }
 }
 
-export function validateMascotSprite(name: string, bytes: Buffer): MascotSpriteFile {
+export async function validateMascotSprite(name: string, bytes: Buffer): Promise<MascotSpriteFile> {
   const extension = name.slice(name.lastIndexOf(".") + 1);
   if (!Object.hasOwn(FORMATS, extension)) throw new MascotSpriteError(`${name} must be a PNG, WebP or GIF image.`);
   const format = FORMATS[extension as SpriteExtension];
@@ -87,7 +87,7 @@ export function validateMascotSprite(name: string, bytes: Buffer): MascotSpriteF
   if (extension === "png" && metadata.frames !== 1) {
     throw new MascotSpriteError(`${name} must be a single still frame. Put the animation in ${stem}.webp or ${stem}.gif.`);
   }
-  if (!decodedImageMatches(bytes, metadata) || (extension === "png" && !pngPixelsDecode(bytes))) {
+  if (!(await decodedImageMatches(bytes, metadata)) || (extension === "png" && !pngPixelsDecode(bytes))) {
     throw new MascotSpriteError(`${name} could not be decoded. Save it again as a standard ${format.label}.`);
   }
   return { name, type: format.type, bytes };
@@ -152,14 +152,14 @@ export async function readMascotSprites(directory: string): Promise<MascotSprite
   for (const state of MASCOT_SPRITE_STATES) {
     const still = await readSprite(directory, `${state}.png`);
     if (!still) throw new MascotSpriteError(missingStill(state, await strayImages(directory)));
-    files.push(validateMascotSprite(`${state}.png`, still));
+    files.push(await validateMascotSprite(`${state}.png`, still));
     const animations: Array<[string, Buffer]> = [];
     for (const name of [`${state}.webp`, `${state}.gif`]) {
       const bytes = await readSprite(directory, name);
       if (bytes) animations.push([name, bytes]);
     }
     if (animations.length > 1) throw new MascotSpriteError(`Keep one animation for ${state}: ${state}.webp or ${state}.gif.`);
-    files.push(...animations.map(([name, bytes]) => validateMascotSprite(name, bytes)));
+    for (const [name, bytes] of animations) files.push(await validateMascotSprite(name, bytes));
   }
   const hash = createHash("sha256");
   for (const file of files) hash.update(`${file.name}:${file.bytes.byteLength}:`).update(file.bytes);

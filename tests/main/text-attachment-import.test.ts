@@ -16,8 +16,8 @@ describe("text attachment formats", () => {
     ["Dockerfile", "", Buffer.from("FROM scratch\n")],
     [".gitignore", "text/plain", Buffer.from("node_modules/\n")],
     ["analysis.ipynb", "application/x-ipynb+json", Buffer.from('{"cells": [], "nbformat": 4}\n')],
-  ])("imports %s with %s and preserves its bytes", (name, mimeType, data) => {
-    const result = validateAttachmentImport({ name, mimeType, data });
+  ])("imports %s with %s and preserves its bytes", async (name, mimeType, data) => {
+    const result = await validateAttachmentImport({ name, mimeType, data });
     expect(result.mimeType).toBe("text/plain");
     expect(result.bytes).toEqual(data);
     expect(result.size).toBe(data.length);
@@ -30,9 +30,9 @@ describe("text attachment formats", () => {
     ["notes.txt", "", Buffer.from("caf\xe9", "latin1"), /Convert the file to UTF-8/u],
     ["app.log", "", Buffer.from("\x1b]52;c;private\x07"), /terminal control commands/u],
     ["app.log", "", Buffer.alloc(MAX_TEXT_ATTACHMENT_BYTES + 1, 0x61), /2 MB text limit/u],
-  ])("explains why %s cannot be consumed without leaking content", (name, mimeType, data, message) => {
+  ])("explains why %s cannot be consumed without leaking content", async (name, mimeType, data, message) => {
     try {
-      validateAttachmentImport({ name, mimeType, data });
+      await validateAttachmentImport({ name, mimeType, data });
       expect.fail("Attachment should have been rejected");
     } catch (error) {
       expect(privacySafeAttachmentImportError(error).message).toMatch(message);

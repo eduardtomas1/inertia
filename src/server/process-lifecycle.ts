@@ -45,6 +45,7 @@ export interface ProcessLifecycleDependencies {
 export interface AwaitableProcessLifecycleDependencies
   extends Partial<ProcessLifecycleDependencies> {
   spawnProcessSync?: typeof spawnSync;
+  pauseSync?: (ms: number) => void;
   waitMs?: number;
   processCanExecute?: (pid: number) => boolean | null;
   processGroupCanExecute?: (processGroupId: number) => boolean | null;
@@ -805,6 +806,7 @@ export function createOwnedPidProcessTreeTermination(
         spawnProcessSync,
         rootProcessGroup: true,
         deadlineAt,
+        pause: dependencies.pauseSync,
       });
       enumeration = posixTreeEnumeration(killed, false);
       observation = killed;
@@ -1027,6 +1029,7 @@ export async function terminateProcessTreeAndWait(
         spawnProcessSync,
         rootProcessGroup: true,
         deadlineAt,
+        pause: dependencies.pauseSync,
       })
       : {
         descendants: [],

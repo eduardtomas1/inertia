@@ -67,9 +67,13 @@ describe("source usage inventory", () => {
         "src/other-tool-only.ts": "export {};",
         "src/generated-only.ts": "export {};",
         "src/dependency-only.ts": "export {};",
+        "src/worktree-only.ts": "export {};",
         "src/orphan.ts": "export {};",
         "docs/pr-evidence/legacy/evidence.ts": 'import "../../../src/docs-only.ts";',
         ".github/tools/inspect.cjs": 'require("../../src/other-tool-only.ts");',
+        ".claude/hooks/check.ts": 'import "../../src/other-tool-only.ts";',
+        ".claude/worktrees/review/hold.ts": 'import "../../../../src/worktree-only.ts";',
+        ".claude/worktrees/review/invalid.ts": "this must never be parsed",
         "docs/out/generated.mjs": 'import "../../src/generated-only.ts";',
         "resources/generated/tool.ts": 'import "../../src/generated-only.ts";',
         "node_modules/dependency/index.js": 'require("../../src/dependency-only.ts");',
@@ -90,6 +94,7 @@ describe("source usage inventory", () => {
       }
     `);
     expect(report.toolingRoots).toEqual([
+      ".claude/hooks/check.ts",
       ".github/tools/inspect.cjs",
       "docs/pr-evidence/legacy/evidence.ts",
       "electron.vite.config.ts",
@@ -101,7 +106,7 @@ describe("source usage inventory", () => {
       "src/docs-only.ts", "src/other-tool-only.ts", "src/renderer/private-connect/vite.config.ts",
     ]);
     expect(report.unreferenced).toEqual([
-      "src/dependency-only.ts", "src/generated-only.ts", "src/orphan.ts",
+      "src/dependency-only.ts", "src/generated-only.ts", "src/orphan.ts", "src/worktree-only.ts",
     ]);
     expect(report.analysisLimitations).toEqual([]);
   });

@@ -51,6 +51,7 @@ import {
 import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
 import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
+  recoveredConversationModel,
   type DatabaseRecoveryImportResult,
 } from "./persistence/database-export";
 import {
@@ -340,9 +341,7 @@ export class RuntimeStore {
           this.createProject(project.name, path).id,
         createConversation: (projectId, conversation) =>
           this.createConversation(projectId, conversation.title, {
-            providerId: conversation.providerId,
-            model: conversation.model || "provider-default",
-            reasoningEffort: conversation.reasoningEffort,
+            ...recoveredConversationModel(conversation),
             interactionMode: conversation.interactionMode,
             // Exported authorization is never authoritative on this device.
             accessMode: "supervised",

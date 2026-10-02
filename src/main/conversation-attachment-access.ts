@@ -10,7 +10,6 @@ import type {
 } from "../node/conversation-attachment-store-child.js";
 import type { ValidatedAttachmentPreview } from "./attachment-registry.js";
 import { AttachmentRegistry } from "./attachment-registry.js";
-import { validateAttachmentImport } from "./attachment-import.js";
 
 export type ConversationAttachmentAccess =
   Promise<ConversationAttachmentStore>;
@@ -63,13 +62,11 @@ async function serializeRetainedPdfOpen<T>(
 
 export function openConversationAttachments(
   dataDirectory: string,
-  operationRunner?: ConversationAttachmentStoreAnyOperationRunner,
+  operationRunner: ConversationAttachmentStoreAnyOperationRunner,
 ): ConversationAttachmentAccess {
   return ConversationAttachmentStore.open(dataDirectory, {
-    validate: validateAttachmentImport,
-    ...(operationRunner
-      ? { operationRunner, readOperationRunner: operationRunner }
-      : {}),
+    operationRunner,
+    readOperationRunner: operationRunner,
   });
 }
 

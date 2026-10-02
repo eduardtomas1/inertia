@@ -120,12 +120,8 @@ export class PrivateConnectHost {
           buildVersion: this.options.buildVersion,
           onStateChange: (state) => this.emitState(state),
         });
-        if (this.stopped) {
-          this.shuttingDownService = service;
-          await service.shutdown();
-          return;
-        }
         this.service = service;
+        if (this.stopped) return;
         this.initializationError = null;
         await service.setPrivacyLocked(this.privacyMonitor.isLocked());
         if (migration.cleaned) {

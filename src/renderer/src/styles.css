@@ -9776,6 +9776,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .backend-edit-profile { min-height: 31px; flex: 0 0 auto; font-size: 8.5px; }
 
+.backend-profile-editor > fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .backend-form-section {
   padding: 16px 0;
   border-top: 1px solid var(--panel-border);

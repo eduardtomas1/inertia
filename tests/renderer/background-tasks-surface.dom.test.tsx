@@ -406,6 +406,11 @@ describe("Background tasks stylesheets", () => {
     expect(css).not.toMatch(/\b(?:rgb|rgba|hsl|hsla|oklch)\(/u);
   });
 
+  it("lifts the two-line clamp on what a task is doing only while its transcript is open", () => {
+    expect(css).toMatch(/\.background-task-line \{[^}]*-webkit-line-clamp: 2;/u);
+    expect(css).toMatch(/\.background-task-doing:has\(\[aria-expanded="true"\]\) \.background-task-line \{[^}]*-webkit-line-clamp: unset;/u);
+  });
+
   it("stays plain: no shadows, uppercase labels or pill shapes", () => {
     expect(css).not.toMatch(/box-shadow|text-transform|999px/u);
   });

@@ -146,6 +146,10 @@
   -webkit-line-clamp: 2;
 }
 
+.background-task-doing:has([aria-expanded="true"]) .background-task-line {
+  -webkit-line-clamp: unset;
+}
+
 .background-task-transcript-toggle {
   display: inline-flex;
   flex: 0 0 auto;

@@ -577,6 +577,54 @@ describe("Claude Agent SDK harness", () => {
     },
   );
 
+  it("labels a blocked path with the access the requesting Claude tool needs", async () => {
+    const root = portableFixtureRoot("Claude blocked path access");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          const canUseTool = options?.canUseTool as CanUseTool;
+          for (const [index, toolName] of ["Read", "Grep", "Write"].entries()) {
+            await canUseTool(toolName, { file_path: "/data/attachments/report.log" }, {
+              signal: new AbortController().signal,
+              toolUseID: `tool-${index}`,
+              requestId: `permission-${index}`,
+              title: `${toolName} report.log`,
+              blockedPath: "/data/attachments/report.log",
+            });
+          }
+          yield claudeSuccessResult("Done", "completed");
+        })();
+        return fixtureClaudeQuery(stream);
+      },
+    });
+    const manager = ProviderManager.createForTests(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const labels: Array<{ title: string; access: string }> = [];
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-blocked-path-access",
+      cwd: root,
+      prompt: "Read the attached log",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => {
+        for (const permissionRoot of event.request.permissionRoots) {
+          labels.push({ title: event.request.title, access: permissionRoot.access });
+        }
+        manager.respondToApproval(event.conversationId, event.request.requestId, "deny", { runId: event.runId, turnId: event.turnId });
+      },
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(labels).toEqual([
+      { title: "Read report.log", access: "read" },
+      { title: "Grep report.log", access: "read" },
+      { title: "Write report.log", access: "write" },
+    ]);
+  });
+
   it("maps the SDK's authoritative model inventory without sending a prompt", async () => {
     let promptWasRead = false;
     let discoveryOptions: ClaudeOptions | undefined;

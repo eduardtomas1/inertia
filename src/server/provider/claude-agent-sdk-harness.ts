@@ -399,7 +399,10 @@ function startClaudeRun(
           cwd: options.input.cwd,
           ...(approvalReason ? { reason: bounded(approvalReason) } : {}),
           permissionRoots: approvalBlockedPath
-            ? [{ path: bounded(approvalBlockedPath), access: "write" }]
+            ? [{
+                path: bounded(approvalBlockedPath),
+                access: /^(?:Read|Grep|Glob|LS|NotebookRead)$/u.test(toolName) ? "read" : "write",
+              }]
             : [],
           availableDecisions: ["approve", "deny", "cancel"],
         },

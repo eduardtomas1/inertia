@@ -112,7 +112,9 @@ export class UsageLimitsService {
       const info = this.dependencies.providers().find((provider) => provider.id === providerId);
       if (!info || !this.dependencies.enabled) return null;
       const account = await this.dependencies.native.read(info, model, cwd, interactive).catch(() => null);
-      if (account && account.keychain !== "deferred") this.rememberChatAccount(scope, account);
+      if (account && account.keychain !== "deferred" && account.status !== "unavailable" && account.status !== "error") {
+        this.rememberChatAccount(scope, account);
+      }
       return account;
     }).finally(() => {
       if (this.chatReads.get(key) === read) this.chatReads.delete(key);

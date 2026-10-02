@@ -60,6 +60,16 @@ describe("privileged usage limits", () => {
     expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
     expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
   });
+  it("reads a chat's account again when the last read found it not ready or failing", async () => {
+    const f = setup();
+    f.read.mockResolvedValueOnce({ ...usageAccount(), status: "unavailable", windows: [], detail: "Codex is not ready." })
+      .mockResolvedValueOnce({ ...usageAccount(), status: "error", windows: [], detail: "Codex quota could not be refreshed." });
+    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "unavailable" });
+    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "error" });
+    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "ready" });
+    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "ready" });
+    expect(f.read).toHaveBeenCalledTimes(3);
+  });
   it("keeps chat-scoped reads out of the Limits page accounts", async () => {
     const f = setup();
     const ready = usageAccount();

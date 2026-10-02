@@ -259,6 +259,20 @@ describe("quota reset actions", () => {
     expect(vi.mocked(dependencies.readAccount).mock.calls.length - reads).toBe(1);
   });
 
+  it("says whether the chat's latest failed turn hit a usage limit, with or without an offer", async () => {
+    vi.mocked(dependencies.readAccount).mockResolvedValueOnce(null);
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null, usageLimited: true });
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: { failedTurnId }, usageLimited: true });
+    await schedule();
+    expect(await scheduler.get(conversationId)).toMatchObject({ plan: { state: "waiting" }, usageLimited: true });
+    scheduler.cancel(conversationId, store.limitResets.get(conversationId)!.id);
+    vi.setSystemTime(instant + 1_000);
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, usageLimited: false });
+  });
+
   it("reports a pending plan from the database without another account read", async () => {
     await schedule();
     const reads = vi.mocked(dependencies.readAccount).mock.calls.length;

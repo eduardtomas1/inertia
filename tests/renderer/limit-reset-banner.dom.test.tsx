@@ -79,6 +79,16 @@ describe("quota reset banner", () => {
     await screen.findByText("Resume scheduled");
     expect(run.mock.calls[1]![0]).toEqual({ type: "conversation.limit-reset.resume", payload: { conversationId, id } });
   });
+  it("does not let an older turn's plan hide the offer for the latest failed turn", async () => {
+    const newer = "55555555-5555-4555-8555-555555555555";
+    const stale = pending(); stale.plan!.state = "blocked"; stale.plan!.error = "The chat changed.";
+    stale.offer = { ...stale.offer!, failedTurnId: newer };
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(stale);
+    render(<LimitResetBanner conversationId={conversationId} latestTurnId={newer} snoozedUntil={null} disabled={false} onCommand={run} />);
+    expect(await screen.findByRole("button", { name: "Resume at reset" })).toBeVisible();
+    expect(screen.queryByText("Resume needs attention")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel resume" })).not.toBeInTheDocument();
+  });
   it("explains a blocked automatic resume while retaining cancellation", async () => {
     const value = pending(); value.plan!.state = "blocked"; value.plan!.error = "The account changed. Resume manually.";
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(value);

@@ -65,6 +65,12 @@ export class LimitResetScheduler {
     const { store } = this.dependencies;
     store.conversation(conversationId);
     let plan = store.limitResets.get(conversationId);
+    const latestTurnId = store.latestAgentTurnForConversation(conversationId)?.id;
+    if (plan && ["waiting", "dispatching", "blocked", "missed"].includes(plan.state) && latestTurnId !== plan.failedTurnId) {
+      store.limitResets.settle(plan, "cancelled", null);
+      this.dependencies.changed(conversationId);
+      plan = store.limitResets.get(conversationId);
+    }
     if (plan && ["waiting", "dispatching", "missed"].includes(plan.state) && !this.current(plan)) {
       store.limitResets.settle(plan, "blocked", "The chat changed. Choose a new reset action to continue.");
       this.dependencies.changed(conversationId);

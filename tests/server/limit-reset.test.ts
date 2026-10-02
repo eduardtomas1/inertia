@@ -186,6 +186,22 @@ describe("quota reset actions", () => {
     expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["blocked", "failed"], ["blocked", "completed"], ["missed", "failed"], ["missed", "completed"],
+  ] as const)("retires a %s plan once a newer turn has %s", async (state, outcome) => {
+    const id = randomUUID(); await schedule(id);
+    store.limitResets.settle(store.limitResets.get(conversationId)!, state, state === "blocked" ? "The account changed." : null);
+    vi.setSystemTime(instant + 5_000);
+    const turn = begin();
+    store.updateAgentTurnLifecycle(turn.id, { status: outcome, completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: outcome === "failed" ? "failed" : "succeeded", finishedAt: new Date().toISOString() });
+    const result = await scheduler.get(conversationId);
+    expect(store.limitResets.get(conversationId)).toMatchObject({ id, state: "cancelled" });
+    expect(result.plan).toMatchObject({ id, state: "cancelled" });
+    if (outcome === "failed") expect(result.offer).toMatchObject({ failedTurnId: turn.id, canResume: true });
+    else expect(result.offer).toBeNull();
+  });
+
   it("reports a pending plan from the database without another account read", async () => {
     await schedule();
     const reads = vi.mocked(dependencies.readAccount).mock.calls.length;

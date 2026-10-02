@@ -85,7 +85,8 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     if (reload) refresh();
   };
   if (result?.conversationId !== conversationId) return null;
-  const plan = result.plan && !["cancelled", "completed"].includes(result.plan.state) ? result.plan : null;
+  const plan = result.plan && !["cancelled", "completed"].includes(result.plan.state)
+    && (latestTurnId === null || result.plan.failedTurnId === latestTurnId) ? result.plan : null;
   const offer = result.offer;
   const unavailable = disabled || busy;
   const action = "secondary-button limit-reset-action";

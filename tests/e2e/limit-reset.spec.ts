@@ -1,24 +1,31 @@
 // @inertia-e2e-resource isolated
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
-import { createAppFixture } from "./support/app-fixture";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { focusAppWindow } from "./support/window-focus";
+
+const ACTION_WINDOW_SECONDS = 3_600;
+const RESUME_WINDOW_SECONDS = 90;
+
+interface ResetState { resetsAt: number | null; windowSeconds: number; turns: number }
 
 test("explicitly schedules, cancels, snoozes and resumes once after reset and restart", async () => {
-  test.setTimeout(120_000);
+  test.setTimeout(300_000);
   const environment: Record<string, string> = { OPENAI_API_KEY: "", CODEX_API_KEY: "", CODEX_ACCESS_TOKEN: "" };
   let statePath = "";
-  const app = await createAppFixture({ name: "limit-reset", initialState: "conversation", additionalEnvironment: environment,
+  const readState = async (): Promise<ResetState> => JSON.parse(await readFile(statePath, "utf8")) as ResetState;
+  const app: AppFixture = await createAppFixture({ name: "limit-reset", initialState: "conversation", additionalEnvironment: environment,
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const home = join(testDirectory, "codex-home"); mkdirSync(home, { recursive: true });
       environment.CODEX_HOME = home;
       writeFileSync(join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: { account_id: "fixture-subscription-account" } }));
       writeFileSync(join(home, "config.toml"), 'cli_auth_credentials_store = "file"\n');
       statePath = join(testDirectory, "reset-state.json");
-      writeFileSync(statePath, JSON.stringify({ resetsAt: null, turns: 0 }));
+      writeFileSync(statePath, JSON.stringify({ resetsAt: null, windowSeconds: ACTION_WINDOW_SECONDS, turns: 0 } satisfies ResetState));
       const source = `
 const fs = require("node:fs");
 const path = ${JSON.stringify(statePath)};
@@ -35,7 +42,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   if (message.method === "config/read") send({ id: message.id, result: { config: { cli_auth_credentials_store: "file" } } });
   if (message.method === "account/rateLimits/read") {
     const state = JSON.parse(fs.readFileSync(path, "utf8"));
-    if (state.resetsAt === null) { state.resetsAt = Math.floor(Date.now() / 1000) + 60; fs.writeFileSync(path, JSON.stringify(state)); }
+    if (state.resetsAt === null) { state.resetsAt = Math.floor(Date.now() / 1000) + state.windowSeconds; fs.writeFileSync(path, JSON.stringify(state)); }
     const available = Date.now() >= state.resetsAt * 1000;
     send({ id: message.id, result: { rateLimits: { limitId: "codex", primary: { usedPercent: available ? 0 : 100, windowDurationMins: 300, resetsAt: available ? state.resetsAt + 18000 : state.resetsAt } } } });
   }
@@ -65,32 +72,40 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
       } finally { store.close(); }
     },
   });
+  const restart = async (): Promise<Page> => {
+    const { electronApp, page } = await app.restart();
+    await focusAppWindow(electronApp, page);
+    return page;
+  };
   let page = app.page;
   try {
-    await expect(page.getByRole("button", { name: "Resume at reset", exact: true })).toBeEnabled();
+    await focusAppWindow(app.electronApp, page);
+    const resume = () => page.getByRole("button", { name: "Resume at reset", exact: true });
+    await expect(resume()).toBeEnabled();
     await page.screenshot({ path: test.info().outputPath("limit-reset-offer.png"), animations: "disabled" });
-    await page.getByRole("button", { name: "Resume at reset", exact: true }).click();
+    await resume().click();
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Cancel resume", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Resume at reset", exact: true })).toBeEnabled();
+    await expect(resume()).toBeEnabled();
     await page.getByRole("button", { name: "Snooze until reset", exact: true }).click();
     await expect(page.getByRole("button", { name: "Snoozed until reset", exact: true })).toBeDisabled();
-    await page.getByRole("button", { name: "Resume at reset", exact: true }).click();
-    // Schedule refreshes quota asynchronously. Restart only after the runtime
-    // confirms that the new plan was persisted, not merely after the click.
+    expect((await readState()).turns).toBe(0);
+
+    writeFileSync(statePath, JSON.stringify({ ...await readState(), resetsAt: null, windowSeconds: RESUME_WINDOW_SECONDS }));
+    page = await restart();
+    await expect(resume()).toBeEnabled();
+    await resume().click();
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
-    ({ page } = await app.restart());
+    page = await restart();
     await expect(page.getByText("Resume scheduled", { exact: true })).toBeVisible();
-    // Observe dispatch after the fixture's actual reset time, then provider
-    // completion. The test's overall 120-second deadline still bounds both.
-    const { resetsAt } = JSON.parse(await readFile(statePath, "utf8")) as { resetsAt: number };
-    const untilReset = Math.max(0, resetsAt * 1000 - Date.now());
+    const { resetsAt } = await readState();
+    const untilReset = Math.max(0, resetsAt! * 1000 - Date.now());
     await expect(page.getByText("Continue from where you stopped.", { exact: true })).toBeVisible({ timeout: untilReset + 60_000 });
     await expect(page.getByText("Resumed after the subscription quota reset.", { exact: true })).toBeVisible({ timeout: 60_000 });
-    expect(JSON.parse(await readFile(statePath, "utf8")).turns).toBe(1);
-    ({ page } = await app.restart());
+    expect((await readState()).turns).toBe(1);
+    page = await restart();
     await expect(page.getByText("Resumed after the subscription quota reset.", { exact: true })).toBeVisible();
-    expect(JSON.parse(await readFile(statePath, "utf8")).turns).toBe(1);
+    expect((await readState()).turns).toBe(1);
   } catch (error) {
     await test.info().attach("runtime-state", { body: JSON.stringify(await app.runtimeSnapshot(), null, 2), contentType: "application/json" });
     throw error;

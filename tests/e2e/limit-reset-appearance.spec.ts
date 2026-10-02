@@ -10,6 +10,7 @@ import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { expectComposerEndsAtDock } from "./support/layout-assertions";
+import { focusAppWindow } from "./support/window-focus";
 
 const HOUR = 3_600_000;
 const FIXED_NOW = Math.floor(Date.now() / HOUR) * HOUR;
@@ -73,6 +74,7 @@ async function showChat(app: AppFixture, chat: Seed["offer"]): Promise<Locator> 
     store.close();
   }
   await app.page.reload();
+  await focusAppWindow(app.electronApp, app.page);
   await expect(app.page.getByRole("heading", { name: chat.title, level: 1 })).toBeVisible();
   return limitRow(app.page);
 }
@@ -210,6 +212,7 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await capture(page, info, "limit-reset-error-dark");
 
     await page.reload();
+    await focusAppWindow(app.electronApp, page);
     await expect(row.getByRole("button", { name: "Resume at reset", exact: true })).toBeEnabled();
     await expect(row.getByRole("alert")).toHaveCount(0);
     await resume.focus();

@@ -231,6 +231,15 @@ export function paletteCurrentProjectId(
   return scoped ?? snapshot?.activeProjectId ?? null;
 }
 
+export function conversationDeletionPrompt(
+  thread: Pick<Conversation, "title" | "projectId" | "worktreePath">,
+  snapshot: AppSnapshot | null,
+): string {
+  const prompt = `Delete “${thread.title}”? This cannot be undone.`;
+  const scratch = snapshot?.projects.some(({ id, workspaceKind }) => id === thread.projectId && workspaceKind === "scratch");
+  return scratch && thread.worktreePath ? `${prompt} Its chat folder is kept at ${thread.worktreePath}.` : prompt;
+}
+
 export function activeConversationIsVisible(input: {
   view: AppView;
   commitDialogOpen: boolean;
@@ -392,7 +401,7 @@ export const AppLayout = memo(function AppLayout({
     },
     deleteConversation: (thread: Conversation) => {
       const confirmed = !settings.confirmDestructiveActions
-        || window.confirm(`Delete “${thread.title}”? This cannot be undone.`);
+        || window.confirm(conversationDeletionPrompt(thread, connection.snapshot));
       if (confirmed) {
         void actions.run("conversation.delete", {
           type: "conversation.delete",

@@ -90,11 +90,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,
   });
-  // Retain the post-restart click boundary when the full Windows x64 lane
-  // reproduces a preview failure; other scenarios and platforms do not trace.
-  if (process.platform === "win32" && process.arch === "x64" && process.env.CI) {
-    previewEvidence = observeImagePreviewFailure(app);
-  }
+  previewEvidence = observeImagePreviewFailure(app);
   try {
     const canvas = createCanvas(1_920, 1_080);
     const context = canvas.getContext("2d");
@@ -217,6 +213,13 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
       const dialog = app.page.getByRole("dialog", {
         name: attachment.name, exact: true,
       });
+      await expect(dialog).toBeVisible();
+      await expect.poll(() => dialog.evaluate((element) => Boolean(
+        element.querySelector('[role="alert"]')
+        || [...element.querySelectorAll("img")]
+          .some((image) => image.complete && image.naturalWidth > 0),
+      ))).toBe(true);
+      expect(await dialog.getByRole("alert").allInnerTexts()).toEqual([]);
       await expect.poll(() => dialog.getByRole("img").evaluate((element) => {
         const image = element as HTMLImageElement;
         return [image.naturalWidth, image.naturalHeight];

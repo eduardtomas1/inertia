@@ -301,8 +301,9 @@ it("deletes a chat through the runtime command without Git checkpoint cleanup an
     writeFileSync(join(folder, "notes.txt"), "keep these notes");
     vi.mocked(deleteCheckpoints).mockClear();
     await mutate({ type: "conversation.delete", payload: { conversationId } });
-    const latest = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && !event.snapshot.conversations.some(({ id }) => id === conversationId));
-    expect(latest.snapshot.projects.some(({ id }) => id === projectId)).toBe(true);
+    const again = await request({ type: "project.ensure-scratch", payload: {} });
+    expect(again.result).toEqual({ kind: "project.created", projectId });
+    await expect(request({ type: "workspace.entries", payload: { projectId, conversationId } })).rejects.toThrow();
     expect(readFileSync(join(folder, "notes.txt"), "utf8")).toBe("keep these notes");
     expect(deleteCheckpoints).not.toHaveBeenCalled();
   } finally {

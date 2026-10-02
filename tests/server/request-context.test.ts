@@ -336,27 +336,6 @@ describe("bounded structured turn request context", () => {
     expect(JSON.stringify(result.persistence.manifest)).not.toContain(imagePath);
   });
 
-  it("keeps the per-message image count and combined size within main's provider limits", async () => {
-    const cwd = await workspace();
-    const images = await Promise.all(Array.from({ length: 9 }, async (_, index) => {
-      const path = join(cwd, `image-${index}.png`);
-      await writeFile(path, Buffer.from([0x89, 0x50, 0x4e, 0x47, index]));
-      return { id: `11111111-1111-4111-8111-11111111111${index}`, name: `image-${index}.png`, path, mimeType: "image/png" as const, size: 5 };
-    }));
-    expect(assembleTurnRequest({ cwd, visibleContent: "Compare.", attachments: images.slice(0, 8) }).imagePaths).toHaveLength(8);
-    expect(() => assembleTurnRequest({ cwd, visibleContent: "Compare.", attachments: images }))
-      .toThrow("Attach at most 8 images to one turn.");
-    const large = join(cwd, "large.png");
-    await writeFile(large, Buffer.alloc(8 * 1024 * 1024));
-    const largeImages = [0, 1, 2].map((index) => ({
-      id: `22222222-2222-4222-8222-22222222222${index}`, name: `large-${index}.png`, path: index === 0 ? large : join(cwd, `large-${index}.png`), mimeType: "image/png" as const, size: 8 * 1024 * 1024,
-    }));
-    await writeFile(largeImages[1]!.path, Buffer.alloc(8 * 1024 * 1024, 1));
-    await writeFile(largeImages[2]!.path, Buffer.alloc(8 * 1024 * 1024, 2));
-    expect(() => assembleTurnRequest({ cwd, visibleContent: "Compare.", attachments: largeImages }))
-      .toThrow("Image attachments exceed the 20 MiB message limit.");
-  });
-
   it("persists verified document text as bounded structured context", async () => {
     const cwd = await workspace();
     const documentPath = join(cwd, "notes.pdf");

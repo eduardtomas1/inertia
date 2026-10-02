@@ -60,7 +60,7 @@ Current attachment limits (see [Attachments](ATTACHMENTS.md)):
 
 - 100 attachments per message, 50 MiB per file, with no additional aggregate
   ordinary-file cap. Images accept 50 MiB sources and are compressed/resized
-  to 10 MiB each; a message carries at most 8 images, 20 MiB combined.
+  to 10 MiB each, with an 80 MiB image budget.
 - 40 megapixels per image, 8,192 pixels per side, 256 animation frames with a
   combined 40-megapixel decoded budget.
 - One maximum-size RGBA decode represents 160,000,000 bytes (152.6 MiB), plus

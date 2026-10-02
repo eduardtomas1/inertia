@@ -53,8 +53,7 @@ export type ChatAttachmentKind = "image" | "document";
 export const MAX_ATTACHMENT_COUNT = 100;
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 export const MAX_IMAGE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-export const MAX_IMAGE_ATTACHMENT_COUNT = 8;
-export const MAX_IMAGE_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
+export const MAX_IMAGE_ATTACHMENT_TOTAL_BYTES = 80 * 1024 * 1024;
 export const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
 export const MAX_ATTACHMENT_TOTAL_BYTES = MAX_ATTACHMENT_COUNT * MAX_ATTACHMENT_BYTES;
 export const MAX_TEXT_ATTACHMENT_BYTES = MAX_ATTACHMENT_BYTES;
@@ -65,7 +64,6 @@ export const ATTACHMENT_UPLOAD_CHUNK_BYTES = 256 * 1024;
 
 export function attachmentLimitError(attachments: readonly { mimeType: string; size: number }[]): string | null {
   if (attachments.length > MAX_ATTACHMENT_COUNT) return `Attach at most ${MAX_ATTACHMENT_COUNT} files.`;
-  let imageCount = 0;
   let imageBytes = 0;
   for (const attachment of attachments) {
     const image = attachment.mimeType.startsWith("image/");
@@ -73,13 +71,9 @@ export function attachmentLimitError(attachments: readonly { mimeType: string; s
       || attachment.size > (image ? MAX_IMAGE_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES)) {
       return image ? "Images must fit within 10 MiB after resizing." : "Files must be nonempty and at most 50 MiB.";
     }
-    if (image) {
-      imageCount += 1;
-      imageBytes += attachment.size;
-    }
+    if (image) imageBytes += attachment.size;
   }
-  if (imageCount > MAX_IMAGE_ATTACHMENT_COUNT) return `Attach at most ${MAX_IMAGE_ATTACHMENT_COUNT} images.`;
-  return imageBytes > MAX_IMAGE_ATTACHMENT_TOTAL_BYTES ? "Images exceed the 20 MiB message limit." : null;
+  return imageBytes > MAX_IMAGE_ATTACHMENT_TOTAL_BYTES ? "Images exceed the 80 MiB message limit." : null;
 }
 export const MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES = 64 * 1024 * 1024;
 

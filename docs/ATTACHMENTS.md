@@ -40,11 +40,19 @@ including a truncated prefix, is shown as raw text. PDF and spreadsheet previews
 their structural validation, including rejection of spreadsheet macros.
 
 Images accept source files up to **50 MiB**. The import utility compresses or
-resizes oversized images to **10 MiB each**. A message carries at most **8 images**
-with a **20 MiB combined image budget**, the limits of the provider image input. Images needing conversion become JPEGs (transparency uses a white
+resizes oversized images to **10 MiB each**, with an **80 MiB combined image
+budget**. Images needing conversion become JPEGs (transparency uses a white
 background and animations become a still frame). Decoding remains bounded to
 40 megapixels across animation frames, with at most 256 frames. Processed images
 have at most 8,192 pixels per side. Providers may enforce additional limits.
+
+Provider requests have their own image limits. Claude, Cursor, and Kimi Code
+receive image bytes inside one request, so a message to them carries at most
+**20 MiB of images**. Every provider accepts at most **32 images** per message;
+Codex and OpenCode receive image paths, and Antigravity has no image input in
+Inertia. A message over its
+provider's limit is refused before anything is sent, and the text and
+attachments stay in the composer or the queue.
 
 Sent files can be reopened from a message or **Open a surface → Attachments**,
 including after restart while the retained copy remains available. Removing a

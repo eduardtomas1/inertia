@@ -3,7 +3,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { ChatAttachment } from "@shared/contracts";
 import {
   MAX_ATTACHMENT_COUNT,
-  MAX_IMAGE_ATTACHMENT_COUNT,
   chatAttachmentKind,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
@@ -73,7 +72,7 @@ export function composerAttachmentActions({
   submittingRef,
 }: ComposerAttachmentActionOptions): ComposerAttachmentActions {
   const reportAttachmentLimit = (): void => setAttachmentError(
-    `Some files were not attached. A message supports up to ${MAX_ATTACHMENT_COUNT} files (50 MiB each), including up to ${MAX_IMAGE_ATTACHMENT_COUNT} images (10 MiB each after resizing, 20 MiB combined).`,
+    `Some files were not attached. A message supports up to ${MAX_ATTACHMENT_COUNT} files (50 MiB each), with 80 MiB of images (10 MiB each after resizing).`,
   );
   const permitsKind = (mimeType: Parameters<typeof chatAttachmentKind>[0] | null): boolean => {
     const image = mimeType !== null && chatAttachmentKind(mimeType) === "image";

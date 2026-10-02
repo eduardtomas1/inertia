@@ -20,7 +20,7 @@ it("shows global disk usage and changes the budget without deleting attachments"
   expect(request.mock.calls.every(([command]) => command.type === "attachment.storage.get")).toBe(true);
   expect(screen.getByText(/This disk budget does not reserve RAM/u)).toBeVisible();
   expect(screen.getByText(/separate temporary disk budget of 16 GiB and 1,024 files/u)).toBeVisible();
-  expect(screen.getByText(/^Per message: 100 files, 50 MiB each, including up to 8 images\. .*20 MiB combined;/u)).toBeVisible();
+  expect(screen.getByText(/^Per message: 100 files, 50 MiB each\./u)).toBeVisible();
 });
 
 it("requires confirmation for both explicit deletion and automatic eviction and allows cancellation", async () => {

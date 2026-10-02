@@ -301,8 +301,6 @@ describe("file-backed attachments", () => {
 
   it("applies a separate image budget without a 20 MiB file budget", () => {
     expect(attachmentLimitError(Array.from({ length: 100 }, () => ({ mimeType: "text/plain", size: 50 * 1024 * 1024 })))).toBeNull();
-    expect(attachmentLimitError(Array.from({ length: 8 }, () => ({ mimeType: "image/jpeg", size: 2.5 * 1024 * 1024 })))).toBeNull();
-    expect(attachmentLimitError(Array.from({ length: 9 }, () => ({ mimeType: "image/png", size: 1 })))).toBe("Attach at most 8 images.");
-    expect(attachmentLimitError(Array.from({ length: 3 }, () => ({ mimeType: "image/jpeg", size: MAX_IMAGE_ATTACHMENT_BYTES })))).toBe("Images exceed the 20 MiB message limit.");
+    expect(attachmentLimitError(Array.from({ length: 9 }, () => ({ mimeType: "image/jpeg", size: MAX_IMAGE_ATTACHMENT_BYTES })))).toContain("80 MiB");
   });
 });

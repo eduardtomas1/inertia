@@ -61,12 +61,10 @@ describe("stored attachment codec", () => {
       size: 3 * 1024 * 1024,
     }));
     expect(parseStoredAttachments(JSON.stringify([bounded[0], bounded[0], ...bounded.slice(1)])))
-      .toEqual(bounded.slice(0, 6));
+      .toEqual(bounded);
     expect(parseAttachments(JSON.stringify(bounded))).toEqual(bounded.slice(0, 6));
     expect(parseStoredAttachments(JSON.stringify(bounded.map((attachment) => ({ ...attachment, size: 1 })))))
-      .toHaveLength(8);
-    const files = bounded.map((attachment) => ({ ...yaml, id: attachment.id, size: 30 * 1024 * 1024 }));
-    expect(parseStoredAttachments(JSON.stringify(files))).toEqual(files);
+      .toHaveLength(9);
   });
 
   it("carries a valid snapshot source and drops an invalid one", () => {

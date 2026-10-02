@@ -125,6 +125,24 @@ describe("durable runtime message queue", () => {
     } finally { reopened?.close(); f.abort.abort(); await f.attachments.close(); }
   });
 
+  it("keeps a queued message and its images when the provider refuses its image count", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID();
+      const images = Array.from({ length: 33 }, (_, index) => ({
+        id: randomUUID(), name: `queued-${index}.png`, path: "opaque", mimeType: "image/png" as const, size: 8,
+      }));
+      await f.command("message.queue.enqueue", id, images); await f.drain();
+      await f.command("message.queue.send", id); await f.drain();
+      const queued = f.store.queuedMessages.get(f.conversationId, id);
+      expect(queued?.state).toBe("blocked");
+      expect(queued?.error).toContain("accepts at most 32 images per message. Remove some images and send again.");
+      expect(queued?.attachments.map(({ id: attachmentId }) => attachmentId)).toEqual(images.map(({ id: attachmentId }) => attachmentId));
+      expect(f.provider.runCount).toBe(0);
+      expect(await f.attachments.preview(images[0]!.id)).not.toBeNull();
+    } finally { await f.close(); }
+  });
+
   it("rolls back retained media if durable enqueue fails", async () => {
     const f = await fixture();
     try {

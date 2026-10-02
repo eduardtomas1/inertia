@@ -3,8 +3,31 @@ import { lstat, open } from "node:fs/promises";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import {
   MAX_IMAGE_ATTACHMENT_BYTES as MAX_IMAGE_FILE_BYTES,
-  MAX_IMAGE_ATTACHMENT_TOTAL_BYTES as MAX_IMAGE_BYTES,
+  chatAttachmentKind,
+  type ChatAttachmentMimeType,
 } from "../../shared/attachments";
+import type { ProviderId } from "./contracts";
+import { PROVIDER_INFO } from "./catalog";
+
+export const MAX_PROVIDER_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_PROVIDER_REQUEST_IMAGE_COUNT = 32;
+const MAX_IMAGE_BYTES = MAX_PROVIDER_REQUEST_IMAGE_BYTES;
+const INLINE_IMAGE_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "cursor", "kimi"]);
+
+export function providerImageRequestLimitError(
+  providerId: ProviderId,
+  attachments: readonly { readonly mimeType: ChatAttachmentMimeType; readonly size: number }[],
+): string | null {
+  const images = attachments.filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
+  const name = PROVIDER_INFO[providerId].name;
+  if (images.length > MAX_PROVIDER_REQUEST_IMAGE_COUNT) {
+    return `${name} accepts at most ${MAX_PROVIDER_REQUEST_IMAGE_COUNT} images per message. Remove some images and send again.`;
+  }
+  return INLINE_IMAGE_PROVIDERS.has(providerId)
+    && images.reduce((total, { size }) => total + size, 0) > MAX_PROVIDER_REQUEST_IMAGE_BYTES
+    ? `${name} accepts at most 20 MiB of images per message. Remove some images and send again.`
+    : null;
+}
 
 const IMAGE_READ_CHUNK_BYTES = 64 * 1024;
 

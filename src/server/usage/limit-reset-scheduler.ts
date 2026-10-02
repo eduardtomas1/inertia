@@ -5,7 +5,7 @@ import type { RuntimeStore } from "../database";
 import { RuntimeRequestError, publicRuntimeError } from "../runtime-errors";
 import { publicLimitResetPlan, type StoredLimitResetPlan } from "../persistence/limit-reset-repository";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
-import { matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
+import { MISSED_RESUME_AFTER_MS, matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
 
 export interface LimitResetDependencies {
   store: RuntimeStore;
@@ -58,7 +58,7 @@ export class LimitResetScheduler {
     const { store } = this.dependencies;
     store.conversation(conversationId);
     let plan = store.limitResets.get(conversationId);
-    if (plan && ["waiting", "dispatching"].includes(plan.state) && !this.current(plan)) {
+    if (plan && ["waiting", "dispatching", "missed"].includes(plan.state) && !this.current(plan)) {
       store.limitResets.settle(plan, "blocked", "The chat changed. Choose a new reset action to continue.");
       this.dependencies.changed(conversationId);
       plan = store.limitResets.get(conversationId);
@@ -86,6 +86,17 @@ export class LimitResetScheduler {
     if (current && ["waiting", "dispatching"].includes(current.state)) return this.get(input.conversationId);
     this.dependencies.store.limitResets.save({ ...input, ...offer, accountIdentity: offer.accountIdentity,
       nextAttemptAt: offer.resetsAt, attempts: 0, state: "waiting", error: null, turnId: null });
+    this.dependencies.changed(input.conversationId);
+    this.arm();
+    return this.get(input.conversationId);
+  }
+  async resume(input: { conversationId: string; id: string }): Promise<LimitResetResult> {
+    if (!this.dependencies.enabled) throw new RuntimeRequestError("Automatic resume requires an available provider runtime.");
+    const plan = this.dependencies.store.limitResets.get(input.conversationId);
+    if (plan?.id !== input.id || plan.state !== "missed" || !this.current(plan)
+      || !this.dependencies.store.limitResets.rearm(plan, new Date().toISOString())) {
+      throw new RuntimeRequestError("This resume is no longer waiting. Check the chat before sending again.");
+    }
     this.dependencies.changed(input.conversationId);
     this.arm();
     return this.get(input.conversationId);
@@ -134,6 +145,11 @@ export class LimitResetScheduler {
             continue;
           }
           if (Date.parse(plan.nextAttemptAt) > Date.now()) continue;
+          if (Date.now() - Date.parse(plan.nextAttemptAt) > MISSED_RESUME_AFTER_MS) {
+            this.dependencies.store.limitResets.settle(plan, "missed", null);
+            this.dependencies.changed(plan.conversationId);
+            continue;
+          }
           if (!this.dependencies.store.limitResets.claim(plan)) continue;
           try {
             this.assertDispatch(plan);

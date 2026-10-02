@@ -31,6 +31,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
   });
   const handler = defineRuntimeCommandHandler([
     "conversation.limit-reset.get", "conversation.limit-reset.schedule", "conversation.limit-reset.cancel", "conversation.limit-reset.snooze",
+    "conversation.limit-reset.resume",
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.limit-reset.get":
@@ -38,6 +39,9 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
         break;
       case "conversation.limit-reset.schedule":
         dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: await scheduler.schedule(command.payload) });
+        break;
+      case "conversation.limit-reset.resume":
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: await scheduler.resume(command.payload) });
         break;
       case "conversation.limit-reset.cancel": {
         dependencies.store.conversation(command.payload.conversationId);

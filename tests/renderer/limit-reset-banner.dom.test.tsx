@@ -68,6 +68,17 @@ describe("quota reset banner", () => {
     expect(screen.queryByText("Resume scheduled")).not.toBeInTheDocument();
     view.unmount();
   });
+  it("offers Resume now for a missed plan without sending automatically", async () => {
+    const missed = pending(); missed.plan!.state = "missed"; missed.offer = null;
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(missed).mockResolvedValueOnce({ ...pending(), offer: null });
+    render(banner(run));
+    await screen.findByText("Resume missed");
+    expect(screen.getByRole("status")).toHaveTextContent("nothing was sent");
+    expect(screen.getByRole("button", { name: "Cancel resume" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Resume now" }));
+    await screen.findByText("Resume scheduled");
+    expect(run.mock.calls[1]![0]).toEqual({ type: "conversation.limit-reset.resume", payload: { conversationId, id } });
+  });
   it("explains a blocked automatic resume while retaining cancellation", async () => {
     const value = pending(); value.plan!.state = "blocked"; value.plan!.error = "The account changed. Resume manually.";
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(value);

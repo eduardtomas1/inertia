@@ -126,6 +126,28 @@ describe("quota reset actions", () => {
     if (change !== "new-turn") expect(store.latestAgentTurnForConversation(conversationId)?.id).toBe(failedTurnId);
   });
 
+  it.each([[59, "completed"], [61, "missed"]] as const)("handles a plan that can first run %i minutes after its reset", async (minutes, state) => {
+    await schedule();
+    vi.setSystemTime(Date.parse(reset) + minutes * 60_000); account.windows[0]!.remainingPercent = 100;
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state });
+    expect(dependencies.dispatch).toHaveBeenCalledTimes(state === "completed" ? 1 : 0);
+    expect(store.latestAgentTurnForConversation(conversationId)?.id === failedTurnId).toBe(state === "missed");
+  });
+
+  it("sends a missed plan only after an explicit Resume now", async () => {
+    const id = randomUUID(); await schedule(id);
+    vi.setSystemTime(Date.parse(reset) + 3 * 3_600_000); account.windows[0]!.remainingPercent = 100;
+    await scheduler.tick(); await scheduler.tick();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    await expect(scheduler.resume({ conversationId, id: randomUUID() })).rejects.toThrow("no longer");
+    expect((await scheduler.resume({ conversationId, id })).plan).toMatchObject({ id, state: "waiting" });
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ id, state: "completed" });
+    await expect(scheduler.resume({ conversationId, id })).rejects.toThrow("no longer");
+  });
+
   it("reports a pending plan from the database without another account read", async () => {
     await schedule();
     const reads = vi.mocked(dependencies.readAccount).mock.calls.length;

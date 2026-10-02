@@ -89,7 +89,9 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const offer = result.offer;
   const unavailable = disabled || busy;
   const action = "secondary-button limit-reset-action";
-  const message = error ? diagnosticErrorReference(error).message : plan?.error ?? null;
+  const missed = plan?.state === "missed";
+  const message = error ? diagnosticErrorReference(error).message
+    : missed ? "Inertia was closed or asleep at the reset, so nothing was sent." : plan?.error ?? null;
   if (!plan && !offer) {
     if (!result.needsCheck) return null;
     return <div className="limit-reset" role="group" aria-label="Usage limit" data-state="check">
@@ -110,15 +112,17 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const resetsAt = plan?.resetsAt ?? offer!.resetsAt;
   const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) >= Date.parse(resetsAt);
   const when = new Date(resetsAt).toLocaleString(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const Icon = blocked ? CircleAlert : Clock3;
-  return <div className="limit-reset" role="group" aria-label="Usage limit" data-state={pending ? "scheduled" : blocked ? "blocked" : "offer"}>
+  const Icon = blocked || missed ? CircleAlert : Clock3;
+  return <div className="limit-reset" role="group" aria-label="Usage limit" data-state={pending ? "scheduled" : blocked ? "blocked" : missed ? "missed" : "offer"}>
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
-      <strong>{pending ? "Resume scheduled" : blocked ? "Resume needs attention" : "Usage limit reached"}</strong>
+      <strong>{pending ? "Resume scheduled" : blocked ? "Resume needs attention" : missed ? "Resume missed" : "Usage limit reached"}</strong>
       <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>{pending ? "Resumes" : "Resets"} {when}</time>
     </span>
     <span className="limit-reset-actions">
-      {pending || blocked ? <button type="button" className={action} aria-disabled={unavailable || undefined}
+      {missed && <button type="button" className={action} aria-disabled={unavailable || undefined}
+        onClick={() => void mutate({ type: "conversation.limit-reset.resume", payload: { conversationId, id: plan.id } })}>Resume now</button>}
+      {pending || blocked || missed ? <button type="button" className={action} aria-disabled={unavailable || undefined}
         onClick={() => void mutate({ type: "conversation.limit-reset.cancel", payload: { conversationId, id: plan.id } })}>Cancel resume</button>
         : offer && <button type="button" className={action} aria-disabled={unavailable || !offer.canResume || undefined}
           title={offer.canResume ? "Continue this chat when quota is available and Inertia is running" : "Automatic resume is unavailable for this account"}

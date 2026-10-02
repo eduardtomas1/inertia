@@ -39,9 +39,13 @@ export class LimitResetRepository {
     return this.database.prepare("UPDATE usage_limit_resume_plans SET state='dispatching', attempts=attempts+1 WHERE id=? AND conversation_id=? AND state='waiting'")
       .run(plan.id, plan.conversationId).changes === 1;
   }
-  settle(plan: StoredLimitResetPlan, state: "blocked" | "cancelled", error: string | null): void {
-    this.database.prepare("UPDATE usage_limit_resume_plans SET state=?, error=? WHERE id=? AND conversation_id=? AND state IN ('waiting','dispatching','blocked')")
+  settle(plan: StoredLimitResetPlan, state: "blocked" | "cancelled" | "missed", error: string | null): void {
+    this.database.prepare("UPDATE usage_limit_resume_plans SET state=?, error=? WHERE id=? AND conversation_id=? AND state IN ('waiting','dispatching','blocked','missed')")
       .run(state, error?.slice(0, 1000) ?? null, plan.id, plan.conversationId);
+  }
+  rearm(plan: StoredLimitResetPlan, nextAttemptAt: string): boolean {
+    return this.database.prepare("UPDATE usage_limit_resume_plans SET state='waiting', next_attempt_at=?, attempts=0, error=NULL WHERE id=? AND conversation_id=? AND state='missed'")
+      .run(nextAttemptAt, plan.id, plan.conversationId).changes === 1;
   }
   retry(plan: StoredLimitResetPlan, nextAttemptAt: string): void {
     this.database.prepare("UPDATE usage_limit_resume_plans SET state='waiting', next_attempt_at=? WHERE id=? AND conversation_id=? AND state='dispatching'")

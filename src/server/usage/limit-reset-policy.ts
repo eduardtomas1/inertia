@@ -10,6 +10,7 @@ export function sameReportedReset(left: string, right: string): boolean {
   return Math.abs(Date.parse(left) - Date.parse(right)) <= 2_000;
 }
 export const MAX_RESET_WAIT_MS = 31 * 86_400_000;
+export const MISSED_RESUME_AFTER_MS = 60 * 60_000;
 export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentTurn | null): boolean {
   return conversation.archivedAt === null && conversation.settledAt === null && turn?.status === "failed"
     && conversation.providerId === turn.providerId

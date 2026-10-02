@@ -113,6 +113,7 @@ describe("shared contracts boundary", () => {
       "conversation.limit-reset.get",
       "conversation.limit-reset.schedule",
       "conversation.limit-reset.cancel",
+      "conversation.limit-reset.resume",
       "conversation.limit-reset.snooze",
       "message.queue.get",
       "message.queue.enqueue",

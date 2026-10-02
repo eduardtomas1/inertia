@@ -76,6 +76,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.limit-reset.get": { timeoutMs: 60000, timeoutDelivery: "rejected" },
   "conversation.limit-reset.schedule": longMutation,
   "conversation.limit-reset.cancel": shortMutation,
+  "conversation.limit-reset.resume": shortMutation,
   "conversation.limit-reset.snooze": longMutation,
   "message.queue.get": shortRetrySafe,
   "message.queue.enqueue": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },

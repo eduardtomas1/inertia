@@ -12,7 +12,7 @@ export const limitResetMigration: DatabaseMigrationDefinition = {
       resets_at TEXT NOT NULL,
       next_attempt_at TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL CHECK (state IN ('waiting','dispatching','blocked','completed','cancelled')),
+      state TEXT NOT NULL CHECK (state IN ('waiting','dispatching','blocked','missed','completed','cancelled')),
       error TEXT CHECK (error IS NULL OR length(error) <= 1000),
       turn_id TEXT REFERENCES agent_turns(id) ON DELETE SET NULL
     );

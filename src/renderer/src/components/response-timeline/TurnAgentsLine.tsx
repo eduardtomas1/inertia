@@ -48,7 +48,7 @@ export function TurnAgentsLine({
   const { text, failed } = turnAgentStatusText(status);
   const content = (
     <>
-      <span className={status.live > 0 ? "background-task-live" : undefined}>{text}</span>
+      <span className={status.running > 0 ? "background-task-live" : undefined}>{text}</span>
       {failed && <>{" · "}<span className="turn-agents-danger">{failed}</span></>}
     </>
   );

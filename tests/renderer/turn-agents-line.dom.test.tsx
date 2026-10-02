@@ -91,6 +91,13 @@ describe("turn agents line", () => {
     expect(button.querySelectorAll(".background-task-live")).toHaveLength(1);
   });
 
+  it("sweeps only while an agent is running, like the panel's cards", () => {
+    const view = render(<TurnAgentsLine {...line} subagents={[taskTrace({ id: "a", status: "waiting" }), taskTrace({ id: "b", status: "queued" })]} onOpenSurface={vi.fn()} />);
+    expect(screen.getByText("2 agents working")).not.toHaveClass("background-task-live");
+    view.rerender(<TurnAgentsLine {...line} subagents={[taskTrace({ id: "a", status: "waiting" }), taskTrace({ id: "b", status: "spawned" })]} onOpenSurface={vi.fn()} />);
+    expect(screen.getByText("2 agents working")).toHaveClass("background-task-live");
+  });
+
   it("says how many agents finished and names failures in words, without animation", () => {
     render(<TurnAgentsLine {...line} subagents={settled} onOpenSurface={vi.fn()} />);
     const button = screen.getByRole("button", { name: "Open Background tasks, 4 agents finished · 1 failed" });

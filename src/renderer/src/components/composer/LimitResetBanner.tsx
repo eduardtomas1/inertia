@@ -117,7 +117,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
       <strong>{pending ? "Resume scheduled" : blocked ? "Resume needs attention" : missed ? "Resume missed" : "Usage limit reached"}</strong>
-      <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>{pending ? "Resumes" : "Resets"} {when}</time>
+      <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>{pending ? "Resumes" : missed ? "Reset" : "Resets"} {when}</time>
     </span>
     <span className="limit-reset-actions">
       {missed && <button type="button" className={action} aria-disabled={unavailable || undefined}

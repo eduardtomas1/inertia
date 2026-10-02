@@ -174,10 +174,10 @@
       },
       "coreJavaScript": {
         "baselineBytes": 2235153,
-        "implementationBytes": 2236720,
-        "deltaBytes": 1567,
+        "implementationBytes": 2236730,
+        "deltaBytes": 1577,
         "previousBudget": 2235208.4,
-        "budget": 2236775.4
+        "budget": 2236785.4
       }
     },
     "unchangedBudgets": {

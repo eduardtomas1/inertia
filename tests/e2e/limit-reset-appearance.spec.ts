@@ -21,6 +21,7 @@ const BLOCKED_ERROR = "The account changed or could not be checked. Resume this 
 interface Seed {
   offer: { conversationId: string; title: string };
   blocked: { conversationId: string; title: string };
+  missed: { conversationId: string; title: string };
 }
 
 function fakeCodex(statePath: string): string {
@@ -150,6 +151,13 @@ test.beforeAll(async () => {
         const second = store.createConversation(first.projectId, "Add search filters", { providerId: first.providerId });
         failTurn(store, store.conversation(second.id), "Add filters for project and status, and keep the search results easy to scan.");
         seeded.offer = { conversationId: second.id, title: "Add search filters" };
+        const third = store.createConversation(first.projectId, "Summarize review feedback", { providerId: first.providerId });
+        const missedTurn = failTurn(store, store.conversation(third.id), "Summarize the open review threads and list the ones that still need a reply.");
+        store.limitResets.save({ id: randomUUID(), conversationId: third.id, failedTurnId: missedTurn,
+          routeIdentity: queuedRouteIdentity(store.conversation(third.id)), accountIdentity: "fixture-account",
+          resetsAt: new Date(FIXED_NOW - 2 * HOUR).toISOString(), nextAttemptAt: new Date(FIXED_NOW - 2 * HOUR).toISOString(), attempts: 0,
+          state: "missed", error: null, turnId: null });
+        seeded.missed = { conversationId: third.id, title: "Summarize review feedback" };
         store.updateSettings({ theme: "dark", codexBinaryPath: binary });
       } finally {
         store.close();
@@ -264,6 +272,32 @@ test("explains a blocked resume inside the composer dock", async ({ browserName:
     await app.resizeWindow(760, 600);
     await expectLayoutHolds(app, row);
     await capture(page, info, "limit-reset-blocked-light-760x600");
+    await setAppearanceInPlace(app, "dark");
+    await app.resizeWindow(1440, 920);
+    expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    await attachFailure(info);
+    throw error;
+  }
+});
+
+test("offers Resume now for a missed resume inside the composer dock", async ({ browserName: _browserName }, info) => {
+  try {
+    await app.resizeWindow(1440, 920);
+    const row = await showChat(app, seed.missed);
+    const page = app.page;
+    await expect(row.getByText("Resume missed", { exact: true })).toBeVisible();
+    await expect(row.getByRole("status")).toHaveText("Inertia was closed or asleep at the reset, so nothing was sent.");
+    await expect(row.getByRole("button", { name: "Resume now", exact: true })).toBeEnabled();
+    await expect(row.getByRole("button", { name: "Cancel resume", exact: true })).toBeEnabled();
+    await expect(row.getByRole("alert")).toHaveCount(0);
+    await expectLayoutHolds(app, row);
+    await capture(page, info, "limit-reset-missed-dark");
+    await setAppearanceInPlace(app, "light");
+    await capture(page, info, "limit-reset-missed-light");
+    await app.resizeWindow(760, 600);
+    await expectLayoutHolds(app, row);
+    await capture(page, info, "limit-reset-missed-light-760x600");
     await setAppearanceInPlace(app, "dark");
     await app.resizeWindow(1440, 920);
     expect(app.rendererErrors).toEqual([]);

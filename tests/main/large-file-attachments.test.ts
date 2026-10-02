@@ -178,6 +178,24 @@ describe("file-backed attachments", () => {
     }])).rejects.toThrow("Temporary attachment storage is full. Remove an attachment and try again.");
   });
 
+  it("keeps a streamed batch open while its chunks keep arriving", async () => {
+    const { registry, coordinator, document } = await fixture();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    cleanups.push(async () => vi.useRealTimers());
+    const batch = coordinator.begin(document);
+    const size = ATTACHMENT_UPLOAD_CHUNK_BYTES * 2;
+    for (let index = 0; index < 3; index += 1) {
+      for (let offset = 0; offset < size; offset += ATTACHMENT_UPLOAD_CHUNK_BYTES) {
+        await coordinator.importOne(document, batch, [{
+          name: `part-${index}.txt`, mimeType: "text/plain", data: new Uint8Array(ATTACHMENT_UPLOAD_CHUNK_BYTES).fill(65 + index).buffer,
+          stream: { size, offset, final: offset + ATTACHMENT_UPLOAD_CHUNK_BYTES === size },
+        }]);
+        await vi.advanceTimersByTimeAsync(50_000);
+      }
+    }
+    expect(registry.usage().records).toBe(3);
+  });
+
   it("ends a waiting upload and reclaims its staged file when the registry is disposed", async () => {
     const { root, registry, coordinator, document } = await fixture();
     const batch = coordinator.begin(document);

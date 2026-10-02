@@ -16,7 +16,8 @@ import type { AttachmentRegistry } from "./attachment-registry.js";
 
 const MAX_ACTIVE_RENDERER_IMPORT_BATCHES = 16;
 const MAX_ACTIVE_RENDERER_IMPORT_BATCHES_PER_OWNER = 4;
-const RENDERER_IMPORT_BATCH_TIMEOUT_MS = 210_000;
+const RENDERER_IMPORT_BATCH_IDLE_MS = 210_000;
+const RENDERER_IMPORT_BATCH_MAX_MS = 1_200_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -82,7 +83,8 @@ interface RendererAttachmentImportBatch {
   readonly attachmentIds: Set<string>;
   readonly digests: Set<string>;
   readonly controller: AbortController;
-  readonly timer: ReturnType<typeof setTimeout>;
+  readonly deadlineAt: number;
+  timer?: ReturnType<typeof setTimeout>;
   state: "open" | "cancelled" | "committed";
   inFlight: Promise<ChatAttachment[]> | null;
   upload?: { stream: AttachmentUploadStream; result: Promise<ChatAttachment[]>; name: string; mimeType: string };
@@ -204,14 +206,12 @@ export class RendererAttachmentImportCoordinator {
       attachmentIds: new Set(),
       digests: new Set(),
       controller: new AbortController(),
-      timer: setTimeout(() => {
-        void this.cancelBatch(batch);
-      }, RENDERER_IMPORT_BATCH_TIMEOUT_MS),
+      deadlineAt: Date.now() + RENDERER_IMPORT_BATCH_MAX_MS,
       state: "open",
       inFlight: null,
       cleanup: null,
     };
-    batch.timer.unref();
+    this.armBatchTimer(batch);
     this.batches.set(id, batch);
     const record = ownerRecord ?? this.createOwnerRecord(document);
     record.batchIds.add(id);
@@ -225,15 +225,28 @@ export class RendererAttachmentImportCoordinator {
     values: readonly unknown[],
   ): Promise<ChatAttachment[]> {
     const batch = this.openOwnedBatch(document, batchId);
-    const value = values[0];
-    if (values.length === 1 && typeof value === "object" && value !== null && "stream" in value) {
-      return await this.importChunk(batch, value as Record<string, unknown>);
+    this.armBatchTimer(batch);
+    try {
+      const value = values[0];
+      if (values.length === 1 && typeof value === "object" && value !== null && "stream" in value) {
+        return await this.importChunk(batch, value as Record<string, unknown>);
+      }
+      if (batch.inFlight || values.length !== 1) {
+        throw new Error("Invalid attachments.");
+      }
+      return await this.importIntoBatch(batch, async (signal) =>
+        await batch.registry.import(values, signal));
+    } finally {
+      if (batch.state === "open") this.armBatchTimer(batch);
     }
-    if (batch.inFlight || values.length !== 1) {
-      throw new Error("Invalid attachments.");
-    }
-    return await this.importIntoBatch(batch, async (signal) =>
-      await batch.registry.import(values, signal));
+  }
+
+  private armBatchTimer(batch: RendererAttachmentImportBatch): void {
+    clearTimeout(batch.timer);
+    batch.timer = setTimeout(() => {
+      void this.cancelBatch(batch);
+    }, Math.max(0, Math.min(RENDERER_IMPORT_BATCH_IDLE_MS, batch.deadlineAt - Date.now())));
+    batch.timer.unref();
   }
 
   private async importChunk(batch: RendererAttachmentImportBatch, value: Record<string, unknown>): Promise<ChatAttachment[]> {

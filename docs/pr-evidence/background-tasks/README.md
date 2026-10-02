@@ -161,9 +161,9 @@ animated working indicator and composer stop control are canvas drawings that
   so settling cannot move the rows below it.
 
 See [renderer-bundle.json](renderer-bundle.json) for every closure measured
-against `origin/main` (`fd02e238`) on this machine. The workbench first load
-grows by 741 bytes and its cap is main's cap plus exactly that. The detached
-chat first load (-4,827), shared core (-3,255), entry stylesheet (-6,793) and
-transcript chunk (-6,261) are smaller than on main and keep main's caps. The
-Background tasks surface itself (13,218 bytes, capped at 13.1 KiB) loads on
-demand.
+against a build of `origin/main` (`2ef3c2a4`) on this machine. The workbench
+first load grows by 1,541 bytes and its cap is main's cap plus exactly that.
+The detached chat first load (-4,308), shared core (-1,247), entry stylesheet
+(-6,793) and transcript chunk (-5,741) are smaller than on main and keep
+main's caps. The Background tasks surface itself (17,434 bytes, capped at
+exactly that) loads on demand.

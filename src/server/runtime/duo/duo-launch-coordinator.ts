@@ -22,6 +22,7 @@ import {
 import type { NewConversationOptions } from "../../persistence/types";
 import type { ProviderManager } from "../../providers";
 import { normalizeIdentityPath } from "../../project-identity";
+import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -656,7 +657,7 @@ export class DuoLaunchCoordinator {
   ): Promise<PreparedDuoLaunch> {
     const participants = [...payload.sides, ...(payload.comparison ? [payload.comparison] : [])];
     if (participants.some(({ projectId }) => this.store.project(projectId).workspaceKind === "scratch")) {
-      throw new Error("Choose a project for each Duo chat and comparison.");
+      throw new RuntimeRequestError("Choose a project for each Duo chat and comparison.");
     }
     // Preflights can own Git or provider resources, so a sibling failure must
     // not return to callers until every concurrent preflight has settled.

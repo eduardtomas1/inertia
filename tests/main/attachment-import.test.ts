@@ -1,3 +1,4 @@
+import { randomFillSync } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
@@ -487,6 +488,32 @@ describe("privileged attachment import validation", () => {
     })).toMatchObject({ bytes, size: bytes.length, mimeType: "image/png" });
   });
 
+  it("accepts a large PNG whose encoder wrote its data in more than 4,096 chunks", async () => {
+    const canvas = createCanvas(96, 96);
+    const context = canvas.getContext("2d");
+    const pixels = context.createImageData(96, 96);
+    randomFillSync(pixels.data);
+    context.putImageData(pixels, 0, 0);
+    const source = canvas.encodeSync("png");
+    const idatOffset = source.indexOf(Buffer.from("IDAT")) - 4;
+    const data: Buffer[] = [];
+    for (let offset = idatOffset; source.toString("ascii", offset + 4, offset + 8) === "IDAT";) {
+      const length = source.readUInt32BE(offset);
+      data.push(source.subarray(offset + 8, offset + 8 + length));
+      offset += 12 + length;
+    }
+    const idatData = Buffer.concat(data);
+    const pieceBytes = Math.ceil(idatData.length / 5_000);
+    const pieces: Buffer[] = [];
+    for (let offset = 0; offset < idatData.length; offset += pieceBytes) {
+      pieces.push(pngChunk("IDAT", idatData.subarray(offset, offset + pieceBytes)));
+    }
+    expect(pieces.length).toBeGreaterThan(4_096);
+    const bytes = Buffer.concat([source.subarray(0, idatOffset), ...pieces, pngChunk("IEND")]);
+    await expect(validateAttachmentImport({ name: "large.png", mimeType: "image/png", data: bytes }))
+      .resolves.toMatchObject({ mimeType: "image/png", size: bytes.length });
+  });
+
   it("still rejects empty, non-contiguous, and excessive PNG data chunks", async () => {
     const headerEnd = 8 + 12 + png.readUInt32BE(8);
     const header = png.subarray(0, headerEnd);
@@ -499,7 +526,7 @@ describe("privileged attachment import validation", () => {
     for (const data of [
       Buffer.concat([header, empty, end]),
       Buffer.concat([header, validData, interrupted, empty, end]),
-      Buffer.concat([header, ...Array<Buffer>(4_096).fill(empty), validData, end]),
+      Buffer.concat([header, ...Array<Buffer>(8_192).fill(empty), validData, end]),
     ]) {
       await expect(validateAttachmentImport({
         name: "unsafe.png", mimeType: "image/png", data,

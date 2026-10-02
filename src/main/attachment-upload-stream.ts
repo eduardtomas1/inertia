@@ -1,7 +1,6 @@
 import type { FileHandle } from "node:fs/promises";
 import { ATTACHMENT_UPLOAD_CHUNK_BYTES } from "../shared/attachments.js";
 
-/** One outstanding chunk: the renderer receives an acknowledgement after disk write. */
 export class AttachmentUploadStream {
   private offset = 0;
   private destination: FileHandle | null = null;
@@ -20,7 +19,6 @@ export class AttachmentUploadStream {
   private writing = false;
 
   constructor(readonly size: number, signal: AbortSignal) {
-    // Rejections can arrive before the registry admits this writer.
     void this.opened.catch(() => undefined);
     void this.completed.catch(() => undefined);
     const abort = (): void => this.cancel(new Error("Attachment import was cancelled."));

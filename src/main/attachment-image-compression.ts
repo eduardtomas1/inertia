@@ -2,12 +2,11 @@ import { createCanvas, Image } from "@napi-rs/canvas";
 import { MAX_IMAGE_ATTACHMENT_BYTES, MAX_SOURCE_IMAGE_BYTES, type ImageAttachmentMimeType } from "../shared/attachments.js";
 import { inspectImageMetadata, MAX_IMAGE_PIXELS } from "./attachment-image-validation.js";
 
-/** Runs inside the supervised import utility, after structural and decode-budget checks. */
 export async function compressAttachmentImage(bytes: Buffer, mimeType: ImageAttachmentMimeType): Promise<Buffer | null> {
   if (bytes.length > MAX_SOURCE_IMAGE_BYTES) throw new Error("Source images must be at most 50 MiB.");
   const metadata = inspectImageMetadata(bytes, mimeType);
   if (!metadata || metadata.width * metadata.height * metadata.frames > MAX_IMAGE_PIXELS) {
-    return null; // The ordinary validator reports invalid or excessive decode dimensions.
+    return null;
   }
   if (bytes.length <= MAX_IMAGE_ATTACHMENT_BYTES && metadata.width <= 8192 && metadata.height <= 8192) return null;
   const image = new Image();

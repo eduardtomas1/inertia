@@ -113,7 +113,7 @@ export async function importComposerAttachmentFilesSequentially(
         });
         if (end < file.size && current.length !== 0) throw new Error("Invalid attachment upload acknowledgement.");
       }
-      if (current.length === 0) continue; // The privileged importer deduplicates by streamed digest.
+      if (current.length === 0) continue;
       if (current.length !== 1) throw new Error("Attachment import did not complete.");
       imported.push(current[0]!);
     }

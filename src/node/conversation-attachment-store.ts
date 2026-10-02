@@ -70,14 +70,12 @@ export class ConversationAttachmentStoreReconcilingError extends Error {
 export interface ConversationAttachmentPayload {
   readonly attachment: ChatAttachment;
   readonly bytes: Uint8Array;
-  /** Verified on-disk source; bytes is empty for file-backed sends. */
   readonly source?: import("./read-attachment.js").AttachmentFileSource;
 }
 
 export interface ConversationAttachmentPreview {
   readonly attachment: ChatAttachment;
   readonly bytes: Buffer;
-  /** Verified on-disk source; bytes is empty for file-backed sends. */
   readonly source?: import("./read-attachment.js").AttachmentFileSource;
 }
 

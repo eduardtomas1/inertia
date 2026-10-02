@@ -175,7 +175,6 @@ export function parseAttachmentPickerMode(
 }
 
 export interface AttachmentImport {
-  /** Chunked uploads are ordered, acknowledged writes to private staging. */
   stream?: { size: number; offset: number; final: boolean };
   name: string;
   /** Renderer-declared only; the privileged boundary verifies it against bytes and extension. */

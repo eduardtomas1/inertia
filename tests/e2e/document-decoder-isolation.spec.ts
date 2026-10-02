@@ -22,8 +22,6 @@ async function observeDecoder(fixture: AppFixture, mode: "stall" | "exit-first")
     Reflect.set(globalThis, "documentDecoderProbe", {
       observations, results,
       request: (bytes: number[]) => {
-        // File-backed sends no longer decode PDFs. Exercise the existing main
-        // broker using the real runtime's event boundary and native utilities.
         runtime.emit("message", {
           type: "runtime.document-preparation-request", requestId: crypto.randomUUID(),
           operation: { deadlineAt: Date.now() + 43_000, payloads: [{

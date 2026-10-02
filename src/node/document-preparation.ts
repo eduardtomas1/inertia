@@ -1,4 +1,3 @@
-// Legacy document decoding retains its bounded byte envelope; file-backed sends bypass it.
 import {
   CHAT_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_ATTACHMENTS,

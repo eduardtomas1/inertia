@@ -108,11 +108,10 @@ function isSpreadsheetPreview(mimeType: ChatAttachmentMimeType): boolean {
     || isSpreadsheetAttachmentMimeType(mimeType);
 }
 
-// A prefix may end inside a UTF-8 sequence or a UTF-16 code unit.
 function trimIncompleteText(bytes: Uint8Array): Uint8Array {
   for (let omitted = 0; omitted <= 4; omitted += 1) {
     const prefix = bytes.subarray(0, bytes.length - omitted);
-    try { decodeTextAttachment(prefix); return prefix; } catch { /* try the preceding code point */ }
+    try { decodeTextAttachment(prefix); return prefix; } catch { continue; }
   }
   return bytes;
 }

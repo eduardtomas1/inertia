@@ -50,7 +50,6 @@ export interface RuntimeAttachmentBroker {
 export interface ResolvedAttachmentPayload {
   attachment: ChatAttachment;
   bytes: Uint8Array;
-  /** Verified on-disk source; bytes is empty for file-backed sends. */
   source?: AttachmentFileSource;
 }
 

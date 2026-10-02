@@ -8,11 +8,6 @@ const kibibyte = 1024;
 // Route closures include their statically imported dependencies. Keeping the
 // bootstrap and both window surfaces separate makes a detached chat regression
 // visible even when Rollup moves shared modules between chunks.
-// Streamed attachment acknowledgements, large-paste recovery and independent image
-// admission measure 854,976 / 661,419 bytes for the two first-load routes.
-// Bounded preview handling measures 18,149 bytes; the updated guide and storage
-// copy measure 29,253 / 5,363. Keep less than 0.3 KiB of headroom per changed
-// budget. Exact feature measurements: docs/pr-evidence/large-file-attachments.json.
 const budgets = {
   // React 19.3 adds 29,322 emitted bytes on identical application source.
   // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.

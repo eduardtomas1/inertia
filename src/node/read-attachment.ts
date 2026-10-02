@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { FileHandle } from "node:fs/promises";
 
-/** Hash a pinned file while retaining only the requested preview prefix. */
 export async function readAttachment(
   file: FileHandle,
   size: number,

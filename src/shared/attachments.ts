@@ -10,7 +10,6 @@ export const SPREADSHEET_ATTACHMENT_MIME_TYPES = [
   "application/vnd.ms-excel",
 ] as const;
 
-// Released migration 56 pins these declarations. Keep its policy byte-identical.
 export const DOCUMENT_ATTACHMENT_MIME_TYPES = [
   "application/pdf",
   "text/plain",
@@ -51,13 +50,11 @@ export type DocumentAttachmentMimeType = (typeof ACCEPTED_DOCUMENT_MIME_TYPES)[n
 export type ChatAttachmentMimeType = (typeof ACCEPTED_ATTACHMENT_MIME_TYPES)[number];
 export type ChatAttachmentKind = "image" | "document";
 
-// File storage and model image input have independent budgets.
 export const MAX_ATTACHMENT_COUNT = 100;
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 export const MAX_IMAGE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_IMAGE_ATTACHMENT_TOTAL_BYTES = 80 * 1024 * 1024;
 export const MAX_SOURCE_IMAGE_BYTES = 50 * 1024 * 1024;
-// Absolute protocol envelope, derived from the count and per-file limits.
 export const MAX_ATTACHMENT_TOTAL_BYTES = MAX_ATTACHMENT_COUNT * MAX_ATTACHMENT_BYTES;
 export const MAX_TEXT_ATTACHMENT_BYTES = MAX_ATTACHMENT_BYTES;
 export const ATTACHMENT_PREVIEW_BYTES = 1024 * 1024;

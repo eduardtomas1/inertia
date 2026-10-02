@@ -1,6 +1,5 @@
 import { TextAttachmentError } from "../shared/text-attachment.js";
 
-/** Validate readable text incrementally without keeping the document in memory. */
 export function attachmentTextValidator(): { chunk(bytes: Buffer): void; finish(): void } {
   let decoder: TextDecoder | undefined;
   let pending = "";

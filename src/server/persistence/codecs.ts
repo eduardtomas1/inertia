@@ -600,7 +600,6 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
   };
 }
 
-// Released migration 56 uses this parser. Keep its original envelope frozen.
 function isPersistedChatAttachment(
   attachment: unknown,
 ): attachment is ChatAttachment {

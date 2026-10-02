@@ -45,6 +45,7 @@ import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
   COLLAPSIBLE_WORK_SECTIONS,
   useSidebarWorkIndex,
+  type PaginatedWorkSectionId,
   type WorkIndexItem,
 } from "../hooks/useSidebarWorkIndex";
 import {
@@ -82,6 +83,10 @@ const SidebarUpdateControl = lazy(async () => ({
   default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
 }));
 const WORK_DONE_PAGE_SIZE = 10;
+const INITIAL_DONE_VISIBLE: Readonly<Record<PaginatedWorkSectionId, number>> = {
+  done: WORK_DONE_PAGE_SIZE,
+  "no-project-done": WORK_DONE_PAGE_SIZE,
+};
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
 
@@ -189,7 +194,7 @@ function SidebarView({
   const [renameDraft, setRenameDraft] = useState("");
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
-  const [doneVisible, setDoneVisible] = useState(WORK_DONE_PAGE_SIZE);
+  const [doneVisible, setDoneVisible] = useState(INITIAL_DONE_VISIBLE);
   const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(() => {
     try {
       const stored = (window.localStorage.getItem(WORK_SECTIONS_STORAGE_KEY) ?? "")
@@ -218,7 +223,7 @@ function SidebarView({
   const compact = snapshot?.settings.compactSidebar ?? false;
   const globalGrouping = snapshot?.settings.projectGrouping ?? "separate";
 
-  useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query]);
+  useEffect(() => setDoneVisible(INITIAL_DONE_VISIBLE), [query]);
   useLayoutEffect(() => {
     if (!projectMenu) return;
     sidebarRef.current?.querySelector<HTMLButtonElement>(
@@ -828,7 +833,10 @@ function SidebarView({
           className="activity-show-more"
           data-sidebar-nav
           data-work-focus-id={item.id}
-          onClick={() => setDoneVisible((count) => count + WORK_DONE_PAGE_SIZE)}
+          onClick={() => setDoneVisible((current) => ({
+            ...current,
+            [item.sectionId]: current[item.sectionId] + WORK_DONE_PAGE_SIZE,
+          }))}
         >
           Show more <span>{item.remaining} older</span>
         </button>

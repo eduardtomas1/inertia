@@ -276,6 +276,26 @@ describe("compact Work sidebar", () => {
     expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(11);
   });
 
+  it("pages project Done and project-free Done separately", () => {
+    const now = new Date();
+    const scratch: Project = { ...project, id: "scratch", name: "No project", workspaceKind: "scratch" };
+    const ordinary = Array.from({ length: 11 }, (_, index) => conversation(`ordinary-${index}`, `Task ${index}`, now, {
+      settledAt: now.toISOString(),
+    }));
+    const free = Array.from({ length: 12 }, (_, index) => conversation(`free-${index}`, `Plan ${index}`, now, {
+      projectId: scratch.id, settledAt: now.toISOString(),
+    }));
+    renderSidebar([...ordinary, ...free], undefined, [], { projects: [project, scratch] });
+    fireEvent.click(screen.getByRole("button", { name: "Done 11" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done 12, No project" }));
+    expect(document.querySelectorAll('[data-work-section="done"]')).toHaveLength(10);
+    expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(10);
+    fireEvent.click(screen.getByRole("button", { name: "Show more 1 older" }));
+    expect(document.querySelectorAll('[data-work-section="done"]')).toHaveLength(11);
+    expect(document.querySelectorAll('[data-work-section="no-project-done"]')).toHaveLength(10);
+    expect(screen.getByRole("button", { name: "Show more 2 older" })).toBeVisible();
+  });
+
   it("keeps snoozed project-free chats separate and restores keyboard focus when they wake", () => {
     vi.useFakeTimers();
     const now = new Date(2026, 7, 11, 12);

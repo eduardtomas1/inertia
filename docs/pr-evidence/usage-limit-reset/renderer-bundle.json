@@ -163,7 +163,7 @@
   },
   "reviewFollowUp": {
     "baseline": "8c422e0a",
-    "method": "Node 22 production builds on macOS ARM64 of the PR head and of the review follow-up (explicit Keychain check row, missed-resume row, timer-based refresh and contract fields). Only exceeded ceilings rise, by the exact measured growth.",
+    "method": "Node 22 production builds on macOS ARM64 of the PR head and of the review follow-up (missed-resume row, visible resume reason, focus-gated timer refresh and contract fields). Only exceeded ceilings rise, by the exact measured growth.",
     "changedBudgets": {
       "mainWorkbenchFirstLoadJavaScript": {
         "baselineBytes": 857846,
@@ -174,10 +174,10 @@
       },
       "coreJavaScript": {
         "baselineBytes": 2235153,
-        "implementationBytes": 2236730,
-        "deltaBytes": 1577,
+        "implementationBytes": 2236035,
+        "deltaBytes": 882,
         "previousBudget": 2235208.4,
-        "budget": 2236785.4
+        "budget": 2236090.4
       }
     },
     "unchangedBudgets": {

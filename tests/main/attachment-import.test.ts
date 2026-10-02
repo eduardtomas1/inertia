@@ -4,7 +4,9 @@ import { createCanvas } from "@napi-rs/canvas";
 import * as XLSX from "xlsx";
 import { pngChunk, pngWithoutPalette, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
+import { privacySafeAttachmentImportError } from "../../src/main/attachment-selection-import";
 import {
+  CREDENTIAL_ATTACHMENT_ERROR,
   attachmentPickerConfiguration,
   validateAttachmentImport,
   validateSelectedAttachmentCount,
@@ -579,11 +581,22 @@ describe("privileged attachment import validation", () => {
 
   it.each([
     { name: "script.svg", mimeType: "image/svg+xml", data: Buffer.from("<svg/>") },
-    { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
-    { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
     { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
+    { name: "id_rsa.pub", mimeType: "", data: Buffer.from("ssh-ed25519 AAAA\n") },
   ])("stores unknown formats as opaque files: $name", async (candidate) => {
     await expect(validateAttachmentImport(candidate)).resolves.toMatchObject({ mimeType: "application/octet-stream", extension: "bin" });
+  });
+
+  it.each([
+    { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
+    { name: ".env", mimeType: "", data: Buffer.from("TOKEN=safe\n") },
+    { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
+    { name: "ID.KEY", mimeType: "", data: Buffer.from("-----BEGIN-----\n") },
+  ])("refuses credential and key files by name without naming them: $name", async (candidate) => {
+    const refusal = validateAttachmentImport(candidate);
+    await expect(refusal).rejects.toThrow(CREDENTIAL_ATTACHMENT_ERROR);
+    expect(privacySafeAttachmentImportError(await refusal.catch((error: unknown) => error)).message)
+      .toBe(CREDENTIAL_ATTACHMENT_ERROR);
   });
 
   it.each([

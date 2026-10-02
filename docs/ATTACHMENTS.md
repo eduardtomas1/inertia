@@ -29,6 +29,9 @@ follow-ups still accept images only; text pastes stay inline.
 | CSV, XLSX, XLS | Bounded table / worksheet view | Saved file path |
 | Other files, including archives | File information; no active content | Saved file path |
 
+`.env`, `.pem`, and `.key` files are refused by name. Credentials and private keys
+stay out of attachment storage, which agents can read.
+
 Text accepts UTF-8 or BOM-marked UTF-16 LE/BE. ANSI color sequences are stripped
 from previews; binary data and terminal control commands in text formats are
 rejected. Preview truncation never changes the stored file. JSON prefixes that

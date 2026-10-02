@@ -32,6 +32,9 @@ import { hasSafePdfAttachment } from "./attachment-pdf-validation.js";
 
 const UNSAFE_ATTACHMENT_CONTENT =
   "Attachment content does not match its safe file type.";
+export const CREDENTIAL_ATTACHMENT_ERROR =
+  "Credential and key files (.env, .pem, .key) cannot be attached.";
+const CREDENTIAL_ATTACHMENT_NAME = /\.(?:env|pem|key)$/u;
 
 const ZIP_END_OF_CENTRAL_DIRECTORY_BYTES = 22;
 const ZIP_MAX_COMMENT_BYTES = 65_535;
@@ -677,6 +680,9 @@ export function prepareAttachmentImportMetadata(
   const declaredMimeType = typeof item.mimeType === "string" ? item.mimeType : "";
   const suppliedName = typeof item.name === "string" ? item.name : "";
   if (!suppliedName.trim()) throw new Error("Invalid attachment.");
+  if (CREDENTIAL_ATTACHMENT_NAME.test(suppliedName.trim().toLowerCase())) {
+    throw new Error(CREDENTIAL_ATTACHMENT_ERROR);
+  }
   const mimeType = chatAttachmentMimeTypeForName(suppliedName);
   if (!mimeType) throw new Error(UNSUPPORTED_ATTACHMENT_TYPE_ERROR);
   if (!isPotentialChatAttachment(suppliedName, declaredMimeType)) {

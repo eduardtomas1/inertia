@@ -17,6 +17,7 @@ import { FILE_OPEN_NO_FOLLOW } from
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { AttachmentPickerMode } from "../shared/desktop.js";
 import {
+  CREDENTIAL_ATTACHMENT_ERROR,
   validateAttachmentPickerName,
   validateSelectedAttachmentCount,
   validateSelectedAttachmentOpen,
@@ -39,6 +40,7 @@ interface SelectedAttachment {
 
 const SAFE_ATTACHMENT_ERRORS = new Set([
   ATTACHMENT_MIME_MISMATCH_ERROR,
+  CREDENTIAL_ATTACHMENT_ERROR,
   TEXT_ATTACHMENT_CONTENT_ERROR,
   TEXT_ATTACHMENT_SIZE_ERROR,
   UNSUPPORTED_ATTACHMENT_TYPE_ERROR,

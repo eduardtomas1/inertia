@@ -43,6 +43,23 @@ describe("privileged usage limits", () => {
     expect(f.read).toHaveBeenCalledOnce();
     expect(f.service.snapshot().accounts[0]).not.toHaveProperty("credentialFingerprint");
   });
+  it("reads Keychain-backed accounts only for explicit Limits refreshes and keeps the last explicit result", async () => {
+    const f = setup();
+    const shown = { ...usageAccount(), keychain: "read" as const };
+    const deferred = { ...usageAccount(), status: "unavailable" as const, windows: [], keychain: "deferred" as const };
+    f.read.mockResolvedValueOnce(shown);
+    await f.service.refresh();
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), undefined, undefined, true);
+    f.read.mockResolvedValueOnce(deferred);
+    const background = await f.service.refresh(true, false);
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), undefined, undefined, false);
+    expect(background.accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
+    expect(background.accounts[0]).not.toHaveProperty("keychain");
+    f.read.mockResolvedValueOnce(deferred);
+    expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toMatchObject({ keychain: "deferred" });
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
+    expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
+  });
   it("upgrades exact schema 73 transactionally without rewriting released migration records", () => {
     const db = new Database(":memory:"); databases.push(db); migrateRuntimeDatabase(db, 73);
     const history = db.prepare("SELECT * FROM schema_migrations ORDER BY version").all();

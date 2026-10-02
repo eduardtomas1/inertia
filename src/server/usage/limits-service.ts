@@ -38,6 +38,7 @@ export class UsageLimitsService {
       accounts: this.accounts.map((account) => {
         const publicAccount = { ...account };
         delete publicAccount.credentialFingerprint;
+        delete publicAccount.keychain;
         const pending = account.identityKey ? this.dependencies.repository.pending(account.identityKey) : null;
         const incompatible = pending && pending.confirmation.creditId === null && account.id !== "native:codex";
         return { ...publicAccount,
@@ -52,10 +53,10 @@ export class UsageLimitsService {
     const next = this.operation.then(() => { this.dependencies.signal.throwIfAborted(); return run(); });
     this.operation = next.catch(() => undefined); return next;
   }
-  refresh(force = false): Promise<UsageLimitsSnapshot> {
+  refresh(force = false, interactive = true): Promise<UsageLimitsSnapshot> {
     if (this.refreshInFlight) return this.refreshInFlight;
     if (!force && this.checkedAt && Date.now() - Date.parse(this.checkedAt) < 60000) return Promise.resolve(this.snapshot());
-    const operation = this.serial(() => this.read());
+    const operation = this.serial(() => this.read(interactive));
     this.refreshInFlight = operation;
     void operation.finally(() => { this.refreshInFlight = null; }).catch(() => undefined);
     return operation;
@@ -85,7 +86,7 @@ export class UsageLimitsService {
       return this.snapshot();
     });
   }
-  async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string): Promise<NativeUsageAccount | null> {
+  async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string, interactive = false): Promise<NativeUsageAccount | null> {
     const id = `native:${providerId}`;
     const scope = JSON.stringify([model ?? null, cwd ?? null]);
     const cached = this.snapshot().accounts.find((account) => account.id === id);
@@ -95,14 +96,14 @@ export class UsageLimitsService {
     return this.serial(async () => {
       const info = this.dependencies.providers().find((provider) => provider.id === providerId);
       if (!info || !this.dependencies.enabled) return null;
-      const account = await this.dependencies.native.read(info, model, cwd).catch(() => null);
-      if (!account) return null;
+      const account = await this.dependencies.native.read(info, model, cwd, interactive).catch(() => null);
+      if (!account || account.keychain === "deferred") return account;
       this.accounts = [...this.accounts.filter((entry) => entry.id !== id), account];
       this.nativeModels.set(id, scope);
       return account;
     });
   }
-  private async read(): Promise<UsageLimitsSnapshot> {
+  private async read(interactive: boolean): Promise<UsageLimitsSnapshot> {
     this.nativeModels.clear();
     const previous = new Map(this.accounts.map((account) => [account.id, account]));
     const next: NativeUsageAccount[] = [];
@@ -110,7 +111,7 @@ export class UsageLimitsService {
     for (const info of this.dependencies.providers()) {
       if (!info.available && info.installState === "not-installed") continue;
       try {
-        next.push(this.dependencies.enabled ? await this.dependencies.native.read(info) : {
+        next.push(this.dependencies.enabled ? await this.dependencies.native.read(info, undefined, undefined, interactive) : {
           id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
           email: null, plan: null, identityKey: null, sources: ["This computer"], status: info.rateLimits.length ? "ready" : "unsupported", detail: info.rateLimits.length ? null : "This provider does not expose a supported subscription quota API.",
           windows: usageWindows(info.rateLimits), credits: null, canReset: false, updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(),
@@ -145,6 +146,7 @@ export class UsageLimitsService {
     }
     this.accounts = next.map((account) => {
       const old = previous.get(account.id);
+      if (account.keychain === "deferred" && old) return old;
       return account.status === "error" && old?.identityKey && account.identityKey === old.identityKey
         ? { ...account, status: "stale", windows: old.windows, updatedAt: old.updatedAt, credits: old.credits, canReset: false }
         : account;

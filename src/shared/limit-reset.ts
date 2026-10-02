@@ -9,6 +9,7 @@ export const limitResetPlanSchema = z.strictObject({
 export const limitResetResultSchema = z.strictObject({
   kind: z.literal("conversation.limit-reset"), conversationId: z.uuid(),
   offer: z.strictObject({ failedTurnId: z.uuid(), resetsAt: z.iso.datetime(), canResume: z.boolean() }).nullable(),
+  needsCheck: z.boolean(),
   plan: limitResetPlanSchema.nullable(),
 });
 export type LimitResetPlan = z.infer<typeof limitResetPlanSchema>;

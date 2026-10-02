@@ -5,8 +5,7 @@ import { createHmac } from "node:crypto";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 
-/** Server-only continuity evidence, excluded from public usage snapshots. */
-export type NativeUsageAccount = UsageAccount & { credentialFingerprint?: string };
+export type NativeUsageAccount = UsageAccount & { credentialFingerprint?: string; keychain?: "deferred" | "read" };
 
 const MAX_BYTES = 256 * 1024;
 /** Provider-owned credentials stay local to these readers; callers retain only opaque fingerprints. */

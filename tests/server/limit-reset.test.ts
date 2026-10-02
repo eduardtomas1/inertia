@@ -8,6 +8,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { LimitResetScheduler, type LimitResetDependencies } from "../../src/server/usage/limit-reset-scheduler";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
 import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
+import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
 
@@ -125,6 +126,14 @@ describe("quota reset actions", () => {
     if (change !== "new-turn") expect(store.latestAgentTurnForConversation(conversationId)?.id).toBe(failedTurnId);
   });
 
+  it("reports a pending plan from the database without another account read", async () => {
+    await schedule();
+    const reads = vi.mocked(dependencies.readAccount).mock.calls.length;
+    vi.setSystemTime(instant + 61_000);
+    expect((await scheduler.get(conversationId)).plan).toMatchObject({ state: "waiting" });
+    expect(dependencies.readAccount).toHaveBeenCalledTimes(reads);
+  });
+
   it("does not offer or schedule continuation after a failed chat is marked Done", async () => {
     store.settleConversation(conversationId, true);
     expect((await scheduler.get(conversationId)).offer).toBeNull();
@@ -224,6 +233,40 @@ describe("resume account identity storage", () => {
     cursorChat(async () => null);
     expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId, canResume: false });
     await expect(schedule()).rejects.toThrow("limit changed");
+  });
+});
+
+describe("macOS Keychain access", () => {
+  let keychain: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
+  beforeEach(() => {
+    const projectId = store.conversation(conversationId).projectId;
+    conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    keychain = vi.fn(async () => "keychain-session-token");
+    const reader = new NativeSubscriptionReader({ platform: "darwin", environment: async () => ({ HOME: directory }), readCursorKeychain: keychain,
+      accountKey: async () => "per-install-identity-key",
+      fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ billingCycleEnd: Date.parse(reset),
+        planUsage: { totalPercentUsed: 40, autoPercentUsed: 100, apiPercentUsed: 0 } }))) });
+    dependencies.readAccount = (_providerId, _force, model, cwd, interactive) => reader.read({ ...usage(), id: "native:cursor", providerId: "cursor",
+      providerLabel: "Cursor", email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory, interactive);
+  });
+  it("never reads the Keychain from the automatic chat refresh and asks for an explicit check", async () => {
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null, needsCheck: true });
+    expect(keychain).not.toHaveBeenCalled();
+    expect(await scheduler.get(conversationId, true)).toMatchObject({ offer: { failedTurnId, resetsAt: reset, canResume: false }, needsCheck: false });
+    expect(keychain).toHaveBeenCalledOnce();
+  });
+  it("never reads the Keychain from the scheduler", async () => {
+    const route = queuedRouteIdentity(store.conversation(conversationId));
+    store.limitResets.save({ id: randomUUID(), conversationId, failedTurnId, routeIdentity: route, accountIdentity: "a".repeat(64),
+      resetsAt: reset, nextAttemptAt: reset, attempts: 0, state: "waiting", error: null, turnId: null });
+    vi.setSystemTime(instant + 61_000);
+    await scheduler.tick();
+    expect(keychain).not.toHaveBeenCalled();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "blocked" });
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 });
 

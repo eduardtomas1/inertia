@@ -57,12 +57,30 @@ describe("native subscription adapters", () => {
     const keychain = vi.fn(() => new Promise<string | null>(() => undefined));
     const reader = new NativeSubscriptionReader({ platform: "darwin", environment: async () => ({}), readCursorKeychain: keychain });
     const firstAbort = new AbortController(); const secondAbort = new AbortController();
-    const first = reader.read(base("cursor"), "auto", firstAbort.signal, "/chat");
-    const second = reader.read(base("cursor"), "auto", secondAbort.signal, "/chat");
+    expect(await reader.read(base("cursor"), "auto", firstAbort.signal, "/chat")).toMatchObject({ status: "unavailable", keychain: "deferred" });
+    expect(keychain).not.toHaveBeenCalled();
+    const first = reader.read(base("cursor"), "auto", firstAbort.signal, "/chat", true);
+    const second = reader.read(base("cursor"), "auto", secondAbort.signal, "/chat", true);
     await vi.waitFor(() => expect(keychain).toHaveBeenCalledOnce());
     firstAbort.abort(); secondAbort.abort();
     expect((await first).status).toBe("error"); expect((await second).status).toBe("error");
     expect(keychain).toHaveBeenCalledOnce();
+  });
+  it("asks the macOS Keychain once per explicit read and keeps that login out of automatic resume", async () => {
+    const keychain = vi.fn(async () => "keychain-token");
+    const reader = new NativeSubscriptionReader({ platform: "darwin", environment: async () => ({}), readCursorKeychain: keychain,
+      fetch: fetcher(cursor), accountKey: async () => "per-install-key" });
+    const result = await reader.read(base("cursor"), "composer-2", new AbortController().signal, "/chat", true);
+    expect(result).toMatchObject({ status: "ready", keychain: "read" });
+    expect(keychain).toHaveBeenCalledOnce();
+    expect(resumeAccountIdentity(result)).toBeNull();
+  });
+  it.each(["linux", "win32"] as const)("never loads the Keychain binding on %s", async (platform) => {
+    const keychain = vi.fn(async () => "keychain-token");
+    const reader = new NativeSubscriptionReader({ platform, environment: async () => ({ HOME: "/home", USERPROFILE: "/profile", APPDATA: "/roaming" }),
+      readCursorKeychain: keychain, readFile: async () => '{"accessToken":"file-token"}', fetch: fetcher(cursor) });
+    expect((await reader.read(base("cursor"), "composer-2", new AbortController().signal, "/chat", true)).status).toBe("ready");
+    expect(keychain).not.toHaveBeenCalled();
   });
   it("refuses a credential replacement during a Cursor quota request", async () => {
     let reads = 0;

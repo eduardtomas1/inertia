@@ -10,7 +10,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
   options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T> }) {
   const scheduler = new LimitResetScheduler({
     store: dependencies.store, signal: options.signal, enabled: dependencies.enableProviders,
-    readAccount: (providerId, force, model, cwd) => limits.nativeAccount(providerId, force, model, cwd),
+    readAccount: (providerId, force, model, cwd, interactive) => limits.nativeAccount(providerId, force, model, cwd, interactive),
     busy: (conversationId) => dependencies.turns.isActive(conversationId)
       || dependencies.store.hasActiveWorkspaceRunForConversation(conversationId)
       || dependencies.providerTerminalResumes.isActive(conversationId),
@@ -45,7 +45,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
         const plan = dependencies.store.limitResets.get(command.payload.conversationId);
         dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: {
           kind: "conversation.limit-reset", conversationId: command.payload.conversationId,
-          offer: null, plan: plan ? publicLimitResetPlan(plan) : null,
+          offer: null, needsCheck: false, plan: plan ? publicLimitResetPlan(plan) : null,
         } });
         break;
       }

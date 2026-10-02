@@ -46,7 +46,7 @@ async function verifiedFileIdentity(client: CodexControlClient, environment: Nod
 const accountSchema = z.object({ type: z.string(), email: z.string().max(256).nullable().optional(), planType: z.string().max(200).nullable().optional() }).nullable();
 export class NativeUsageReader {
   constructor(private readonly providers: ProviderManager, private readonly cwd: string, private readonly signal: AbortSignal, private readonly subscriptions = new NativeSubscriptionReader({ openCodeAccount: (directory, model, signal) => providers.openCodeUsageAccount(directory, model, signal) })) {}
-  async read(info: ProviderInfo, model?: string, cwd = this.cwd): Promise<NativeUsageAccount> {
+  async read(info: ProviderInfo, model?: string, cwd = this.cwd, interactive = false): Promise<NativeUsageAccount> {
     const base: UsageAccount = { id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
       email: null, plan: null, identityKey: null, sources: ["This computer"], status: "unavailable", detail: null,
       windows: usageWindows(info.rateLimits), updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(), credits: null, canReset: false };
@@ -59,7 +59,7 @@ export class NativeUsageReader {
       info = { ...info, canRun: detection.canRun, authState: detection.authState };
     }
     if (!info.canRun) return { ...base, detail: `${info.label} is ${info.authState === "unauthenticated" ? "not signed in" : "not ready"}.` };
-    if (info.id !== "codex" && info.id !== "claude") return this.subscriptions.read(base, model, this.signal, cwd);
+    if (info.id !== "codex" && info.id !== "claude") return this.subscriptions.read(base, model, this.signal, cwd, interactive);
     if (info.id === "claude") {
       const result = await this.providers.claudeUsage(cwd);
       const parsed = z.object({ email: z.string().max(256).optional(), organization: z.string().max(256).optional(), subscriptionType: z.string().max(200).optional(), apiProvider: z.string().max(50).optional() }).safeParse(result.account);

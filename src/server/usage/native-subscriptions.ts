@@ -8,7 +8,7 @@ import { providerChildEnvironment, providerEnvironment } from "../environment";
 import { cursorSubscriptionWindows, kimiSubscriptionWindows, openCodeSubscriptionWindows } from "./subscription-parsers";
 import { readSubscriptionFile, subscriptionAccountIdentity, subscriptionJson, type NativeUsageAccount } from "./subscription-io";
 
-interface Credential { token: string; scope: string }
+interface Credential { token: string; scope: string; keychain?: true }
 export interface NativeSubscriptionDependencies {
   environment?: () => Promise<NodeJS.ProcessEnv>;
   platform?: NodeJS.Platform;
@@ -23,8 +23,6 @@ const CURSOR_ENDPOINT = "https://api2.cursor.sh";
 const KIMI_ENDPOINT = "https://api.kimi.com/coding/v1";
 const trimEnd = (value: string) => value.replace(/\/+$/u, "");
 
-/** Native account probes for providers whose CLI has no quota RPC. The same
- * credential precedence and selected route as the CLI must own the response. */
 export class NativeSubscriptionReader {
   private keychainRead: Promise<string | null> | null = null;
   private identityKey: string | null = null;
@@ -43,18 +41,19 @@ export class NativeSubscriptionReader {
     this.identityKey ??= await this.dependencies.accountKey?.(signal).catch(() => null) ?? null;
     return this.identityKey && subscriptionAccountIdentity(this.identityKey, credential.scope, credential.token);
   }
-  private async credentials(provider: ProviderId, model: string | undefined, env: NodeJS.ProcessEnv, cwd: string, signal: AbortSignal): Promise<Credential | null> {
+  private async credentials(provider: ProviderId, model: string | undefined, env: NodeJS.ProcessEnv, cwd: string, signal: AbortSignal,
+    interactive: boolean): Promise<Credential | "deferred" | null> {
     const platform = this.dependencies.platform ?? process.platform;
     const home = (platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
     const read = this.dependencies.readFile ?? readSubscriptionFile;
     if (provider === "cursor") {
-      // Stored logins must never be sent to an overridden API endpoint.
       if (trimEnd(env.CURSOR_API_ENDPOINT?.trim() || CURSOR_ENDPOINT) !== CURSOR_ENDPOINT) return null;
       if (env.CURSOR_AUTH_TOKEN?.trim()) return { token: token.parse(env.CURSOR_AUTH_TOKEN.trim()), scope: "cursor:subscription" };
       if (env.CURSOR_API_KEY?.trim() || env.AGENT_CLI_CREDENTIAL_STORE === "memory") return null;
       if (platform === "darwin" && env.AGENT_CLI_CREDENTIAL_STORE !== "file") {
+        if (!interactive) return "deferred";
         const value = await this.keychain();
-        return value ? { token: token.parse(value), scope: "cursor:subscription" } : null;
+        return value ? { token: token.parse(value), scope: "cursor:subscription", keychain: true } : null;
       }
       const directory = platform === "win32" ? join(env.APPDATA || join(home, "AppData", "Roaming"), "Cursor")
         : platform === "darwin" ? join(home, ".cursor") : join(env.XDG_CONFIG_HOME || join(home, ".config"), "cursor");
@@ -96,13 +95,15 @@ export class NativeSubscriptionReader {
     value ||= env.KIMI_API_KEY?.trim() || providerConfig.api_key;
     return value ? { token: token.parse(value), scope: "kimi:code" } : null;
   }
-  async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string): Promise<NativeUsageAccount> {
+  async read(base: UsageAccount, model: string | undefined, lifetime: AbortSignal, cwd: string, interactive = false): Promise<NativeUsageAccount> {
     const provider = base.providerId as ProviderId;
     if (provider === "antigravity") return { ...base, windows: [], status: "unsupported", detail: "Antigravity's current CLI protocol does not report subscription reset times." };
     const signal = AbortSignal.any([lifetime, AbortSignal.timeout(10_000)]);
     const work = async (): Promise<NativeUsageAccount> => {
       const env = providerChildEnvironment(provider, await (this.dependencies.environment?.() ?? providerEnvironment().then(({ env }) => env)));
-      const account = await this.credentials(provider, model, env, cwd, signal);
+      const account = await this.credentials(provider, model, env, cwd, signal, interactive);
+      if (account === "deferred") return { ...base, windows: [], status: "unavailable", keychain: "deferred",
+        detail: "Refresh Limits to read this Cursor login from the macOS Keychain." };
       if (!account) return { ...base, windows: [], status: "unsupported", detail: provider === "opencode"
         ? "Reset times are available for OpenCode Go models with a Go subscription. Other OpenCode backends do not expose a shared quota API."
         : "This account or selected model does not expose a supported subscription reset time." };
@@ -113,17 +114,15 @@ export class NativeSubscriptionReader {
           { post: true, headers: { "connect-protocol-version": "1", "x-cursor-client-type": "cli" } })
         : await subscriptionJson(fetcher, provider === "kimi" ? `${KIMI_ENDPOINT}/usages` : "https://opencode.ai/zen/go/v1/usage", account.token, signal);
       const receivedAt = Date.now();
-      const current = await this.credentials(provider, model, env, cwd, signal);
+      const current = account.keychain ? account : await this.credentials(provider, model, env, cwd, signal, interactive);
       signal.throwIfAborted();
-      if (!current || current.scope !== account.scope || current.token !== account.token) throw new Error("The provider account changed during the read.");
+      if (!current || current === "deferred" || current.scope !== account.scope || current.token !== account.token) throw new Error("The provider account changed during the read.");
       const windows = provider === "cursor" ? cursorSubscriptionWindows(raw) : provider === "kimi" ? kimiSubscriptionWindows(raw, receivedAt) : openCodeSubscriptionWindows(raw);
-      const identity = await this.accountIdentity(account, signal);
-      return { ...base, windows, ...(identity ? { credentialFingerprint: identity } : {}), status: windows.length ? "ready" : "unavailable",
+      const identity = account.keychain ? null : await this.accountIdentity(account, signal);
+      return { ...base, windows, ...(identity ? { credentialFingerprint: identity } : {}), ...(account.keychain ? { keychain: "read" as const } : {}), status: windows.length ? "ready" : "unavailable",
         updatedAt: new Date(receivedAt).toISOString(), checkedAt: new Date().toISOString(),
         detail: windows.length ? null : "The provider did not report quota windows." };
     };
-    // Keychain access can wait on a native OS prompt. Keep that one request in
-    // flight for the next read, while the caller's deadline remains bounded.
     let aborted!: () => void;
     const cancelled = new Promise<never>((_resolve, reject) => { aborted = () => reject(new Error("Subscription read cancelled.")); signal.addEventListener("abort", aborted, { once: true }); if (signal.aborted) aborted(); });
     try { return await Promise.race([work(), cancelled]); }

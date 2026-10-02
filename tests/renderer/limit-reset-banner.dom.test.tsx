@@ -9,7 +9,7 @@ const failedTurnId = "22222222-2222-4222-8222-222222222222";
 const id = "33333333-3333-4333-8333-333333333333";
 const resetsAt = "2026-10-02T03:16:55.000Z";
 const result = (): LimitResetResult => ({ kind: "conversation.limit-reset", conversationId,
-  offer: { failedTurnId, resetsAt, canResume: true }, plan: null });
+  offer: { failedTurnId, resetsAt, canResume: true }, needsCheck: false, plan: null });
 const pending = (): LimitResetResult => ({ ...result(), plan: { id, conversationId, failedTurnId, resetsAt, state: "waiting", error: null } });
 function banner(run: LimitResetCommandRunner, owner = conversationId) {
   return <LimitResetBanner conversationId={owner} latestTurnId={failedTurnId} snoozedUntil={null} disabled={false} onCommand={run} />;
@@ -54,7 +54,7 @@ describe("quota reset banner", () => {
     expect(view.container).toBeEmptyDOMElement();
   });
   it("does not let an older poll restore a cancelled plan", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers(); vi.setSystemTime(Date.parse(resetsAt) + 60_000);
     let resolvePoll!: (value: LimitResetResult) => void;
     const poll = new Promise<LimitResetResult>((resolve) => { resolvePoll = resolve; });
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(pending()).mockReturnValueOnce(poll).mockResolvedValueOnce(result());
@@ -75,6 +75,58 @@ describe("quota reset banner", () => {
     await screen.findByText("Resume needs attention");
     expect(screen.getByRole("status")).toHaveTextContent("The account changed.");
     expect(screen.getByRole("button", { name: "Cancel resume" })).toBeEnabled();
+  });
+});
+
+describe("quota reset account reads", () => {
+  const flush = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  it("reads a failed chat without a reported limit once instead of polling", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(Date.parse(resetsAt) - 3_600_000);
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: null });
+    render(banner(run)); await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000); });
+    await act(async () => { window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange")); await vi.advanceTimersByTimeAsync(0); });
+    expect(run).toHaveBeenCalledOnce();
+  });
+  it("refreshes a reported limit once at its reset instead of polling", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(Date.parse(resetsAt) - 10 * 60_000);
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result());
+    render(banner(run)); await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60_000); });
+    expect(run).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60_000); });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it("waits for a focused, visible window before the first account read", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(Date.parse(resetsAt) - 3_600_000);
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result());
+    render(banner(run)); await flush();
+    expect(run).not.toHaveBeenCalled();
+    focus.mockReturnValue(true);
+    await act(async () => { window.dispatchEvent(new Event("focus")); await vi.advanceTimersByTimeAsync(0); });
+    expect(run).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Resume at reset" })).toBeVisible();
+  });
+  it("reads a Keychain-backed account only after the explicit check", async () => {
+    const unchecked: LimitResetResult = { ...result(), offer: null, needsCheck: true };
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(unchecked)
+      .mockResolvedValueOnce({ ...result(), offer: { failedTurnId, resetsAt, canResume: false } }).mockResolvedValue(unchecked);
+    render(banner(run));
+    fireEvent.click(await screen.findByRole("button", { name: "Check reset time" }));
+    expect(run.mock.calls[1]![0]).toEqual({ type: "conversation.limit-reset.get", payload: { conversationId, refresh: true } });
+    expect(await screen.findByRole("button", { name: "Resume at reset" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Snooze until reset" })).not.toHaveAttribute("aria-disabled");
+  });
+  it("shows the current limit after a rejected action", async () => {
+    const moved = new Date(Date.parse(resetsAt) + 3_600_000).toISOString();
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(result())
+      .mockRejectedValueOnce(new Error("The reported limit changed. Check the new reset time and try again."))
+      .mockResolvedValueOnce({ ...result(), offer: { failedTurnId, resetsAt: moved, canResume: true } });
+    render(banner(run));
+    fireEvent.click(await screen.findByRole("button", { name: "Resume at reset" }));
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByRole("group", { name: "Usage limit" }).querySelector("time")).toHaveAttribute("dateTime", moved));
   });
 });
 
@@ -110,7 +162,7 @@ describe("quota reset row inside the composer", () => {
     expect(screen.getByRole("group", { name: "Usage limit" })).toBeInTheDocument();
   });
   it("reports a failed action as an alert without the diagnostic reference", async () => {
-    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(result())
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue(result()).mockResolvedValueOnce(result())
       .mockRejectedValueOnce(new Error("The reported limit changed. Refresh this chat before scheduling a resume. [incident:21feb702-c9bc-4896-a470-8cb97fd58d25]"));
     render(banner(run));
     fireEvent.click(await screen.findByRole("button", { name: "Resume at reset" }));

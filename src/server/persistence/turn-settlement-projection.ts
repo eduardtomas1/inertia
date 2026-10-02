@@ -8,6 +8,7 @@ interface SettlementProjectionStore {
     "status" | "attentionKind" | "providerSessionId" | "continuationIdentity">>): Conversation;
   workspaceRun(runId: string): WorkspaceRun;
   updateWorkspaceRun(runId: string, update: Partial<Pick<WorkspaceRun, "status" | "detail">>): WorkspaceRun;
+  limitResets: { markUsageLimited(turnId: string): void };
 }
 
 /** Stored lifecycle projections commit with their terminal row, or not at all. */
@@ -43,6 +44,7 @@ export function settleProjectedAgentTurn(
         detail: projection.detail,
       });
     }
+    if (projection.usageLimited && turn.status === "failed") store.limitResets.markUsageLimited(turn.id);
     return result;
   })();
 }

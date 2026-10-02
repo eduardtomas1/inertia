@@ -43,6 +43,30 @@ describe("reset dispatch through ordinary turn admission", () => {
     } finally { await runtime.controller.dispose(); runtime.store.close(); }
   });
 
+  it("writes the usage-limit tag inside the terminal settlement commit", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      let settling = false;
+      const settle = runtime.store.settleAgentTurn.bind(runtime.store);
+      vi.spyOn(runtime.store, "settleAgentTurn").mockImplementation((turnId, update) => {
+        settling = true;
+        try { return settle(turnId, update); } finally { settling = false; }
+      });
+      const tagged: boolean[] = [];
+      const mark = runtime.store.limitResets.markUsageLimited.bind(runtime.store.limitResets);
+      vi.spyOn(runtime.store.limitResets, "markUsageLimited").mockImplementation((turnId) => { tagged.push(settling); mark(turnId); });
+      const turn = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First task" });
+      runtime.controller.start(turn.turn.id);
+      await flushTurnControllerTestPromises();
+      runtime.provider.resolve({ status: "failed", text: "Usage limit reached",
+        failure: { reason: "codex-error", message: "Usage limit reached", usageLimited: true } });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.waitForProviderCleanup([runtime.conversationId]);
+      expect(tagged).toEqual([true]);
+      expect(runtime.store.limitResets.usageLimited(turn.turn.id)).toBe(true);
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
+
   it.each([false, true])("keeps the durable reset claim and turn acceptance atomic (cancel=%s)", async (cancel) => {
     const runtime = await createTurnControllerTestRuntime();
     const attachments = await ConversationAttachmentStore.open(runtime.directory);

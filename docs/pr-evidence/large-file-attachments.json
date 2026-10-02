@@ -29,5 +29,17 @@
       "entryCss": 0
     },
     "notes": "Generic file icon and full-name tooltip on attachment chips and sent tiles, a visible truncated-preview notice row in its own deferred stylesheet, and the opaque-file preview block. Caps grow by exactly the measured bytes; headroom is unchanged."
+  },
+  "timestampFormatterCache": {
+    "environment": "macOS ARM64, Node 22.23.2, production electron-vite build",
+    "measurements": {
+      "mainWorkbenchFirstLoadJavaScript": 860500,
+      "coreJavaScript": 2238608
+    },
+    "growth": {
+      "mainWorkbenchFirstLoadJavaScript": 193,
+      "coreJavaScript": 193
+    },
+    "notes": "Transcript timestamp formatters are reused instead of constructed twice per row, and refreshed each minute and when the time zone offset changes. Caps grow by exactly the measured bytes."
   }
 }

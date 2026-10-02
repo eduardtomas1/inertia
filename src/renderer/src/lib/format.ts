@@ -25,40 +25,41 @@ export function formatWorkAge(value: string): string {
   return formatRelativeTime(value);
 }
 
-let timestampFormatters: {
-  key: string;
-  time: Intl.DateTimeFormat;
-  day: Intl.DateTimeFormat;
-  year: Intl.DateTimeFormat;
-  full: Intl.DateTimeFormat;
-} | undefined;
+let timestampFormatterKey = "";
+const timestampFormatters = new Map<string, Intl.DateTimeFormat>();
 
-function messageTimestampFormatters(): NonNullable<typeof timestampFormatters> {
+function timestampFormatter(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   const now = new Date();
   const key = `${now.getTimezoneOffset()}:${Math.floor(now.getTime() / 60_000)}`;
-  if (timestampFormatters?.key !== key) {
-    timestampFormatters = {
-      key,
-      time: new Intl.DateTimeFormat(INTERFACE_LOCALE, { hour: "numeric", minute: "2-digit" }),
-      day: new Intl.DateTimeFormat(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
-      year: new Intl.DateTimeFormat(INTERFACE_LOCALE, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
-      full: new Intl.DateTimeFormat(INTERFACE_LOCALE, { dateStyle: "full", timeStyle: "short" }),
-    };
+  if (key !== timestampFormatterKey) {
+    timestampFormatters.clear();
+    timestampFormatterKey = key;
   }
-  return timestampFormatters;
+  const id = JSON.stringify(options);
+  let formatter = timestampFormatters.get(id);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(INTERFACE_LOCALE, options);
+    timestampFormatters.set(id, formatter);
+  }
+  return formatter;
 }
 
 export function formatMessageTime(value: string, now = new Date()): string {
   const date = new Date(value);
-  const formatters = messageTimestampFormatters();
-  const formatter = date.toDateString() === now.toDateString()
-    ? formatters.time
-    : date.getFullYear() === now.getFullYear() ? formatters.day : formatters.year;
-  return formatter.format(date);
+  const sameDay = date.toDateString() === now.toDateString();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return timestampFormatter({
+    ...(sameDay ? {} : { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }),
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 export function formatFullDateTime(value: string): string {
-  return messageTimestampFormatters().full.format(new Date(value));
+  return timestampFormatter({
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export function projectNameFromPath(path: string): string {

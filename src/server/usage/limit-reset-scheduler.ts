@@ -27,7 +27,13 @@ export class LimitResetScheduler {
       const conversation = store.conversation(plan.conversationId);
       const turn = store.latestAgentTurnForConversation(plan.conversationId);
       return matchesFailedNativeTurn(conversation, turn) && turn?.id === plan.failedTurnId
-        && queuedRouteIdentity(conversation) === plan.routeIdentity;
+        && queuedRouteIdentity(conversation) === plan.routeIdentity && this.providerOwned(conversation);
+    } catch { return false; }
+  }
+  private providerOwned(conversation: Conversation): boolean {
+    try {
+      this.dependencies.store.assertConversationProvider(conversation.id, conversation.providerId);
+      return true;
     } catch { return false; }
   }
   assertDispatch(plan: StoredLimitResetPlan): void {
@@ -39,7 +45,7 @@ export class LimitResetScheduler {
     const { store } = this.dependencies;
     const conversation = store.conversation(conversationId);
     const turn = store.latestAgentTurnForConversation(conversationId);
-    if (!matchesFailedNativeTurn(conversation, turn) || !turn || this.dependencies.busy(conversationId)) return null;
+    if (!matchesFailedNativeTurn(conversation, turn) || !turn || !this.providerOwned(conversation) || this.dependencies.busy(conversationId)) return null;
     const route = queuedRouteIdentity(conversation);
     const account = await this.dependencies.readAccount(conversation.providerId, force, turn.model, store.conversationPath(conversationId), interactive);
     this.dependencies.signal.throwIfAborted();
@@ -166,6 +172,8 @@ export class LimitResetScheduler {
               continue;
             }
             await this.dependencies.dispatch(plan, () => this.assertDispatch(plan));
+            const settled = this.dependencies.store.limitResets.get(plan.conversationId);
+            if (settled?.id === plan.id && settled.state === "dispatching") throw new RuntimeRequestError("The continuation could not be confirmed. Resume this chat manually.");
           } catch (error) {
             if (this.dependencies.signal.aborted) this.dependencies.store.limitResets.retry(plan, new Date().toISOString());
             else this.dependencies.store.limitResets.settle(plan, "blocked", publicRuntimeError(error));

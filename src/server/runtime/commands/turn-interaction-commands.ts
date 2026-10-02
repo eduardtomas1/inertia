@@ -203,6 +203,7 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
+          if (dependencies.limitResetDispatch) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
           messageSendStage = "follow-up-preparation";
           if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(

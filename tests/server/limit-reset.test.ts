@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { LimitResetScheduler, type LimitResetDependencies } from "../../src/server/usage/limit-reset-scheduler";
@@ -146,6 +147,43 @@ describe("quota reset actions", () => {
     expect(dependencies.dispatch).toHaveBeenCalledOnce();
     expect(store.limitResets.get(conversationId)).toMatchObject({ id, state: "completed" });
     await expect(scheduler.resume({ conversationId, id })).rejects.toThrow("no longer");
+  });
+
+  it("does not leave an unconfirmed dispatch to replay after restart", async () => {
+    await schedule(); vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    dependencies.dispatch = vi.fn(async () => undefined);
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "blocked", turnId: null });
+    store.close(); store = new RuntimeStore(join(directory, "inertia.sqlite"), directory, { recoverInterruptedRuns: false });
+    dependencies.store = store; scheduler = makeScheduler(); scheduler.start();
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer or send a resume in a chat whose history mixes providers", async () => {
+    const earlier = failedTurnId;
+    vi.setSystemTime(instant + 1_000);
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    await schedule();
+    const database = new Database(join(directory, "inertia.sqlite"));
+    try { database.prepare("UPDATE agent_turns SET provider_id = 'claude' WHERE id = ?").run(earlier); } finally { database.close(); }
+    expect((await scheduler.get(conversationId)).plan).toMatchObject({ state: "blocked" });
+    expect((await scheduler.get(conversationId)).offer).toBeNull();
+    await expect(schedule()).rejects.toThrow("limit changed");
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    await scheduler.tick();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("drops a pending resume with its deleted chat", async () => {
+    await schedule();
+    store.deleteConversation(conversationId);
+    expect(store.limitResets.pending()).toEqual([]);
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    await scheduler.tick();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 
   it("reports a pending plan from the database without another account read", async () => {

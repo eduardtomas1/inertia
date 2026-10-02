@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
@@ -10,6 +10,24 @@ import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, 
 
 afterEach(cleanupTurnControllerTestDirectories);
 describe("reset dispatch through ordinary turn admission", () => {
+  it("never delivers a reset continuation as a follow-up to an active turn", async () => {
+    const conversationId = randomUUID();
+    const acquireFollowUpAdmission = vi.fn(() => ({ supportsImages: false, release: vi.fn() }));
+    const steer = vi.fn();
+    const dependencies = {
+      store: { conversation: () => ({ id: conversationId, archivedAt: null }) },
+      turns: { isActive: () => true, acquireFollowUpAdmission, steer },
+      providerTerminalResumes: { isActive: () => false },
+      send: vi.fn(), broadcast: vi.fn(), broadcastSnapshot: vi.fn(),
+      limitResetDispatch: { planId: randomUUID(), assertCurrent: () => undefined },
+    } as unknown as TurnInteractionCommandDependencies;
+    await expect(createTurnInteractionCommandHandler(dependencies)(null as unknown as WebSocket, {
+      type: "message.send", requestId: randomUUID(), payload: { conversationId, content: "Continue from where you stopped.", attachments: [], activate: false },
+    })).rejects.toThrow("busy");
+    expect(acquireFollowUpAdmission).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("keeps the durable reset claim and turn acceptance atomic (cancel=%s)", async (cancel) => {
     const runtime = await createTurnControllerTestRuntime();
     const attachments = await ConversationAttachmentStore.open(runtime.directory);

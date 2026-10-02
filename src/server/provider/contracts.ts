@@ -196,6 +196,7 @@ export interface ProviderRunFailure {
   activityId?: string;
   sessionUnavailable?: true;
   resumeRejected?: true;
+  usageLimited?: true;
 }
 
 export interface ProviderFreshSessionFallback {

@@ -687,6 +687,11 @@
       "version": 86,
       "name": "PersistScratchProject",
       "digest": "7c8ba44e6070963b0985107f6d392502cb30fa72f808717e7a73ab09ea114836"
+    },
+    {
+      "version": 87,
+      "name": "PersistUsageLimitResumePlans",
+      "digest": "dde1188240bdcdcd416fc47ba366d27b25565871b9f2460e06eeefe029918a5b"
     }
   ]
 }

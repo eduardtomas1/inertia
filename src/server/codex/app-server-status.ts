@@ -76,6 +76,10 @@ export function codexTurnInterruptionFailure(
   };
 }
 
+export function codexUsageLimited(errorInfo: unknown): boolean {
+  return codexErrorInfoName(errorInfo) === "usageLimitExceeded";
+}
+
 function codexErrorInfoName(value: unknown): string | undefined {
   const keys = Object.keys(objectValue(value) ?? {});
   const name = typeof value === "string" ? value : keys.length === 1 ? keys[0] : undefined;

@@ -1,5 +1,5 @@
 import { backendSecretReferenceForProfile } from "../../src/node/backend-secret-reference";
-import { USAGE_RESET_CONFIRMATION_EXPIRED } from "../../src/shared/provider-usage-limits";
+import { USAGE_RESET_CONFIRMATION_EXPIRED, usageAccountSchema } from "../../src/shared/provider-usage-limits";
 import { publicRuntimeError } from "../../src/server/runtime-errors";
 import { deduplicateUsageAccounts } from "../../src/shared/usage-limits-projection";
 import { CliproxyUsageClient, opaqueUsageIdentity } from "../../src/server/usage/cliproxy";
@@ -18,12 +18,69 @@ afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 function setup() {
   const db = new Database(":memory:"); databases.push(db); db.exec(providerUsageLimitsMigration.up as string);
   const repository = new UsageLimitsRepository(db);
-  const read = vi.fn(async () => usageAccount());
+  const read = vi.fn<NativeUsageReader["read"]>(async () => usageAccount());
   const consume = vi.fn<NativeUsageReader["consume"]>(async () => "reset" as const);
   const deps: UsageLimitsDependencies = { repository, native: { read, consume }, providers: () => [{ ...initialProviderSnapshots(false)[0]!, available: true, canRun: true }], customProfiles: () => [], signal: new AbortController().signal, enabled: true };
   return { repository, read, consume, deps, service: new UsageLimitsService(deps) };
 }
 describe("privileged usage limits", () => {
+  it("excludes credential continuity from refreshed and cached public snapshots", async () => {
+    const f = setup();
+    const account = { ...usageAccount(), credentialFingerprint: "a".repeat(64) };
+    f.read.mockResolvedValue(account);
+    expect((await f.service.refresh()).accounts[0]).not.toHaveProperty("credentialFingerprint");
+    expect(f.service.snapshot().accounts[0]).not.toHaveProperty("credentialFingerprint");
+    expect(usageAccountSchema.safeParse(account).success).toBe(false);
+  });
+  it("retains private resume identity and stale-quota projection on cached native reads", async () => {
+    const f = setup();
+    const account = { ...usageAccount(), credentialFingerprint: "b".repeat(64) };
+    account.windows[0]!.resetsAt = new Date(Date.now() - 1000).toISOString();
+    f.read.mockResolvedValue(account);
+    expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toHaveProperty("credentialFingerprint", account.credentialFingerprint);
+    expect(await f.service.nativeAccount("codex", false, "model", "/chat"))
+      .toMatchObject({ credentialFingerprint: account.credentialFingerprint, status: "stale", canReset: false });
+    expect(f.read).toHaveBeenCalledOnce();
+    expect(f.service.snapshot().accounts).toEqual([]);
+  });
+  it("reads Keychain-backed accounts only for explicit Limits refreshes and keeps the last explicit result", async () => {
+    const f = setup();
+    const shown = { ...usageAccount(), keychain: "read" as const };
+    const deferred = { ...usageAccount(), status: "unavailable" as const, windows: [], keychain: "deferred" as const };
+    f.read.mockResolvedValueOnce(shown);
+    await f.service.refresh();
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), undefined, undefined, true);
+    f.read.mockResolvedValueOnce(deferred);
+    const background = await f.service.refresh(true, false);
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), undefined, undefined, false);
+    expect(background.accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
+    expect(background.accounts[0]).not.toHaveProperty("keychain");
+    f.read.mockResolvedValueOnce(deferred);
+    expect(await f.service.nativeAccount("codex", true, "model", "/chat")).toMatchObject({ keychain: "deferred" });
+    expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
+    expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
+  });
+  it("keeps chat-scoped reads out of the Limits page accounts", async () => {
+    const f = setup();
+    const ready = usageAccount();
+    f.read.mockImplementation(async (_info, model) => model ? { ...ready, status: "unsupported", windows: [], detail: "Other model." } : ready);
+    expect((await f.service.refresh(true)).accounts[0]).toMatchObject({ status: "ready" });
+    expect(await f.service.nativeAccount("codex", false, "another-model", "/chat")).toMatchObject({ status: "unsupported" });
+    expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: ready.windows });
+    expect(await f.service.nativeAccount("codex", false, "another-model", "/chat")).toMatchObject({ status: "unsupported" });
+    expect(f.read).toHaveBeenCalledTimes(2);
+  });
+  it("runs an explicit refresh pressed during a background refresh as its own explicit read", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    f.read.mockImplementationOnce(async () => { await gate; return usageAccount(); });
+    const background = f.service.refresh(true, false);
+    const explicit = f.service.refresh(true, true);
+    release();
+    await Promise.all([background, explicit]);
+    expect(f.read.mock.calls.map((call) => call[3])).toEqual([false, true]);
+  });
   it("upgrades exact schema 73 transactionally without rewriting released migration records", () => {
     const db = new Database(":memory:"); databases.push(db); migrateRuntimeDatabase(db, 73);
     const history = db.prepare("SELECT * FROM schema_migrations ORDER BY version").all();

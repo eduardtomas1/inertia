@@ -138,6 +138,7 @@ export interface AgentTurnLifecycleUpdate {
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
   queuedMessageId?: string;
+  limitResetPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
   attachments?: ChatAttachment[];
@@ -167,7 +168,7 @@ export interface AgentTurnSettlementUpdate
   extends Omit<AgentTurnLifecycleUpdate, "status"> {
   status: AgentTurnTerminalStatus;
   /** Controller-owned stored projections belong to the same terminal commit. */
-  projection?: { workspaceRunCreated: boolean; detail: string };
+  projection?: { workspaceRunCreated: boolean; detail: string; usageLimited?: true };
 }
 
 export interface AgentTurnSettlementResult {

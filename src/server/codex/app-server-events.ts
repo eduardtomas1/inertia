@@ -52,7 +52,8 @@ import {
 } from "./app-server-item-events";
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
-import { codexTurnInterruptionFailure } from "./app-server-status";
+import { projectCodexErrorNotification } from "./app-server-error-events";
+import { codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
 import { CodexApprovalAuthority } from "./app-server-approval-authority";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
@@ -116,6 +117,7 @@ export interface CodexAppServerEventHost {
     reason: ProviderRunFailure["reason"],
     message: string,
     technicalDetail?: string,
+    usageLimited?: boolean,
   ) => void;
 }
 
@@ -811,41 +813,7 @@ export class CodexAppServerEvents {
       return;
     }
     if (method === "error") {
-      const error = objectValue(params.error);
-      const message =
-        boundedText(error?.message, 4_000) ?? "Codex reported an error.";
-      this.host.setLastError(message);
-      if (params.willRetry === true) {
-        this.host.options.onStatus?.("retrying", "error/willRetry");
-        this.emitActivity(
-          "system",
-          "info",
-          "Codex is retrying after an error",
-          {
-            ...(boundedText(params.itemId, 1_000)
-              ? { activityId: boundedText(params.itemId, 1_000)! }
-              : {}),
-            detail: providerActivityDetailSections({ error: message })!,
-          },
-        );
-      } else {
-        this.host.rememberFailure(
-          "codex-error",
-          "Codex reported an error.",
-          message,
-        );
-        this.emitActivity(
-          "system",
-          "failed",
-          "Codex reported an error",
-          {
-            ...(boundedText(params.itemId, 1_000)
-              ? { activityId: boundedText(params.itemId, 1_000)! }
-              : {}),
-            detail: providerActivityDetailSections({ error: message })!,
-          },
-        );
-      }
+      projectCodexErrorNotification(this.host, params);
       return;
     }
     if (method === "model/rerouted") {
@@ -940,6 +908,7 @@ export class CodexAppServerEvents {
           "codex-error",
           interruptionFailure?.message ?? "Codex could not complete the turn.",
           interruptionFailure ? interruptionFailure.technicalDetail : lastError,
+          codexUsageLimited(turnError?.codexErrorInfo),
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {

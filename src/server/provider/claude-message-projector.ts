@@ -210,6 +210,7 @@ export class ClaudeMessageProjector {
       phase: "turn",
       terminalEvent: candidate.terminalEvent,
       ...(candidate.activityId ? { activityId: candidate.activityId } : {}),
+      ...(candidate.terminalEvent === "assistant/rate_limit" ? { usageLimited: true as const } : {}),
     };
   }
 

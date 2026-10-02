@@ -105,6 +105,7 @@ import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecuta
 import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
+import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
@@ -1038,12 +1039,7 @@ async function bootstrap(): Promise<void> {
       release: (attachmentId) =>
         attachmentRegistry().release(attachmentId),
     },
-    credentialBroker: {
-      resolve: (secretReference) => credentialVault!.resolve(secretReference),
-      status: (secretReference) => credentialVault!.status(secretReference),
-      clear: (secretReference) => credentialVault!.clear(secretReference),
-      forget: (secretReference) => credentialVault!.forget(secretReference),
-    },
+    credentialBroker: runtimeCredentialBroker(() => credentialVault!),
     secureFileBroker: new SecureFileBroker({
       retryUnconfirmedShutdown: process.platform === "linux",
       spawn: (parent) => utilityProcess.fork(

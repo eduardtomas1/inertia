@@ -10,6 +10,11 @@ import { AGENT_GOAL_STATUSES } from "../agent-workflows";
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
 export const agentCommandSchemas = [
+  z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.get"), payload: z.strictObject({ conversationId: z.uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.schedule"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid(), failedTurnId: z.uuid(), resetsAt: z.iso.datetime() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.cancel"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.resume"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.limit-reset.snooze"), payload: z.strictObject({ conversationId: z.uuid(), failedTurnId: z.uuid(), resetsAt: z.iso.datetime() }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.get"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid().optional() }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.enqueue"), payload: z.strictObject({
     conversationId: z.uuid(), id: z.uuid(), content: z.string().trim().min(1).max(20_000), attachments: attachmentsSchema,

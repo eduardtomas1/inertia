@@ -307,12 +307,16 @@ function monitorLinuxGuardian(
     },
     {
       release: async (abortSignal) => {
-        const helper = signalLinuxGuardianExactAsync(
-          durableClaim.process as LinuxProcessIdentity,
-          registry.darwinGuardianPath!,
-          "release",
-          abortSignal,
-        );
+        const signalRelease = (): Promise<boolean> => abortSignal.aborted
+          ? Promise.resolve(false)
+          : signalLinuxGuardianExactAsync(
+              durableClaim.process as LinuxProcessIdentity,
+              registry.darwinGuardianPath!,
+              "release",
+              abortSignal,
+            );
+        const execHelper = claim.linuxExecHelper;
+        const helper = execHelper ? execHelper.then(signalRelease, signalRelease) : signalRelease();
         claim.linuxReleaseHelper = helper;
         registry.pendingReleaseConfirmations.add(helper);
         const closed = (): void => {
@@ -410,12 +414,18 @@ async function admitLinuxGuardian(
       return true;
     }
     stage = "linux-authorization";
-    let authorized = await signalLinuxGuardianExactAsync(
+    const execHelper = signalLinuxGuardianExactAsync(
       owned.process as LinuxProcessIdentity,
       guardianPath,
       "exec",
       registry.admissionController.signal,
     );
+    claim.linuxExecHelper = execHelper;
+    const execClosed = (): void => {
+      if (claim.linuxExecHelper === execHelper) claim.linuxExecHelper = undefined;
+    };
+    void execHelper.then(execClosed, execClosed);
+    let authorized = await execHelper;
     if (!authorized) {
       const observedOwned = await readLinuxGuardianOwnedAsync(
         pid,

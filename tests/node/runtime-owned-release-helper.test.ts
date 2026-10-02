@@ -33,6 +33,9 @@ function fixture() {
   const helpers: Array<{ signal: AbortSignal; close: (success?: boolean) => void }> = [];
   let liveHelpers = 0;
   let peakHelpers = 0;
+  let liveControlHelpers = 0;
+  let peakControlHelpers = 0;
+  let execGate: Promise<void> | null = null;
   let pid = 42_000;
   vi.spyOn(linux, "linuxGuardianExecutableMatches").mockReturnValue(true);
   vi.spyOn(posix, "exactProcessGroupTerminal").mockReturnValue(true);
@@ -41,15 +44,25 @@ function fixture() {
     guardianExecutableDevice: "1", guardianExecutableInode: "2",
   }));
   vi.spyOn(linux, "signalLinuxGuardianExactAsync").mockImplementation(async (_identity, _path, action, signal) => {
+    if (action === "exec" && execGate) {
+      liveControlHelpers += 1;
+      peakControlHelpers = Math.max(peakControlHelpers, liveControlHelpers);
+      await execGate;
+      liveControlHelpers -= 1;
+      return true;
+    }
     if (action !== "release") return true;
     liveHelpers += 1;
     peakHelpers = Math.max(peakHelpers, liveHelpers);
+    liveControlHelpers += 1;
+    peakControlHelpers = Math.max(peakControlHelpers, liveControlHelpers);
     return await new Promise<boolean>((resolve) => {
       let closed = false;
       helpers.push({ signal: signal!, close: (success = !signal!.aborted) => {
         if (closed) return;
         closed = true;
         liveHelpers -= 1;
+        liveControlHelpers -= 1;
         resolve(success);
       } });
     });
@@ -102,6 +115,8 @@ function fixture() {
   return {
     helpers, records, deactivate, terminalGuardian,
     liveHelpers: () => liveHelpers, peakHelpers: () => peakHelpers,
+    peakControlHelpers: () => peakControlHelpers,
+    holdExec: (gate: Promise<void>) => { execGate = gate; },
     closeGuardian: async () => {
       const child = await terminalGuardian();
       Reflect.set(child, "exitCode", 0);
@@ -180,4 +195,24 @@ it("keeps each Git scan slot until its release helper closes", async () => {
   await expect(scan).resolves.toEqual([true, true, true, true]);
   expect(app.peakHelpers()).toBe(3);
   expect(app.liveHelpers()).toBe(0);
+});
+
+it("starts the release helper only after the guardian's exec helper has closed", async () => {
+  const app = fixture();
+  let openExec!: () => void;
+  app.holdExec(new Promise<void>((resolve) => { openExec = resolve; }));
+  const child = await app.terminalGuardian();
+  for (let turn = 0; turn < 4; turn += 1) await tick();
+  expect(app.helpers).toHaveLength(0);
+  openExec();
+  for (let turn = 0; turn < 8 && app.helpers.length === 0; turn += 1) await tick();
+  expect(app.helpers).toHaveLength(1);
+  Reflect.set(child, "exitCode", 0);
+  child.emit("close", 0, null);
+  await tick();
+  const cleanup = awaitRuntimeOwnedProcessStopped(child);
+  app.helpers[0]!.close();
+  await expect(cleanup).resolves.toBe(true);
+  expect(app.peakControlHelpers()).toBe(1);
+  expect(runtimeOwnedProcessCleanupConfirmed()).toBe(true);
 });

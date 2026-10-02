@@ -69,6 +69,7 @@ export interface ActiveRuntimeOwnedProcessClaim {
   darwinStopBarrier?: Promise<boolean>;
   settleLinuxMonitorConfirmation?: (confirmed: boolean) => void;
   stopLinuxMonitor?: () => void;
+  linuxExecHelper?: Promise<boolean>;
   linuxReleaseHelper?: Promise<boolean>;
   intentRetirement?: RuntimeOwnedIntentRetirement;
 }

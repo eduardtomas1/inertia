@@ -33,6 +33,20 @@ describe("renderer time labels", () => {
     expect(formatMessageTime("2026-07-22T03:00:00.000Z", new Date("2026-07-22T12:00:00.000Z"))).toMatch(/^3:00\sAM$/u);
   });
 
+  it("reuses its date formatters across transcript rows", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+    const construct = vi.spyOn(Intl, "DateTimeFormat");
+    for (let row = 0; row < 50; row += 1) {
+      formatMessageTime("2026-07-22T09:05:00.000Z");
+      formatMessageTime("2026-07-21T16:14:00.000Z");
+      formatMessageTime("2025-12-31T16:14:00.000Z");
+      formatFullDateTime("2026-07-21T16:14:00.000Z");
+    }
+    expect(construct.mock.calls.length).toBeLessThanOrEqual(4);
+    construct.mockRestore();
+  });
+
   it("dates message times from earlier days and years", () => {
     const now = new Date("2026-07-22T12:00:00.000Z");
 

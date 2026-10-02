@@ -25,22 +25,40 @@ export function formatWorkAge(value: string): string {
   return formatRelativeTime(value);
 }
 
+let timestampFormatters: {
+  key: string;
+  time: Intl.DateTimeFormat;
+  day: Intl.DateTimeFormat;
+  year: Intl.DateTimeFormat;
+  full: Intl.DateTimeFormat;
+} | undefined;
+
+function messageTimestampFormatters(): NonNullable<typeof timestampFormatters> {
+  const now = new Date();
+  const key = `${now.getTimezoneOffset()}:${Math.floor(now.getTime() / 60_000)}`;
+  if (timestampFormatters?.key !== key) {
+    timestampFormatters = {
+      key,
+      time: new Intl.DateTimeFormat(INTERFACE_LOCALE, { hour: "numeric", minute: "2-digit" }),
+      day: new Intl.DateTimeFormat(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+      year: new Intl.DateTimeFormat(INTERFACE_LOCALE, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
+      full: new Intl.DateTimeFormat(INTERFACE_LOCALE, { dateStyle: "full", timeStyle: "short" }),
+    };
+  }
+  return timestampFormatters;
+}
+
 export function formatMessageTime(value: string, now = new Date()): string {
   const date = new Date(value);
-  const sameDay = date.toDateString() === now.toDateString();
-  const sameYear = date.getFullYear() === now.getFullYear();
-  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
-    ...(sameDay ? {} : { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }),
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  const formatters = messageTimestampFormatters();
+  const formatter = date.toDateString() === now.toDateString()
+    ? formatters.time
+    : date.getFullYear() === now.getFullYear() ? formatters.day : formatters.year;
+  return formatter.format(date);
 }
 
 export function formatFullDateTime(value: string): string {
-  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
-    dateStyle: "full",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return messageTimestampFormatters().full.format(new Date(value));
 }
 
 export function projectNameFromPath(path: string): string {

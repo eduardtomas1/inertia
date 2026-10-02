@@ -332,6 +332,11 @@ export class WorkspacePathAuthority {
     this.enrollProject(projectId, path, null, null);
   }
 
+  reenrollConversation(conversationId: string, projectId: string, path: string): void {
+    this.database.prepare("DELETE FROM conversation_path_authorities WHERE conversation_id = ?").run(conversationId);
+    this.enrollConversation(conversationId, projectId, path);
+  }
+
   promoteProjectRepository(
     projectId: string,
     path: string,
@@ -427,8 +432,13 @@ export class WorkspacePathAuthority {
   }
 
   resolveConversation(row: ConversationRow, project: ProjectRow): string {
-    if (project.workspace_kind !== "scratch" || row.worktree_path === null) {
+    if (project.workspace_kind !== "scratch") {
       return this.resolveAuthorizedConversation(row, project);
+    }
+    if (row.worktree_path === null) {
+      throw new WorkspacePathAuthorityError(
+        "This chat does not have its own folder yet, so it can be read but not continued. Inertia sets one up when the folder for chats without a project is available.",
+      );
     }
     try {
       return this.resolveAuthorizedConversation(row, project);

@@ -57,7 +57,6 @@ export interface NewConversationOptions {
   activate?: boolean;
   branch?: string | null;
   worktreePath?: string | null;
-  enrollWorktree?: boolean;
 }
 
 interface ConversationWorktreeOwnershipBase {

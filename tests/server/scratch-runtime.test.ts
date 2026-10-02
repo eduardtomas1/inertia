@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { deleteCheckpoints } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
+import { readDatabaseRecoveryExportFile } from "../../src/server/persistence/database-export-file";
+import type { RunRecoveryImportWorkerOptions } from "../../src/server/persistence/database-recovery-import-worker-client";
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -11,6 +13,21 @@ import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import { startTestRuntime } from "../support/test-runtime";
 import { connectRuntime } from "../support/runtime-event-queue";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
+
+vi.mock("../../src/server/persistence/database-recovery-import-worker-client", () => ({
+  runRecoveryImportWorker: async (input: RunRecoveryImportWorkerOptions) => {
+    const store = new RuntimeStore(input.databasePath, input.defaultWorkspacePath, { recoverInterruptedRuns: false });
+    try {
+      return await store.importRecoveryData(
+        await readDatabaseRecoveryExportFile(input.recoveryPath),
+        input.targetDirectory,
+        { operationId: input.operationId },
+      );
+    } finally {
+      store.close();
+    }
+  },
+}));
 
 vi.mock("../../src/server/checkpoints", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/server/checkpoints")>();
@@ -20,12 +37,9 @@ vi.mock("../../src/server/checkpoints", async (importOriginal) => {
 type CommandWithoutId = ClientCommand extends infer Command
   ? Command extends ClientCommand ? Omit<Command, "requestId"> : never : never;
 
-async function startScratchRuntime(prefix: string) {
-  const root = mkdtempSync(join(tmpdir(), prefix));
-  const workspace = join(root, "workspace");
-  mkdirSync(workspace);
-  const runtime = await startTestRuntime({ dataDirectory: join(root, "data"), defaultWorkspacePath: workspace,
-    enableProviders: false, runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
+async function connectScratchRuntime(root: string, dataDirectory: string, generation = 1) {
+  const runtime = await startTestRuntime({ dataDirectory, defaultWorkspacePath: join(root, "workspace"),
+    enableProviders: false, runtimeGenerationId: `00000000-0000-4000-8000-00000000000${generation}:1`,
     systemBootId: "test:00000000-0000-4000-8000-000000000001", secureFiles: new SecureFileTestBroker() });
   const client = await connectRuntime(runtime.websocketUrl);
   const send = (command: CommandWithoutId): string => {
@@ -37,13 +51,92 @@ async function startScratchRuntime(prefix: string) {
     (event): event is Extract<ServerEvent, { type: "request.result" }> => event.type === "request.result", Date.now() + 10_000);
   const mutate = async (command: CommandWithoutId) => client.events.nextForRequest(send(command),
     (event): event is Extract<ServerEvent, { type: "request.ok" }> => event.type === "request.ok", Date.now() + 10_000);
-  const close = async (): Promise<void> => {
+  const stop = async (): Promise<void> => {
     client.socket.close();
     await runtime.close();
+  };
+  return { runtime, client, request, mutate, stop };
+}
+
+async function startScratchRuntime(prefix: string) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  mkdirSync(join(root, "workspace"));
+  const connection = await connectScratchRuntime(root, join(root, "data"));
+  const close = async (): Promise<void> => {
+    await connection.stop();
     rmSync(root, { recursive: true, force: true });
   };
-  return { root, runtime, client, request, mutate, close };
+  return { root, ...connection, close };
 }
+
+async function createScratchChat(connection: Awaited<ReturnType<typeof connectScratchRuntime>>, title: string) {
+  const created = await connection.request({ type: "project.ensure-scratch", payload: {} });
+  if (created.result.kind !== "project.created") throw new Error("Missing project");
+  const projectId = created.result.projectId;
+  const chat = await connection.request({ type: "conversation.create", payload: { projectId, title, activate: false } });
+  if (chat.result.kind !== "conversation.created") throw new Error("Missing chat");
+  const conversationId = chat.result.conversationId;
+  const snapshot = await connection.client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && event.snapshot.conversations.some(({ id }) => id === conversationId));
+  return { projectId, chat: snapshot.snapshot.conversations.find(({ id }) => id === conversationId)! };
+}
+
+it("re-enrolls existing chats at startup after the data directory moved", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inertia-scratch-moved-"));
+  mkdirSync(join(root, "workspace"));
+  try {
+    const first = await connectScratchRuntime(root, join(root, "data"));
+    const { projectId, chat } = await createScratchChat(first, "Before the move");
+    writeFileSync(join(chat.worktreePath!, "notes.txt"), "moved notes");
+    await first.stop();
+    mkdirSync(join(root, "moved"));
+    for (const name of readdirSync(join(root, "data")).filter((entry) => entry.startsWith("inertia.sqlite") || entry === "scratch")) {
+      renameSync(join(root, "data", name), join(root, "moved", name));
+    }
+    const second = await connectScratchRuntime(root, join(root, "moved"), 2);
+    try {
+      const listed = await second.request({ type: "workspace.entries", payload: { projectId, conversationId: chat.id } });
+      expect(JSON.stringify(listed.result)).toContain("notes.txt");
+    } finally {
+      await second.stop();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("gives imported chats without a project their own folders after a runtime recovery import", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inertia-scratch-import-"));
+  mkdirSync(join(root, "workspace"));
+  try {
+    const source = await connectScratchRuntime(root, join(root, "source"));
+    await createScratchChat(source, "Recovered chat");
+    const recoveryPath = join(root, "recovery.json");
+    await source.runtime.exportRecoveryData(recoveryPath);
+    await source.stop();
+    const target = await connectScratchRuntime(root, join(root, "target"), 2);
+    try {
+      const recoveryFolder = join(root, "recovered");
+      mkdirSync(recoveryFolder);
+      await createScratchChat(target, "Already here");
+      const insideScratch = join(root, "target", "scratch");
+      await expect(target.runtime.importRecoveryData(recoveryPath, insideScratch, new AbortController().signal, randomUUID()))
+        .rejects.toThrow("Choose a recovery folder outside");
+      await target.runtime.importRecoveryData(recoveryPath, recoveryFolder, new AbortController().signal, randomUUID());
+      const snapshot = await target.client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => (
+        event.type === "snapshot.updated" && event.snapshot.conversations.some(({ title, worktreePath }) => title === "Recovered chat" && worktreePath !== null)
+      ));
+      const chat = snapshot.snapshot.conversations.find(({ title }) => title === "Recovered chat")!;
+      expect(chat.worktreePath!.startsWith(join(root, "target", "scratch"))).toBe(true);
+      expect(snapshot.snapshot.projects.filter(({ workspaceKind }) => workspaceKind === "scratch")).toHaveLength(1);
+      const listed = await target.request({ type: "workspace.entries", payload: { projectId: chat.projectId, conversationId: chat.id } });
+      expect(listed.result.kind).toBe("workspace.entries");
+    } finally {
+      await target.stop();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 it("creates a managed chat through the runtime boundary and only lists its own files", async () => {
   const { root, client, request, close } = await startScratchRuntime("inertia-scratch-runtime-");

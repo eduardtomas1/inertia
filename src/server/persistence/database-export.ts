@@ -61,10 +61,10 @@ const legacyRecoveryConversationSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
 }).strict().transform(normalizeRecoveryConversation);
 
-function requireOrderedMessages(
-  value: { messages: Array<{ ordinal: number }> },
-  context: z.RefinementCtx,
-): void {
+const recoveryConversationSchema = z.object({
+  ...recoveryConversationFields,
+  messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
+}).strict().superRefine((value, context) => {
   for (const [index, message] of value.messages.entries()) {
     if (message.ordinal !== index) {
       context.addIssue({
@@ -74,27 +74,14 @@ function requireOrderedMessages(
       });
     }
   }
-}
-
-const recoveryPathSchema = z.string().min(1).max(4_096).refine(
-  (value) => !value.includes("\0"),
-  "Expected a bounded project path identity without NUL bytes.",
-);
-
-const version2RecoveryConversationSchema = z.object({
-  ...recoveryConversationFields,
-  messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
-}).strict().superRefine(requireOrderedMessages).transform(normalizeRecoveryConversation);
-
-const recoveryConversationSchema = z.object({
-  ...recoveryConversationFields,
-  worktreePath: recoveryPathSchema.optional(),
-  messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
-}).strict().superRefine(requireOrderedMessages).transform(normalizeRecoveryConversation);
+}).transform(normalizeRecoveryConversation);
 
 const recoveryProjectFields = {
   name: z.string().max(1_000),
-  path: recoveryPathSchema,
+  path: z.string().min(1).max(4_096).refine(
+    (value) => !value.includes("\0"),
+    "Expected a bounded project path identity without NUL bytes.",
+  ),
 };
 
 const legacyRecoveryProjectSchema = z.object({
@@ -105,7 +92,7 @@ const legacyRecoveryProjectSchema = z.object({
 
 const version2RecoveryProjectSchema = z.object({
   ...recoveryProjectFields,
-  conversations: z.array(version2RecoveryConversationSchema)
+  conversations: z.array(recoveryConversationSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
 
@@ -114,15 +101,7 @@ const recoveryProjectSchema = z.object({
   workspaceKind: z.literal("scratch").optional(),
   conversations: z.array(recoveryConversationSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
-}).strict().superRefine((project, context) => {
-  if (project.workspaceKind !== "scratch" && project.conversations.some(({ worktreePath }) => worktreePath !== undefined)) {
-    context.addIssue({
-      code: "custom",
-      path: ["conversations"],
-      message: "Only chats without a project carry their own folder.",
-    });
-  }
-});
+}).strict();
 
 interface RecoveryExportCounts {
   projects: Array<{

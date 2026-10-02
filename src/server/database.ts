@@ -2,6 +2,7 @@ import type { MessageSearchTarget } from "../shared/message-search";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
 import Database from "better-sqlite3";
+import { dirname, resolve } from "node:path";
 import {
   type AgentActivity,
   type AgentGoal,
@@ -54,6 +55,7 @@ import {
   type DatabaseRecoveryImportResult,
 } from "./persistence/database-export";
 import { recoveryImportWriters } from "./persistence/recovery-import-writers";
+import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   exportDatabaseRecoveryData,
   importDatabaseRecoveryData,
@@ -332,11 +334,13 @@ export class RuntimeStore {
     authorizedRoot: string,
     options: DatabaseRecoveryImportOptions = {},
   ): Promise<DatabaseRecoveryImportResult> {
+    if (isWithinScratchRoot(dirname(resolve(this.database.name)), authorizedRoot)) {
+      throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+    }
     return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, recoveryImportWriters({
       database: this.database,
       createProject: (name, path, identity) => this.createProject(name, path, identity),
       createConversation: (projectId, title, conversation) => this.createConversation(projectId, title, conversation),
-      projectPath: (projectId) => this.projectPath(projectId),
       createRecoveredMessage: (...message) => { this.transcriptRepository.createRecoveredMessage(...message); },
     }), options);
   }
@@ -393,6 +397,10 @@ export class RuntimeStore {
 
   rebindScratchProject(projectId: string, path: string): Project {
     return this.projectRepository.rebindScratch(projectId, path);
+  }
+
+  bindScratchFolder(conversationId: string, path: string): Conversation {
+    return this.conversationRepository.bindScratchFolder(conversationId, path);
   }
 
   removeProject(projectId: string): void {

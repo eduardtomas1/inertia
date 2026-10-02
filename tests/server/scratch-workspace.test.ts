@@ -1,6 +1,6 @@
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { GitError } from "../../src/server/git/types";
@@ -127,6 +127,47 @@ describe("chats without a project", () => {
     expect(() => store.conversationPath(chat.id)).toThrow("can be read but not continued");
     const next = await scratch.createConversation(project.id, "After", {});
     expect(store.conversationPath(next.id)).toBe(next.worktreePath);
+  });
+
+  it("re-enrolls chats whose folders moved with the data directory and nothing else", async () => {
+    const project = await scratch.ensureProject();
+    const moved = await scratch.createConversation(project.id, "Moved", {});
+    const copied = await scratch.createConversation(project.id, "Copied", {});
+    const gone = await scratch.createConversation(project.id, "Gone", {});
+    const swapped = await scratch.createConversation(project.id, "Swapped", {});
+    writeFileSync(join(moved.worktreePath!, "notes.txt"), "moved notes");
+    const data = join(directory, "moved-data");
+    mkdirSync(data);
+    const root = join(data, "scratch");
+    renameSync(project.path, root);
+    rmSync(join(root, basename(gone.worktreePath!)), { recursive: true });
+    const copiedFolder = join(root, basename(copied.worktreePath!));
+    renameSync(copiedFolder, `${copiedFolder}-old`);
+    cpSync(`${copiedFolder}-old`, copiedFolder, { recursive: true });
+    rmSync(`${copiedFolder}-old`, { recursive: true });
+    const outside = join(directory, "outside");
+    mkdirSync(outside);
+    rmSync(join(root, basename(swapped.worktreePath!)), { recursive: true });
+    symlinkSync(outside, join(root, basename(swapped.worktreePath!)), "junction");
+    await new ScratchWorkspace(store, data).reconcile();
+    expect(store.projectPath(project.id)).toBe(root);
+    expect(store.conversationPath(moved.id)).toBe(join(root, basename(moved.worktreePath!)));
+    expect(readFileSync(join(store.conversationPath(moved.id), "notes.txt"), "utf8")).toBe("moved notes");
+    expect(store.conversationPath(copied.id)).toBe(copiedFolder);
+    expect(() => store.conversationPath(gone.id)).toThrow(`This chat's folder (${gone.worktreePath}) is missing or was replaced`);
+    expect(() => store.conversationPath(swapped.id)).toThrow("is missing or was replaced");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("does not create the managed folder at startup when the moved data directory lacks it", async () => {
+    const project = await scratch.ensureProject();
+    const chat = await scratch.createConversation(project.id, "Stays", {});
+    const data = join(directory, "empty-data");
+    mkdirSync(data);
+    await new ScratchWorkspace(store, data).reconcile();
+    expect(readdirSync(data)).toEqual([]);
+    expect(store.project(project.id).path).toBe(project.path);
+    expect(store.conversationPath(chat.id)).toBe(chat.worktreePath);
   });
 
   it("rebinds the managed folder to a moved data directory after verifying the new folder", async () => {

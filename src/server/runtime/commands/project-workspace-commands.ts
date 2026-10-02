@@ -14,7 +14,7 @@ import { cloneProject } from "../../project-clone";
 import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
-import { isWithinScratchRoot } from "../scratch-workspace";
+import { isWithinScratchRoot } from "../../scratch-root";
 import type { TerminalManager } from "../../terminal";
 import { PROVIDER_INFO, type ProviderManager } from "../../providers";
 import type { ProviderInstallationUseTransfer } from

@@ -46,7 +46,6 @@ export interface DatabaseRecoveryImportWriters {
   createConversation(
     projectId: string,
     conversation: RecoveryConversation,
-    scratch: boolean,
   ): string;
   createMessage(
     id: string,
@@ -129,7 +128,6 @@ export function exportDatabaseRecoveryData(
           + length(CAST(reasoning_effort AS BLOB))
           + length(CAST(interaction_mode AS BLOB))
           + length(CAST(access_mode AS BLOB))
-          + COALESCE(length(CAST(worktree_path AS BLOB)), 0)
           + 64 AS bytes
       FROM conversations
       UNION ALL
@@ -228,7 +226,6 @@ export function exportDatabaseRecoveryData(
               reasoningEffort: conversation.reasoningEffort,
               interactionMode: conversation.interactionMode,
               accessMode: conversation.accessMode,
-              worktreePath: scratch ? conversation.worktreePath : null,
             });
             return {
               title: conversation.title,
@@ -237,9 +234,6 @@ export function exportDatabaseRecoveryData(
               reasoningEffort: conversation.reasoningEffort,
               interactionMode: conversation.interactionMode,
               accessMode: conversation.accessMode,
-              ...(scratch && conversation.worktreePath
-                ? { worktreePath: conversation.worktreePath }
-                : {}),
               messages: (messagesByConversation.get(conversation.id) ?? [])
                 .map((message, ordinal) => {
                   const exportedMessage = {
@@ -334,7 +328,6 @@ export async function importDatabaseRecoveryData(
           const conversationId = writers.createConversation(
             projectId,
             importedConversation,
-            scratch,
           );
           conversationCount += 1;
           const messageIdPrefix = randomUUID().slice(

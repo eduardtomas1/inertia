@@ -97,12 +97,15 @@ receipt makes a late retry idempotent, recovery operations are serialized, and
 any failure rolls the import back in full.
 
 Format version 3 also marks Inertia's managed folder for chats without a
-project and records each such chat's folder. Import attaches those chats to the
-destination's managed folder (creating its project record if needed) and
-creates no folders. A recorded chat folder is authorized only when it is a
-direct, unshared child of the destination's verified managed folder; otherwise
-the chat stays readable but cannot be continued. Version 1 and 2 files import
-exactly as before; older Inertia builds cannot read version 3 files.
+project; it never infers that from a project's name. Import merges those chats
+into the destination's managed project (recording it if the profile has none)
+and creates no folders inside the import transaction. After the import commits,
+the runtime sets up the managed folder through its normal checks and gives each
+imported chat a new empty folder of its own. That step is idempotent and also
+runs at startup, so an interrupted import finishes later; until then such a
+chat can be read but not continued. A recovery folder at or inside the managed
+folder is refused. Version 1 and 2 files import exactly as before; older
+Inertia builds cannot read version 3 files.
 
 ## Fault coverage
 

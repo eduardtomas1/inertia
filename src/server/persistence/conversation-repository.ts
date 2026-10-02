@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 
 import type { Conversation } from "../../shared/contracts";
 import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
@@ -107,13 +108,11 @@ export class ConversationRepository {
           conversation.worktreePath,
           conversation.branch,
         );
-        if (options.enrollWorktree !== false) {
-          this.pathAuthority.enrollConversation(
-            conversation.id,
-            conversation.projectId,
-            conversation.worktreePath,
-          );
-        }
+        this.pathAuthority.enrollConversation(
+          conversation.id,
+          conversation.projectId,
+          conversation.worktreePath,
+        );
       }
       this.context.touchProject(projectId, now);
       if (options.activate !== false) {
@@ -330,6 +329,27 @@ export class ConversationRepository {
     if (this.context.state().active_conversation_id === null) {
       this.context.selectProject(conversation.project_id);
     }
+  }
+
+  bindScratchFolder(conversationId: string, path: string): Conversation {
+    const row = this.context.requireConversation(conversationId);
+    if (this.context.requireProject(row.project_id).workspace_kind !== "scratch") {
+      throw new Error("Only chats without a project have their own managed folder.");
+    }
+    const folder = resolve(path);
+    this.context.database.transaction(() => {
+      this.context.database.prepare("UPDATE conversations SET worktree_path = ?, branch = NULL WHERE id = ?")
+        .run(folder, conversationId);
+      this.context.database.prepare("DELETE FROM conversation_worktree_ownership WHERE conversation_id = ?")
+        .run(conversationId);
+      this.context.database.prepare(`
+        INSERT INTO conversation_worktree_ownership (
+          conversation_id, path, branch, owns_worktree, creation_state
+        ) VALUES (?, ?, NULL, 0, 'external')
+      `).run(conversationId, folder);
+      this.pathAuthority.reenrollConversation(conversationId, row.project_id, folder);
+    })();
+    return this.get(conversationId);
   }
 
   get(conversationId: string): Conversation {

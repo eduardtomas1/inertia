@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, realpathSync, rmdirSync, statSync, type BigIntStats, type Stats } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, type Stats } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Conversation, Project } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
@@ -9,29 +9,9 @@ import { runGitInspection } from "../git/runner";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
 
-function isSameDirectory(path: string, identity: BigIntStats): boolean {
-  try {
-    const current = statSync(path, { bigint: true });
-    return current.dev === identity.dev && current.ino === identity.ino;
-  } catch {
-    return false;
-  }
-}
+export { isWithinScratchRoot } from "../scratch-root";
 
-export function isWithinScratchRoot(dataDirectory: string, path: string): boolean {
-  let root: BigIntStats;
-  let candidate: string;
-  try {
-    root = statSync(join(dataDirectory, "scratch"), { bigint: true });
-    candidate = realpathSync.native(path);
-  } catch {
-    return false;
-  }
-  for (let current = candidate; ; current = dirname(current)) {
-    if (isSameDirectory(current, root)) return true;
-    if (dirname(current) === current) return false;
-  }
-}
+const CHAT_IDENTITY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 function releaseClaimedFolder(folder: string, claimed: Stats): void {
   try {
@@ -68,6 +48,10 @@ function hasRepositoryMarker(path: string): boolean {
   }
 }
 
+function folderWords(title: string): string {
+  return title.toLowerCase().match(/[a-z0-9]+/gu)?.slice(0, 5).join("-").slice(0, 48) || "chat";
+}
+
 export class ScratchWorkspace {
   constructor(private readonly store: RuntimeStore, private readonly dataDirectory: string) {}
 
@@ -76,6 +60,34 @@ export class ScratchWorkspace {
     if (lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()
       || normalizeIdentityPath(realpathSync(root)) !== normalizeIdentityPath(expected)) {
       throw new RuntimeRequestError("The folder for chats without a project cannot be verified.");
+    }
+  }
+
+  private isDirectChild(root: string, folder: string): boolean {
+    try {
+      return dirname(resolve(folder)) === resolve(root)
+        && !lstatSync(folder).isSymbolicLink()
+        && lstatSync(folder).isDirectory()
+        && realpathSync(folder) === join(realpathSync(root), basename(folder));
+    } catch {
+      return false;
+    }
+  }
+
+  private chatsOf(projectId: string): Conversation[] {
+    return this.store.shellSnapshot().conversations.filter((conversation) => conversation.projectId === projectId);
+  }
+
+  private adoptMovedChats(projectId: string, root: string): void {
+    const chats = this.chatsOf(projectId);
+    const used = new Set(chats.map(({ worktreePath }) => worktreePath).filter((path) => path !== null));
+    for (const chat of chats) {
+      if (chat.worktreePath === null || dirname(resolve(chat.worktreePath)) === resolve(root)) continue;
+      const candidate = join(root, basename(chat.worktreePath));
+      if (!basename(candidate).endsWith(`-${chat.id}`) || used.has(candidate)) continue;
+      if (!this.isDirectChild(root, candidate)) continue;
+      this.store.bindScratchFolder(chat.id, candidate);
+      used.add(candidate);
     }
   }
 
@@ -106,14 +118,52 @@ export class ScratchWorkspace {
     }
     this.verifyRoot(root);
     const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
-    if (current && (rootMissing || normalizeIdentityPath(current.path) !== normalizeIdentityPath(root))) {
-      return this.store.rebindScratchProject(current.id, root);
+    if (!current) return this.store.createProject("No project", root, { workspaceKind: "scratch", activate: false });
+    const moved = rootMissing || normalizeIdentityPath(current.path) !== normalizeIdentityPath(root);
+    const project = moved ? this.store.rebindScratchProject(current.id, root) : current;
+    this.store.projectPath(project.id);
+    this.adoptMovedChats(project.id, root);
+    return project;
+  }
+
+  async reconcile(): Promise<void> {
+    const project = this.store.shellSnapshot().projects.find(({ workspaceKind }) => workspaceKind === "scratch");
+    if (!project) return;
+    const root = resolve(this.dataDirectory, "scratch");
+    const chats = this.chatsOf(project.id);
+    const pending = chats.filter(({ worktreePath }) => worktreePath === null);
+    const relocated = normalizeIdentityPath(project.path) !== normalizeIdentityPath(root)
+      || chats.some(({ worktreePath }) => worktreePath !== null && dirname(resolve(worktreePath)) !== root);
+    if (pending.length === 0 && !(relocated && pathExists(root))) return;
+    const current = await this.ensureProject();
+    if (pending.length === 0) return;
+    const projectRoot = this.store.projectPath(current.id);
+    const leftovers = new Map(readdirSync(projectRoot).map((name) => [name.slice(-36), name]));
+    for (const chat of pending) {
+      try {
+        this.materializeFolder(current.id, projectRoot, chat, leftovers.get(chat.id));
+      } catch {
+        continue;
+      }
     }
-    if (current) {
-      this.store.projectPath(current.id);
-      return current;
+  }
+
+  private materializeFolder(projectId: string, root: string, chat: Conversation, leftover: string | undefined): void {
+    const expected = `-${folderWords(chat.title)}-${chat.id}`;
+    if (leftover && /^\d{4}-\d{2}-\d{2}-/u.test(leftover) && leftover.endsWith(expected)) {
+      const folder = join(root, leftover);
+      if (this.isDirectChild(root, folder) && readdirSync(folder).length === 0) {
+        this.store.bindScratchFolder(chat.id, folder);
+        return;
+      }
     }
-    return this.store.createProject("No project", root, { workspaceKind: "scratch", activate: false });
+    const { folder, claimed } = this.claimFolder(projectId, root, chat.id, chat.title);
+    try {
+      this.store.bindScratchFolder(chat.id, folder);
+    } catch (error) {
+      releaseClaimedFolder(folder, claimed);
+      throw error;
+    }
   }
 
   async createConversation(projectId: string, title: string, options: NewConversationOptions): Promise<Conversation> {
@@ -122,7 +172,7 @@ export class ScratchWorkspace {
     const root = this.store.projectPath(project.id);
     this.verifyRoot(root);
     const id = options.id ?? randomUUID();
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)) {
+    if (!CHAT_IDENTITY.test(id)) {
       throw new RuntimeRequestError("The chat identity is invalid.");
     }
     const { folder, claimed } = this.claimFolder(project.id, root, id, title);
@@ -135,15 +185,13 @@ export class ScratchWorkspace {
   }
 
   private claimFolder(projectId: string, root: string, id: string, title: string): { folder: string; claimed: Stats } {
-    const words = title.toLowerCase().match(/[a-z0-9]+/gu)?.slice(0, 5).join("-").slice(0, 48) || "chat";
-    const folder = join(root, `${new Date().toISOString().slice(0, 10)}-${words}-${id}`);
+    const folder = join(root, `${new Date().toISOString().slice(0, 10)}-${folderWords(title)}-${id}`);
     mkdirSync(folder, { mode: 0o700 });
     const claimed = lstatSync(folder);
     try {
       this.verifyRoot(root);
       this.store.projectPath(projectId);
-      const realFolder = realpathSync(folder);
-      if (lstatSync(folder).isSymbolicLink() || realFolder !== join(realpathSync(root), basename(folder))) {
+      if (!this.isDirectChild(root, folder)) {
         throw new RuntimeRequestError("The chat folder changed before it could be authorized.");
       }
     } catch (error) {

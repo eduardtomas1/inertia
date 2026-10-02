@@ -42,6 +42,8 @@ import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError } from "./runtim
 import { createTestShutdownTrace } from "./runtime/test-shutdown-trace";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
+import { ScratchWorkspace } from "./runtime/scratch-workspace";
+import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   ProjectIdentityRefresher,
   projectIdentityIsUsable,
@@ -906,7 +908,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       .then(() => testOnlyProjectIdentityRefresh))
       .catch(() => undefined);
     postReadyWork = trackRuntimeOperation(() =>
-      duoLaunchCoordinator.resumeComparisons()
+      Promise.all([
+        new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined),
+        duoLaunchCoordinator.resumeComparisons(),
+      ])
         .then(() => {
           if (!closed) broadcastSnapshot();
         }))
@@ -1127,6 +1132,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         if (!operationId) {
           throw new Error("The database recovery import identity is required.");
         }
+        if (isWithinScratchRoot(dataDirectory, targetDirectory)) {
+          throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+        }
         recoveryImportAdmission.begin();
         try {
           if (activeRuntimeCommands > 0) {
@@ -1167,6 +1175,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
                 }
               : {}),
           });
+          await new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined);
           broadcastSnapshot();
           return result;
         } catch (error) {

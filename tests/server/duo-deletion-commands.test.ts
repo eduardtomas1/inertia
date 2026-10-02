@@ -135,6 +135,7 @@ function projectDependencies(
     release: vi.fn(),
   };
   return {
+    dataDirectory: "/data",
     store: {
       hasRecordedActiveWorkspaceRunForProject: vi.fn(() => false),
       project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),

@@ -14,19 +14,33 @@ import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 type CommandWithoutId = ClientCommand extends infer Command
   ? Command extends ClientCommand ? Omit<Command, "requestId"> : never : never;
 
-it("creates a managed chat through the runtime boundary and only lists its own files", async () => {
-  const root = mkdtempSync(join(tmpdir(), "inertia-scratch-runtime-"));
+async function startScratchRuntime(prefix: string) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   const runtime = await startTestRuntime({ dataDirectory: join(root, "data"), defaultWorkspacePath: workspace,
     enableProviders: false, runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
     systemBootId: "test:00000000-0000-4000-8000-000000000001", secureFiles: new SecureFileTestBroker() });
   const client = await connectRuntime(runtime.websocketUrl);
-  const request = async (command: CommandWithoutId) => {
+  const send = (command: CommandWithoutId): string => {
     const requestId = randomUUID();
     client.socket.send(JSON.stringify({ ...command, requestId }));
-    return client.events.nextForRequest(requestId, (event): event is Extract<ServerEvent, { type: "request.result" }> => event.type === "request.result", Date.now() + 10_000);
+    return requestId;
   };
+  const request = async (command: CommandWithoutId) => client.events.nextForRequest(send(command),
+    (event): event is Extract<ServerEvent, { type: "request.result" }> => event.type === "request.result", Date.now() + 10_000);
+  const mutate = async (command: CommandWithoutId) => client.events.nextForRequest(send(command),
+    (event): event is Extract<ServerEvent, { type: "request.ok" }> => event.type === "request.ok", Date.now() + 10_000);
+  const close = async (): Promise<void> => {
+    client.socket.close();
+    await runtime.close();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { root, client, request, mutate, close };
+}
+
+it("creates a managed chat through the runtime boundary and only lists its own files", async () => {
+  const { root, client, request, close } = await startScratchRuntime("inertia-scratch-runtime-");
   try {
     const created = await request({ type: "project.ensure-scratch", payload: {} });
     expect(created.result.kind).toBe("project.created");
@@ -46,9 +60,35 @@ it("creates a managed chat through the runtime boundary and only lists its own f
     await expect(request({ type: "workspace.entries", payload: { projectId } })).rejects.toThrow("Choose a chat");
     await expect(request({ type: "conversation.create", payload: { projectId, title: "Reuse", worktreePath: conversation.worktreePath, activate: false } })).rejects.toThrow("cannot reuse");
   } finally {
-    client.socket.close();
-    await runtime.close();
-    rmSync(root, { recursive: true, force: true });
+    await close();
+  }
+});
+
+it("refuses project management commands that would remove, rename or duplicate the managed folder", async () => {
+  const { root, client, request, mutate, close } = await startScratchRuntime("inertia-scratch-guards-");
+  try {
+    const created = await request({ type: "project.ensure-scratch", payload: {} });
+    if (created.result.kind !== "project.created") throw new Error("Missing project");
+    const projectId = created.result.projectId;
+    const chat = await request({ type: "conversation.create", payload: { projectId, title: "Keep me", activate: false } });
+    if (chat.result.kind !== "conversation.created") throw new Error("Missing chat");
+    const conversationId = chat.result.conversationId;
+    const snapshot = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && event.snapshot.conversations.some(({ id }) => id === conversationId));
+    const folder = snapshot.snapshot.conversations.find(({ id }) => id === conversationId)!.worktreePath!;
+    const scratchRoot = join(root, "data", "scratch");
+    await expect(mutate({ type: "project.remove", payload: { projectId } })).rejects.toThrow("Delete chats without a project one at a time.");
+    await expect(mutate({ type: "project.update", payload: { projectId, name: "Renamed" } })).rejects.toThrow("Chats without a project have no project settings.");
+    for (const path of [scratchRoot, folder]) {
+      await expect(request({ type: "project.create", payload: { name: "Duplicate", path } })).rejects.toThrow("Inertia manages this folder for chats without a project.");
+    }
+    const after = await request({ type: "conversation.create", payload: { projectId, title: "Still works", activate: false } });
+    expect(after.result.kind).toBe("conversation.created");
+    const latest = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && event.snapshot.conversations.length === 2);
+    expect(latest.snapshot.conversations.map(({ id }) => id)).toContain(conversationId);
+    expect(latest.snapshot.projects.filter(({ name }) => name === "Duplicate")).toEqual([]);
+    expect(latest.snapshot.projects.find(({ id }) => id === projectId)).toMatchObject({ name: "No project", workspaceKind: "scratch" });
+  } finally {
+    await close();
   }
 });
 

@@ -771,6 +771,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createProjectWorkspaceCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
+        dataDirectory,
         workspaceRuns,
         turns,
         providers,

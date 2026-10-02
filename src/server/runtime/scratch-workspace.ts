@@ -5,9 +5,22 @@ import type { Conversation, Project } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { NewConversationOptions } from "../persistence/types";
 import { GitError } from "../git/types";
+import { isContained } from "../git/paths";
 import { runGitInspection } from "../git/runner";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
+
+export function isWithinScratchRoot(dataDirectory: string, path: string): boolean {
+  let root: string;
+  let candidate: string;
+  try {
+    root = normalizeIdentityPath(realpathSync(join(dataDirectory, "scratch")));
+    candidate = normalizeIdentityPath(realpathSync(path));
+  } catch {
+    return false;
+  }
+  return isContained(root, candidate);
+}
 
 /** A real project identity owns Scratch; each chat owns a separate plain folder. */
 export class ScratchWorkspace {

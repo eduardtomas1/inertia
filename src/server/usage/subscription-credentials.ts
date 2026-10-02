@@ -34,12 +34,12 @@ const kimiConfigSchema = z.object({
 const trimEnd = (value: string) => value.replace(/\/+$/u, "");
 
 export function credentialContinuity(credential: SubscriptionCredential): string | null {
-  if (credential.kind === "key") return `key\0${credential.token}`;
+  if (credential.kind === "key") return JSON.stringify(["key", credential.token]);
   const parts = credential.token.split(".");
   if (parts.length !== 3) return null;
   try {
     const claims = claimsSchema.safeParse(JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")));
-    return claims.success ? `account\0${claims.data.iss ?? ""}\0${claims.data.sub}` : null;
+    return claims.success ? JSON.stringify(["account", claims.data.iss ?? null, claims.data.sub]) : null;
   } catch {
     return null;
   }

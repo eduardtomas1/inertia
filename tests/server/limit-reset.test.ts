@@ -1,12 +1,13 @@
 // @inertia-test-suite portable
-import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { LimitResetScheduler, type LimitResetDependencies } from "../../src/server/usage/limit-reset-scheduler";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
+import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
 
@@ -191,6 +192,38 @@ describe("quota reset actions", () => {
     dependencies.track = vi.fn().mockRejectedValueOnce(new Error("Import in progress")).mockImplementation(async (operation) => operation());
     await scheduler.tick(); expect(store.limitResets.get(conversationId)?.state).toBe("waiting");
     await scheduler.tick(); expect(dependencies.dispatch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("resume account identity storage", () => {
+  const secret = "fake-cursor-session-token-0123456789";
+  function cursorChat(accountKey: () => Promise<string | null>) {
+    const projectId = store.conversation(conversationId).projectId;
+    conversationId = store.createConversation(projectId, "Paused Cursor task", { providerId: "cursor", model: "composer-2" }).id;
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: secret }), accountKey,
+      fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ billingCycleEnd: Date.parse(reset),
+        planUsage: { totalPercentUsed: 40, autoPercentUsed: 100, apiPercentUsed: 0 } }))) });
+    dependencies.readAccount = (_providerId, _force, model, cwd) => reader.read({ ...usage(), id: "native:cursor", providerId: "cursor",
+      providerLabel: "Cursor", email: null, identityKey: null, status: "unavailable", windows: [] }, model, abort.signal, cwd ?? directory);
+  }
+  it("stores neither a provider token nor its plain SHA-256 in the database", async () => {
+    cursorChat(async () => "per-install-identity-key");
+    await schedule();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", accountIdentity: expect.stringMatching(/^[0-9a-f]{64}$/u) });
+    const contents = readdirSync(directory).filter((name) => name.startsWith("inertia.sqlite"))
+      .map((name) => readFileSync(join(directory, name)).toString("latin1")).join("");
+    for (const derivative of [secret, createHash("sha256").update(secret).digest("hex"),
+      createHash("sha256").update("inertia-subscription\0cursor:subscription\0").update(secret).digest("hex")]) {
+      expect(contents.includes(derivative), derivative).toBe(false);
+    }
+  });
+  it("disables automatic resume when the per-install identity key is unavailable", async () => {
+    cursorChat(async () => null);
+    expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId, canResume: false });
+    await expect(schedule()).rejects.toThrow("limit changed");
   });
 });
 

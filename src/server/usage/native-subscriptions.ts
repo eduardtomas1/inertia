@@ -6,7 +6,7 @@ import type { ProviderId } from "../../shared/contracts";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 import { providerChildEnvironment, providerEnvironment } from "../environment";
 import { cursorSubscriptionWindows, kimiSubscriptionWindows, openCodeSubscriptionWindows } from "./subscription-parsers";
-import { readSubscriptionFile, subscriptionFingerprint, subscriptionJson, type NativeUsageAccount } from "./subscription-io";
+import { readSubscriptionFile, subscriptionAccountIdentity, subscriptionJson, type NativeUsageAccount } from "./subscription-io";
 
 interface Credential { token: string; scope: string }
 export interface NativeSubscriptionDependencies {
@@ -16,6 +16,7 @@ export interface NativeSubscriptionDependencies {
   readFile?: typeof readSubscriptionFile;
   readCursorKeychain?: () => Promise<string | null>;
   openCodeAccount?: (cwd: string, model: string | undefined, signal: AbortSignal) => Promise<Credential | null>;
+  accountKey?: (signal: AbortSignal) => Promise<string | null>;
 }
 const token = z.string().min(1).max(64 * 1024);
 const CURSOR_ENDPOINT = "https://api2.cursor.sh";
@@ -26,6 +27,7 @@ const trimEnd = (value: string) => value.replace(/\/+$/u, "");
  * credential precedence and selected route as the CLI must own the response. */
 export class NativeSubscriptionReader {
   private keychainRead: Promise<string | null> | null = null;
+  private identityKey: string | null = null;
   constructor(private readonly dependencies: NativeSubscriptionDependencies = {}) {}
   private keychain(): Promise<string | null> {
     if (!this.keychainRead) {
@@ -36,6 +38,10 @@ export class NativeSubscriptionReader {
       })().finally(() => { this.keychainRead = null; });
     }
     return this.keychainRead;
+  }
+  private async accountIdentity(credential: Credential, signal: AbortSignal): Promise<string | null> {
+    this.identityKey ??= await this.dependencies.accountKey?.(signal).catch(() => null) ?? null;
+    return this.identityKey && subscriptionAccountIdentity(this.identityKey, credential.scope, credential.token);
   }
   private async credentials(provider: ProviderId, model: string | undefined, env: NodeJS.ProcessEnv, cwd: string, signal: AbortSignal): Promise<Credential | null> {
     const platform = this.dependencies.platform ?? process.platform;
@@ -101,7 +107,6 @@ export class NativeSubscriptionReader {
         ? "Reset times are available for OpenCode Go models with a Go subscription. Other OpenCode backends do not expose a shared quota API."
         : "This account or selected model does not expose a supported subscription reset time." };
       signal.throwIfAborted();
-      const fingerprint = subscriptionFingerprint(account.scope, account.token);
       const fetcher = this.dependencies.fetch ?? fetch;
       const raw = provider === "cursor"
         ? await subscriptionJson(fetcher, `${CURSOR_ENDPOINT}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`, account.token, signal,
@@ -110,9 +115,10 @@ export class NativeSubscriptionReader {
       const receivedAt = Date.now();
       const current = await this.credentials(provider, model, env, cwd, signal);
       signal.throwIfAborted();
-      if (!current || subscriptionFingerprint(current.scope, current.token) !== fingerprint) throw new Error("The provider account changed during the read.");
+      if (!current || current.scope !== account.scope || current.token !== account.token) throw new Error("The provider account changed during the read.");
       const windows = provider === "cursor" ? cursorSubscriptionWindows(raw) : provider === "kimi" ? kimiSubscriptionWindows(raw, receivedAt) : openCodeSubscriptionWindows(raw);
-      return { ...base, windows, credentialFingerprint: fingerprint, status: windows.length ? "ready" : "unavailable",
+      const identity = await this.accountIdentity(account, signal);
+      return { ...base, windows, ...(identity ? { credentialFingerprint: identity } : {}), status: windows.length ? "ready" : "unavailable",
         updatedAt: new Date(receivedAt).toISOString(), checkedAt: new Date().toISOString(),
         detail: windows.length ? null : "The provider did not report quota windows." };
     };

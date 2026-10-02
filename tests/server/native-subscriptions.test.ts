@@ -25,7 +25,7 @@ describe("native subscription adapters", () => {
   it("reads Cursor using the CLI's explicit auth token without exposing it", async () => {
     const request = fetcher(cursor);
     const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: "fake-cursor-token" }), fetch: request,
-      readFile: vi.fn(async () => { throw new Error("Must not read another account"); }) });
+      readFile: vi.fn(async () => { throw new Error("Must not read another account"); }), accountKey: async () => "per-install-key" });
     const result = await read(reader);
     expect(result.status).toBe("ready");
     expect(result.windows).toHaveLength(3);
@@ -33,6 +33,8 @@ describe("native subscription adapters", () => {
     expect(JSON.stringify(result)).not.toContain("fake-cursor-token");
     expect(result.identityKey).toBeNull(); expect(result.canReset).toBe(false);
     expect(resumeAccountIdentity(result)).toMatch(/^[a-f0-9]{64}$/u);
+    const unkeyed = await read(new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: "fake-cursor-token" }), fetch: fetcher(cursor) }));
+    expect(unkeyed.status).toBe("ready"); expect(resumeAccountIdentity(unkeyed)).toBeNull();
   });
   it.each([
     { CURSOR_API_KEY: "api-key" }, { AGENT_CLI_CREDENTIAL_STORE: "memory" },

@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { dirname, basename, join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 
@@ -30,8 +30,8 @@ export async function readSubscriptionFile(path: string): Promise<string | null>
     throw new Error("The provider's account configuration could not be read.");
   }
 }
-export function subscriptionFingerprint(provider: string, credential: string): string {
-  return createHash("sha256").update(`inertia-subscription\0${provider}\0`).update(credential).digest("hex");
+export function subscriptionAccountIdentity(key: string, provider: string, credential: string): string {
+  return createHmac("sha256", key).update(`inertia-subscription\0${provider}\0`).update(credential).digest("hex");
 }
 /** Fixed provider endpoints only. No redirects, unbounded bodies or remote error text. */
 export async function subscriptionJson(fetcher: typeof fetch, url: string, token: string, signal: AbortSignal,

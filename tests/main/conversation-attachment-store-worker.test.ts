@@ -196,6 +196,17 @@ describe("retained attachment utility validation", () => {
     });
   });
 
+  it("previews retained JSON that import accepted as readable text", async () => {
+    const receipt = receiptFor(Buffer.from("{bad}"), "notes.json", "application/json");
+    const parentPort = await perform(receipt, { preview: true });
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: true, receipt }));
+  });
+
+  it("still rejects retained text that import would not accept", async () => {
+    const parentPort = await perform(receiptFor(Buffer.from("safe\0unsafe"), "notes.txt", "text/plain"), { preview: true });
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+  });
+
   it("returns a stored record without parsing its content for maintenance reads", async () => {
     const loadParser = vi.fn(async () =>
       await vi.importActual("../../src/main/attachment-import.js"));

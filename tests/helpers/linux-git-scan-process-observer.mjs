@@ -6,11 +6,13 @@ if (!parentPort) throw new Error("The Linux process observer requires a parent p
 const parentPid = workerData.parentPid;
 const repositoryRoots = new Set(workerData.repositoryRoots);
 const controlHelperPids = new Set();
+const controlHelperCommands = new Map();
 const guardianPids = new Set();
 const guardedTreePids = new Set();
 const observed = new Set();
 const startedAt = performance.now();
 let peakControlHelpers = 0;
+let peakControlHelperDetail = [];
 let peakDescendants = 0;
 let peakGuardedTreeDescendants = 0;
 let peakDescendantRssKb = 0;
@@ -106,7 +108,17 @@ function sample() {
       guardianExecutable(pid)
       && (args[1] === "ready" || args[1] === "signal")
       && guardianPids.has(Number(args[2]))
-    ) controlHelperPids.add(pid);
+    ) {
+      controlHelperPids.add(pid);
+      if (!controlHelperCommands.has(pid)) {
+        controlHelperCommands.set(pid, {
+          mode: args[1],
+          target: Number(args[2]),
+          action: args[1] === "signal" ? args[6] ?? null : null,
+          firstSeenMs: Math.round(performance.now() - startedAt),
+        });
+      }
+    }
   }
   const current = all.filter((pid) => (
     guardedTreePids.has(pid) || controlHelperPids.has(pid)
@@ -120,6 +132,19 @@ function sample() {
   });
   const guardedCurrent = liveCurrent.filter((pid) => guardedTreePids.has(pid));
   const helpersCurrent = liveCurrent.filter((pid) => controlHelperPids.has(pid));
+  if (helpersCurrent.length > peakControlHelpers) {
+    const atMs = Math.round(performance.now() - startedAt);
+    peakControlHelperDetail = helpersCurrent.map((pid) => {
+      const command = controlHelperCommands.get(pid);
+      return {
+        pid,
+        ...command,
+        state: procState(pid),
+        targetState: command ? procState(command.target) ?? "gone" : null,
+        ageMs: command ? atMs - command.firstSeenMs : null,
+      };
+    });
+  }
   peakControlHelpers = Math.max(peakControlHelpers, helpersCurrent.length);
   peakDescendants = Math.max(peakDescendants, liveCurrent.length);
   peakGuardedTreeDescendants = Math.max(
@@ -162,6 +187,7 @@ async function finish() {
       finalDescendants,
       forkRatePerSecond: observed.size / (durationMs / 1_000),
       peakControlHelpers,
+      peakControlHelperDetail,
       peakDescendants,
       peakGuardedTreeDescendants,
       peakDescendantRssKb,

@@ -684,10 +684,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
   queuedMessages.start();
+  const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
+    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+  });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       queuedMessages.handler,
-      usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
+      ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,

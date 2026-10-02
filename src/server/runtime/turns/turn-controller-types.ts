@@ -188,6 +188,7 @@ export interface TurnControllerHooks {
 
 export interface QueueTurnRequest {
   queuedMessageId?: string;
+  limitResetPlanId?: string;
   conversationId: string;
   /** Authenticated Private Connect origin, supplied only by the privileged gateway. */
   privateConnectDeviceId?: string;

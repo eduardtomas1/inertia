@@ -167,6 +167,7 @@ export function startCodexAppServerRun(
     reason: ProviderRunFailure["reason"],
     message: string,
     technicalDetail?: string,
+    usageLimited = false,
   ): void => {
     failure ??= {
       reason,
@@ -176,6 +177,7 @@ export function startCodexAppServerRun(
       ...(lastActivityId ? { activityId: lastActivityId } : {}),
       ...(technicalDetail ? { technicalDetail } : {}),
     };
+    if (usageLimited && reason === "codex-error" && failure.reason === "codex-error") failure.usageLimited = true;
   };
 
   const rememberTransportFailure = (message: string, technicalDetail?: string): void => {

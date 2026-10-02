@@ -66,6 +66,11 @@ export function detachedChatCommandRejection(
     case "agent.goal.clear":
     case "agent.stop":
     case "conversation.compact":
+    case "conversation.limit-reset.get":
+    case "conversation.limit-reset.schedule":
+    case "conversation.limit-reset.cancel":
+    case "conversation.limit-reset.resume":
+    case "conversation.limit-reset.snooze":
     case "message.queue.get":
     case "message.queue.enqueue":
     case "message.queue.remove":

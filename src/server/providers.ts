@@ -1,4 +1,4 @@
-import { codexUsageContext, readManagedClaudeUsage, type CodexControlContext } from "./provider/usage-context";
+import { codexUsageContext, readManagedClaudeUsage, readManagedOpenCodeAccount, type CodexControlContext } from "./provider/usage-context";
 export type { CodexControlContext } from "./provider/usage-context";
 import { randomUUID } from "node:crypto";
 
@@ -1062,6 +1062,10 @@ export class ProviderManager {
 
   claudeUsage(cwd: string): ReturnType<typeof readManagedClaudeUsage> {
     return this.trackAuxiliary(() => readManagedClaudeUsage(this.resolvedCommands.get("claude"), cwd, this.installationAuthority, this.lifetimeSignal));
+  }
+
+  openCodeUsageAccount(cwd: string, model: string | undefined, signal: AbortSignal): ReturnType<typeof readManagedOpenCodeAccount> {
+    return this.trackAuxiliary(() => readManagedOpenCodeAccount(this.resolvedCommands.get("opencode"), cwd, model, this.installationAuthority, AbortSignal.any([signal, this.lifetimeSignal])));
   }
 
   codexControlContext(cwd: string): Promise<CodexControlContext> {

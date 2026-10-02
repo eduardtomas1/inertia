@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "./limitResetClient";
 import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
@@ -66,6 +67,7 @@ export interface ComposerProps {
   agentContextRequest?: AgentConversationContextRequest | null;
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
+  onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   goal?: ChatGoalControlProps | null;

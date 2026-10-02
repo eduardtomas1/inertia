@@ -1,3 +1,4 @@
+import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
@@ -133,6 +134,7 @@ export class RuntimeStore {
   private readonly snapshotRepository: SnapshotRepository;
   readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
+  readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
@@ -182,6 +184,7 @@ export class RuntimeStore {
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
+    this.limitResets = new LimitResetRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
     this.projectRepository = new ProjectRepository({
       database: this.database,
@@ -1110,13 +1113,7 @@ export class RuntimeStore {
     return row ? JSON.parse(row.report_json) : null;
   }
   saveIssueReport(report: import("../shared/issue-report").IssueReport): void { this.database.prepare("INSERT INTO issue_report_draft (singleton, report_json) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET report_json = excluded.report_json").run(JSON.stringify(report)); }
-  createWorkspaceRun(
-    input: Omit<WorkspaceRun, "id" | "actionId" | "attentionState" | "canStop" | "startedAt" | "finishedAt"> & {
-      id?: string;
-      actionId?: string | null;
-      attentionState?: WorkspaceRun["attentionState"];
-    },
-  ): WorkspaceRun {
+  createWorkspaceRun(input: Parameters<WorkspaceRunRepository["create"]>[0]): WorkspaceRun {
     return this.workspaceRunRepository.create(input);
   }
 

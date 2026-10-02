@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "../components/composer/limitResetClient";
 import {
   useCallback,
   useMemo,
@@ -67,6 +68,7 @@ type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 
 const ignoreLatestContentVisibility = (): void => undefined;
+const unavailableLimitReset: LimitResetCommandRunner = async () => { throw new Error("Reset actions are unavailable."); };
 const unavailableQueue: QueueCommandRunner = async () => { throw new Error("Message queues are unavailable."); };
 
 export interface SplitWorkspaceSceneController {
@@ -78,6 +80,7 @@ interface SplitWorkspaceActions
   extends Pick<
     WorkspaceSceneActions,
     | "runQueueCommand"
+    | "runLimitResetCommand"
     | "importProject"
     | "createConversation"
     | "respondToApproval"
@@ -366,6 +369,7 @@ export function useSplitWorkspaceScene({
     },
     run,
     runQueueCommand: actions.runQueueCommand ?? unavailableQueue,
+    runLimitResetCommand: actions.runLimitResetCommand ?? unavailableLimitReset,
   });
   const model = useMemo(() => createWorkspaceSceneModel({
     view: "workspace",

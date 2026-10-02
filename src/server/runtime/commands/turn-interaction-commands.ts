@@ -114,6 +114,7 @@ function classifiedMessageSendError(
 
 export interface TurnInteractionCommandDependencies {
   queuedMessage?: QueuedMessage;
+  limitResetDispatch?: { planId: string; assertCurrent(): void };
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
@@ -160,6 +161,7 @@ export function createTurnInteractionCommandHandler(
           conversation = dependencies.store.conversation(
             command.payload.conversationId,
           );
+          dependencies.limitResetDispatch?.assertCurrent();
           if (dependencies.queuedMessage && (
             dependencies.queuedMessage.conversationId !== conversation.id
             || conversation.archivedAt !== null
@@ -200,6 +202,7 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
+          if (dependencies.limitResetDispatch) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
           messageSendStage = "follow-up-preparation";
           if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(
@@ -770,6 +773,7 @@ export function createTurnInteractionCommandHandler(
         let durableTurnPersisted = false;
         let deriveInitialTitle = false;
         try {
+          dependencies.limitResetDispatch?.assertCurrent();
           if (dependencies.queuedMessage) {
             const current = dependencies.store.conversation(conversation.id);
             const item = dependencies.store.queuedMessages.get(conversation.id, dependencies.queuedMessage.id);
@@ -796,6 +800,7 @@ export function createTurnInteractionCommandHandler(
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
                 queuedMessageId: dependencies.queuedMessage?.id,
+                limitResetPlanId: dependencies.limitResetDispatch?.planId,
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,

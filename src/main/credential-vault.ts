@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { constants as fsConstants, type Stats } from "node:fs";
 import {
   chmod,
@@ -686,53 +686,7 @@ export class CredentialVault {
           : "The backend credential is invalid.",
       );
     }
-    await this.enqueueMutation(async () => {
-      const storage = await this.storageState();
-      if (!storage.available) {
-        throw new CredentialVaultError(
-          "storage-unavailable",
-          "Secure credential storage is unavailable on this system.",
-        );
-      }
-      let encrypted: Buffer;
-      try {
-        encrypted = await this.encryption.encrypt(secret);
-      } catch {
-        throw new CredentialVaultError(
-          "encryption-failed",
-          "The backend credential could not be protected.",
-        );
-      }
-      if (
-        encrypted.length === 0
-        || encrypted.toString("base64").length > MAX_CIPHERTEXT_BASE64_LENGTH
-      ) {
-        throw new CredentialVaultError(
-          "encryption-failed",
-          "The backend credential could not be protected.",
-        );
-      }
-      const current = await this.load();
-      if (
-        !Object.prototype.hasOwnProperty.call(current.entries, secretReference)
-        && Object.keys(current.entries).length >= MAX_VAULT_ENTRIES
-      ) {
-        throw new CredentialVaultError(
-          "persistence-failed",
-          "The secure credential vault is full.",
-        );
-      }
-      const vault: PersistedCredentialVault = {
-        ...current,
-        entries: { ...current.entries },
-      };
-      vault.entries[secretReference] = {
-        ciphertext: encrypted.toString("base64"),
-        credentialGeneration: randomUUID(),
-        updatedAt: new Date().toISOString(),
-      };
-      await this.persist(vault);
-    });
+    await this.enqueueMutation(() => this.write(secretReference, secret));
     return await this.state(profileId, secretReference);
   }
 
@@ -778,6 +732,23 @@ export class CredentialVault {
       );
     }
     return decrypted.plainText;
+  }
+
+  async resolveOrCreate(secretReference: string): Promise<string> {
+    const existing = await this.resolve(secretReference);
+    if (existing !== null) return existing;
+    await this.enqueueMutation(async () => {
+      if ((await this.load()).entries[secretReference]?.ciphertext) return;
+      await this.write(secretReference, randomBytes(32).toString("base64url"));
+    });
+    const created = await this.resolve(secretReference);
+    if (created === null) {
+      throw new CredentialVaultError(
+        "persistence-failed",
+        "The secure credential vault could not be saved.",
+      );
+    }
+    return created;
   }
 
   async clearForProfile(profileId: string): Promise<BackendCredentialState> {
@@ -870,6 +841,54 @@ export class CredentialVault {
       removed = true;
     });
     return removed;
+  }
+
+  private async write(secretReference: string, secret: string): Promise<void> {
+    const storage = await this.storageState();
+    if (!storage.available) {
+      throw new CredentialVaultError(
+        "storage-unavailable",
+        "Secure credential storage is unavailable on this system.",
+      );
+    }
+    let encrypted: Buffer;
+    try {
+      encrypted = await this.encryption.encrypt(secret);
+    } catch {
+      throw new CredentialVaultError(
+        "encryption-failed",
+        "The backend credential could not be protected.",
+      );
+    }
+    if (
+      encrypted.length === 0
+      || encrypted.toString("base64").length > MAX_CIPHERTEXT_BASE64_LENGTH
+    ) {
+      throw new CredentialVaultError(
+        "encryption-failed",
+        "The backend credential could not be protected.",
+      );
+    }
+    const current = await this.load();
+    if (
+      !Object.prototype.hasOwnProperty.call(current.entries, secretReference)
+      && Object.keys(current.entries).length >= MAX_VAULT_ENTRIES
+    ) {
+      throw new CredentialVaultError(
+        "persistence-failed",
+        "The secure credential vault is full.",
+      );
+    }
+    const vault: PersistedCredentialVault = {
+      ...current,
+      entries: { ...current.entries },
+    };
+    vault.entries[secretReference] = {
+      ciphertext: encrypted.toString("base64"),
+      credentialGeneration: randomUUID(),
+      updatedAt: new Date().toISOString(),
+    };
+    await this.persist(vault);
   }
 
   private async setByReference(

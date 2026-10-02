@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "./composer/limitResetClient";
 import { readTranscriptPosition, forgetTranscriptPosition } from "../utils/transcriptPosition";
 import {
   lazy,
@@ -199,6 +200,7 @@ type ChatWorkspaceProps = {
   contextPackets?: readonly ConversationContextPacketSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
+  onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
@@ -310,6 +312,7 @@ export function ChatWorkspace({
   contextPackets = EMPTY_CONTEXT_PACKETS,
   onConversationContextCommand,
   onQueueCommand,
+  onLimitResetCommand,
   previewContextUrl,
   providerIdentityLabels,
   loading,
@@ -1104,6 +1107,7 @@ export function ChatWorkspace({
           agentContextRequest={agentContextRequest}
           onConversationContextCommand={onConversationContextCommand}
           onQueueCommand={onQueueCommand}
+          onLimitResetCommand={onLimitResetCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}
           disabled={!conversation}

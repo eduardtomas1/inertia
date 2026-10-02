@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
   AgentApprovalDecision,
@@ -266,6 +267,7 @@ export interface WorkspaceSceneActions {
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
+  runLimitResetCommand?: LimitResetCommandRunner;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -723,6 +725,7 @@ export function createWorkspaceSceneModel({
       contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onQueueCommand: actions.runQueueCommand,
+      onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")

@@ -8,7 +8,6 @@ import type { UsageAccount } from "../../shared/provider-usage-limits";
 export type NativeUsageAccount = UsageAccount & { credentialFingerprint?: string; keychain?: "deferred" | "read" };
 
 const MAX_BYTES = 256 * 1024;
-/** Provider-owned credentials stay local to these readers; callers retain only opaque fingerprints. */
 export async function readSubscriptionFile(path: string): Promise<string | null> {
   try {
     const canonical = join(await realpath(dirname(path)), basename(path));
@@ -32,7 +31,6 @@ export async function readSubscriptionFile(path: string): Promise<string | null>
 export function subscriptionAccountIdentity(key: string, provider: string, credential: string): string {
   return createHmac("sha256", key).update(`inertia-subscription\0${provider}\0`).update(credential).digest("hex");
 }
-/** Fixed provider endpoints only. No redirects, unbounded bodies or remote error text. */
 export async function subscriptionJson(fetcher: typeof fetch, url: string, token: string, signal: AbortSignal,
   options: { post?: boolean; headers?: Record<string, string> } = {}): Promise<unknown> {
   const response = await fetcher(url, { method: options.post ? "POST" : "GET", redirect: "error", signal,

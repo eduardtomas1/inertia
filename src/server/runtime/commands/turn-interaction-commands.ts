@@ -114,7 +114,6 @@ function classifiedMessageSendError(
 
 export interface TurnInteractionCommandDependencies {
   queuedMessage?: QueuedMessage;
-  /** Server-only authorization for one persisted reset plan. Never accepted over IPC. */
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;

@@ -138,7 +138,6 @@ export interface AgentTurnLifecycleUpdate {
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
   queuedMessageId?: string;
-  /** Server-owned plan claimed atomically with the accepted turn. */
   limitResetPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;

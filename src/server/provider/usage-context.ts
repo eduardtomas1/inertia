@@ -41,8 +41,6 @@ export async function readManagedClaudeUsage(executable: string | undefined, cwd
   return result;
 }
 
-/** Resolve Go credentials from the actual workspace's effective OpenCode
- * inventory, including project config and environment overrides. */
 export async function readManagedOpenCodeAccount(executable: string | undefined, cwd: string, model: string | undefined,
   installation: ProviderManagerInstallationAuthority, signal: AbortSignal): Promise<{ token: string; scope: string } | null> {
   if (!executable || (model && !model.startsWith("opencode-go/"))) return null;

@@ -181,7 +181,7 @@ export class LimitResetScheduler {
           } finally { this.dependencies.changed(plan.conversationId); }
         }
       });
-    } catch { /* Admission may be closed during backup/import; the durable plan remains pending. */ }
+    } catch { return; }
     finally { this.running = false; this.arm(); }
   }
 }

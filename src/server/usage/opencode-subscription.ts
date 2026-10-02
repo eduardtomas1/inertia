@@ -1,7 +1,5 @@
 import type { Provider } from "@opencode-ai/sdk/v2";
 
-/** The SDK resolves environment, stored auth and workspace configuration. Do
- * not substitute a global Go login for a different effective model backend. */
 export function openCodeSubscriptionCredential(inventory: { all: Provider[]; default: Record<string, string>; connected: string[] },
   model: string | undefined): { token: string; scope: string } | null {
   if (model && !model.startsWith("opencode-go/")) return null;

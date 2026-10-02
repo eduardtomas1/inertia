@@ -4,8 +4,6 @@ import { providerNativeBackendProfile } from "../../shared/model-routing";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 import type { NativeUsageAccount } from "./subscription-io";
 
-/** Relative reset durations are sampled across a network round trip. Accept
- * at most two seconds of sampling drift; a moved quota window needs a new offer. */
 export function sameReportedReset(left: string, right: string): boolean {
   return Math.abs(Date.parse(left) - Date.parse(right)) <= 2_000;
 }
@@ -21,9 +19,6 @@ export function matchesFailedNativeTurn(conversation: Conversation, turn: AgentT
     && (!conversation.reasoningEffort || conversation.reasoningEffort === turn.reasoningEffort)
     && conversation.interactionMode === turn.interactionMode && conversation.accessMode === turn.accessMode;
 }
-/** Pin the native API's reported account metadata across the wait. This is
- * separate from the verified identity required for reset-credit redemption;
- * email/organization metadata must never grant authority to spend a credit. */
 export function resumeAccountIdentity(account: NativeUsageAccount): string | null {
   if (account.credentialFingerprint) return account.credentialFingerprint;
   if (account.identityKey) return account.identityKey;
@@ -48,8 +43,6 @@ export function resetQuota(account: UsageAccount, model: string, now = Date.now(
     return (window.id === "claude:seven_day_opus" && model.includes("opus"))
       || (window.id === "claude:seven_day_sonnet" && model.includes("sonnet"));
   });
-  // A new/model-scoped exhausted window cannot be guessed away. Known windows
-  // for another Claude family and the extra-usage allowance do not block this route.
   const unrelated = new Set(["cursor:autoPercentUsed", "cursor:apiPercentUsed", "claude:seven_day_opus", "claude:seven_day_sonnet", "claude:seven_day_overage_included"]);
   if (account.windows.some((window) => window.remainingPercent === 0 && !relevant.includes(window) && !unrelated.has(window.id))) return { kind: "unknown" };
   if (!relevant.length || relevant.some(({ remainingPercent }) => remainingPercent === null

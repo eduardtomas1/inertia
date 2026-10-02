@@ -96,6 +96,14 @@ the user's current active selection unchanged. A durable content-and-destination
 receipt makes a late retry idempotent, recovery operations are serialized, and
 any failure rolls the import back in full.
 
+Format version 3 also marks Inertia's managed folder for chats without a
+project and records each such chat's folder. Import attaches those chats to the
+destination's managed folder (creating its project record if needed) and
+creates no folders. A recorded chat folder is authorized only when it is a
+direct, unshared child of the destination's verified managed folder; otherwise
+the chat stays readable but cannot be continued. Version 1 and 2 files import
+exactly as before; older Inertia builds cannot read version 3 files.
+
 ## Fault coverage
 
 Automated coverage exercises committed WAL backup, corrupt-primary quarantine,

@@ -51,11 +51,15 @@ async function connectScratchRuntime(root: string, dataDirectory: string, genera
     (event): event is Extract<ServerEvent, { type: "request.result" }> => event.type === "request.result", Date.now() + 10_000);
   const mutate = async (command: CommandWithoutId) => client.events.nextForRequest(send(command),
     (event): event is Extract<ServerEvent, { type: "request.ok" }> => event.type === "request.ok", Date.now() + 10_000);
+  const settle = async (command: CommandWithoutId) => client.events.nextForRequest(send(command),
+    (event): event is Extract<ServerEvent, { type: "request.result" | "request.ok" }> => (
+      event.type === "request.result" || event.type === "request.ok"
+    ), Date.now() + 10_000);
   const stop = async (): Promise<void> => {
     client.socket.close();
     await runtime.close();
   };
-  return { runtime, client, request, mutate, stop };
+  return { runtime, client, request, mutate, settle, stop };
 }
 
 async function startScratchRuntime(prefix: string) {
@@ -79,6 +83,70 @@ async function createScratchChat(connection: Awaited<ReturnType<typeof connectSc
   const snapshot = await connection.client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated" && event.snapshot.conversations.some(({ id }) => id === conversationId));
   return { projectId, chat: snapshot.snapshot.conversations.find(({ id }) => id === conversationId)! };
 }
+
+it("gives concurrent requests from several windows exactly one managed folder", async () => {
+  const context = await startScratchRuntime("inertia-scratch-concurrent-");
+  try {
+    const results = await Promise.all([1, 2, 3].map(() => context.request({ type: "project.ensure-scratch", payload: {} })));
+    const ids = new Set(results.map(({ result }) => result.kind === "project.created" ? result.projectId : null));
+    expect(ids.size).toBe(1);
+    const [first, second] = await Promise.all([createScratchChat(context, "One"), createScratchChat(context, "One")]);
+    expect(first.chat.worktreePath).not.toBe(second.chat.worktreePath);
+    expect(new Set([first.projectId, second.projectId, ...ids])).toEqual(new Set([first.projectId]));
+  } finally {
+    await context.close();
+  }
+});
+
+it("refuses every root-level workspace route for the managed folder without a chat", async () => {
+  const context = await startScratchRuntime("inertia-scratch-routes-");
+  try {
+    const { projectId } = await createScratchChat(context, "Chat A");
+    const terminalId = randomUUID();
+    const commands: CommandWithoutId[] = [
+      { type: "workspace.entries", payload: { projectId, query: "a" } },
+      { type: "workspace.file.read", payload: { projectId, path: "x.txt" } },
+      { type: "project.actions", payload: { projectId } },
+      { type: "project.action.run", payload: { projectId, actionId: "x", terminalId, cols: 80, rows: 24 } },
+      { type: "terminal.create", payload: { projectId, cols: 80, rows: 24 } },
+      { type: "terminal.attach", payload: { projectId, terminalId, cols: 80, rows: 24 } },
+      { type: "git.refresh", payload: { projectId } },
+      { type: "git.workspace.refresh", payload: { projectId } },
+      { type: "git.fetch", payload: { projectId } },
+      { type: "git.pull", payload: { projectId } },
+      { type: "git.push", payload: { projectId } },
+      { type: "git.branch.create", payload: { projectId, name: "x" } },
+      { type: "git.pr.open", payload: { projectId } },
+    ];
+    for (const command of commands) {
+      await expect(context.settle(command), command.type).rejects.toThrow(/Choose a chat|Refresh repository status/u);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+it("never crosses chat and project identities", async () => {
+  const context = await startScratchRuntime("inertia-scratch-identity-");
+  try {
+    const { projectId, chat: scratchChat } = await createScratchChat(context, "Scratch chat");
+    const userFolder = join(context.root, "user");
+    mkdirSync(userFolder);
+    const user = await context.request({ type: "project.create", payload: { name: "User", path: userFolder } });
+    if (user.result.kind !== "project.created") throw new Error("Missing user project");
+    const userProjectId = user.result.projectId;
+    const created = await context.request({ type: "conversation.create", payload: { projectId: userProjectId, title: "User chat", activate: false } });
+    if (created.result.kind !== "conversation.created") throw new Error("Missing user chat");
+    const userChatId = created.result.conversationId;
+    await expect(context.request({ type: "workspace.entries", payload: { projectId, conversationId: userChatId } })).rejects.toThrow("does not belong");
+    await expect(context.request({ type: "workspace.entries", payload: { projectId: userProjectId, conversationId: scratchChat.id } })).rejects.toThrow("does not belong");
+    await expect(context.request({ type: "conversation.create", payload: {
+      projectId: userProjectId, title: "Reuse scratch", worktreePath: scratchChat.worktreePath!, activate: false,
+    } })).rejects.toThrow();
+  } finally {
+    await context.close();
+  }
+});
 
 it("re-enrolls existing chats at startup after the data directory moved", async () => {
   const root = mkdtempSync(join(tmpdir(), "inertia-scratch-moved-"));

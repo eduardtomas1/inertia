@@ -58,6 +58,75 @@ afterEach(() => {
 });
 
 describe("managed folder containment", () => {
+  it("creates the managed folder privately and turns hostile titles into plain folder names", async () => {
+    const scratch = new ScratchWorkspace(store, directory);
+    const project = await scratch.ensureProject();
+    if (process.platform !== "win32") expect(fs.statSync(project.path).mode & 0o777).toBe(0o700);
+    const titles = ["CON", "nul.txt", "COM1 ", "..", "a/b\\c", "trailing. . .", "Cafe\u0301 \u00e9t\u00e9", "\u65e5\u672c\u8a9e", "x".repeat(400)];
+    for (const title of titles) {
+      const chat = await scratch.createConversation(project.id, title, {});
+      const name = basename(chat.worktreePath!);
+      expect(chat.worktreePath!.slice(0, project.path.length)).toBe(project.path);
+      expect(name).toMatch(/^\d{4}-\d{2}-\d{2}-[a-z0-9-]{1,48}-[0-9a-f-]{36}$/u);
+    }
+  });
+
+  it("refuses a case-only identity collision without touching the first chat folder", async () => {
+    const scratch = new ScratchWorkspace(store, directory);
+    const project = await scratch.ensureProject();
+    const upper = await scratch.createConversation(project.id, "Same", { id: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" });
+    fs.writeFileSync(join(upper.worktreePath!, "keep.txt"), "keep");
+    const lower = scratch.createConversation(project.id, "Same", { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    if (fs.existsSync(join(project.path, basename(upper.worktreePath!).toLowerCase()))) await expect(lower).rejects.toThrow(/EEXIST/u);
+    else await expect(lower).resolves.toBeTruthy();
+    expect(fs.readFileSync(join(upper.worktreePath!, "keep.txt"), "utf8")).toBe("keep");
+  });
+
+  it("refuses a symlink already sitting where a chat folder would go", async () => {
+    const scratch = new ScratchWorkspace(store, directory);
+    const project = await scratch.ensureProject();
+    const outside = join(directory, "outside");
+    fs.mkdirSync(outside);
+    const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const day = new Date().toISOString().slice(0, 10);
+    fs.symlinkSync(outside, join(project.path, `${day}-chat-${id}`), "junction");
+    await expect(scratch.createConversation(project.id, "", { id })).rejects.toThrow(/EEXIST/u);
+    expect(fs.readdirSync(outside)).toEqual([]);
+    expect(store.shellSnapshot().conversations).toEqual([]);
+  });
+
+  it("refuses a managed folder replaced by a symlink", async () => {
+    const scratch = new ScratchWorkspace(store, directory);
+    const project = await scratch.ensureProject();
+    const outside = join(directory, "outside");
+    fs.mkdirSync(outside);
+    fs.renameSync(project.path, `${project.path}-old`);
+    fs.symlinkSync(outside, project.path, "junction");
+    await expect(scratch.createConversation(project.id, "x", {})).rejects.toThrow();
+    expect(fs.readdirSync(outside)).toEqual([]);
+  });
+
+  it("without Git, refuses a .git file or a dangling .git symlink in a parent folder", async () => {
+    vi.mocked(runGitInspection).mockRejectedValue(new GitError("git-unavailable", "missing"));
+    const markers = [
+      (parent: string) => fs.writeFileSync(join(parent, ".git"), "gitdir: /nowhere\n"),
+      (parent: string) => fs.symlinkSync(join(parent, "missing"), join(parent, ".git")),
+    ];
+    for (const make of markers) {
+      const parent = fs.mkdtempSync(join(directory, "parent-"));
+      make(parent);
+      const data = join(parent, "data");
+      fs.mkdirSync(data);
+      const nested = new RuntimeStore(join(data, "inertia.sqlite"), data);
+      try {
+        await expect(new ScratchWorkspace(nested, data).ensureProject()).rejects.toThrow("outside a Git repository");
+      } finally {
+        nested.close();
+      }
+    }
+    await expect(new ScratchWorkspace(store, directory).ensureProject()).resolves.toMatchObject({ workspaceKind: "scratch" });
+  });
+
   it("recognises a differently cased spelling of the managed folder", async () => {
     const project = await new ScratchWorkspace(store, directory).ensureProject();
     const upper = join(directory, "SCRATCH");

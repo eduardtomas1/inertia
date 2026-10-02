@@ -8,8 +8,15 @@ import { GitError } from "../git/types";
 import { runGitInspection } from "../git/runner";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
+import { WorkspacePathAuthorityError } from "../workspace-path-authority";
 
 export { isWithinScratchRoot } from "../scratch-root";
+
+export const SCRATCH_PROVISIONING_CHUNK = 100;
+
+const LEFTOVER_FOLDER = /^\d{4}-\d{2}-\d{2}-[a-z0-9-]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+const setupQueues = new WeakMap<RuntimeStore, Promise<void>>();
 
 const CHAT_IDENTITY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
@@ -65,9 +72,11 @@ export class ScratchWorkspace {
 
   private isDirectChild(root: string, folder: string): boolean {
     try {
+      const metadata = lstatSync(folder);
       return dirname(resolve(folder)) === resolve(root)
-        && !lstatSync(folder).isSymbolicLink()
-        && lstatSync(folder).isDirectory()
+        && !metadata.isSymbolicLink()
+        && metadata.isDirectory()
+        && metadata.dev === lstatSync(root).dev
         && realpathSync(folder) === join(realpathSync(root), basename(folder));
     } catch {
       return false;
@@ -91,16 +100,52 @@ export class ScratchWorkspace {
     }
   }
 
-  async ensureProject(): Promise<Project> {
+  private serialized<T>(work: () => Promise<T>): Promise<T> {
+    const previous = setupQueues.get(this.store) ?? Promise.resolve();
+    const next = previous.then(work, work);
+    setupQueues.set(this.store, next.then(() => undefined, () => undefined));
+    return next;
+  }
+
+  ensureProject(): Promise<Project> {
+    return this.serialized(() => this.ensureProjectNow());
+  }
+
+  private async ensureProjectNow(): Promise<Project> {
     const root = resolve(this.dataDirectory, "scratch");
-    const existing = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
-    const rootMissing = !pathExists(root);
-    if (existing && !rootMissing && normalizeIdentityPath(existing.path) === normalizeIdentityPath(root)) {
-      this.store.projectPath(existing.id);
-    } else {
-      try { mkdirSync(root, { mode: 0o700 }); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    let created: Stats | null = null;
+    try {
+      mkdirSync(root, { mode: 0o700 });
+      created = lstatSync(root);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+    try {
+      await this.checkRoot(root);
+    } catch (error) {
+      if (created) releaseClaimedFolder(root, created);
+      throw error;
+    }
+    const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
+    if (!current) return this.store.createProject("No project", root, { workspaceKind: "scratch", activate: false });
+    const bound = normalizeIdentityPath(current.path) === normalizeIdentityPath(root) && this.hasValidReceipt(current.id);
+    const project = bound ? current : this.store.rebindScratchProject(current.id, root);
+    this.store.projectPath(project.id);
+    this.adoptMovedChats(project.id, root);
+    return project;
+  }
+
+  private hasValidReceipt(projectId: string): boolean {
+    try {
+      this.store.projectPath(projectId);
+      return true;
+    } catch (error) {
+      if (error instanceof WorkspacePathAuthorityError) return false;
+      throw error;
+    }
+  }
+
+  private async checkRoot(root: string): Promise<void> {
     this.verifyRoot(root);
     const insideRepository = new RuntimeRequestError(
       "Chats without a project need an Inertia data folder outside a Git repository.",
@@ -117,40 +162,40 @@ export class ScratchWorkspace {
       if (!gitUnavailable && !(error instanceof GitError && error.code === "not-repository")) throw error;
     }
     this.verifyRoot(root);
-    const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
-    if (!current) return this.store.createProject("No project", root, { workspaceKind: "scratch", activate: false });
-    const moved = rootMissing || normalizeIdentityPath(current.path) !== normalizeIdentityPath(root);
-    const project = moved ? this.store.rebindScratchProject(current.id, root) : current;
-    this.store.projectPath(project.id);
-    this.adoptMovedChats(project.id, root);
-    return project;
   }
 
-  async reconcile(): Promise<void> {
+  reconcile(): Promise<void> {
+    return this.serialized(() => this.reconcileNow());
+  }
+
+  private async reconcileNow(): Promise<void> {
     const project = this.store.shellSnapshot().projects.find(({ workspaceKind }) => workspaceKind === "scratch");
     if (!project) return;
     const root = resolve(this.dataDirectory, "scratch");
     const chats = this.chatsOf(project.id);
-    const pending = chats.filter(({ worktreePath }) => worktreePath === null);
+    const hasPending = chats.some(({ worktreePath }) => worktreePath === null);
     const relocated = normalizeIdentityPath(project.path) !== normalizeIdentityPath(root)
       || chats.some(({ worktreePath }) => worktreePath !== null && dirname(resolve(worktreePath)) !== root);
-    if (pending.length === 0 && !(relocated && pathExists(root))) return;
-    const current = await this.ensureProject();
-    if (pending.length === 0) return;
+    if (!hasPending && !(relocated && pathExists(root))) return;
+    const current = await this.ensureProjectNow();
     const projectRoot = this.store.projectPath(current.id);
     const leftovers = new Map(readdirSync(projectRoot).map((name) => [name.slice(-36), name]));
-    for (const chat of pending) {
-      try {
-        this.materializeFolder(current.id, projectRoot, chat, leftovers.get(chat.id));
-      } catch {
-        continue;
+    const pending = this.chatsOf(current.id).filter(({ worktreePath }) => worktreePath === null);
+    for (let start = 0; start < pending.length; start += SCRATCH_PROVISIONING_CHUNK) {
+      if (start > 0) await new Promise<void>((resume) => setImmediate(resume));
+      for (const chat of pending.slice(start, start + SCRATCH_PROVISIONING_CHUNK)) {
+        if (this.store.conversation(chat.id).worktreePath !== null) continue;
+        try {
+          this.materializeFolder(current.id, projectRoot, chat, leftovers.get(chat.id));
+        } catch {
+          continue;
+        }
       }
     }
   }
 
   private materializeFolder(projectId: string, root: string, chat: Conversation, leftover: string | undefined): void {
-    const expected = `-${folderWords(chat.title)}-${chat.id}`;
-    if (leftover && /^\d{4}-\d{2}-\d{2}-/u.test(leftover) && leftover.endsWith(expected)) {
+    if (leftover && LEFTOVER_FOLDER.test(leftover) && leftover.endsWith(`-${chat.id}`)) {
       const folder = join(root, leftover);
       if (this.isDirectChild(root, folder) && readdirSync(folder).length === 0) {
         this.store.bindScratchFolder(chat.id, folder);

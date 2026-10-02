@@ -89,7 +89,7 @@ describe("chats without a project", () => {
     expect(readdirSync(outside)).toEqual([]);
   });
 
-  it("does not renew authority when the managed root or a chat folder is replaced", async () => {
+  it("re-checks a replaced managed folder but never renews a replaced chat folder", async () => {
     const project = await scratch.ensureProject();
     const chat = await scratch.createConversation(project.id, "New chat", {});
     renameSync(chat.worktreePath!, `${chat.worktreePath}-old`);
@@ -97,7 +97,9 @@ describe("chats without a project", () => {
     expect(() => store.conversationPath(chat.id)).toThrow("is missing or was replaced, so the chat can be read but not continued");
     renameSync(project.path, `${project.path}-old`);
     mkdirSync(project.path);
-    await expect(scratch.ensureProject()).rejects.toThrow("authorization expired");
+    await expect(scratch.ensureProject()).resolves.toMatchObject({ id: project.id });
+    expect(store.projectPath(project.id)).toBe(project.path);
+    expect(() => store.conversationPath(chat.id)).toThrow("is missing or was replaced, so the chat can be read but not continued");
   });
 
   it("explains that a chat whose folder is gone can be read but not continued", async () => {

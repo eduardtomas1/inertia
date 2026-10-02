@@ -10,6 +10,7 @@ import { isWithinScratchRoot, ScratchWorkspace } from "../../src/server/runtime/
 const hooks = vi.hoisted(() => ({
   beforeFolderMkdir: null as null | ((path: string) => void),
   aliases: new Map<string, string>(),
+  otherDevice: new Set<string>(),
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -32,7 +33,12 @@ vi.mock("node:fs", async (importOriginal) => {
   const statSync = ((path: fs.PathLike, options?: never) => (
     actual.statSync(hooks.aliases.get(String(path)) ?? path, options)
   )) as typeof actual.statSync;
-  const overrides = { mkdirSync, realpathSync, statSync };
+  const lstatSync = ((path: fs.PathLike, options?: never) => {
+    const stats = actual.lstatSync(path, options) as fs.Stats;
+    if (hooks.otherDevice.has(String(path))) stats.dev += 1;
+    return stats;
+  }) as typeof actual.lstatSync;
+  const overrides = { mkdirSync, realpathSync, statSync, lstatSync };
   return { ...actual, ...overrides, default: { ...actual, ...overrides } };
 });
 
@@ -50,6 +56,7 @@ beforeEach(() => {
   vi.mocked(runGitInspection).mockReset().mockRejectedValue(new GitError("not-repository", "No Git repository"));
   hooks.beforeFolderMkdir = null;
   hooks.aliases.clear();
+  hooks.otherDevice.clear();
 });
 
 afterEach(() => {
@@ -58,6 +65,23 @@ afterEach(() => {
 });
 
 describe("managed folder containment", () => {
+  it("does not adopt a chat folder on another device after the data directory moved", async () => {
+    const scratch = new ScratchWorkspace(store, directory);
+    const project = await scratch.ensureProject();
+    const chat = await scratch.createConversation(project.id, "Moved", {});
+    const moved = join(directory, "moved");
+    fs.mkdirSync(join(moved, "scratch"), { recursive: true, mode: 0o700 });
+    const candidate = join(moved, "scratch", basename(chat.worktreePath!));
+    fs.mkdirSync(candidate);
+    hooks.otherDevice.add(candidate);
+    await new ScratchWorkspace(store, moved).reconcile();
+    expect(store.projectPath(project.id)).toBe(join(moved, "scratch"));
+    expect(store.conversation(chat.id).worktreePath).toBe(chat.worktreePath);
+    hooks.otherDevice.clear();
+    await new ScratchWorkspace(store, moved).reconcile();
+    expect(store.conversation(chat.id).worktreePath).toBe(candidate);
+  });
+
   it("creates the managed folder privately and turns hostile titles into plain folder names", async () => {
     const scratch = new ScratchWorkspace(store, directory);
     const project = await scratch.ensureProject();

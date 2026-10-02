@@ -1,25 +1,49 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { lstatSync, mkdirSync, realpathSync, rmdirSync, statSync, type BigIntStats, type Stats } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Conversation, Project } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { NewConversationOptions } from "../persistence/types";
 import { GitError } from "../git/types";
-import { isContained } from "../git/paths";
 import { runGitInspection } from "../git/runner";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
 
-export function isWithinScratchRoot(dataDirectory: string, path: string): boolean {
-  let root: string;
-  let candidate: string;
+function isSameDirectory(path: string, identity: BigIntStats): boolean {
   try {
-    root = normalizeIdentityPath(realpathSync(join(dataDirectory, "scratch")));
-    candidate = normalizeIdentityPath(realpathSync(path));
+    const current = statSync(path, { bigint: true });
+    return current.dev === identity.dev && current.ino === identity.ino;
   } catch {
     return false;
   }
-  return isContained(root, candidate);
+}
+
+export function isWithinScratchRoot(dataDirectory: string, path: string): boolean {
+  let root: BigIntStats;
+  let candidate: string;
+  try {
+    root = statSync(join(dataDirectory, "scratch"), { bigint: true });
+    candidate = realpathSync.native(path);
+  } catch {
+    return false;
+  }
+  for (let current = candidate; ; current = dirname(current)) {
+    if (isSameDirectory(current, root)) return true;
+    if (dirname(current) === current) return false;
+  }
+}
+
+function releaseClaimedFolder(folder: string, claimed: Stats): void {
+  try {
+    const current = lstatSync(folder);
+    const sameFolder = !current.isSymbolicLink()
+      && current.ino === claimed.ino
+      && current.dev === claimed.dev
+      && current.birthtimeMs === claimed.birthtimeMs;
+    if (sameFolder) rmdirSync(folder);
+  } catch {
+    return;
+  }
 }
 
 function pathExists(path: string): boolean {
@@ -66,7 +90,9 @@ export class ScratchWorkspace {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     }
     this.verifyRoot(root);
-    const insideRepository = new RuntimeRequestError("Chats without a project need an Inertia data folder outside a Git repository.");
+    const insideRepository = new RuntimeRequestError(
+      "Chats without a project need an Inertia data folder outside a Git repository.",
+    );
     try {
       await runGitInspection(root, ["rev-parse", "--is-inside-work-tree"], {
         timeoutMs: 3_000, maxOutputBytes: 4_096,
@@ -99,27 +125,31 @@ export class ScratchWorkspace {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)) {
       throw new RuntimeRequestError("The chat identity is invalid.");
     }
+    const { folder, claimed } = this.claimFolder(project.id, root, id, title);
+    try {
+      return this.store.createConversation(project.id, title, { ...options, id, branch: null, worktreePath: folder });
+    } catch (error) {
+      releaseClaimedFolder(folder, claimed);
+      throw error;
+    }
+  }
+
+  private claimFolder(projectId: string, root: string, id: string, title: string): { folder: string; claimed: Stats } {
     const words = title.toLowerCase().match(/[a-z0-9]+/gu)?.slice(0, 5).join("-").slice(0, 48) || "chat";
     const folder = join(root, `${new Date().toISOString().slice(0, 10)}-${words}-${id}`);
     mkdirSync(folder, { mode: 0o700 });
     const claimed = lstatSync(folder);
     try {
       this.verifyRoot(root);
-      this.store.projectPath(project.id);
-      if (lstatSync(folder).isSymbolicLink() || realpathSync(folder) !== join(realpathSync(root), folder.slice(root.length + 1))) {
+      this.store.projectPath(projectId);
+      const realFolder = realpathSync(folder);
+      if (lstatSync(folder).isSymbolicLink() || realFolder !== join(realpathSync(root), basename(folder))) {
         throw new RuntimeRequestError("The chat folder changed before it could be authorized.");
       }
-      return this.store.createConversation(project.id, title, { ...options, id, branch: null, worktreePath: folder });
     } catch (error) {
-      try {
-        this.verifyRoot(root);
-        this.store.projectPath(project.id);
-        const current = lstatSync(folder);
-        if (!current.isSymbolicLink() && current.ino === claimed.ino && current.dev === claimed.dev && current.birthtimeMs === claimed.birthtimeMs) rmdirSync(folder);
-      } catch {
-        throw error;
-      }
+      releaseClaimedFolder(folder, claimed);
       throw error;
     }
+    return { folder, claimed };
   }
 }

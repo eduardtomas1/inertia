@@ -3,7 +3,7 @@ import { deleteCheckpoints } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -84,7 +84,9 @@ it("refuses project management commands that would remove, rename or duplicate t
     const scratchRoot = join(root, "data", "scratch");
     await expect(mutate({ type: "project.remove", payload: { projectId } })).rejects.toThrow("Delete chats without a project one at a time.");
     await expect(mutate({ type: "project.update", payload: { projectId, name: "Renamed" } })).rejects.toThrow("Chats without a project have no project settings.");
-    for (const path of [scratchRoot, folder]) {
+    const cased = join(root, "data", "SCRATCH");
+    const spellings = existsSync(cased) ? [cased, join(cased, basename(folder).toUpperCase())] : [];
+    for (const path of [scratchRoot, folder, ...spellings]) {
       await expect(request({ type: "project.create", payload: { name: "Duplicate", path } })).rejects.toThrow("Inertia manages this folder for chats without a project.");
     }
     const after = await request({ type: "conversation.create", payload: { projectId, title: "Still works", activate: false } });

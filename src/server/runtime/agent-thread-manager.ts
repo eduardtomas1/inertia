@@ -855,6 +855,7 @@ export class AgentThreadManager {
         throw new Error("A managed chat cannot exceed its parent chat's access mode.");
       }
       const workspace = input.workspace ?? { kind: "project" as const };
+      this.assertSharableWorkspace(current, workspace.kind);
       if (workspace.kind === "reuse-current" && !current.worktreePath) {
         throw new Error("The parent chat does not own an attached worktree to reuse.");
       }
@@ -896,6 +897,12 @@ export class AgentThreadManager {
     }
   }
 
+  private assertSharableWorkspace(current: Conversation, kind: z.infer<typeof workspaceSchema>["kind"]): void {
+    if (kind === "reuse-current" && this.dependencies.store.project(current.projectId).workspaceKind === "scratch") {
+      throw new Error("A chat without a project cannot share its folder with another chat.");
+    }
+  }
+
   private approvalDetail(
     source: AgentThreadSource,
     toolName: AgentThreadMutationTool,
@@ -906,12 +913,23 @@ export class AgentThreadManager {
       const input = createSchema.parse(args);
       const selection = this.resolveSelection(current, input.route);
       const workspace = input.workspace ?? { kind: "project" as const };
+      const summary = [
+        providerIdForHarness(selection.harnessId) ?? selection.harnessId,
+        selection.modelId,
+        input.interactionMode ?? current.interactionMode,
+        input.accessMode ?? current.accessMode,
+        workspace.kind,
+      ].join(" · ");
+      const title = `Create and start “${input.title}”`;
+      if (this.dependencies.store.project(current.projectId).workspaceKind === "scratch") {
+        return { title, detail: `${summary} · in its own new folder`, permissionRoots: [] };
+      }
       const sourcePath = workspace.kind === "reuse-current"
         ? this.dependencies.store.conversationPath(current.id)
         : this.dependencies.store.projectPath(current.projectId);
       return {
-        title: `Create and start “${input.title}”`,
-        detail: `${providerIdForHarness(selection.harnessId) ?? selection.harnessId} · ${selection.modelId} · ${input.interactionMode ?? current.interactionMode} · ${input.accessMode ?? current.accessMode} · ${workspace.kind}`,
+        title,
+        detail: summary,
         permissionRoots: [{ path: sourcePath, access: "write" }],
       };
     }
@@ -1013,6 +1031,7 @@ export class AgentThreadManager {
       throw new Error("A managed chat cannot exceed its parent chat's access mode.");
     }
     const workspace = input.workspace ?? { kind: "project" as const };
+    this.assertSharableWorkspace(current, workspace.kind);
     if (
       workspace.kind === "reuse-current"
       && workspace.sourceBranch

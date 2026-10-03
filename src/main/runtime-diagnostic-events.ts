@@ -57,7 +57,6 @@ interface Presentation {
 const RUNTIME_STDERR_PRESENTATION = {
   "database-backup-failed": { severity: "error", title: "A scheduled database backup failed" },
   "database-migration-failed": { severity: "error", title: "A database migration failed and was rolled back" },
-  "database-migration-succeeded": { severity: "info", title: "The database was migrated" },
   "git-scan-cleanup-failed": { severity: "warning", title: "Git scan cleanup failed after a timeout" },
   "review-summary-malformed": { severity: "warning", title: "A saved review summary could not be read" },
   "settlement-snapshot-unpublished": { severity: "warning", title: "A finished turn could not be published" },

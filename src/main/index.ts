@@ -86,6 +86,8 @@ import {
 } from "./credential-vault.js";
 import type { RuntimeDiagnostics } from "./runtime-diagnostics.js";
 import { openRuntimeDiagnostics, registerDiagnosticsMainIpc } from "./diagnostics-main-ipc.js";
+import type { MainFailureCode } from "./runtime-diagnostic-events.js";
+import { attachRuntimeStderr, RuntimeStderrJournal } from "./runtime-stderr-journal.js";
 import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
@@ -354,6 +356,11 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
 
 function diagnostics(): RuntimeDiagnostics {
   return runtimeDiagnostics ??= openRuntimeDiagnostics(app.getPath("userData"));
+}
+
+function reportMainFailure(code: MainFailureCode, message: string, error: unknown): void {
+  console.error(message, error);
+  runtimeDiagnostics?.record("main.failure", { code });
 }
 
 function registerIpcHandlers(): void {
@@ -784,7 +791,10 @@ async function createMainWindow(): Promise<void> {
   window.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces();
   });
-  window.webContents.on("render-process-gone", () => previewBroker.releaseSurfaces());
+  window.webContents.on("render-process-gone", (_event, details) => {
+    previewBroker.releaseSurfaces();
+    runtimeDiagnostics?.record("renderer.crash", { reason: details.reason, exitCode: details.exitCode });
+  });
   hardenDesktopSession(window.webContents.session);
 
   window.once("ready-to-show", () => window.show());
@@ -848,9 +858,9 @@ function runPrivilegedCleanup(): Promise<boolean> {
         console.error("Failed to stop the local runtime", error);
       },
       onPrivateConnectStopped: () => { if (privateConnectHost === privateConnectHostToStop) privateConnectHost = null; },
-      onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+      onPrivateConnectError: (error) => reportMainFailure("private-connect-stop-failed", "Failed to stop Private Connect cleanly", error),
       disposeTemporaryAttachments: () => testCleanupOwners.observe("temporaryAttachments", disposeImportedAttachments),
-      onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+      onTemporaryAttachmentError: (error) => reportMainFailure("temporary-attachment-cleanup-failed", "Failed to remove temporary attachments", error),
       onUnconfirmedRuntimeExit: () => console.warn("Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them."),
       closeDurableAttachments: async () => await testCleanupOwners.observe("durableAttachments", () => closeConversationAttachmentAccess(retainedAttachments)),
       onDurableAttachmentsClosed: () => { if (conversationAttachments === retainedAttachments) conversationAttachments = null; },
@@ -913,7 +923,7 @@ async function bootstrap(): Promise<void> {
       app.getPath("userData")),
     finishNormalShutdown: finishQuitAfterCleanup,
     onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
-    reportError: (error) => console.error("Failed to prepare the application update", error),
+    reportError: (error) => reportMainFailure("app-update-preparation-failed", "Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
@@ -1052,15 +1062,16 @@ async function bootstrap(): Promise<void> {
         ),
       ],
     },
-    spawn: () => utilityProcess.fork(
-      fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),
-      [],
-      {
+    spawn: () => {
+      const child = utilityProcess.fork(fileURLToPath(new URL("./runtime-worker.js", import.meta.url)), [], {
         cwd: app.getPath("home"), env: runtimeBootstrap.runtimeProcessEnvironment(),
-        stdio: "ignore",
-        serviceName: "Inertia Runtime",
-      },
-    ),
+        stdio: ["ignore", "ignore", "pipe"], serviceName: "Inertia Runtime",
+      });
+      attachRuntimeStderr(child.stderr, new RuntimeStderrJournal({
+        record: (code, count) => runtimeDiagnostics?.record("runtime.stderr", { code, count }),
+      }));
+      return child;
+    },
     onMascotStatus: (status, chats, focus, counts, request) => mascotMain?.observe(status, chats, focus, counts, request),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
@@ -1167,12 +1178,12 @@ void startApplicationWithUpdateHandoff({
   finishNormalShutdown: finishQuitAfterCleanup,
   onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
   reportSingletonContention: linuxLifecycleNotices.reportSingletonContention,
-  reportCleanupFailure: (error) => console.error("Failed to finish privileged shutdown", error),
+  reportCleanupFailure: (error) => reportMainFailure("privileged-shutdown-failed", "Failed to finish privileged shutdown", error),
   validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
   bootstrap,
   awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),
   cleanupFailedCandidate: runPrivilegedCleanup,
-  reportCandidateFailure: (message, error) => console.error(message, error),
+  reportCandidateFailure: (message, error) => reportMainFailure("app-update-candidate-failed", message, error),
 }).catch((error: unknown) => handleStartupFailure(error, {
   environment: process.env,
   recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {

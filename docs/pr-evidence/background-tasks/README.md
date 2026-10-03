@@ -165,5 +165,5 @@ against a build of `origin/main` (`2ef3c2a4`) on this machine. The workbench
 first load grows by 1,541 bytes and its cap is main's cap plus exactly that.
 The detached chat first load (-4,308), shared core (-1,247), entry stylesheet
 (-6,793) and transcript chunk (-5,741) are smaller than on main and keep
-main's caps. The Background tasks surface itself (17,434 bytes, capped at
+main's caps. The Background tasks surface itself (19,059 bytes, capped at
 exactly that) loads on demand.

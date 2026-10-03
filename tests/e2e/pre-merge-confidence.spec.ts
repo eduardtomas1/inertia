@@ -197,6 +197,20 @@ test("keeps exact-head green and blocking evidence legible across real Electron 
     contentType: "image/png",
   });
 
+  await app.resizeWindow(1000, 800);
+  const leftCentreOwner = await dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const owner = document.elementFromPoint(
+      bounds.left + 2,
+      bounds.top + bounds.height / 2,
+    );
+    return {
+      insideDialog: element.contains(owner),
+      owner: owner ? `${owner.tagName.toLowerCase()}.${owner.className}` : null,
+    };
+  });
+  expect(leftCentreOwner.insideDialog, leftCentreOwner.owner ?? "no element").toBe(true);
+
   await app.resizeWindow(760, 800);
   await dialog.locator(".pre-merge-scroll").evaluate((element) => {
     element.scrollTop = element.scrollHeight;

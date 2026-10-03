@@ -9,6 +9,7 @@ import {
 import clsx from "clsx";
 import type { SubagentTrace } from "@shared/contracts";
 import { activeWorkIdentityLabel } from "../../utils/finalAnswerIdentity";
+import { sameTurnAgentStatus } from "../../utils/turnAgentStatus";
 import type { ResponseTurn } from "../../utils/responseTimeline";
 import {
   AgentExecutionLayer,
@@ -182,7 +183,7 @@ export function sameTurnTimelineProps(
   const right = next.props;
   return previous.turn === next.turn
     && previous.previousArtifactTurnId === next.previousArtifactTurnId
-    && previous.subagents === next.subagents
+    && sameTurnAgentStatus(previous.subagents, next.subagents)
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle
     && left.providerIdentityLabels === right.providerIdentityLabels
@@ -202,8 +203,7 @@ export function sameTurnTimelineProps(
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
-    && left.onFollowUpSubagent === right.onFollowUpSubagent
-    && left.onStopSubagent === right.onStopSubagent
+    && left.onOpenSurface === right.onOpenSurface
     && left.turns === right.turns
     && left.contextPackets === right.contextPackets
     && left.omittedTurnIds === right.omittedTurnIds

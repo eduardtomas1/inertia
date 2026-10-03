@@ -226,14 +226,11 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
     // grace. Measure idle motion after that one-time startup work completes.
     await expect.poll(() => initialBackupReady, { timeout: 60_000 }).toBe(true);
     if (mature) {
-      await expect(page.locator(".subagent-elapsed")).toHaveCount(6);
-      // Exercise activation from follow-latest: claiming history on pointer
-      // press used to shift the summary before release, losing Linux clicks.
       const jump = page.getByRole("button", { name: "Jump to latest", exact: true });
       if (await jump.isVisible()) await jump.click();
       await expect(jump).toBeHidden();
-      await page.locator(".subagent-disclosure summary").click();
-      await expect(page.locator(".subagent-disclosure")).toHaveAttribute("open", "");
+      await page.getByRole("button", { name: "Open Background tasks, 6 agents working" }).click();
+      await expect(page.getByRole("region", { name: "Background tasks" }).locator(".subagent-elapsed")).toHaveCount(6);
     }
     await expect(page.locator(".composer")).toHaveAttribute("data-maximum-reasoning", "true");
     await page.emulateMedia({ reducedMotion: "no-preference" });

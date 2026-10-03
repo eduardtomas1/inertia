@@ -71,6 +71,7 @@ export class RecoveryRepository {
       UPDATE subagent_traces
       SET status = 'lost',
           is_live = 0,
+          activity = NULL,
           sequence = sequence + 1,
           updated_at = CASE WHEN updated_at > ? THEN updated_at ELSE ? END
       WHERE is_live = 1

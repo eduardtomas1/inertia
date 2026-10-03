@@ -304,15 +304,25 @@ describe("Cursor ACP harness", { concurrent: false }, () => {
     })).toMatchObject({
       toolCallId: "task-tool",
       subagentType: "provider-auditor",
+      model: "cursor-model",
       durationMs: 42,
     });
+    for (const durationMs of [-1, 1.5, "42", Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => parseCursorTaskNotification({
+        toolCallId: "task-tool",
+        description: "Explore",
+        prompt: "Inspect",
+        subagentType: "explore",
+        durationMs,
+      })).toThrow("durationMs");
+    }
     expect(() => parseCursorTaskNotification({
       toolCallId: "task-tool",
       description: "Explore",
       prompt: "Inspect",
       subagentType: "explore",
-      durationMs: -1,
-    })).toThrow("durationMs");
+      model: "",
+    })).toThrow("model");
 
     expect(parseCursorGenerateImageNotification({
       toolCallId: "image-tool",
@@ -817,6 +827,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.id === 101) return send({ jsonrpc: "2.0", id: 102, method: "cursor/create_plan", params: { toolCallId: "tool-3", plan: "Inspect then implement", todos: [{ id: "todo-1", content: "Inspect", status: "in_progress" }] } });
   if (message.id === 102) {
     send({ jsonrpc: "2.0", method: "cursor/task", params: { toolCallId: "tool-subagent", description: "Explore provider events", prompt: "Find missing lifecycle events", subagentType: "explore", model: "model-a", agentId: "agent-1", durationMs: 42 } });
+    send({ jsonrpc: "2.0", method: "cursor/task", params: { toolCallId: "tool-subagent-long", description: "Explore a long route", prompt: "Inspect", subagentType: "explore", model: "m".repeat(300), durationMs: 31 * 24 * 60 * 60 * 1000 + 1 } });
+    send({ jsonrpc: "2.0", method: "cursor/task", params: { toolCallId: "tool-subagent-bare", description: "Explore without metadata", prompt: "Inspect", subagentType: "explore", model: 7 } });
     send({ jsonrpc: "2.0", method: "cursor/generate_image", params: { toolCallId: "tool-image", description: "Provider architecture", filePath: ${JSON.stringify(join(root, "generated.png"))}, referenceImagePaths: [${JSON.stringify(imagePath)}] } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "stale-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stale" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking" } } } });
@@ -1003,13 +1015,40 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       label: "Generated image: Provider architecture",
       detail: `Output: ${join("<workspace>", "generated.png")}\nReferences: ${join("<workspace>", "reference.png")}`,
     }));
-    expect(subagents).toEqual([expect.objectContaining({
-      providerTaskId: "tool-subagent",
-      providerAgentId: "agent-1",
-      status: "completed",
-      description: "Explore provider events",
-      progress: "Completed in 42 ms",
-    })]);
+    expect(subagents).toEqual([
+      expect.objectContaining({
+        sequence: 1,
+        providerTaskId: "tool-subagent",
+        providerAgentId: "agent-1",
+        providerName: null,
+        status: "completed",
+        description: "Explore provider events",
+        progress: null,
+        model: "model-a",
+        durationMs: 42,
+      }),
+      expect.objectContaining({
+        sequence: 2,
+        providerTaskId: "tool-subagent-long",
+        providerName: null,
+        progress: null,
+        model: "m".repeat(200),
+      }),
+      expect.objectContaining({
+        sequence: 3,
+        providerTaskId: "tool-subagent-bare",
+        providerName: null,
+        progress: null,
+      }),
+    ]);
+    for (const subagent of subagents) {
+      expect(subagent).not.toHaveProperty("usage");
+      expect(subagent).not.toHaveProperty("activity");
+      expect(subagent).not.toHaveProperty("toolUseCount");
+    }
+    expect(subagents[1]).not.toHaveProperty("durationMs");
+    expect(subagents[2]).not.toHaveProperty("durationMs");
+    expect(subagents[2]).not.toHaveProperty("model");
     expect(usage).toEqual([321, 321]);
     expect(usageDetails.at(-1)).toMatchObject({
       usedTokens: 321,

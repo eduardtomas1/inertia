@@ -102,7 +102,9 @@ server.listen(port, "127.0.0.1", () => {
 
 describe("OpenCode reads of this chat's own attachments", () => {
   const roots: string[] = [];
+  const managers: ProviderManager[] = [];
   afterEach(async () => {
+    await Promise.all(managers.splice(0).map(async (manager) => await manager.disposeAll()));
     await Promise.all(roots.splice(0).map(async (root) => await removePortableFixture(root)));
   });
 
@@ -128,6 +130,7 @@ describe("OpenCode reads of this chat's own attachments", () => {
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
+    managers.push(manager);
     const approvals: string[] = [];
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",

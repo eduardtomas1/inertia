@@ -22,6 +22,7 @@ import {
   type ModelSelection,
   type Project,
   type ProviderId,
+  type SubagentTaskUsage,
   type SubagentTrace,
   type ThreadUsageSnapshot,
   type WorkspaceRun,
@@ -57,7 +58,13 @@ import {
   resolveHarnessBackendCompatibility,
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
-import { providerTimestamp, validateProviderUsage } from "../provider/usage-values";
+import { providerTimestamp, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
+import {
+  boundedSubagentCount,
+  boundedSubagentLabel,
+  MAX_SUBAGENT_DURATION_MS,
+  MAX_SUBAGENT_TOOL_USE_COUNT,
+} from "../provider/subagent-trace";
 import { parseWorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 import type {
   ActivityRow,
@@ -791,10 +798,24 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     description: row.description,
     progress: row.progress,
     result: row.result,
+    model: boundedSubagentLabel(row.model),
+    activity: boundedSubagentLabel(row.activity),
+    usage: subagentTaskUsageFromJson(row.usage_json),
+    toolUseCount: boundedSubagentCount(row.tool_use_count, MAX_SUBAGENT_TOOL_USE_COUNT),
+    durationMs: boundedSubagentCount(row.duration_ms, MAX_SUBAGENT_DURATION_MS),
     sequence: row.sequence,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function subagentTaskUsageFromJson(value: string | null): SubagentTaskUsage | null {
+  if (value === null) return null;
+  try {
+    return validateSubagentTaskUsage(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 export function agentGoalFromRow(row: AgentGoalRow): AgentGoal {

@@ -63,7 +63,7 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 1_541,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -90,6 +90,7 @@ const budgets = {
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128,
+  deferredBackgroundTasksJavaScript: 18 * kibibyte + 627,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -664,6 +665,12 @@ if (entryJavaScriptClosure.has(attachmentStorageSettingsEntry) || mainWorkbenchJ
   throw new Error("Attachment storage settings must remain deferred from the initial chat routes");
 }
 const deferredAttachmentStorageSettingsJavaScriptBytes = await assetBytes(`assets/${attachmentStorageSettingsEntry}`);
+const backgroundTasksEntry = assetNames.find((name) => /^tasks-.*\.js$/u.test(name));
+if (!backgroundTasksEntry) throw new Error("Missing deferred Background tasks surface");
+if (entryJavaScriptClosure.has(backgroundTasksEntry) || mainWorkbenchJavaScriptClosure.has(backgroundTasksEntry) || detachedChatJavaScriptClosure.has(backgroundTasksEntry)) {
+  throw new Error("Background tasks must remain deferred from the initial chat routes");
+}
+const deferredBackgroundTasksJavaScriptBytes = await assetBytes(`assets/${backgroundTasksEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
@@ -673,6 +680,7 @@ const coreJavaScriptBytes =
   - deferredSnapshotSettingsJavaScriptBytes
   - deferredSnapshotControlJavaScriptBytes
   - deferredAttachmentStorageSettingsJavaScriptBytes
+  - deferredBackgroundTasksJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
@@ -713,6 +721,7 @@ const measurements = {
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
   deferredSnapshotControlJavaScript: deferredSnapshotControlJavaScriptBytes,
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
+  deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

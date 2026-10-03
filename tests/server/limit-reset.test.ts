@@ -259,6 +259,20 @@ describe("quota reset actions", () => {
     expect(vi.mocked(dependencies.readAccount).mock.calls.length - reads).toBe(1);
   });
 
+  it("says whether the chat's latest failed turn hit a usage limit, with or without an offer", async () => {
+    vi.mocked(dependencies.readAccount).mockResolvedValueOnce(null);
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, plan: null, usageLimited: true });
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: { failedTurnId }, usageLimited: true });
+    await schedule();
+    expect(await scheduler.get(conversationId)).toMatchObject({ plan: { state: "waiting" }, usageLimited: true });
+    scheduler.cancel(conversationId, store.limitResets.get(conversationId)!.id);
+    vi.setSystemTime(instant + 1_000);
+    const turn = begin(); failedTurnId = turn.id;
+    store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
+    store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
+    expect(await scheduler.get(conversationId)).toMatchObject({ offer: null, usageLimited: false });
+  });
+
   it("reports a pending plan from the database without another account read", async () => {
     await schedule();
     const reads = vi.mocked(dependencies.readAccount).mock.calls.length;
@@ -520,7 +534,11 @@ describe("schema 87 usage-limit tags", () => {
     const path = join(directory, "inertia.sqlite");
     store.close();
     const raw = new Database(path);
-    raw.exec("DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version = 87;");
+    raw.exec("DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version >= 87;");
+    for (const column of ["model", "activity", "usage_json", "tool_use_count", "duration_ms"]) {
+      raw.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
+    }
+    raw.exec("DROP INDEX workspace_runs_conversation_started_idx");
     raw.close();
     store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
     dependencies.store = store;
@@ -532,7 +550,7 @@ describe("schema 87 usage-limit tags", () => {
     const check = new Database(path, { readonly: true });
     try {
       expect(check.prepare("SELECT count(*) AS n FROM usage_limited_turns").get()).toEqual({ n: 0 });
-      expect(check.prepare("SELECT max(version) AS v FROM schema_migrations").get()).toEqual({ v: 87 });
+      expect(check.prepare("SELECT max(version) AS v FROM schema_migrations").get()).toEqual({ v: 88 });
     } finally { check.close(); }
   });
   it("cannot tag a turn that does not exist", () => {

@@ -1,17 +1,11 @@
+export { formatCompact } from "./compactFormat";
+
 const countFormatter = new Intl.NumberFormat("en", {
   maximumFractionDigits: 0,
-});
-const compactFormatter = new Intl.NumberFormat("en", {
-  notation: "compact",
-  maximumFractionDigits: 2,
 });
 
 export function formatCount(value: number): string {
   return countFormatter.format(value);
-}
-
-export function formatCompact(value: number): string {
-  return compactFormatter.format(value);
 }
 
 export function formatDuration(milliseconds: number): string {

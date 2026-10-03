@@ -241,6 +241,11 @@ export interface SubagentTraceRow {
   description: string | null;
   progress: string | null;
   result: string | null;
+  model: string | null;
+  activity: string | null;
+  usage_json: string | null;
+  tool_use_count: number | null;
+  duration_ms: number | null;
   sequence: number;
   created_at: string;
   updated_at: string;

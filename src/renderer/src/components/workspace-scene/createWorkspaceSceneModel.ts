@@ -1,3 +1,4 @@
+import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
@@ -49,8 +50,8 @@ import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
-  isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
+import { activeBackgroundTaskCount } from "../../utils/backgroundTaskRuns";
 import { buildWorkspaceSurfaceSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
@@ -268,6 +269,7 @@ export interface WorkspaceSceneActions {
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
+  loadBackgroundTasks?: ConversationBackgroundTasksLoader;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -538,7 +540,13 @@ export function createWorkspaceSceneModel({
   const canGuideParent = (trace: SubagentTrace): boolean =>
     Boolean(conversationIsRunning
       && canFollowUpSubagentTrace(trace, projection.turns));
-  const liveAgentCount = projection.subagents.filter(isLiveSubagentTrace).length;
+  const workspaceRuns = connection.snapshot?.runs ?? [];
+  const activeBackgroundTasks = activeBackgroundTaskCount(
+    projection.subagents,
+    workspaceRuns,
+    persistedConversation?.id ?? null,
+    projection.turns,
+  );
   const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
     try {
       await actions.stopSubagent(trace);
@@ -788,8 +796,7 @@ export function createWorkspaceSceneModel({
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
       onRevertCheckpoint: actions.revertCheckpoint,
-      onFollowUpSubagent: actions.followUpSubagent,
-      onStopSubagent: actions.stopSubagent,
+      onOpenSurface: project && !globalChatActive ? layout.openSurface : undefined,
       onStop: actions.stopAgent,
     },
     checkoutBranch: project && !globalChatActive ? {
@@ -845,7 +852,7 @@ export function createWorkspaceSceneModel({
         unavailable: unavailableSurfaces,
         presentation: stackedTools ? "stacked" : sheetPanel ? "sheet" : "inline",
         visible: toolsVisible,
-        liveAgentCount,
+        activeBackgroundTaskCount: activeBackgroundTasks,
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: currentWorkflow?.goals.some(({ status }) =>
@@ -870,6 +877,13 @@ export function createWorkspaceSceneModel({
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,
         turns: projection.turns,
+        runs: workspaceRuns,
+        conversationId: persistedConversation?.id ?? null,
+        loadTasks: actions.loadBackgroundTasks && persistedConversation
+          ? (before) => actions.loadBackgroundTasks!(persistedConversation.id, before)
+          : undefined,
+        onStopCommand: activityActions.stopWorkspaceRun,
+        onDismissCommand: activityActions.dismissActivity,
         canFollowUpSubagent: canGuideParent,
         onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {

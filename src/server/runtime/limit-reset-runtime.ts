@@ -51,6 +51,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
         dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: {
           kind: "conversation.limit-reset", conversationId: command.payload.conversationId,
           offer: null, plan: plan ? publicLimitResetPlan(plan) : null,
+          usageLimited: scheduler.usageLimited(command.payload.conversationId),
         } });
         break;
       }

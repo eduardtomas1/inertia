@@ -259,6 +259,17 @@ export type SubagentTraceStatus =
   | "unknown"
   | "lost";
 
+export interface SubagentTaskUsage {
+  totalTokens: number | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
+  outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  contextTokens: number | null;
+  maxContextTokens: number | null;
+}
+
 /**
  * A bounded, provider-authored projection of one delegated agent. Provider
  * task and agent identities remain separate because neither transport
@@ -290,6 +301,11 @@ export interface SubagentTrace {
   description: string | null;
   progress: string | null;
   result: string | null;
+  model: string | null;
+  activity: string | null;
+  usage: SubagentTaskUsage | null;
+  toolUseCount: number | null;
+  durationMs: number | null;
   /** Monotonic within the provider run; stale/replayed patches are ignored. */
   sequence: number;
   createdAt: string;

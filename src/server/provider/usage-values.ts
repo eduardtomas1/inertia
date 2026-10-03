@@ -1,4 +1,4 @@
-import type { ThreadUsageSnapshot } from "../../shared/contracts";
+import type { SubagentTaskUsage, ThreadUsageSnapshot } from "../../shared/contracts";
 
 export function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -91,4 +91,44 @@ export function validateProviderUsage(value: unknown): ProviderUsage {
     reasoningOutputTokens: tokenCount(usage.reasoningOutputTokens),
     compactsAutomatically: typeof usage.compactsAutomatically === "boolean" ? usage.compactsAutomatically : null,
   };
+}
+
+const SUBAGENT_TASK_USAGE_KEYS = [
+  "totalTokens",
+  "inputTokens",
+  "cachedInputTokens",
+  "cacheWriteInputTokens",
+  "outputTokens",
+  "reasoningOutputTokens",
+  "contextTokens",
+  "maxContextTokens",
+] as const satisfies readonly (keyof SubagentTaskUsage)[];
+
+export function validateSubagentTaskUsage(value: unknown): SubagentTaskUsage | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const usage = value as Partial<Record<keyof SubagentTaskUsage, unknown>>;
+  const maxContextTokens = tokenCount(usage.maxContextTokens, false);
+  const reportedContextTokens = tokenCount(usage.contextTokens);
+  const validated: SubagentTaskUsage = {
+    totalTokens: tokenCount(usage.totalTokens),
+    inputTokens: tokenCount(usage.inputTokens),
+    cachedInputTokens: tokenCount(usage.cachedInputTokens),
+    cacheWriteInputTokens: tokenCount(usage.cacheWriteInputTokens),
+    outputTokens: tokenCount(usage.outputTokens),
+    reasoningOutputTokens: tokenCount(usage.reasoningOutputTokens),
+    contextTokens: maxContextTokens !== null && reportedContextTokens !== null && reportedContextTokens > maxContextTokens
+      ? null
+      : reportedContextTokens,
+    maxContextTokens,
+  };
+  return SUBAGENT_TASK_USAGE_KEYS.some((key) => validated[key] !== null) ? validated : null;
+}
+
+export function mergeSubagentTaskUsage(
+  current: SubagentTaskUsage | null,
+  next: SubagentTaskUsage | null,
+): SubagentTaskUsage | null {
+  if (!current || !next) return validateSubagentTaskUsage(next ?? current);
+  return validateSubagentTaskUsage(Object.fromEntries(SUBAGENT_TASK_USAGE_KEYS.map((key) =>
+    [key, next[key] ?? current[key]])));
 }

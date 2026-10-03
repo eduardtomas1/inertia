@@ -1,6 +1,7 @@
 import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
 import { conversationHistoryRequestSchema } from "../../conversation-history";
+import { backgroundTaskCursorSchema } from "../../background-tasks";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
@@ -260,6 +261,11 @@ export const appCommandSchemas = [
       payload: z.object({ conversationId: z.string().uuid(), history: conversationHistoryRequestSchema.optional() }).strict(),
     })
     .strict(),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.background-tasks.get"),
+    payload: z.strictObject({ conversationId: z.uuid(), before: backgroundTaskCursorSchema.nullable() }),
+  }),
   z
     .object({
       ...requestBase,

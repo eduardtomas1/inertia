@@ -181,7 +181,6 @@
   animation-delay: calc(var(--motion-index, 0) * 80ms);
 }
 
-.subagent-disclosure li,
 .goal-panel-subagents > li {
   animation: beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1) both;
   animation-delay: calc(var(--motion-index, 0) * 80ms);
@@ -192,10 +191,6 @@
 .subagent-status-mark[data-live="true"]::after {
   animation: beautiful-spin 1.1s linear infinite;
 }
-.subagent-disclosure[data-active="true"] > summary > svg:first-child {
-  animation: beautiful-subagent-breathe 1.4s ease-in-out infinite;
-}
-.subagent-state-pill,
 .goal-panel-subagent-state {
   animation: beautiful-fade-in 200ms ease-out both;
 }
@@ -212,45 +207,8 @@
 .subagent-detail-reveal .subagent-trace-details > div:nth-child(5) { --motion-index: 4; }
 .subagent-detail-reveal .subagent-trace-details > div:nth-child(n + 6) { --motion-index: 5; }
 @keyframes beautiful-task-row-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes beautiful-subagent-breathe { 50% { opacity: .48; } }
 
 /* Visual task grammar for live agent actions and delegated work. */
-.subagent-disclosure[data-active="true"] > summary > svg:first-child { color: var(--accent-strong); }
-.subagent-disclosure ol { gap: 0; margin-top: 3px; }
-.subagent-disclosure li {
-  grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; min-height: 28px; padding: 3px 6px;
-  border: 0; border-radius: 7px; background: transparent; box-shadow: none;
-  transition: background-color 150ms ease;
-}
-.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) { background: var(--surface-hover); }
-.subagent-disclosure li::before { top: -2px; left: -9px; width: 8px; }
-.subagent-disclosure .subagent-status-mark { width: 16px; height: 16px; flex-basis: 16px; }
-.subagent-disclosure .subagent-status-mark::before { width: 9px; height: 9px; }
-.subagent-disclosure .subagent-copy { min-height: 0; }
-.subagent-disclosure .subagent-copy-heading { gap: 7px; align-items: baseline; }
-.subagent-disclosure .subagent-copy-heading strong { flex: 0 1 auto; max-width: 42%; }
-.subagent-disclosure .subagent-copy-heading > small {
-  display: block; flex: 1 1 auto; min-width: 0; padding: 0; border: 0; overflow: hidden;
-  color: var(--text-muted); line-height: inherit; text-overflow: ellipsis; white-space: nowrap;
-}
-.subagent-disclosure .subagent-copy-heading > .subagent-relationship { flex: 0 0 auto; }
-.subagent-lane-state { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
-.subagent-lane-state .subagent-route { color: var(--text-muted); font-size: var(--ui-font-micro); }
-.subagent-disclosure ol > li[data-status] .subagent-state-pill { min-height: 0; padding: 0; background: transparent; }
-.subagent-disclosure .subagent-lane-state { transition: opacity 120ms ease; }
-.subagent-disclosure .subagent-row-actions {
-  position: absolute; top: 3px; right: 4px; height: 22px; padding-left: 18px;
-  background: linear-gradient(to right, transparent, var(--surface-hover) 18px);
-  opacity: 0; transition: opacity 120ms ease;
-}
-.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }
-.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-lane-state { opacity: 0; }
-.subagent-disclosure .subagent-row-actions button { height: 20px; padding: 0 6px; background: var(--surface-hover); }
-@media (hover: none) {
-  .subagent-disclosure li { grid-template-columns: 16px minmax(0, 1fr) auto auto; }
-  .subagent-disclosure .subagent-row-actions { position: static; padding-left: 0; background: none; opacity: 1; pointer-events: auto; }
-  .subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-lane-state { opacity: 1; }
-}
 .subagent-status-mark {
   position: relative; display: inline-grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center;
   border-radius: 50%; color: var(--text-muted); background: color-mix(in srgb, var(--surface-muted) 86%, transparent);
@@ -275,21 +233,14 @@
 .subagent-status-mark[data-status="completed"] { color: var(--success-state); background: color-mix(in srgb, var(--success-state) 10%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success-state) 22%, var(--border)); }
 .subagent-status-mark:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) { color: var(--danger); background: color-mix(in srgb, var(--danger-soft) 46%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 22%, var(--border)); }
 .subagent-status-mark[data-status="unknown"] { color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, var(--surface)); }
-.subagent-copy { min-height: 43px; }
-.subagent-copy-heading { align-items: center; }
-.subagent-state-pill,
 .goal-panel-subagent-state {
   display: inline-flex; min-height: 19px; flex: 0 0 auto; align-items: center; padding: 1px 6px;
   border: 0; border-radius: 999px; color: var(--text-muted); background: var(--surface-muted);
   font-size: var(--ui-font-micro); font-weight: 620; line-height: 1.3;
 }
-.subagent-disclosure li:is([data-status="queued"], [data-status="spawned"], [data-status="running"], [data-status="waiting"]) .subagent-state-pill,
 .goal-panel-subagents > li:is([data-status="queued"], [data-status="spawned"], [data-status="running"], [data-status="waiting"]) .goal-panel-subagent-state { color: var(--accent-strong); background: var(--accent-soft); }
-.subagent-disclosure li[data-status="completed"] .subagent-state-pill,
 .goal-panel-subagents > li[data-status="completed"] .goal-panel-subagent-state { color: var(--success-state); background: color-mix(in srgb, var(--success-state) 10%, var(--surface)); }
-.subagent-disclosure li:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) .subagent-state-pill,
 .goal-panel-subagents > li:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) .goal-panel-subagent-state { color: var(--danger); background: var(--danger-soft); }
-.subagent-route { font-variant-numeric: tabular-nums; }
 .subagent-detail-reveal { min-width: 0; grid-column: 2 / -1; }
 .subagent-detail-reveal > .subagent-trace-details { grid-column: auto; }
 
@@ -325,13 +276,6 @@
   .agent-input-footer .agent-request-actions button { flex: 1; }
 }
 
-@container response-transcript (max-width: 440px) {
-  .subagent-state-pill { justify-self: start; }
-  .subagent-disclosure li { grid-template-columns: 24px minmax(0, 1fr); }
-  .subagent-row-actions, .subagent-detail-reveal { grid-column: 2; }
-  .subagent-row-actions { flex-wrap: wrap; justify-content: flex-start; }
-}
-
 @container (max-width: 360px) {
   .goal-panel-subagents > li { grid-template-columns: 24px minmax(0, 1fr); }
 }
@@ -349,10 +293,9 @@
   .turn-work-log details[open] > .turn-work-details,
   .turn-work-log details[open] > div,
   .plan-step, .plan-step-status, .plan-step.is-in-progress .plan-step-marker svg,
-  .subagent-disclosure li, .goal-panel-subagents > li,
+  .goal-panel-subagents > li,
   .subagent-status-mark, .subagent-status-mark[data-live="true"]::after,
-  .subagent-disclosure[data-active="true"] > summary > svg:first-child,
-  .subagent-state-pill, .goal-panel-subagent-state,
+  .goal-panel-subagent-state,
   .subagent-detail-reveal, .subagent-detail-reveal .subagent-trace-details > div,
   .agent-activity.is-running .agent-activity-icon::after {
     animation: none; filter: none; transform: none;
@@ -387,8 +330,6 @@
 .app-shell[data-document-visible="false"]
   .turn-reasoning-step.is-active::before,
 .app-shell[data-document-visible="false"] .subagent-status-mark[data-live="true"]::after,
-.app-shell[data-document-visible="false"]
-  .subagent-disclosure[data-active="true"] > summary > svg:first-child,
 .app-shell[data-document-visible="false"]
   .agent-activity.is-running .agent-activity-icon::after {
   animation-play-state: paused;

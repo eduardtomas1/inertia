@@ -1,6 +1,8 @@
 import { readFileSync, readlinkSync } from "node:fs";
 import { parentPort, workerData } from "node:worker_threads";
 
+import { controlHelperCensus } from "./linux-control-helper-census.mjs";
+
 if (!parentPort) throw new Error("The Linux process observer requires a parent port.");
 
 const parentPid = workerData.parentPid;
@@ -13,6 +15,11 @@ const observed = new Set();
 const startedAt = performance.now();
 let peakControlHelpers = 0;
 let peakControlHelperDetail = [];
+let peakAdmissionHelpers = 0;
+let peakReleaseHelpers = 0;
+let peakInspectionsWithControlHelpers = 0;
+let releaseHandoffSamples = 0;
+const controlHelperViolations = [];
 let peakDescendants = 0;
 let peakGuardedTreeDescendants = 0;
 let peakDescendantRssKb = 0;
@@ -92,23 +99,25 @@ function guardianExecutable(pid) {
 function sample() {
   const direct = procChildren(parentPid);
   const all = descendants(parentPid);
+  const directPids = new Set(direct);
+  const helperCandidates = [];
   for (const pid of direct) {
-    if (
-      guardianExecutable(pid)
-      && repositoryRoots.has(procLink(pid, "cwd"))
-    ) {
+    if (!guardianExecutable(pid)) continue;
+    const args = procCommand(pid);
+    if (args[1] === "ready" || args[1] === "signal") {
+      helperCandidates.push({ pid, args });
+      if (directPids.has(Number(args[2]))) guardianPids.add(Number(args[2]));
+    } else if (repositoryRoots.has(procLink(pid, "cwd"))) {
       guardianPids.add(pid);
-      guardedTreePids.add(pid);
-      descendants(pid).forEach((child) => guardedTreePids.add(child));
     }
   }
   for (const pid of direct) {
-    const args = procCommand(pid);
-    if (
-      guardianExecutable(pid)
-      && (args[1] === "ready" || args[1] === "signal")
-      && guardianPids.has(Number(args[2]))
-    ) {
+    if (!guardianPids.has(pid)) continue;
+    guardedTreePids.add(pid);
+    descendants(pid).forEach((child) => guardedTreePids.add(child));
+  }
+  for (const { pid, args } of helperCandidates) {
+    if (guardianPids.has(Number(args[2]))) {
       controlHelperPids.add(pid);
       if (!controlHelperCommands.has(pid)) {
         controlHelperCommands.set(pid, {
@@ -146,6 +155,23 @@ function sample() {
     });
   }
   peakControlHelpers = Math.max(peakControlHelpers, helpersCurrent.length);
+  const census = controlHelperCensus(
+    helpersCurrent.map((pid) => ({ pid, ...controlHelperCommands.get(pid) })),
+    (guardian) => procChildren(guardian).length,
+  );
+  peakAdmissionHelpers = Math.max(peakAdmissionHelpers, census.admission);
+  peakReleaseHelpers = Math.max(peakReleaseHelpers, census.release);
+  peakInspectionsWithControlHelpers = Math.max(
+    peakInspectionsWithControlHelpers,
+    census.guardians,
+  );
+  if (census.handoffs > 0) releaseHandoffSamples += 1;
+  if (census.violations.length > 0 && controlHelperViolations.length < 8) {
+    controlHelperViolations.push({
+      atMs: Math.round(performance.now() - startedAt),
+      violations: census.violations,
+    });
+  }
   peakDescendants = Math.max(peakDescendants, liveCurrent.length);
   peakGuardedTreeDescendants = Math.max(
     peakGuardedTreeDescendants,
@@ -188,6 +214,11 @@ async function finish() {
       forkRatePerSecond: observed.size / (durationMs / 1_000),
       peakControlHelpers,
       peakControlHelperDetail,
+      peakAdmissionHelpers,
+      peakReleaseHelpers,
+      peakInspectionsWithControlHelpers,
+      releaseHandoffSamples,
+      controlHelperViolations,
       peakDescendants,
       peakGuardedTreeDescendants,
       peakDescendantRssKb,

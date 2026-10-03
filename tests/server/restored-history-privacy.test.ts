@@ -110,15 +110,20 @@ describe("secret scrubber cost", () => {
   const repeated = (unit: string) => (size: number) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
   const pemHeader = joined("-----BEGIN PRIVATE", " KEY-----");
 
-  function scrubMilliseconds(text: string): number {
-    boundedSubagentText(text, 16);
-    const timings: number[] = [];
-    for (let run = 0; run < 3; run += 1) {
-      const started = performance.now();
-      boundedSubagentText(text, 16);
-      timings.push(performance.now() - started);
+  function scrubMilliseconds(small: string, large: string): { small: number; large: number } {
+    boundedSubagentText(small, 16);
+    boundedSubagentText(large, 16);
+    let best = { small: Number.POSITIVE_INFINITY, large: Number.POSITIVE_INFINITY };
+    for (let round = 0; round < 3; round += 1) {
+      const smallStarted = performance.now();
+      boundedSubagentText(small, 16);
+      const smallTime = performance.now() - smallStarted;
+      const largeStarted = performance.now();
+      boundedSubagentText(large, 16);
+      const largeTime = performance.now() - largeStarted;
+      best = { small: Math.min(best.small, smallTime), large: Math.min(best.large, largeTime) };
     }
-    return Math.min(...timings);
+    return best;
   }
 
   it.each([
@@ -135,11 +140,10 @@ describe("secret scrubber cost", () => {
     ["colon-separated words", repeated("a:b:c:d@")],
     ["ordinary prose", repeated("The quick brown fox jumps over the lazy dog. ")],
   ])("scrubs %s in linear time", (_label, build) => {
-    const oneMiB = scrubMilliseconds(build(MIB));
-    const twoMiB = scrubMilliseconds(build(2 * MIB));
-    expect(twoMiB).toBeLessThanOrEqual(3 * oneMiB + 50);
+    const { small: oneMiB, large: fourMiB } = scrubMilliseconds(build(MIB), build(4 * MIB));
+    expect(fourMiB).toBeLessThanOrEqual(8 * oneMiB + 50);
     expect(oneMiB).toBeLessThan(1_000);
-    expect(twoMiB).toBeLessThan(2_000);
+    expect(fourMiB).toBeLessThan(4_000);
   });
 });
 

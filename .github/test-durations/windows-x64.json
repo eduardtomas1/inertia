@@ -332,8 +332,6 @@
     "tests/renderer/split-conversation.test.ts": 13,
     "tests/renderer/stable-controller.test.ts": 5,
     "tests/renderer/streaming-caret-layout.test.ts": 5,
-    "tests/renderer/subagent-disclosure-preference.dom.test.tsx": 404,
-    "tests/renderer/subagent-disclosure.dom.test.tsx": 717,
     "tests/renderer/subagent-disclosure.test.ts": 15,
     "tests/renderer/subagent-timeline-focus.dom.test.tsx": 67,
     "tests/renderer/terminal-input-chunks.test.ts": 8,

@@ -35,6 +35,7 @@ import {
   subagentRouteLabel,
   subagentStatsLabel,
   subagentStatusLabel,
+  subagentTokensLabel,
   subagentTraceLabel,
   subagentTraceSummary,
 } from "../utils/subagentDisclosure";
@@ -619,6 +620,7 @@ export function SubagentsSection({
             const stop = onStopSubagent;
             const label = subagentTraceLabel(trace);
             const route = subagentRouteLabel(trace, turns);
+            const tokens = subagentTokensLabel(trace);
             const status = subagentStatusLabel(trace);
             const expanded = expandedTraceIds.has(trace.id);
             const stopping = stoppingTraceIds.has(trace.id);
@@ -651,6 +653,7 @@ export function SubagentsSection({
                         : undefined}
                     >
                       {route} · <SubagentElapsed trace={trace} now={now} />
+                      {tokens && ` · ${tokens}`}
                     </small>
                   </span>
                   {subagentHasNestedParent(trace) && (

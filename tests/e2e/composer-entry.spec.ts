@@ -98,18 +98,18 @@ for (const theme of ["dark", "light"] as const) {
       expect(sent.detail.messages.find(({ id }) => id === sent.detail.contextPackets?.[0]?.consumedMessageId))
         .toMatchObject({ content: "Review the selected decisions", role: "user" });
       // The other entry point creates a saved empty chat. Exercise the exact
-      // Agents-panel layout from the report as well as the unsaved home draft.
+      // Background tasks panel layout from the report as well as the unsaved home draft.
       await page.getByRole("button", { name: "New chat", exact: true }).click();
       await expect(page.getByRole("heading", { name: "What should we build in Inertia?" })).toBeVisible();
       const panel = await ensureWorkspaceTools(page);
-      await selectWorkspaceTool(panel, "Agents");
-      await expect(panel.getByText("No provider-reported subagents in this conversation.")).toBeVisible();
+      await selectWorkspaceTool(panel, "Background tasks");
+      await expect(panel.getByText("No background tasks.", { exact: true })).toBeVisible();
       const savedEmpty = await page.screenshot({ animations: "disabled", scale: "css",
         path: testInfo.outputPath(`composer-agents-${theme}.png`) });
       await expectPaintedComposer(page, savedEmpty);
       await zone.click({ position: { x: 6, y: 8 } });
-      await page.keyboard.type("Typing with the Agents panel open");
-      await expect(editor).toHaveValue("Typing with the Agents panel open");
+      await page.keyboard.type("Typing with the Background tasks panel open");
+      await expect(editor).toHaveValue("Typing with the Background tasks panel open");
       expect(app.rendererErrors).toEqual([]);
     } finally { await app.close(); }
   });

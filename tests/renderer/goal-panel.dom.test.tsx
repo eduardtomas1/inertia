@@ -167,6 +167,11 @@ function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
     description: "Inspect provider boundaries",
     progress: "Reading capability contracts",
     result: null,
+    model: null,
+    activity: null,
+    usage: null,
+    toolUseCount: null,
+    durationMs: null,
     sequence: 1,
     createdAt: "2030-01-01T00:00:00.000Z",
     updatedAt: "2030-01-01T00:00:10.000Z",
@@ -847,5 +852,16 @@ describe("GoalPanel", () => {
     expect(screen.getByRole("button", {
       name: "Show 2 more delegated tasks",
     })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("shows the tokens a provider reported for a delegated task beside its elapsed time", () => {
+    renderPanel({
+      subagents: [
+        trace({ id: "with-usage", providerName: "Reporter", usage: { totalTokens: 18_600, inputTokens: null, cachedInputTokens: null, cacheWriteInputTokens: null, outputTokens: null, reasoningOutputTokens: null, contextTokens: null, maxContextTokens: null } }),
+        trace({ id: "without-usage", providerTaskId: "task-2", providerAgentId: "agent-2", providerName: "Silent" }),
+      ],
+    });
+    expect(screen.getByRole("listitem", { name: /^Reporter/u })).toHaveTextContent("18.6K tokens");
+    expect(screen.getByRole("listitem", { name: /^Silent/u })).not.toHaveTextContent("tokens");
   });
 });

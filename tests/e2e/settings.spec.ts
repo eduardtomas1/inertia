@@ -340,7 +340,7 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("button", { name: "View storage & backups", exact: true }).click();
   await expect(page.getByRole("button", { name: "Archive & data", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
-  await expect(page.getByText(/targeting 5 copies and 512 MB in total/u)).toBeVisible();
+  await expect(page.getByText(/targeting 5 copies and 512 MiB in total/u)).toBeVisible();
   await expect(page.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
   const exportPath = join(testDirectory, "settings-recovery-export.json");
   await electronApp.evaluate(({ dialog }, path) => {

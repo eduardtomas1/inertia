@@ -1,4 +1,4 @@
-.snapshot-settings { display: grid; gap: 24px; padding: 24px; }
+.snapshot-settings { display: grid; gap: 12px; }
 .snapshot-instructions { margin: 0; padding-left: 22px; list-style: decimal; line-height: 1.7; }
 .snapshot-instructions li + li { margin-top: 8px; }
 .snapshot-permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }

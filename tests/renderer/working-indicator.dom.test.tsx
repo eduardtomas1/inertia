@@ -241,7 +241,7 @@ describe("working indicator settings", () => {
 
   it("enables activity indicators only for Automatic and preserves the saved switch", () => {
     renderSettings({ ...automatic, activity: true });
-    const activity = screen.getByRole("switch", { name: "Use for tool and step activity" });
+    const activity = screen.getByRole("switch", { name: "Animate tool and step activity" });
     expect(activity).toBeEnabled();
     expect(activity).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("radio", { name: "Shaping" }));
@@ -262,7 +262,7 @@ describe("working indicator settings", () => {
       document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent);
     expect(groups).toEqual(["Working indicator", "Colour", "Speed"]);
     expect([...section.querySelectorAll('[role="switch"]')].map((element) => element.getAttribute("aria-label")))
-      .toEqual(["Glow", "Use for tool and step activity"]);
+      .toEqual(["Glow", "Animate tool and step activity"]);
     const inputs = section.querySelectorAll('input[type="color"]');
     expect(inputs).toHaveLength(1);
     expect(inputs[0]).toHaveAttribute("aria-hidden", "true");

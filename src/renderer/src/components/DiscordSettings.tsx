@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { MessageSquare, RefreshCw } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Send } from "lucide-react";
 
 import {
   BACKEND_CREDENTIAL_MASK,
@@ -37,6 +37,19 @@ export function DiscordSettings({
   const [webhookState, setWebhookState] = useState<BackendCredentialState | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [incidentId, setIncidentId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const postTrigger = useRef<HTMLButtonElement>(null);
+  const confirmCancel = useRef<HTMLButtonElement>(null);
+  const restorePostFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (confirming) {
+      confirmCancel.current?.focus();
+      return;
+    }
+    if (!restorePostFocus.current) return;
+    restorePostFocus.current = false;
+    postTrigger.current?.focus();
+  }, [confirming]);
   const reportValidation = async (code: RendererDiagnostic["code"]): Promise<void> => {
     try {
       const result = await window.inertia.reportValidationDiagnostic({ code, correlationId: crypto.randomUUID() });
@@ -112,20 +125,26 @@ export function DiscordSettings({
     });
   };
 
-  const generateReleaseInfo = (): void => {
-    const normalizedRepositoryUrl = repositoryUrl.trim();
-    if (!normalizedRepositoryUrl) {
+  const requestPost = (): void => {
+    if (!repositoryUrl.trim()) {
       void reportValidation("discord.repository-missing");
-      discord.report({ tone: "error", text: "Add a release repository URL before generating." });
+      discord.report({ tone: "error", text: "Add a release repository URL before posting." });
       return;
     }
+    discord.report(null);
+    setConfirming(true);
+  };
+
+  const postReleaseInfo = (): void => {
+    const normalizedRepositoryUrl = repositoryUrl.trim();
+    setConfirming(false);
     setIncidentId(null);
     let deliveryRequested = false;
     void discord.run(async () => {
       const storedWebhook = await storeWebhook();
       if (!storedWebhook?.hasSecret) {
         void reportValidation("discord.webhook-missing");
-        throw new DiscordReleaseError("Add and save a Discord webhook before generating.");
+        throw new DiscordReleaseError("Add and save a Discord webhook before posting.");
       }
       deliveryRequested = true;
       const result = await window.inertia.sendDiscordReleaseInfo({ repositoryUrl: normalizedRepositoryUrl });
@@ -157,8 +176,6 @@ export function DiscordSettings({
       className="discord-settings"
       title="Discord"
       headingId="discord-heading"
-      description="Prepare release details before publishing them to Discord."
-      icon={MessageSquare}
     >
       <SettingTextField
         id="discord-repository"
@@ -224,26 +241,38 @@ export function DiscordSettings({
       <SettingActionRow
         id="discord-release"
         className="runtime-log-setting"
-        title="Release info"
-        description="Send published release notes and a bounded commit preview. No AI request is made."
+        title="Post release to Discord"
+        description="Posts the published release notes and a bounded commit preview to the webhook channel. No AI request is made."
         actions={(
           <button
+            ref={postTrigger}
             type="button"
-            className="primary-button"
+            className="secondary-button"
+            aria-expanded={confirming}
             disabled={disabled || discord.busy
               || (!webhookState?.hasSecret && !webhookDraft.trim())}
-            onClick={generateReleaseInfo}
+            onClick={requestPost}
           >
-            <RefreshCw size={14} />
-            {discord.pending === "send" ? "Sending…" : "Generate"}
+            <Send size={14} aria-hidden="true" />
+            {discord.pending === "send" ? "Posting…" : "Post release to Discord…"}
           </button>
         )}
       />
+      {confirming && (
+        <div className="discord-post-confirm" role="group" aria-label="Confirm Discord post">
+          <strong>Post the latest release to Discord?</strong>
+          <small>Everyone in the webhook&apos;s channel will see it. Discord posts cannot be withdrawn from Inertia.</small>
+          <div>
+            <button ref={confirmCancel} type="button" className="secondary-button" onClick={() => { restorePostFocus.current = true; setConfirming(false); }}>Cancel</button>
+            <button type="button" className="primary-button" disabled={disabled || discord.busy} onClick={postReleaseInfo}>Post to Discord</button>
+          </div>
+        </div>
+      )}
       <div className="release-info-status">
         <SettingNoteStatus notice={discord.notice ?? (storageError ? { tone: "info", text: storageError } : null)} />
       </div>
       {incidentId && <button type="button" className="secondary-button discord-diagnostic-link" onClick={() => navigateDiagnosticContext({
-        section: "diagnostics", selection: { incidentId },
+        section: "help", anchor: "diagnostics-incidents", selection: { incidentId },
       })}>View diagnostics</button>}
     </SettingsGroup>
   );

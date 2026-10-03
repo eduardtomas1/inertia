@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, ChevronDown, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
+import { Bot, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 
 import type {
@@ -18,7 +18,6 @@ import {
   ProviderStatus,
   providerSetupAction,
   providerStateDetail,
-  providerStateLabel,
 } from "../ProviderStatus";
 import { loadLifecycleIntegritySettings } from "../settingsSectionLoaders";
 import { useSectionMemory, type SettingsSectionMemory } from "./sectionMemory";
@@ -83,10 +82,6 @@ export function ProvidersSettings({
   const LifecycleIntegritySettings = useLoadedSurface(loadLifecycleIntegritySettings, true);
   const labelAction = useSettingAction();
   const binaryAction = useSettingAction();
-  const defaultsAction = useSettingAction();
-  const updateDefaults = (update: Partial<AppSettings>): void => {
-    void defaultsAction.run(() => onUpdate(update));
-  };
   const [selectedProviderId, setSelectedProviderId] = useSectionMemory<ProviderId | null>(
     memory,
     "providers.selected",
@@ -99,7 +94,6 @@ export function ProvidersSettings({
   );
   const providerConfigurationTabRef = useRef<HTMLButtonElement>(null);
   const providerModelsTabRef = useRef<HTMLButtonElement>(null);
-  const [providerAdvancedOpen, setProviderAdvancedOpen] = useSectionMemory(memory, "providers.advanced", () => false);
   const [providerIdentityLabelsDraft, setProviderIdentityLabelsDraft] = useState(
     () => settings.providerIdentityLabels,
   );
@@ -129,7 +123,6 @@ export function ProvidersSettings({
     providerIdentityLabelsDraftRef.current = providerIdentityLabels;
     setProviderIdentityLabelsDraft(providerIdentityLabels);
   }, [providerIdentityLabelsFingerprint, settings.providerIdentityLabels]);
-  const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
   const selectedProvider = providers.find(({ id }) => id === selectedProviderId)
     ?? providers[0]
     ?? null;
@@ -161,22 +154,6 @@ export function ProvidersSettings({
       ? providerConfigurationTabRef
       : providerModelsTabRef).current?.focus();
   };
-  const storedDefaultModel = defaultProvider?.models.find(
-    ({ id }) => id === settings.defaultModel,
-  );
-  const providerDefaultModel = defaultProvider?.models.find(
-    ({ isDefault }) => isDefault,
-  ) ?? defaultProvider?.models[0];
-  const effectiveDefaultModel = storedDefaultModel ?? providerDefaultModel;
-  const reasoningOptions = effectiveDefaultModel?.reasoningOptions ?? [];
-  const modelDefaultReasoning = reasoningOptions.find(
-    ({ value }) => value === effectiveDefaultModel?.defaultReasoningEffort,
-  );
-  const providerDefaultModelLabel = providerDefaultModel
-    ? `Provider default — ${providerDefaultModel.label}`
-    : "Provider default";
-  const modelDefaultReasoningLabel = modelDefaultReasoning?.label
-    ?? effectiveDefaultModel?.defaultReasoningEffort;
   const updateProviderIdentityLabelDraft = (
     providerId: ProviderId,
     value: string,
@@ -377,9 +354,9 @@ export function ProvidersSettings({
                   aria-labelledby="provider-settings-configuration-tab"
                 >
                   <label className="provider-settings-field" data-setting-id="provider-display-name">
-                    <span className="setting-title">Display name<SettingStatus notice={labelAction.notice} /></span>
+                    <span className="setting-title">Account name<SettingStatus notice={labelAction.notice} /></span>
                     <input
-                      aria-label="Name in Inertia"
+                      aria-label="Account name"
                       value={selectedProviderIdentityLabel ?? ""}
                       maxLength={48}
                       placeholder={`${selectedProvider.label} account`}
@@ -415,7 +392,7 @@ export function ProvidersSettings({
                   )}
 
                   <div className="provider-settings-field" data-setting-id="provider-binary-path">
-                    <span className="setting-title">Binary path<SettingStatus notice={binaryAction.notice} /></span>
+                    <span className="setting-title">Executable<SettingStatus notice={binaryAction.notice} /></span>
                     <div className="provider-settings-binary-row">
                       <input
                         aria-label={`${selectedProvider.label} executable path`}
@@ -526,35 +503,6 @@ export function ProvidersSettings({
         </div>
       </div>
 
-      <button
-        type="button"
-        className="provider-settings-advanced-toggle"
-        aria-controls="provider-settings-advanced"
-        aria-expanded={providerAdvancedOpen}
-        onClick={() => setProviderAdvancedOpen(!providerAdvancedOpen)}
-      >
-        <ChevronDown
-          size={13}
-          className={clsx(providerAdvancedOpen && "is-open")}
-        />
-        Advanced
-      </button>
-      {providerAdvancedOpen && (
-        <div className="provider-settings-advanced" id="provider-settings-advanced">
-          <div className="provider-settings-advanced-heading" data-setting-id="new-chat-defaults">
-            <strong className="setting-title">New chat defaults<SettingStatus notice={defaultsAction.notice} /></strong>
-            <small>Applied only when a new chat is created.</small>
-          </div>
-          <div className="settings-form-grid">
-            <label><span>Provider</span><select value={settings.defaultProvider} disabled={disabled} onChange={(event) => updateDefaults({ defaultProvider: event.target.value as ProviderId, defaultModel: "", defaultReasoningEffort: "" })}>{providers.map((provider) => <option value={provider.id} key={provider.id}>{provider.label} — {providerStateLabel(provider)}</option>)}</select></label>
-            <label><span>Model</span><select value={settings.defaultModel} disabled={disabled || !defaultProvider?.models.length} onChange={(event) => { const model = defaultProvider?.models.find(({ id }) => id === event.target.value); updateDefaults({ defaultModel: event.target.value, defaultReasoningEffort: model?.defaultReasoningEffort ?? "" }); }}><option value="">{providerDefaultModelLabel}</option>{settings.defaultModel && !storedDefaultModel && <option value={settings.defaultModel}>{settings.defaultModel} — Unavailable</option>}{defaultProvider?.models.map((model) => <option value={model.id} key={model.id}>{model.label}{model.isDefault ? " — Default" : ""}</option>)}</select></label>
-            <label><span>Reasoning</span><select value={settings.defaultReasoningEffort} disabled={disabled || reasoningOptions.length === 0} onChange={(event) => updateDefaults({ defaultReasoningEffort: event.target.value })}><option value="">Model default{modelDefaultReasoningLabel ? ` — ${modelDefaultReasoningLabel}` : ""}</option>{settings.defaultReasoningEffort && !reasoningOptions.some(({ value }) => value === settings.defaultReasoningEffort) && <option value={settings.defaultReasoningEffort}>{settings.defaultReasoningEffort} — Unavailable</option>}{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
-            <label><span>Mode</span><select value={settings.defaultInteractionMode} disabled={disabled} onChange={(event) => updateDefaults({ defaultInteractionMode: event.target.value as AppSettings["defaultInteractionMode"] })}><option value="build">Build</option><option value="plan">Plan</option></select></label>
-            <label><span>Access</span><select value={settings.defaultAccessMode} disabled={disabled} onChange={(event) => updateDefaults({ defaultAccessMode: event.target.value as AppSettings["defaultAccessMode"] })}><option value="supervised">Supervised</option><option value="auto-edit">Auto-accept edits</option><option value="full">Full access</option></select></label>
-            <label><span>Chat location</span><select value={settings.newThreadMode} disabled={disabled} onChange={(event) => updateDefaults({ newThreadMode: event.target.value as AppSettings["newThreadMode"] })}><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option></select></label>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

@@ -1199,7 +1199,7 @@ export class RuntimeStore {
   clearModelBackendDefault(projectId: string | null): void {
     this.backendProfileRepository.clearDefault(projectId);
   }
-  setNativeDefaultModel(update: Required<Pick<AppSettingsUpdate, "defaultProvider" | "defaultModel" | "defaultReasoningEffort">>): void {
+  updateSettingsClearingGlobalDefault(update: AppSettingsUpdate): void {
     this.database.transaction(() => {
       this.settingsRepository.update(update);
       this.backendProfileRepository.clearDefault(null);

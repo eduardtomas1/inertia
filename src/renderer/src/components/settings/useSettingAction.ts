@@ -113,12 +113,15 @@ export function useOptimisticSetting<T>(
   authoritative: T,
   action: SettingAction,
   persist: (next: T) => Promise<void> | void,
+  failure?: SettingActionOptions<void>["failure"],
 ): { value: T; save: (next: T) => void } {
   const [draft, setDraft] = useState<{ value: T } | null>(null);
   const persistRef = useRef(persist);
+  const failureRef = useRef(failure);
   useEffect(() => {
     persistRef.current = persist;
-  }, [persist]);
+    failureRef.current = failure;
+  }, [failure, persist]);
   useEffect(() => {
     if (draft && Object.is(draft.value, authoritative)) setDraft(null);
   }, [authoritative, draft]);
@@ -126,7 +129,7 @@ export function useOptimisticSetting<T>(
   const save = useCallback((next: T) => {
     const attempt = { value: next };
     setDraft(attempt);
-    void run(() => persistRef.current(next)).then((saved) => {
+    void run(() => persistRef.current(next), { failure: failureRef.current }).then((saved) => {
       if (!saved) setDraft((current) => (current === attempt ? null : current));
     });
   }, [run]);

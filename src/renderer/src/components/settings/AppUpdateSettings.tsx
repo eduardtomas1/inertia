@@ -36,7 +36,7 @@ export function AppUpdateSettings({
     void action.run(operation, { key: "update", success: null, failure });
   };
   return (
-    <SettingsGroup title="Application updates" headingId="application-update-heading" description="Update on your schedule, never during active work." icon={Download}>
+    <SettingsGroup title="About and updates" headingId="application-update-heading">
       <SettingActionRow
         id="app-updates"
         className="application-update-setting"

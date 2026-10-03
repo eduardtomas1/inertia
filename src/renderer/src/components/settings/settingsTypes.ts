@@ -35,6 +35,8 @@ export interface SettingsViewProps {
   databaseBackup?: DatabaseBackupStatus;
   lifecycleDiagnostics?: RuntimeLifecycleDiagnosticSnapshot;
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
+  onSetDefaultModel: (update: Pick<AppSettings, "defaultProvider" | "defaultModel" | "defaultReasoningEffort">) => Promise<void>;
+  onRestoreDefaults: () => Promise<void>;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
   maintenanceOperations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>;

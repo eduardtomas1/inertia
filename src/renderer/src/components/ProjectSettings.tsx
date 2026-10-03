@@ -12,7 +12,8 @@ import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
 import { SettingStatus } from "./settings/SettingsLayout";
-import { useSettingAction, type SettingNotice } from "./settings/useSettingAction";
+import { SettingRadioGroup, SettingSwitch } from "./settings/SettingControls";
+import type { SettingNotice } from "./settings/useSettingAction";
 import "./ProjectSettings.css";
 
 interface Props {
@@ -32,7 +33,8 @@ function Row({ id, title, description, notice, children }: { id: string; title: 
   return <div className="project-setting-row" data-setting-id={id}><div><span className="setting-title"><h3>{title}</h3><SettingStatus notice={notice} /></span><p>{description}</p></div><div className="project-setting-control">{children}</div></div>;
 }
 
-const workspaceOptions = { local: "Current checkout", worktree: "Isolated worktree" };
+const workspaceOptions = { local: "Current checkout", worktree: "New worktree" };
+const groupingOptions: Record<AppSettings["projectGrouping"], string> = { repository: "By repository", "repository-path": "By repository and folder", separate: "Keep separate" };
 
 function ProjectSelect({ label, value, disabled, options, onChange }: {
   label: string; value: string; disabled: boolean; options: Record<string, string>; onChange: (value: string) => void;
@@ -91,7 +93,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   return <>
     {error && <p className="project-settings-error" role="alert">{error}</p>}
     <section className="project-settings-card" aria-label="Project defaults">
-      <Row id="project-name" title="Name" description="The name shown in the sidebar and thread lists.">
+      <Row id="project-name" title="Name" description="The name shown in the sidebar and chat lists.">
         <form className="project-name-form" onSubmit={(event) => { event.preventDefault(); if (trimmedName) void save({ name: trimmedName }); }}>
           <input aria-label="Project name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} disabled={blocked} />
           {trimmedName !== project.name && <button type="submit" disabled={blocked || !trimmedName}>Save</button>}
@@ -121,13 +123,13 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       <Row id="project-pin" title="Pin to top" description="Keep this project first in the project filter and project choosers.">
         <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={blocked} onChange={(pinned) => setAppearance({ pinned })} />
       </Row>
-      <Row id="project-model" title="Model" description="New threads use this default. Existing threads keep their model and session.">
+      <Row id="project-model" title="Model" description="New chats use this model. Existing chats keep their model and session.">
         <ProjectModelDefault projectId={project.id} providers={providers} backendDefaults={backendDefaults}
           backendProfiles={backendProfiles} settings={settings} disabled={blocked} onChange={setModel} />
       </Row>
-      <Row id="project-workspace" title="Workspace" description="Choose where new threads work. Existing checkouts are never moved.">
-        <ProjectSelect label="Project default workspace" value={preferences.workspace ?? ""} disabled={blocked}
-          options={{ "": `Inherit (${workspaceOptions[settings.newThreadMode].toLowerCase()})`, ...workspaceOptions }}
+      <Row id="project-workspace" title="Where new chats run" description="Existing checkouts are never moved.">
+        <ProjectSelect label="Where new chats run in this project" value={preferences.workspace ?? ""} disabled={blocked}
+          options={{ "": `Default (${workspaceOptions[settings.newThreadMode]})`, ...workspaceOptions }}
           onChange={(value) => setPreference("workspace", value as ProjectPreferences["workspace"] || null)} />
       </Row>
       <Row id="project-auto-pull" title="Automatically pull" description="Keep the default branch current only when its checkout is idle, clean and has no local commits. Off by default.">
@@ -135,7 +137,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </Row>
       <Row id="project-browser-access" title="Agent browser access" description="Allow agents to use Inertia's preview browser. Turning this off blocks new browser tool calls, not external CLI tools.">
         <ProjectSelect label="Agent browser access" value={preferences.browserAccess === null ? "inherit" : String(preferences.browserAccess)} disabled={blocked}
-          options={{ inherit: "Inherit (on)", true: "On", false: "Off" }}
+          options={{ inherit: "Default (On)", true: "On", false: "Off" }}
           onChange={(value) => setPreference("browserAccess", value === "inherit" ? null : value === "true")} />
       </Row>
       <Row id="project-spend-limit" title="Claude spend limit per turn" description="Caps estimated API cost for Claude on Anthropic; subagents count toward it.">
@@ -150,9 +152,9 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>
     <section className="project-settings-card" aria-label="Checkout settings">
-      <Row id="project-grouping-override" title="Project grouping" description="How this checkout joins project groups in navigation.">
-        <ProjectSelect label="Project grouping" value={project.groupingMode ?? ""} disabled={blocked}
-          options={{ "": `Use global (${settings.projectGrouping})`, repository: "Group by repository", "repository-path": "Group by repository and folder", separate: "Keep separate" }}
+      <Row id="project-grouping-override" title="Group this project" description="How this checkout joins project groups in navigation.">
+        <ProjectSelect label="Group this project" value={project.groupingMode ?? ""} disabled={blocked}
+          options={{ "": `Default (${groupingOptions[settings.projectGrouping]})`, ...groupingOptions }}
           onChange={(value) => void save({ groupingMode: value as Project["groupingMode"] || null })} />
       </Row>
       <Row id="project-actions" title="Actions" description="Named commands for this checkout. Run explicitly from the workspace; saving never executes them.">
@@ -172,9 +174,9 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         : <ul className="project-actions-list">{preferences.actions.map((action) => <li key={action.id}><div><strong>{action.name}</strong><code>{[action.executable, ...action.args].join(" ")}</code></div><button type="button" aria-label={`Remove ${action.name}`} disabled={blocked} onClick={() => setPreference("actions", preferences.actions.filter(({ id }) => id !== action.id))}><Trash2 size={14} /></button></li>)}</ul>}
     </section>
     <h2 className="project-settings-group-title">Danger zone</h2>
-    <section className="project-settings-card"><Row id="project-remove" title="Remove project" description="Remove this project and its threads from Inertia. Files on disk are not touched.">
+    <section className="project-settings-card"><Row id="project-remove" title="Remove project" description="Remove this project and its chats from Inertia. Files on disk are not touched.">
       <button type="button" className="is-danger" disabled={blocked || busyProject} onClick={() => {
-        if (!request || !window.confirm(`Remove “${project.name}” and its threads from Inertia? This cannot be undone. Files on disk will not be deleted.`)) return;
+        if (!request || !window.confirm(`Remove “${project.name}” and its chats from Inertia? This cannot be undone. Files on disk will not be deleted.`)) return;
         void mutate({ type: "project.remove", payload: { projectId: project.id } }).then((removed) => { if (removed) onRemoved(); });
       }}><Trash2 size={14} />Remove project</button>
     </Row></section>
@@ -186,18 +188,21 @@ export function ProjectSettings(props: Props): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(props.initialProjectId ?? null);
   const [chooserOpen, setChooserOpen] = useState(false);
   const chooser = useRef<HTMLButtonElement>(null);
-  const workspaceDefault = useSettingAction();
   const selected = props.projects.find(({ id }) => id === selectedId);
   return <div className="project-settings">
-    <header className="project-settings-heading"><div><h1>Projects</h1><p>Defaults for your next thread. Your existing work stays unchanged.</p></div>
+    <header className="project-settings-heading"><div><h1>Projects</h1><p>Defaults for your next chat. Your existing work stays unchanged.</p></div>
       <button ref={chooser} type="button" aria-label="Choose project" aria-haspopup="dialog" aria-expanded={chooserOpen} onClick={() => setChooserOpen(!chooserOpen)}>{selected ? <ProjectIcon project={selected} /> : <Folders size={15} aria-hidden="true" />}<ProjectName project={selected}>{selected?.name ?? "All projects"}</ProjectName><ChevronDown size={14} /></button>
     </header>
     {chooserOpen && <ProjectSearchDialog projects={props.projects} selectedId={selectedId} includeAll label="Choose project" trigger={chooser.current} onClose={() => setChooserOpen(false)} onSelect={setSelectedId} />}
     {selectedId && !selected && <p role="status">This project is no longer available. Choose another project.</p>}
-    {!selected ? <section className="project-settings-card"><Row id="project-workspace-default" title="Workspace default" description="Projects inherit this setting unless they override it." notice={workspaceDefault.notice}>
-      <ProjectSelect label="Default workspace for all projects" value={props.settings.newThreadMode} disabled={props.disabled} options={workspaceOptions}
-        onChange={(value) => { void workspaceDefault.run(() => props.onUpdateSettings({ newThreadMode: value as AppSettings["newThreadMode"] })); }} />
-    </Row><p className="project-actions-empty">Choose a project to configure its name, icon, model, source control and actions. Global model defaults are in Providers.</p></section>
+    {!selected ? <section className="project-settings-card" aria-label="All projects">
+      <SettingRadioGroup id="project-grouping" className="project-grouping-setting" title="Group projects" description="Uses Git identity and normalized paths, never display names."
+        value={props.settings.projectGrouping} disabled={props.disabled}
+        options={(Object.keys(groupingOptions) as AppSettings["projectGrouping"][]).map((value) => ({ value, label: groupingOptions[value] }))}
+        onChange={(projectGrouping) => props.onUpdateSettings({ projectGrouping })} />
+      <SettingSwitch id="compact-sidebar" title="Compact sidebar" description="Less spacing in project navigation." checked={props.settings.compactSidebar} disabled={props.disabled}
+        onChange={(compactSidebar) => props.onUpdateSettings({ compactSidebar })} />
+      <p className="project-actions-empty">Choose a project to configure its name, icon, model, source control and actions. Defaults for new chats are in Chats.</p></section>
       : <ProjectEditor key={selected.id} {...props} project={selected} onRemoved={() => setSelectedId(null)} />}
   </div>;
 }

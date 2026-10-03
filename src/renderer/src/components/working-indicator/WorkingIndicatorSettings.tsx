@@ -17,7 +17,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { AgentPixelGrid } from "../AgentPixelGrid";
 import { Switch } from "../ui";
-import { SettingRow, SettingStatus } from "../settings/SettingsLayout";
+import { SettingDisclosure, SettingRow, SettingStatus } from "../settings/SettingsLayout";
 import { useSettingAction } from "../settings/useSettingAction";
 import { orbMotionForPhase } from "./orbMotion";
 import { WorkingIndicatorProvider } from "./WorkingIndicatorContext";
@@ -256,14 +256,6 @@ export function WorkingIndicatorSettings({
               onChange={(glow) => commit({ glow })}
             />
           </SettingRow>
-          <SettingRow id="working-indicator-activity" title="Use for tool and step activity" description="Automatic can match running tools, subagents and reasoning steps. Fixed styles only change the Work tab and working indicator.">
-            <Switch
-              label="Use for tool and step activity"
-              checked={value.style === "automatic" && value.activity}
-              disabled={disabled || value.style !== "automatic"}
-              onChange={(activity) => commit({ activity })}
-            />
-          </SettingRow>
         </div>
         <div className="response-density-setting working-indicator-row">
           <span>
@@ -284,6 +276,16 @@ export function WorkingIndicatorSettings({
             ))}
           </div>
         </div>
+        <SettingDisclosure className="working-indicator-advanced" summary="Advanced">
+          <SettingRow id="working-indicator-activity" title="Animate tool and step activity" description="With Automatic, running tools, subagents and reasoning steps get their own animation.">
+            <Switch
+              label="Animate tool and step activity"
+              checked={value.style === "automatic" && value.activity}
+              disabled={disabled || value.style !== "automatic"}
+              onChange={(activity) => commit({ activity })}
+            />
+          </SettingRow>
+        </SettingDisclosure>
       </section>
     </WorkingIndicatorProvider>
   );

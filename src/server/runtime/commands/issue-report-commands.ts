@@ -67,7 +67,7 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
           // Cancellation can replace the singleton while vault readiness is pending.
           if (!active()) break;
           if (readiness ? !readiness.ready : !provider?.canRun) {
-            save({ ...current(value.id, validationRevision), status: "failed", revision: validationRevision + 1, notice: "The selected model is not ready. Check its backend in Settings → Providers, or continue with the manual preview." });
+            save({ ...current(value.id, validationRevision), status: "failed", revision: validationRevision + 1, notice: "The selected model is not ready. Check its backend in Settings → Agents, or continue with the manual preview." });
             break;
           }
           const completed = await deps.isolatedRuns.run({

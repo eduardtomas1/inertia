@@ -1080,7 +1080,7 @@ function providerAdmissionRefusal(
   installation: "current" | "changed" | "unverified",
   capabilityId: ProviderCapabilityId,
 ): string {
-  const next = "Open Settings > Providers and choose Refresh all providers, or restart Inertia.";
+  const next = "Open Settings > Agents and choose Refresh all providers, or restart Inertia.";
   if (installation === "changed") {
     return `${name} changed since Inertia last checked it, for example after an update, and Inertia could not verify the new installation. ${next}`;
   }

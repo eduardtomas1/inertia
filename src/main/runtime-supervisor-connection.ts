@@ -46,7 +46,7 @@ export function unavailableRuntimeConnection(
       code: state.startupBlockerCode,
       retryable: false,
       message: platform === "win32"
-        ? "Runtime startup is blocked because prior process cleanup remains unconfirmed. Close Inertia, choose Restart from the Windows power menu, then reopen Inertia. Your saved work is preserved. If it is still blocked, copy the support summary in Settings → Lifecycle Integrity."
+        ? "Runtime startup is blocked because prior process cleanup remains unconfirmed. Close Inertia, choose Restart from the Windows power menu, then reopen Inertia. Your saved work is preserved. If it is still blocked, copy the support summary in Settings → Help."
         : "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
     };
   }

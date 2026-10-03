@@ -44,7 +44,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Connect an agent",
-        detail: "Inertia uses the accounts you already have with Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Each provider keeps its own sign-in. Connect or refresh one in Settings → Providers.",
+        detail: "Inertia uses the accounts you already have with Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Each provider keeps its own sign-in. Connect or refresh one in Settings → Agents.",
       },
       {
         name: "Start a chat",
@@ -62,7 +62,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
     jumps: [
       { label: "Add a project", command: "add-project" },
-      { label: "Open Settings → Providers", settings: "providers" },
+      { label: "Open Settings → Agents", settings: "agents" },
       { label: "Show welcome guide", command: "welcome-guide" },
     ],
   },
@@ -97,11 +97,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Custom backends",
-        detail: "Add a backend profile in Settings → Model backends to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
+        detail: "Add a custom backend in Settings → Agents to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
       },
     ],
     jumps: [
-      { label: "Open Settings → Model backends", settings: "backends" },
+      { label: "Open Settings → Agents", settings: "agents" },
     ],
   },
   {
@@ -128,12 +128,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Notifications and mascot",
-        detail: "Turn on desktop notifications or the desktop mascot in Settings → General. Notifications leave out prompt and response text.",
+        detail: "Turn on desktop notifications or the desktop mascot in Settings → Notifications. Notifications leave out prompt and response text.",
       },
     ],
     jumps: [
       { label: "Open Daily work", command: "daily-work" },
-      { label: "Open Settings → General", settings: "general" },
+      { label: "Open Settings → Notifications", settings: "notifications" },
     ],
   },
   {
@@ -215,7 +215,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
     ],
     jumps: [
-      { label: "Open Settings → Source control", settings: "source" },
+      { label: "Open Settings → Chats", settings: "chats" },
     ],
   },
   {
@@ -234,12 +234,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Archive",
-        detail: "Archive thread hides a chat and keeps its data. Restore it from Settings → Archive & data.",
+        detail: "Archive thread hides a chat and keeps its data. Restore it from Settings → Data.",
       },
     ],
     jumps: [
       { label: "Open search", command: "search" },
-      { label: "Open Settings → Archive & data", settings: "archive" },
+      { label: "Open Settings → Data", settings: "data" },
     ],
   },
   {
@@ -272,20 +272,19 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Snapshots",
-        detail: "Turn on Snapshots in Settings → Snapshots to attach a screenshot of the foreground window with its accessibility context, using the capture shortcut you choose there.",
+        detail: "Turn on Window snapshots in Settings → Devices & integrations to attach a screenshot of the foreground window with its accessibility context. Choose its shortcut in Settings → Keyboard.",
       },
       {
         name: "Private Connect",
-        detail: "Settings → Connections & devices pairs a browser on another device over your Tailscale network while this computer stays online. Each paired device gets Monitor or Collaborate access.",
+        detail: "Settings → Devices & integrations pairs a browser on another device over your Tailscale network while this computer stays online. Each paired device gets Monitor or Collaborate access.",
       },
       {
         name: "Discord",
-        detail: "Settings → Discord prepares release notes and a commit preview to post to a Discord webhook.",
+        detail: "Settings → Devices & integrations prepares release notes and a commit preview to post to a Discord webhook.",
       },
     ],
     jumps: [
-      { label: "Open Settings → Snapshots", settings: "snapshots" },
-      { label: "Open Settings → Connections & devices", settings: "connections" },
+      { label: "Open Settings → Devices & integrations", settings: "devices" },
     ],
   },
   {
@@ -295,7 +294,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Themes",
-        detail: "Choose System, Light or Dark and a color theme from the theme library in Settings → General.",
+        detail: "Choose System, Light or Dark and a colour theme from the theme library in Settings → Appearance.",
       },
       {
         name: "Interface scale",
@@ -307,7 +306,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
     ],
     jumps: [
-      { label: "Open Settings → General", settings: "general" },
+      { label: "Open Settings → Appearance", settings: "appearance" },
     ],
   },
   {
@@ -331,7 +330,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
     ],
     jumps: [
-      { label: "Open Settings → Keybindings", settings: "keybindings" },
+      { label: "Open Settings → Keyboard", settings: "keyboard" },
     ],
   },
   {
@@ -341,28 +340,27 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "An agent stops responding",
-        detail: "Refresh it in Settings → Providers. Feature availability there shows what is ready and what needs setup.",
+        detail: "Refresh it in Settings → Agents. Feature availability there shows what is ready and what needs setup.",
       },
       {
         name: "Diagnostics",
-        detail: "Settings → Diagnostics keeps a local history of incidents that you can search, filter and export.",
+        detail: "Settings → Help keeps a local history of incidents that you can search, filter and export.",
       },
       {
         name: "Report an issue",
-        detail: "Settings → Report an issue drafts a report. You review the exact text before anything is submitted to GitHub. Storage & backups on the same page shows local storage and backups.",
+        detail: "Report an issue in Settings → Help drafts a report. You review the exact text before anything is submitted to GitHub.",
       },
       {
         name: "Support summary",
-        detail: "Copy support summary, under Runtime diagnostics in Settings → Archive & data, copies a bounded summary to attach to a bug report.",
+        detail: "Copy support summary in Settings → Help copies a bounded summary to attach to a bug report.",
       },
       {
         name: "Updates",
-        detail: "The update button in the sidebar footer and Settings → General check for, download and install updates. Canary builds run as a separate app and can prepare a rollback.",
+        detail: "The update button in the sidebar footer and Settings → Help check for, download and install updates. Canary builds run as a separate app and can prepare a rollback.",
       },
     ],
     jumps: [
-      { label: "Open Settings → Diagnostics", settings: "diagnostics" },
-      { label: "Open Settings → Report an issue", settings: "support" },
+      { label: "Open Settings → Help", settings: "help" },
     ],
   },
 ];

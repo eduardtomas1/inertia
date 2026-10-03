@@ -102,7 +102,7 @@ export function AppStatusOverlays({
             <div className="error-toast" role="alert">
               <AlertCircle size={17} />
               <span>{diagnosticError?.message}</span>
-              {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "diagnostics", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
+              {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "help", anchor: "diagnostics-incidents", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
               <IconButton label="Dismiss error" onClick={onDismissError}>
                 <X size={15} />
               </IconButton>

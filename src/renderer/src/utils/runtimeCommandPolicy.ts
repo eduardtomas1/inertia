@@ -232,6 +232,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "attachment.storage.get": shortMutation,
   "attachment.storage.cleanup": { timeoutMs: 60_000, timeoutDelivery: "ambiguous" },
   "settings.default-model.set": shortMutation,
+  "settings.restore-defaults": {
+    timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS,
+    timeoutDelivery: "ambiguous",
+  },
   "settings.update": {
     timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",

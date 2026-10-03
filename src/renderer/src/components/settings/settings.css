@@ -48,7 +48,38 @@
   max-width: 50%;
 }
 
+.setting-select-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-select-group .setting-select {
+  max-width: none;
+}
+
+.setting-select-group kbd,
+.setting-keys kbd {
+  min-width: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--surface-muted);
+  font-family: inherit;
+  font-size: var(--ui-font-micro);
+  text-align: center;
+}
+
+.setting-keys {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
 .setting-select:disabled,
+.setting-select[aria-disabled="true"],
 .setting-input:disabled {
   opacity: var(--disabled-opacity);
 }

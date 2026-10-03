@@ -96,7 +96,7 @@ export function MascotSettings() {
             <button className="secondary-button" type="button" disabled={busy !== null} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
           </div>
         </div>
-        <details className="mascot-sprite-guide" key={snapshot.sprites ? "custom" : "default"} open={!snapshot.sprites || undefined}>
+        <details className="mascot-sprite-guide">
           <summary>How custom sprites work</summary>
           <ol aria-label="Steps">
             {MASCOT_SPRITE_STEPS.map((step) => <li key={step}>{step}</li>)}

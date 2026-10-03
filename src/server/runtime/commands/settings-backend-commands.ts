@@ -7,7 +7,9 @@ import type {
   ProviderId,
   ServerEvent,
 } from "../../../shared/contracts";
+import { defaultSettings } from "../../../shared/contracts/app";
 import { providerIdForHarness } from "../../../shared/model-routing";
+import { restoredDefaultSettings } from "../../../shared/restore-defaults";
 import type { RuntimeStore } from "../../database";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -67,6 +69,7 @@ export function createSettingsBackendCommandHandler(
     "backend.default.set",
     "backend.default.clear",
     "settings.default-model.set",
+    "settings.restore-defaults",
   ], async (socket, command) => {
     switch (command.type) {
       case "attachment.storage.get":
@@ -285,9 +288,27 @@ export function createSettingsBackendCommandHandler(
         if (current) {
           assertHarnessMaintenanceIdle(current.selection.harnessId);
         }
-        dependencies.backendProfileController.replaceGlobalDefaultWithNativeModel(
+        dependencies.backendProfileController.replaceGlobalDefaultWithSettings(
           command.payload,
         );
+        return "mutation";
+      }
+      case "settings.restore-defaults": {
+        const current = dependencies.backendProfileController.defaults().find(
+          (candidate) => candidate.projectId === null,
+        );
+        if (current) {
+          assertHarnessMaintenanceIdle(current.selection.harnessId);
+        }
+        assertMaintenanceIdle("codex");
+        const restored = restoredDefaultSettings(dependencies.store.shellSnapshot().settings);
+        dependencies.backendProfileController.replaceGlobalDefaultWithSettings(restored);
+        dependencies.providers.setCommand("codex", undefined);
+        dependencies.conversationAttachments.setStoragePolicy(
+          defaultSettings.attachmentStorageGiB * 1024 ** 3,
+          defaultSettings.autoRemoveOldAttachments,
+        );
+        await dependencies.refreshProviderInfo("codex", true, true);
         return "mutation";
       }
       default:

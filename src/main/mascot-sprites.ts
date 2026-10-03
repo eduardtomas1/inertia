@@ -253,7 +253,7 @@ export function mascotSpriteReadme(): string {
     "Inertia mascot sprites",
     "",
     "Replace the images in this folder with your own artwork and keep the file names.",
-    "Then open Settings > General > Desktop mascot, choose Import sprites, select this folder, and apply the preview.",
+    "Then open Settings > Notifications > Desktop mascot, choose Import sprites, select this folder, and apply the preview.",
     "",
     `Required: ${MASCOT_SPRITE_STATES.length} still images, one per state.`,
     `Format: PNG, exactly ${SIZE_LABEL}, a single frame, up to ${BYTES_LABEL} each.`,

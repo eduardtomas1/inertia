@@ -36,7 +36,7 @@ export function ProjectModelDefault({ projectId, providers, backendProfiles, bac
       const route = routes.find(({ key }) => key === event.target.value);
       if (route?.selectable) onChange(route.selection);
     }}>
-      <option value="">Inherit ({inherited.displayName})</option>
+      <option value="">Default ({inherited.displayName})</option>
       {saved && !routes.some(({ key }) => key === selected.key) && <option value={selected.key} disabled>{selected.displayName} — unavailable</option>}
       {[...groups].map(([label, choices]) => <optgroup key={label} label={label}>{choices.map((route) =>
         <option key={route.key} value={route.key} disabled={!route.selectable}>{route.displayName}{route.selectable ? "" : " — unavailable"}</option>)}</optgroup>)}

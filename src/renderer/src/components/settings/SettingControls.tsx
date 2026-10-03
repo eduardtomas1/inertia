@@ -4,9 +4,10 @@ import clsx from "clsx";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { Switch } from "../ui";
 import { SettingCopy, SettingRow } from "./SettingsLayout";
-import { useOptimisticSetting, useSettingAction } from "./useSettingAction";
+import { useOptimisticSetting, useSettingAction, type SettingActionOptions } from "./useSettingAction";
 
 type Persist<T> = (value: T) => Promise<void> | void;
+type Failure = SettingActionOptions<void>["failure"];
 
 export function SettingSwitch({
   id,
@@ -15,6 +16,7 @@ export function SettingSwitch({
   checked,
   disabled = false,
   label,
+  failure,
   onChange,
 }: {
   id: string;
@@ -23,10 +25,11 @@ export function SettingSwitch({
   checked: boolean;
   disabled?: boolean;
   label?: string;
+  failure?: Failure;
   onChange: Persist<boolean>;
 }): React.JSX.Element {
   const action = useSettingAction();
-  const { value, save } = useOptimisticSetting(checked, action, onChange);
+  const { value, save } = useOptimisticSetting(checked, action, onChange, failure);
   return (
     <SettingRow id={id} title={title} description={description} notice={action.notice}>
       <Switch label={label ?? title} checked={value} disabled={disabled} onChange={save} />
@@ -38,6 +41,17 @@ export interface SettingOption<T extends string> {
   value: T;
   label: string;
   disabled?: boolean;
+  group?: string;
+}
+
+function groupedOptions<T extends string>(options: readonly SettingOption<T>[]): Array<{ group?: string; options: SettingOption<T>[] }> {
+  const groups: Array<{ group?: string; options: SettingOption<T>[] }> = [];
+  for (const option of options) {
+    const last = groups.at(-1);
+    if (last && last.group === option.group) last.options.push(option);
+    else groups.push({ group: option.group, options: [option] });
+  }
+  return groups;
 }
 
 export function SettingSelect<T extends string>({
@@ -48,7 +62,10 @@ export function SettingSelect<T extends string>({
   value: authoritative,
   options,
   disabled = false,
+  unavailable = false,
+  prefix,
   className,
+  failure,
   onChange,
 }: {
   id: string;
@@ -58,24 +75,36 @@ export function SettingSelect<T extends string>({
   value: T;
   options: readonly SettingOption<T>[];
   disabled?: boolean;
+  unavailable?: boolean;
+  prefix?: ReactNode;
   className?: string;
+  failure?: Failure;
   onChange: Persist<T>;
 }): React.JSX.Element {
   const action = useSettingAction();
-  const { value, save } = useOptimisticSetting(authoritative, action, onChange);
+  const { value, save } = useOptimisticSetting(authoritative, action, onChange, failure);
+  const select = (
+    <select
+      className="setting-select"
+      aria-label={label ?? title}
+      aria-disabled={unavailable || undefined}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => {
+        if (!unavailable) save(event.currentTarget.value as T);
+      }}
+    >
+      {groupedOptions(options).map(({ group, options: entries }, index) => {
+        const rendered = entries.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
+        ));
+        return group === undefined ? rendered : <optgroup key={`${index}:${group}`} label={group}>{rendered}</optgroup>;
+      })}
+    </select>
+  );
   return (
     <SettingRow id={id} title={title} description={description} notice={action.notice} className={className}>
-      <select
-        className="setting-select"
-        aria-label={label ?? title}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => save(event.currentTarget.value as T)}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
-        ))}
-      </select>
+      {prefix === undefined ? select : <span className="setting-select-group">{prefix}{select}</span>}
     </SettingRow>
   );
 }

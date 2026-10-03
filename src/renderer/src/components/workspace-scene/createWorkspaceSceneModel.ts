@@ -604,6 +604,12 @@ export function createWorkspaceSceneModel({
         ? connection.snapshot?.lifecycleDiagnostics
         : undefined,
       onUpdate: actions.updateSettings,
+      onSetDefaultModel: async (payload) => {
+        await actions.run("settings.default-model.set", { type: "settings.default-model.set", payload });
+      },
+      onRestoreDefaults: async () => {
+        await actions.run("settings.restore-defaults", { type: "settings.restore-defaults", payload: {} });
+      },
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
         actions.refreshProvider(providerId);

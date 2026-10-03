@@ -39,7 +39,7 @@ describe("mascot custom sprite settings", () => {
     const section = await screen.findByRole("region", { name: "Custom sprites" });
     expect(section).toHaveTextContent("Import your own artwork for each state. The built-in mascot stays until you apply a set.");
     const guide = section.querySelector("details.mascot-sprite-guide")!;
-    expect(guide).toHaveProperty("open", true);
+    expect(guide).toHaveProperty("open", false);
     expect(within(section).getByText("How custom sprites work")).toBeInTheDocument();
     expect(within(section).getByRole("list", { name: "Steps" }).querySelectorAll("li")).toHaveLength(4);
     expect(within(section).getByRole("list", { name: "Steps" })).toHaveTextContent("Export template to get a folder with the five built-in images");

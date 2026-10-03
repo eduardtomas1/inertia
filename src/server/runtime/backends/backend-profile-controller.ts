@@ -457,8 +457,8 @@ export class BackendProfileController {
     this.store.clearModelBackendDefault(projectId);
   }
 
-  replaceGlobalDefaultWithNativeModel(
-    update: Parameters<RuntimeStore["setNativeDefaultModel"]>[0],
+  replaceGlobalDefaultWithSettings(
+    update: Parameters<RuntimeStore["updateSettingsClearingGlobalDefault"]>[0],
   ): void {
     const current = this.store.listModelBackendDefaults().find(
       (candidate) => candidate.projectId === null,
@@ -466,7 +466,7 @@ export class BackendProfileController {
     if (current) {
       this.runtime.assertConfigurationMutable(current.selection.harnessId);
     }
-    this.store.setNativeDefaultModel(update);
+    this.store.updateSettingsClearingGlobalDefault(update);
   }
 
   async deleteProfile(profileId: string): Promise<void> {

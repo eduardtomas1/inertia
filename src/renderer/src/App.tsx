@@ -753,10 +753,10 @@ export default function App(): React.JSX.Element {
   const connectProvider = useCallback((providerId: ProviderId) => setAuthProviderId(providerId), []);
   const closeProviderAuth = useCallback(() => setAuthProviderId(null), []);
   const openProviderSetup = useCallback((_providerId: ProviderId) => {
-    openSettings({ section: "providers" });
+    openSettings({ section: "agents" });
   }, [openSettings]);
   const openBackendSetup = useCallback((profileId: string) => {
-    openSettings({ section: "backends", profileId });
+    openSettings({ section: "agents", anchor: "model-backends", profileId });
   }, [openSettings]);
   const openProjectSettings = useCallback((projectId: string) => {
     openSettings({ section: "projects", projectId });

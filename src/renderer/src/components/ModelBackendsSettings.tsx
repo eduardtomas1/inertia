@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Bot,
   Check,
@@ -17,14 +17,10 @@ import clsx from "clsx";
 
 import {
   type BackendModelDefinition,
-  type ModelBackendDefault,
   type ModelBackendProfileDetail,
   type ModelBackendProfileDraft,
   type ModelBackendProfileView,
-  type ModelSelection,
-  type Project,
 } from "@shared/contracts";
-import { modelSelectionSchema } from "@shared/model-routing";
 import {
   backendProfileSemanticUpdate,
   backendProfileIsReady,
@@ -37,8 +33,6 @@ import { Switch } from "./ui";
 type ModelBackendsSettingsProps = {
   profiles: ModelBackendProfileView[];
   initialProfileId?: string;
-  defaults: ModelBackendDefault[];
-  projects: Project[];
   disabled: boolean;
   onLoadDetail: (profileId: string) => Promise<ModelBackendProfileDetail>;
   onCreate: (draft: ModelBackendProfileDraft) => Promise<ModelBackendProfileDetail>;
@@ -56,11 +50,6 @@ type ModelBackendsSettingsProps = {
     modelId: string,
   ) => Promise<ModelBackendProfileDetail>;
   onDelete: (profileId: string) => Promise<void>;
-  onSetDefault: (
-    projectId: string | null,
-    selection: ModelSelection,
-  ) => Promise<void>;
-  onClearDefault: (projectId: string | null) => Promise<void>;
 };
 
 const emptyCapabilities: BackendModelDefinition["capabilities"] = [];
@@ -109,29 +98,6 @@ function identityLabel(profile: ModelBackendProfileView): string {
   return `${harness} harness · ${profile.displayName}`;
 }
 
-function profileSelection(
-  profile: ModelBackendProfileView,
-  modelId: string,
-  reasoningEffort: string | null = null,
-): ModelSelection {
-  const model = profile.models.find((candidate) => candidate.id === modelId);
-  if (!model) throw new Error("That model is unavailable.");
-  return modelSelectionSchema.parse({
-    harnessId: profile.harnessId,
-    backendProfileId: profile.id,
-    backendProfileDisplayName: profile.displayName,
-    modelId: model.id,
-    alias: profile.preset === "kimi-code"
-      ? null
-      : model.displayName === model.id ? null : model.displayName,
-    reasoningEffort,
-    contextWindowOverride: model.contextWindowTokens,
-    providerOptions: {},
-    capabilities: model.capabilities,
-    backendConfigurationRevision: profile.configurationRevision,
-  });
-}
-
 function statusLabel(profile: ModelBackendProfileView): string {
   if (!profile.enabled) return "Disabled";
   if (profile.compatibility.state === "verified") return "Verified";
@@ -156,8 +122,6 @@ interface BackendCredentialDraft {
 export function ModelBackendsSettings({
   profiles,
   initialProfileId,
-  defaults,
-  projects,
   disabled,
   onLoadDetail,
   onCreate,
@@ -166,8 +130,6 @@ export function ModelBackendsSettings({
   onClearCredential,
   onProbe,
   onDelete,
-  onSetDefault,
-  onClearDefault,
 }: ModelBackendsSettingsProps): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(
     profiles.find(({ id }) => id === initialProfileId)?.id
@@ -190,9 +152,6 @@ export function ModelBackendsSettings({
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const restoreDeleteFocusRef = useRef(false);
   const selectionEpochRef = useRef(0);
-  const [projectDefaultProjectId, setProjectDefaultProjectId] = useState(
-    projects[0]?.id ?? "",
-  );
   const selected = profiles.find(({ id }) => id === selectedId) ?? profiles[0] ?? null;
   const selectedProfileId = selected?.id ?? null;
   const selectedAuthorityRef = useRef({
@@ -208,20 +167,6 @@ export function ModelBackendsSettings({
     ? credentialDraft.value
     : "";
   const editingBuiltIn = Boolean(editingId && selected?.source === "built-in");
-  const modelChoices = useMemo(() =>
-    profiles.flatMap((profile) => profile.enabled
-      && profile.compatibility.state !== "unknown"
-      && profile.compatibility.state !== "unavailable"
-      ? profile.models.map((model) => ({
-          key: `${profile.id}\0${model.id}`,
-          profile,
-          model,
-        }))
-      : []), [profiles]);
-  const globalDefault = defaults.find(({ scope }) => scope === "global") ?? null;
-  const projectDefault = defaults.find(({ scope, projectId }) =>
-    scope === "project" && projectId === projectDefaultProjectId) ?? null;
-
   useEffect(() => {
     if (!selected && profiles[0]) setSelectedId(profiles[0].id);
   }, [profiles, selected]);
@@ -273,10 +218,8 @@ export function ModelBackendsSettings({
     const ownsDraft = draft !== null;
     const ownsResponse = (): boolean => (
       isCurrent()
-      && (key === "default" || (
-        selectionEpochRef.current === selectionEpoch
-        && (ownsDraft || selectedAuthorityRef.current.profileId === selectedProfileId)
-      ))
+      && selectionEpochRef.current === selectionEpoch
+      && (ownsDraft || selectedAuthorityRef.current.profileId === selectedProfileId)
     );
     setBusy(key);
     setError(null);
@@ -431,28 +374,12 @@ export function ModelBackendsSettings({
     (mode) => setAdvancedRouting(mode === "advanced"),
   );
 
-  const setDefault = (projectId: string | null, key: string): void => {
-    void run("default", async () => {
-      if (!key) {
-        await onClearDefault(projectId);
-        return;
-      }
-      const choice = modelChoices.find((candidate) => candidate.key === key);
-      if (!choice) return;
-      await onSetDefault(
-        projectId,
-        profileSelection(choice.profile, choice.model.id),
-      );
-    });
-  };
-
   return (
     <section className="backend-settings" aria-label="Model backend profiles" data-setting-id="model-backends">
       <div className="backend-settings-toolbar">
         <span>
-          <span className="welcome-kicker">Harness-aware routing</span>
-          <h3>Connections</h3>
-          <p>Keep the agent harness, backend profile, model, and reasoning as separate choices.</p>
+          <h3>Custom backends</h3>
+          <p>Route a chat through your own compatible endpoint. Credentials stay in the system credential vault.</p>
         </span>
         <button
           type="button"
@@ -712,14 +639,6 @@ export function ModelBackendsSettings({
         </div>
       </div>
 
-      <section className="settings-card backend-defaults-card" aria-labelledby="backend-defaults-heading">
-        <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="backend-defaults-heading">New chat defaults</h3><p>Choose a full harness, backend, and model identity. Project defaults override the global choice.</p></span></div>
-        <div className="settings-form-grid">
-          <label><span>Global default</span><select value={globalDefault ? `${globalDefault.selection.backendProfileId}\0${globalDefault.selection.modelId}` : ""} disabled={disabled} onChange={(event) => setDefault(null, event.target.value)}><option value="">Use native app default</option>{modelChoices.map(({ key, profile, model }) => <option value={key} key={key}>{identityLabel(profile)} · {model.displayName}</option>)}</select></label>
-          <label><span>Project</span><select value={projectDefaultProjectId} disabled={disabled || projects.length === 0} onChange={(event) => setProjectDefaultProjectId(event.target.value)}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
-          <label className="backend-project-default"><span>Project default</span><select value={projectDefault ? `${projectDefault.selection.backendProfileId}\0${projectDefault.selection.modelId}` : ""} disabled={disabled || !projectDefaultProjectId} onChange={(event) => setDefault(projectDefaultProjectId || null, event.target.value)}><option value="">Use global default</option>{modelChoices.map(({ key, profile, model }) => <option value={key} key={key}>{identityLabel(profile)} · {model.displayName}</option>)}</select></label>
-        </div>
-      </section>
     </section>
   );
 }

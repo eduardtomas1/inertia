@@ -20,3 +20,23 @@ export const loadMascotSettings = createSurfaceLoader(async () => ({
 export const loadIssueReportSettings = createSurfaceLoader(async () => ({
   default: (await import("./IssueReportSettings")).IssueReportSettings,
 }));
+
+export const loadModelBackendsSettings = createSurfaceLoader(async () => ({
+  default: (await import("./ModelBackendsSettings")).ModelBackendsSettings,
+}));
+
+export const loadConnectionsAndDevicesSettings = createSurfaceLoader(async () => ({
+  default: (await import("./ConnectionsAndDevicesSettings")).ConnectionsAndDevicesSettings,
+}));
+
+export const loadSnapshotSettings = createSurfaceLoader(async () => ({
+  default: (await import("./SnapshotSettings")).SnapshotSettings,
+}));
+
+export const loadDiscordSettings = createSurfaceLoader(async () => ({
+  default: (await import("./DiscordSettings")).DiscordSettings,
+}));
+
+export const loadDiagnosticsSettings = createSurfaceLoader(async () => ({
+  default: (await import("./DiagnosticsSettings")).DiagnosticsSettings,
+}));

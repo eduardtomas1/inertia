@@ -16,3 +16,32 @@
 .discord-settings :is(.primary-button, .secondary-button) { margin-top: 0; min-height: 36px; height: auto; padding: 9px 12px; font-size: 11px; }
 .discord-settings .discord-diagnostic-link { margin-top: 12px; }
 .discord-settings :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.discord-post-confirm {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.discord-post-confirm small {
+  color: var(--text-muted);
+}
+
+.discord-post-confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.discord-post-confirm .primary-button {
+  margin: 0;
+}
+
+@media (forced-colors: active) {
+  .discord-post-confirm {
+    border: 1px solid CanvasText;
+  }
+}

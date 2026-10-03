@@ -82,7 +82,7 @@ function SettingsSectionHost({
 
 const SettingsShell = memo(function SettingsShell({
   target = null,
-  initialSection = "general",
+  initialSection = "appearance",
   onSectionChange,
   ...view
 }: SettingsViewProps): React.JSX.Element {
@@ -159,7 +159,7 @@ const SettingsShell = memo(function SettingsShell({
               >
                 <Icon size={15} />
                 <span>{item.label}</span>
-                {item.id === "archive" && view.archived.length > 0 && <small>{view.archived.length}</small>}
+                {item.id === "data" && view.archived.length > 0 && <small>{view.archived.length}</small>}
               </button>
             );
           })}

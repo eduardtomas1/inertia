@@ -519,4 +519,11 @@ export const configurationCommandSchemas = [
         .strict(),
     })
     .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("settings.restore-defaults"),
+      payload: z.object({}).strict(),
+    })
+    .strict(),
 ] as const;

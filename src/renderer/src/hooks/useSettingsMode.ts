@@ -43,7 +43,7 @@ export function useSettingsMode({
   navigateToView: (view: AppView) => void;
 }): SettingsMode {
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null);
-  const [lastSection, setLastSection] = useState<SettingsSection>("general");
+  const [lastSection, setLastSection] = useState<SettingsSection>("appearance");
   const returnView = useRef<AppView>("workspace");
   const opener = useRef<HTMLElement | null>(null);
   const lastFocused = useRef<HTMLElement | null>(null);

@@ -66,6 +66,7 @@ export function createSettingsBackendCommandHandler(
     "backend.profile.delete",
     "backend.default.set",
     "backend.default.clear",
+    "settings.default-model.set",
   ], async (socket, command) => {
     switch (command.type) {
       case "attachment.storage.get":
@@ -274,6 +275,18 @@ export function createSettingsBackendCommandHandler(
         }
         dependencies.backendProfileController.clearDefault(
           command.payload.projectId,
+        );
+        return "mutation";
+      }
+      case "settings.default-model.set": {
+        const current = dependencies.backendProfileController.defaults().find(
+          (candidate) => candidate.projectId === null,
+        );
+        if (current) {
+          assertHarnessMaintenanceIdle(current.selection.harnessId);
+        }
+        dependencies.backendProfileController.replaceGlobalDefaultWithNativeModel(
+          command.payload,
         );
         return "mutation";
       }

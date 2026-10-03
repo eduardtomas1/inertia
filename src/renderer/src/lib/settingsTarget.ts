@@ -1,19 +1,32 @@
 export const SETTINGS_SECTION_IDS = [
-  "general",
-  "snapshots",
+  "appearance",
+  "chats",
+  "notifications",
+  "keyboard",
   "projects",
-  "providers",
-  "backends",
-  "connections",
-  "discord",
-  "diagnostics",
-  "source",
-  "keybindings",
-  "support",
-  "archive",
+  "agents",
+  "devices",
+  "data",
+  "help",
 ] as const;
 
 export type SettingsSection = typeof SETTINGS_SECTION_IDS[number];
+
+const LEGACY_SETTINGS_SECTIONS = {
+  general: { section: "appearance" },
+  snapshots: { section: "devices", anchor: "snapshots-enabled" },
+  providers: { section: "agents" },
+  backends: { section: "agents", anchor: "model-backends" },
+  connections: { section: "devices", anchor: "private-connect" },
+  discord: { section: "devices", anchor: "discord-repository" },
+  diagnostics: { section: "help", anchor: "diagnostics-incidents" },
+  source: { section: "chats", anchor: "wrap-diffs" },
+  keybindings: { section: "keyboard" },
+  support: { section: "help", anchor: "report-issue" },
+  archive: { section: "data" },
+} as const satisfies Record<string, { section: SettingsSection; anchor?: string }>;
+
+export type LegacySettingsSection = keyof typeof LEGACY_SETTINGS_SECTIONS;
 
 export interface DiagnosticSelection {
   incidentId?: string;
@@ -43,6 +56,16 @@ export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === "string" && (SETTINGS_SECTION_IDS as readonly string[]).includes(value);
 }
 
+function isLegacySettingsSection(value: unknown): value is LegacySettingsSection {
+  return typeof value === "string" && Object.hasOwn(LEGACY_SETTINGS_SECTIONS, value);
+}
+
+export function legacySettingsTarget(
+  section: SettingsSection | LegacySettingsSection,
+): { section: SettingsSection; anchor?: string } {
+  return isLegacySettingsSection(section) ? { ...LEGACY_SETTINGS_SECTIONS[section] } : { section };
+}
+
 function parseSelection(value: unknown): DiagnosticSelection | null {
   if (!isRecord(value)) return null;
   const selection: DiagnosticSelection = {};
@@ -54,9 +77,9 @@ function parseSelection(value: unknown): DiagnosticSelection | null {
 }
 
 export function parseSettingsTarget(value: unknown): SettingsTarget | null {
-  if (!isRecord(value) || !isSettingsSection(value.section)) return null;
+  if (!isRecord(value) || !(isSettingsSection(value.section) || isLegacySettingsSection(value.section))) return null;
   if (Object.keys(value).some((key) => !TARGET_KEYS.has(key))) return null;
-  const target: SettingsTarget = { section: value.section };
+  const target: SettingsTarget = legacySettingsTarget(value.section);
   if (value.anchor !== undefined) {
     if (typeof value.anchor !== "string" || !ANCHOR.test(value.anchor)) return null;
     target.anchor = value.anchor;
@@ -70,7 +93,7 @@ export function parseSettingsTarget(value: unknown): SettingsTarget | null {
     target.profileId = value.profileId;
   }
   if (value.selection !== undefined) {
-    const selection = value.section === "diagnostics" ? parseSelection(value.selection) : null;
+    const selection = target.section === "help" ? parseSelection(value.selection) : null;
     if (!selection) return null;
     target.selection = selection;
   }

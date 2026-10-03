@@ -506,4 +506,17 @@ export const configurationCommandSchemas = [
       payload: z.object({ projectId: z.string().uuid().nullable() }).strict(),
     })
     .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("settings.default-model.set"),
+      payload: z
+        .object({
+          defaultProvider: providerIdSchema,
+          defaultModel: z.string().trim().max(160),
+          defaultReasoningEffort: z.string().trim().max(40),
+        })
+        .strict(),
+    })
+    .strict(),
 ] as const;

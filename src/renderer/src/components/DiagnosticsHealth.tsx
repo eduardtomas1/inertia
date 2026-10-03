@@ -6,7 +6,6 @@ import {
 import type { RuntimeLifecycleDiagnosticSnapshot } from "@shared/contracts";
 import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { formatHealthBytes, formatStorageBytes } from "./StorageStatusSettings";
 
 const LIFECYCLE_LABELS: Readonly<Record<RuntimeLifecycleDiagnosticSnapshot["actionableState"], string>> = {
   "safe-and-ready": "Safe and ready",
@@ -20,8 +19,8 @@ const LIFECYCLE_LABELS: Readonly<Record<RuntimeLifecycleDiagnosticSnapshot["acti
   "recovery-requires-manual-attention": "Recovery requires manual attention",
 };
 
-function processMemory(process: AppHealthSnapshot["mainProcess"]): string {
-  return process ? formatStorageBytes(process.memoryBytes) : "unavailable";
+function megabytes(bytes: number | null): string {
+  return bytes === null ? "unavailable" : `${Math.round(bytes / 1_048_576)} MB`;
 }
 
 export function DiagnosticsHealth({ runtime, lifecycleDiagnostics, appUpdateStatus }: {
@@ -48,10 +47,10 @@ export function DiagnosticsHealth({ runtime, lifecycleDiagnostics, appUpdateStat
   const renderers = health?.rendererProcesses ?? null;
   const usage = health
     ? [
-        `Memory ${formatHealthBytes(health.totalMemoryBytes)}`,
-        `Main ${processMemory(health.mainProcess)}${health.mainProcess ? `, ${health.mainProcess.cpuPercent.toFixed(1)}% CPU` : ""}`,
-        `Interface ${renderers ? formatStorageBytes(renderers.reduce((total, process) => total + process.memoryBytes, 0)) : "unavailable"}`,
-        `Local service ${processMemory(health.runtimeProcess)}`,
+        `Memory ${megabytes(health.totalMemoryBytes)}`,
+        `Main ${megabytes(health.mainProcess?.memoryBytes ?? null)}${health.mainProcess ? `, ${health.mainProcess.cpuPercent.toFixed(1)}% CPU` : ""}`,
+        `Interface ${megabytes(renderers ? renderers.reduce((total, process) => total + process.memoryBytes, 0) : null)}`,
+        `Local service ${megabytes(health.runtimeProcess?.memoryBytes ?? null)}`,
       ].join(" · ")
     : failed ? "Process health is unavailable." : "Measuring…";
   const phase = health?.runtimePhase ?? (runtime === "ready" ? "ready" : runtime === "unavailable" ? "offline" : null);

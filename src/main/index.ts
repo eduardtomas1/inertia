@@ -106,6 +106,7 @@ import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-s
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
+import { runtimeIssueEvidenceBroker } from "./runtime-issue-evidence-broker.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
@@ -1020,6 +1021,7 @@ async function bootstrap(): Promise<void> {
     platform: process.platform,
     ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     agentBrowserBroker: previewBroker,
+    issueEvidenceBroker: runtimeIssueEvidenceBroker({ channel: releaseChannel.channel }),
     getProcessMetrics: () => app.getAppMetrics(),
     systemBootId: bootstrapSafety.systemBootId,
     onSystemSuspendResult: (id, generation, recorded) =>

@@ -292,8 +292,11 @@ describe("main push reuse of an identical certified pull-request tree", () => {
     }
     expect(plan(["src/server/database.ts"], { event: "push", reusedRun, base: null }).platforms).toHaveLength(6);
     const performance = plan(["benchmarks/data-throughput.test.ts"], { event: "push", reusedRun });
-    expect(performance).toMatchObject({ lane: "main", reusedRun: null, benchmarks: true });
-    expect(performance.platforms).toHaveLength(6);
+    expect(performance).toMatchObject({ lane: "main", reusedRun, benchmarks: true });
+    expect(performance.reasons).toContain("performance-change-measured-on-main");
+    expect(performance.platforms).toEqual(["linux-x64", "windows-x64", "macos-arm64"]);
+    expect(createEvidencePlan({ ...performance, draft: false })).toEqual(performance);
+    expect(evaluateMergeEvidence(performance, evidence(performance))).toEqual([]);
   });
 
   it("cannot be forged by editing the plan", () => {

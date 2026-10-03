@@ -35,16 +35,12 @@ export function createEvidencePlan({
     throw new Error("CI requires the exact tested and source commit identities.");
   }
   if (!base || !SHA.test(base)) base = null;
-  let changes = classifyChangedPaths(base ? paths : []);
-  let reused = event === "push" && base !== null && validReusedRun(reusedRun) ? {
+  const changes = classifyChangedPaths(base ? paths : []);
+  const certifiedRun = event === "push" && base !== null && validReusedRun(reusedRun) ? {
     runId: reusedRun.runId, pullRequest: reusedRun.pullRequest, sourceHead: reusedRun.sourceHead,
   } : null;
-  const reuseReasons = [];
-  if (reused && changes.domains.includes("performance")) {
-    reused = null;
-    changes = classifyChangedPaths([]);
-    reuseReasons.push("performance-change-measured-on-main");
-  }
+  const reused = certifiedRun && !changes.domains.includes("performance") ? certifiedRun : null;
+  const reuseReasons = certifiedRun && !reused ? ["performance-change-measured-on-main"] : [];
   const lane = event === "schedule" ? "nightly"
     : event === "push" ? (reused ? "main-reused" : "main")
       : event === "merge_group" ? "merge"
@@ -106,7 +102,7 @@ export function createEvidencePlan({
       ? [1, 2, 3, 4].map((shard) => `Windows unit tests (${shard}/4)`)
       : [EVIDENCE_JOBS[job]]);
   return {
-    schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane, reusedRun: reused,
+    schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane, reusedRun: certifiedRun,
     paths: [...paths], domains: changes.domains,
     reasons: [baselineReason, ...reuseReasons, ...changes.reasons,
       lane === "main-reused" ? "certified-identical-tree-in-pull-request-run"

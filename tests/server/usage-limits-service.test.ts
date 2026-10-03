@@ -60,15 +60,31 @@ describe("privileged usage limits", () => {
     expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
     expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
   });
-  it("reads a chat's account again when the last read found it not ready or failing", async () => {
-    const f = setup();
-    f.read.mockResolvedValueOnce({ ...usageAccount(), status: "unavailable", windows: [], detail: "Codex is not ready." })
-      .mockResolvedValueOnce({ ...usageAccount(), status: "error", windows: [], detail: "Codex quota could not be refreshed." });
-    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "unavailable" });
-    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "error" });
-    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "ready" });
-    expect(await f.service.nativeAccount("codex", false, "model", "/chat")).toMatchObject({ status: "ready" });
-    expect(f.read).toHaveBeenCalledTimes(3);
+  it("keeps a chat's not-ready or failing account read for 15 seconds, and a forced read bypasses it", async () => {
+    vi.useFakeTimers({ now: Date.parse("2030-01-01T00:00:00.000Z"), toFake: ["Date"] });
+    try {
+      const f = setup();
+      const at = () => new Date().toISOString();
+      f.read.mockImplementationOnce(async () => ({ ...usageAccount(), status: "unavailable", windows: [], detail: "Codex is not ready.", checkedAt: at() }))
+        .mockImplementationOnce(async () => ({ ...usageAccount(), status: "error", windows: [], detail: "Codex quota could not be refreshed.", checkedAt: at() }))
+        .mockImplementation(async () => ({ ...usageAccount(), checkedAt: at() }));
+      const read = (force = false) => f.service.nativeAccount("codex", force, "model", "/chat");
+      expect(await read()).toMatchObject({ status: "unavailable" });
+      for (const seconds of [1, 3, 10]) {
+        vi.setSystemTime(Date.parse("2030-01-01T00:00:00.000Z") + seconds * 1_000);
+        expect(await read()).toMatchObject({ status: "unavailable" });
+      }
+      expect(f.read).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(Date.parse("2030-01-01T00:00:16.000Z"));
+      expect(await read()).toMatchObject({ status: "error" });
+      expect(await read(true)).toMatchObject({ status: "ready" });
+      expect(f.read).toHaveBeenCalledTimes(3);
+      vi.setSystemTime(Date.parse("2030-01-01T00:00:50.000Z"));
+      expect(await read()).toMatchObject({ status: "ready" });
+      expect(f.read).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("keeps chat-scoped reads out of the Limits page accounts", async () => {
     const f = setup();

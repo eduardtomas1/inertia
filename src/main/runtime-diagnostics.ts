@@ -412,6 +412,9 @@ export class RuntimeDiagnostics {
 
   queryIncidents(query: DiagnosticQuery): DiagnosticPage { return this.incidents.query(query); }
   exportIncidents(query: DiagnosticQuery): string { return this.incidents.export(query); }
+  exportForReport(sinceMs: number, maxBytes: number): string {
+    return this.incidents.exportWithin({ severity: "all", after: new Date(sinceMs).toISOString() }, maxBytes);
+  }
   flushIncidents(): void { this.incidents.flush(); }
   onIncidentsChanged(notify: () => void): void { this.incidents.onChange(notify); }
   setIncidentRuntimeReady(ready: boolean, generationHash: string | null = null): void { this.incidents.setRuntime(ready, generationHash); }

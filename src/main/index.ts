@@ -87,6 +87,7 @@ import {
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
+import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
@@ -904,6 +905,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
 }
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+  setDiagnosticsReportSource(() => runtimeDiagnostics);
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
   const systemSuspends = new RuntimeSystemSuspendTracker({
     statePath: join(app.getPath("userData"), "runtime-system-suspends.json"),

@@ -122,12 +122,37 @@ export class ApplicationIncidentIndex {
   }
 
   export(value: DiagnosticQuery): string {
+    const report = this.render(this.exportRecords(value));
+    if (Buffer.byteLength(report) > DIAGNOSTIC_LIMITS.exportBytes) {
+      throw new Error("Select a smaller diagnostics time range before exporting.");
+    }
+    return report;
+  }
+
+  exportWithin(value: DiagnosticQuery, maxBytes: number): string {
+    const records = this.exportRecords(value);
+    const fits = (count: number): boolean => Buffer.byteLength(this.render(records.slice(0, count))) <= maxBytes;
+    if (records.length === 0 || !fits(1)) return "";
+    let low = 1;
+    let high = records.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (fits(middle)) low = middle;
+      else high = middle - 1;
+    }
+    return this.render(records.slice(0, low));
+  }
+
+  private exportRecords(value: DiagnosticQuery): DiagnosticRecord[] {
     const query = diagnosticQuerySchema.parse(value);
     this.load();
     this.prune();
-    const records = [...this.records.values()]
+    return [...this.records.values()]
       .filter((record) => diagnosticMatches(record, query))
       .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  }
+
+  private render(records: DiagnosticRecord[]): string {
     // Per-export pseudonyms preserve correlation within this report without
     // exporting project/chat/turn/request IDs or stable cross-report identifiers.
     const references = new Map<string, string>();
@@ -142,15 +167,11 @@ export class ApplicationIncidentIndex {
       ...(context.providerId ? { provider: context.providerId } : {}),
       explanation: diagnosticDefinition(record.code),
     }));
-    const report = JSON.stringify({
+    return JSON.stringify({
       schemaVersion: 1, generatedAt: new Date(this.options.now()).toISOString(),
       privacy: "Context identifiers, names, paths, URLs, credentials and all user/provider content are omitted. Correlation references are local to this export.",
       persistence: this.persistence, records: safe,
     }, null, 2);
-    if (Buffer.byteLength(report) > DIAGNOSTIC_LIMITS.exportBytes) {
-      throw new Error("Select a smaller diagnostics time range before exporting.");
-    }
-    return report;
   }
 
   flush(): void {

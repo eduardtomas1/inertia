@@ -168,8 +168,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(main).toContain(
       "if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces()",
     );
-    expect(main).toContain(
-      'window.webContents.on("render-process-gone", () => previewBroker.releaseSurfaces())',
+    expect(main).toMatch(
+      /window\.webContents\.on\("render-process-gone", \(_event, details\) => \{\s*previewBroker\.releaseSurfaces\(\);/u,
     );
     expect(main).toMatch(/window\.on\("closed", \(\) => \{[^}]*previewBroker\.close\(\);/u);
   });

@@ -71,7 +71,6 @@ import { AppUpdateRuntimeReadiness } from "./app-update-runtime-readiness.js";
 import { startApplicationWithUpdateHandoff } from "./app-update-startup.js";
 import { AppHealthCollector, InertiaHealthRegistry } from "./app-health.js";
 import { registerInertiaReleaseIpc } from "./inertia-release-ipc.js";
-import { registerLifecycleSupportReportIpc } from "./lifecycle-support-report.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
 import { AppUpdateInstallCoordinator, appUpdateInstallRuntimeContext } from
   "./app-update-install.js";
@@ -85,10 +84,12 @@ import {
   FileCredentialVaultPersistence,
   backendSecretReferenceForProfile,
 } from "./credential-vault.js";
-import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
-import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
+import type { RuntimeDiagnostics } from "./runtime-diagnostics.js";
+import { openRuntimeDiagnostics, registerDiagnosticsMainIpc } from "./diagnostics-main-ipc.js";
+import type { MainFailureCode } from "./runtime-diagnostic-events.js";
+import { attachRuntimeStderr, RuntimeStderrJournal } from "./runtime-stderr-journal.js";
+import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
-import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
@@ -354,27 +355,28 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
   return detachedChatMain.assertTrustedChatIpc(event, argumentCount, expectedArguments);
 }
 
+function diagnostics(): RuntimeDiagnostics {
+  return runtimeDiagnostics ??= openRuntimeDiagnostics(app.getPath("userData"));
+}
+
+function reportMainFailure(code: MainFailureCode, message: string, error: unknown): void {
+  console.error(message, error);
+  runtimeDiagnostics?.record("main.failure", { code });
+}
+
 function registerIpcHandlers(): void {
-  registerApplicationDiagnosticsIpc({
-    ipcMain, assertTrusted: assertTrustedIpc,
-    diagnostics: () => {
-      runtimeDiagnostics ??= new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
-      runtimeDiagnostics.onIncidentsChanged(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(DIAGNOSTICS_IPC.changed);
-      });
-      return runtimeDiagnostics;
-    },
-    copyText: (text) => clipboard.writeText(text),
-    chooseExportPath: async () => {
-      if (!mainWindow || mainWindow.isDestroyed()) throw new Error("The diagnostics window is unavailable.");
-      const result = await dialog.showSaveDialog(mainWindow, {
-        title: "Export filtered diagnostics",
-        defaultPath: join(app.getPath("documents"), `inertia-diagnostics-${new Date().toISOString().slice(0, 10)}.json`),
-        buttonLabel: "Export diagnostics", filters: [{ name: "JSON", extensions: ["json"] }],
-        properties: ["createDirectory", "showOverwriteConfirmation"],
-      });
-      return result.canceled ? null : result.filePath ?? null;
-    },
+  registerDiagnosticsMainIpc({
+    ipcMain, assertTrusted: assertTrustedIpc, diagnostics,
+    userDataDirectory: app.getPath("userData"), documentsDirectory: () => app.getPath("documents"),
+    mainWindow: () => mainWindow, revealChannel: IPC.revealRuntimeLogs, supportReportChannel: IPC.copyRuntimeDiagnosticReport,
+    supportReportInput: () => ({
+      version: app.getVersion(), channel: releaseChannel.channel, platform: process.platform, architecture: process.arch,
+      runtime: runtimeSupervisor?.snapshot() ?? null, appUpdateStatus: appUpdateService?.current() ?? null,
+      dataDirectory: configuredRuntimeDataDirectory(), writeClipboard: (text) => clipboard.writeText(text),
+    }),
+    writeClipboard: (text) => clipboard.writeText(text), openPath: async (path) => await shell.openPath(path),
+    showSaveDialog: async (window, options) => await dialog.showSaveDialog(window, options),
+    revealsHostFolder: process.env.NODE_ENV !== "test",
   });
   registerCompletionSoundIpc({
     ipcMain, assertTrusted: assertTrustedIpc,
@@ -495,37 +497,6 @@ function registerIpcHandlers(): void {
     );
     if (!summary) throw new Error("The recovery import returned no summary.");
     return { status: "imported", summary };
-  });
-
-  ipcMain.handle(IPC.revealRuntimeLogs, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
-    const diagnostics = runtimeDiagnostics
-      ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
-    runtimeDiagnostics = diagnostics;
-    const directory = diagnostics.ensureDirectory();
-    diagnostics.record("logs.reveal");
-    // E2E exercises the trusted no-argument bridge without launching a host file
-    // manager. Production always asks the OS to reveal this fixed local path.
-    if (process.env.NODE_ENV === "test") return "";
-    return await shell.openPath(directory);
-  });
-
-  registerLifecycleSupportReportIpc({
-    ipcMain, channel: IPC.copyRuntimeDiagnosticReport, assertTrustedIpc,
-    createInput: () => {
-      const diagnostics = runtimeDiagnostics
-        ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
-      runtimeDiagnostics = diagnostics;
-      return {
-        diagnostics,
-        version: app.getVersion(), channel: releaseChannel.channel,
-        platform: process.platform, architecture: process.arch,
-        runtime: runtimeSupervisor?.snapshot() ?? null,
-        appUpdateStatus: appUpdateService?.current() ?? null,
-        dataDirectory: configuredRuntimeDataDirectory(),
-        writeClipboard: (text) => clipboard.writeText(text),
-      };
-    },
   });
 
   registerInertiaReleaseIpc(
@@ -821,7 +792,10 @@ async function createMainWindow(): Promise<void> {
   window.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces();
   });
-  window.webContents.on("render-process-gone", () => previewBroker.releaseSurfaces());
+  window.webContents.on("render-process-gone", (_event, details) => {
+    previewBroker.releaseSurfaces();
+    runtimeDiagnostics?.record("renderer.crash", { reason: details.reason, exitCode: details.exitCode });
+  });
   hardenDesktopSession(window.webContents.session);
 
   window.once("ready-to-show", () => window.show());
@@ -885,9 +859,9 @@ function runPrivilegedCleanup(): Promise<boolean> {
         console.error("Failed to stop the local runtime", error);
       },
       onPrivateConnectStopped: () => { if (privateConnectHost === privateConnectHostToStop) privateConnectHost = null; },
-      onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+      onPrivateConnectError: (error) => reportMainFailure("private-connect-stop-failed", "Failed to stop Private Connect cleanly", error),
       disposeTemporaryAttachments: () => testCleanupOwners.observe("temporaryAttachments", disposeImportedAttachments),
-      onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+      onTemporaryAttachmentError: (error) => reportMainFailure("temporary-attachment-cleanup-failed", "Failed to remove temporary attachments", error),
       onUnconfirmedRuntimeExit: () => console.warn("Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them."),
       closeDurableAttachments: async () => await testCleanupOwners.observe("durableAttachments", () => closeConversationAttachmentAccess(retainedAttachments)),
       onDurableAttachmentsClosed: () => { if (conversationAttachments === retainedAttachments) conversationAttachments = null; },
@@ -904,7 +878,8 @@ function runPrivilegedCleanup(): Promise<boolean> {
   privilegedCleanup = tracked; return tracked;
 }
 async function bootstrap(): Promise<void> {
-  runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+  runtimeDiagnostics = openRuntimeDiagnostics(app.getPath("userData"));
+  setDiagnosticsReportSource(() => runtimeDiagnostics);
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
   const systemSuspends = new RuntimeSystemSuspendTracker({
     statePath: join(app.getPath("userData"), "runtime-system-suspends.json"),
@@ -949,7 +924,7 @@ async function bootstrap(): Promise<void> {
       app.getPath("userData")),
     finishNormalShutdown: finishQuitAfterCleanup,
     onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
-    reportError: (error) => console.error("Failed to prepare the application update", error),
+    reportError: (error) => reportMainFailure("app-update-preparation-failed", "Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
@@ -1089,15 +1064,16 @@ async function bootstrap(): Promise<void> {
         ),
       ],
     },
-    spawn: () => utilityProcess.fork(
-      fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),
-      [],
-      {
+    spawn: () => {
+      const child = utilityProcess.fork(fileURLToPath(new URL("./runtime-worker.js", import.meta.url)), [], {
         cwd: app.getPath("home"), env: runtimeBootstrap.runtimeProcessEnvironment(),
-        stdio: "ignore",
-        serviceName: "Inertia Runtime",
-      },
-    ),
+        stdio: ["ignore", "ignore", "pipe"], serviceName: "Inertia Runtime",
+      });
+      attachRuntimeStderr(child.stderr, new RuntimeStderrJournal({
+        record: (code, count) => runtimeDiagnostics?.record("runtime.stderr", { code, count }),
+      }));
+      return child;
+    },
     onMascotStatus: (status, chats, focus, counts, request) => mascotMain?.observe(status, chats, focus, counts, request),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
@@ -1204,12 +1180,12 @@ void startApplicationWithUpdateHandoff({
   finishNormalShutdown: finishQuitAfterCleanup,
   onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
   reportSingletonContention: linuxLifecycleNotices.reportSingletonContention,
-  reportCleanupFailure: (error) => console.error("Failed to finish privileged shutdown", error),
+  reportCleanupFailure: (error) => reportMainFailure("privileged-shutdown-failed", "Failed to finish privileged shutdown", error),
   validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
   bootstrap,
   awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),
   cleanupFailedCandidate: runPrivilegedCleanup,
-  reportCandidateFailure: (message, error) => console.error(message, error),
+  reportCandidateFailure: (message, error) => reportMainFailure("app-update-candidate-failed", message, error),
 }).catch((error: unknown) => handleStartupFailure(error, {
   environment: process.env,
   recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {

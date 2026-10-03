@@ -147,7 +147,8 @@ test("starts without a demo and adds the first real project", async () => {
   await expect(page.getByRole("heading", { name: "Bring a project into focus." })).toBeVisible();
   await expect(page.getByText("Getting Started", { exact: true })).toHaveCount(0);
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
-  await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toBeDisabled();
+  await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toBeEnabled();
+  await expect(sidebar.getByRole("button", { name: /^No project /u })).toHaveCount(0);
   await expect(sidebar.getByText("No projects yet", { exact: true })).toHaveCount(1);
   await expect(sidebar.getByText("No work yet", { exact: true })).toHaveCount(0);
 

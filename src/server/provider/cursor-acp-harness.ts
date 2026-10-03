@@ -1,6 +1,7 @@
 import { AcpSecretRedactor } from "./acp-redaction";
 import { acpStopReasonMessage } from "./acp-stop-reasons";
 import { acpPermissionDetail } from "./acp-permission-detail";
+import { acpAttachmentReadAllowed } from "./attachment-read-grant";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
@@ -806,10 +807,13 @@ async function cursorPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
 ): Promise<RequestPermissionResponse> {
+  const allow = cursorOneShotPermissionOption(params.options, true);
+  if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
+    return { outcome: { outcome: "selected", optionId: allow.optionId } };
+  }
   if (options.input.interactionMode === "plan") {
     return { outcome: { outcome: "cancelled" } };
   }
-  const allow = cursorOneShotPermissionOption(params.options, true);
   const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
   if (
     options.input.access === "full"

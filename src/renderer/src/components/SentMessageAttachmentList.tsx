@@ -1,4 +1,5 @@
 import {
+  File,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
@@ -44,7 +45,7 @@ function SentAttachment({
   const unavailable = state === "unavailable";
   const Icon = kind === "image"
     ? unavailable ? TriangleAlert : ImageIcon
-    : previewKind === "spreadsheet" ? FileSpreadsheet : FileText;
+    : previewKind === "spreadsheet" ? FileSpreadsheet : previewKind === "file" ? File : FileText;
   return (
     <li
       className="sent-attachment"

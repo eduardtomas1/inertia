@@ -16,7 +16,7 @@ export const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_FRAMES = 256;
 // All frames of an animation share the budget of one maximum-size still image.
 const MAX_IMAGE_DECODED_PIXELS = MAX_IMAGE_PIXELS;
-const MAX_STRUCTURE_RECORDS = 4_096;
+const MAX_STRUCTURE_RECORDS = 8_192;
 const MAX_JPEG_MARKER_FILL_BYTES = 32;
 const MAX_GIF_SUB_BLOCKS = 48_000;
 

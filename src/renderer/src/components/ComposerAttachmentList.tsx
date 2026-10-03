@@ -1,4 +1,4 @@
-import { FileSpreadsheet, FileText, X } from "lucide-react";
+import { File, FileSpreadsheet, FileText, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -64,10 +64,12 @@ export function ComposerAttachmentList({
                     )
                   : previewKind === "spreadsheet"
                     ? <FileSpreadsheet size={19} />
-                    : <FileText size={19} />}
+                    : previewKind === "file"
+                      ? <File size={19} />
+                      : <FileText size={19} />}
               </span>
               <span className="composer-attachment-copy">
-                <strong>{attachment.snapshot?.appName ?? attachment.name}</strong>
+                <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
                 <small>
                   {attachment.snapshot ? attachment.snapshot.windowTitle : `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`}
                 </small>

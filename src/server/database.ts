@@ -1,7 +1,9 @@
+import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
 import Database from "better-sqlite3";
+import { dirname, resolve } from "node:path";
 import {
   type AgentActivity,
   type AgentGoal,
@@ -51,9 +53,10 @@ import {
 import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
 import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
-  recoveredConversationModel,
   type DatabaseRecoveryImportResult,
 } from "./persistence/database-export";
+import { recoveryImportWriters } from "./persistence/recovery-import-writers";
+import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   exportDatabaseRecoveryData,
   importDatabaseRecoveryData,
@@ -131,6 +134,7 @@ export class RuntimeStore {
   private readonly snapshotRepository: SnapshotRepository;
   readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
+  readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
@@ -180,6 +184,7 @@ export class RuntimeStore {
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
+    this.limitResets = new LimitResetRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
     this.projectRepository = new ProjectRepository({
       database: this.database,
@@ -332,33 +337,15 @@ export class RuntimeStore {
     authorizedRoot: string,
     options: DatabaseRecoveryImportOptions = {},
   ): Promise<DatabaseRecoveryImportResult> {
-    return importDatabaseRecoveryData(
-      this.database,
-      serialized,
-      authorizedRoot,
-      {
-        createProject: (project, path) =>
-          this.createProject(project.name, path).id,
-        createConversation: (projectId, conversation) =>
-          this.createConversation(projectId, conversation.title, {
-            ...recoveredConversationModel(conversation),
-            interactionMode: conversation.interactionMode,
-            // Exported authorization is never authoritative on this device.
-            accessMode: "supervised",
-            activate: false,
-          }).id,
-        createMessage: (id, conversationId, message) => {
-          this.transcriptRepository.createRecoveredMessage(
-            id,
-            conversationId,
-            message.content,
-            message.role,
-            message.createdAt,
-          );
-        },
-      },
-      options,
-    );
+    if (isWithinScratchRoot(dirname(resolve(this.database.name)), authorizedRoot)) {
+      throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+    }
+    return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, recoveryImportWriters({
+      database: this.database,
+      createProject: (name, path, identity) => this.createProject(name, path, identity),
+      createConversation: (projectId, title, conversation) => this.createConversation(projectId, title, conversation),
+      createRecoveredMessage: (...message) => { this.transcriptRepository.createRecoveredMessage(...message); },
+    }), options);
   }
 
   reconcileRecoveryImport(): void {
@@ -402,13 +389,21 @@ export class RuntimeStore {
   createProject(
     name: string,
     projectPath: string,
-    identity: Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">> = {},
+    identity: Parameters<ProjectRepository["create"]>[2] = {},
   ): Project {
     return this.projectRepository.create(name, projectPath, identity);
   }
 
   updateProject(projectId: string, update: Parameters<ProjectRepository["update"]>[1]): Project {
     return this.projectRepository.update(projectId, update);
+  }
+
+  rebindScratchProject(projectId: string, path: string): Project {
+    return this.projectRepository.rebindScratch(projectId, path);
+  }
+
+  bindScratchFolder(conversationId: string, path: string): Conversation {
+    return this.conversationRepository.bindScratchFolder(conversationId, path);
   }
 
   removeProject(projectId: string): void {
@@ -1118,13 +1113,7 @@ export class RuntimeStore {
     return row ? JSON.parse(row.report_json) : null;
   }
   saveIssueReport(report: import("../shared/issue-report").IssueReport): void { this.database.prepare("INSERT INTO issue_report_draft (singleton, report_json) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET report_json = excluded.report_json").run(JSON.stringify(report)); }
-  createWorkspaceRun(
-    input: Omit<WorkspaceRun, "id" | "actionId" | "attentionState" | "canStop" | "startedAt" | "finishedAt"> & {
-      id?: string;
-      actionId?: string | null;
-      attentionState?: WorkspaceRun["attentionState"];
-    },
-  ): WorkspaceRun {
+  createWorkspaceRun(input: Parameters<WorkspaceRunRepository["create"]>[0]): WorkspaceRun {
     return this.workspaceRunRepository.create(input);
   }
 

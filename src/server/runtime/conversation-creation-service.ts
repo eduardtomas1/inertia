@@ -17,6 +17,7 @@ import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import type { WorkspaceRunController } from "./workspace-run-controller";
+import { ScratchWorkspace } from "./scratch-workspace";
 import {
   pinWorktreeSourceIdentity,
   verifyWorktreeSourceIdentity,
@@ -49,6 +50,10 @@ export interface ConversationCreationDependencies {
  */
 export class ConversationCreationService {
   constructor(private readonly dependencies: ConversationCreationDependencies) {}
+
+  ensureScratchProject() {
+    return new ScratchWorkspace(this.dependencies.store, this.dependencies.dataDirectory).ensureProject();
+  }
 
   canonicalSelection(payload: ConversationCreatePayload): {
     providerId: Conversation["providerId"];
@@ -84,6 +89,16 @@ export class ConversationCreationService {
     payload: ConversationCreatePayload,
     requestId: string,
   ): Promise<Conversation> {
+    if (this.dependencies.store.project(payload.projectId).workspaceKind === "scratch") {
+      if (payload.branch || payload.worktreePath) {
+        throw new RuntimeRequestError("A chat without a project gets its own folder; it cannot reuse a branch or worktree.");
+      }
+      const { providerId, selection } = this.canonicalSelection(payload);
+      return new ScratchWorkspace(this.dependencies.store, this.dependencies.dataDirectory).createConversation(
+        payload.projectId, payload.title,
+        { ...payload, id: payload.draftConversationId, providerId, modelSelection: selection },
+      );
+    }
     if (payload.useWorktree === undefined && !payload.worktreePath && !payload.branch) {
       const preference = this.dependencies.store.project(payload.projectId).preferences?.workspace;
       if (preference !== undefined && preference !== null) {

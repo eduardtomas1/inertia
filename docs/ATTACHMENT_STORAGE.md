@@ -11,12 +11,12 @@ reports app RAM, database size, browser cache and temporary attachment bytes.
 | --- | --- | --- |
 | Retained original file bytes, all chats | 2 GiB | 16 GiB default; choose 2, 4, 8, 16, 32 or 64 GiB |
 | Retained file count, all chats | 4,096 | 65,536 |
-| Temporary original file bytes | 512 MiB | 1 GiB |
+| Temporary original file bytes | 512 MiB | 16 GiB |
 | Temporary file count | 256 | 1,024 |
 | Automatic eviction when full | Enabled | Off by default; explicit opt-in with confirmation |
 
-16 GiB gives eight times the previous disk capacity (roughly 1,638 files at the
-10 MiB maximum). The 64 GiB ceiling permits larger local collections while
+16 GiB gives eight times the previous disk capacity (roughly 327 files at the
+50 MiB maximum). The 64 GiB ceiling permits larger local collections while
 retaining a finite quota. The larger count guard allows small screenshots to
 use that disk budget instead of hitting the old 4,096-image ceiling. No space
 is preallocated. Quotas count original file bytes; filesystem allocation,
@@ -56,15 +56,19 @@ Startup reconciliation stays incremental; gallery images outside the visible
 scroll area are unmounted, and only the newest 60 attachments are projected in
 the gallery. Full originals remain available through message previews.
 
-The following limits are unchanged:
+Current attachment limits (see [Attachments](ATTACHMENTS.md)):
 
-- 8 attachments per message, 20 MiB total, 10 MiB per file.
+- 100 attachments per message, 50 MiB per file, with no additional aggregate
+  ordinary-file cap. Images accept 50 MiB sources and are compressed/resized
+  to 10 MiB each, with an 80 MiB image budget.
 - 40 megapixels per image, 8,192 pixels per side, 256 animation frames with a
   combined 40-megapixel decoded budget.
 - One maximum-size RGBA decode represents 160,000,000 bytes (152.6 MiB), plus
   codec/runtime overhead. Up to two short-lived validation utilities may run.
-- Imported file reads remain sequential, native selection copies use 64 KiB
-  chunks, and pending temporary import payloads share a 20 MiB bound.
+- Imported file reads remain sequential. Native selection copies use 64 KiB
+  chunks; renderer uploads acknowledge each 256 KiB chunk after writing it.
+  Runtime sends and durable copies use file paths and streamed digest checks.
+  Text previews capture at most 1 MiB while retaining the complete file.
 - Workspace file previews keep their separate 6-megapixel / 12-megapixel
   animation budget and 20 MiB active encoded-stream limit.
 

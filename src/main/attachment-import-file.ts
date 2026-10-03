@@ -1,3 +1,6 @@
+import { attachmentTextValidator } from "../node/attachment-text-validation.js";
+import { compressAttachmentImage } from "./attachment-image-compression.js";
+import { readAttachment } from "../node/read-attachment.js";
 import { constants } from "node:fs";
 import { lstat, open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -6,19 +9,20 @@ import { setTimeout as wait } from "node:timers/promises";
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
-  MAX_CHAT_ATTACHMENT_BYTES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_BYTES,
   type ChatAttachmentMimeType,
+  type ImageAttachmentMimeType,
 } from "../shared/attachments.js";
 import {
   ImageAttachmentTooLargeError,
   imageAttachmentTooLargeMessage,
 } from "./attachment-image-validation.js";
-import { validateAttachmentImport } from "./attachment-import.js";
+import { prepareAttachmentImportMetadata, validateAttachmentImport } from "./attachment-import.js";
 import { TextAttachmentError } from "../shared/text-attachment.js";
 
 const OWNED_STAGED_ATTACHMENT =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls)$/iu;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls|bin)$/iu;
 const DECIMAL_IDENTITY = /^\d{1,40}$/u;
 const SHA256_DIGEST = /^[0-9a-f]{64}$/u;
 
@@ -32,6 +36,7 @@ export interface AttachmentImportFileOperation {
   readonly mimeType: string;
   readonly size: number;
   readonly stallBeforeValidationMs: number;
+  readonly normalizeImage?: boolean;
 }
 
 export interface AttachmentImportValidationReceipt {
@@ -40,6 +45,7 @@ export interface AttachmentImportValidationReceipt {
   readonly extension: string;
   readonly size: number;
   readonly digest: string;
+  readonly normalized?: true;
 }
 
 export interface AttachmentImportValidationExecution {
@@ -116,7 +122,8 @@ function record(value: unknown): value is Record<string, unknown> {
 export function parseAttachmentImportFileOperation(
   value: unknown,
 ): AttachmentImportFileOperation | null {
-  if (!record(value) || Object.keys(value).length !== 9) return null;
+  if (!record(value) || ![9, 10].includes(Object.keys(value).length)
+    || (Object.keys(value).length === 10 && typeof value.normalizeImage !== "boolean")) return null;
   if (
     typeof value.root !== "string"
     || !isAbsolute(value.root)
@@ -143,7 +150,7 @@ export function parseAttachmentImportFileOperation(
     || typeof value.size !== "number"
     || !Number.isSafeInteger(value.size)
     || value.size < 1
-    || value.size > MAX_CHAT_ATTACHMENT_BYTES
+    || value.size > MAX_ATTACHMENT_BYTES
     || typeof value.stallBeforeValidationMs !== "number"
     || !Number.isSafeInteger(value.stallBeforeValidationMs)
     || value.stallBeforeValidationMs < 0
@@ -159,30 +166,32 @@ export function parseAttachmentImportFileOperation(
     mimeType: value.mimeType,
     size: value.size,
     stallBeforeValidationMs: value.stallBeforeValidationMs,
+    ...(value.normalizeImage === true ? { normalizeImage: true } : {}),
   };
 }
 
 export function parseAttachmentImportValidationReceipt(
   value: unknown,
 ): AttachmentImportValidationReceipt | null {
-  if (!record(value) || Object.keys(value).length !== 5) return null;
+  if (!record(value) || ![5, 6].includes(Object.keys(value).length)
+    || (Object.keys(value).length === 6 && value.normalized !== true)) return null;
   if (
     typeof value.displayName !== "string"
     || value.displayName.length < 1
     || value.displayName.length > 255
     || /[\0-\x1f\x7f]/u.test(value.displayName)
     || typeof value.mimeType !== "string"
-    || !(CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(
+    || !(ACCEPTED_ATTACHMENT_MIME_TYPES as readonly string[]).includes(
       value.mimeType,
     )
     || typeof value.extension !== "string"
-    || !/^(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls)$/u.test(
+    || !/^(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls|bin)$/u.test(
       value.extension,
     )
     || typeof value.size !== "number"
     || !Number.isSafeInteger(value.size)
     || value.size < 1
-    || value.size > MAX_CHAT_ATTACHMENT_BYTES
+    || value.size > MAX_ATTACHMENT_BYTES
     || typeof value.digest !== "string"
     || !SHA256_DIGEST.test(value.digest)
   ) return null;
@@ -192,6 +201,7 @@ export function parseAttachmentImportValidationReceipt(
     extension: value.extension,
     size: value.size,
     digest: value.digest,
+    ...(value.normalized === true ? { normalized: true as const } : {}),
   };
 }
 
@@ -286,29 +296,38 @@ export async function validateAttachmentImportFile(
     if (operation.stallBeforeValidationMs > 0) {
       await wait(operation.stallBeforeValidationMs, undefined, { signal });
     }
-    const bytes = Buffer.allocUnsafe(operation.size);
-    let readOffset = 0;
-    while (readOffset < bytes.length) {
-      signal?.throwIfAborted();
-      const { bytesRead } = await file.read(
-        bytes,
-        readOffset,
-        bytes.length - readOffset,
-        readOffset,
-      );
-      if (bytesRead === 0) break;
-      readOffset += bytesRead;
-    }
-    const overflowProbe = Buffer.allocUnsafe(1);
-    const { bytesRead: overflowBytes } = await file.read(
-      overflowProbe,
-      0,
-      overflowProbe.length,
-      operation.size,
-    );
-    if (readOffset !== operation.size || overflowBytes !== 0) {
+    const metadata = prepareAttachmentImportMetadata(operation);
+    const text = metadata.mimeType.startsWith("text/") || metadata.mimeType === "application/json" || metadata.mimeType === "application/octet-stream";
+    const opaqueRecord = operation.mimeType === "application/octet-stream";
+    const validator = text && metadata.mimeType !== "application/octet-stream" && !opaqueRecord
+      ? attachmentTextValidator()
+      : undefined;
+    let readable = validator !== undefined;
+    const inspect = validator
+      ? (chunk: Buffer): void => {
+          if (!readable) return;
+          try {
+            validator.chunk(chunk);
+          } catch {
+            readable = false;
+          }
+        }
+      : undefined;
+    let read: Awaited<ReturnType<typeof readAttachment>>;
+    try {
+      read = await readAttachment(file, operation.size, text ? 0 : operation.size, signal, inspect);
+    } catch {
       throw new AttachmentImportValidationError("unsafe");
     }
+    if (validator && readable) {
+      try {
+        validator.finish();
+      } catch {
+        readable = false;
+      }
+    }
+    const opaque = text && (opaqueRecord || (validator !== undefined && !readable));
+    const { bytes, digest } = read;
     const after = await file.stat({ bigint: true });
     signal?.throwIfAborted();
     if (
@@ -322,11 +341,19 @@ export async function validateAttachmentImportFile(
     ) throw new AttachmentImportValidationError("unsafe");
     await assertRoot(operation, options.requirePinnedCwd === true);
     let validated;
+    let normalized: Buffer | null = null;
     try {
-      validated = await validateAttachmentImport({
-        name: operation.name,
-        mimeType: operation.mimeType,
-        data: bytes,
+      if (operation.normalizeImage && metadata.mimeType.startsWith("image/")) {
+        normalized = await compressAttachmentImage(bytes, metadata.mimeType as ImageAttachmentMimeType);
+      }
+      validated = text ? {
+        ...metadata,
+        ...(opaque ? { mimeType: "application/octet-stream" as const, extension: "bin" } : {}),
+        digest,
+      } : await validateAttachmentImport({
+        name: normalized ? operation.name.replace(/\.[^.]+$/u, "") + ".jpg" : operation.name,
+        mimeType: normalized ? "image/jpeg" : operation.mimeType,
+        data: normalized ?? bytes,
       });
     } catch (error) {
       if (error instanceof TextAttachmentError) {
@@ -345,8 +372,8 @@ export async function validateAttachmentImportFile(
       throw new AttachmentImportValidationError("content");
     }
     if (
-      validated.size !== operation.size
-      || operation.fileName !== `${operation.fileName.slice(0, 36)}.${validated.extension}`
+      !normalized && (validated.size !== operation.size
+      || (!opaque && operation.fileName !== `${operation.fileName.slice(0, 36)}.${validated.extension}`))
     ) throw new AttachmentImportValidationError("unsafe");
     signal?.throwIfAborted();
     const [finalPinned, finalNamed, finalCanonical] = await Promise.all([
@@ -373,12 +400,33 @@ export async function validateAttachmentImportFile(
       || finalCanonical !== path
     ) throw new AttachmentImportValidationError("unsafe");
     await assertRoot(operation, options.requirePinnedCwd === true);
+    if (normalized) {
+      signal?.throwIfAborted();
+      const writer = await open(path, constants.O_WRONLY | noFollow | nonBlocking);
+      try {
+        const target = await writer.stat({ bigint: true });
+        if (!target.isFile() || target.nlink !== 1n || !sameIdentity(finalPinned, target)) {
+          throw new AttachmentImportValidationError("unsafe");
+        }
+        let offset = 0;
+        while (offset < normalized.length) {
+          const { bytesWritten } = await writer.write(normalized, offset, normalized.length - offset, offset);
+          if (bytesWritten === 0) throw new AttachmentImportValidationError("unsafe");
+          offset += bytesWritten;
+        }
+        await writer.truncate(normalized.length);
+        await writer.sync();
+      } finally {
+        await writer.close();
+      }
+    }
     return {
       displayName: validated.displayName,
       mimeType: validated.mimeType,
       extension: validated.extension,
       size: validated.size,
       digest: validated.digest,
+      ...(normalized ? { normalized: true as const } : {}),
     };
   } finally {
     await file.close();

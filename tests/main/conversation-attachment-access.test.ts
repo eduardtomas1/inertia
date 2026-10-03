@@ -17,7 +17,7 @@ import {
 import type { ConversationAttachmentStoreAnyOperationRunner } from "../../src/node/conversation-attachment-store-child";
 import { metadataFor } from "../../src/node/conversation-attachment-store-metadata";
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
   type ChatAttachmentMimeType,
 } from "../../src/shared/attachments";
 
@@ -85,7 +85,7 @@ describe("opaque conversation attachment preview responses", () => {
     await expect(resolveAttachmentPreviewResponse(null, Promise.resolve(store), attachmentId)).resolves.toBeNull();
   });
 
-  it.each(CHAT_ATTACHMENT_MIME_TYPES)(
+  it.each(ACCEPTED_ATTACHMENT_MIME_TYPES)(
     "serves a revalidated %s attachment through the private preview route",
     async (mimeType) => {
       const response = await resolveAttachmentPreviewResponse(

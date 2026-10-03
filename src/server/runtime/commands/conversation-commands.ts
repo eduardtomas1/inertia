@@ -108,6 +108,7 @@ export function createConversationCommandHandler(
   const creation = dependencies.creation
     ?? new ConversationCreationService(dependencies);
   return defineRuntimeCommandHandler([
+    "project.ensure-scratch",
     "conversation.create",
     "conversation.select",
     "conversation.detail.load",
@@ -128,6 +129,15 @@ export function createConversationCommandHandler(
     "conversation.regenerate-title",
   ], async (socket, command) => {
     switch (command.type) {
+      case "project.ensure-scratch": {
+        const project = await creation.ensureScratchProject();
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result", requestId: command.requestId,
+          result: { kind: "project.created", projectId: project.id },
+        });
+        return "handled";
+      }
       case "conversation.mark-unread":
         dependencies.store.markConversationUnread(command.payload.conversationId);
         return "mutation";
@@ -665,10 +675,12 @@ export function createConversationCommandHandler(
               }
             }
           }
-          await deleteCheckpoints(
-            dependencies.store.projectPath(conversation.projectId),
-            conversation.id,
-          ).catch(() => undefined);
+          if (dependencies.store.project(conversation.projectId).workspaceKind !== "scratch") {
+            await deleteCheckpoints(
+              dependencies.store.projectPath(conversation.projectId),
+              conversation.id,
+            ).catch(() => undefined);
+          }
           const finalConversation = dependencies.store.conversation(
             command.payload.conversationId,
           );

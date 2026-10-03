@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  attachmentLimitError,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_BYTES,
 } from "../../attachments";
 import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "../../conversation-context";
 
@@ -46,13 +47,17 @@ export const attachmentSchema = z
     id: z.string().uuid(),
     name: z.string().trim().min(1).max(255),
     path: z.string().min(1).max(4096),
-    mimeType: z.enum(CHAT_ATTACHMENT_MIME_TYPES),
-    size: z.number().int().min(1).max(MAX_CHAT_ATTACHMENT_BYTES),
+    mimeType: z.enum(ACCEPTED_ATTACHMENT_MIME_TYPES),
+    size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
   })
   .strict();
 
 export const attachmentsSchema = z.array(attachmentSchema)
-  .max(MAX_CHAT_ATTACHMENTS)
+  .max(MAX_ATTACHMENT_COUNT)
+  .superRefine((attachments, context) => {
+    const message = attachmentLimitError(attachments);
+    if (message) context.addIssue({ code: "custom", message });
+  })
   .default([]);
 
 export const turnRequestContextSchema = z

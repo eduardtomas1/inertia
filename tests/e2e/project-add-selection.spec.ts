@@ -208,7 +208,8 @@ test("starts a new chat in the project chosen from the New chat palette", async 
 
       await newChat.click();
       await expect(search).toBeFocused();
-      await expect(picker.getByRole("option")).toHaveCount(2);
+      await expect(picker.getByRole("option")).toHaveCount(3);
+      await expect(picker.getByRole("option").filter({ hasText: "No project" })).toHaveCount(1);
       await expect(picker.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
       const bounds = await picker.boundingBox();
       expect(bounds).toBeTruthy();

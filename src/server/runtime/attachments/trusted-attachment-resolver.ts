@@ -1,5 +1,5 @@
 import { snapshotSourceSchema } from "../../../shared/snapshots";
-import { createHash } from "node:crypto";
+import { readAttachment, type AttachmentFileSource } from "../../../node/read-attachment.js";
 import { constants } from "node:fs";
 import {
   lstat,
@@ -9,6 +9,7 @@ import {
 import {
   basename,
   isAbsolute,
+  join,
   relative,
   sep,
 } from "node:path";
@@ -16,15 +17,17 @@ import {
 import { FILE_OPEN_NO_FOLLOW } from
   "../../../node/platform-file-open-flags.js";
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
-  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
+  MAX_ATTACHMENT_COUNT,
+  attachmentLimitError,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
+  storedAttachmentTypeMatchesName,
   chatAttachmentStorageExtension,
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
 import { AttachmentResolutionError } from "./attachment-errors.js";
+import { MAX_ATTACHMENT_READ_ROOTS } from "../../provider/attachment-read-grant.js";
 
 export interface RuntimeAttachmentBroker {
   resolve(
@@ -49,6 +52,7 @@ export interface RuntimeAttachmentBroker {
 export interface ResolvedAttachmentPayload {
   attachment: ChatAttachment;
   bytes: Uint8Array;
+  source?: AttachmentFileSource;
 }
 
 function isContained(root: string, target: string): boolean {
@@ -88,7 +92,7 @@ export class TrustedAttachmentResolver {
     handoffId: string,
     signal?: AbortSignal,
   ): Promise<ResolvedAttachmentPayload[]> {
-    if (requested.length > MAX_CHAT_ATTACHMENTS) throw publicAttachmentError();
+    if (requested.length > MAX_ATTACHMENT_COUNT) throw publicAttachmentError();
     if (requested.length === 0) return [];
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
       .test(handoffId)) throw publicAttachmentError();
@@ -120,9 +124,10 @@ export class TrustedAttachmentResolver {
         if (seenPaths.has(attachment.path)) throw publicAttachmentError();
         seenPaths.add(attachment.path);
         totalBytes += attachment.size;
-        if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) throw publicAttachmentError();
+        if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) throw publicAttachmentError();
         resolved.push(payload);
       }
+      if (attachmentLimitError(resolved.map(({ attachment }) => attachment))) throw publicAttachmentError();
       return resolved;
     } catch (error) {
       await this.relinquishAll(claimedIds);
@@ -148,9 +153,9 @@ export class TrustedAttachmentResolver {
     try {
       if (
         trusted.size < 1
-        || trusted.size > MAX_CHAT_ATTACHMENT_BYTES
+        || trusted.size > MAX_ATTACHMENT_BYTES
         || !/^[0-9a-f]{64}$/u.test(trusted.digest)
-        || chatAttachmentMimeTypeForName(trusted.name) !== trusted.mimeType
+        || !storedAttachmentTypeMatchesName(trusted.name, trusted.mimeType)
       ) throw publicAttachmentError();
       const pathInfo = await lstat(trusted.path);
       if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) throw publicAttachmentError();
@@ -177,14 +182,15 @@ export class TrustedAttachmentResolver {
           || before.size !== trusted.size
         ) throw publicAttachmentError();
         if (signal?.aborted) throw publicAttachmentError();
-        bytes = await file.readFile();
+        const read = await readAttachment(file, trusted.size, 0, signal);
+        bytes = read.bytes;
         const after = await file.stat();
         if (
           signal?.aborted
           || after.size !== before.size
           || after.mtimeMs !== before.mtimeMs
           || after.ctimeMs !== before.ctimeMs
-          || createHash("sha256").update(bytes).digest("hex") !== trusted.digest
+          || read.digest !== trusted.digest
         ) throw publicAttachmentError();
       } finally {
         await file.close();
@@ -199,9 +205,23 @@ export class TrustedAttachmentResolver {
           ...(trusted.snapshot ? { snapshot: snapshotSourceSchema.parse(trusted.snapshot) } : {}),
         },
         bytes,
+        source: { path: canonicalPath, digest: trusted.digest },
       };
     } catch {
       throw publicAttachmentError();
     }
   }
+}
+
+export function conversationAttachmentReadRoots(
+  store: { attachments(conversationId: string): readonly { readonly id: string }[] },
+  retained: { readonly directory: string },
+): (input: { conversationId: string; attachmentIds: readonly string[] }) => string[] {
+  return ({ conversationId, attachmentIds }) => [...new Set([
+    ...store.attachments(conversationId).map(({ id }) => id),
+    ...attachmentIds,
+  ])]
+    .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id))
+    .slice(-MAX_ATTACHMENT_READ_ROOTS)
+    .map((id) => join(retained.directory, id));
 }

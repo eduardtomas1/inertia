@@ -17,6 +17,7 @@ import { FILE_OPEN_NO_FOLLOW } from
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { AttachmentPickerMode } from "../shared/desktop.js";
 import {
+  CREDENTIAL_ATTACHMENT_ERROR,
   validateAttachmentPickerName,
   validateSelectedAttachmentCount,
   validateSelectedAttachmentOpen,
@@ -39,12 +40,13 @@ interface SelectedAttachment {
 
 const SAFE_ATTACHMENT_ERRORS = new Set([
   ATTACHMENT_MIME_MISMATCH_ERROR,
+  CREDENTIAL_ATTACHMENT_ERROR,
   TEXT_ATTACHMENT_CONTENT_ERROR,
   TEXT_ATTACHMENT_SIZE_ERROR,
   UNSUPPORTED_ATTACHMENT_TYPE_ERROR,
   "A selected attachment changed while it was being opened.",
   "A selected attachment changed while it was being read.",
-  "A selected attachment is empty or exceeds the 10 MB file limit.",
+  "A selected attachment is empty or exceeds the 50 MiB file limit.",
   "Attachment content does not match its safe file type.",
   "Attachment import did not complete.",
   "Attachment import is busy. Try again in a moment.",
@@ -59,11 +61,12 @@ const SAFE_ATTACHMENT_ERRORS = new Set([
   "Attachment validation utility shutdown is unconfirmed.",
   "Attachment validation utility stopped before replying.",
   "Attachment validation utility stopped unexpectedly.",
-  "Attachments exceed the 20 MB turn limit.",
+  "Attachments exceed the maximum message size.",
   "Follow-up attachments must be images.",
   "Invalid attachment.",
+  "Files must be nonempty and at most 50 MiB.",
   "Invalid attachments.",
-  "Selected attachments exceed the 20 MB turn limit.",
+  "Selected attachments exceed the maximum message size.",
   "Temporary attachment storage could not be verified safely.",
   "Temporary attachment storage is no longer available.",
   "Temporary attachment storage is full. Remove an attachment and try again.",

@@ -1,0 +1,106 @@
+.limit-reset {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  padding: 0 0 calc(var(--composer-zone-gap) + var(--composer-density-spacing-adjustment));
+  border-bottom: 1px solid var(--composer-zone-separator);
+}
+
+.limit-reset-icon {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  color: var(--warning);
+}
+
+.limit-reset[data-state="scheduled"] .limit-reset-icon {
+  color: var(--text-muted);
+}
+
+.limit-reset-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 160px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.limit-reset-copy strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--ui-font-micro);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.limit-reset-copy time {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: max(calc(var(--ui-font-micro) - 1px), 8px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.limit-reset-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.limit-reset-action.secondary-button {
+  min-height: var(--control-height-small);
+  padding: 0 10px;
+  font-size: var(--ui-font-micro);
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+
+.limit-reset-action.secondary-button:hover:not([aria-disabled="true"]) {
+  border-color: var(--interactive-border-hover);
+}
+
+.limit-reset-action[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
+.limit-reset-action.secondary-button[aria-disabled="true"]:hover {
+  background: var(--surface-strong);
+}
+
+.limit-reset-message {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin: 0;
+  padding-left: 22px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: max(calc(var(--ui-font-micro) - 1px), 8px);
+  line-height: 1.45;
+}
+
+.limit-reset-message[role="alert"] {
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .limit-reset-action.secondary-button:active:not([aria-disabled="true"]) {
+    transform: scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .limit-reset-action.secondary-button {
+    transition: none;
+  }
+}

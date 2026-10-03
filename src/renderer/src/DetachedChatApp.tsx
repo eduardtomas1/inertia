@@ -613,6 +613,7 @@ export default function DetachedChatApp({
             promptPresetsEnabled={false}
             promptStashEnabled={false}
             onQueueCommand={runtimeActions.runQueueCommand}
+            onLimitResetCommand={runtimeActions.runLimitResetCommand}
             conversationContextHandoffEnabled={false}
             goal={{
               workflow: workflowState,

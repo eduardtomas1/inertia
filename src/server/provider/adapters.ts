@@ -1,6 +1,8 @@
 import { isAbsolute } from "node:path";
 
 import { PROVIDER_INFO } from "./catalog";
+import { MAX_PROVIDER_REQUEST_IMAGE_COUNT } from "./provider-image-read";
+import { MAX_ATTACHMENT_READ_ROOTS } from "./attachment-read-grant";
 import {
   versionedContinuationIdentitySchema,
   currentKnownHarnessIdSchema,
@@ -18,7 +20,6 @@ import {
 } from "./contracts";
 
 const MAX_PROMPT_CHARS = 256 * 1024;
-const MAX_IMAGE_COUNT = 32;
 const MAX_SKILL_COUNT = 8;
 
 function isProviderId(value: unknown): value is ProviderId {
@@ -203,11 +204,18 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     }
   }
   const imagePaths = input.imagePaths ?? [];
-  if (imagePaths.length > MAX_IMAGE_COUNT) {
+  if (imagePaths.length > MAX_PROVIDER_REQUEST_IMAGE_COUNT) {
     throw new ProviderRuntimeError("invalid_input", "Too many images were attached.");
   }
   if (imagePaths.some((path) => !path.trim() || path.length > 4096 || path.includes("\0"))) {
     throw new ProviderRuntimeError("invalid_input", "An image path is invalid.");
+  }
+  const readRoots = input.attachmentReadRoots ?? [];
+  if (
+    readRoots.length > MAX_ATTACHMENT_READ_ROOTS
+    || readRoots.some((root) => !isAbsolute(root) || root.length > 4096 || root.includes("\0"))
+  ) {
+    throw new ProviderRuntimeError("invalid_input", "An attachment read root is invalid.");
   }
   const skills = input.skills ?? [];
   if (skills.length > MAX_SKILL_COUNT) {

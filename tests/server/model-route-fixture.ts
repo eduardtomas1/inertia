@@ -34,6 +34,7 @@ interface NativeProviderRunInput {
   access: ProviderAccessMode;
   sessionId?: string;
   imagePaths?: readonly string[];
+  attachmentReadRoots?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   goalStart?: ProviderRunInput["goalStart"];
   goalContinuationExpected?: boolean;

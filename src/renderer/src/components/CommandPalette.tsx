@@ -1,4 +1,4 @@
-import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, MessageSquarePlus, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -26,6 +26,7 @@ type CommandPaletteProps = {
   onSelectMessage?: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   onNewThread: () => void;
   onNewThreadIn: (project: Project) => void;
+  onNewThreadWithoutProject?: () => void;
   onAddProject: () => void;
   onOpenSettings: () => void;
 };
@@ -75,7 +76,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [view, setView] = useState(initialView);
   const choosingProject = view === "new-chat";
   const [query, setQuery] = useState("");
@@ -106,15 +107,16 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
       ...(projects.length > 1
         ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={15} />, view: "new-chat" as const }]
         : []),
+      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <MessageSquarePlus size={15} />, run: onNewThreadWithoutProject }] : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={15} />, run: openHelpGuide },
     ];
-    const projectItems: PaletteItem[] = projects.map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={15} />, run: () => onSelectProject(project) }));
+    const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={15} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
+  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onSelectConversation, onSelectProject, projects]);
   const messageItems = useMemo<PaletteItem[]>(() => {
     if (!onSelectMessage) return [];
     return (search.result?.hits ?? []).flatMap((hit) => {
@@ -128,12 +130,17 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   }, [search.result, conversations, projects, onSelectMessage]);
   const projectChoices = useMemo<PaletteItem[]>(() => {
     const current = projects.find(({ id }) => id === currentProjectId);
-    return (current ? [current, ...projects.filter((project) => project !== current)] : projects).map((project) => ({
-      id: `new-thread-in:${project.id}`, group: "Projects", label: project.name, detail: project.path,
+    const choices: PaletteItem[] = (current ? [current, ...projects.filter((project) => project !== current)] : projects).filter((project) => project.workspaceKind !== "scratch").map((project) => ({
+      id: `new-thread-in:${project.id}`, group: "Projects" as const, label: project.name, detail: project.path,
       icon: <ProjectIcon project={project} size={15} />, shortcut: project === current ? "Current" : undefined,
       run: () => onNewThreadIn(project),
     }));
-  }, [currentProjectId, onNewThreadIn, projects]);
+    if (onNewThreadWithoutProject) choices.splice(current && current.workspaceKind !== "scratch" ? 1 : 0, 0, {
+      id: "new-thread-in:none", group: "Projects", label: "No project", detail: "Start in a separate local folder",
+      icon: <MessageSquare size={15} />, run: onNewThreadWithoutProject,
+    });
+    return choices;
+  }, [currentProjectId, onNewThreadIn, onNewThreadWithoutProject, projects]);
   const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : filterItems(allItems, value);
   const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...filterItems(allItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query]);
   const activeIndex = Math.max(0, items.findIndex(({ id }) => id === activeId));

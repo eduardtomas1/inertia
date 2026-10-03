@@ -7,7 +7,7 @@ export function createUsageLimitCommandHandler(limits: UsageLimitsService, send:
   return defineRuntimeCommandHandler(["usage.limits.get", "usage.source.save", "usage.source.remove", "usage.reset.prepare", "usage.reset.confirm"], async (socket, command) => {
     switch (command.type) {
       case "usage.limits.get":
-        send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "usage.limits", snapshot: command.payload.refresh ? await limits.refresh(command.payload.force) : limits.snapshot() } }); break;
+        send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "usage.limits", snapshot: command.payload.refresh ? await limits.refresh(command.payload.force, !command.payload.background) : limits.snapshot() } }); break;
       case "usage.source.save":
         send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "usage.limits", snapshot: await limits.saveSource(command.payload) } }); break;
       case "usage.source.remove":

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,6 +94,7 @@ beforeEach(async () => {
     id,
     extension: "png",
     size: bytes.length,
+    digest: createHash("sha256").update(bytes).digest("hex"),
   }));
   await writeFile(join(record, `${id}.png`), bytes);
   await chmod(root, 0o755);

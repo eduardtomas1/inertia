@@ -14,6 +14,7 @@ import {
   testProviderBinDirectory,
 } from "../../src/server/environment";
 import { detectProvider } from "../../src/server/provider/discovery";
+import { AcpSecretRedactor, acpEnvironmentSecretValues } from "../../src/server/provider/acp-redaction";
 import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
 
 const ENVIRONMENT_KEYS = [
@@ -362,6 +363,24 @@ describe("provider environment discovery", { concurrent: false }, () => {
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "INERTIA_LOGIN_SHELL_MARKER",
     );
+  });
+
+  it("passes Cursor's login selectors only to Cursor and redacts its session token", () => {
+    const source = {
+      PATH: process.env.PATH,
+      CURSOR_AUTH_TOKEN: "cursor-session-token",
+      CURSOR_API_ENDPOINT: "https://api2.cursor.sh",
+      AGENT_CLI_CREDENTIAL_STORE: "file",
+    };
+    const cursor = providerChildEnvironment("cursor", source);
+    expect(cursor).toMatchObject(source);
+    expect(acpEnvironmentSecretValues(cursor)).toEqual(["cursor-session-token"]);
+    const redactor = new AcpSecretRedactor(cursor);
+    expect(redactor.assistantChunk("Saved the file with cursor-session-token") + redactor.finishAssistant())
+      .toBe("Saved the file with [redacted]");
+    for (const providerId of ["codex", "claude", "kimi", "antigravity", "opencode"] as const) {
+      expect(Object.keys(providerChildEnvironment(providerId, source))).toEqual(["PATH"]);
+    }
   });
 
   it("preserves bounded Claude cloud routes and ordinary brokered credentials", () => {

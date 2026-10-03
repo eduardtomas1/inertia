@@ -21,7 +21,10 @@ function backgroundTasks(...tasks: Array<{ task_id: string; ambient?: boolean }>
 
 describe("Claude visible final answer settlement", () => {
   const roots: string[] = [];
-  afterEach(async () => { await Promise.all(roots.splice(0).map(removePortableFixture)); });
+  afterEach(async () => {
+    vi.useRealTimers();
+    await Promise.all(roots.splice(0).map(removePortableFixture));
+  });
 
   const normalCases = (["none", "queued", "started"] as const).flatMap((state) =>
     [0, 1].flatMap((numTurns) => [false, true].map((correlated) =>
@@ -91,11 +94,13 @@ describe("Claude visible final answer settlement", () => {
   );
 
   it("bounds trace cleanup after foreground work becomes ambient without inventing a terminal task edge", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const root = portableFixtureRoot("Claude foreground task becomes ambient");
     roots.push(root);
+    let ready!: () => void;
+    const waiting = new Promise<void>((resolve) => { ready = resolve; });
     let release!: () => void;
     const released = new Promise<void>((resolve) => { release = resolve; });
-    let waitStartedAt = 0;
     const traces: Array<{ status: string; isLive: boolean }> = [];
     const close = vi.fn(() => release());
     const harness = createClaudeAgentSdkHarness({
@@ -106,7 +111,7 @@ describe("Claude visible final answer settlement", () => {
         yield claudeSuccessResult("Visible provisional answer", "completed");
         yield backgroundTasks({ task_id: "agent", ambient: true });
         yield claudeSuccessResult("Fresh final answer", "completed");
-        waitStartedAt = Date.now();
+        ready();
         await released;
       })(), { close }),
     });
@@ -118,12 +123,18 @@ describe("Claude visible final answer settlement", () => {
         if (event.type === "subagent") traces.push({ status: event.status, isLive: event.isLive });
       } },
     });
+    const settled = vi.fn();
+    void run.result.then(settled);
     try {
+      await expect(Promise.race([waiting.then(() => "waiting"), run.result.then(() => "settled")])).resolves.toBe("waiting");
+      await vi.advanceTimersByTimeAsync(24);
+      expect(settled).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
       await expect(run.result).resolves.toMatchObject({
         status: "completed", text: "Fresh final answer", cleanupConfirmed: true,
       });
-      expect(waitStartedAt).toBeGreaterThan(0);
-      expect(Date.now() - waitStartedAt).toBeGreaterThanOrEqual(20);
+      expect(settled).toHaveBeenCalledOnce();
       // The turn controller still receives this known live descendant and can
       // reject completion; ambient roster flags never fabricate task completion.
       expect(traces).toEqual([{ status: "spawned", isLive: true }]);

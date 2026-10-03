@@ -112,12 +112,17 @@ describe("private staged attachment validation", () => {
     expect(await readFile(path)).toEqual(bytes);
   });
 
-  it("returns a bounded text-content error for an ambiguous encoding", async () => {
-    const { operation } = await stage("notes.txt", "text/plain", Buffer.from("caf\xe9", "latin1"));
-    await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({
-      code: "text-content",
-      message: expect.stringContaining("Convert the file to UTF-8"),
+  it("keeps text with an ambiguous encoding as an opaque file", async () => {
+    const bytes = Buffer.from("caf\xe9", "latin1");
+    const { operation, path } = await stage("notes.txt", "text/plain", bytes);
+    expect(await validateAttachmentImportFile(operation)).toEqual({
+      displayName: "notes.txt",
+      mimeType: "application/octet-stream",
+      extension: "bin",
+      size: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
     });
+    expect(await readFile(path)).toEqual(bytes);
   });
   it.each([
     {

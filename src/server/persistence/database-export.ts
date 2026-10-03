@@ -5,7 +5,7 @@ import type { ProviderId } from "../../shared/contracts";
 import type { NewConversationOptions } from "./types";
 
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
-export const DATABASE_RECOVERY_EXPORT_VERSION = 2;
+export const DATABASE_RECOVERY_EXPORT_VERSION = 3;
 export const DATABASE_RECOVERY_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
 export const DATABASE_RECOVERY_EXPORT_MAX_PROJECTS = 10_000;
 export const DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS = 100_000;
@@ -90,8 +90,15 @@ const legacyRecoveryProjectSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
 
+const version2RecoveryProjectSchema = z.object({
+  ...recoveryProjectFields,
+  conversations: z.array(recoveryConversationSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
+}).strict();
+
 const recoveryProjectSchema = z.object({
   ...recoveryProjectFields,
+  workspaceKind: z.literal("scratch").optional(),
   conversations: z.array(recoveryConversationSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
@@ -136,6 +143,14 @@ const legacyDatabaseRecoveryExportSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
 }).strict().superRefine(validateRecoveryExportCounts);
 
+const version2DatabaseRecoveryExportSchema = z.object({
+  format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
+  version: z.literal(2),
+  exportedAt: timestampSchema,
+  projects: z.array(version2RecoveryProjectSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
+}).strict().superRefine(validateRecoveryExportCounts);
+
 export const databaseRecoveryExportSchema = z.object({
   format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
   version: z.literal(DATABASE_RECOVERY_EXPORT_VERSION),
@@ -146,6 +161,7 @@ export const databaseRecoveryExportSchema = z.object({
 
 const supportedDatabaseRecoveryExportSchema = z.union([
   databaseRecoveryExportSchema,
+  version2DatabaseRecoveryExportSchema,
   legacyDatabaseRecoveryExportSchema,
 ]);
 
@@ -189,6 +205,9 @@ export function parseDatabaseRecoveryExport(
   }
   if (result.data.version === DATABASE_RECOVERY_EXPORT_VERSION) {
     return result.data;
+  }
+  if (result.data.version === 2) {
+    return { ...result.data, version: DATABASE_RECOVERY_EXPORT_VERSION };
   }
   return {
     ...result.data,

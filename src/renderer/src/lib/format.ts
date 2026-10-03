@@ -25,10 +25,40 @@ export function formatWorkAge(value: string): string {
   return formatRelativeTime(value);
 }
 
-export function formatClockTime(value: string): string {
-  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
+let timestampFormatterKey = "";
+const timestampFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function timestampFormatter(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const now = new Date();
+  const key = `${now.getTimezoneOffset()}:${Math.floor(now.getTime() / 60_000)}`;
+  if (key !== timestampFormatterKey) {
+    timestampFormatters.clear();
+    timestampFormatterKey = key;
+  }
+  const id = JSON.stringify(options);
+  let formatter = timestampFormatters.get(id);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(INTERFACE_LOCALE, options);
+    timestampFormatters.set(id, formatter);
+  }
+  return formatter;
+}
+
+export function formatMessageTime(value: string, now = new Date()): string {
+  const date = new Date(value);
+  const sameDay = date.toDateString() === now.toDateString();
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return timestampFormatter({
+    ...(sameDay ? {} : { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }),
     hour: "numeric",
     minute: "2-digit",
+  }).format(date);
+}
+
+export function formatFullDateTime(value: string): string {
+  return timestampFormatter({
+    dateStyle: "full",
+    timeStyle: "short",
   }).format(new Date(value));
 }
 

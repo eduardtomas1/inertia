@@ -1273,6 +1273,8 @@ describe("database backup and startup recovery", () => {
   it.each([
     "agent_turns",
     "agent_thread_operations",
+    "usage_limit_resume_plans",
+    "usage_limited_turns",
   ] as const)(
     "preserves all evidence and refuses startup when a current-schema primary lost %s",
     async (missingTable) => {

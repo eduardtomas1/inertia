@@ -62,7 +62,7 @@ export function parseDocumentPreparationOperation(value: unknown): DocumentPrepa
       || !id(payload.id) || seen.has(payload.id)
       || typeof payload.name !== "string" || payload.name.length < 1 || payload.name.length > 512
       || typeof payload.mimeType !== "string"
-      || !CHAT_ATTACHMENT_MIME_TYPES.includes(payload.mimeType as ChatAttachmentMimeType)
+      || !(CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(payload.mimeType)
       || !bytes(payload.bytes)) return null;
     seen.add(payload.id);
     total += payload.bytes.byteLength;

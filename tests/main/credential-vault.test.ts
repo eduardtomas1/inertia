@@ -243,6 +243,41 @@ describe("CredentialVault", () => {
     ]);
   });
 
+  it("creates one protected random secret for concurrent first resolution", async () => {
+    const persistence = new MemoryPersistence();
+    const encryption = new TestEncryption();
+    const vault = new CredentialVault(encryption, persistence);
+    const reference = "secret:usage:account-identity";
+
+    const [first, second] = await Promise.all([
+      vault.resolveOrCreate(reference),
+      vault.resolveOrCreate(reference),
+    ]);
+
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(second).toBe(first);
+    expect(encryption.encryptCalls).toBe(1);
+    expect(await vault.resolveOrCreate(reference)).toBe(first);
+    expect(persistence.value).not.toContain(first);
+    await vault.clear(reference);
+    const replacement = await vault.resolveOrCreate(reference);
+    expect(replacement).not.toBe(first);
+    expect(await vault.resolve(reference)).toBe(replacement);
+  });
+
+  it("does not create a secret while OS protection is unavailable", async () => {
+    const persistence = new MemoryPersistence();
+    const encryption = new TestEncryption();
+    encryption.available = false;
+    const vault = new CredentialVault(encryption, persistence);
+
+    await expect(vault.resolveOrCreate("secret:usage:account-identity")).rejects.toMatchObject({
+      code: "storage-unavailable",
+    });
+    expect(persistence.value).toBeNull();
+    expect(encryption.encryptCalls).toBe(0);
+  });
+
   it("does not restore an older secret during concurrent key rotation", async () => {
     const persistence = new MemoryPersistence();
     const encryption = new TestEncryption();

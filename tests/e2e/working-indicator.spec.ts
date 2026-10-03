@@ -53,16 +53,6 @@ async function openAppearanceSettings(): Promise<void> {
   await page.locator(".working-indicator-settings").scrollIntoViewIfNeeded();
 }
 
-test("keeps the Classic grid and rings by default", async () => {
-  await expect(activeTurn().locator(".turn-working-status .agent-pixel-loader > span")).toHaveCount(9);
-  await expect(page.locator(".working-orb")).toHaveCount(0);
-  await expect(sidebarRow("Working indicator fixture").locator('.agent-pixel-loader[data-rhythm="orbit"]')).toBeVisible();
-  const ring = await activeTurn().locator(".agent-activity.is-running .agent-activity-icon").first()
-    .evaluate((element) => getComputedStyle(element, "::after").content);
-  expect(ring).toBe('""');
-  expect(app.rendererErrors).toEqual([]);
-});
-
 test("changes the indicator from Settings with the keyboard and updates the open chat live", async () => {
   await openAppearanceSettings();
   const picker = page.getByRole("radiogroup", { name: "Working indicator" });

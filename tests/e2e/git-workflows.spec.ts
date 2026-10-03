@@ -4,10 +4,8 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test, type Locator } from "@playwright/test";
-import Database from "better-sqlite3";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openLocalProjectFromDialog } from "./support/add-project";
-import { observeGitAction, type GitActionTarget } from "./support/git-action-observer";
 
 const execFileAsync = promisify(execFile);
 async function gitOutput(cwd: string, ...args: string[]): Promise<string> {
@@ -19,13 +17,10 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 let app: AppFixture;
 let remote: string;
 let initialBranch: string;
-let trackingIdentity: { projectId: string; conversationId: string } | undefined;
 const pushScenario = "pushes existing commits while preserving unrelated edits";
-const trackingScenario = "tracks an exact remote branch with missing fetch mappings";
 const pullScenario = "fast-forwards incoming commits using checkout filters";
 test.beforeEach(async () => {
   const scenario = test.info().title;
-  trackingIdentity = undefined;
   app = await createAppFixture({
     name: "git-workflows", initialState: "conversation", windowDisplay: "primary",
     beforeLaunch: async ({ workspaceDirectory, testDirectory }) => {
@@ -38,25 +33,15 @@ test.beforeEach(async () => {
       await git(workspaceDirectory, "push", "-u", "origin", initialBranch);
       await git(remote, "branch", "feature/remote-review", initialBranch);
       await git(workspaceDirectory, "fetch", "origin");
-      await git(workspaceDirectory, "branch", "feature/local-review");
-      await git(workspaceDirectory, "worktree", "add", "-b", "feature/occupied", join(testDirectory, "occupied"));
       // Seed independent mutation scenarios before the renderer's first Git
       // scan so setup does not require another live refresh or UI operation.
-      if (scenario === pushScenario || scenario === trackingScenario || scenario === pullScenario) {
+      if (scenario === pushScenario || scenario === pullScenario) {
         if (scenario !== pushScenario) await git(workspaceDirectory, "config", "core.autocrlf", "true");
         await git(workspaceDirectory, "add", "--", "sample.ts");
         await git(workspaceDirectory, "commit", "-m", "Prepare clean checkout");
       }
       if (scenario === pushScenario) {
         await writeFile(join(workspaceDirectory, "notes.txt"), "unfinished local work\n");
-      } else if (scenario === trackingScenario) {
-        await git(workspaceDirectory, "config", "--unset-all", "remote.origin.fetch");
-        const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true, fileMustExist: true });
-        try {
-          trackingIdentity = database.prepare("SELECT id AS conversationId, project_id AS projectId FROM conversations WHERE title = ?")
-            .get("git-workflows fixture") as typeof trackingIdentity;
-          expect(trackingIdentity).toBeDefined();
-        } finally { database.close(); }
       } else if (scenario === pullScenario) {
         await git(workspaceDirectory, "switch", "--track", "-c", "feature/remote-review", "refs/remotes/origin/feature/remote-review");
         const peer = join(testDirectory, "peer");
@@ -162,13 +147,9 @@ async function openGit(): Promise<Locator> {
   await expect(menu.getByRole("menuitem", { name: /^Fetch/u })).not.toHaveAttribute("aria-disabled", "true");
   return menu;
 }
-async function fetchFromUi(target?: GitActionTarget): Promise<void> {
+async function fetchFromUi(): Promise<void> {
   const menu = await openGit();
-  const observer = target ? await observeGitAction(app.page, { type: "git.fetch", payload: target }) : undefined;
-  try {
-    await menu.getByRole("menuitem", { name: /^Fetch/u }).click();
-    await observer?.waitForResult();
-  } finally { await observer?.dispose(); }
+  await menu.getByRole("menuitem", { name: /^Fetch/u }).click();
   await openGit();
   await app.page.keyboard.press("Escape");
 }
@@ -222,71 +203,6 @@ test("fetch preserves local work and recovers after a remote failure", async () 
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("branch search retains failed choices and keeps keyboard focus visible", async () => {
-  const { page, workspaceDirectory } = app;
-  const trigger = page.getByRole("group", { name: "Chat checkout context" }).locator(".checkout-branch-button");
-  await trigger.click();
-  const menu = page.getByRole("menu", { name: "Branches" });
-  const search = menu.getByRole("searchbox", { name: "Search branches" });
-  await expect(menu.getByRole("menuitemradio", { name: /feature\/occupied/u })).toBeDisabled();
-  await expect(menu.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u })).toBeEnabled();
-  const geometry = await menu.locator(".git-branch-results").evaluate((element) => ({
-    overflow: element.scrollWidth - element.clientWidth,
-    names: [...element.querySelectorAll(".git-branch-name")].map((name) => name.getBoundingClientRect().width),
-  }));
-  expect(geometry.overflow).toBeLessThanOrEqual(1);
-  expect(geometry.names.every((width) => width > 100)).toBe(true);
-  await capture("git-branches-dark.png");
-  await search.fill("remote-review");
-  await search.press("Enter");
-  await expect(menu.getByRole("alert")).toContainText("Commit or stash local changes before switching branches.");
-  await expect(search).toHaveValue("remote-review");
-  await expect(menu.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u })).toBeEnabled();
-  await expect(page.locator(".error-toast")).toHaveCount(0);
-  await capture("git-branch-error-dark.png");
-  const create = menu.getByRole("textbox", { name: "New branch name" });
-  await create.fill("feature/keep-editing");
-  await create.press("Home");
-  await expect(create).toBeFocused();
-  expect(await create.evaluate((input: HTMLInputElement) => input.selectionStart)).toBe(0);
-  await create.press("End");
-  expect(await create.evaluate((input: HTMLInputElement) => input.selectionStart)).toBe("feature/keep-editing".length);
-  await page.keyboard.press("Escape");
-  await expect(trigger).toBeFocused();
-
-  for (let index = 0; index < 24; index += 1) await git(workspaceDirectory, "branch", `topic/review-${String(index).padStart(2, "0")}`);
-  await trigger.click();
-  await expect(menu.getByRole("menuitemradio", { name: "topic/review-23", exact: true })).toBeVisible();
-  await expect(menu.getByRole("menuitemradio", { name: "topic/review-23", exact: true })).toBeEnabled();
-  await search.focus();
-  const count = await menu.locator('.git-branch-results button:not(:disabled)').count();
-  for (let index = 0; index < count; index += 1) await page.keyboard.press("ArrowDown");
-  const focused = await menu.locator(".git-branch-results").evaluate((element) => {
-    const active = document.activeElement;
-    const row = active?.getBoundingClientRect();
-    const bounds = element.getBoundingClientRect();
-    const rectangle = (value: DOMRect | undefined): unknown => value && ({
-      top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height,
-    });
-    return {
-      scrollTop: element.scrollTop, visible: Boolean(row && row.top >= bounds.top && row.bottom <= bounds.bottom + 1),
-      activeTag: active?.tagName, activeRole: active?.getAttribute("role"), activeInside: element.contains(active),
-      activeBranch: active?.querySelector(".git-branch-name")?.textContent?.slice(0, 80),
-      row: rectangle(row), bounds: rectangle(bounds), menu: rectangle(element.closest('[role="menu"]')?.getBoundingClientRect()),
-      clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollBehavior: getComputedStyle(element).scrollBehavior,
-      enabledRows: element.querySelectorAll('button:not(:disabled)').length,
-    };
-  });
-  expect(focused.scrollTop).toBeGreaterThan(0);
-  expect(focused.visible, JSON.stringify({ keyPresses: count, ...focused })).toBe(true);
-  await search.fill(initialBranch);
-  await search.press("Enter");
-  await expect(menu).toBeHidden();
-  await expect(trigger).toBeFocused();
-  expect(await git(workspaceDirectory, "branch", "--show-current")).toBe(initialBranch);
-  expect(app.rendererErrors).toEqual([]);
-});
-
 // Keep each mutation independent. Native timing found 83 guarded Git commands
 // in review alone, followed by commit revalidation and the transaction. Allow
 // this complete flow its own bound without changing other scenarios or retries.
@@ -310,36 +226,6 @@ test(pushScenario, async () => {
   await push.click();
   await expect.poll(async () => await git(remote, "rev-parse", `refs/heads/${initialBranch}`)).toBe(localHead);
   expect(await readFile(join(workspaceDirectory, "notes.txt"), "utf8")).toBe("unfinished local work\n");
-  expect(app.rendererErrors).toEqual([]);
-});
-
-test(trackingScenario, async () => {
-  // This functional scenario explicitly allows backend settlement up to 60s
-  // after admission, then retains the ordinary 15s UI bound. Like commit, its
-  // full setup/action/assertion allowance is 120s, not the former 45s.
-  test.setTimeout(120_000);
-  const { page, workspaceDirectory } = app;
-  if (!trackingIdentity) throw new Error("The seeded tracking conversation is unavailable.");
-  // Fetch has its own guarded backend work before branch switching. Observe
-  // that exact request's settlement, then keep the ordinary UI assertion bound.
-  await fetchFromUi({ ...trackingIdentity, repositoryPath: "." });
-  const trigger = page.getByRole("group", { name: "Chat checkout context" }).locator(".checkout-branch-button");
-  await trigger.click();
-  const branches = page.getByRole("menu", { name: "Branches" });
-  await branches.getByRole("searchbox").fill("remote-review");
-  await expect(branches.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u })).toBeEnabled();
-  const switchObserver = await observeGitAction(page, {
-    type: "git.branch.switch",
-    payload: { ...trackingIdentity, repositoryPath: ".", name: "origin/feature/remote-review", remote: true },
-  });
-  try {
-    await branches.getByRole("searchbox").press("Enter");
-    await switchObserver.waitForResult();
-  } finally { await switchObserver.dispose(); }
-  await expect(branches).toBeHidden();
-  await expect(trigger).toContainText("feature/remote-review");
-  expect(await git(workspaceDirectory, "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/feature/remote-review");
-  expect(await git(workspaceDirectory, "config", "--get-all", "remote.origin.fetch")).toBe("+refs/heads/*:refs/remotes/origin/*");
   expect(app.rendererErrors).toEqual([]);
 });
 

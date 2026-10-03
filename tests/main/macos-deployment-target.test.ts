@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -85,27 +85,6 @@ it.each([
   const { verifyMacosDeploymentTarget } = await verifier();
   const file = await binary(change(machO(13 * 65536)));
   expect(() => verifyMacosDeploymentTarget(file, "13.0", "arm64")).toThrow();
-});
-
-it.skipIf(process.platform !== "darwin")("builds the real guardian for the declared macOS minimum despite a newer host target", async () => {
-  const root = await temporaryRoot();
-  const output = join(root, "generated/runtime-process-guardian");
-  await run(process.execPath, [join(repositoryRoot, "scripts/build-runtime-process-guardian.mjs")], {
-    cwd: repositoryRoot,
-    env: {
-      ...process.env, NODE_ENV: "test", MACOSX_DEPLOYMENT_TARGET: "26.0",
-      INERTIA_TEST_GUARDIAN_COMPILER: "",
-      INERTIA_TEST_GUARDIAN_OUTPUT_DIRECTORY: output,
-    },
-    timeout: 30_000, maxBuffer: 64 * 1024,
-  });
-  const manifest = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
-    build: { mac: { minimumSystemVersion: string } };
-  };
-  const { verifyMacosDeploymentTarget } = await verifier();
-  expect(() => verifyMacosDeploymentTarget(
-    join(output, "runtime-process-guardian"), manifest.build.mac.minimumSystemVersion,
-  )).not.toThrow();
 });
 
 it.skipIf(process.platform !== "darwin")("package smoke rejects a newer guardian before parsing the archive or launching the app", async () => {

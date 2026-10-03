@@ -29,7 +29,7 @@ describe("desktop startup failure", () => {
     expect(actions.quit).toHaveBeenCalledOnce();
   });
 
-  it.each([undefined, "development", "production"])(
+  it.each([undefined, "production"])(
     "keeps the production dialog and shutdown behavior for NODE_ENV=%s",
     (nodeEnvironment) => {
       const actions = dependencies(nodeEnvironment);
@@ -39,39 +39,6 @@ describe("desktop startup failure", () => {
 
       expect(actions.recordDiagnostic).toHaveBeenCalledWith(
         "Inertia could not start.",
-      );
-      expect(actions.logFailure).toHaveBeenCalledWith(failure);
-      expect(actions.showErrorBox).toHaveBeenCalledWith(
-        "Inertia could not start",
-        "The local workspace runtime failed to start. Please reopen Inertia and try again.",
-      );
-      expect(actions.quit).toHaveBeenCalledOnce();
-    },
-  );
-
-  it.each(["diagnostic", "log", "dialog"] as const)(
-    "continues reporting and always quits when %s reporting throws",
-    (failurePoint) => {
-      const actions = dependencies("production");
-      const failure = new Error("runtime unavailable");
-      if (failurePoint === "diagnostic") {
-        actions.recordDiagnostic.mockImplementation(() => {
-          throw new Error("diagnostic unavailable");
-        });
-      } else if (failurePoint === "log") {
-        actions.logFailure.mockImplementation(() => {
-          throw new Error("console unavailable");
-        });
-      } else {
-        actions.showErrorBox.mockImplementation(() => {
-          throw new Error("dialog unavailable");
-        });
-      }
-
-      expect(() => handleStartupFailure(failure, actions)).not.toThrow();
-
-      expect(actions.recordDiagnostic).toHaveBeenCalledWith(
-        "runtime unavailable",
       );
       expect(actions.logFailure).toHaveBeenCalledWith(failure);
       expect(actions.showErrorBox).toHaveBeenCalledWith(

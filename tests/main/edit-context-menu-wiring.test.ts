@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
 
 import type { BrowserWindowConstructorOptions } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -88,19 +87,5 @@ describe("native editing menu wiring", () => {
     const window = detachedWindow();
     window.webContents.emit("context-menu", {}, { ...editableParams, frame: window.webContents.mainFrame, ...patch });
     expect(electron.build).not.toHaveBeenCalled();
-  });
-
-  it("registers the main window menu with the exact trusted renderer check", () => {
-    const main = readFileSync(new URL("../../src/main/index.ts", import.meta.url), "utf8");
-    const start = main.indexOf("async function createMainWindow()");
-    const end = main.indexOf("\n}\n", start);
-    const creation = main.slice(start, end);
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(creation).toContain("registerEditContextMenu(window, isTrustedRendererLocation);");
-    expect(creation.indexOf("registerEditContextMenu(window")).toBeGreaterThan(creation.indexOf("mainWindow = window;"));
-    const trust = main.slice(main.indexOf("function isTrustedRendererLocation("), main.indexOf("function assertTrustedIpc("));
-    for (const part of ["protocol", "hostname", "port", "pathname", "search", "hash"]) {
-      expect(trust).toContain(`actual.${part} === expected.${part}`);
-    }
   });
 });

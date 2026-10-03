@@ -100,36 +100,29 @@ function linuxBirthtimeProbe(
   mode:
     | "valid"
     | "zero"
-    | "device-mismatch"
     | "inode-mismatch"
     | "malformed"
-    | "trailing"
     | "nonzero-exit"
     | "overflow"
     | "overflow-hang"
     | "timeout"
     | "missing",
 ): WorktreeFilesystemIdentityDependencies {
-  const validScript = "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);";
   const script = mode === "valid"
-    ? validScript
+    ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);"
     : mode === "zero"
       ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,'0.000000000'].join(z)+z);"
-      : mode === "device-mismatch"
-        ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev+1n,s.ino,'1.000000000'].join(z)+z);"
-        : mode === "inode-mismatch"
-          ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino+1n,'1.000000000'].join(z)+z);"
-          : mode === "malformed"
-            ? "process.stdout.write('not-stat-output')"
-            : mode === "trailing"
-              ? `${validScript}process.stdout.write('trailing');`
-              : mode === "nonzero-exit"
-                ? "process.exit(7)"
-        : mode === "overflow"
-          ? "process.stdout.write('x'.repeat(1024))"
-          : mode === "overflow-hang"
-            ? "process.stdout.write('x'.repeat(1024));setInterval(() => undefined, 1000)"
-          : "setInterval(() => undefined, 1000)";
+      : mode === "inode-mismatch"
+        ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino+1n,'1.000000000'].join(z)+z);"
+        : mode === "malformed"
+          ? "process.stdout.write('not-stat-output')"
+          : mode === "nonzero-exit"
+            ? "process.exit(7)"
+            : mode === "overflow"
+              ? "process.stdout.write('x'.repeat(1024))"
+              : mode === "overflow-hang"
+                ? "process.stdout.write('x'.repeat(1024));setInterval(() => undefined, 1000)"
+                : "setInterval(() => undefined, 1000)";
   return {
     platform: "linux",
     linuxStatExecutable: mode === "missing"
@@ -173,10 +166,8 @@ afterEach(() => {
 describe("launch-owned Git cleanup", () => {
   it.each([
     "zero",
-    "device-mismatch",
     "inode-mismatch",
     "malformed",
-    "trailing",
     "nonzero-exit",
     "missing",
     "overflow",

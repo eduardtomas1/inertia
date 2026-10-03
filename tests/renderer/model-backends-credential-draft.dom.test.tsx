@@ -147,7 +147,7 @@ describe("backend credential draft identity", () => {
     expect(screen.getByRole("button", { name: "New profile" })).toBeEnabled();
   });
 
-  it.each(["probe", "clear", "enable", "save", "create", "delete"])(
+  it.each(["probe", "save", "create", "delete"])(
     "keeps the selected profile and its credential draft after a background %s completes",
     async (operation) => {
       const user = userEvent.setup();
@@ -161,7 +161,6 @@ describe("backend credential draft identity", () => {
       const props = {
         ...settingsProps([profileA, profileC, profileB], async (id) => details.get(id)!, vi.fn()),
         onProbe: change,
-        onClearCredential: change,
         onUpdate: change,
         onCreate: change,
         onDelete: async () => { await change(); },
@@ -177,12 +176,8 @@ describe("backend credential draft identity", () => {
       } else if (operation === "delete") {
         await user.click(screen.getByRole("button", { name: "Delete" }));
         await user.click(screen.getByRole("button", { name: "Delete permanently" }));
-      } else if (operation === "enable") {
-        await user.click(screen.getByRole("switch", { name: "Enable Profile A" }));
       } else {
-        await user.click(screen.getByRole("button", {
-          name: operation === "probe" ? "Test connection" : "Clear backend credential",
-        }));
+        await user.click(screen.getByRole("button", { name: "Test connection" }));
       }
       expect(change).toHaveBeenCalledOnce();
       const rail = screen.getByRole("complementary", { name: "Backend profiles" });

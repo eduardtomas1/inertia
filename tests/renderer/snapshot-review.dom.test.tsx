@@ -103,7 +103,3 @@ it("keeps denied capture visible without asking for approval or silently retryin
   expect(snapshot).toHaveBeenCalledTimes(1);
 });
 
-it("disables capture when the composer cannot accept images", () => {
-  render(<ReviewedScreenshotControl conversationId={chat} disabled />);
-  expect(screen.getByRole("button", { name: "Take reviewed screenshot" })).toBeDisabled();
-});

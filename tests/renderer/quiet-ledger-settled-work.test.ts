@@ -21,10 +21,6 @@ import type {
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestedAt = "2026-07-23T10:00:00.000Z";
-const viewportSource = readFileSync(
-  new URL("../../src/renderer/src/components/response-timeline/viewport.tsx", import.meta.url),
-  "utf8",
-);
 const styles = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
@@ -395,10 +391,6 @@ describe("Quiet Ledger settled work summary", () => {
       'class="turn-run-details" id="turn-run-details-auto-collapse" aria-labelledby="turn-run-details-auto-collapse-label"',
     );
     expect(expanded).not.toContain('aria-labelledby="turn-run-details-auto-collapse-label" hidden=""');
-    // Keyboard activation and anchor ordering are exercised behaviorally in
-    // anchored-details-toggle.dom.test.tsx, rather than pinning an event phase.
-    expect(viewportSource).toContain("onBeforeToggle={captureExpansionAnchor}");
-    expect(viewportSource).toContain("onAfterToggle={restoreExpansionAnchor}");
   });
 
   it("settles three consecutive successful turns without duplicate work rows or durations", () => {
@@ -446,7 +438,7 @@ describe("Quiet Ledger settled work summary", () => {
     expect(historicalHtml).toContain('data-turn-completion-announcement=""></span>');
   });
 
-  it("styles the summary as quiet divider text rather than a card", () => {
+  it("keeps the settled summary toggle at its minimum target height", () => {
     const summaryRule = styles.slice(
       styles.indexOf(".turn-work-log.is-settled .turn-settled-summary {"),
       styles.indexOf(
@@ -455,9 +447,5 @@ describe("Quiet Ledger settled work summary", () => {
     );
 
     expect(summaryRule).toContain("min-height: 26px");
-    expect(summaryRule).toContain("border-bottom: 1px solid");
-    expect(summaryRule).toContain("border-radius: 0");
-    expect(summaryRule).not.toContain("box-shadow");
-    expect(summaryRule).not.toContain("background:");
   });
 });

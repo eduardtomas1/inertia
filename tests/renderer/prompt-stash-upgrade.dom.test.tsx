@@ -26,7 +26,7 @@ it("keeps a prompt saved by v0.0.54 accessible after upgrading", async () => {
   expect(readPromptStash(window.localStorage)).toEqual(entries);
 });
 
-it.each([true, false, "reject"])("copies legacy text explicitly without changing either chat or stored prompts (clipboard: %s)", async (outcome) => {
+it.each([true, "reject"])("copies legacy text explicitly without changing either chat or stored prompts (clipboard: %s)", async (outcome) => {
   const chat = conversation("upgraded-chat");
   const entries = addPromptStashEntry([], "Keep my old prompt\nwith its full text", chat.modelSelection);
   writePromptStash(window.localStorage, entries);

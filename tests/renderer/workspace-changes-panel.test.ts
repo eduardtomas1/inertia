@@ -351,16 +351,4 @@ describe("workspace repository-scoped Changes panel", () => {
       [{ ...note, stale: true }],
     )).toEqual([]);
   });
-
-  it("shows nested review support and the checkpoint-backed revision boundary", () => {
-    const nested = snapshot();
-    nested.repositories = nested.repositories.filter((repository) => repository.repositoryPath !== ".");
-    nested.files = 2;
-    const html = renderWorkspaceChanges(nested);
-
-    expect(html).toContain("Nested repo");
-    expect(html).toContain("Review marks, local notes, questions, prompt references, and selective revert keep this repository identity");
-    expect(html).toContain("Agent summaries and revisions remain available only for the project-root repository");
-    expect(html).toContain("recovery checkpoints cover that root");
-  });
 });

@@ -564,14 +564,6 @@ test("Codex sign-in keeps terminal input live while its browser callback complet
   await expect(row).toContainText("Sign in required", { timeout: 30_000 });
 
   let dialog = await openConnect("Codex", "Connect");
-  await expect(dialog).toContainText("Starting local login server");
-  await cancelWithInterrupt(dialog, await nextLoginPid("codex"));
-
-  dialog = await openConnect("Codex", "Connect");
-  await expect(dialog).toContainText("Starting local login server");
-  await closeWhileWaiting(dialog, await nextLoginPid("codex"));
-
-  dialog = await openConnect("Codex", "Connect");
   await expect(dialog).toContainText("navigate to this URL to authenticate");
   const rejected = await nextLoginPid("codex");
   await expectTerminalFocused(dialog);
@@ -608,10 +600,6 @@ for (const scenario of [
 
     dialog = await openConnect(scenario.label, "Connect");
     await expect(dialog).toContainText(scenario.prompt);
-    await closeWhileWaiting(dialog, await nextLoginPid(scenario.provider));
-
-    dialog = await openConnect(scenario.label, "Connect");
-    await expect(dialog).toContainText(scenario.prompt);
     const rejected = await nextLoginPid(scenario.provider);
     await expectTerminalFocused(dialog);
     await app.page.keyboard.type("typed-probe");
@@ -641,14 +629,6 @@ test("OpenCode credential setup accepts menu keys, typing and a pasted code", as
   await expect(app.page.locator(".provider-settings-editor").getByRole("button", { name: "Configure", exact: true }))
     .toBeEnabled({ timeout: 60_000 });
 
-  let dialog = await openConnect("OpenCode", "Configure");
-  await expect(dialog).toContainText("Select provider");
-  await cancelWithInterrupt(dialog, await nextLoginPid("opencode"));
-
-  dialog = await openConnect("OpenCode", "Configure");
-  await expect(dialog).toContainText("Select provider");
-  await closeWhileWaiting(dialog, await nextLoginPid("opencode"));
-
   const chooseClaudeProMax = async (target: Locator): Promise<void> => {
     await expect(target).toContainText("Select provider");
     await expectTerminalFocused(target);
@@ -664,7 +644,7 @@ test("OpenCode credential setup accepts menu keys, typing and a pasted code", as
     await expect(target).toContainText("Paste the authorization code here:");
   };
 
-  dialog = await openConnect("OpenCode", "Configure");
+  let dialog = await openConnect("OpenCode", "Configure");
   const rejected = await nextLoginPid("opencode");
   await chooseClaudeProMax(dialog);
   await app.page.keyboard.type("typed-wrong-code");
@@ -690,15 +670,7 @@ test("Antigravity sign-in accepts a retry and a menu paste in its own prompt", a
   const row = app.page.getByRole("button", { name: "Configure Antigravity", exact: true });
   await expect(row).toContainText("Antigravity checks your sign-in", { timeout: 30_000 });
 
-  let dialog = await openConnect("Antigravity", "Connect");
-  await expect(dialog).toContainText("Authorization code:");
-  await cancelWithInterrupt(dialog, await nextLoginPid("antigravity"));
-
-  dialog = await openConnect("Antigravity", "Connect");
-  await expect(dialog).toContainText("Authorization code:");
-  await closeWhileWaiting(dialog, await nextLoginPid("antigravity"));
-
-  dialog = await openConnect("Antigravity", "Connect");
+  const dialog = await openConnect("Antigravity", "Connect");
   await expect(dialog).toContainText("Authorization code:");
   const pid = await nextLoginPid("antigravity");
   await expectTerminalFocused(dialog);

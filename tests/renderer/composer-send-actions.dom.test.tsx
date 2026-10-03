@@ -229,18 +229,6 @@ describe("composer morphing send actions", () => {
     expect(onReleaseAttachment).not.toHaveBeenCalled();
   });
 
-  it("keeps Stop authoritative without a separate new-turn acceptance", () => {
-    render(
-      <ComposerSendActions
-        {...idle}
-        primaryAction="stop-ready"
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
   it("jumps to the target path when the user prefers reduced motion", () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: true,

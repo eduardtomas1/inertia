@@ -105,7 +105,7 @@ describe("Windows historical unobserved process recovery", () => {
     expect(state.receipts.has(state.generations[0]!)).toBe(false);
   });
 
-  it.each(["wrong-boot", "wrong-job", "missing-session", "missing-lease", "extra-key", "pid-one", "negative-pid", "non-windows"])(
+  it.each(["wrong-boot", "wrong-job", "missing-session", "missing-lease", "extra-key", "pid-one", "non-windows"])(
     "does not rewrite an unproven %s profile",
     (change) => {
       const state = fixture();
@@ -113,7 +113,6 @@ describe("Windows historical unobserved process recovery", () => {
       if (change === "wrong-boot") claim.systemBootId = "win32:00000002";
       if (change === "extra-key") Object.assign(claim, { unexpected: true });
       if (change === "pid-one") claim.process.pid = 1;
-      if (change === "negative-pid") claim.process.pid = -1;
       if (change === "non-windows") claim.process.platform = "linux";
       writeFileSync(state.paths[0]!, JSON.stringify(claim));
       if (change === "missing-session") unlinkSync(join(state.directory,

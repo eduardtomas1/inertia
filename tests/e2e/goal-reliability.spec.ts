@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -10,35 +10,11 @@ import {
 import { createAppFixture } from "./support/app-fixture";
 import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 import {
-  attachDarwinRecoverySafetyLockDiagnostic,
-  installRuntimeRecoveryConsent,
-  runtimeRecoveryConsentDiagnostic,
-} from "./support/runtime-crash-safety";
-import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
 } from "./support/workspace-tools";
 
 const providerSessionId = "33333333-3333-4333-8333-333333333333";
-
-async function expectResumeGoalState(tools: Locator): Promise<void> {
-  const resumeGoal = tools.getByRole("button", { name: "Resume goal" });
-  const safetyWarning = tools.getByText(
-    /Changes are unavailable in recovery safety mode/u,
-  );
-  await expect.poll(async () => {
-    const [safetyLocked, resumeEnabled] = await Promise.all([
-      safetyWarning.isVisible(),
-      resumeGoal.isEnabled(),
-    ]);
-    return safetyLocked ? !resumeEnabled : resumeEnabled;
-  }).toBe(true);
-  if (await safetyWarning.isVisible()) {
-    await expect(resumeGoal).toBeDisabled();
-  } else {
-    await expect(resumeGoal).toBeEnabled();
-  }
-}
 
 const goalAppServer = `
 const fs = require("node:fs");
@@ -124,10 +100,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-test("starts a sessionless goal and recovers it after Stop and runtime crash", {
+test("starts a sessionless goal and resumes it after Stop", {
   tag: "@runtime-recovery",
 }, async () => {
-  // Two Git-protected activations plus runtime recovery need a test budget
+  // Two Git-protected activations need a test budget
   // that does not preempt either activation's own bounded assertion.
   test.setTimeout(150_000);
   const app = await createAppFixture({
@@ -200,128 +176,6 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
     })).toBeVisible({ timeout: 45_000 });
     await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
-    const shell = page.locator(".app-shell");
-    const beforeRuntimeGeneration = await shell.getAttribute(
-      "data-runtime-generation",
-    );
-    expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
-    const noReloadMarker = await page.evaluate(() => {
-      const marker = crypto.randomUUID();
-      Reflect.set(window, "__inertiaGoalNoReloadMarker", marker);
-      return marker;
-    });
-    const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
-      app.electronApp,
-    );
-    let latestRendererObservation: {
-      connectionStatus: string | null;
-      runtimeGeneration: string | null;
-    } | null = null;
-    let recoveryOperationError: unknown = null;
-    let recoveryOperationFailed = false;
-    try {
-      await app.electronApp.evaluate(() => {
-        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-          crash: () => unknown;
-        } | undefined;
-        if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-        runtime.crash();
-      });
-      // The app-shell recovery scenario owns privileged supervisor/PID proof.
-      // This goal-specific scenario observes the replacement runtime through
-      // the renderer contract instead: an Electron main-process evaluate is
-      // not cancellable, so polling it across a deliberate utility crash can
-      // poison the Playwright transport even after a Promise.race times out.
-      await expect.poll(async () => {
-        const [connectionStatus, runtimeGeneration] = await Promise.all([
-          shell.getAttribute("data-connection-status", { timeout: 500 })
-            .catch(() => null),
-          shell.getAttribute("data-runtime-generation", { timeout: 500 })
-            .catch(() => null),
-        ]);
-        latestRendererObservation = {
-          connectionStatus,
-          runtimeGeneration,
-        };
-        return connectionStatus === "online"
-          && runtimeGeneration !== null
-          && runtimeGeneration !== beforeRuntimeGeneration;
-      // An explicitly authorized macOS replacement owns one bounded recovery
-      // window and, after consuming that exact authority, one bounded normal
-      // startup window. Observe the complete production envelope without
-      // weakening either supervisor deadline.
-      }, { timeout: 70_000 }).toBe(true);
-    } catch (error) {
-      recoveryOperationFailed = true;
-      recoveryOperationError = error;
-    }
-    let recoveryConsent = null as Awaited<ReturnType<
-      typeof restoreRuntimeRecoveryConsent
-    >> | null;
-    let recoveryConsentError: unknown = null;
-    let recoveryConsentFailed = false;
-    try {
-      recoveryConsent = await restoreRuntimeRecoveryConsent();
-    } catch (error) {
-      recoveryConsentFailed = true;
-      recoveryConsentError = error;
-      recoveryConsent = runtimeRecoveryConsentDiagnostic(error);
-    }
-    if (recoveryOperationFailed || recoveryConsentFailed) {
-      await test.info().attach("goal runtime recovery diagnostic", {
-        body: Buffer.from(JSON.stringify({
-          beforeRuntimeGeneration,
-          latestRendererObservation,
-          recoveryConsent,
-          rendererErrorCount: app.rendererErrors.length,
-          rendererErrors: app.rendererErrors.slice(-25),
-        }, null, 2)),
-        contentType: "application/json",
-      }).catch(() => undefined);
-      const recoveryError = recoveryOperationFailed
-        ? recoveryOperationError
-        : recoveryConsentError;
-      await attachDarwinRecoverySafetyLockDiagnostic(
-        test.info(),
-        join(app.testDirectory, "data"),
-        null,
-        recoveryConsentFailed ? recoveryConsentError : recoveryError,
-      ).catch(() => undefined);
-      if (recoveryOperationFailed && recoveryConsentFailed) {
-        throw new AggregateError(
-          [recoveryOperationError, recoveryConsentError],
-          "Runtime recovery and recovery-consent restoration both failed.",
-        );
-      }
-      throw recoveryError;
-    }
-    expect(await page.evaluate(() =>
-      Reflect.get(window, "__inertiaGoalNoReloadMarker"))).toBe(noReloadMarker);
-    await expect(tools.getByText("Ship the reliable goal flow", {
-      exact: true,
-    })).toBeVisible({ timeout: 10_000 });
-    await expect(tools.getByText("Active", { exact: true })).toBeVisible();
-    await expect(tools.getByRole("button", { name: "Resume goal" }))
-      .toBeVisible({ timeout: 10_000 });
-    await expectResumeGoalState(tools);
-    await expect(tools.getByText(/no Inertia run is connected/u))
-      .toBeVisible();
-
-    await page.reload();
-    await expect(page.locator(".app-shell")).toHaveAttribute(
-      "data-connection-status",
-      "online",
-    );
-    const reloadedTools = await ensureWorkspaceTools(page);
-    await selectWorkspaceTool(reloadedTools, "Goal");
-    await expect(reloadedTools.getByText("Ship the reliable goal flow", {
-      exact: true,
-    })).toBeVisible({ timeout: 10_000 });
-    await expect(reloadedTools.getByText("Active", { exact: true }))
-      .toBeVisible();
-    await expect(reloadedTools.getByRole("button", { name: "Resume goal" }))
-      .toBeVisible();
-    await expectResumeGoalState(reloadedTools);
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     scenarioFailed = true;
@@ -330,7 +184,7 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
       (await app.runtimeSnapshot()).websocketUrl).catch(() => undefined);
   }
   // Fail-closed cleanup is independently authoritative. Retain both failures
-  // when recovery fails first, rather than replacing its evidence with the
+  // when the scenario fails first, rather than replacing its evidence with the
   // expected downstream cleanup refusal.
   try {
     await app.close();

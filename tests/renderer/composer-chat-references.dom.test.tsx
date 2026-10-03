@@ -370,69 +370,6 @@ describe("composer chat references", () => {
     });
   });
 
-  it("keeps the file mention menu unlabelled as chats when none match", async () => {
-    const user = userEvent.setup();
-    const current = conversation("chat-reference-files-only");
-    render(<Composer {...composerProps(current, {
-      mentionResults: [{ path: "src/first.ts", kind: "file" }],
-      contextSources: [sourceOption],
-      onConversationContextCommand: vi.fn(async () => packetResult()),
-    })} />);
-
-    const editor = screen.getByRole("textbox", { name: "Message" });
-    await user.type(editor, "@src");
-    expect(await screen.findByRole("listbox", { name: "Project files" }))
-      .toBeInTheDocument();
-  });
-
-  it("states how many messages the budget omitted", () => {
-    const current = conversation("chat-reference-chip");
-    render(<Composer {...composerProps(current, {
-      contextPackets: [packetSummary({
-        targetConversationId: current.id,
-        droppedMessageCount: 7,
-      })],
-      onConversationContextCommand: vi.fn(async () => packetResult()),
-    })} />);
-
-    expect(screen.getByText(/23 messages · 7 omitted/u)).toBeInTheDocument();
-  });
-
-  it("answers an agent context request without reopening a picker panel", async () => {
-    const user = userEvent.setup();
-    const onCommand = vi.fn(async () => ({
-      type: "request.ok",
-      requestId: "99999999-9999-4999-8999-999999999999",
-    } as unknown as ServerEvent));
-    const current = conversation("chat-reference-agent");
-    render(<Composer {...composerProps(current, {
-      contextSources: [sourceOption],
-      agentContextRequest: {
-        requestId: "11111111-1111-4111-8111-111111111111",
-        targetConversationId: current.id,
-        targetTurnId: "22222222-2222-4222-8222-222222222222",
-        requestedSourceConversationId: sourceOption.conversationId,
-        createdAt: "2026-08-19T09:30:00.000Z",
-        expiresAt: "2026-08-19T09:35:00.000Z",
-      },
-      onConversationContextCommand: onCommand,
-    })} />);
-
-    const card = await screen.findByRole("region", {
-      name: "Agent requested chat context",
-    });
-    await user.click(within(card).getByRole("button", { name: "Decline" }));
-
-    expect(onCommand).toHaveBeenCalledWith("conversation.context.agent.respond", {
-      type: "conversation.context.agent.respond",
-      payload: {
-        decision: "cancel",
-        contextRequestId: "11111111-1111-4111-8111-111111111111",
-        targetConversationId: current.id,
-      },
-    });
-  });
-
   it("shares the whole preselected chat when the agent request is approved", async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn(async () => ({

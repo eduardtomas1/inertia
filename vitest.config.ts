@@ -92,16 +92,10 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       reporter: ["text-summary", "json-summary", "html"],
       thresholds: {
-        statements: 62.5,
-        branches: 57.5,
-        functions: 59,
-        lines: 66,
-        "src/renderer/**": {
-          statements: 78,
-          branches: 72.5,
-          functions: 73.5,
-          lines: 81,
-        },
+        statements: 81,
+        branches: 76.5,
+        functions: 82,
+        lines: 83.5,
         "src/shared/private-connect/*.ts": {
           statements: 95,
           branches: 90,

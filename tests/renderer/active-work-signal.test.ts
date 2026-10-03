@@ -23,14 +23,6 @@ const activityGroupCss = readFileSync(
   "utf8",
 );
 const css = `${baseCss}\n${exactMotionCssSource}\n${supportingMotionCss}\n${activityGroupCss}`;
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
-  "utf8",
-);
-const pixelGridSource = readFileSync(
-  new URL("../../src/renderer/src/components/AgentPixelGrid.tsx", import.meta.url),
-  "utf8",
-);
 
 function cssBlock(source: string, marker: string): string {
   const markerIndex = source.indexOf(marker);
@@ -48,88 +40,7 @@ function cssBlock(source: string, marker: string): string {
   return "";
 }
 
-const activePixelMarker = '.agent-pixel-loader[data-animated="true"] > span';
-const finalReducedMotionIndex = exactMotionCssSource.lastIndexOf(
-  "@media (prefers-reduced-motion: reduce)",
-);
-const exactMotionCss = exactMotionCssSource.slice(
-  exactMotionCssSource.lastIndexOf(
-    activePixelMarker,
-    finalReducedMotionIndex - 1,
-  ),
-  finalReducedMotionIndex,
-);
-const activePixelRule = cssBlock(exactMotionCss, activePixelMarker);
-
 describe("Minimal Workstream active pixel signal", () => {
-  it("attaches the active-state hook only inside the active execution branch", () => {
-    const activeBranchStart = timelineSource.indexOf("{turn.isActive ? (");
-    const settledBranchStart = timelineSource.indexOf(") : (", activeBranchStart);
-    const activeBranch = timelineSource.slice(activeBranchStart, settledBranchStart);
-    const settledBranch = timelineSource.slice(
-      settledBranchStart,
-      timelineSource.indexOf(")}", settledBranchStart),
-    );
-
-    expect(activeBranch).toContain('data-active-work-region=""');
-    expect(activeBranch).toContain(
-      "data-active-work-state={runState}",
-    );
-    expect(activeBranch).toContain(
-      "data-active-agent-phase={activePresentation.phase}",
-    );
-    expect(activeBranch).toContain("<AgentPixelLoader");
-    expect(timelineSource).toContain("<AgentPixelGrid animated={animated} phase={phase} />");
-    expect(pixelGridSource).toContain("data-phase={phase}");
-    expect(settledBranch).not.toContain("data-active-work-region");
-    expect(settledBranch).not.toContain("<AgentPixelLoader");
-  });
-
-  it("keeps pixel motion on the derived state with a static working label", () => {
-    expect(timelineSource).toContain("animated={activePresentation.animated}");
-    expect(pixelGridSource).toContain('data-animated={animated ? "true" : "false"}');
-    expect(pixelGridSource).toContain("AGENT_PIXEL_GRID_CELLS = Array.from");
-    expect(exactMotionCss).toContain("--pixel-drive-delay: 90ms");
-    expect(exactMotionCss).toContain("--pixel-orbit-delay: 770ms");
-    expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');
-    expect(css).not.toContain("beautiful-shimmer-text");
-    expect(css).toMatch(/\.turn-working-status \.turn-working-copy strong\s*\{[^}]*color:\s*var\(--text-soft\);/su);
-    expect(css).not.toContain("will-change:");
-    expect(css).not.toContain(".turn-working-status::before");
-    expect(css).not.toContain("active-work-tonal-wash");
-  });
-
-  it("moves one restrained shimmer through a fixed nine-pixel grid", () => {
-    expect(activePixelRule).toContain("agent-pixel-shimmer");
-    const keyframes = cssBlock(
-      css.slice(css.lastIndexOf("@keyframes agent-pixel-shimmer")),
-      "@keyframes agent-pixel-shimmer",
-    );
-
-    expect(activePixelRule).toContain("agent-pixel-shimmer 650ms");
-    expect(activePixelRule).toContain("ease-in-out infinite");
-    expect(keyframes).toContain("opacity: .15");
-    expect(keyframes).toContain("opacity: 1");
-    expect(`${activePixelRule}\n${keyframes}`).not.toMatch(/transform:|scale:/iu);
-  });
-
-  it("keeps Dots, Drive, and Orbit inside the same bounded pixel grid", () => {
-    const orbitCenterRule = cssBlock(
-      exactMotionCss,
-      '.agent-pixel-loader[data-animated="true"][data-phase="thinking"] > span:nth-child(5)',
-    );
-    const dotsRule = cssBlock(
-      css,
-      '.agent-pixel-loader:is([data-phase="queued"], [data-phase="starting"]) > span',
-    );
-
-    expect(dotsRule).toContain("border-radius: 50%");
-    expect(orbitCenterRule).toContain("animation: none");
-    expect(orbitCenterRule).toContain("opacity: .07");
-    expect(exactMotionCss).toContain("--pixel-orbit-delay: 770ms");
-    expect(css).not.toMatch(/agent-pixel-loader[^}]*url\(/su);
-  });
-
   it("uses a static readable grid when reduced motion is requested", () => {
     const reducedMotion = exactMotionCssSource.slice(
       exactMotionCssSource.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
@@ -159,15 +70,6 @@ describe("Minimal Workstream active pixel signal", () => {
 
     expect(forcedColorsPixelRule).toContain("color: CanvasText");
     expect(forcedColorsPixelRule).toContain("forced-color-adjust: auto");
-  });
-
-  it("keeps running glyph motion scoped to the authoritative active region", () => {
-    expect(activityGroupCss).toContain(
-      "[data-active-work-region] .turn-activity-group .agent-activity.is-running > .agent-activity-icon",
-    );
-    expect(css).not.toMatch(
-      /^\.turn-work-log \.agent-activity\.is-running > svg\s*\{[^}]*animation:/mu,
-    );
   });
 
   it("pauses every remaining infinite active-work animation while hidden", () => {

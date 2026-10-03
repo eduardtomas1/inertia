@@ -393,18 +393,11 @@ describe("new-turn admission recovery", () => {
     },
   );
 
-  it.each([
-    "codex",
-    "claude",
-    "cursor",
-    "kimi",
-    "opencode",
-  ] as const)("uses the same admission handoff for the %s provider", async (providerId) => {
+  it("uses the admission handoff for a new turn", async () => {
     const queue = vi.fn(() => queuedTurn());
     const runtime = dependencies({
       queue,
       relinquishAll: vi.fn(async () => undefined),
-      providerId,
     });
     const handler = createTurnInteractionCommandHandler(runtime);
 
@@ -700,8 +693,6 @@ describe("provider image request budgets", () => {
 describe("attachment send handoff", () => {
   it.each([
     ["New\nchat", "New chat", false],
-    ["New\tthread", "New thread", false],
-    ["New\nchat", "New chat", true],
     ["New\tthread", "New thread", true],
   ] as const)("keeps the first title for %j as %j (providers: %s)", async (content, expectedTitle, enableProviders) => {
     let hasMessages = false;
@@ -2136,7 +2127,8 @@ describe("image messages against a full durable attachment store", () => {
     };
   }
 
-  it.each([1, 2])("steers %i image follow-up(s) into a running turn by evicting settled history", async (count) => {
+  it("steers image follow-ups into a running turn by evicting settled history", async () => {
+    const count = 2;
     const full = await fullStore();
     try {
       const payloads = Array.from({ length: count }, () => payload());

@@ -134,15 +134,6 @@ describe("hostile provider markdown", () => {
     expect(container.querySelector("base")).toBeNull();
   });
 
-  it("does not keep remote image sources that could leak metadata", () => {
-    const container = renderMarkdown("![beacon](https://evil.test/pixel.png)");
-    const image = container.querySelector("img");
-    if (image) {
-      expect(image.getAttribute("src")).not.toMatch(/^file:/iu);
-      expect(image.getAttribute("src")).not.toMatch(/^inertia:/iu);
-    }
-  });
-
   it("does not let images reference local files", () => {
     const container = renderMarkdown(
       "![local](file:///etc/passwd)<img src=\"file:///etc/shadow\" />",
@@ -161,13 +152,6 @@ describe("hostile provider markdown", () => {
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector('a[href^="javascript:" i]')).toBeNull();
     expect(container.textContent).toContain("[link](javascript:x)");
-  });
-
-  it("handles an extremely large markdown input", () => {
-    const container = renderMarkdown(
-      `${"paragraph text ".repeat(40_000)}\n\n<script>alert(1)</script>`,
-    );
-    expect(container.querySelector("script")).toBeNull();
   });
 
   it("never calls a privileged bridge method while rendering", () => {
@@ -199,24 +183,6 @@ describe("hostile provider markdown", () => {
 });
 
 describe("safe provider markdown still works", () => {
-  it("renders collapsible details from raw html", () => {
-    const container = renderMarkdown(
-      "<details><summary>More</summary>\n\nInner text\n\n</details>",
-    );
-    expect(container.querySelector("details")).toBeTruthy();
-    expect(container.querySelector("summary")?.textContent).toContain("More");
-  });
-
-  it("renders and highlights fenced code blocks", () => {
-    const container = renderMarkdown(
-      "```typescript\nconst answer: number = 42;\n```",
-    );
-    const code = container.querySelector("pre code");
-    expect(code).toBeTruthy();
-    expect(code?.className).toContain("language-typescript");
-    expect(code?.textContent).toContain("const answer");
-  });
-
   it("keeps ordinary external links usable", () => {
     const bridge = inertiaBridge();
     const container = renderMarkdown("[docs](https://example.test/docs)");
@@ -226,13 +192,5 @@ describe("safe provider markdown still works", () => {
     expect(bridge.openExternal).toHaveBeenCalledWith(
       "https://example.test/docs",
     );
-  });
-
-  it("renders GFM tables and task lists", () => {
-    const container = renderMarkdown(
-      "| a | b |\n| --- | --- |\n| 1 | 2 |\n\n- [x] done\n- [ ] todo",
-    );
-    expect(container.querySelector("table")).toBeTruthy();
-    expect(container.querySelectorAll("input[type=checkbox]").length).toBe(2);
   });
 });

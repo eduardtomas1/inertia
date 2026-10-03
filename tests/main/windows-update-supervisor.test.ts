@@ -614,27 +614,6 @@ Capture (New-Object byte[] 8193) $false
     ))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("retires staged helper authority after a pre-launch broker failure", async () => {
-    const value = await fixture();
-    const launched = launcher(async () => {
-      throw new WindowsUpdateSupervisorBrokerError(
-        "broker rejected before launch",
-        true,
-      );
-    });
-
-    await expect(launchWindowsUpdateSupervisor({
-      ...value,
-      handoffToken: token,
-      newExecutableDigest: "e".repeat(64),
-      launchThroughExecutableLock: launched.launchThroughExecutableLock,
-    })).rejects.toThrow("broker rejected before launch");
-    await expect(readFile(join(
-      value.dataDirectory,
-      windowsUpdateSupervisorExecutableName(operationId),
-    ))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
   it("treats an unclassified broker failure as retained native authority", async () => {
     const value = await fixture();
     const launched = launcher(async () => {

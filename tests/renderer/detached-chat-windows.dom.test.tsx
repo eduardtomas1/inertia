@@ -13,8 +13,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetachedConversationPlaceholder } from "../../src/renderer/src/components/DetachedConversationPlaceholder";
 import { useDetachedChatWindows } from "../../src/renderer/src/hooks/useDetachedChatWindows";
 import type {
-  DetachedChatWindowOpenResult,
-  DetachedChatWindowOpenRequest,
   DetachedChatWindowSummary,
   DetachedChatDraftHandoff,
   PendingDetachedChatDraft,
@@ -52,8 +50,6 @@ function installDetachedChatBridge({
   onWindowsChanged = vi.fn(() => vi.fn()),
   onDraftChanged = vi.fn(() => vi.fn()),
   onDraftMirrored = vi.fn(() => vi.fn()),
-  open = vi.fn(),
-  focus = vi.fn(),
 }: {
   getWindows?: () => Promise<DetachedChatWindowSummary[]>;
   getPendingDrafts?: () => Promise<PendingDetachedChatDraft[]>;
@@ -70,10 +66,6 @@ function installDetachedChatBridge({
   onDraftMirrored?: (
     listener: (handoff: DetachedChatDraftHandoff) => void,
   ) => () => void;
-  open?: (
-    request: DetachedChatWindowOpenRequest,
-  ) => Promise<DetachedChatWindowOpenResult>;
-  focus?: (conversationId: string) => Promise<boolean>;
 } = {}): void {
   Object.defineProperty(window, "inertia", {
     configurable: true,
@@ -84,8 +76,8 @@ function installDetachedChatBridge({
       onDetachedChatWindowsChanged: onWindowsChanged,
       onDetachedChatDraftChanged: onDraftChanged,
       onDetachedChatDraftMirrored: onDraftMirrored,
-      openDetachedChat: open,
-      focusDetachedChat: focus,
+      openDetachedChat: vi.fn(),
+      focusDetachedChat: vi.fn(),
     },
   });
 }
@@ -310,29 +302,6 @@ describe("useDetachedChatWindows", () => {
     } finally {
       storageWrite.mockRestore();
     }
-  });
-
-  it("forwards open and focus requests to the desktop bridge", async () => {
-    const request: DetachedChatWindowOpenRequest = {
-      conversationId: CONVERSATION_ID,
-      title: "Detached ownership",
-      draft: "exact draft",
-    };
-    const opened: DetachedChatWindowOpenResult = {
-      conversationId: CONVERSATION_ID,
-      alwaysOnTop: false,
-      disposition: "opened",
-    };
-    const open = vi.fn(async () => opened);
-    const focus = vi.fn(async () => true);
-    installDetachedChatBridge({ open, focus });
-    const hook = renderHook(() => useDetachedChatWindows());
-
-    await expect(hook.result.current.open(request)).resolves.toEqual(opened);
-    await expect(hook.result.current.focus(CONVERSATION_ID)).resolves.toBe(true);
-
-    expect(open).toHaveBeenCalledWith(request);
-    expect(focus).toHaveBeenCalledWith(CONVERSATION_ID);
   });
 });
 

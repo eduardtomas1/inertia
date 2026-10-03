@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { CanUseTool, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { claudeSuccessResult, fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
-import { portableFixtureRoot } from "../helpers/portable-provider-fixture";
+import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const OWN = "11111111-1111-4111-8111-111111111111";
@@ -82,8 +82,8 @@ async function runRequests(
 
 describe("Claude reads of this chat's own attachments", () => {
   const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    for (const root of roots.splice(0)) await removePortableFixture(root);
   });
 
   it.each([

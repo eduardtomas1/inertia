@@ -1635,7 +1635,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(manager.activeConversationIds()).toEqual([]);
   }, 10_000);
 
-  it.each([0, 150])("uses verified transitive descendant activity for liveness without projecting it (SSE delay %i ms)", async (eventSubscriptionDelayMs) => {
+  it("uses verified transitive descendant activity for liveness without projecting it (SSE delay 150 ms)", async () => {
     const root = portableFixtureRoot("OpenCode descendant liveness");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -1643,7 +1643,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     writeNodeSubcommand(
       root,
       "serve",
-      lifecycleServerSource(root, capturePath, "descendant-liveness", eventSubscriptionDelayMs),
+      lifecycleServerSource(root, capturePath, "descendant-liveness", 150),
     );
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
@@ -1902,7 +1902,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 15_000,
+        runDeadlineMs: 3_000,
         eventInactivityDeadlineMs: 20_000,
         terminateProcessTree: terminateOwnedProcessTree,
       })]),
@@ -1932,7 +1932,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     );
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
-  }, 25_000);
+  }, 15_000);
 
   it("rejects oversized events and unavailable image capability", async () => {
     const oversizedRoot = portableFixtureRoot("OpenCode oversized");

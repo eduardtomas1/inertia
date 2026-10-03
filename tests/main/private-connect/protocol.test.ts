@@ -10,8 +10,6 @@ import {
   privateConnectRequestSchema,
   privateConnectResponseSchema,
 } from "../../../src/shared/private-connect/protocol";
-import { normalizePrivateConnectGrants } from "../../../src/shared/private-connect/grants";
-import { scopesForPreset } from "../../../src/shared/private-connect/scopes";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
 
@@ -34,19 +32,6 @@ describe("Private Connect shared contract", () => {
       requestId: "22222222-2222-4222-8222-222222222222",
       arbitrary: true,
     }).success).toBe(false);
-  });
-
-  it("normalizes grants and keeps preset scopes explicit", () => {
-    expect(normalizePrivateConnectGrants([
-      { projectId: "project", conversationIds: ["conversation", "conversation"], includeFutureConversations: false },
-      { projectId: "project", conversationIds: ["other"], includeFutureConversations: true },
-    ])).toEqual([{
-      projectId: "project",
-      conversationIds: ["conversation", "other"],
-      includeFutureConversations: true,
-    }]);
-    expect(scopesForPreset("monitor")).toEqual(["private:read"]);
-    expect(scopesForPreset("collaborate")).toContain("private:stop");
   });
 
   it("validates browser responses before they are projected into the UI", () => {

@@ -29,9 +29,6 @@ import {
   runtimeRecoveryConsentDiagnostic,
   type RuntimeRecoveryConsentDiagnostic,
 } from "./runtime-recovery-consent";
-export { installRuntimeRecoveryConsent, runtimeRecoveryConsentDiagnostic } from
-  "./runtime-recovery-consent";
-export type { RuntimeRecoveryConsentDiagnostic } from "./runtime-recovery-consent";
 
 interface RuntimeObservation {
   readonly observedAt: string;
@@ -62,7 +59,7 @@ function diagnosticRead<T>(read: () => T): DiagnosticRead<T> {
   }
 }
 
-export async function attachDarwinRecoverySafetyLockDiagnostic(
+async function attachDarwinRecoverySafetyLockDiagnostic(
   testInfo: TestInfo,
   dataDirectory: string,
   priorGenerationId: string | null,

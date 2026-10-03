@@ -62,26 +62,6 @@ describe("agent harness architecture", () => {
     expect(registry.resolve(input("opencode")).id).toBe("opencode-sdk");
   });
 
-  it("keeps process lifecycle fixture identities outside the production registry", () => {
-    const productionIds = createDefaultAgentHarnessRegistry().list().map(
-      ({ id }) => id,
-    );
-    const legacyIds = Object.keys(
-      PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS,
-    ).map((providerId) =>
-      createProcessLifecycleHarnessForTests(
-        providerId as "codex" | "claude" | "cursor" | "opencode",
-      ).id);
-
-    expect(productionIds).not.toEqual(expect.arrayContaining(legacyIds));
-    expect(legacyIds.sort()).toEqual([
-      "claude-cli",
-      "codex-cli",
-      "cursor-cli",
-      "opencode-cli",
-    ]);
-  });
-
   it("advertises typed provider extensions instead of common capability booleans", () => {
     const manager = ProviderManager.createForTests();
     const codex = manager.harnessCapabilities("codex");

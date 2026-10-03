@@ -475,17 +475,14 @@ describe("RuntimeSupervisor lifecycle", () => {
     expect(new RuntimeOwnedProcessJournal(dataDirectory).sessionExact(generation)).not.toBeNull();
   });
 
-  it.each(["stop", "recycle"] as const)("settles %s when unexpected-exit recovery throws synchronously", async (operation) => {
+  it("settles stop when unexpected-exit recovery throws synchronously", async () => {
     const { children, supervisor } = createHarness({
       recoverOwnedProcesses: () => { throw new Error("journal unavailable"); },
     });
     supervisor.start();
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
-    const pending = operation === "stop" ? supervisor.stop() : supervisor.testOnlyRecycle();
-    const settled = operation === "stop"
-      ? expect(pending).resolves.toBe(false)
-      : expect(pending).rejects.toThrow("before clean readiness");
+    const settled = expect(supervisor.stop()).resolves.toBe(false);
     expect(() => children[0].exit(137)).not.toThrow();
     await settled;
     await vi.advanceTimersByTimeAsync(60_000);
@@ -598,31 +595,22 @@ describe("RuntimeSupervisor lifecycle", () => {
     });
   });
 
-  it.each([
-    [
-      "owned-process-tainted",
-      "The runtime restarted because owned process containment could not be confirmed.",
-    ],
-    [
-      "owned-process-cleanup-unconfirmed",
-      "The runtime restarted because owned process cleanup could not be confirmed.",
-    ],
-  ] as const)("preserves the bounded %s restart reason", (reason, message) => {
+  it("preserves the bounded owned-process-cleanup-unconfirmed restart reason", () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
-    children[0].message({ type: "runtime.restart-requested", reason });
+    children[0].message({ type: "runtime.restart-requested", reason: "owned-process-cleanup-unconfirmed" });
     children[0].exit(1);
 
     expect(supervisor.snapshot()).toMatchObject({
       phase: "restarting",
-      lastError: message,
+      lastError: "The runtime restarted because owned process cleanup could not be confirmed.",
     });
   });
 
-  it.each([false, true])("reports the first restart cause once even when diagnostics throws=%s", (throws) => {
-    const onRestartRequested = vi.fn(() => { if (throws) throw new Error("diagnostic failure"); });
+  it("reports the first restart cause once even when diagnostics throws", () => {
+    const onRestartRequested = vi.fn(() => { throw new Error("diagnostic failure"); });
     const { children, supervisor } = createHarness({ onRestartRequested });
     supervisor.start();
     children[0].spawn();

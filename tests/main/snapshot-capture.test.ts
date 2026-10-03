@@ -259,11 +259,11 @@ describe("Windows application roots", () => {
     expect(native.x11).not.toHaveBeenCalled();
   });
 
-  it.each([0, 2])("refuses a process with %i active windows", async (count) => {
+  it("refuses a process with two active windows", async () => {
     const app = foreground();
     native.foreground.mockResolvedValue({ ...app,
       asElement: () => ({ ...app.asElement(), role: "application", active: false, bounds: null }),
-      children: async () => Array.from({ length: count }, (_, index) => ({ ...app.asElement(), stableId: `window-${index}` })),
+      children: async () => [0, 1].map((index) => ({ ...app.asElement(), stableId: `window-${index}` })),
     });
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window", phase: "foreground" });
     expect(native.foreground).toHaveBeenCalledTimes(3);

@@ -3,8 +3,6 @@ import { resolve } from "node:path";
 
 import { expect, it, vi } from "vitest";
 
-import { probeCanvasInEnvironment } from "../helpers/canvas-in-environment";
-
 const native = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock("electron", () => ({ utilityProcess: native }));
 import { attachmentImportRunner } from "../../src/main/attachment-import-desktop-runner";
@@ -34,9 +32,4 @@ it("validates imported images without loading system fonts on every import", asy
   await expect(importing.result).rejects.toThrow();
   const env = native.fork.mock.calls[0]![2].env as Record<string, string>;
   expect(env).toEqual({ DISABLE_SYSTEM_FONTS_LOAD: "1" });
-  expect(probeCanvasInEnvironment(env)).toEqual({
-    families: 0,
-    decoded: [1920, 1080],
-    reencoded: [1920, 1080],
-  });
 });

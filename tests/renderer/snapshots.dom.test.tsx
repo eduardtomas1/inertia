@@ -4,7 +4,6 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import { useComposerSnapshots } from "../../src/renderer/src/components/composer/useComposerSnapshots";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
-import { ContextCompactionRow } from "../../src/renderer/src/components/response-timeline/ContextCompactionRow";
 import { SnapshotSettings } from "../../src/renderer/src/components/SnapshotSettings";
 import { SnapshotControl } from "../../src/renderer/src/components/composer/SnapshotControl";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
@@ -35,7 +34,7 @@ it("shows only capture failures in the composer and restores focus on close or u
   expect(nativePreviewSuspended()).toBe(false);
 });
 
-it.each(["Linux x86_64", "Linux aarch64", "MacIntel", "Win32"])("offers only supported snapshot shortcuts on %s", async (platform) => {
+it.each(["Linux x86_64", "MacIntel", "Win32"])("offers only supported snapshot shortcuts on %s", async (platform) => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
   window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
   render(<SnapshotSettings />);
@@ -161,10 +160,4 @@ it("keeps split composers from cancelling each other's deliveries and binds the 
   act(() => listener({ conversationId: "secondary", selection: { batchId: "snapshot-split", attachments: [] } }));
   await waitFor(() => expect(secondary).toHaveBeenCalledOnce());
   expect(primary).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
-});
-
-it("renders the compact command and an accessible provider-confirmed divider", () => {
-  render(<ContextCompactionRow message={{ id: "receipt", conversationId: "chat", turnId: null, role: "system", content: "/compact", attachments: [], createdAt: "2026-09-08T09:00:00.000Z", compaction: { providerId: "codex", beforeTokens: 173000, afterTokens: 5690, instructionForwarded: false } }} />);
-  expect(screen.getByText("/compact")).toBeInTheDocument();
-  expect(screen.getByRole("separator", { name: "Compacted context 173K → 5.69K tokens" })).toBeInTheDocument();
 });

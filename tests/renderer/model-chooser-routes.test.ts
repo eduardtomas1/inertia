@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildComposerModelRoutes,
   providerRunsModels,
-  readyModelChooserRoutes,
   selectedModelSearchRoute,
 } from "../../src/renderer/src/utils/modelChooserRoutes";
 import type {
@@ -467,22 +466,5 @@ describe("composer model chooser route projection", () => {
     })).toBe(false);
     expect(providerRunsModels({ ...provider(), available: false })).toBe(false);
     expect(providerRunsModels(undefined)).toBe(false);
-  });
-
-  it("offers only runnable routes while never hiding the active selection", () => {
-    const current = providerNativeModelSelection({ providerId: "codex" });
-    const routes = buildComposerModelRoutes(
-      [provider(), claudeWithoutCatalog()],
-      [],
-      current,
-    );
-    const activeClaude = routes.find(({ providerId }) =>
-      providerId === "claude")!;
-
-    expect(readyModelChooserRoutes(routes).map(({ providerId }) => providerId))
-      .not.toContain("claude");
-    expect(
-      readyModelChooserRoutes(routes, ({ key }) => key === activeClaude.key),
-    ).toContain(activeClaude);
   });
 });

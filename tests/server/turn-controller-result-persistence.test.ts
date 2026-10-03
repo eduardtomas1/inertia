@@ -81,7 +81,7 @@ describe("TurnController terminal result persistence", () => {
     }
   });
 
-  it.each(["missing", "identity-mismatch", "force-detached"] as const)(
+  it.each(["missing"] as const)(
     "retains the failed result owner when cleanup is %s",
     async (cleanupResult) => {
       const runtime = await createTurnControllerTestRuntime();

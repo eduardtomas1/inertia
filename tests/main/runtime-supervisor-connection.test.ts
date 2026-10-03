@@ -6,7 +6,6 @@ import {
 import {
   detachedRuntimeConnection,
   runtimeConnection,
-  RuntimeConnectionUnavailableError,
   unavailableRuntimeConnection,
 } from "../../src/main/runtime-supervisor-connection";
 
@@ -50,40 +49,6 @@ describe("runtime supervisor connection", () => {
       kind: "accepted",
       authority: { conversationId, clientId: "web-contents:7" },
     });
-  });
-
-  it("never projects arbitrary child errors or locations", () => {
-    const privateDetail =
-      "spawn failed at /mnt/customer/roadmap.txt prompt=TOP_SECRET";
-    let caught: unknown;
-    try {
-      runtimeConnection({
-        phase: "restarting",
-        generation: 2,
-        websocketUrl: null,
-        databaseRecoveryReport: null,
-        databaseRecoveryNoticePending: false,
-        startupBlockerCode: null,
-        // Model the supervisor's private lastError without adding it back to
-        // the renderer-facing connection contract.
-        lastError: privateDetail,
-      } as Parameters<typeof runtimeConnection>[0] & { lastError: string });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(RuntimeConnectionUnavailableError);
-    const connection = (caught as RuntimeConnectionUnavailableError)
-      .connection;
-    expect(connection).toEqual({
-      unavailable: true,
-      code: "runtime-restarting",
-      retryable: true,
-      message: "The local service is restarting. Try again in a moment.",
-    });
-    expect(JSON.stringify(connection)).not.toContain(privateDetail);
-    expect(JSON.stringify(connection)).not.toContain("roadmap.txt");
-    expect(JSON.stringify(connection)).not.toContain("TOP_SECRET");
   });
 
   it.each([

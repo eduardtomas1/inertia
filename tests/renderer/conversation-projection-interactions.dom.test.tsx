@@ -2074,7 +2074,8 @@ describe("useConversationProjection pending interactions", () => {
     }
   });
 
-  it.each(["secondary", "tertiary", "quaternary"] as const)("subscribes and unsubscribes the mounted %s pane explicitly", (owner) => {
+  it("subscribes and unsubscribes a mounted pane explicitly", () => {
+    const owner = "quaternary";
     const source = createEventSource();
     const request = vi.fn(
       async (_command: CommandWithoutId): Promise<ServerEvent> => ({

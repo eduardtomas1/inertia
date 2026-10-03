@@ -204,16 +204,6 @@ describe("visual contrast system", () => {
       .toBeGreaterThanOrEqual(3);
   });
 
-  it("uses the readable application typography scale for Git file metadata", () => {
-    for (const selector of [
-      ".change-file-status",
-      ".change-file-path, .file-entry-path",
-      ".change-file-stats",
-    ]) {
-      expect(cssBlock(selector)).toContain("font-size: var(--ui-font-micro)");
-    }
-  });
-
   it.each(["light", "dark"] as const)(
     "keeps %s primary, secondary, metadata, and semantic text readable",
     (theme) => {
@@ -266,23 +256,9 @@ describe("visual contrast system", () => {
     },
   );
 
-  it("uses defined semantic tokens and visible focus states for repaired controls", () => {
-    expect(css).not.toMatch(
-      /var\(--(?:accent-contrast|attention-state|input-bg|success-text)(?:[,)]|\s)/u,
-    );
-    expect(css).toMatch(
-      /\.composer-context-request button:first-child\s*\{[^}]*color:\s*var\(--accent-text\)/u,
-    );
-    expect(css).toMatch(
-      /\.composer-context-request select\s*\{[^}]*background:\s*var\(--surface-strong\)/u,
-    );
+  it("keeps a visible focus outline on the new branch input", () => {
     expect(css).toMatch(
       /\.new-branch-form input:focus-visible,[\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
-    );
-    expect(cssBlock(".preview-address-form:focus-within"))
-      .toContain("box-shadow: 0 0 0 2px var(--focus-ring-soft)");
-    expect(css).not.toMatch(
-      /:disabled[^{]*\{[^}]*opacity:\s*0\./su,
     );
   });
 
@@ -330,54 +306,7 @@ describe("visual contrast system", () => {
     },
   );
 
-  it("keeps the dark canvas and everyday surfaces neutral graphite", () => {
-    const tokens = themeTokens("dark");
-    for (const tokenName of [
-      "app-bg",
-      "sidebar-bg",
-      "surface",
-      "surface-strong",
-      "surface-muted",
-      "surface-hover",
-    ]) {
-      const value = tokens.get(tokenName);
-      expect(value, `missing --${tokenName}`).toBeDefined();
-      const channels = rgb(value!);
-      expect(
-        Math.max(...channels) - Math.min(...channels),
-        `dark --${tokenName} should not carry a blue cast`,
-      ).toBeLessThanOrEqual(4);
-    }
-    expect(luminance(tokens.get("app-bg")!)).toBeLessThan(
-      luminance(tokens.get("surface")!),
-    );
-    expect(luminance(tokens.get("surface")!)).toBeLessThan(
-      luminance(tokens.get("surface-hover")!),
-    );
-  });
-
-  it("defines the shared interaction, selection, state-surface, and compatibility aliases", () => {
-    const root = cssBlock(":root");
-    for (const token of [
-      "--focus-ring",
-      "--focus-ring-soft",
-      "--interactive-border",
-      "--interactive-border-hover",
-      "--selected-surface",
-      "--selected-surface-strong",
-      "--approval-surface",
-      "--question-surface",
-      "--warning-surface",
-      "--failure-surface",
-      "--success-surface",
-      "--disabled-opacity",
-      "--text-faint",
-      "--success",
-      "--mono",
-    ]) {
-      expect(root, `missing ${token}`).toContain(`${token}:`);
-    }
-
+  it("keeps visible focus outlines on the shared, transcript, and file navigator controls", () => {
     expect(css).toMatch(
       /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
     );
@@ -389,72 +318,7 @@ describe("visual contrast system", () => {
     );
   });
 
-  it("keeps the repository scope and file navigator on shared readability tokens", () => {
-    expect(cssBlock(".workspace-repository-scope-leading strong,\n.workspace-repository-scope-leading select"))
-      .toContain("font-size: var(--ui-font-secondary)");
-    expect(cssBlock(".workspace-repository-scope-meta"))
-      .toContain("font-size: var(--ui-font-micro)");
-    expect(cssBlock(".workspace-repository-file-copy strong"))
-      .toContain("font-size: var(--ui-font-secondary)");
-    expect(css).toMatch(
-      /\.workspace-repository-file-copy small\s*\{[^}]*font-size:\s*var\(--ui-font-micro\)/su,
-    );
-    expect(cssBlock(".workspace-repository-file-stats"))
-      .toContain("font: var(--ui-font-micro)/1.2");
-    expect(css).toMatch(
-      /@container \(max-width: 460px\)\s*\{[\s\S]*?\.workspace-repository-scope\s*\{[^}]*flex-direction:\s*column;/u,
-    );
-  });
-
-  it("distinguishes selected navigation, files, models, and workspace tabs from hover", () => {
-    expect(css).toMatch(
-      /\.change-file-button\.is-selected,\s*\.file-entry\.is-selected\s*\{[^}]*background:\s*var\(--selected-surface\);[^}]*box-shadow:/su,
-    );
-    expect(css).toMatch(
-      /\.workspace-panel-tab\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
-    );
-    expect(css).toMatch(
-      /\.settings-navigation nav button\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
-    );
-    expect(css).toMatch(
-      /\.model-chooser-row\.is-active\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
-    );
-    expect(css).toMatch(
-      /\.model-source-rail-item\.is-selected\s*\{[^}]*background:\s*var\(--selected-surface\);/su,
-    );
-    expect(css).toMatch(
-      /\.project-row\.is-active \.project-name,\s*\.project-row\.is-active \.project-icon\s*\{[^}]*color:\s*var\(--accent-strong\);/su,
-    );
-    expect(css).toMatch(
-      /\.project-row\.is-active \.project-name\s*\{[^}]*font-weight:\s*680;/su,
-    );
-    expect(css).toMatch(
-      /\.conversation-row\.is-active\s*\{[^}]*background:\s*transparent;/su,
-    );
-    expect(css).toMatch(
-      /\.conversation-row\.is-active::before\s*\{[^}]*width:\s*2px;[^}]*background:\s*var\(--accent\);/su,
-    );
-  });
-
-  it("animates only maximum reasoning composer frames and honors reduced motion", () => {
-    const ultraFrame = cssBlock(
-      '.composer[data-maximum-reasoning="true"]::after',
-    );
-    expect(ultraFrame).toContain("pointer-events: none");
-    expect(ultraFrame).toContain("animation: ultra-reasoning-comet 5.5s linear infinite");
-    expect(ultraFrame).toContain("conic-gradient(");
-    expect(ultraFrame).toContain("from var(--ultra-angle)");
-    expect(ultraFrame).toContain("mask-composite: exclude");
-    expect(ultraFrame).toContain("border-radius: var(--radius-composer)");
-    expect(ultraFrame).toContain("inset: 0 0 var(--composer-strip-offset, 0px)");
-    expect(css).toMatch(/@property --ultra-angle\s*\{[^}]*syntax:\s*"<angle>";[^}]*inherits:\s*false;/su);
-    const glow = cssBlock('.composer[data-maximum-reasoning="true"] > .composer-ultra-glow');
-    expect(glow).toContain("pointer-events: none");
-    expect(glow).toContain("animation: ultra-reasoning-comet 5.5s linear infinite");
-    expect(css).toMatch(/\.composer-ultra-glow\s*\{[^}]*display:\s*none;/su);
-    expect(css).not.toMatch(
-      /\.composer-input-zone::after/u,
-    );
+  it("pauses maximum reasoning composer frames while hidden and stops them for reduced motion", () => {
     expect(css).toMatch(
       /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after,[\s\S]*?\.composer-ultra-glow\s*\{[^}]*animation-play-state:\s*paused;/u,
     );
@@ -464,11 +328,6 @@ describe("visual contrast system", () => {
     expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] > \.composer-ultra-glow\s*\{[^}]*display:\s*none;/u,
     );
-    const label = cssBlock(
-      '.composer[data-maximum-reasoning="true"] .composer-reasoning-control .composer-setting-value',
-    );
-    expect(label).toContain("background-clip: text");
-    expect(label).toContain("color: transparent");
   });
 });
 

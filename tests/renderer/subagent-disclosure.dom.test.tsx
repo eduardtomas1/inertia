@@ -6,7 +6,6 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -308,15 +307,6 @@ describe("delegated-agent timeline disclosure", () => {
     const stop = within(parentRow).getByRole("button", { name: "Stop Evidence scout" });
     stop.focus();
     expect(parentRow.querySelector(".subagent-row-actions")).toContainElement(stop);
-
-    const motion = readFileSync("src/renderer/src/components/BeautifulUiMotion.css", "utf8");
-    const styles = readFileSync("src/renderer/src/styles.css", "utf8");
-    expect(motion).toContain(
-      '.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }',
-    );
-    expect(motion).toContain("min-height: 28px");
-    expect(styles).toMatch(/\.subagent-disclosure li::before \{[^}]*border-bottom-left-radius/u);
-    expect(styles).toContain('.subagent-disclosure li[data-depth="0"]::before');
   });
 
   it("keeps completed history collapsed until the keyboard-accessible summary opens it", async () => {

@@ -14,13 +14,6 @@ import {
   type PendingConnectionRequest,
 } from "../../src/renderer/src/utils/connectionMessages";
 
-const runtimeActionsSource = readFileSync(
-  new URL(
-    "../../src/renderer/src/hooks/useAppRuntimeActions.ts",
-    import.meta.url,
-  ),
-  "utf8",
-).replace(/\r\n?/gu, "\n");
 const workspaceToolsSource = readFileSync(
   new URL("../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles.ts", import.meta.url),
   "utf8",
@@ -338,19 +331,5 @@ describe("renderer error visibility boundary", () => {
       "setFilesError(",
     );
     expect(workspaceToolsSource).toContain('"Files could not be loaded."');
-  });
-
-  it("still promotes explicitly invoked action failures to the user-facing toast", () => {
-    const runStart = runtimeActionsSource.indexOf("const run = useCallback");
-    const runEnd = runtimeActionsSource.indexOf(
-      "const openProjectPath = useCallback",
-      runStart,
-    );
-    const run = runtimeActionsSource.slice(runStart, runEnd);
-
-    expect(run).toContain("setActionError(null)");
-    expect(run).toMatch(
-      /setActionError\(\s*error instanceof Error\s*\?\s*error\.message\s*:\s*"That action could not be completed\.",?\s*\)/u,
-    );
   });
 });

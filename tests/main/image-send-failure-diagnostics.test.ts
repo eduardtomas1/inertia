@@ -88,11 +88,11 @@ describe("image-send failure evidence", () => {
     expect(await readImageSendRuntimeRecords(f.root, signal())).toEqual([]);
   });
 
-  it.each([undefined, "git"] as const)("retains the first restart cause after the record window fills (probe=%s)", async (probe) => {
+  it("retains the first restart cause after the record window fills", async () => {
     const f = await fixture();
     f.diagnostics.record("runtime.restart-requested", { generation: 1, reason: "owned-process-tainted",
       stage: "darwin-guardian-close", signal: "SIGUSR2", exitCode: 0,
-      ...(probe ? { probe } : {}),
+      probe: "git",
       argv: ["PRIVATE"], stderr: "PRIVATE", message: "PRIVATE" });
     for (let generation = 0; generation < 40; generation++) f.diagnostics.record("runtime.failure", {
       generation, message: "Runtime shutdown could not confirm owned-process cleanup.",
@@ -101,13 +101,13 @@ describe("image-send failure evidence", () => {
     expect(records).toHaveLength(32);
     expect(records[0]).toMatchObject({ event: "runtime.restart-requested", generation: 1,
       reason: "owned-process-tainted", stage: "darwin-guardian-close", signal: "SIGUSR2", exitCode: 0 });
-    if (probe) expect(records[0]).toMatchObject({ probe });
+    expect(records[0]).toMatchObject({ probe: "git" });
     expect(records.at(-1)).toMatchObject({ generation: 39, lastErrorCode: "owned-process-cleanup-unconfirmed" });
     expect(JSON.stringify(records)).not.toMatch(/PRIVATE|argv|stderr|message|recordDigest/u);
     const report = f.diagnostics.supportReport({ version: "test", platform: "darwin", architecture: "x64", runtime: null });
     expect(report.text).toContain("stage=darwin-guardian-close");
     expect(report.text).toContain("signal=SIGUSR2");
-    if (probe) expect(report.text).toContain(`probe=${probe}`);
+    expect(report.text).toContain("probe=git");
   });
 
   it("bounds known files and keeps only the latest 32 records", async () => {

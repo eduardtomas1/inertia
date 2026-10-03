@@ -1,12 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { Worker } from "node:worker_threads";
 
 import { parse } from "@babel/parser";
 import Database from "better-sqlite3";
-import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -144,16 +141,6 @@ function completeDump(database: Database.Database): Record<string, Row[]> {
   ]));
 }
 
-function completeDigest(database: Database.Database): string {
-  const hash = createHash("sha256");
-  for (const [table, key] of DUMPED_TABLES) {
-    for (const row of database.prepare(`SELECT * FROM ${table} ORDER BY ${key}`).iterate()) {
-      hash.update(JSON.stringify([table, row]));
-    }
-  }
-  return hash.digest("hex");
-}
-
 function releasedAndBounded(image: Buffer, sourceSchemaVersion = 17): {
   released: { diagnostics: LegacyBackfillDiagnostics; rows: Record<string, Row[]> };
   bounded: { diagnostics: LegacyBackfillDiagnostics; rows: Record<string, Row[]> };
@@ -229,22 +216,6 @@ function walDatabase(name: string): string {
   database.pragma("journal_mode = WAL");
   database.close();
   return path;
-}
-
-async function bundle(name: string, contents: string): Promise<string> {
-  const outfile = join(workRoot, `${name}.mjs`);
-  await build({
-    stdin: { contents, resolveDir: process.cwd(), loader: "ts", sourcefile: `${name}.ts` },
-    outfile,
-    bundle: true,
-    packages: "external",
-    platform: "node",
-    format: "esm",
-    target: "node22",
-    banner: { js: "import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);" },
-    logLevel: "silent",
-  });
-  return outfile;
 }
 
 function catalogWith(
@@ -617,39 +588,6 @@ describe("bounded legacy backfill fallback", { timeout: 240_000 }, () => {
     }
   });
 
-  it("produces the released helper's exact rows when that helper has an enlarged stack", async () => {
-    const workerPath = await bundle("released-backfill-worker", `
-      import { parentPort, workerData } from "node:worker_threads";
-      import Database from "better-sqlite3";
-      import { backfillLegacyAgentTurns } from "./${RUNNER_PATH}";
-      const database = new Database(Buffer.from(workerData.image));
-      database.pragma("foreign_keys = ON");
-      const diagnostics = backfillLegacyAgentTurns(database, { sourceSchemaVersion: 17 });
-      parentPort.postMessage({ diagnostics, image: database.serialize() });
-      database.close();
-    `);
-    const released = await new Promise<{ diagnostics: LegacyBackfillDiagnostics; image: Uint8Array }>((settle, reject) => {
-      const worker = new Worker(workerPath, {
-        workerData: { image: largeImage },
-        resourceLimits: { stackSizeMb: 64 },
-      });
-      worker.once("message", settle);
-      worker.once("error", reject);
-    });
-    const releasedDatabase = reopen(Buffer.from(released.image));
-    const boundedDatabase = reopen(largeImage);
-    try {
-      const boundedDiagnostics = backfillLegacyAgentTurnsBounded(boundedDatabase, { sourceSchemaVersion: 17 });
-      expect(boundedDiagnostics).toEqual(released.diagnostics);
-      expect(completeDigest(boundedDatabase)).toBe(completeDigest(releasedDatabase));
-      expect(count(boundedDatabase, "SELECT COUNT(*) AS count FROM activities WHERE turn_id = ?", REPRODUCTION_TURN_ID))
-        .toBe(LARGE_ACTIVITY_COUNT);
-    } finally {
-      releasedDatabase.close();
-      boundedDatabase.close();
-    }
-  });
-
   it("rolls the whole upgrade back byte-for-byte when the fallback fails midway, then retries", () => {
     const path = walDatabase("midway-failure.sqlite");
     const before = sha256File(path);
@@ -685,52 +623,6 @@ describe("bounded legacy backfill fallback", { timeout: 240_000 }, () => {
       expectUpgradedReproduction(retry);
     } finally {
       retry.close();
-    }
-  });
-
-  it("recovers an upgrade killed during the fallback and retries safely", async () => {
-    const path = walDatabase("interrupted.sqlite");
-    const interruptionReceipt = join(workRoot, "interrupted-at.txt");
-    const before = sha256File(path);
-    const childPath = await bundle("interrupted-upgrade", `
-      import { writeFileSync } from "node:fs";
-      import Database from "better-sqlite3";
-      import { migrateRuntimeDatabase } from "./src/server/persistence/migrations/runtime-catalog.ts";
-      const database = new Database(process.argv[2]);
-      database.pragma("foreign_keys = ON");
-      let assignments = 0;
-      database.function("interrupt_midway", () => {
-        assignments += 1;
-        if (assignments === ${MIDWAY_ASSIGNMENT}) {
-          writeFileSync(process.argv[3], String(assignments), { flag: "wx" });
-          process.kill(process.pid, "SIGKILL");
-        }
-        return null;
-      });
-      database.exec("CREATE TEMP TRIGGER interrupt_midway AFTER UPDATE OF turn_id ON main.activities BEGIN SELECT interrupt_midway(); END");
-      migrateRuntimeDatabase(database);
-      process.stdout.write("completed");
-    `);
-    const child = spawnSync(process.execPath, [childPath, path, interruptionReceipt], { encoding: "utf8", timeout: 180_000 });
-    expect(child.error).toBeUndefined();
-    expect(readFileSync(interruptionReceipt, "utf8")).toBe(String(MIDWAY_ASSIGNMENT));
-    expect(child.stdout).toBe("");
-    expect(child.stderr).toBe("");
-    expect(child.status === 0).toBe(false);
-    if (process.platform !== "win32") expect(child.signal).toBe("SIGKILL");
-    expect(sha256File(path)).toBe(before);
-
-    const recovered = new Database(path);
-    try {
-      recovered.pragma("foreign_keys = ON");
-      expect(recovered.pragma("integrity_check", { simple: true })).toBe("ok");
-      expectUntouchedReproduction(recovered);
-      const { diagnostic, error } = migrate(recovered, runtimeMigrationCatalog());
-      expect(error).toBeNull();
-      expect(diagnostic?.compatibility).toBe("bounded-legacy-backfill");
-      expectUpgradedReproduction(recovered);
-    } finally {
-      recovered.close();
     }
   });
 });

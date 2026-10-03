@@ -1,115 +1,143 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile, chmod, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
-import { comparisonPaths, contractDifference, currentRunJobs, resolveMainBaseline, selectMainBaseline, verificationContractAt } from "../../scripts/ci/validation-baseline.mjs";
+import { expect, it } from "vitest";
+import { comparisonPaths, currentRunJobs, resolveCertifiedPullRequest } from "../../scripts/ci/validation-baseline.mjs";
 import { classifyChangedPaths } from "../../scripts/ci/change-classifier.mjs";
 
 const head = "a".repeat(40);
-const older = "b".repeat(40);
-const unproven = "c".repeat(40);
+const parent = "b".repeat(40);
+const sourceHead = "c".repeat(40);
+const tree = "d".repeat(40);
 const repository = "test/ci";
-const good = {
-  id: 10, workflow_id: 2, path: ".github/workflows/ci.yml",
-  repository: { full_name: repository }, head_repository: { full_name: repository },
-  event: "push", head_branch: "main", status: "completed", conclusion: "success", head_sha: older,
-};
-function choose(runs: object[], options = {}) {
-  return selectMainBaseline({
-    runs, head, repository, workflowId: 2, currentRunId: 20,
-    contractAt: () => "same-contract", isAncestor: () => true,
-    hasSuccessfulGate: async () => true, ...options,
+const runId = 20;
+
+type Responses = Record<string, unknown>;
+function responses(overrides: Responses = {}): Responses {
+  return {
+    [`repos/${repository}/actions/runs/${runId}`]: {
+      id: runId, head_sha: head, event: "push", head_branch: "main", repository: { full_name: repository },
+    },
+    [`repos/${repository}/commits/${head}/pulls`]: [{
+      number: 12, merged_at: "2026-10-02T00:00:00Z", merge_commit_sha: head,
+      base: { ref: "main", repo: { full_name: repository } },
+      head: { sha: sourceHead, repo: { full_name: repository } },
+    }],
+    [`repos/${repository}/git/commits/${sourceHead}`]: { sha: sourceHead, tree: { sha: tree } },
+    [`repos/${repository}/compare/${parent}...${sourceHead}`]: { status: "ahead", merge_base_commit: { sha: parent } },
+    [`repos/${repository}/actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sourceHead}&status=completed&per_page=20`]: {
+      workflow_runs: [{
+        id: 7, event: "pull_request", head_sha: sourceHead, path: ".github/workflows/ci.yml", status: "completed",
+        repository: { full_name: repository }, head_repository: { full_name: repository },
+      }],
+    },
+    [`repos/${repository}/actions/runs/7/jobs?filter=latest&per_page=100&page=1`]: {
+      total_count: 1,
+      jobs: [{ name: "merge-ready", run_id: 7, head_sha: sourceHead, status: "completed", conclusion: "success" }],
+    },
+    ...overrides,
+  };
+}
+function git(overrides: { parents?: string | null; tree?: string | null } = {}) {
+  return (args: string[]) => args[0] === "rev-list"
+    ? ("parents" in overrides ? overrides.parents! : `${head} ${parent}\n`)
+    : ("tree" in overrides ? overrides.tree! : `${tree}\n`);
+}
+function resolve(overrides: Responses = {}, gitOverrides = {}) {
+  const table = responses(overrides);
+  return resolveCertifiedPullRequest({
+    head, repository, runId, git: git(gitOverrides),
+    api: (endpoint: string) => {
+      if (!(endpoint in table)) throw Object.assign(new Error("private output"), { code: "api-command-failed" });
+      const value = table[endpoint];
+      if (value instanceof Error) throw value;
+      return value;
+    },
   });
 }
+const pulls = `repos/${repository}/commits/${head}/pulls`;
+const runs = `repos/${repository}/actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sourceHead}&status=completed&per_page=20`;
+const jobs = `repos/${repository}/actions/runs/7/jobs?filter=latest&per_page=100&page=1`;
+const pullRecord = (responses()[pulls] as Array<Record<string, unknown>>)[0]!;
+const runRecord = (responses()[runs] as { workflow_runs: Array<Record<string, unknown>> }).workflow_runs[0]!;
 
-it("retains the accumulated diff after failed and cancelled predecessors", async () => {
-  const result = await choose([
-    { ...good, id: 12, head_sha: unproven, conclusion: "cancelled" },
-    { ...good, id: 11, head_sha: unproven, conclusion: "failure" },
-    good,
-  ]);
-  expect(result).toMatchObject({ base: older, reason: "trusted-main-run:10",
-    diagnostics: { evaluated: 3, rejected: { "run-metadata": 2 } } });
+it("reuses the successful pull-request run whose head has the identical tree", async () => {
+  expect(await resolve()).toEqual({
+    reused: { runId: 7, pullRequest: 12, sourceHead }, base: parent, reason: "certified-pull-request-run:7",
+  });
 });
 
 it.each([
-  { conclusion: "failure" }, { conclusion: "cancelled" }, { status: "in_progress" },
-  { event: "pull_request" }, { head_branch: "feature" }, { workflow_id: 3 },
-  { path: ".github/workflows/other.yml" }, { repository: { full_name: "foreign/repo" } },
-  { head_repository: { full_name: "foreign/repo" } }, { id: 20 }, { head_sha: "HEAD" },
-])("rejects untrusted or unsuccessful baseline metadata %j", async (override) => {
-  expect((await choose([{ ...good, ...override }])).base).toBeNull();
+  ["current-run-identity", { [`repos/${repository}/actions/runs/${runId}`]: { id: runId, head_sha: head, event: "pull_request", head_branch: "main", repository: { full_name: repository } } }],
+  ["pull-request-list-invalid", { [pulls]: {} }],
+  ["pull-request-not-unique", { [pulls]: [] }],
+  ["pull-request-not-unique", { [pulls]: [pullRecord, pullRecord] }],
+  ["pull-request-not-unique", { [pulls]: [{ ...pullRecord, merged_at: null }] }],
+  ["pull-request-not-unique", { [pulls]: [{ ...pullRecord, merge_commit_sha: parent }] }],
+  ["pull-request-not-unique", { [pulls]: [{ ...pullRecord, head: { sha: sourceHead, repo: { full_name: "fork/ci" } } }] }],
+  ["tree-mismatch", { [`repos/${repository}/git/commits/${sourceHead}`]: { sha: sourceHead, tree: { sha: "e".repeat(40) } } }],
+  ["parent-not-ancestor", { [`repos/${repository}/compare/${parent}...${sourceHead}`]: { status: "diverged", merge_base_commit: { sha: "e".repeat(40) } } }],
+  ["run-list-invalid", { [runs]: {} }],
+  ["no-successful-merge-ready", { [runs]: { workflow_runs: [] } }],
+  ["no-successful-merge-ready", { [runs]: { workflow_runs: [{ ...runRecord, head_repository: { full_name: "fork/ci" } }] } }],
+  ["no-successful-merge-ready", { [runs]: { workflow_runs: [{ ...runRecord, id: runId }] } }],
+  ["no-successful-merge-ready", { [jobs]: { total_count: 1, jobs: [{ name: "merge-ready", run_id: 7, head_sha: sourceHead, status: "completed", conclusion: "failure" }] } }],
+  ["no-successful-merge-ready", { [jobs]: { total_count: 1, jobs: [{ name: "merge-ready", run_id: 7, head_sha: parent, status: "completed", conclusion: "success" }] } }],
+  ["metadata-or-history-unavailable", { [jobs]: { total_count: 2, jobs: [] } }],
+  ["api-command-failed", { [pulls]: Object.assign(new Error("private output"), { code: "api-command-failed" }) }],
+  ["api-timeout", { [`repos/${repository}/compare/${parent}...${sourceHead}`]: Object.assign(new Error("private"), { code: "api-timeout" }) }],
+])("falls back to the complete plan: %s", async (reason, overrides) => {
+  const result = await resolve(overrides as Responses);
+  expect(result).toEqual({ reused: null, reason });
+  expect(JSON.stringify(result)).not.toContain("private");
 });
 
-it("requires ancestry, compatible verifier, explicit aggregate and an available baseline", async () => {
-  for (const options of [
-    { isAncestor: () => false },
-    { contractAt: (sha: string) => sha },
-    { contractAt: () => null },
-    { hasSuccessfulGate: async () => false },
-  ]) expect((await choose([good], options)).base).toBeNull();
-  expect((await choose([])).base).toBeNull();
+it.each([
+  [{ parents: `${head} ${parent} ${"e".repeat(40)}\n` }],
+  [{ parents: null }],
+  [{ tree: null }],
+])("requires a single-parent main commit with a readable tree %j", async (gitOverrides) => {
+  expect(await resolve({}, gitOverrides)).toEqual({ reused: null, reason: "main-commit-history-unavailable" });
 });
 
-it("reads accumulated real Git paths, preserves rename/deletion impact and detects contract replacement", async () => {
+it("stops at the shared lookup deadline", async () => {
+  let clock = 0;
+  const table = responses();
+  const result = await resolveCertifiedPullRequest({
+    head, repository, runId, git: git(), now: () => clock,
+    api: (endpoint: string) => { clock = 120_001; return table[endpoint]; },
+  });
+  expect(result).toEqual({ reused: null, reason: "metadata-deadline" });
+});
+
+it("reads accumulated real Git paths and preserves rename/deletion impact", async () => {
   const root = await mkdtemp(join(tmpdir(), "inertia-ci-baseline-"));
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const run = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   try {
-    git("init", "--quiet");
-    git("config", "user.name", "CI fixture");
-    git("config", "user.email", "ci@example.invalid");
+    run("init", "--quiet");
+    run("config", "user.name", "CI fixture");
+    run("config", "user.email", "ci@example.invalid");
     await mkdir(join(root, "src/renderer"), { recursive: true });
     await mkdir(join(root, "tests"));
     await mkdir(join(root, "docs"));
-    await writeFile(join(root, "package.json"), "{}\n");
     await writeFile(join(root, "tests/contract.test.ts"), "initial verifier\n");
     await writeFile(join(root, "src/renderer/view.ts"), "original source\n");
-    git("add", "."); git("commit", "--quiet", "-m", "trusted baseline");
-    const baseline = git("rev-parse", "HEAD");
-    await writeFile(join(root, "src/renderer/view.ts"), "unproven source\n");
-    git("commit", "--quiet", "-am", "cancelled predecessor");
+    run("add", "."); run("commit", "--quiet", "-m", "baseline");
+    const baseline = run("rev-parse", "HEAD");
+    await writeFile(join(root, "src/renderer/view.ts"), "changed source\n");
     await writeFile(join(root, "docs/note.md"), "latest docs\n");
-    git("add", "."); git("commit", "--quiet", "-m", "latest push");
-    const current = git("rev-parse", "HEAD");
+    run("add", "."); run("commit", "--quiet", "-m", "latest push");
+    const current = run("rev-parse", "HEAD");
     expect(comparisonPaths(baseline, current, root)).toEqual(["docs/note.md", "src/renderer/view.ts"]);
-    expect(verificationContractAt(baseline, root)).toBe(verificationContractAt(current, root));
-    git("mv", "tests/contract.test.ts", "docs/contract.md");
-    git("commit", "--quiet", "-m", "move verifier into docs");
-    const renamed = git("rev-parse", "HEAD");
-    const paths = comparisonPaths(current, renamed, root)!;
+    run("mv", "tests/contract.test.ts", "docs/contract.md");
+    run("commit", "--quiet", "-m", "move verifier into docs");
+    const paths = comparisonPaths(current, run("rev-parse", "HEAD"), root)!;
     expect(paths).toEqual(["docs/contract.md", "tests/contract.test.ts"]);
     expect(classifyChangedPaths(paths).allEvidence).toBe(true);
-    expect(verificationContractAt(renamed, root)).not.toBe(verificationContractAt(current, root));
     expect(comparisonPaths("missing", current, root)).toBeNull();
   } finally {
     await rm(root, { recursive: true, force: true });
-  }
-});
-
-it("bounds diagnostics and rejects missing, malformed, future and excessive metadata", async () => {
-  const result = await choose(Array.from({ length: 50 }, (_, i) => ({ ...good, id: i + 100 })));
-  expect(result.diagnostics).toMatchObject({ evaluated: 50, rejected: { "run-metadata": 50 }, truncated: true });
-  expect(result.diagnostics!.candidates).toHaveLength(10);
-  for (const runs of [[null], [{}], [good, ...Array.from({ length: 50 }, () => good)]]) {
-    expect((await selectMainBaseline({ runs, head, repository, workflowId: 2,
-      currentRunId: 20, contractAt: () => "same", isAncestor: () => true,
-      hasSuccessfulGate: async () => true })).base).toBeNull();
-  }
-  for (const context of [{ workflowId: NaN }, { currentRunId: NaN }, { head: "missing" }]) {
-    expect((await choose([good], context)).reason).toBe("baseline-metadata-invalid");
-  }
-});
-
-it("distinguishes ancestry, unavailable/changed contracts and unsuccessful exact aggregate", async () => {
-  for (const [context, rejection] of [
-    [{ isAncestor: () => false }, "not-ancestor-or-history-unavailable"],
-    [{ contractAt: (sha: string) => sha === head ? "current" : null }, "contract-unavailable"],
-    [{ contractAt: (sha: string) => sha }, "contract-changed"],
-    [{ hasSuccessfulGate: async () => false }, "merge-ready-evidence"],
-  ] as const) {
-    const result = await choose([good], context);
-    expect(result.diagnostics!.rejected).toEqual({ [rejection]: 1 });
   }
 });
 
@@ -129,118 +157,4 @@ it("accepts complete bounded pagination and rejects counts changing during pagin
   calls = 0;
   expect(() => currentRunJobs(repository, 10, Date.now() + 30_000,
     () => ++calls === 1 ? page : { jobs: [{ id: 100 }], total_count: 102 })).toThrow();
-});
-
-async function contractFixture() {
-  const root = await mkdtemp(join(tmpdir(), "inertia-ci-shadow-"));
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-  let tip = "";
-  const commit = () => { git("add", "."); git("commit", "--quiet", "-m", "fixture"); tip = git("rev-parse", "HEAD"); return tip; };
-  const fingerprints = new Map<string, string | null>();
-  const fingerprint = (sha: string) => {
-    const known = fingerprints.get(sha);
-    if (known !== undefined) return known;
-    const value = verificationContractAt(sha, root, { rendererDomShadow: true });
-    fingerprints.set(sha, value);
-    return value;
-  };
-  try {
-    git("init", "--quiet"); git("config", "user.name", "CI fixture"); git("config", "user.email", "ci@example.invalid");
-    git("config", "maintenance.auto", "false");
-    await mkdir(join(root, "tests/renderer"), { recursive: true });
-    await writeFile(join(root, "package.json"), "{}\n");
-    await writeFile(join(root, "tests/renderer/focus.dom.test.tsx"), "original test\n");
-    const base = commit();
-    return { root, git, commit, fingerprint, base, tip: () => tip };
-  } catch (error) {
-    await rm(root, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-it("shadows only existing regular DOM contents", async () => {
-  const { root, commit, fingerprint, base } = await contractFixture();
-  try {
-    await writeFile(join(root, "tests/renderer/focus.dom.test.tsx"), "current candidate regression\n");
-    const changed = commit();
-    expect(verificationContractAt(base, root)).not.toBe(verificationContractAt(changed, root));
-    expect(fingerprint(base)).toBe(fingerprint(changed));
-    expect(contractDifference(base, changed, root)).toEqual({ count: 1,
-      paths: ["tests/renderer/focus.dom.test.tsx"], truncated: false });
-    const common = { runs: [{ ...good, head_sha: base }], head: changed, repository,
-      workflowId: 2, currentRunId: 20, isAncestor: () => true, hasSuccessfulGate: async () => true };
-    expect((await selectMainBaseline({ ...common, contractAt: (sha) => verificationContractAt(sha, root) })).base).toBeNull();
-    expect((await selectMainBaseline({ ...common, contractAt: fingerprint })).base).toBe(base);
-    const gate = { name: "merge-ready", run_id: 10, head_sha: base, status: "completed", conclusion: "success" };
-    const observe = (jobs: object[], rendererDomShadow = true) => resolveMainBaseline({ head: changed, repository, runId: 20, cwd: root,
-      rendererDomShadow,
-      api: (endpoint) => endpoint.endsWith("/runs/20") ? { ...good, id: 20, head_sha: changed }
-        : endpoint.includes("workflows/ci.yml/runs") ? { workflow_runs: [{ ...good, head_sha: base }] }
-          : { jobs, total_count: jobs.length },
-    });
-    const observed = await observe([gate]);
-    expect(observed.base).toBeNull();
-    expect(observed.shadow?.base).toBe(base);
-    expect((await observe([gate], false)).shadow).toBeUndefined();
-    for (const jobs of [[], [gate, gate], [{ ...gate, run_id: 9 }], [{ ...gate, head_sha: older }],
-      [{ ...gate, conclusion: "cancelled" }], [{ ...gate, status: "in_progress" }]]) {
-      expect((await observe(jobs)).shadow?.base).toBeNull();
-    }
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-it("preserves every other contract identity under the DOM shadow", async () => {
-  const { root, git, commit, fingerprint, tip } = await contractFixture();
-  try {
-    // Additions, unknown test paths, shared helpers, control-plane changes and
-    // resource declarations all keep their exact blob/path inventory.
-    for (const file of ["tests/renderer/added.dom.test.tsx", "tests/renderer/dom/setup.ts",
-      "tests/renderer/shared-fixture.ts", "tests/helpers/shared.ts", "tests/support/e2e-resource-policy.ts",
-      "tests/e2e/resource.spec.ts", "tests/server/new.test.ts", "scripts/ci/renamed.mjs",
-      ".github/workflows/ci.yml", "playwright.config.ts", "package-lock.json"]) {
-      const previous = tip();
-      await mkdir(join(root, file, ".."), { recursive: true });
-      await writeFile(join(root, file), "first\n");
-      expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-      if (file !== "tests/renderer/added.dom.test.tsx") {
-        const beforeEdit = tip();
-        await writeFile(join(root, file), "changed resource or toolchain\n");
-        expect(fingerprint(commit())).not.toBe(fingerprint(beforeEdit));
-      }
-    }
-    let previous = tip();
-    git("mv", "tests/renderer/focus.dom.test.tsx", "tests/renderer/moved.dom.test.tsx");
-    expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-    previous = tip();
-    git("rm", "tests/renderer/moved.dom.test.tsx");
-    expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-    previous = tip();
-    await chmod(join(root, "tests/renderer/added.dom.test.tsx"), 0o755);
-    git("update-index", "--chmod=+x", "tests/renderer/added.dom.test.tsx");
-    expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-    if (process.platform !== "win32") {
-      previous = tip();
-      await rm(join(root, "tests/renderer/added.dom.test.tsx"));
-      await symlink("shared-fixture.ts", join(root, "tests/renderer/added.dom.test.tsx"));
-      expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-    }
-    expect(fingerprint("missing")).toBeNull();
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-
-it("keeps API failures and the total lookup deadline closed without leaking error text", async () => {
-  const failed = await resolveMainBaseline({ head, repository, runId: 20,
-    api: () => { throw Object.assign(new Error("private child-process output"), { code: "api-timeout" }); },
-  });
-  expect(failed).toEqual({ base: null, reason: "trusted-main-baseline-unavailable", failureClass: "api-timeout" });
-  expect(JSON.stringify(failed)).not.toContain("private");
-  vi.useFakeTimers();
-  try {
-    vi.setSystemTime(0);
-    const expired = await resolveMainBaseline({ head, repository, runId: 20,
-      api: () => { vi.setSystemTime(120_001); return { ...good, id: 20, head_sha: head }; },
-    });
-    expect(expired).toMatchObject({ base: null, failureClass: "metadata-deadline" });
-  } finally { vi.useRealTimers(); }
 });

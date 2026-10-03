@@ -24,6 +24,7 @@ export type ChangeDomain =
 export interface ChangeClassification {
   allEvidence: boolean;
   fullCertification: boolean;
+  nativeArchitecture: boolean;
   documentationOnly: boolean;
   domains: ChangeDomain[];
   reasons: string[];

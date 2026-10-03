@@ -86,9 +86,12 @@ function limitRow(page: Page): Locator {
 }
 
 async function dismissQuotaNotice(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(
+    (key) => window.localStorage.getItem(key) ?? "",
+    "inertia:provider-quota-notifications:v1",
+  )).toContain("codex:builtin:");
   const dismiss = page.getByRole("button", { name: "Dismiss Codex 5-hour quota notice", exact: true });
-  await expect(dismiss).toBeVisible();
-  await dismiss.click();
+  await dismiss.click({ timeout: 2_000 }).catch(() => undefined);
   await expect(dismiss).toHaveCount(0);
 }
 

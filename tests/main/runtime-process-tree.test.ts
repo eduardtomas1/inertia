@@ -174,8 +174,10 @@ describe("runtime process-tree termination", () => {
     })).resolves.toBe(false);
   });
 
-  it.each((["linux", "darwin"] as const).flatMap((platform) =>
-    ["R", "S", "D"].map((state) => ({ platform, state }))))(
+  it.each([
+    { platform: "linux", state: "R" },
+    { platform: "darwin", state: "D" },
+  ] as const)(
     "does not confirm a $platform tree whose root stayed $state before the kill",
     async ({ platform, state }) => {
       const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {

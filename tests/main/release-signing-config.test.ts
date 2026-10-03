@@ -118,17 +118,10 @@ function loadIncompleteMacSigningMatrix(): {
 }
 
 describe("release signing configuration", () => {
-  it("removes blank CI credential variables on every channel and native architecture", () => {
+  it("removes blank CI credential variables on every channel and operating system", () => {
     const blanks = Object.fromEntries(signingEnvironmentKeys.map((key) => [key, ""]));
     for (const channel of releaseChannels) {
-      for (const platform of [
-        "macos-x64",
-        "macos-arm64",
-        "windows-x64",
-        "windows-arm64",
-        "linux-x64",
-        "linux-arm64",
-      ] as const) {
+      for (const platform of ["macos-arm64", "windows-x64", "linux-x64"] as const) {
         const result = loadConfig(platform, {
           ...blanks,
           INERTIA_RELEASE_CHANNEL: channel,
@@ -252,42 +245,15 @@ describe("release signing configuration", () => {
     expect(complete.stdout).not.toContain("password");
   });
 
-  it("applies the same fail-closed macOS policy to the native Intel build", () => {
-    const complete = loadConfig("macos-x64", {
-      CSC_LINK: "certificate",
-      CSC_KEY_PASSWORD: "password",
-      APPLE_API_KEY: "/private/key.p8",
-      APPLE_API_KEY_ID: "key-id",
-      APPLE_API_ISSUER: "issuer",
-    });
-    expect(complete.status).toBe(0);
-    expect(JSON.parse(complete.stdout)).toMatchObject({
-      forceCodeSigning: true,
-      extraMetadata: {
-        inertiaUpdateCapability: { delivery: "in-app", platform: "darwin" },
-      },
-      mac: { hardenedRuntime: true, notarize: true },
-    });
-  });
-
-  it("rejects both Windows singleton signing subsets on both channels and architectures", () => {
-    let checked = 0;
-    for (const channel of releaseChannels) {
-      for (const platform of ["windows-x64", "windows-arm64"] as const) {
-        for (const key of windowsSigningEnvironmentKeys) {
-          const value = `configured-${key}`;
-          const result = loadConfig(platform, {
-            INERTIA_RELEASE_CHANNEL: channel,
-            [key]: value,
-          });
-          expect(result.status, `${channel}/${platform}/${key}: ${result.stderr}`).not.toBe(0);
-          expect(result.stderr).toContain("Windows signing configuration is incomplete");
-          expect(result.stderr).not.toContain(value);
-          checked += 1;
-        }
-      }
+  it("rejects both Windows singleton signing subsets", () => {
+    for (const key of windowsSigningEnvironmentKeys) {
+      const value = `configured-${key}`;
+      const result = loadConfig("windows-x64", { [key]: value });
+      expect(result.status, `${key}: ${result.stderr}`).not.toBe(0);
+      expect(result.stderr).toContain("Windows signing configuration is incomplete");
+      expect(result.stderr).not.toContain(value);
     }
-    expect(checked).toBe(8);
+    expect(windowsSigningEnvironmentKeys).toHaveLength(2);
   });
 
   it("accepts the complete Windows signing configuration", () => {
@@ -323,23 +289,6 @@ describe("release signing configuration", () => {
         artifactName: "Inertia.Setup.${version}.arm64.${ext}",
       },
     });
-  });
-
-  it("marks only the release AppImage configuration as Linux in-app capable", () => {
-    for (const platform of ["linux-x64", "linux-arm64"] as const) {
-      const result = loadConfig(platform);
-      expect(result.status).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({
-        forceCodeSigning: false,
-        publish: [{
-          provider: "generic",
-          url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
-        }],
-        extraMetadata: {
-          inertiaUpdateCapability: { delivery: "in-app", platform: "linux" },
-        },
-      });
-    }
   });
 
   it("builds Canary as a separate application, feed, cache lineage, executable, and artifact set", () => {

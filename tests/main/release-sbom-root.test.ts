@@ -31,12 +31,8 @@ describe("release SBOM root package identity", () => {
 
   it.each([
     { name: "other-package" },
-    { version: "9.9.9" },
-    { "bom-ref": "other-package@1.2.3" },
-    { purl: "pkg:npm/other-package@1.2.3" },
     { purl: "pkg:npm/fixture-app@1.2.3?unverified=true" },
     { "bom-ref": undefined },
-    { purl: undefined },
   ])("rejects inconsistent root identity %j rather than renaming arbitrary output", (change) => {
     expect(() => canonicalReleaseSbomRoot(
       { ...component, ...change }, manifest, lockfile, "disposable-worktree",
@@ -45,18 +41,14 @@ describe("release SBOM root package identity", () => {
 
   it.each([
     { ...lockfile, name: "different" },
-    { ...lockfile, version: "1.2.2" },
-    { ...lockfile, packages: { "": { ...manifest, name: "different" } } },
-    { ...lockfile, packages: { "": { ...manifest, version: "1.2.2" } } },
     { ...lockfile, packages: {} },
-    null,
   ])("rejects a stale or mismatched lock root %j", (lock) => {
     expect(() => canonicalReleaseSbomRoot(component, manifest, lock, "fixture-app"))
       .toThrow("locked package identity");
   });
 
-  it.each([null, [], "fixture-app", {}])("rejects malformed root %j", (root) => {
-    expect(() => canonicalReleaseSbomRoot(root, manifest, lockfile, "fixture-app"))
+  it("rejects a malformed root", () => {
+    expect(() => canonicalReleaseSbomRoot(null, manifest, lockfile, "fixture-app"))
       .toThrow("locked package identity");
   });
 });

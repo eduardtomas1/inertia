@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +6,6 @@ import {
   MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
   MULTI_SPAWN_PRESET_STORAGE_KEY,
   projectsShareLocalCheckout,
-  readPendingMultiSpawnLaunchId,
   readMultiSpawnPreset,
   refreshMultiSpawnSelection,
   selectionFromPreset,
@@ -130,40 +127,10 @@ describe("multi-spawn preset", () => {
     const launchId = "33333333-3333-4333-8333-333333333333";
 
     expect(writePendingMultiSpawnLaunchId(target, launchId)).toBe(true);
-    expect(readPendingMultiSpawnLaunchId(target)).toBe(launchId);
-
-    target.setItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY, "not-a-launch-id");
-    expect(readPendingMultiSpawnLaunchId(target)).toBeNull();
+    expect(target.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY)).toBe(launchId);
 
     expect(clearPendingMultiSpawnLaunchId(target)).toBe(true);
     expect(target.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY)).toBeNull();
-  });
-
-  it("keeps the dialog contained while the route model palette escapes scrolling", () => {
-    const styles = readFileSync(
-      new URL(
-        "../../src/renderer/src/components/MultiSpawnDialog.css",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const dialogRules = styles.match(
-      /\.multi-spawn-dialog \{(?<rules>[^}]+)\}/u,
-    )?.groups?.rules;
-    const routeCardRules = styles.match(
-      /\.multi-spawn-side \{(?<rules>[^}]+)\}/u,
-    )?.groups?.rules;
-    const bodyRules = styles.match(
-      /\.multi-spawn-dialog-body \{(?<rules>[^}]+)\}/u,
-    )?.groups?.rules;
-    const routePaletteRules = styles.match(
-      /\.multi-spawn-route \.model-chooser-palette \{(?<rules>[^}]+)\}/u,
-    )?.groups?.rules;
-
-    expect(dialogRules).toContain("overflow: hidden");
-    expect(bodyRules).toContain("overflow: auto");
-    expect(routeCardRules).toContain("overflow: visible");
-    expect(routePaletteRules).toContain("position: fixed");
   });
 
   it("persists only bounded route identity, reasoning, access, and names", () => {

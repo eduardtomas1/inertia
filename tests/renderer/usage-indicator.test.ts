@@ -17,7 +17,6 @@ import {
 } from "../../src/renderer/src/utils/usageDisplay";
 import {
   CONTEXT_NEAR_LIMIT_REMAINING_PERCENT,
-  contextRemaining,
   contextRingState,
   contextTriggerSummary,
   displayPercent,
@@ -124,30 +123,6 @@ describe("UsageIndicator", () => {
     expect(render(usage(), [], freshState, "hidden")).toBe("");
   });
 
-  it("keeps the anchored popover width and height bounded", () => {
-    const css = readFileSync(
-      new URL("../../src/renderer/src/styles.css", import.meta.url),
-      "utf8",
-    ).replace(/\r\n?/gu, "\n");
-    expect(css).toMatch(
-      /\.usage-popover\s*\{[^}]*width:\s*min\(320px,\s*calc\(100vw\s*-\s*24px\)\)[^}]*max-width:\s*calc\(100vw\s*-\s*24px\)[^}]*max-height:\s*min\(460px,\s*calc\(100vh\s*-\s*72px\)\)/su,
-    );
-    expect(css).toMatch(/\.usage-popover\s*\{[^}]*position:\s*absolute[^}]*right:\s*0[^}]*bottom:\s*calc\(100%\s*\+\s*8px\)/su);
-    expect(css).toMatch(/\.composer-usage\s*\{[^}]*flex:\s*0 0 auto[^}]*align-self:\s*center/su);
-    expect(css).not.toMatch(/\.composer-usage\s*\{[^}]*width:/su);
-    expect(css).not.toContain(".usage-panel");
-    expect(css).not.toContain(".usage-expanded-content");
-    expect(css).not.toContain(".usage-compact-main");
-  });
-
-  it("retains conservative context handling", () => {
-    expect(contextRemaining(usage())).toBe(50);
-    expect(contextRemaining(usage({ maxTokens: 0 }))).toBeNull();
-    expect(contextRemaining(usage({ usedTokens: null, maxTokens: 200_000 }))).toBeNull();
-    expect(contextRemaining(usage({ usedTokens: 200_001, maxTokens: 200_000 }))).toBeNull();
-    expect(contextRemaining(usage({ usedTokens: -1, maxTokens: 200_000 }))).toBeNull();
-  });
-
   it("distinguishes current, stale, near-limit, and unavailable context honestly", () => {
     const current = contextUsageDisplayValue({ usedTokens: 50, maxTokens: 100 }, "current");
     const stale = contextUsageDisplayValue({ usedTokens: 50, maxTokens: 100 }, "stale");
@@ -214,13 +189,11 @@ describe("UsageIndicator", () => {
     expect(html).not.toContain('data-context-ring-state="refreshing"');
   });
 
-  it("uses semantic, scale-aware ring styling with no idle spinner motion", () => {
+  it("removes the context ring transition for reduced motion", () => {
     const css = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
     ).replace(/\r\n?/gu, "\n");
-    const ringBlock = css.match(/\.usage-context-ring\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
-    const refreshBlock = css.match(/\.usage-quota-refresh-indicator\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
     const reducedRuleIndex = css.indexOf(
       ".usage-context-ring-value {\n    transition: none;",
     );
@@ -237,14 +210,6 @@ describe("UsageIndicator", () => {
       reducedMotionEnd === -1 ? undefined : reducedMotionEnd,
     );
 
-    expect(ringBlock).toMatch(/width:\s*clamp\(23px,\s*calc\(var\(--control-height\)\s*-\s*7px\),\s*31px\)/su);
-    expect(css).toMatch(/\.usage-context-ring-value\s*\{[^}]*stroke:\s*color-mix\(in srgb,\s*var\(--accent\)\s*72%,\s*var\(--text-muted\)\)/su);
-    expect(css).toMatch(/\.usage-context-ring-track,\s*\.usage-context-ring-value\s*\{[^}]*stroke-width:\s*1\.65/su);
-    expect(css).toMatch(/\.usage-context-ring\.is-near-limit\s+\.usage-context-ring-value\s*\{[^}]*stroke:\s*var\(--warning\)/su);
-    expect(css).toMatch(/\.usage-context-ring\.is-unavailable\s+\.usage-context-ring-track\s*\{[^}]*stroke-dasharray:/su);
-    expect(ringBlock).not.toContain("animation");
-    expect(css).not.toMatch(/\.usage-context-ring-value\s*\{[^}]*animation:/su);
-    expect(refreshBlock).not.toContain("animation");
     expect(reducedRuleIndex).toBeGreaterThan(reducedMotionStart);
     expect(reducedMotion).toMatch(/\.usage-context-ring-value\s*\{[^}]*transition:\s*none/su);
   });

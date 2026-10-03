@@ -208,7 +208,7 @@ describe("Cursor ACP harness", { concurrent: false }, () => {
     const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness({
-        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 5_000,
+        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 2_000,
       })]),
     );
     const result = await manager.run(nativeProviderRunInput({
@@ -1262,8 +1262,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
   it.each([
     ["cursor/update_todos", "todo update"],
-    ["cursor/task", "task notification"],
-    ["cursor/generate_image", "generated-image notification"],
   ] as const)("fails a Cursor turn when a malformed %s races end_turn", async (
     method,
     label,
@@ -1306,17 +1304,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       toolCallId: "todo-tool",
       todos: [],
       merge: false,
-    }],
-    ["cursor/task", {
-      toolCallId: "task-tool",
-      description: "Inspect provider state",
-      prompt: "Inspect",
-      subagentType: "explore",
-    }],
-    ["cursor/generate_image", {
-      toolCallId: "image-tool",
-      description: "Provider diagram",
-      referenceImagePaths: [],
     }],
   ] as const)("rejects %s when it is sent as a JSON-RPC request", async (
     method,

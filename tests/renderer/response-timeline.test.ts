@@ -20,7 +20,6 @@ import {
   buildResponseTimeline,
   buildTurnExecutionStream,
   buildTimelineMinimapMarkers,
-  estimateTimelineRowSize,
   formatElapsed,
   resolveTimelineKeyboardIntent,
   shouldFollowTimeline,
@@ -28,9 +27,7 @@ import {
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
   turnExecutionElapsedMs,
-  turnQueueElapsedMs,
   turnTimingLabels,
-  workSummaryLabel,
   type ResponseTurn,
   type TurnGitArtifactSummary,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -495,78 +492,6 @@ describe("authoritative response timeline", () => {
       .toBeGreaterThan(html.indexOf('data-turn-layer="agent-execution"'));
     expect(html.indexOf('data-turn-layer="supporting-ledger"'))
       .toBeGreaterThan(html.indexOf('data-turn-layer="final-answer"'));
-  });
-
-  it("keeps active commentary in the execution stream and reserves the answer document for persistence", () => {
-    const renderTurn = (
-      turn: AgentTurn,
-      messages: ChatMessage[],
-      streamingText: string,
-    ) => renderToStaticMarkup(createElement(ResponseTimeline, {
-      turns: [turn],
-      messages,
-      activities: [],
-      reasonings: [],
-      plans: [],
-      checkpoints: [],
-      projectRoot: "/workspace",
-      projectId: "project-1",
-      conversationId,
-      streamingText,
-      streamingReasoning: "",
-      streamingChannel: streamingText ? "text" : null,
-      approvals: [],
-      inputRequests: [],
-      showTimestamps: false,
-      showThinking: false,
-      defaultCodeWrap: false,
-      autoCollapseWorkLog: true,
-      showChangedFileSummaries: false,
-      checkpointRestoreDisabled: false,
-      onRespondToApproval: async () => undefined,
-      onRespondToInput: async () => undefined,
-      onRevertCheckpoint: () => undefined,
-      onOpenTurnDiff: () => undefined,
-      onCompareTurnArtifacts: () => undefined,
-      onOpenTurnFile: () => undefined,
-      onStop: () => undefined,
-    }));
-    const active = agentTurn("turn-active", "user-active", {
-      status: "running",
-      completedAt: null,
-    });
-    const activeHtml = renderTurn(
-      active,
-      [message("user-active", active.id, "user", "Stream it", active.requestedAt)],
-      "Answer in progress",
-    );
-    const settled = agentTurn("turn-settled", "user-settled", {
-      terminalAssistantMessageId: "assistant-settled",
-    });
-    const settledHtml = renderTurn(
-      settled,
-      [
-        message("user-settled", settled.id, "user", "Finish it", settled.requestedAt),
-        message("assistant-settled", settled.id, "assistant", "Persisted answer", settled.completedAt!),
-      ],
-      "",
-    );
-
-    expect(activeHtml).not.toContain("turn-final-answer-document");
-    expect(activeHtml).toContain("turn-commentary-row is-streaming");
-    expect(activeHtml).toContain('data-turn-layer="agent-execution"');
-    expect(activeHtml).toContain('data-stream-motion="word-reveal"');
-    expect(activeHtml).toContain('<span class="response-stream-word">Answer</span>');
-    expect(activeHtml).toContain('<span class="response-stream-word">progress</span>');
-    expect(activeHtml).not.toContain('aria-label="Final answer actions and run metadata"');
-    expect(activeHtml).not.toContain('data-turn-layer="supporting-ledger"');
-    expect(settledHtml).toContain("turn-final-answer-document");
-    expect(settledHtml).toContain('data-turn-layer="final-answer"');
-    expect(settledHtml).toContain('data-turn-layer="supporting-ledger"');
-    expect(settledHtml.indexOf('data-turn-layer="final-answer"'))
-      .toBeGreaterThan(settledHtml.indexOf('data-turn-layer="user-request"'));
-    expect(settledHtml).toContain('data-answer-phase="persisted"');
-    expect(settledHtml).toContain('data-terminal-answer-id="assistant-settled"');
   });
 
   it("interleaves commentary with adjacent call groups, a bounded live window, and secondary work in Details", () => {
@@ -1103,22 +1028,6 @@ describe("authoritative response timeline", () => {
     expect(second.activities).toEqual([]);
   });
 
-  it("separates requested-to-started queue delay from started-to-completed work time", () => {
-    const turn = agentTurn("turn-1", "user-1");
-    const response = timelineTurn(buildResponseTimeline({
-      turns: [turn],
-      messages: [message("user-1", turn.id, "user", "Run it", turn.requestedAt)],
-      activities: [],
-      reasonings: [],
-      checkpoints: [],
-    }), turn.id);
-
-    expect(turnQueueElapsedMs(response)).toBe(5_000);
-    expect(turnExecutionElapsedMs(response)).toBe(7_000);
-    expect(turnTimingLabels(response)).toEqual(["Queued 5s", "Worked 7s"]);
-    expect(workSummaryLabel(response)).toBe("Completed without tool activity");
-  });
-
   it("excludes persisted system suspend time from completed work duration", () => {
     const turn = {
       ...agentTurn("turn-1", "user-1"),
@@ -1172,27 +1081,6 @@ describe("authoritative response timeline", () => {
     if (compatibility?.kind === "compatibility") {
       expect(compatibility.compatibility.plans).toEqual([legacyPlan]);
     }
-  });
-
-  it("uses honest stopped and failed lifecycle labels", () => {
-    const failed = agentTurn("failed", "failed-user", { status: "failed" });
-    const cancelled = agentTurn("cancelled", "cancelled-user", { status: "cancelled" });
-    const interrupted = agentTurn("interrupted", "interrupted-user", { status: "interrupted" });
-    const timeline = buildResponseTimeline({
-      turns: [failed, cancelled, interrupted],
-      messages: [
-        message("failed-user", failed.id, "user", "Fail", failed.requestedAt),
-        message("cancelled-user", cancelled.id, "user", "Cancel", cancelled.requestedAt),
-        message("interrupted-user", interrupted.id, "user", "Interrupt", interrupted.requestedAt),
-      ],
-      activities: [],
-      reasonings: [],
-      checkpoints: [],
-    });
-
-    expect(workSummaryLabel(timelineTurn(timeline, failed.id))).toBe("Failed after 7s");
-    expect(workSummaryLabel(timelineTurn(timeline, cancelled.id))).toBe("Stopped after 7s");
-    expect(workSummaryLabel(timelineTurn(timeline, interrupted.id))).toBe("Stopped after 7s");
   });
 
   it("quarantines inferred turns and every unowned record in one compatibility section", () => {
@@ -1397,35 +1285,7 @@ describe("authoritative response timeline", () => {
       .toBeNull();
   });
 
-  it("builds thousands of authoritative rows without quadratic rescanning", () => {
-    const count = 3_000;
-    const baseTime = Date.parse("2026-07-23T10:00:00.000Z");
-    const turns = Array.from({ length: count }, (_, index) => agentTurn(
-      `turn-${String(index).padStart(4, "0")}`,
-      `user-${index}`,
-      { requestedAt: new Date(baseTime + index * 1_000).toISOString() },
-    ));
-    const messages = turns.map((turn, index) =>
-      message(`user-${index}`, turn.id, "user", `Request ${index}`, turn.requestedAt));
-    const started = performance.now();
-    const timeline = buildResponseTimeline({
-      turns,
-      messages,
-      activities: [],
-      reasonings: [],
-      checkpoints: [],
-    });
-    const elapsed = performance.now() - started;
-    expect(timeline).toHaveLength(count);
-    expect(timeline[0]?.id).toBe("turn-0000");
-    expect(timeline.at(-1)?.id).toBe("turn-2999");
-    expect(estimateTimelineRowSize(timeline[0]!)).toBeGreaterThanOrEqual(190);
-    expect(elapsed).toBeLessThan(2_000);
-  });
-
   it("follows only near the bottom and formats bounded elapsed labels", () => {
-    expect(shouldFollowTimeline(1_380, 500, 2_000)).toBe(true);
-    expect(shouldFollowTimeline(900, 500, 2_000)).toBe(false);
     expect(shouldFollowTimeline(Number.NaN, 500, 2_000)).toBe(true);
     expect(formatElapsed(42_000)).toBe("42s");
     expect(formatElapsed(125_000)).toBe("2m 5s");

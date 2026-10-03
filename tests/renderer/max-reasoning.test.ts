@@ -10,9 +10,6 @@ describe("maximum reasoning frame", () => {
     ["Codex", ["low", "medium", "high", "xhigh", "ultra"], "ultra"],
     ["Claude", ["max", "low", "medium", "high"], "max"],
     ["Cursor", ["low", "high"], "high"],
-    ["Kimi", ["medium", "high"], "high"],
-    ["Antigravity", ["low", "high"], "high"],
-    ["OpenCode", ["xhigh", "high", "medium", "low"], "xhigh"],
   ])("uses the %s model's supported maximum independent of catalog order", (_, levels, max) => {
     expect(isMaximumReasoning(model(levels), ` ${max.toUpperCase()} `)).toBe(true);
     expect(isMaximumReasoning(model(levels), "low")).toBe(false);

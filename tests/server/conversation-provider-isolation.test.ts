@@ -16,7 +16,6 @@ import {
   MIXED_PROVIDER_HISTORY_MESSAGE,
   conversationContinuationRefusal,
 } from "../../src/shared/continuation-policy";
-import { createQuietLedgerFixture } from "../e2e/support/quiet-ledger-fixture";
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { resolveTurnRequest, type PrepareTurnRequestDependencies } from "../../src/server/runtime/turns/turn-request-preparation";
@@ -341,25 +340,6 @@ describe("chat provider isolation", () => {
       .toThrow(explanation);
     expect(conversationContinuationRefusal(store.conversationDetail(conversation.id)?.conversation))
       .toBe(explanation);
-  });
-
-  it("publishes the Quiet Ledger fixture's restored history as mixed and rejects every provider in place", () => {
-    const directory = mkdtempSync(join(tmpdir(), "inertia-quiet-ledger-mixed-"));
-    directories.push(directory);
-    const workspaceDirectory = join(directory, "workspace");
-    mkdirSync(workspaceDirectory);
-    mkdirSync(join(directory, "data"));
-    const { conversation, databasePath } = createQuietLedgerFixture({ testDirectory: directory, workspaceDirectory });
-    const store = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
-    stores.push(store);
-    expect(store.conversationHistory(conversation.id)?.conversation).toMatchObject({
-      hasHistory: true,
-      mixedProviderHistory: true,
-    });
-    for (const providerId of ["codex", "claude", "kimi"] as const) {
-      expect(() => store.assertConversationProvider(conversation.id, providerId, true))
-        .toThrow(ConversationProviderChangeError);
-    }
   });
 
   it("keeps the in-flight configuration guard for same-provider updates", async () => {

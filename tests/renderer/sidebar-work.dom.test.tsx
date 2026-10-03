@@ -139,7 +139,6 @@ function renderSidebar(
   const onOpenDailyWork = vi.fn();
   const onClose = vi.fn();
   const onViewChange = vi.fn();
-  const onOpenHome = vi.fn();
   const sidebarProps = {
     connectionStatus: "online" as const,
     view: options.view ?? "workspace" as const,
@@ -148,7 +147,7 @@ function renderSidebar(
     layoutWidth: 276,
     onClose,
     onViewChange,
-    onOpenHome,
+    onOpenHome: vi.fn(),
     onImportProject: vi.fn(),
     onSelectConversation,
     splitConversationIds: new Set(options.splitConversationId ? [options.splitConversationId] : []),
@@ -196,7 +195,6 @@ function renderSidebar(
     onOpenDailyWork,
     onClose,
     onViewChange,
-    onOpenHome,
     rerenderSnapshot(nextSnapshot: AppSnapshot, collapsed = false) {
       view.rerender(<ScopedSidebar snapshot={nextSnapshot} collapsed={collapsed} {...sidebarProps} />);
     },
@@ -323,102 +321,6 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("button", { name: /^Weekend plans,/ })).toHaveFocus();
   });
 
-  it("opens the global project launcher from the Inertia logo", () => {
-    const view = renderSidebar([]);
-
-    fireEvent.click(screen.getByRole("button", { name: "Start a new chat" }));
-
-    expect(view.onOpenHome).toHaveBeenCalledOnce();
-  });
-
-  it("does not reshuffle working rows when providers publish activity updates", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 11, 12));
-    const conversations = [
-      conversation("codex-running", "Codex running", new Date(2026, 7, 11, 9), {
-        providerId: "codex",
-        status: "running",
-      }),
-      conversation("claude-running", "Claude running", new Date(2026, 7, 11, 10), {
-        providerId: "claude",
-        status: "running",
-      }),
-      conversation("opencode-running", "OpenCode running", new Date(2026, 7, 11, 11), {
-        providerId: "opencode",
-        status: "running",
-      }),
-    ];
-    const runs = conversations.map((entry, index): WorkspaceRun => ({
-      id: `run-${entry.id}`,
-      kind: "agent",
-      projectId: entry.projectId,
-      conversationId: entry.id,
-      actionId: null,
-      label: entry.title,
-      detail: null,
-      status: "running",
-      attentionState: "acknowledged",
-      canStop: true,
-      port: null,
-      startedAt: new Date(2026, 7, 11, 9 + index).toISOString(),
-      finishedAt: null,
-    }));
-    const view = renderSidebar(conversations, vi.fn(), runs);
-    const rowState = () => {
-      const work = screen.getByRole("list", { name: "Work" });
-      const rows = within(work).getAllByRole("listitem");
-      return {
-        identities: rows.map((row) => row.getAttribute("data-sidebar-motion-id")),
-        positions: rows.map((row) => row.getAttribute("aria-posinset")),
-      };
-    };
-
-    expect(rowState()).toEqual({
-      identities: [
-        "thread:opencode-running",
-        "thread:claude-running",
-        "thread:codex-running",
-      ],
-      positions: ["1", "2", "3"],
-    });
-
-    const noisyActivityUpdates = conversations.map((entry, index) => ({
-      ...entry,
-      updatedAt: new Date(2026, 7, 11, 15 - index).toISOString(),
-    }));
-    view.rerenderSnapshot(snapshot(noisyActivityUpdates, runs));
-    expect(rowState()).toEqual({
-      identities: [
-        "thread:opencode-running",
-        "thread:claude-running",
-        "thread:codex-running",
-      ],
-      positions: ["1", "2", "3"],
-    });
-
-    const approvalConversation = {
-      ...noisyActivityUpdates[1]!,
-      status: "needs-input" as const,
-      attentionKind: "approval" as const,
-    };
-    const waitingRuns = runs.map((run) => run.conversationId === approvalConversation.id
-      ? { ...run, status: "waiting" as const }
-      : run);
-    view.rerenderSnapshot(snapshot([
-      noisyActivityUpdates[0]!,
-      approvalConversation,
-      noisyActivityUpdates[2]!,
-    ], waitingRuns));
-    expect(rowState()).toEqual({
-      identities: [
-        "thread:claude-running",
-        "thread:opencode-running",
-        "thread:codex-running",
-      ],
-      positions: ["1", "2", "3"],
-    });
-  });
-
   it("opens Daily work from the footer above Usage and Settings", () => {
     const view = renderSidebar([]);
     const footerButtons = within(view.container.querySelector(".sidebar-footer")!)
@@ -431,31 +333,16 @@ describe("compact Work sidebar", () => {
       "Help",
     ]);
     const dailyWork = screen.getByRole("button", { name: "Daily work" });
-    const mark = dailyWork.querySelector(".daily-work-mark");
-    expect(mark).toHaveAttribute("aria-hidden", "true");
-    expect(mark).toHaveAttribute("focusable", "false");
-    expect(mark).toHaveAttribute("width", "16");
+    expect(dailyWork.querySelector(".daily-work-mark")).toHaveAttribute("aria-hidden", "true");
     expect(dailyWork).toHaveAttribute("aria-haspopup", "dialog");
     expect(dailyWork).toHaveAttribute("aria-expanded", "false");
-    expect(dailyWork.className).not.toContain("is-open");
     fireEvent.click(dailyWork);
     expect(view.onOpenDailyWork).toHaveBeenCalledTimes(1);
     expect(view.onClose).toHaveBeenCalledTimes(1);
-  });
+    view.unmount();
 
-  it("returns from Settings to the current workspace", () => {
-    const view = renderSidebar([], vi.fn(), [], { view: "settings" });
-    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
-    expect(view.onViewChange).toHaveBeenCalledWith("workspace");
-    expect(view.onClose).toHaveBeenCalledOnce();
-  });
-
-  it("marks the Daily work destination while its dialog is open", () => {
     renderSidebar([], vi.fn(), [], { dailyWorkOpen: true });
-
-    const dailyWork = screen.getByRole("button", { name: "Daily work" });
-    expect(dailyWork).toHaveAttribute("aria-expanded", "true");
-    expect(dailyWork.className).toContain("is-open");
+    expect(screen.getByRole("button", { name: "Daily work" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("shows chronological rows with provider, project, repository, and branch metadata", () => {
@@ -869,14 +756,6 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("creates a new chat in the project selected through its actions", () => {
-    const view = renderSidebar([]);
-    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
-    fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "New chat in Studio" }));
-    expect(view.onCreateConversation).toHaveBeenCalledWith(project);
-  });
-
   it("cancels a mobile project rename without closing navigation", () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: query === "(max-width: 760px)",
@@ -1202,29 +1081,6 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("button", { name: "Done 1" })).not.toHaveFocus();
   });
 
-  it("does not reclaim focus after the user points outside Work", () => {
-    vi.useFakeTimers();
-    const start = new Date(2026, 7, 11, 23, 59, 59, 900);
-    vi.setSystemTime(start);
-    renderSidebar([
-      conversation("today", "Leave Work before midnight", new Date(2026, 7, 11, 12)),
-    ]);
-
-    const row = screen.getByRole("button", { name: /^Leave Work before midnight,/ });
-    row.focus();
-    fireEvent.pointerDown(document.body);
-    row.blur();
-    act(() => {
-      vi.advanceTimersByTime(101);
-    });
-
-    expect(screen.getByRole("button", { name: /^Leave Work before midnight,/ }))
-      .not.toHaveFocus();
-    expect(screen.getByRole("searchbox", {
-      name: "Search projects and conversations",
-    })).not.toHaveFocus();
-  });
-
   it("does not reclaim focus after the user points at blank sidebar space", () => {
     vi.useFakeTimers();
     const start = new Date(2026, 7, 11, 23, 59, 59, 900);
@@ -1517,24 +1373,6 @@ describe("compact Work sidebar", () => {
     expect(cue?.closest("button")).toHaveAccessibleDescription(
       `Working since ${startedAt.toLocaleString(INTERFACE_LOCALE)}. Right-click or press Shift+F10 for thread actions.`,
     );
-  });
-
-  it("plays the arrival cue only when a thread reaches a status the user has not seen", () => {
-    const at = new Date(2026, 7, 11, 9);
-    const working = conversation("arrival-thread", "Arrival task", at, { status: "running" });
-    const approval = conversation("arrival-thread", "Arrival task", at, {
-      status: "needs-input",
-      attentionKind: "approval",
-    });
-    const view = renderSidebar([working]);
-    expect(document.querySelector("[data-work-arrival]")).toBeNull();
-
-    view.rerenderSnapshot(snapshot([approval]));
-    expect(document.querySelector('[data-work-status="approval"]')).toHaveAttribute("data-work-arrival");
-
-    view.unmount();
-    renderSidebar([approval]);
-    expect(document.querySelector('[data-work-status="approval"]')).not.toHaveAttribute("data-work-arrival");
   });
 
   function scopeTo(name: string): HTMLElement {

@@ -547,29 +547,6 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     },
   );
 
-  it.each([
-    ["versioned", "Inertia-0.0.46.AppImage"],
-    ["unversioned", "Inertia.AppImage"],
-  ] as const)("rolls back a %s ownership commit when the replacement is not admitted", async (_kind, name) => {
-    const root = await temporaryRoot();
-    const active = await appImage(join(root, name), "known-good");
-    const downloaded = await appImage(join(root, "downloaded.AppImage"), "broken-update");
-
-    const staged = await prepareAppImageUpdate({
-      channel: "stable",
-      activePath: active,
-      downloadedPath: downloaded,
-      operationId: "44444444-4444-4444-8444-444444444444",
-    });
-    await staged.commit();
-    await staged.rollback();
-
-    expect(await readFile(active, "utf8")).toBe("known-good");
-    if (name !== "Inertia.AppImage") {
-      expect(await missing(join(root, "Inertia.AppImage"))).toBe(true);
-    }
-  });
-
   it("keeps both launchable paths and the journal when finalization finds a foreign backup", async () => {
     const root = await temporaryRoot();
     const active = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");

@@ -65,11 +65,30 @@ function normalizedRepositoryPath(input) {
 }
 
 function isDocumentation(path) {
-  return (path.startsWith("docs/") && /\.(?:md|png)$/u.test(path))
+  return path.startsWith("docs/")
     || path === "README.md"
     || path === "CONTRIBUTING.md"
     || path === "SECURITY.md"
     || (!path.includes("/") && path.endsWith(".md"));
+}
+
+const NATIVE_ARCHITECTURE_PATHS = [
+  /^package(?:-lock)?\.json$/u,
+  /^\.nvmrc$/u,
+  /^\.github\/actions\//u,
+  /^\.github\/workflows\/(?:ci|release-platforms)\.yml$/u,
+  /^scripts\/ci\//u,
+  /^native\//u,
+  /^build\//u,
+  /^electron-builder/u,
+  /^scripts\/(?:run-electron-builder|electron-builder|package-smoke|release-|windows-|linux-|validate-linux|verify-electron-fuses|verify-native|native-|runtime-process-guardian|build-runtime-process-guardian|ensure-node-pty)/u,
+  /^src\/main\/(?:app-update|update|runtime-process-guardian|linux-singleton|windows-)/u,
+  /^src\/node\/runtime-owned-process/u,
+  /^resources\/runtime\//u,
+];
+
+function isNativeArchitecturePath(path) {
+  return NATIVE_ARCHITECTURE_PATHS.some((pattern) => pattern.test(path));
 }
 
 function providerDomains(path) {
@@ -326,6 +345,7 @@ export function classifyChangedPaths(inputPaths) {
     return {
       allEvidence: true,
       fullCertification: true,
+      nativeArchitecture: true,
       documentationOnly: false,
       domains: [...CHANGE_DOMAINS],
       reasons: ["empty-or-unavailable-diff"],
@@ -336,12 +356,14 @@ export function classifyChangedPaths(inputPaths) {
   const reasons = new Set();
   let broad = false;
   let full = false;
+  let nativeArchitecture = false;
   let documentationOnly = true;
 
   for (const input of inputPaths) {
     const path = normalizedRepositoryPath(input);
     if (path === null) {
       broad = true;
+      nativeArchitecture = true;
       documentationOnly = false;
       reasons.add("unsafe-path");
       continue;
@@ -349,10 +371,12 @@ export function classifyChangedPaths(inputPaths) {
     const result = domainsForKnownPath(path);
     if (result === null) {
       broad = true;
+      nativeArchitecture = true;
       documentationOnly = false;
       reasons.add(`unclassified:${path}`);
       continue;
     }
+    if (isNativeArchitecturePath(path)) nativeArchitecture = true;
     if (!result.documentation) {
       documentationOnly = false;
       domains.add("quality_shared");
@@ -372,6 +396,7 @@ export function classifyChangedPaths(inputPaths) {
     fullCertification: broad || full || [...domains].some(
       (domain) => FULL_CERTIFICATION_DOMAINS.has(domain),
     ),
+    nativeArchitecture,
     documentationOnly,
     domains: CHANGE_DOMAINS.filter((domain) => domains.has(domain)),
     reasons: [...reasons].sort(),
@@ -383,6 +408,7 @@ export function githubOutputsForClassification(classification) {
   const outputs = {
     all_evidence: classification.allEvidence,
     full_certification: classification.fullCertification,
+    native_architecture: classification.nativeArchitecture,
     documentation_only: classification.documentationOnly,
     domains_json: JSON.stringify(classification.domains),
   };

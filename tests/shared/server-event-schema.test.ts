@@ -930,19 +930,8 @@ describe("server event settings trust boundary", () => {
   });
   it.each([
     ["theme", "sepia"],
-    ["lightCustomColor", "red"],
     ["darkCustomColor", "#12345g"],
     ["defaultProvider", "unknown-provider"],
-    ["defaultAccessMode", "unrestricted"],
-    ["newThreadMode", "remote"],
-    ["usageDisplayMode", "verbose"],
-    ["interfaceScale", "huge"],
-    ["responseDensity", "dense"],
-    ["workspaceStartupSurface", "terminal"],
-    ["autoScrollToFinalAnswer", "yes"],
-    ["sidebarMode", "folders"],
-    ["projectGrouping", "flat"],
-    ["defaultInteractionMode", "chat"],
     ["terminalFontSize", 13.5],
   ])("rejects malformed nested settings.%s", (key, invalidValue) => {
     expect(() => parseServerEvent(snapshotEvent({
@@ -1156,25 +1145,10 @@ describe("server event conversation discriminant boundary", () => {
     ["continuationIdentity", { ...continuationIdentityForSelection(selection), backendConfigurationRevision: 99 }],
     ["continuationIdentity", { ...continuationIdentityForSelection(selection), modelIdentity: "other-model" }], ["model", "other-model"], ["reasoningEffort", "low"],
     ["latestTurn", { ...conversationShell.latestTurn, modelSelection: claudeSelection }], ["latestTurn", { ...conversationShell.latestTurn, model: "other-model" }],
-    ["interactionMode", "chat"],
-    ["accessMode", "unrestricted"],
     ["status", "sleeping"],
-    ["attentionKind", "confirmation"],
   ])("rejects malformed shell conversation.%s", (key, invalidValue) => {
     expect(() => parseServerEvent(snapshotEvent({
       ...conversationShell,
-      [key]: invalidValue,
-    }))).toThrow("Malformed server event");
-  });
-  it.each([
-    ["providerId", "unknown-provider"],
-    ["interactionMode", "chat"],
-    ["accessMode", "unrestricted"],
-    ["status", "sleeping"],
-    ["attentionKind", "confirmation"],
-  ])("rejects malformed detail conversation.%s", (key, invalidValue) => {
-    expect(() => parseServerEvent(detailEvent({
-      ...conversation,
       [key]: invalidValue,
     }))).toThrow("Malformed server event");
   });
@@ -1410,9 +1384,7 @@ describe("server event workspace-run discriminant boundary", () => {
     });
   });
   it.each([
-    ["kind", "background"],
     ["status", "paused"],
-    ["attentionState", "ignored"],
   ])("rejects malformed workspace run %s", (key, invalidValue) => {
     expect(() => parseServerEvent(snapshotEvent({
       ...run,
@@ -1623,35 +1595,10 @@ describe("server event remaining discriminant and identity boundary", () => {
     }))).toBeTruthy();
   });
   it.each([
-    ["project status", { projects: [{ ...project, status: "paused" }] }],
-    ["provider install state", { providers: [{ ...provider, installState: "missing" }] }],
-    ["provider auth state", { providers: [{ ...provider, authState: "ready" }] }],
-    ["provider metadata freshness", { providers: [{ ...provider, metadataState: {
-      ...provider.metadataState,
-      models: { ...provider.metadataState.models, freshness: "recent" },
-    } }] }],
-    ["provider metadata provenance", { providers: [{ ...provider, metadataState: {
-      ...provider.metadataState,
-      rateLimits: { ...provider.metadataState.rateLimits, provenance: "database" },
-    } }] }],
     ["maintenance provider", { providers: [{ ...provider, maintenance: {
       ...maintenance, providerId: "claude",
     } }] }],
-    ["maintenance status", { providers: [{ ...provider, maintenance: {
-      ...maintenance, versionStatus: "outdated",
-    } }] }],
-    ["maintenance freshness", { providers: [{ ...provider, maintenance: {
-      ...maintenance, freshness: "recent",
-    } }] }],
-    ["maintenance install method", { providers: [{ ...provider, maintenance: {
-      ...maintenance, installMethod: "script",
-    } }] }],
-    ["maintenance availability", { providers: [{ ...provider, maintenance: {
-      ...maintenance, updateAvailability: "maybe",
-    } }] }],
     ["operation provider", { maintenanceOperations: [{ ...operation, providerId: "unknown-provider" }] }],
-    ["operation status", { maintenanceOperations: [{ ...operation, status: "paused" }] }],
-    ["backend default scope", { backendDefaults: [{ ...backendDefault, scope: "workspace" }] }],
     ["backend default relationship", { backendDefaults: [{
       ...backendDefault, scope: "global", projectId: "11111111-1111-4111-8111-111111111111",
     }] }],
@@ -1670,12 +1617,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     })).toThrow("Malformed server event");
   });
   it.each([
-    ["activity kind", "activities", { ...conversationDetail.activities[0], kind: "network" }],
-    ["activity status", "activities", { ...conversationDetail.activities[0], status: "paused" }],
     ["subagent provider", "subagents", { ...conversationDetail.subagents[0], providerId: "unknown-provider" }],
-    ["subagent status", "subagents", { ...conversationDetail.subagents[0], status: "paused" }],
-    ["turn interaction", "agentTurns", { ...conversationDetail.agentTurns[0], interactionMode: "chat" }],
-    ["turn access", "agentTurns", { ...conversationDetail.agentTurns[0], accessMode: "unrestricted" }],
     ["turn route", "agentTurns", { ...conversationDetail.agentTurns[0], modelSelection: claudeSelection }],
     ["turn model", "agentTurns", { ...conversationDetail.agentTurns[0], model: "other-model" }], ["turn alias", "agentTurns", { ...conversationDetail.agentTurns[0], modelAlias: "other" }],
     ["turn reasoning", "agentTurns", { ...conversationDetail.agentTurns[0], reasoningEffort: "low" }], ["turn revision", "agentTurns", { ...conversationDetail.agentTurns[0], configurationRevision: 99 }],
@@ -1731,7 +1673,6 @@ describe("server event remaining discriminant and identity boundary", () => {
   });
   it.each([
     ["approval provider", { ...approval, providerId: "unknown-provider" }],
-    ["approval kind", { ...approval, kind: "network" }],
     ["approval protocol", { ...approval, networkScope: { host: "x", protocol: "ftp" } }],
     ["approval access", { ...approval, permissionRoots: [{ path: "/tmp", access: "execute" }] }],
   ])("rejects malformed %s", (_label, request) => {

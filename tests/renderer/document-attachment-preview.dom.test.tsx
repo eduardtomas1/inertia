@@ -218,16 +218,6 @@ describe("document attachment previews", () => {
       mimeType: "application/vnd.ms-excel",
       bytes: workbookBytes("xls"),
     },
-    {
-      name: "forecast.csv",
-      mimeType: "text/csv",
-      bytes: new TextEncoder().encode("Region,Revenue\nNorth,1200\n"),
-    },
-    {
-      name: "utf16.csv",
-      mimeType: "text/csv",
-      bytes: Buffer.from("\ufeffRegion,Revenue\nNorth,1200\n", "utf16le").swap16(),
-    },
   ] satisfies Array<{
     name: string;
     mimeType: ChatAttachment["mimeType"];

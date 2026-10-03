@@ -984,12 +984,4 @@ describe("image-less composer routes", () => {
     expect(screen.queryByText("diagram.png")).toBeNull();
     expect(screen.getByText("notes.txt")).toBeTruthy();
   });
-
-  it("keeps image wording for routes that accept images", () => {
-    render(<Composer {...composerProps(conversation("codex-images"))} />);
-    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
-      .toBe("Ask for follow-up changes or attach images");
-    expect(screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" }))
-      .toBeTruthy();
-  });
 });

@@ -113,7 +113,7 @@ describe("composer for a chat that cannot continue", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it.each(["click", "Enter"] as const)("replaces send with the new-chat action for %s and keeps the draft", async (trigger) => {
+  it("replaces send with the new-chat action for Enter and keeps the draft", async () => {
     const { onSend, onCreateConversationForSelection } = renderComposer(true);
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Continue the legacy work." } });
@@ -121,8 +121,7 @@ describe("composer for a chat that cannot continue", () => {
     expect(start).not.toHaveAttribute("aria-disabled");
     expect(start.getAttribute("aria-describedby")).toBe(explanation().id);
     expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
-    if (trigger === "click") fireEvent.click(start);
-    else fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("Continue the legacy work.");

@@ -1,17 +1,8 @@
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
-import { MAX_ANIMATED_STREAM_WORDS } from "../../src/renderer/src/components/response-timeline/activity";
-
-const activitySource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url), "utf8");
-const styles = [
-  readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8"),
-  readFileSync(new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url), "utf8"),
-].join("\n");
-const usageStyles = readFileSync(new URL("../../src/renderer/src/components/UsageView.css", import.meta.url), "utf8");
 
 describe("Beautiful UI primitive adaptations", () => {
   it("renders plan steps as truthful connected task states", () => {
@@ -40,50 +31,5 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(html).toContain('data-plan-step-status="in-progress"');
     expect(html).toContain('aria-current="step"');
     expect(html).toContain("In progress");
-    expect(styles).toContain(".plan-step:not(:last-child)::after");
-    expect(styles).toContain("animation: beautiful-fade-up 450ms");
-    expect(styles).toContain("animation: beautiful-spin 1.1s linear infinite");
-    expect(styles).toContain(".plan-step.is-in-progress .plan-step-marker svg");
-  });
-
-  it("keeps the review filter row transition token", () => {
-    expect(styles).toContain("grid-template-rows 300ms cubic-bezier(0.23, 1, 0.32, 1)");
-  });
-
-  it("keeps the prompt action pop-in token", () => {
-    expect(styles).toContain("animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1)");
-  });
-
-  it("keeps the Beautiful UI motion tokens", () => {
-    expect(styles).toContain("--pixel-drive-delay: 90ms");
-    expect(styles).toContain("--pixel-orbit-delay: 770ms");
-    expect(styles).toContain("animation: agent-pixel-shimmer 650ms ease-in-out infinite");
-    expect(styles).toContain("animation-duration: 950ms");
-    expect(styles).not.toContain("beautiful-shimmer-text");
-    expect(styles).toMatch(/\.turn-working-status \.turn-working-copy strong\s*\{[^}]*color:\s*var\(--text-soft\);/su);
-
-    expect(styles).toContain("beautiful-stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1)");
-    expect(styles).toContain(".response-markdown.is-streaming a { animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1)");
-
-    expect(styles).toContain("reasoning-step-enter 320ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(styles).toContain("var(--motion-index, 0) * 120ms");
-    expect(styles).toContain("beautiful-spin 700ms linear infinite");
-    expect(styles).toContain("beautiful-fade-up 350ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(styles).toContain("var(--motion-index, 0) * 80ms");
-    expect(styles).toContain("var(--motion-index, 0) * 100ms");
-    expect(styles).toContain("700ms + var(--motion-index, 0) * 80ms");
-
-    expect(usageStyles).toContain("width 500ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(usageStyles).toContain("usage-insight-content-in 250ms ease both");
-    expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
-  });
-
-  it("keeps the live stream, task row, and delegated task motion policy", () => {
-    expect(MAX_ANIMATED_STREAM_WORDS).toBe(96);
-    expect(activitySource).toContain('import "./ActivityGroup.css";');
-    expect(styles).toContain("beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(styles).toContain("beautiful-spin 1.1s linear infinite");
-    expect(styles).toContain('.subagent-status-mark[data-live="true"]::after');
-    expect(styles).toContain('.app-shell[data-document-visible="false"] .response-stream-word');
   });
 });

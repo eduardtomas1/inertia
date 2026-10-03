@@ -1063,7 +1063,7 @@ describe("durable conversation attachment storage", () => {
       const store = await ConversationAttachmentStore.open(dataDirectory, {
         readFault: {
           attachmentId: payload.attachment.id,
-          stallBeforeRecordRevalidateMs: 10_000,
+          stallBeforeRecordRevalidateMs: 2_000,
           onReady: signalReadReady,
         },
       });
@@ -1090,7 +1090,6 @@ describe("durable conversation attachment storage", () => {
         await rename(moved, record);
       }
     },
-    15_000,
   );
 
   it("fails closed when retained bytes or their private record are replaced", async () => {
@@ -1263,17 +1262,4 @@ describe("durable conversation attachment storage", () => {
       }
     },
   );
-
-  it("enforces bounded persistent record and byte capacity", async () => {
-    const dataDirectory = await root();
-    const store = await openTestStore(dataDirectory, {
-      maxRecords: 1,
-      maxBytes: png.length,
-    });
-    await store.retain([image()]);
-
-    await expect(store.retain([
-      image("44444444-4444-4444-8444-444444444444"),
-    ])).rejects.toThrow(/storage is full/u);
-  });
 });

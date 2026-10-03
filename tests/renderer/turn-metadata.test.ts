@@ -335,31 +335,12 @@ describe("final-answer turn metadata", () => {
     );
   });
 
-  it("stays uncarded, token-driven, focus-visible, and readable across themes, scales, and narrow widths", () => {
+  it("keeps a visible focus outline on the run details toggle", () => {
     const css = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
     );
-    const metadata = cssBlock(css, ".turn-meta {");
-    const details = cssBlock(css, ".turn-run-details {");
-    const focus = cssBlock(css, ".turn-run-details-toggle:focus-visible {");
-    const narrow = cssBlock(css, "@container response-transcript (max-width: 440px)");
-
-    expect(metadata).toContain("max-width: var(--answer-max-width)");
-    expect(metadata).toContain("font-size: var(--metadata-font-size)");
-    expect(details).toContain("border: 0");
-    expect(details).toContain("background: transparent");
-    expect(details).not.toContain("border-radius");
-    expect(details).not.toContain("box-shadow");
-    expect(focus).toContain("outline: 2px solid var(--accent)");
-    expect(css).toContain(':root[data-theme="dark"]');
-    expect(css).toContain(':root[data-interface-scale="compact"]');
-    expect(css).toContain(':root[data-interface-scale="large"]');
-    expect(narrow).toMatch(
-      /\.turn-run-details\s*>\s*div\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/su,
-    );
-    expect(narrow).toMatch(
-      /\.turn-run-details\s+dd\s*\{[^}]*overflow-wrap:\s*anywhere/su,
-    );
+    expect(cssBlock(css, ".turn-run-details-toggle:focus-visible {"))
+      .toContain("outline: 2px solid var(--accent)");
   });
 });

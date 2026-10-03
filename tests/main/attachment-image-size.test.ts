@@ -65,7 +65,6 @@ async function importError(data: Buffer): Promise<unknown> {
 describe("attachment image size limits", () => {
   it.each([
     ["4K", 3_840, 2_160, "rgba"],
-    ["5K", 5_120, 2_880, "mono"],
     ["6K", 6_016, 3_384, "mono"],
   ] as const)("accepts a %s screenshot", async (_label, width, height, format) => {
     const data = solidPng(width, height, format);

@@ -1,4 +1,7 @@
 import Database from "better-sqlite3";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +19,16 @@ import { INERTIA_VERSION } from "../../src/shared/version";
 const input: IssueReportInput = { description: "The chat stops responding after cancelling a turn. Expected a new message to start.", steps: "", providerId: null, attachDiagnostics: true };
 const host: IssueHostEvidence = { channel: "canary", osVersion: "15.1.0", diagnostics: "2026-10-03T10:00:00Z error app.runtime.crash x1" };
 const stores: RuntimeStore[] = [];
-afterEach(() => { stores.splice(0).forEach((store) => store.close()); });
+const directories: string[] = [];
+afterEach(() => {
+  stores.splice(0).forEach((store) => store.close());
+  directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }));
+});
+function temporaryDatabase(): string {
+  const directory = mkdtempSync(join(tmpdir(), "inertia-issue-report-"));
+  directories.push(directory);
+  return join(directory, "inertia.sqlite");
+}
 function setup() {
   const store = new RuntimeStore(":memory:", process.cwd()); stores.push(store);
   const snapshot = () => store.shellSnapshot([]);
@@ -308,6 +320,9 @@ it.each([
   ["failed", "preview", ""],
   ["uncertain", "uncertain", "Check GitHub before proceeding."],
   ["retired", "retired", "Check GitHub before proceeding."],
+  ["submitting", "submitting", "Check GitHub before proceeding."],
+  ["submitted", "submitted", "Check GitHub before proceeding."],
+  ["preview", "preview", "Check GitHub before proceeding."],
 ])("upgrades a saved %s report from schema 87 to the reviewed preview shape", (status, expected, notice) => {
   const database = new Database(":memory:");
   try {
@@ -327,6 +342,39 @@ it.each([
     });
     expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
   } finally { database.close(); }
+});
+
+it("keeps a published report's link and turns an interrupted publication uncertain after the upgrade", () => {
+  const path = temporaryDatabase();
+  const database = new Database(path);
+  const legacy = { id: "11111111-1111-4111-8111-111111111111", revision: 2, description: "The chat stopped after cancelling.", projectId: null, selection: {}, evidence: "{}", answer: "", title: "Cancelled chat", body: "Body text long enough.", notice: "", issueUrl: null };
+  try {
+    migrateRuntimeDatabase(database, 87);
+    database.prepare("INSERT INTO issue_report_draft VALUES (1, ?)").run(JSON.stringify({ ...legacy, status: "submitted", issueUrl: "https://github.com/eduardtomas1/inertia/issues/7" }));
+    migrateRuntimeDatabase(database);
+    expect(issueReportSchema.parse(JSON.parse(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get() as string))).toMatchObject({ status: "submitted", issueUrl: "https://github.com/eduardtomas1/inertia/issues/7" });
+    database.prepare("UPDATE issue_report_draft SET report_json = ?").run(JSON.stringify({ ...legacy, status: "submitting", steps: "", providerId: null, attachDiagnostics: false, projectId: undefined, selection: undefined, evidence: undefined, answer: undefined }));
+  } finally { database.close(); }
+  const store = new RuntimeStore(path, process.cwd()); stores.push(store);
+  createIssueReportCommandHandler({ store, snapshot: () => store.shellSnapshot([]), providerInfo: () => [], publisher: { status: vi.fn(), create: vi.fn(), find: vi.fn() }, send: vi.fn() });
+  expect(store.readIssueReport()).toMatchObject({ status: "uncertain", revision: 3 });
+});
+
+it.each(["not json", "[1, 2]", '"text"'])("leaves a malformed saved report untouched and starts without it: %s", async (value) => {
+  const path = temporaryDatabase();
+  const database = new Database(path);
+  try {
+    migrateRuntimeDatabase(database, 87);
+    database.prepare("INSERT INTO issue_report_draft VALUES (1, ?)").run(value);
+    migrateRuntimeDatabase(database);
+    expect(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get()).toBe(value);
+    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+  } finally { database.close(); }
+  const store = new RuntimeStore(path, process.cwd()); stores.push(store);
+  const send = vi.fn<(socket: WebSocket, event: ServerEvent) => void>();
+  const handler = createIssueReportCommandHandler({ store, snapshot: () => store.shellSnapshot([]), providerInfo: () => [], publisher: { status: vi.fn(), create: vi.fn(), find: vi.fn() }, send });
+  await handler({} as WebSocket, { type: "support.report.get", requestId: crypto.randomUUID() });
+  expect(send.mock.calls.at(-1)?.[1]).toMatchObject({ result: { kind: "support.report", report: null } });
 });
 
 it.each([

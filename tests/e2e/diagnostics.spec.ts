@@ -29,7 +29,7 @@ test("real operation failures survive restart and remain readable/copyable after
     .toBeGreaterThan(0);
   const providerIncident = (await page.evaluate(() => window.inertia.queryDiagnostics({ subsystem: "provider", providerId: "codex" }))).records[0]!;
   expect(["provider.start-failed", "provider.connection-failed"]).toContain(providerIncident.code);
-  const summary = page.locator(".diagnostics-incident summary").filter({ hasText: "Codex" }).first();
+  const summary = page.locator(".diagnostics-event-row").filter({ hasText: "Codex" }).first();
   await summary.focus(); await summary.press("Enter");
   await expect(page.getByRole("button", { name: "Open provider settings", exact: true })).toBeVisible();
 
@@ -57,18 +57,20 @@ test("real operation failures survive restart and remain readable/copyable after
     await page.screenshot({ path: discord, animations: "disabled" });
     await testInfo.attach(`discord-${theme}`, { path: discord, contentType: "image/png" });
     await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
-    await expect(page.locator(".diagnostics-incident").first()).toBeVisible();
+    await expect(page.locator(".diagnostics-event").first()).toBeVisible();
     await app.expectNoViewportOverflow();
-    const gutters = await page.locator(".diagnostics-center").evaluate((element) => {
+    const column = await page.locator(".diagnostics").evaluate((element) => {
       const content = element.closest(".settings-content")!.getBoundingClientRect();
       const inner = element.getBoundingClientRect();
-      return [inner.left - content.left, content.right - inner.right];
+      return { left: inner.left - content.left, right: content.right - inner.right, width: content.width };
     });
-    for (const gutter of gutters) expect(gutter).toBeGreaterThanOrEqual(20);
+    expect(column.left).toBeGreaterThanOrEqual(0);
+    expect(column.right).toBeGreaterThanOrEqual(0);
+    expect(column.width).toBeLessThanOrEqual(810);
     const path = testInfo.outputPath(`diagnostics-${theme}.png`);
     await page.screenshot({ path, animations: "disabled" });
     await testInfo.attach(`diagnostics-${theme}`, { path, contentType: "image/png" });
-    await page.locator(".diagnostics-incident summary").filter({ hasText: "Codex" }).first().click();
+    await page.locator(".diagnostics-event-row").filter({ hasText: "Codex" }).first().click();
     await expect(page.getByRole("button", { name: "Open provider settings", exact: true })).toBeVisible();
     const detail = testInfo.outputPath(`diagnostics-detail-${theme}.png`);
     await page.screenshot({ path: detail, animations: "disabled" });
@@ -92,11 +94,11 @@ test("real operation failures survive restart and remain readable/copyable after
     .toBe(originalId);
   const cleanup = await prepareElectronPrivilegedCleanup(restarted.electronApp);
   expect(cleanup.cleanupConfirmed).toBe(true);
-  await expect(page.getByText("Runtime offline · diagnostics available")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Process health" })).toContainText(/Local service (?:stopped|offline)/u);
   // Search and native keyboard expansion still work after runtime/SQLite shutdown.
   await page.getByRole("searchbox", { name: "Search diagnostics" }).fill("discord.repository-missing");
-  await expect(page.locator(".diagnostics-incident")).toHaveCount(1);
-  const row = page.locator(".diagnostics-incident summary").filter({ hasText: "A release repository is needed" });
+  await expect(page.locator(".diagnostics-event")).toHaveCount(1);
+  const row = page.locator(".diagnostics-event-row").filter({ hasText: "A release repository is needed" });
   await row.focus(); await row.press("Enter");
   await page.getByRole("button", { name: "Copy incident", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Incident copied" })).toBeVisible();
@@ -114,8 +116,8 @@ test("real operation failures survive restart and remain readable/copyable after
     // and the atomic main-process file writer remain real.
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, exportPath);
-  await page.getByRole("button", { name: "Export filtered", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Filtered diagnostics saved" })).toBeVisible();
+  await page.getByRole("button", { name: "Export…", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Diagnostics exported." })).toBeVisible();
   const exported = JSON.parse(await readFile(exportPath, "utf8"));
   expect(exported.records).toHaveLength(1);
   expect(exported.records[0].code).toBe("discord.repository-missing");

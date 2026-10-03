@@ -22,7 +22,7 @@ import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator"; import { isCompletionSoundSettings } from "../completion-sound";
-import { isQuotaWarningSettings } from "../quota-warnings";
+import { validNotificationSettings } from "./notification-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
@@ -361,8 +361,7 @@ function appSettings(value: unknown): boolean {
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
     && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
-    && (value.notifyOnlyInBackground === undefined || booleanField(value, "notifyOnlyInBackground"))
-    && (value.quotaWarnings === undefined || isQuotaWarningSettings(value.quotaWarnings));
+    && validNotificationSettings(value);
 }
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)

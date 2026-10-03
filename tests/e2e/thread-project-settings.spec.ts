@@ -3,15 +3,16 @@ import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
-import { defaultProjectPreferences } from "../../src/shared/project-preferences";
+import { defaultProjectPreferences, type ProjectPreferences } from "../../src/shared/project-preferences";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app: AppFixture;
 let projectId: string;
 let threadId: string;
 let otherThreadId: string;
+let otherProjectName: string;
 
-async function createThreadFixture(withSavedAction = false): Promise<AppFixture> {
+async function createThreadFixture(withSavedAction = false, defaultAccessMode: ProjectPreferences["defaultAccessMode"] = null): Promise<AppFixture> {
   // Delayed hover previews and the native clipboard need exclusive display ownership.
   return createAppFixture({ name: "thread-project-settings", initialState: "conversation", seedSecondProject: true, windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory, secondWorkspaceDirectory }) => {
@@ -24,8 +25,9 @@ async function createThreadFixture(withSavedAction = false): Promise<AppFixture>
         const thread = state.conversations.find((chat) => chat.projectId === project.id)!;
         threadId = thread.id;
         otherThreadId = state.conversations.find((chat) => chat.projectId !== project.id)!.id;
+        otherProjectName = state.projects.find(({ id }) => id !== project.id)!.name;
         store.updateProject(project.id, { name: "Workspace studio", preferences: {
-          ...defaultProjectPreferences(), icon: { kind: "symbol", name: "code" },
+          ...defaultProjectPreferences(), defaultAccessMode, icon: { kind: "symbol", name: "code" },
           actions: withSavedAction ? [{ id: randomUUID(), name: "Check workspace", executable: process.execPath, args: ["--version"] }] : [],
         } });
         store.updateConversation(thread.id, { title: "Review authentication flow" });
@@ -203,5 +205,23 @@ test("runs a saved action only on explicit selection through the real terminal",
   }).toEqual([{ projectId, conversationId: threadId, status: "succeeded" }]);
   await expect(page.locator(".xterm-screen").first()).toBeVisible();
   await capture(info, "project-action-terminal-dark");
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("starts a new chat in a project with that project's default access", async () => {
+  await app.close();
+  app = await createThreadFixture(false, "full");
+  const page = app.page;
+  const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+  const newChatIn = async (project: string): Promise<void> => {
+    await sidebar.getByRole("button", { name: "Filter work by project" }).click();
+    await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: `Project actions for ${project}` }).first().click();
+    await sidebar.getByRole("menu", { name: `Project actions for ${project}` }).getByRole("menuitem", { name: `New chat in ${project}` }).click();
+    await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
+  };
+  await newChatIn("Workspace studio");
+  await expect(page.getByRole("button", { name: "Choose project access. Current access: Full access." })).toBeVisible();
+  await newChatIn(otherProjectName);
+  await expect(page.getByRole("button", { name: "Choose project access. Current access: Supervised." })).toBeVisible();
   expect(app.rendererErrors).toEqual([]);
 });

@@ -35,4 +35,6 @@ Use **New chat** in the sidebar, or press ⌘N on macOS (Ctrl+N elsewhere). In t
 - **Auto-edit** allows supported file edits without asking.
 - **Full Access** is an explicit choice for a workspace and task you trust.
 
+New chats start in the mode chosen in **Settings → Chats → New chats**. A project can start its new chats in another mode with **Settings → Projects → Default access**; you can still change the mode for each chat in the composer.
+
 Next: [Chats and agents](chats-and-agents.md).

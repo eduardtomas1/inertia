@@ -68,7 +68,9 @@ describe("explainable CI plan", () => {
     expect(selected.requiredChecks).toEqual([
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Windows x64", "macOS arm64",
-      "Linux x64 Electron", "Windows x64 Electron", "macOS arm64 Electron",
+      "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
+      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated)",
+      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
     ]);
@@ -76,7 +78,10 @@ describe("explainable CI plan", () => {
       platform, reason: "sibling-architecture-certified-nightly-and-release",
     })));
     expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
-    for (const missingName of ["Linux x64", "Windows x64", "macOS arm64", "Linux x64 Electron", "macOS arm64 Electron"]) {
+    for (const missingName of [
+      "Linux x64", "Windows x64", "macOS arm64", "Linux x64 Electron (display-sensitive)",
+      "Windows x64 Electron (isolated)", "macOS arm64 Electron (isolated)",
+    ]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
       expect(evaluateMergeEvidence(selected, missingNative))
@@ -92,8 +97,11 @@ describe("explainable CI plan", () => {
     expect(selected.requiredChecks).toEqual([
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
-      "Linux x64 Electron", "Linux ARM64 Electron (runtime-recovery)", "Windows x64 Electron",
-      "Windows ARM64 Electron (runtime-recovery)", "macOS arm64 Electron", "macOS x64 Electron (runtime-recovery)",
+      "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
+      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated)",
+      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
+      "Linux ARM64 Electron (runtime-recovery)", "Windows ARM64 Electron (runtime-recovery)",
+      "macOS x64 Electron (runtime-recovery)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
     ]);
@@ -134,7 +142,7 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(6);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(9);
   });
 
   it.each([
@@ -146,7 +154,7 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(3);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(6);
   });
 
   it("missing baseline overrides an apparently harmless latest push", () => {
@@ -157,17 +165,19 @@ describe("explainable CI plan", () => {
     const selected = plan(["README.md"], { event: "schedule" });
     expect(selected.suites).toContain("linux-all-source-coverage");
     expect(selected.suites).toContain("linux-x64:native-units-package-smoke");
-    expect(selected.suites).toContain("linux-x64:electron-display-isolated-recovery");
+    expect(selected.suites).toContain("linux-x64:electron-display-sensitive");
+    expect(selected.suites).toContain("linux-x64:electron-isolated-recovery");
+    expect(selected.suites).not.toContain("macos-x64:electron-recovery");
     expect(selected.suites.filter((suite) => suite.includes("upgrade"))).toEqual([
       "windows-x64:published-N-1-installed-upgrade",
       "windows-arm64:published-N-1-installed-upgrade",
     ]);
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
-    expect(selected.electronMatrix.include.map(({ check }) => check)).toEqual([
-      "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
-      "macOS arm64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)",
-      "macOS x64 Electron (runtime-recovery)",
-    ]);
+    expect(selected.electronMatrix.include.map(({ check }) => check)).toEqual(
+      ["Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64"].flatMap((label) => [
+        `${label} Electron (display-sensitive)`, `${label} Electron (isolated)`,
+      ]),
+    );
   });
 
   it("draft feedback is not the merge tier; ready and merge queue certify the same broad change", () => {

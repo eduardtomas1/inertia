@@ -150,32 +150,44 @@ it("CI runs native package proof and desktop Electron projects as separate same-
   }
 });
 
-it("runs sibling architectures' recovery project on PRs and every macOS Intel phase nightly", () => {
+it("splits every complete Electron target into display-sensitive and isolated-plus-recovery jobs", () => {
   const pullRequest = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["package-lock.json"] });
-  const siblings = pullRequest.electronMatrix.include.filter(({ artifact }) => ["linux-arm64", "windows-arm64", "macos-x64"].includes(artifact));
-  expect(siblings.map(({ artifact, phase }) => `${artifact}:${phase}`)).toEqual([
+  expect(pullRequest.electronMatrix.include.map(({ artifact, phase }) => `${artifact}:${phase}`)).toEqual([
+    "linux-x64:display-sensitive", "linux-x64:isolated", "windows-x64:display-sensitive", "windows-x64:isolated",
+    "macos-arm64:display-sensitive", "macos-arm64:isolated",
     "linux-arm64:runtime-recovery", "windows-arm64:runtime-recovery", "macos-x64:runtime-recovery",
   ]);
   const nightly = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["README.md"], event: "schedule" });
-  const intel = nightly.electronMatrix.include.filter(({ artifact }) => artifact === "macos-x64");
-  expect(intel.map(({ phase }) => phase)).toEqual(["display-sensitive", "isolated", "runtime-recovery"]);
+  expect(nightly.electronMatrix.include.map(({ artifact, phase }) => `${artifact}:${phase}`)).toEqual(
+    PLATFORMS.flatMap(({ artifact }) => [`${artifact}:display-sensitive`, `${artifact}:isolated`]),
+  );
   for (const plan of [pullRequest, nightly]) {
     expect(new Set(plan.electronMatrix.include.map(({ evidence_artifact }) => evidence_artifact)).size)
       .toBe(plan.electronMatrix.include.length);
+    for (const { check } of plan.electronMatrix.include) expect(plan.requiredChecks).toContain(check);
   }
-  for (const platform of intel) {
-    expect(nightly.requiredChecks).toContain(platform.check);
-    for (const step of workflow.jobs.electron.steps.filter((entry: { run?: string }) =>
-      entry.run?.includes("playwright test") && entry.run.includes(`--project=${platform.phase} `))) {
-      expect(step.if).toContain(`matrix.phase == '${platform.phase}'`);
+  const playwrightSteps = workflow.jobs.electron.steps.filter((entry: { run?: string }) => entry.run?.includes("playwright test"));
+  const phasesFor = (project: string) => playwrightSteps.filter((step: { run: string }) => step.run.includes(`--project=${project} `));
+  for (const [project, phases] of [
+    ["display-sensitive", ["display-sensitive"]],
+    ["isolated", ["isolated"]],
+    ["runtime-recovery", ["isolated", "runtime-recovery"]],
+  ] as const) {
+    const steps = phasesFor(project);
+    expect(steps).toHaveLength(2);
+    for (const step of steps) {
+      const guarded = [...step.if.matchAll(/matrix\.phase == '([a-z-]+)'/gu)].map((match) => match[1]);
+      expect(guarded).toEqual(phases);
       expect(step["continue-on-error"]).not.toBe(true);
     }
   }
+  expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Keep provider settings visual evidence").if)
+    .toContain("matrix.phase == 'display-sensitive'");
   const benchmarks = workflow.jobs.electron.steps.filter((step: { run?: string }) => step.run?.includes("benchmark:desktop"));
   expect(benchmarks).toHaveLength(1);
-  expect(benchmarks[0].if).toContain("matrix.artifact == 'linux-x64'");
+  expect(benchmarks[0].if).toContain("matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'");
   expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Keep desktop performance evidence").if)
-    .toContain("matrix.artifact == 'linux-x64'");
+    .toContain("matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'");
 });
 
 it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {

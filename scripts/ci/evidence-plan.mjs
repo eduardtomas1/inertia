@@ -69,13 +69,11 @@ export function createEvidencePlan({
   });
   const recoveryOnly = (platform) => !completeSiblings
     && !PRIMARY_PLATFORM_ARTIFACTS.includes(platform.artifact);
-  const electronPlatforms = selectedPlatforms.flatMap((platform) => (
-    recoveryOnly(platform) ? [phaseEntry(platform, "runtime-recovery")]
-      : platform.artifact === "macos-x64"
-        ? ["display-sensitive", "isolated", "runtime-recovery"].map((phase) => phaseEntry(platform, phase))
-        : [{ ...platform, phase: "all", check: `${platform.label}${ELECTRON_CHECK_SUFFIX}`,
-          evidence_artifact: platform.artifact }]
-  ));
+  const electronPlatforms = [
+    ...selectedPlatforms.filter((platform) => !recoveryOnly(platform)).flatMap((platform) => (
+      ["display-sensitive", "isolated"].map((phase) => phaseEntry(platform, phase)))),
+    ...selectedPlatforms.filter(recoveryOnly).map((platform) => phaseEntry(platform, "runtime-recovery")),
+  ];
   const code = lane !== "main-reused" && (!changes.documentationOnly || full);
   const provider = domains.has("provider_common");
   const critical = !full && code;
@@ -122,8 +120,9 @@ export function createEvidencePlan({
       ...(jobs["pr-windows-lifecycle"] ? ["windows-portable-and-lifecycle", "windows-codex-discovery"] : []),
       ...(jobs["pr-macos-lifecycle"] ? ["macos-portable-and-lifecycle"] : []),
       ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
-      ...selectedPlatforms.map((platform) => recoveryOnly(platform)
-        ? `${platform.artifact}:electron-recovery` : `${platform.artifact}:electron-display-isolated-recovery`),
+      ...selectedPlatforms.flatMap((platform) => recoveryOnly(platform)
+        ? [`${platform.artifact}:electron-recovery`]
+        : [`${platform.artifact}:electron-display-sensitive`, `${platform.artifact}:electron-isolated-recovery`]),
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },

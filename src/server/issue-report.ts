@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { INERTIA_VERSION } from "../shared/version";
 import { parseRuntimeLifecycleDiagnosticSnapshot, type RuntimeLifecycleDiagnosticSnapshot } from "../shared/lifecycle-diagnostics";
-import { issueReportSchema, scrubReportText, REPORT_BODY_LIMIT, type IssueReport, type IssueReportInput } from "../shared/issue-report";
+import { issueReportSchema, REPORT_BODY_LIMIT, type IssueReport, type IssueReportInput } from "../shared/issue-report";
+import { scrubReportText } from "../shared/issue-report-scrub";
 import type { AppSnapshot, ProviderInfo } from "../shared/contracts";
 import type { IssueHostEvidence } from "../node/runtime-issue-evidence-protocol";
 import { RuntimeRequestError } from "./runtime-errors";

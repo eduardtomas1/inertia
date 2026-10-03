@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { providerIdSchema } from "../../src/shared/contracts/client-command/common";
-import { REPORT_PROVIDER_IDS, scrubReportText } from "../../src/shared/issue-report";
+import { REPORT_PROVIDER_IDS } from "../../src/shared/issue-report";
+import { scrubReportText } from "../../src/shared/issue-report-scrub";
 
 it.each([
   "ENOENT: no such file or directory, open 'config.json'",

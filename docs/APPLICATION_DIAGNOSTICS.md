@@ -205,11 +205,10 @@ highlighter and its character/line limits. Stale, composing, oversized and
 unsupported content uses plain text; highlighted HTML never becomes saved text.
 
 Diagnostics uses the shared 810 px Settings column and a container query for
-narrow widths. Report an issue uses panel-width-responsive gutters and controls.
-The report's primary action is separated from copying/manual continuation and
-the saved-progress/new-draft footer. Keyboard order follows visual order, with
-visible focus and narrow-panel wrapping. Issue validation/publication semantics
-and privacy review are unchanged.
+narrow widths. Report an issue uses the same column; its form, preview and
+publication states are described in [Issue reporting](ISSUE_REPORTING.md). With
+Attach diagnostics on, the report embeds this page's pseudonymised export of the
+last 24 hours, obtained by the runtime from the main process.
 
 ## Verification and limitations
 

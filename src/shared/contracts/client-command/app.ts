@@ -4,6 +4,7 @@ import { conversationHistoryRequestSchema } from "../../conversation-history";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
+import { QUOTA_WARNING_THRESHOLDS } from "../../quota-warnings";
 import { isReleaseRepositoryUrl, RELEASE_REPOSITORY_URL_MAX_LENGTH } from "../../release-repository";
 import {
   WORKING_INDICATOR_COLORS,
@@ -401,6 +402,11 @@ export const configurationCommandSchemas = [
           autoOpenPlan: z.boolean().optional(),
           confirmDestructiveActions: z.boolean().optional(),
           desktopNotifications: z.boolean().optional(),
+          notifyOnlyInBackground: z.boolean().optional(),
+          quotaWarnings: z.object({
+            enabled: z.boolean().optional(),
+            firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),
+          }).strict().optional(),
           providerIdentityLabels: z.partialRecord(
             providerIdSchema,
             z.string().trim().min(1).max(48).refine(

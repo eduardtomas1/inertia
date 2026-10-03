@@ -8,7 +8,8 @@ export const RESTORE_DEFAULTS_RESETS = [
     keys: [
       "showThinking", "autoCollapseWorkLog", "autoScrollToFinalAnswer", "showTimestamps", "showChangedFileSummaries",
       "defaultCodeWrap", "autoOpenPlan", "confirmDestructiveActions", "usageDisplayMode", "wrapDiffs", "ignoreWhitespace",
-      "terminalFontSize", "desktopNotifications", "completionSound", "projectGrouping", "compactSidebar",
+      "terminalFontSize", "desktopNotifications", "notifyOnlyInBackground", "completionSound", "quotaWarnings",
+      "projectGrouping", "compactSidebar",
     ],
   },
   { label: "keyboard shortcuts", keys: ["keybindings"] },

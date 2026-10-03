@@ -232,6 +232,7 @@ export type DesktopNotificationKind =
 export interface DesktopNotificationRequest {
   conversationId: string;
   kind: DesktopNotificationKind;
+  onlyInBackground?: boolean;
 }
 
 export const DETACHED_CHAT_WINDOW_LIMIT = 8;
@@ -320,8 +321,9 @@ export function parseDesktopNotificationRequest(
   if (!plainObject(value)) return null;
   const keys = Object.keys(value);
   if (
-    keys.length !== 2
-    || !keys.every((key) => key === "conversationId" || key === "kind")
+    keys.length !== (value.onlyInBackground === undefined ? 2 : 3)
+    || !keys.every((key) => key === "conversationId" || key === "kind" || key === "onlyInBackground")
+    || (value.onlyInBackground !== undefined && typeof value.onlyInBackground !== "boolean")
     || typeof value.conversationId !== "string"
     || !UUID_PATTERN.test(value.conversationId)
     || !["completed", "approval", "input", "failed"].includes(

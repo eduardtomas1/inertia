@@ -37,4 +37,8 @@ Press ⌘K (Ctrl+K elsewhere) to find commands, projects, chats and saved messag
 
 ## Optional desktop mascot
 
-Turn on the mascot in **Settings → General** for a movable companion that previews progress, questions, approvals and results in a small bubble. Click the bubble to open the chat; right-click to pause or hide it.
+Turn on the mascot in **Settings → Notifications** for a movable companion that previews progress, questions, approvals and results in a small bubble. Click the bubble to open the chat; right-click to pause or hide it. **Animate mascot** in the same place pauses or resumes its animation.
+
+## Notifications
+
+Desktop notifications tell you when a chat finishes, fails or needs your approval or answer, without prompt or response text. In **Settings → Notifications**, **Only when Inertia is in the background** skips them while any Inertia window is focused; completion sounds are not affected.

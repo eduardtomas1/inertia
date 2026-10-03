@@ -154,8 +154,15 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     load: sectionAfter(NotificationsSettings, loadMascotSettings),
     prefetch: [],
     rows: [
-      ...rows("Alerts", [["desktop-notifications", "Desktop notifications", ["alerts"]]]),
+      ...rows("Alerts", [
+        ["desktop-notifications", "Desktop notifications", ["alerts"]],
+        ["notify-only-in-background", "Only when Inertia is in the background", ["focus", "foreground", "quiet"]],
+      ]),
       ...rows("Sound", [["completion-sound", "Sound when a task ends", ["sounds", "chime", "audio", "long tasks"]]]),
+      ...rows("Quota warnings", [
+        ["quota-warnings", "Quota warnings", ["limits", "usage", "quota"]],
+        ["quota-warning-threshold", "Warn when below", ["threshold", "percent", "remaining"]],
+      ]),
       ...rows("Desktop mascot", [["desktop-mascot", "Desktop mascot", ["companion", "sprites"]]]),
     ],
     select: (context) => ({

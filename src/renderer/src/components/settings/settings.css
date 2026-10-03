@@ -117,6 +117,11 @@
   opacity: var(--disabled-opacity);
 }
 
+.setting-select[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
 .setting-field-control {
   display: flex;
   min-width: 0;

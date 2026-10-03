@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MascotSettings } from "../../src/renderer/src/components/MascotSettings";
 import { emptyMascotStatus, type MascotSettingsBridge, type MascotSnapshot } from "../../src/shared/mascot";
@@ -149,5 +149,45 @@ describe("mascot custom sprite settings", () => {
     expect(await screen.findByText("Custom sprites applied.")).toBeInTheDocument();
     expect(section.querySelector("details.mascot-sprite-guide")).toHaveProperty("open", false);
     expect(within(section).getByText("How custom sprites work")).toBeInTheDocument();
+  });
+});
+
+describe("mascot animation setting", () => {
+  it("pauses and resumes the mascot's animation through the mascot preferences", async () => {
+    const bridge = install();
+    await bridge.configure({ enabled: true, motion: true });
+    bridge.configure.mockClear();
+    render(<MascotSettings />);
+    const control = await screen.findByRole("switch", { name: "Animate mascot" });
+    expect(control.closest("[data-setting-id]")).toHaveAttribute("data-setting-id", "mascot-motion");
+    expect(control).toBeChecked();
+    expect(control).not.toHaveAttribute("aria-disabled");
+
+    fireEvent.click(control);
+    await waitFor(() => expect(bridge.configure).toHaveBeenCalledWith({ enabled: true, motion: false }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Animate mascot" })).not.toBeChecked());
+    fireEvent.click(screen.getByRole("switch", { name: "Animate mascot" }));
+    await waitFor(() => expect(bridge.configure).toHaveBeenLastCalledWith({ enabled: true, motion: true }));
+  });
+
+  it("keeps the animation switch focusable but unavailable while the mascot is off", async () => {
+    const bridge = install();
+    render(<MascotSettings />);
+    const control = await screen.findByRole("switch", { name: "Animate mascot" });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Desktop mascot" })).not.toBeDisabled());
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    control.focus();
+    expect(control).toHaveFocus();
+    fireEvent.click(control);
+    expect(bridge.configure).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed animation change", async () => {
+    const bridge = install();
+    await bridge.configure({ enabled: true, motion: true });
+    bridge.configure.mockRejectedValueOnce(new Error("offline"));
+    render(<MascotSettings />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Animate mascot" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not update the mascot. Try again.");
   });
 });

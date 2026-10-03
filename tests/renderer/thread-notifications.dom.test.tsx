@@ -356,4 +356,39 @@ describe("thread notification lifecycle", () => {
 
     expect(showThreadNotification).not.toHaveBeenCalled();
   });
+
+  it("asks the desktop to show background-only alerts only while Inertia is in the background", () => {
+    const showThreadNotification = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        onThreadNotificationActivated: vi.fn(() => vi.fn()),
+        showThreadNotification,
+      },
+    });
+    const idle = snapshot(conversation("idle"));
+    const completed = snapshot(conversation("completed"));
+    const props = {
+      documentActive: true,
+      activeConversationVisible: true,
+      splitConversationIds: new Set<string>(),
+      enabled: true,
+      onActivate: vi.fn(),
+    };
+    const view = render(<ThreadNotifications {...props} snapshot={idle} onlyInBackground />);
+    view.rerender(<ThreadNotifications {...props} snapshot={completed} onlyInBackground />);
+    expect(showThreadNotification).toHaveBeenLastCalledWith({
+      conversationId: completed.conversations[0]!.id,
+      kind: "completed",
+      onlyInBackground: true,
+    });
+
+    view.rerender(<ThreadNotifications {...props} snapshot={idle} />);
+    view.rerender(<ThreadNotifications {...props} snapshot={completed} />);
+    expect(showThreadNotification).toHaveBeenCalledTimes(2);
+    expect(showThreadNotification).toHaveBeenLastCalledWith({
+      conversationId: completed.conversations[0]!.id,
+      kind: "completed",
+    });
+  });
 });

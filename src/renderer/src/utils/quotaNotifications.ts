@@ -3,8 +3,15 @@ import type {
   ProviderMetadataFieldState,
   ProviderRateLimit,
 } from "@shared/contracts";
+import {
+  activeQuotaWarningThresholds,
+  DEFAULT_QUOTA_WARNINGS,
+  QUOTA_WARNING_THRESHOLDS,
+  type QuotaWarningSettings,
+  type QuotaWarningThreshold,
+} from "@shared/quota-warnings";
 
-export const QUOTA_NOTIFICATION_THRESHOLDS = [25, 15, 5] as const;
+export const QUOTA_NOTIFICATION_THRESHOLDS = QUOTA_WARNING_THRESHOLDS;
 export const QUOTA_NOTIFICATION_STORAGE_KEY =
   "inertia:provider-quota-notifications:v1";
 
@@ -13,8 +20,7 @@ const UNKNOWN_RESET = "provider-reset-unavailable";
 const FIVE_HOURS_MINUTES = 300;
 const WEEK_MINUTES = 10_080;
 
-export type QuotaNotificationThreshold =
-  (typeof QUOTA_NOTIFICATION_THRESHOLDS)[number];
+export type QuotaNotificationThreshold = QuotaWarningThreshold;
 
 export interface QuotaNotification {
   id: string;
@@ -136,10 +142,11 @@ function resetIdentity(limit: ProviderRateLimit): string {
 }
 
 function crossedThreshold(
+  thresholds: readonly QuotaNotificationThreshold[],
   previousRemaining: number | null,
   remaining: number,
 ): QuotaNotificationThreshold | null {
-  const crossed = QUOTA_NOTIFICATION_THRESHOLDS
+  const crossed = thresholds
     .filter((threshold) => (
       remaining <= threshold
       && (previousRemaining === null || previousRemaining > threshold)
@@ -167,7 +174,9 @@ export function evaluateQuotaNotifications(
   providers: readonly ProviderInfo[],
   previous: PersistedQuotaNotificationState,
   observedAt = new Date().toISOString(),
+  warnings: QuotaWarningSettings = DEFAULT_QUOTA_WARNINGS,
 ): QuotaNotificationEvaluation {
+  const thresholds = activeQuotaWarningThresholds(warnings);
   const nextWindows = { ...previous.windows };
   const notices: QuotaNotification[] = [];
 
@@ -198,6 +207,7 @@ export function evaluateQuotaNotifications(
       if (inferredReset) identity = UNKNOWN_RESET;
       const activePrior = resetChanged || inferredReset ? undefined : prior;
       const threshold = crossedThreshold(
+        thresholds,
         activePrior?.remainingPercent ?? null,
         limit.remainingPercent,
       );

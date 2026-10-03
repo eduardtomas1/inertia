@@ -101,6 +101,13 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
+function globalBackendDefaults(): number {
+  const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true });
+  const { count } = database.prepare("SELECT COUNT(*) AS count FROM model_backend_defaults WHERE scope = 'global'").get() as { count: number };
+  database.close();
+  return count;
+}
+
 test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
   const openBackends = async (): Promise<void> => {
     const backends = page.getByRole("button", { name: "Agents", exact: true });
@@ -287,18 +294,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
     label: "Visual primary model with a deliberately long readable name",
   });
   await expect(page.locator('[data-setting-id="new-chat-model"]').getByRole("status")).toHaveText("Saved");
-  await expect.poll(() => {
-    const database = new Database(join(testDirectory, "data", "inertia.sqlite"), {
-      readonly: true,
-    });
-    const count = (database.prepare(`
-      SELECT COUNT(*) AS count
-      FROM model_backend_defaults
-      WHERE scope = 'global'
-    `).get() as { count: number }).count;
-    database.close();
-    return count;
-  }).toBe(1);
+  await expect.poll(globalBackendDefaults).toBe(1);
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-success-enabled.png"),
   });
@@ -309,12 +305,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await page.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:1/backend-probe");
   await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(enable).toHaveAttribute("aria-checked", "false");
-  await expect.poll(() => {
-    const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true });
-    const count = (database.prepare("SELECT COUNT(*) AS count FROM model_backend_defaults WHERE scope = 'global'").get() as { count: number }).count;
-    database.close();
-    return count;
-  }).toBe(0);
+  await expect.poll(globalBackendDefaults).toBe(0);
   await probe.click();
   await expect(page.locator(".backend-status-strip").getByText("failed", {
     exact: true,

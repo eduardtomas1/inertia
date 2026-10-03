@@ -38,8 +38,8 @@ export function MascotSettings() {
     setNotice("");
     void operation().catch(() => report(failure)).finally(() => setBusy(null));
   };
-  const configure = (enabled: boolean): void => {
-    if (snapshot) run("configure", async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, enabled })), "Could not update the mascot. Try again.");
+  const configure = (change: Partial<MascotSnapshot["preferences"]>): void => {
+    if (snapshot) run("configure", async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, ...change })), "Could not update the mascot. Try again.");
   };
   const importSprites = (): void => run("import", async () => {
     const result = await bridge.importSprites();
@@ -73,7 +73,11 @@ export function MascotSettings() {
     <div className="mascot-settings">
       <div className="setting-row" data-setting-id="desktop-mascot">
         <span className="setting-copy"><strong>Desktop mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
-        <Switch label="Desktop mascot" checked={enabled} disabled={busy !== null || !snapshot} onChange={configure} />
+        <Switch label="Desktop mascot" checked={enabled} disabled={busy !== null || !snapshot} onChange={(value) => configure({ enabled: value })} />
+      </div>
+      <div className="setting-row" data-setting-id="mascot-motion">
+        <span className="setting-copy"><strong>Animate mascot</strong></span>
+        <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} disabled={busy !== null || !snapshot} inactive={!enabled} onChange={(motion) => configure({ motion })} />
       </div>
       {enabled && snapshot && <div className="mascot-settings-controls">
         <span role="status">{MASCOT_LABELS[snapshot.status.phase]}</span>

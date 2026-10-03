@@ -131,7 +131,7 @@ const SECTIONS: ReadonlyArray<{
     id: "notifications",
     label: "Notifications",
     overview: "alerts",
-    cards: [["alerts", null], ["sound", "completion-sound-heading"], ["mascot", "desktop-mascot-heading"]],
+    cards: [["alerts", null], ["sound", "completion-sound-heading"], ["quota-warnings", "quota-warnings-heading"], ["mascot", "desktop-mascot-heading"]],
   },
   { id: "keyboard", label: "Keyboard", overview: "default" },
   { id: "projects", label: "Projects", overview: "all" },

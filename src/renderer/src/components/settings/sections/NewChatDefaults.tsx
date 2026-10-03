@@ -135,7 +135,7 @@ export function NewChatDefaults({
           value={levels.length > 0 ? effective.reasoning ?? "" : ""}
           options={levels.length > 0 ? reasoningOptions : reasoningOptions.slice(0, 1)}
           disabled={disabled}
-          unavailable={levels.length === 0}
+          inactive={levels.length === 0}
           onChange={chooseReasoning}
         />
         <SettingSelect

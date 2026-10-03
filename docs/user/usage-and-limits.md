@@ -19,6 +19,10 @@ Subscription quota across your accounts:
 
 An unavailable measurement is never shown as zero, and a countdown reaching zero doesn't refill a bar: refresh to get the provider's answer.
 
+## Quota warnings
+
+Inertia shows a short notice when a 5-hour or weekly window drops below 25%, 15% and 5% remaining. In **Settings → Notifications**, turn off **Quota warnings**, or set **Warn when below** to 15% or 5% to be warned later.
+
 The composer's usage indicator shows the context window. Its popover adds the selected account's quota in the same colours, says when another account of the same provider has more room, using the last Limits reading, and offers **All provider limits**, which opens the same information without sending a message.
 
 The **Usage** section of the Environment panel opens by default in every chat. If you collapse it, it stays collapsed until you open it again.

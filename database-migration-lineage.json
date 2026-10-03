@@ -692,6 +692,11 @@
       "version": 87,
       "name": "PersistUsageLimitResumePlans",
       "digest": "dde1188240bdcdcd416fc47ba366d27b25565871b9f2460e06eeefe029918a5b"
+    },
+    {
+      "version": 88,
+      "name": "PersistNotificationPreferences",
+      "digest": "d42c62f44e2a8d5c159d4093e63a3064b8c61f82a1cbf3455eaf8fc68d8899d4"
     }
   ]
 }

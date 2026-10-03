@@ -15,6 +15,7 @@ export function SettingSwitch({
   description,
   checked,
   disabled = false,
+  inactive = false,
   label,
   failure,
   onChange,
@@ -24,6 +25,7 @@ export function SettingSwitch({
   description?: ReactNode;
   checked: boolean;
   disabled?: boolean;
+  inactive?: boolean;
   label?: string;
   failure?: Failure;
   onChange: Persist<boolean>;
@@ -32,7 +34,7 @@ export function SettingSwitch({
   const { value, save } = useOptimisticSetting(checked, action, onChange, failure);
   return (
     <SettingRow id={id} title={title} description={description} notice={action.notice}>
-      <Switch label={label ?? title} checked={value} disabled={disabled} onChange={save} />
+      <Switch label={label ?? title} checked={value} disabled={disabled} inactive={inactive} onChange={save} />
     </SettingRow>
   );
 }
@@ -62,7 +64,7 @@ export function SettingSelect<T extends string>({
   value: authoritative,
   options,
   disabled = false,
-  unavailable = false,
+  inactive = false,
   prefix,
   className,
   failure,
@@ -75,7 +77,7 @@ export function SettingSelect<T extends string>({
   value: T;
   options: readonly SettingOption<T>[];
   disabled?: boolean;
-  unavailable?: boolean;
+  inactive?: boolean;
   prefix?: ReactNode;
   className?: string;
   failure?: Failure;
@@ -87,11 +89,11 @@ export function SettingSelect<T extends string>({
     <select
       className="setting-select"
       aria-label={label ?? title}
-      aria-disabled={unavailable || undefined}
+      aria-disabled={inactive || undefined}
       value={value}
       disabled={disabled}
       onChange={(event) => {
-        if (!unavailable) save(event.currentTarget.value as T);
+        if (!inactive) save(event.currentTarget.value as T);
       }}
     >
       {groupedOptions(options).map(({ group, options: entries }, index) => {

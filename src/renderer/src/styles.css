@@ -10479,6 +10479,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--accent);
 }
 
+.switch-control[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
 .switch-thumb {
   position: absolute;
   top: 3px;

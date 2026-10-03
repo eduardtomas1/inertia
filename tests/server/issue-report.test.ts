@@ -28,7 +28,8 @@ function setup() {
   const evidence = { collect: vi.fn(async (_attach: boolean): Promise<IssueHostEvidence | null> => host) };
   const send = vi.fn<(socket: WebSocket, event: ServerEvent) => void>();
   const providers = [{ id: "claude", version: "2.0.14 (Claude Code)" }] as ProviderInfo[];
-  const deps = { store, snapshot, publisher, evidence, providerInfo: () => providers, send };
+  const clock = { now: 1_000_000 };
+  const deps = { store, snapshot, publisher, evidence, providerInfo: () => providers, send, now: () => clock.now };
   const handler = createIssueReportCommandHandler(deps);
   const result = async (command: import("../../src/renderer/src/lib/runtimeCommands").CommandWithoutId) => {
     await handler({} as WebSocket, { requestId: crypto.randomUUID(), ...command } as ClientCommand);
@@ -37,7 +38,7 @@ function setup() {
     return last.result;
   };
   const dispatch = async (command: import("../../src/renderer/src/lib/runtimeCommands").CommandWithoutId) => (await result(command)).report!;
-  return { store, deps, handler, dispatch, result, snapshot, publisher, evidence, send };
+  return { store, deps, handler, dispatch, result, snapshot, publisher, evidence, send, clock };
 }
 
 describe("issue reports", () => {
@@ -107,6 +108,24 @@ describe("issue reports", () => {
     publisher.status.mockResolvedValueOnce("signed-out");
     expect(await result({ type: "support.report.github" })).toMatchObject({ report: null, github: "signed-out" });
     expect((await result({ type: "support.report.get" })).github).toBeUndefined();
+  });
+
+  it("runs one sign-in check at a time and reuses its result for 30 seconds", async () => {
+    const { result, publisher, clock } = setup();
+    let finish!: (state: IssueGitHubState) => void;
+    publisher.status.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const first = result({ type: "support.report.github" });
+    const second = result({ type: "support.report.github" });
+    await vi.waitFor(() => expect(publisher.status).toHaveBeenCalledOnce());
+    finish("signed-out");
+    expect((await first).github).toBe("signed-out");
+    expect((await second).github).toBe("signed-out");
+    clock.now += 29_000;
+    expect((await result({ type: "support.report.github" })).github).toBe("signed-out");
+    expect(publisher.status).toHaveBeenCalledOnce();
+    clock.now += 2_000;
+    expect((await result({ type: "support.report.github" })).github).toBe("ready");
+    expect(publisher.status).toHaveBeenCalledTimes(2);
   });
 
   it("publishes hand edits exactly and rejects stale writes", async () => {

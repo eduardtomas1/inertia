@@ -16,8 +16,10 @@ interface Dependencies {
   publisher: IssuePublisher;
   evidence?: RuntimeIssueEvidenceSource;
   send(socket: WebSocket, event: ServerEvent): void;
+  now?(): number;
 }
 
+const GITHUB_STATUS_TTL_MS = 30_000;
 const UNCERTAIN_NOTICE = "GitHub may still have received the issue. Check submission before trying again; a second issue is never created automatically.";
 
 export function createIssueReportCommandHandler(deps: Dependencies): RuntimeCommandHandler {
@@ -36,6 +38,17 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
     return report;
   };
   let publicationBusy = false;
+  const now = deps.now ?? Date.now;
+  let githubCheck: Promise<IssueGitHubState> | null = null;
+  let githubCache: { state: IssueGitHubState; at: number } | null = null;
+  const githubStatus = async (): Promise<IssueGitHubState> => {
+    if (githubCache && now() - githubCache.at < GITHUB_STATUS_TTL_MS) return githubCache.state;
+    githubCheck ??= deps.publisher.status().then((state) => {
+      githubCache = { state, at: now() };
+      return state;
+    }).finally(() => { githubCheck = null; });
+    return await githubCheck;
+  };
   const assertReplaceable = (): void => {
     if (publicationBusy || (report && ["submitting", "uncertain"].includes(report.status))) throw new RuntimeRequestError("Check the pending GitHub submission before starting another report.");
   };
@@ -46,7 +59,7 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
     switch (command.type) {
       case "support.report.get": break;
       case "support.report.github": {
-        github = await deps.publisher.status();
+        github = await githubStatus();
         break;
       }
       case "support.report.prepare": {

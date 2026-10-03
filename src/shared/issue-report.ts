@@ -77,7 +77,7 @@ export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[redacted token]")
     .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]"))
     .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]+/giu, "[redacted URL]")
-    .replace(/(?:[A-Za-z]:[\\/]|\\\\|~?\/)[^\s<>"']+/gu, "[private path]")
+    .replace(/(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?<![\w.~-])~?\/)[^\s<>"']+/gu, "[private path]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "")
     .slice(0, limit).trim();

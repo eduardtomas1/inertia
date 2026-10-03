@@ -36,6 +36,12 @@ it("removes a whole unquoted secret phrase, not only its first word", () => {
   expect(scrubReportText("db_password: correct horse battery")).toBe("[redacted secret]");
 });
 
+it("keeps relative paths and slash-separated words but removes absolute paths", () => {
+  expect(scrubReportText("All user/provider content is omitted. See src/main/index.ts:42 and 200/300 runs.")).toBe("All user/provider content is omitted. See src/main/index.ts:42 and 200/300 runs.");
+  const clean = scrubReportText("Opened /home/alice/notes (~/private/key) \"/etc/passwd\" path=/Users/bob/x");
+  expect(clean).toBe("Opened [private path] ([private path] \"[private path]\" path=[private path]");
+});
+
 it("accepts exactly the providers the command contracts accept", () => {
   expect([...REPORT_PROVIDER_IDS].sort()).toEqual([...providerIdSchema.options].sort());
 });

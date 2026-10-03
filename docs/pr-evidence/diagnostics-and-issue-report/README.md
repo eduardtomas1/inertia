@@ -21,19 +21,42 @@ Wide is 1440×920, narrow 1000×800, and the tight size 760×600.
 | Light, narrow | ![](before-diagnostics-light-narrow.png) | ![](diagnostics-light-narrow.png) |
 | Dark, narrow | ![](before-diagnostics-dark-narrow.png) | ![](diagnostics-dark-narrow.png) |
 | Dark, 760×600 | ![](before-diagnostics-dark-760x600.png) | ![](diagnostics-dark-760x600.png) |
+| Expanded row, light | | ![](diagnostics-expanded-light-wide.png) |
 | Capture off, dark | | ![](diagnostics-capture-off-dark-wide.png) |
+| Capture off, light | | ![](diagnostics-capture-off-light-wide.png) |
 | Clear history dialog, dark | | ![](diagnostics-clear-dialog-dark-wide.png) |
+| Clear history dialog, light | | ![](diagnostics-clear-dialog-light-wide.png) |
+| No matching events, dark | | ![](diagnostics-empty-dark-wide.png) |
+| Read failed, dark | | ![](diagnostics-read-failed-dark-wide.png) |
+
+The read-failed state is produced by exhausting the per-minute read limit in the
+spec, then reopening the page.
 
 ## Archive & data
 
 | State | Before | After |
 | --- | --- | --- |
 | Local data, dark | ![](before-archive-data-dark-wide.png) | ![](archive-data-dark-wide.png) |
+| Local data, light | | ![](archive-data-light-wide.png) |
+| Local data, light, 1000×800 | | ![](archive-data-light-narrow.png) |
+
+## Shared switch
+
+The off thumb now uses `--text-muted` and the on thumb `--accent-text`; the spec
+measures at least 3:1 against the track in both themes and states. General →
+Workspace shows the other switches with the same change.
+
+| Light | Dark |
+| --- | --- |
+| ![](settings-switches-light-wide.png) | ![](settings-switches-dark-wide.png) |
 
 ## What changed
 
-- Diagnostics uses the shared Settings column and type scale. The tagline,
-  icon tile, privacy strip, outcome pills, footer sentence and lock copy are gone.
+- Every Settings page keeps at least a 20 px gutter beside the navigation
+  (the shared `.settings-content` width now subtracts the 205 px navigation).
+- Diagnostics uses the shared Settings header (icon, title, one line), column,
+  type scale, field fill and select picker. The large heading, privacy strip,
+  outcome pills, footer sentence and lock copy are gone.
 - One header card: the *Capture diagnostics* switch, *Export…*, *Copy support
   summary*, *Reveal log folder*, *Clear history…*, and a two-line process
   health block. The last three moved here from Archive & data, which now shows
@@ -41,9 +64,10 @@ Wide is 1440×920, narrow 1000×800, and the tight size 760×600.
 - *Recent events* lists lifecycle events and incidents together, newest first,
   filtered by level, source and time, with search. Rows are buttons; the outcome
   moved into the expanded detail.
-- The spec also checks no viewport overflow, no nested buttons, untruncated row
-  titles, 44 px rows, control sizes, keyboard expansion, focus return after the
-  dialog and the capture switch keeping focus.
+- The spec also checks the navigation gutters, the shared field fill and
+  picker, no viewport overflow, no nested buttons, untruncated row titles,
+  44 px rows, control sizes, keyboard expansion, focus return after the dialog,
+  the capture switch keeping focus and switch thumb contrast.
 
 ## Report an issue
 

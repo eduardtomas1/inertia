@@ -208,6 +208,14 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await capture(page, info, "archive-data-light-narrow");
   await setAppearanceInPlace(app, "dark");
   await app.resizeWindow(1440, 920);
+
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("heading", { name: "Workspace", exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("switch", { name: "Message timestamps" })).toBeVisible();
+  await capture(page, info, "settings-switches-dark-wide");
+  await setAppearanceInPlace(app, "light");
+  await capture(page, info, "settings-switches-light-wide");
+  await setAppearanceInPlace(app, "dark");
   expect(app.rendererErrors).toEqual([]);
 });
 

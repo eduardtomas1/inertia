@@ -329,6 +329,30 @@ export async function repositoryMetadataMarkerIdentity(
   return ["git-dir", gitDirectory, "git-common-dir", commonDirectory].join("\0");
 }
 
+export async function revParseValues(
+  root: string,
+  queries: readonly (readonly string[])[],
+  options: { deadlineAt?: number; failureMessage: string },
+): Promise<string[]> {
+  const inspect = async (args: readonly string[], count: number): Promise<Buffer> =>
+    (await runGitInspection(root, ["rev-parse", ...args], {
+      deadlineAt: options.deadlineAt,
+      maxOutputBytes: 4_096 * count,
+      failureMessage: options.failureMessage,
+    })).stdout;
+  const lines = (await inspect(queries.flat(), queries.length))
+    .toString("utf8").split("\n");
+  if (lines.length === queries.length + 1 && lines.at(-1) === "") {
+    return lines.slice(0, -1).map((line) =>
+      line.endsWith("\r") ? line.slice(0, -1) : line);
+  }
+  const values: string[] = [];
+  for (const query of queries) {
+    values.push(terminalPathOutput(await inspect(query, 1)));
+  }
+  return values;
+}
+
 export function validateName(value: string, label: string): string {
   if (
     typeof value !== "string"

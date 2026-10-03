@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 
@@ -67,7 +67,6 @@ let page!: AppFixture["page"];
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "composer-popover-placement",
-    windowDisplay: "primary",
     initialState: "conversation",
     seedSecondProject: true,
     codexAppServerSource,

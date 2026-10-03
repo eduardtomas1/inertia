@@ -10,7 +10,7 @@ import {
   runGitInspection,
   withPreparedGitRefReservation,
 } from "./runner";
-import { hasHead } from "./status";
+import { headCommit } from "./status";
 import {
   assertPreparedReferenceLocksSync,
   acquireIndexReservationSync,
@@ -117,12 +117,7 @@ async function readRegularFile(path: string): Promise<Buffer> {
 }
 
 async function headState(root: string): Promise<HeadState> {
-  const head = await hasHead(root)
-    ? (await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
-        maxOutputBytes: 256,
-        failureMessage: "Unable to verify the reviewed commit parent.",
-      })).stdout.toString("utf8").trim()
-    : null;
+  const head = await headCommit(root);
   let headRef: string | null = null;
   try {
     headRef = stripTerminalEol((await runGitInspection(

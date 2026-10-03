@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
@@ -7,7 +7,7 @@ import { createAppFixture } from "./support/app-fixture";
 import { capturePageWebSockets, refreshCapturedRuntimeSnapshot } from "./support/browser-websocket-fixture";
 
 test("reopens project filters and changes the new-chat project without leaving the draft", async ({ browserName: _browserName }, testInfo) => {
-  const app = await createAppFixture({ name: "project-navigation", initialState: "conversation", seedSecondProject: true, windowDisplay: "primary" });
+  const app = await createAppFixture({ name: "project-navigation", initialState: "conversation", seedSecondProject: true });
   try {
     await app.resizeWindow(1200, 800);
     const page = app.page;

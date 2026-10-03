@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
@@ -14,7 +14,6 @@ test("projects exact live run states in the real Electron shell", async ({
   const app = await createAppFixture({
     name: "authoritative-run-state",
     initialState: "conversation",
-    windowDisplay: "primary",
   });
 
   try {

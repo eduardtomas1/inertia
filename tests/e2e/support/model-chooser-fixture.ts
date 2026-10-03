@@ -10,7 +10,6 @@ export async function createModelChooserFixture(
   const app = await createAppFixture({
     name,
     initialState: "conversation",
-    windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       seedLargeModelCatalog(testDirectory, workspaceDirectory, options.nativeModels);
     },

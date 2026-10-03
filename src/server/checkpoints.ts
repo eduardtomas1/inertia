@@ -8,7 +8,7 @@ import {
   runGit as runBoundedGit,
 } from "./git/runner";
 import { GitError } from "./git/types";
-import { hasHead } from "./git/status";
+import { headCommit } from "./git/status";
 
 export class CheckpointError extends Error {}
 
@@ -148,22 +148,12 @@ async function checkpointEnvironment(
       mode: 0o600,
     });
     configurationOwned = true;
-    const objectFormat = (
-      await runGit(
-        repositoryPath,
-        checkpointGitArguments(["rev-parse", "--show-object-format"]),
-        isolatedConfiguration,
-        undefined,
-        1024 * 1024,
-        deadlineAt,
-        signal,
-      )
-    ).stdout.toString("utf8").trim();
-    const objectDirectory = (
+    const objectStore = (
       await runGit(
         repositoryPath,
         checkpointGitArguments([
           "rev-parse",
+          "--show-object-format",
           "--path-format=absolute",
           "--git-path",
           "objects",
@@ -174,7 +164,11 @@ async function checkpointEnvironment(
         deadlineAt,
         signal,
       )
-    ).stdout.toString("utf8").replace(/(?:\r\n|\n)$/u, "");
+    ).stdout.toString("utf8");
+    const formatEnd = objectStore.indexOf("\n");
+    const objectFormat = objectStore.slice(0, Math.max(0, formatEnd)).trim();
+    const objectDirectory = objectStore.slice(formatEnd + 1)
+      .replace(/(?:\r\n|\n)$/u, "");
     if (
       (objectFormat !== "sha1" && objectFormat !== "sha256")
       || !objectDirectory
@@ -253,23 +247,10 @@ export async function captureRawWorktreeTree(
   const baseEnvironment = { GIT_INDEX_FILE: indexPath };
   let isolated: Awaited<ReturnType<typeof checkpointEnvironment>> | null = null;
   try {
-    const hasCurrentHead = await hasHead(repositoryPath, {
+    const head = await headCommit(repositoryPath, {
       deadlineAt: options.deadlineAt,
       signal: options.signal,
     });
-    const head = hasCurrentHead
-      ? (
-          await runGit(
-            repositoryPath,
-            checkpointGitArguments(["rev-parse", "--verify", "HEAD"]),
-            {},
-            undefined,
-            1024,
-            options.deadlineAt,
-            options.signal,
-          )
-        ).stdout.toString("utf8").trim()
-      : null;
     isolated = await checkpointEnvironment(
       repositoryPath,
       storageDirectory,

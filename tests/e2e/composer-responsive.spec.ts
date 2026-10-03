@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
@@ -30,7 +30,7 @@ let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 const runtimeConnections = createRuntimeConnectionEvidence();
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "composer-responsive", initialState: "conversation", windowDisplay: "primary", observePage: runtimeConnections.observe });
+  app = await createAppFixture({ name: "composer-responsive", initialState: "conversation", observePage: runtimeConnections.observe });
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;

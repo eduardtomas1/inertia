@@ -35,16 +35,12 @@ export function createEvidencePlan({
     throw new Error("CI requires the exact tested and source commit identities.");
   }
   if (!base || !SHA.test(base)) base = null;
-  let changes = classifyChangedPaths(base ? paths : []);
-  let reused = event === "push" && base !== null && validReusedRun(reusedRun) ? {
+  const changes = classifyChangedPaths(base ? paths : []);
+  const certifiedRun = event === "push" && base !== null && validReusedRun(reusedRun) ? {
     runId: reusedRun.runId, pullRequest: reusedRun.pullRequest, sourceHead: reusedRun.sourceHead,
   } : null;
-  const reuseReasons = [];
-  if (reused && changes.domains.includes("performance")) {
-    reused = null;
-    changes = classifyChangedPaths([]);
-    reuseReasons.push("performance-change-measured-on-main");
-  }
+  const reused = certifiedRun && !changes.domains.includes("performance") ? certifiedRun : null;
+  const reuseReasons = certifiedRun && !reused ? ["performance-change-measured-on-main"] : [];
   const lane = event === "schedule" ? "nightly"
     : event === "push" ? (reused ? "main-reused" : "main")
       : event === "merge_group" ? "merge"
@@ -63,19 +59,22 @@ export function createEvidencePlan({
         || (domains.has("macos_packaging") && artifact.startsWith("macos-"))
       ));
   const platforms = selectedPlatforms.map(({ artifact }) => artifact);
-  const phaseEntry = (platform, phase) => ({
-    ...platform, phase, check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${phase})`,
-    evidence_artifact: `${platform.artifact}-${phase}`,
+  const shardSlug = (shard) => (shard ? `-${shard.replace("/", "-of-")}` : "");
+  const phaseEntry = (platform, phase, shard = null) => ({
+    ...platform, phase, ...(shard && { shard }),
+    check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${shard ? `${phase} ${shard}` : phase})`,
+    evidence_artifact: `${platform.artifact}-${phase}${shardSlug(shard)}`,
   });
+  const isolatedShards = (platform) => (platform.artifact.startsWith("windows-") ? ["1/2", "2/2"] : [null]);
   const recoveryOnly = (platform) => !completeSiblings
     && !PRIMARY_PLATFORM_ARTIFACTS.includes(platform.artifact);
-  const electronPlatforms = selectedPlatforms.flatMap((platform) => (
-    recoveryOnly(platform) ? [phaseEntry(platform, "runtime-recovery")]
-      : platform.artifact === "macos-x64"
-        ? ["display-sensitive", "isolated", "runtime-recovery"].map((phase) => phaseEntry(platform, phase))
-        : [{ ...platform, phase: "all", check: `${platform.label}${ELECTRON_CHECK_SUFFIX}`,
-          evidence_artifact: platform.artifact }]
-  ));
+  const electronPlatforms = [
+    ...selectedPlatforms.filter((platform) => !recoveryOnly(platform)).flatMap((platform) => [
+      phaseEntry(platform, "display-sensitive"),
+      ...isolatedShards(platform).map((shard) => phaseEntry(platform, "isolated", shard)),
+    ]),
+    ...selectedPlatforms.filter(recoveryOnly).map((platform) => phaseEntry(platform, "runtime-recovery")),
+  ];
   const code = lane !== "main-reused" && (!changes.documentationOnly || full);
   const provider = domains.has("provider_common");
   const critical = !full && code;
@@ -103,7 +102,7 @@ export function createEvidencePlan({
       ? [1, 2, 3, 4].map((shard) => `Windows unit tests (${shard}/4)`)
       : [EVIDENCE_JOBS[job]]);
   return {
-    schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane, reusedRun: reused,
+    schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane, reusedRun: certifiedRun,
     paths: [...paths], domains: changes.domains,
     reasons: [baselineReason, ...reuseReasons, ...changes.reasons,
       lane === "main-reused" ? "certified-identical-tree-in-pull-request-run"
@@ -122,8 +121,10 @@ export function createEvidencePlan({
       ...(jobs["pr-windows-lifecycle"] ? ["windows-portable-and-lifecycle", "windows-codex-discovery"] : []),
       ...(jobs["pr-macos-lifecycle"] ? ["macos-portable-and-lifecycle"] : []),
       ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
-      ...selectedPlatforms.map((platform) => recoveryOnly(platform)
-        ? `${platform.artifact}:electron-recovery` : `${platform.artifact}:electron-display-isolated-recovery`),
+      ...selectedPlatforms.flatMap((platform) => recoveryOnly(platform)
+        ? [`${platform.artifact}:electron-recovery`]
+        : [`${platform.artifact}:electron-display-sensitive`, ...isolatedShards(platform).map((shard) => (
+          `${platform.artifact}:electron-isolated${shardSlug(shard)}${shard === "2/2" ? "" : "-recovery"}`))]),
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },

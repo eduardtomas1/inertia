@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { createCanvas } from "@napi-rs/canvas";
 import { expect, test, type Request } from "@playwright/test";
 import { randomUUID } from "node:crypto";
@@ -17,7 +17,7 @@ let app: AppFixture;
 
 test.beforeAll(async () => {
   app = await createAppFixture({
-    name: "gallery-visibility", initialState: "conversation", windowDisplay: "primary",
+    name: "gallery-visibility", initialState: "conversation",
     observePage: (page) => {
       page.on("request", (request) => {
         const id = /\/attachment-preview\/([^/]+)$/u.exec(request.url())?.[1];

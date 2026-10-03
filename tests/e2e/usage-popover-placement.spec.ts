@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { ensureWorkspaceTools } from "./support/workspace-tools";
 
 test("contains usage details and the Limits shortcut in a constrained workspace", async ({ browserName: _browserName }, testInfo) => {
   const app = await createAppFixture({ name: "usage-popover-placement",
-    initialState: "conversation", windowDisplay: "primary" });
+    initialState: "conversation" });
   try {
     for (const theme of ["dark", "light"] as const) {
       const store = new RuntimeStore(join(app.testDirectory, "data", "inertia.sqlite"),

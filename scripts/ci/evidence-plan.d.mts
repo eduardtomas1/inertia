@@ -47,7 +47,7 @@ export interface EvidencePlan {
   suites: string[];
   matrix: { include: NativePlatform[] };
   electronMatrix: { include: Array<NativePlatform & {
-    phase: string; check: string; evidence_artifact: string;
+    phase: string; shard?: string; check: string; evidence_artifact: string;
   }> };
   renderer: boolean;
   benchmarks: boolean;

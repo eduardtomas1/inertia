@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { CanUseTool, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -8,9 +8,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { claudeSuccessResult, fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
-import { portableFixtureRoot } from "../helpers/portable-provider-fixture";
+import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
+const managers: ProviderManager[] = [];
 const OWN = "11111111-1111-4111-8111-111111111111";
 const SIBLING = "22222222-2222-4222-8222-222222222222";
 
@@ -63,6 +64,7 @@ async function runRequests(
     { commands: { claude: process.execPath } },
     new AgentHarnessRegistry([harness]),
   );
+  managers.push(manager);
   const approvals: Array<{ title: string; access: string[] }> = [];
   await expect(manager.run(nativeProviderRunInput({
     providerId: "claude",
@@ -82,8 +84,9 @@ async function runRequests(
 
 describe("Claude reads of this chat's own attachments", () => {
   const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await Promise.all(managers.splice(0).map(async (manager) => await manager.disposeAll()));
+    await Promise.all(roots.splice(0).map(async (root) => await removePortableFixture(root)));
   });
 
   it.each([

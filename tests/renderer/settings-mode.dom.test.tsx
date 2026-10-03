@@ -109,12 +109,16 @@ describe("Settings as a mode", () => {
     pressEscape(screen.getByRole("menuitem", { name: "Menu item" }));
     fireEvent.click(screen.getByRole("button", { name: "Keybindings" }));
     pressEscape(screen.getByLabelText("Search everything key"));
+    pressEscape(screen.getByLabelText("New chat key").querySelector("option")!);
     const dialog = document.createElement("div");
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");
     document.body.append(dialog);
-    pressEscape(screen.getByRole("main", { name: "Settings" }));
-    dialog.remove();
+    try {
+      pressEscape(screen.getByRole("main", { name: "Settings" }));
+    } finally {
+      dialog.remove();
+    }
     expect(screen.getByLabelText("Current view")).toHaveTextContent("settings");
   });
 

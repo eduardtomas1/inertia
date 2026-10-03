@@ -87,6 +87,23 @@ describe("Archive settings", () => {
   });
 });
 
+describe("Provider settings memory", () => {
+  it("keeps the selected provider, tab and Advanced disclosure while moving between sections", () => {
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "providers" },
+      providers: [settingsProvider("codex", "Codex"), settingsProvider("claude", "Claude")],
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(screen.getByRole("button", { name: "General" }));
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Configure Claude" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("tab", { name: /Models/u })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
 describe("Codex executable settings", () => {
   it("browses for a Codex executable and returns to automatic discovery", async () => {
     const onUpdate = vi.fn(async () => undefined);

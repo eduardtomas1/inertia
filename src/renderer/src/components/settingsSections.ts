@@ -204,6 +204,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       onCancelProviderUpdate: context.onCancelProviderUpdate,
       onOpenProviderUpdateInstructions: context.onOpenProviderUpdateInstructions,
       onChooseCodexBinary: context.onChooseCodexBinary,
+      memory: context.memory,
     }),
   }),
   defineSection({

@@ -21,6 +21,7 @@ import {
   providerStateLabel,
 } from "../ProviderStatus";
 import { loadLifecycleIntegritySettings } from "../settingsSectionLoaders";
+import { useSectionMemory, type SettingsSectionMemory } from "./sectionMemory";
 import { SettingStatus } from "./SettingsLayout";
 import { useSettingAction } from "./useSettingAction";
 
@@ -38,6 +39,7 @@ export interface ProvidersSettingsProps {
   onCancelProviderUpdate: (operationId: string) => Promise<void>;
   onOpenProviderUpdateInstructions: (url: string) => void;
   onChooseCodexBinary: () => void;
+  memory: SettingsSectionMemory;
 }
 
 function stableRecordFingerprint(
@@ -76,6 +78,7 @@ export function ProvidersSettings({
   onCancelProviderUpdate,
   onOpenProviderUpdateInstructions,
   onChooseCodexBinary,
+  memory,
 }: ProvidersSettingsProps): React.JSX.Element {
   const LifecycleIntegritySettings = useLoadedSurface(loadLifecycleIntegritySettings, true);
   const labelAction = useSettingAction();
@@ -84,15 +87,19 @@ export function ProvidersSettings({
   const updateDefaults = (update: Partial<AppSettings>): void => {
     void defaultsAction.run(() => onUpdate(update));
   };
-  const [selectedProviderId, setSelectedProviderId] = useState<ProviderId | null>(
+  const [selectedProviderId, setSelectedProviderId] = useSectionMemory<ProviderId | null>(
+    memory,
+    "providers.selected",
     () => providers[0]?.id ?? null,
   );
-  const [providerDetailTab, setProviderDetailTab] = useState<
-    "configuration" | "models"
-  >("configuration");
+  const [providerDetailTab, setProviderDetailTab] = useSectionMemory<"configuration" | "models">(
+    memory,
+    "providers.tab",
+    () => "configuration",
+  );
   const providerConfigurationTabRef = useRef<HTMLButtonElement>(null);
   const providerModelsTabRef = useRef<HTMLButtonElement>(null);
-  const [providerAdvancedOpen, setProviderAdvancedOpen] = useState(false);
+  const [providerAdvancedOpen, setProviderAdvancedOpen] = useSectionMemory(memory, "providers.advanced", () => false);
   const [providerIdentityLabelsDraft, setProviderIdentityLabelsDraft] = useState(
     () => settings.providerIdentityLabels,
   );
@@ -524,7 +531,7 @@ export function ProvidersSettings({
         className="provider-settings-advanced-toggle"
         aria-controls="provider-settings-advanced"
         aria-expanded={providerAdvancedOpen}
-        onClick={() => setProviderAdvancedOpen((open) => !open)}
+        onClick={() => setProviderAdvancedOpen(!providerAdvancedOpen)}
       >
         <ChevronDown
           size={13}

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { AppView } from "../appView";
 import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 
-const ESCAPE_OWNERS = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .xterm';
+const ESCAPE_OWNERS = 'select, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .xterm';
 
 export interface SettingsMode {
   settingsTarget: SettingsTarget | null;
@@ -32,7 +32,6 @@ export function escapeLeavesSettings(event: KeyboardEvent): boolean {
   if (document.querySelector('[role="dialog"][aria-modal="true"]')) return false;
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return true;
-  if (target instanceof HTMLSelectElement) return false;
   return !target.closest(ESCAPE_OWNERS);
 }
 

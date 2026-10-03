@@ -6,6 +6,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { structurallyEqual } from "../utils/structuralEquality";
 import { SettingsPage } from "./settings/SettingsLayout";
 import { SettingsSectionFallback } from "./settings/SettingsSectionFallback";
+import type { SettingsSectionMemory } from "./settings/sectionMemory";
 import type { SettingsSectionContext, SettingsViewProps } from "./settings/settingsTypes";
 import {
   prefetchSettingsSection,
@@ -88,6 +89,7 @@ const SettingsShell = memo(function SettingsShell({
   const rootRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [section, setSection] = useState<SettingsSection>(target?.section ?? initialSection);
+  const [memory] = useState<SettingsSectionMemory>(() => new Map());
   const focusRequest = useRef<FocusRequest | null>(target?.anchor ? { anchor: target.anchor } : null);
   const previousTarget = useRef(target);
   const focusRootOnMount = useRef(!target?.anchor);
@@ -134,6 +136,7 @@ const SettingsShell = memo(function SettingsShell({
     regularProjects,
     allConversations,
     onNavigate: navigate,
+    memory,
   };
   return (
     <main ref={rootRef} className="settings-view" aria-label="Settings" tabIndex={-1}>

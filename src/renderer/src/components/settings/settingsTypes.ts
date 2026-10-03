@@ -17,6 +17,7 @@ import type {
 import type { AppUpdateStatus } from "@shared/desktop";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 import type { IssueReportSettingsProps } from "../IssueReportSettings";
+import type { SettingsSectionMemory } from "./sectionMemory";
 
 export interface SettingsViewProps {
   onReportCommand?: IssueReportSettingsProps["request"];
@@ -69,4 +70,5 @@ export interface SettingsSectionContext extends Omit<SettingsViewProps, "target"
   regularProjects: Project[];
   allConversations: Conversation[];
   onNavigate: (section: SettingsSection) => void;
+  memory: SettingsSectionMemory;
 }

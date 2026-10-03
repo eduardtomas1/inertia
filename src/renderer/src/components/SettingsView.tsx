@@ -128,6 +128,7 @@ export type SettingsViewProps = {
   onInstallAppUpdate: () => Promise<void>;
   onOpenAppRelease: () => Promise<void>;
   onUnarchive: (conversation: Conversation) => void;
+  onOpenConversation?: (conversationId: string) => void;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
   onCreateBackendProfile: (draft: ModelBackendProfileDraft) => Promise<ModelBackendProfileDetail>;
   onUpdateBackendProfile: (profileId: string, update: Partial<ModelBackendProfileDraft> & { enabled?: boolean }) => Promise<ModelBackendProfileDetail>;
@@ -214,6 +215,7 @@ export function SettingsView({
   onInstallAppUpdate,
   onOpenAppRelease,
   onUnarchive,
+  onOpenConversation,
   onLoadBackendProfile,
   onCreateBackendProfile,
   onUpdateBackendProfile,
@@ -566,7 +568,7 @@ export function SettingsView({
               initialProjectId={target?.section === "projects" ? target.projectId : undefined}
               projects={regularProjects} conversations={conversations} providers={providers} settings={settings}
               backendDefaults={backendDefaults} backendProfiles={backendProfiles}
-              disabled={disabled} request={onReportCommand} onUpdateSettings={onUpdate} />
+              disabled={disabled} request={onReportCommand} onOpenConversation={onOpenConversation} onUpdateSettings={onUpdate} />
           : <SettingsSectionFallback />)}
         {section === "snapshots" && (SnapshotSettings ? <SnapshotSettings /> : <SettingsSectionFallback />)}
         {section === "general" && (

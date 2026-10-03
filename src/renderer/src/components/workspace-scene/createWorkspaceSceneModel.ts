@@ -202,6 +202,7 @@ export function visibleConversationLatestTurnSummary(
 
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
+  openConversation?: (conversationId: string) => void;
   selectGlobalChatProject?: (project: Project | null) => void;
   createConversation: (
     targetProject?: Project | null,
@@ -636,6 +637,7 @@ export function createWorkspaceSceneModel({
           payload: { conversationId: thread.id },
         }).catch(() => undefined);
       },
+      onOpenConversation: actions.openConversation,
       onLoadBackendProfile: backendProfileActions.loadBackendProfile,
       onCreateBackendProfile: backendProfileActions.createBackendProfile,
       onUpdateBackendProfile: backendProfileActions.updateBackendProfile,

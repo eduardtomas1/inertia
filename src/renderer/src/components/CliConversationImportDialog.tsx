@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, Check, Download, RefreshCw, Search, TerminalSquare, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Download, RefreshCw, Search, X } from "lucide-react";
 import type { Project, ServerEvent } from "@shared/contracts";
-import type { CliConversationPreview, CliConversationScan } from "@shared/cli-conversations";
+import { cliProviderLabel, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan } from "@shared/cli-conversations";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { diagnosticErrorReference } from "../utils/diagnosticNavigation";
@@ -11,38 +11,50 @@ import { IconButton } from "./ui";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import "./CliConversationImportDialog.css";
 
-const providerLabel = (id: string): string => id === "codex" ? "Codex" : "Claude Code";
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`;
-export function CliConversationImportDialog({ project, request, disabled = false, onClose }: {
+const providerFilters = [["all", "All"], ["codex", "Codex"], ["claude", "Claude"]] as const;
+const mac = typeof navigator !== "undefined" && navigator.platform.includes("Mac");
+const importShortcut = mac ? "Meta+Enter" : "Control+Enter";
+const cardLabel = (date: Date): string => date.toLocaleString(undefined, date.getFullYear() === new Date().getFullYear()
+  ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+  : { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+const fullLabel = (date: Date): string => date.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
+const accessibleName = (item: CliConversationCandidate): string =>
+  `${item.title}, ${cliProviderLabel(item.providerId)}, ${fullLabel(new Date(item.updatedAt))}${item.importedConversationId ? ", imported" : ""}`;
+
+export function CliConversationImportDialog({ project, request, disabled = false, onClose, onOpenConversation }: {
   project: Pick<Project, "id" | "name">;
   request(command: CommandWithoutId): Promise<ServerEvent>;
   disabled?: boolean;
   onClose(): void;
+  onOpenConversation?(conversationId: string): void;
 }): React.JSX.Element {
   const [scan, setScan] = useState<CliConversationScan | null>(null);
   const [preview, setPreview] = useState<CliConversationPreview | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("all");
   const [busy, setBusy] = useState<"scan" | "preview" | "import" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState(false);
-  const root = useRef<HTMLElement>(null);
   const epoch = useRef(0);
   const importing = useRef(false);
   const requestRef = useRef(request);
   requestRef.current = request;
-  const titleId = useId();
-  const descriptionId = useId();
-  const listLabelId = useId();
+  const searchInput = useRef<HTMLInputElement>(null);
+  const gallery = useRef<HTMLDivElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
+  const returnFocusId = useRef<string | null>(null);
+  const idPrefix = useId();
+  const openTitleId = useId();
   useNativePreviewSuspension(true);
   useLayoutEffect(() => captureModalFocus(), []);
-  useLayoutEffect(() => { root.current?.focus(); }, []);
+  useLayoutEffect(() => { searchInput.current?.focus(); }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (importing.current || disabled) return;
     const generation = ++epoch.current;
-    setBusy("scan"); setError(null); setScan(null); setPreview(null); setSelected(null); setImported(false);
+    setBusy("scan"); setError(null); setScan(null); setPreview(null); setOpenId(null); setImported(false);
     try {
       const event = await requestRef.current({ type: "conversation.cli.scan", payload: { projectId: project.id } });
       if (generation !== epoch.current) return;
@@ -57,18 +69,26 @@ export function CliConversationImportDialog({ project, request, disabled = false
     return () => { epoch.current += 1; };
   }, [refresh]);
 
-  const select = async (id: string): Promise<void> => {
+  const open = async (id: string): Promise<void> => {
     if (importing.current || disabled) return;
     const generation = ++epoch.current;
-    setSelected(id); setPreview(null); setImported(false); setBusy("preview"); setError(null);
+    returnFocusId.current = id;
+    setOpenId(id); setPreview(null); setImported(false); setError(null); setBusy("preview");
     try {
       const event = await requestRef.current({ type: "conversation.cli.preview", payload: { projectId: project.id, candidateId: id } });
       if (generation !== epoch.current) return;
       if (event.type !== "request.result" || event.result.kind !== "conversation.cli.preview") throw new Error("Could not preview this conversation.");
       setPreview(event.result.preview);
     } catch (cause) {
-      if (generation === epoch.current) setError(cause instanceof Error ? cause.message : "Could not preview this conversation.");
+      if (generation !== epoch.current) return;
+      setPreview(null);
+      setError(cause instanceof Error ? cause.message : "Could not preview this conversation.");
     } finally { if (generation === epoch.current) setBusy(null); }
+  };
+  const back = (): void => {
+    if (importing.current) return;
+    epoch.current += 1;
+    setOpenId(null); setPreview(null); setBusy(null); setError(null); setImported(false);
   };
   const importConversation = async (): Promise<void> => {
     if (!preview || busy || importing.current || disabled || preview.candidate.importedConversationId) return;
@@ -87,91 +107,130 @@ export function CliConversationImportDialog({ project, request, disabled = false
       if (generation === epoch.current) setError(cause instanceof Error ? cause.message : "Could not import this conversation. Scan again to check its status.");
     } finally { importing.current = false; if (generation === epoch.current) setBusy(null); }
   };
-  const candidates = (scan?.candidates ?? []).filter((item) => (provider === "all" || item.providerId === provider)
-    && `${item.title} ${providerLabel(item.providerId)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+
+  const rows = (scan?.candidates ?? [])
+    .filter((item) => (provider === "all" || item.providerId === provider)
+      && `${item.title} ${cliProviderLabel(item.providerId)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const cardId = (id: string): string => `${idPrefix}-card-${id}`;
+  useLayoutEffect(() => {
+    if (openId) { backButton.current?.focus(); return; }
+    const id = returnFocusId.current;
+    if (!id) return;
+    returnFocusId.current = null;
+    document.getElementById(`${idPrefix}-card-${id}`)?.focus();
+  }, [idPrefix, openId]);
+  const onGalleryKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (!(event.target instanceof HTMLElement) || !event.target.matches(".cli-import-card")) return;
+    const cards = [...event.currentTarget.querySelectorAll<HTMLElement>(".cli-import-card")];
+    const index = cards.indexOf(event.target);
+    const columns = Math.max(1, Math.round(event.currentTarget.clientWidth / Math.max(1, event.target.offsetWidth)));
+    const target = event.key === "ArrowRight" ? index + 1 : event.key === "ArrowLeft" ? index - 1
+      : event.key === "ArrowDown" ? index + columns : event.key === "ArrowUp" ? index - columns
+        : event.key === "Home" ? 0 : event.key === "End" ? cards.length - 1 : null;
+    if (target === null) return;
+    event.preventDefault();
+    cards[Math.min(Math.max(target, 0), cards.length - 1)]?.focus();
+  };
+
+  const openedId = imported && preview?.candidate.importedConversationId && onOpenConversation ? preview.candidate.importedConversationId : null;
+  const openChat = (): void => {
+    if (!openedId || !onOpenConversation) return;
+    onClose();
+    onOpenConversation(openedId);
+  };
+  const runAction = (): void => { if (openedId) openChat(); else void importConversation(); };
+  const openCandidate = openId ? scan?.candidates.find((item) => item.id === openId) ?? preview?.candidate ?? null : null;
   const alreadyImported = Boolean(preview?.candidate.importedConversationId);
   const importUnavailable = !preview || Boolean(busy) || disabled || alreadyImported;
   const scanUnavailable = Boolean(busy) || disabled;
+  const status = error ? diagnosticErrorReference(error).message : imported ? "Imported." : null;
+  const galleryState = busy === "scan" ? "Looking for conversations…"
+    : error ? diagnosticErrorReference(error).message
+      : scan && !rows.length ? scan.candidates.length ? "No conversations match your search." : "No CLI conversations found." : null;
   return createPortal(
     <div className="dialog-backdrop cli-import-backdrop" role="presentation"
       onMouseDown={(event) => { if (event.target === event.currentTarget && !importing.current) onClose(); }}>
-      <section ref={root} className="cli-import-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1}
-        onKeyDown={(event) => { trapModalFocus(event, event.currentTarget); if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); if (!importing.current) onClose(); } }}>
-        <header className="cli-import-header">
-          <span className="dialog-icon"><TerminalSquare size={18} aria-hidden="true" /></span>
-          <div>
-            <h2 id={titleId}>Import CLI conversations</h2>
-            <p id={descriptionId}>Codex and Claude Code conversations started in {project.name}.</p>
+      <section className="cli-import-dialog" role="dialog" aria-modal="true" aria-label="Import CLI conversations" tabIndex={-1}
+        onKeyDown={(event) => {
+          trapModalFocus(event, event.currentTarget);
+          if (event.key === "Escape") {
+            event.preventDefault(); event.stopPropagation();
+            if (importing.current) return;
+            if (openId) back(); else onClose();
+          }
+          if (openId && event.key === "Enter" && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); runAction(); }
+        }}>
+        <div className="cli-import-search">
+          <Search size={17} aria-hidden="true" />
+          <input ref={searchInput} aria-label="Search CLI conversations" placeholder="Search Codex and Claude Code conversations…" value={query} autoComplete="off"
+            onChange={(event) => { setQuery(event.target.value); if (openId) back(); }}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" || openId) return;
+              const first = gallery.current?.querySelector<HTMLElement>(".cli-import-card");
+              if (!first) return;
+              event.preventDefault();
+              first.focus();
+            }} />
+          <div className="cli-import-filter" role="group" aria-label="Filter by CLI provider">
+            {providerFilters.map(([value, label], index) => <span key={value}>
+              {index > 0 && <span aria-hidden="true">·</span>}
+              <button type="button" aria-pressed={provider === value} onClick={() => { setProvider(value); if (openId) back(); }}>{label}</button>
+            </span>)}
           </div>
-          <IconButton label="Close CLI import" disabled={busy === "import"} onClick={onClose}><X size={16} aria-hidden="true" /></IconButton>
-        </header>
-        <div className="cli-import-toolbar">
-          <label className="cli-import-search">
-            <Search size={14} aria-hidden="true" />
-            <input aria-label="Search CLI conversations" placeholder="Search conversations" value={query} onChange={(event) => setQuery(event.target.value)} />
-          </label>
-          <select className="cli-import-provider" aria-label="Filter by CLI provider" value={provider} onChange={(event) => setProvider(event.target.value)}>
-            <option value="all">All providers</option>
-            <option value="codex">Codex</option>
-            <option value="claude">Claude Code</option>
-          </select>
-          <button type="button" className="secondary-button cli-import-scan" aria-disabled={scanUnavailable}
+          <IconButton label="Scan again" className={busy === "scan" ? "is-scanning" : undefined} aria-disabled={scanUnavailable}
             onClick={() => { if (!scanUnavailable) void refresh(); }}>
-            <RefreshCw size={14} aria-hidden="true" />Scan again
-          </button>
+            <RefreshCw size={15} aria-hidden="true" />
+          </IconButton>
+          <IconButton label="Close CLI import" disabled={busy === "import"} onClick={onClose}><X size={15} aria-hidden="true" /></IconButton>
         </div>
         <div className="cli-import-body">
-          <aside className="cli-import-list" aria-label="CLI conversations" aria-busy={busy === "scan"}>
-            <p id={listLabelId} className="cli-import-list-label">{candidates.length ? plural(candidates.length, "conversation") : "Conversations"}</p>
-            {scan?.limited && <p className="cli-import-list-note">Showing recent history only. Older conversations were not scanned.</p>}
-            {Boolean(scan?.skipped) && <p className="cli-import-list-note">{plural(scan!.skipped, "file")} skipped: unreadable, unsupported or larger than 16&nbsp;MiB.</p>}
-            {busy === "scan" ? <p className="cli-import-list-empty" role="status"><span className="loading-mark" aria-hidden="true" />Looking for conversations…</p>
-              : <div className="cli-import-candidates" role="group" aria-labelledby={listLabelId}>
-                {candidates.map((item) => <button key={item.id} type="button" className="cli-import-candidate" aria-pressed={selected === item.id}
-                  disabled={busy === "import" || disabled} onClick={() => void select(item.id)}>
-                  <ProviderBrandIcon providerId={item.providerId} size={16} decorative />
-                  <span className="cli-import-candidate-copy">
-                    <strong>{item.title}</strong>
-                    <span className="cli-import-candidate-meta">
-                      {providerLabel(item.providerId)} · <time dateTime={item.updatedAt}>{new Date(item.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time>
-                      {item.importedConversationId && <> · <span className="cli-import-candidate-imported"><Check size={12} aria-hidden="true" />Imported</span></>}
-                    </span>
-                  </span>
-                </button>)}
+          {openId && openCandidate ? <div key={openId} className="cli-import-open" role="group" aria-labelledby={openTitleId}>
+            <div className="cli-import-open-head">
+              <IconButton ref={backButton} label="Back to conversations" disabled={busy === "import"} onClick={back}><ArrowLeft size={15} aria-hidden="true" /></IconButton>
+              <h2 id={openTitleId}>{openCandidate.title}</h2>
+            </div>
+            <div className="cli-import-open-scroll">
+              {busy === "preview" ? <p className="cli-import-state" role="status">Loading conversation…</p>
+                : preview && <div className="cli-import-messages">
+                  {preview.omittedMessages > 0 && <p className="cli-import-omitted">{plural(preview.omittedMessages, "earlier message")} not shown.</p>}
+                  {preview.messages.map((message, index) => <article key={index} className={`cli-import-message is-${message.role}`}
+                    aria-label={message.role === "user" ? "You" : cliProviderLabel(preview.candidate.providerId)}>
+                    <p>{message.content}</p>
+                  </article>)}
+                </div>}
+            </div>
+            <div className="cli-import-actions">
+              {status && <p className="cli-import-status" role={error ? "alert" : "status"}>{status}</p>}
+              {preview && <button type="button" className={openedId || !alreadyImported ? "primary-button" : "secondary-button"}
+                aria-disabled={openedId ? false : importUnavailable} aria-keyshortcuts={importShortcut} onClick={runAction}>
+                {openedId ? <ArrowRight size={14} aria-hidden="true" /> : busy === "import" ? <span className="loading-mark" aria-hidden="true" /> : alreadyImported ? <Check size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
+                {openedId ? "Open chat" : busy === "import" ? "Importing…" : alreadyImported ? "Already imported" : "Import conversation"}
+              </button>}
+            </div>
+          </div>
+            : galleryState ? <p className="cli-import-state" role={error ? "alert" : busy === "scan" ? "status" : undefined}>{galleryState}</p>
+              : <div ref={gallery} className="cli-import-gallery" role="list" aria-label="CLI conversations" onKeyDown={onGalleryKeyDown}>
+                {rows.map((item, index) => {
+                  return <div key={item.id} role="listitem" className="cli-import-cell" style={{ "--cli-import-index": Math.min(index, 10) } as React.CSSProperties}>
+                    <button type="button" id={cardId(item.id)} className="cli-import-card" aria-label={accessibleName(item)}
+                      aria-disabled={disabled} onClick={() => void open(item.id)}>
+                      <ProviderBrandIcon providerId={item.providerId} size={56} decorative className="cli-import-card-watermark" />
+                      <span className="cli-import-card-title">{item.title}</span>
+                      <span className="cli-import-mini" aria-hidden="true">
+                        <span className="cli-import-mini-user">{item.opening.user}</span>
+                        {item.opening.assistant && <span className="cli-import-mini-reply">{item.opening.assistant}</span>}
+                      </span>
+                      <span className="cli-import-card-meta">
+                        <ProviderBrandIcon providerId={item.providerId} size={16} decorative />
+                        <time dateTime={item.updatedAt}>{cardLabel(new Date(item.updatedAt))}</time>
+                        {item.importedConversationId && <span>Imported</span>}
+                      </span>
+                    </button>
+                  </div>;
+                })}
               </div>}
-            {scan && !candidates.length && <p className="cli-import-list-empty">{scan.candidates.length ? "No conversations match your search." : "No supported conversations found for this project folder. Conversations from other checkouts belong to their own project."}</p>}
-          </aside>
-          <div className="cli-import-preview" aria-label="Conversation preview" aria-busy={busy === "preview"}>
-            {busy === "preview" ? <p className="cli-import-placeholder" role="status"><span className="loading-mark" aria-hidden="true" />Loading preview…</p> : preview ? <>
-              <div className="cli-import-preview-heading">
-                <h3>{preview.candidate.title}</h3>
-                <p>{providerLabel(preview.candidate.providerId)} · {plural(preview.messages.length, "text message")}</p>
-              </div>
-              <div className="cli-import-messages">
-                {preview.omittedMessages > 0 && <p className="cli-import-omitted">{plural(preview.omittedMessages, "earlier message")} not shown. The CLI session keeps its full history.</p>}
-                {preview.messages.map((message, index) => <article key={index} className={`cli-import-message is-${message.role}`}>
-                  <h4>{message.role === "user" ? "You" : providerLabel(preview.candidate.providerId)}</h4>
-                  <p>{message.content}</p>
-                </article>)}
-              </div>
-            </> : <p className="cli-import-placeholder">{scan && !scan.candidates.length ? "Nothing to preview." : "Select a conversation to preview its messages."}</p>}
-          </div>
         </div>
-        <footer className="cli-import-footer">
-          <div className="cli-import-footer-status">
-            {error ? <p className="cli-import-error" role="alert"><AlertCircle size={14} aria-hidden="true" />{diagnosticErrorReference(error).message}</p>
-              : imported ? <p className="cli-import-success" role="status"><Check size={14} aria-hidden="true" />Imported. Find this conversation in {project.name}’s chat list.</p>
-                : <>
-                  <p>Continues the original CLI session. Close it in your terminal before sending here.</p>
-                  <small>Text history only. Tool output, thinking, and media are not copied. Long messages may be shortened.</small>
-                </>}
-          </div>
-          <button type="button" className={alreadyImported ? "secondary-button" : "primary-button"} aria-disabled={importUnavailable}
-            onClick={() => void importConversation()}>
-            {busy === "import" ? <span className="loading-mark" aria-hidden="true" /> : alreadyImported ? <Check size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
-            {busy === "import" ? "Importing…" : alreadyImported ? "Already imported" : "Import conversation"}
-          </button>
-        </footer>
       </section>
     </div>, document.body,
   );

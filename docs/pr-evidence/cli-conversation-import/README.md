@@ -16,29 +16,34 @@ candidate or preview title may be clipped.
 
 ## What changed
 
-- The dialog is a portalled `.dialog-backdrop` dialog like the file editor:
-  a 36px `.dialog-icon`, "Import CLI conversations" as the heading that names
-  it, one muted line naming the project, and the shared `IconButton` close.
-  It no longer inherits the Project settings button styles.
-- The search field, provider select and "Scan again" share one 32px control
-  height, the form-field border and fill, and one focus ring.
-- The list label is sentence case ("3 conversations"). Rows are plain
-  buttons: provider glyph, title that wraps in full, and one meta line
-  ("Codex · 25 Sep 2026 · Imported"). Selection uses the shared selected
-  surface, with no accent border.
-- User messages in the preview use the timeline's user-request tint, aligned
-  right; replies are plain text under the provider name.
-- Scan notes (limited scan, skipped files) sit under the list label.
-  Failures, the import result and the session note share the footer's status
-  line, so nothing above the panes moves. Diagnostic incident references are
-  left to the app-level error toast.
-- "Already imported" is a quiet secondary button. Busy and unavailable
-  buttons use `aria-disabled`, so keyboard focus stays on "Import
-  conversation" through "Importing…" and "Already imported".
-- The settings entry is one Row in the existing Checkout card instead of a
-  card of its own.
-- All sizes come from the font, radius, control-height and motion tokens; the
-  stylesheet is multi-line and has no literal colours or shadows.
+- The importer is an 820px gallery, at most 80% of the viewport tall. Its
+  first row is a borderless search field with a quiet "All · Codex · Claude"
+  text toggle (`aria-pressed`), an icon-only "Scan again" button that spins
+  while scanning, and the shared close button.
+- Each conversation is a card in a two-column grid (one column when the
+  dialog is narrower than 720px): the title, a miniature of the first request
+  and reply in the transcript styling that fades into the card, and the date,
+  time and "Imported" beside a small provider logo. A large provider logo
+  sits in the corner at low opacity. Cards lift on hover and reveal with a
+  short stagger. Miniatures come from the opening exchange in the scan, so
+  the gallery makes no extra requests.
+- Cards are buttons in a list, named by title, provider, full date and
+  import state; the miniature is hidden from assistive technology. Arrow
+  Down from the search field reaches the first card and arrow keys move
+  between cards.
+- Choosing a card crossfades into the full conversation with a back control,
+  the title, the transcript and the import button. The view always fetches a
+  fresh preview so an import uses the current revision. Escape goes back to
+  the gallery and returns focus to the card; Escape in the gallery closes the
+  importer.
+- After an import the button becomes "Open chat", which closes the importer
+  and opens the chat. Cmd+Enter on macOS or Ctrl+Enter elsewhere runs the
+  button. "Already imported" stays a quiet secondary button; busy buttons
+  use `aria-disabled`, so focus stays put.
+- Empty, scanning and error states are one centred muted sentence, and all
+  motion is off under reduced motion.
+- The settings entry is one Row in the Checkout card: "Import Codex and
+  Claude Code conversations started in this checkout."
 
 ## Before and after
 

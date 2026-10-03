@@ -25,6 +25,7 @@ interface Props {
   settings: AppSettings;
   disabled: boolean;
   request?: IssueReportSettingsProps["request"];
+  onOpenConversation?: (conversationId: string) => void;
   onUpdateSettings: (settings: Partial<AppSettings>) => void;
 }
 
@@ -42,7 +43,7 @@ function ProjectSelect({ label, value, disabled, options, onChange }: {
   </select>;
 }
 
-function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
+function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onOpenConversation, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
   const preferences = project.preferences ?? defaultProjectPreferences();
   const [budget, setBudget] = useState(String(preferences.claudeMaxBudgetUsd ?? ""));
   const budgetErrorId = useId();
@@ -148,9 +149,9 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </Row>
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>
-    {cliImportOpen && request && <Suspense fallback={null}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} /></Suspense>}
+    {cliImportOpen && request && <Suspense fallback={null}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} onOpenConversation={onOpenConversation} /></Suspense>}
     <section className="project-settings-card" aria-label="Checkout settings">
-      <Row title="CLI conversations" description="Import Codex and Claude Code conversations started in this checkout. The original files are not changed.">
+      <Row title="CLI conversations" description="Import Codex and Claude Code conversations started in this checkout.">
         <button type="button" disabled={blocked} onClick={() => setCliImportOpen(true)}>Import conversations…</button>
       </Row>
       <Row title="Project grouping" description="How this checkout joins project groups in navigation.">

@@ -99,18 +99,22 @@ test("imports both native histories, persists duplicates across restart, and res
   await openImporter(app.page);
   const dialog = app.page.getByRole("dialog", { name: "Import CLI conversations" });
   await dialog.getByRole("button", { name: new RegExp(codexTitle, "u") }).click();
-  await expect(dialog.getByText("Codex · 4 text messages", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("group", { name: codexTitle })).toBeVisible();
   await capture(info, "cli-import-preview-light");
   await dialog.getByRole("button", { name: "Import conversation", exact: true }).click();
   await expect.poll(async () => {
     const error = await dialog.getByRole("alert").allTextContents();
-    return error.length ? error.join("\n") : await dialog.locator(".cli-import-footer button").innerText();
-  }).toBe("Already imported");
+    return error.length ? error.join("\n") : await dialog.locator(".cli-import-actions button").innerText();
+  }).toBe("Open chat");
+  await dialog.getByRole("button", { name: "Back to conversations", exact: true }).click();
   await dialog.getByRole("button", { name: new RegExp(claudeTitle, "u") }).click();
-  await expect(dialog.getByText("Claude Code · 2 text messages", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("group", { name: claudeTitle })).toBeVisible();
   await dialog.getByRole("button", { name: "Import conversation", exact: true }).click();
-  await expect(dialog.getByRole("status")).toContainText("Imported. Find this conversation");
-  await dialog.getByRole("button", { name: "Close CLI import" }).click();
+  await expect(dialog.getByRole("status")).toHaveText("Imported.");
+  await dialog.getByRole("button", { name: "Open chat", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(app.page.getByText("The settings panel needs a clear focus order, visible focus rings, and Escape to return to the previous view.", { exact: true })).toBeVisible();
+  await app.page.getByRole("complementary", { name: "Project navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
   await app.page.getByRole("button", { name: "General", exact: true }).click();
   await app.page.getByRole("radio", { name: "Dark", exact: true }).click();
   await openImporter(app.page);
@@ -157,8 +161,8 @@ async function expectDialogLayout(dialog: Locator): Promise<void> {
     nested: [...element.querySelectorAll("button")].filter((button) => button.parentElement?.closest("button")).length,
     overflowing: [...element.querySelectorAll<HTMLElement>("*")]
       .filter((node) => !["INPUT", "SELECT"].includes(node.tagName) && getComputedStyle(node).overflowX !== "visible"
-        && node.scrollWidth > node.clientWidth + 1).length,
-    truncatedTitles: [...element.querySelectorAll<HTMLElement>("button[aria-pressed] strong, h3")]
+        && getComputedStyle(node).textOverflow !== "ellipsis" && node.scrollWidth > node.clientWidth + 1).length,
+    truncatedTitles: [...element.querySelectorAll<HTMLElement>(".cli-import-message p, .cli-import-open-head h2")]
       .filter((title) => title.scrollWidth > title.clientWidth + 1 || title.scrollHeight > title.clientHeight + 1).length,
   }));
   expect(layout).toEqual({ nested: 0, overflowing: 0, truncatedTitles: 0 });
@@ -211,12 +215,13 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await captureState(info, "settings-row-dark-wide");
   await launcher.click();
   await expect(dialog.getByRole("button", { name: new RegExp(codexTitle, "u") })).toBeVisible();
+  await expect(dialog.locator(".cli-import-mini-reply")).toHaveCount(3);
   await expectDialogLayout(dialog);
   await captureState(info, "dialog-idle-dark-wide");
   await setAppearanceInPlace(app, "light");
   await captureState(info, "dialog-idle-light-wide");
   await dialog.getByRole("button", { name: new RegExp(codexTitle, "u") }).click();
-  await expect(dialog.getByText("Codex · 4 text messages", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("group", { name: codexTitle })).toBeVisible();
   await expectDialogLayout(dialog);
   await captureState(info, "dialog-preview-light-wide");
   await setAppearanceInPlace(app, "dark");
@@ -237,15 +242,16 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await captureState(info, "dialog-imported-dark-wide");
   await setAppearanceInPlace(app, "light");
   await captureState(info, "dialog-imported-light-wide");
+  await dialog.getByRole("button", { name: "Back to conversations", exact: true }).click();
   await dialog.getByRole("button", { name: /Audit the release checklist/u }).click();
-  await expect(dialog.getByRole("heading", { name: longTitle })).toBeVisible();
+  await expect(dialog.getByRole("group", { name: longTitle })).toBeVisible();
   await app.resizeWindow(1000, 800);
   await expectDialogLayout(dialog);
   await captureState(info, "dialog-long-title-light-narrow");
   await app.resizeWindow(1440, 920);
   await writeFile(unreadableFile, "{\"type\":\"session_meta\"");
   await dialog.getByRole("button", { name: "Scan again", exact: true }).click();
-  await expect(dialog.getByText(/skipped/u)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: new RegExp(claudeTitle, "u") })).toBeVisible();
   await rm(claudeFile);
   await dialog.getByRole("button", { name: new RegExp(claudeTitle, "u") }).click();
   await expect(dialog.getByRole("alert")).toContainText("no longer readable");
@@ -255,7 +261,7 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await captureState(info, "dialog-error-dark-wide");
   await rm(codexFile); await rm(longFile); await rm(unreadableFile);
   await dialog.getByRole("button", { name: "Scan again", exact: true }).click();
-  await expect(dialog.getByText(/No supported conversations/u)).toBeVisible();
+  await expect(dialog.getByText("No CLI conversations found.", { exact: true })).toBeVisible();
   await expectDialogLayout(dialog);
   await captureState(info, "dialog-empty-dark-wide");
   await setAppearanceInPlace(app, "light");

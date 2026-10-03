@@ -253,6 +253,7 @@ export const rendererDiagnosticSchema = z.object({
   context: diagnosticContextSchema.optional(),
 }).strict();
 export type RendererDiagnostic = z.infer<typeof rendererDiagnosticSchema>;
+export const diagnosticCaptureSchema = z.boolean();
 
 /** Content is omitted, not redacted heuristically: no caller-supplied prose is accepted. */
 export function parseDiagnosticIncident(value: unknown): DiagnosticIncident | null {

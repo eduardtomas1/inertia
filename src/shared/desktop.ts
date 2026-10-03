@@ -619,6 +619,8 @@ export interface DesktopBridge {
   copyDiagnostics: (query: DiagnosticQuery) => Promise<{ copied: boolean; count: number }>;
   exportDiagnostics: (query: DiagnosticQuery) => Promise<{ status: "exported" | "cancelled" }>;
   reportValidationDiagnostic: (report: RendererDiagnostic) => Promise<{ incidentId: string } | null>;
+  setDiagnosticsCapture: (enabled: boolean) => Promise<{ enabled: boolean; since: string | null }>;
+  clearDiagnostics: () => Promise<{ cleared: true }>;
   onDiagnosticsChanged: (listener: () => void) => () => void;
   /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */
   copyRuntimeDiagnosticReport: (

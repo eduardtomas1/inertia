@@ -11,6 +11,7 @@ import type {
   RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
+import { SettingDisclosure } from "./settings/SettingsLayout";
 
 const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   images: "Images",
@@ -93,8 +94,7 @@ export function LifecycleIntegritySettings(
               : "Optional provider features remain unavailable until version and protocol evidence match this manifest."}
           </small>
           {contract.capabilities && (
-            <details className="provider-settings-capability-details">
-              <summary>Feature availability</summary>
+            <SettingDisclosure className="provider-settings-capability-details" summary="Feature availability">
               <ul aria-label={`${props.provider.label} feature availability`}>
                 {contract.capabilities.filter(({ id }) => CAPABILITY_LABELS[id]).map(({ id, state }) => (
                   <li key={id}>
@@ -106,7 +106,7 @@ export function LifecycleIntegritySettings(
                 ))}
               </ul>
               <p>Availability can also depend on the model and settings of each chat.</p>
-            </details>
+            </SettingDisclosure>
           )}
         </div>
       </div>

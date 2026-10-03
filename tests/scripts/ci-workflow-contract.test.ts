@@ -200,7 +200,7 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
     expect(step.if.includes("matrix.shard != '2/2'")).toBe(step.if.startsWith("runner.os != 'Linux'"));
   }
   expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Keep provider settings visual evidence").if)
-    .toContain("matrix.phase == 'display-sensitive'");
+    .toContain("matrix.phase == 'isolated'");
   const benchmarks = workflow.jobs.electron.steps.filter((step: { run?: string }) => step.run?.includes("benchmark:desktop"));
   expect(benchmarks).toHaveLength(1);
   expect(benchmarks[0].if).toContain("matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'");

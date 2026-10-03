@@ -29,10 +29,7 @@ import {
   runGit,
   runGitInspection,
 } from "./runner";
-import {
-  getRepositoryStatus,
-  hasHead,
-} from "./status";
+import { inspectRepositoryStatusAndHead } from "./status";
 import { getUnifiedDiff } from "./diff";
 import {
   bufferHash,
@@ -311,8 +308,8 @@ async function buildReversalState(
   secureRoot: SecureFileRootCapability,
   workspace?: ReversalWorkspaceScope,
 ): Promise<ReversalState> {
-  if (!(await hasHead(root))) throw new GitError("invalid-input", "Selective reversal requires a repository with an initial commit.");
-  const status = await getRepositoryStatus(root);
+  const { status, hasCurrentHead } = await inspectRepositoryStatusAndHead(root, {});
+  if (!hasCurrentHead) throw new GitError("invalid-input", "Selective reversal requires a repository with an initial commit.");
   if (status.truncated) throw new GitError("output-limit", "The complete Git status is too large to validate safely.");
   const statusFile = status.files.find((candidate) => candidate.path === selection.filePath);
   if (!statusFile) throw new GitError("not-found", "The selected file is no longer changed.");

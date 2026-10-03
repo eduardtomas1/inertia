@@ -11,8 +11,9 @@ import {
   utf8Prefix,
 } from "./runner";
 import {
-  getRepositoryStatus,
   hasHead,
+  inspectRepositoryStatusAndHead,
+  resolvedRepositoryStatus,
 } from "./status";
 import {
   GitError,
@@ -116,11 +117,19 @@ export async function getUnifiedDiff(
     DEFAULT_DIFF_BYTES,
     MAX_DIFF_BYTES,
   );
-  const status = await getRepositoryStatus(root, {
-    deadlineAt: options.deadlineAt,
-    signal: options.signal,
-    scan: options.statusScan,
-  });
+  const { status, hasCurrentHead } = options.statusScan
+    ? {
+        status: await resolvedRepositoryStatus(root, {
+          deadlineAt: options.deadlineAt,
+          signal: options.signal,
+          scan: options.statusScan,
+        }),
+        hasCurrentHead: undefined,
+      }
+    : await inspectRepositoryStatusAndHead(root, {
+        deadlineAt: options.deadlineAt,
+        signal: options.signal,
+      });
   const requested = options.paths
     ? await validatedPaths(root, options.paths, {
         deadlineAt: options.deadlineAt,
@@ -151,7 +160,7 @@ export async function getUnifiedDiff(
       "--unified=3",
       ...(options.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
-    const args = (await hasHead(root, {
+    const args = (hasCurrentHead ?? await hasHead(root, {
       deadlineAt: options.deadlineAt,
       signal: options.signal,
     }))

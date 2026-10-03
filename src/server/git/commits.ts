@@ -20,6 +20,7 @@ import { FILE_OPEN_NO_FOLLOW } from
 import { NETWORK_TIMEOUT_MS } from "./constants";
 import {
   repositoryRoot,
+  revParseValues,
   validatedPaths,
 } from "./paths";
 import {
@@ -28,12 +29,12 @@ import {
   withPreparedGitRefReservation,
   withPreparedGitRefUpdate,
 } from "./runner";
-import { getRepositoryStatus, hasHead } from "./status";
+import { headCommit, resolvedRepositoryStatus } from "./status";
 import {
   deriveGitCommitSelection,
   gitCommitReviewFingerprintsEqual,
   prepareGitCommitSelection,
-  prepareGitCommitReview,
+  prepareResolvedGitCommitReview,
   requireGitCommitReviewFingerprint,
 } from "./commit-review";
 import {
@@ -61,6 +62,15 @@ import { recoverCommitTransaction } from "./commit-recovery";
 const MAX_INDEX_BYTES = 256 * 1024 * 1024;
 const REFERENCE_LOCK_RELEASE_GRACE_MS = 500;
 const REFERENCE_LOCK_POLL_MS = 10;
+const COMMIT_POLICY_STATES = [
+  "MERGE_HEAD",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+  "BISECT_START",
+  "rebase-apply",
+  "rebase-merge",
+  "sequencer",
+] as const;
 const COMMIT_POLICY_HOOKS = [
   "pre-commit",
   "prepare-commit-msg",
@@ -183,14 +193,7 @@ async function headState(
   root: string,
   options: { deadlineAt?: number } = {},
 ): Promise<CommitHeadState> {
-  const currentHasHead = await hasHead(root, options);
-  const head = currentHasHead
-    ? (await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
-        deadlineAt: options.deadlineAt,
-        maxOutputBytes: 256,
-        failureMessage: "Unable to verify the reviewed commit parent.",
-      })).stdout.toString("utf8").trim()
-    : null;
+  const head = await headCommit(root, options);
   let headRef: string | null = null;
   try {
     const symbolicHead = await runGitInspection(
@@ -278,14 +281,14 @@ async function ensureReviewedCommitPolicy(
       "Reviewed commits currently require Git's files reference format.",
     );
   }
-  const gitDirectory = stripTerminalEol((await runGitInspection(root, [
-    "rev-parse",
-    "--absolute-git-dir",
+  const [gitDirectory, hooksPath, ...statePaths] = await revParseValues(root, [
+    ["--absolute-git-dir"],
+    ...["hooks", ...COMMIT_POLICY_STATES].map((name) =>
+      ["--path-format=absolute", "--git-path", name]),
   ], {
     deadlineAt: options.deadlineAt,
-    maxOutputBytes: 4_096,
     failureMessage: "Unable to locate the repository Git directory.",
-  })).stdout.toString("utf8"));
+  });
   const headPath = join(gitDirectory, "HEAD");
   const headInfo = await lstat(headPath).catch(() => null);
   if (!headInfo?.isFile()) {
@@ -294,26 +297,8 @@ async function ensureReviewedCommitPolicy(
       "Reviewed commits require a regular Git HEAD file; symlink reference mode is not supported.",
     );
   }
-  for (const name of [
-    "MERGE_HEAD",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "BISECT_START",
-    "rebase-apply",
-    "rebase-merge",
-    "sequencer",
-  ]) {
-    const statePath = stripTerminalEol((await runGitInspection(root, [
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-path",
-      name,
-    ], {
-      deadlineAt: options.deadlineAt,
-      maxOutputBytes: 4_096,
-      failureMessage: "Unable to verify the repository operation state.",
-    })).stdout.toString("utf8"));
-    if (await pathExists(statePath)) {
+  for (const [index, name] of COMMIT_POLICY_STATES.entries()) {
+    if (await pathExists(statePaths[index])) {
       throw new GitError(
         "conflict",
         name === "rebase-apply"
@@ -347,17 +332,6 @@ async function ensureReviewedCommitPolicy(
       "Reviewed commits are unavailable while a custom Git hooks path is configured.",
     );
   }
-  const hooks = await runGitInspection(root, [
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-path",
-    "hooks",
-  ], {
-    deadlineAt: options.deadlineAt,
-    maxOutputBytes: 4_096,
-    failureMessage: "Unable to verify the repository hook policy.",
-  });
-  const hooksPath = stripTerminalEol(hooks.stdout.toString("utf8"));
   for (const hook of COMMIT_POLICY_HOOKS) {
     await access(`${hooksPath}/${hook}`, fsConstants.F_OK).then(() => {
       throw new GitError(
@@ -376,40 +350,17 @@ async function ensureReviewedCommitPolicy(
   }
 }
 
-async function commitIndexPath(root: string): Promise<string> {
-  return (await runGitInspection(root, [
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-path",
-    "index",
-  ], {
-    maxOutputBytes: 4_096,
-    failureMessage: "Unable to locate the repository index.",
-  })).stdout.toString("utf8").replace(/(?:\r\n|\n)$/u, "");
-}
-
-async function commitHeadPath(root: string): Promise<string> {
-  return stripTerminalEol((await runGitInspection(root, [
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-path",
-    "HEAD",
-  ], {
-    maxOutputBytes: 4_096,
-    failureMessage: "Unable to locate the repository HEAD.",
-  })).stdout.toString("utf8"));
-}
-
-async function commitRefPath(root: string, ref: string): Promise<string> {
-  return stripTerminalEol((await runGitInspection(root, [
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-path",
-    ref,
-  ], {
-    maxOutputBytes: 4_096,
-    failureMessage: "Unable to locate the reviewed branch reference.",
-  })).stdout.toString("utf8"));
+async function commitPaths(
+  root: string,
+  ref: string,
+): Promise<{ indexPath: string; headPath: string; refPath: string }> {
+  const [indexPath, headPath, refPath] = await revParseValues(
+    root,
+    ["index", "HEAD", ref].map((name) =>
+      ["--path-format=absolute", "--git-path", name]),
+    { failureMessage: "Unable to locate the repository index." },
+  );
+  return { indexPath, headPath, refPath };
 }
 
 async function referenceOid(root: string, ref: string): Promise<string | null> {
@@ -444,7 +395,7 @@ async function reviewedCommitResult(
     await beforeStatus?.();
     return {
       commit,
-      status: await getRepositoryStatus(root),
+      status: await resolvedRepositoryStatus(root),
       ...(refreshWarning ? { refreshWarning } : {}),
     };
   } catch {
@@ -545,7 +496,7 @@ export async function commitReviewedChanges(
   const expected = requireGitCommitReviewFingerprint(
     expectedReviewFingerprint,
   );
-  const prepared = await prepareGitCommitReview(root, options);
+  const prepared = await prepareResolvedGitCommitReview(root, options);
   let finalSelection: Awaited<ReturnType<typeof prepareGitCommitSelection>> | null = null;
   try {
     const current = prepared.capture;
@@ -638,7 +589,10 @@ export async function commitReviewedChanges(
         "The selected files have no changes to commit.",
       );
     }
-    const indexPath = await commitIndexPath(root);
+    const { indexPath, headPath, refPath } = await commitPaths(
+      root,
+      currentHead.headRef,
+    );
     const originalIndex = await readRegularFile(indexPath);
     const originalIndexHash = digest(originalIndex);
     await options.verifyRepositoryIdentity?.();
@@ -672,8 +626,6 @@ export async function commitReviewedChanges(
       options.deadlineAt,
     );
     const lockPath = `${indexPath}.lock`;
-    const headPath = await commitHeadPath(root);
-    const refPath = await commitRefPath(root, currentHead.headRef);
     const journalPath = `${indexPath}.inertia-commit-transaction.json`;
     const stagePath = createPrivateIndexStagePath(indexPath);
     const reservationToken = randomBytes(32).toString("hex");

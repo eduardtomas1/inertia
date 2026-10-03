@@ -161,18 +161,18 @@ export interface GitStatusOptions {
   scan?: Omit<GitScanRequest, "deadlineAt" | "optionsKey" | "signal">;
 }
 
-export async function hasHead(
+export async function headCommit(
   root: string,
   options: GitStatusOptions = {},
-): Promise<boolean> {
+): Promise<string | null> {
   try {
-    await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
+    const result = await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
       deadlineAt: options.deadlineAt,
       signal: options.signal,
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
     });
-    return true;
+    return result.stdout.toString("utf8").trim();
   } catch (error) {
     if (
       error instanceof GitError
@@ -180,10 +180,17 @@ export async function hasHead(
       && !options.signal?.aborted
       && !isGitProcessTreeTerminationFailure(error)
     ) {
-      return false;
+      return null;
     }
     throw error;
   }
+}
+
+export async function hasHead(
+  root: string,
+  options: GitStatusOptions = {},
+): Promise<boolean> {
+  return await headCommit(root, options) !== null;
 }
 
 export async function getRepositoryStatus(
@@ -192,6 +199,13 @@ export async function getRepositoryStatus(
 ): Promise<GitRepositoryStatus> {
   const root = options.scan?.identity.repositoryRoot
     ?? await repositoryRoot(repositoryPath, options);
+  return await resolvedRepositoryStatus(root, options);
+}
+
+export async function resolvedRepositoryStatus(
+  root: string,
+  options: GitStatusOptions = {},
+): Promise<GitRepositoryStatus> {
   if (options.scan) {
     return await gitScanCoordinator.request({
       ...options.scan,
@@ -210,6 +224,13 @@ async function inspectRepositoryStatus(
   root: string,
   options: GitStatusOptions,
 ): Promise<GitRepositoryStatus> {
+  return (await inspectRepositoryStatusAndHead(root, options)).status;
+}
+
+export async function inspectRepositoryStatusAndHead(
+  root: string,
+  options: Omit<GitStatusOptions, "scan">,
+): Promise<{ status: GitRepositoryStatus; hasCurrentHead: boolean }> {
   const statusResult = await runGitInspection(
     root,
     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
@@ -266,7 +287,7 @@ async function inspectRepositoryStatus(
     const values = stats.get(file.path);
     if (values) Object.assign(file, values);
   }
-  return {
+  const status: GitRepositoryStatus = {
     root,
     branch: parsed.branch,
     detached: parsed.detached,
@@ -288,4 +309,5 @@ async function inspectRepositoryStatus(
     truncated:
       parsed.truncated || statusResult.truncated || statsResult.truncated,
   };
+  return { status, hasCurrentHead };
 }

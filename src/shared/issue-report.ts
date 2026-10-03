@@ -1,7 +1,6 @@
 import { z } from "zod";
-import type { ProviderId } from "./contracts";
 
-export const REPORT_PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const satisfies readonly ProviderId[];
+export const REPORT_PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
 const providerIdSchema = z.enum(REPORT_PROVIDER_IDS);
 
 export const ISSUE_REPOSITORY = "eduardtomas1/inertia";

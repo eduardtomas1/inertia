@@ -18,10 +18,10 @@
   min-height: var(--control-height);
   box-sizing: border-box;
   padding: 7px 10px;
-  border: 1px solid var(--border-strong);
+  border-width: 1px;
+  border-style: solid;
   border-radius: var(--radius-small);
   color: var(--text);
-  background: var(--surface-strong);
   font: inherit;
   font-weight: 450;
   line-height: 1.5;
@@ -39,11 +39,11 @@
   line-height: 1.6;
 }
 
-.issue-report-field :is(input, textarea, select):hover:not(:disabled) {
+.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled) {
   border-color: var(--interactive-border-hover);
 }
 
-.issue-report-field :is(input, textarea, select):focus-visible {
+.settings-content .issue-report-field :is(input, textarea, select):focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-color: var(--accent);
@@ -55,7 +55,6 @@
 
 .issue-report-field :is(input, textarea)[readonly] {
   color: var(--text-soft);
-  background: var(--surface);
 }
 
 .issue-report-provider {

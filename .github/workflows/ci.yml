@@ -749,7 +749,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.classify.outputs.electron_matrix_json) }}
-      max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
+      max-parallel: ${{ github.event_name == 'schedule' && 2 || 10 }}
     env:
       CI: "true"
       INERTIA_CI_TIMINGS: "true"
@@ -813,10 +813,10 @@ jobs:
         env:
           # Bound Windows load after hosted socket-buffer exhaustion.
           INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
-        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
+        run: npm exec -- playwright test --project=isolated ${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }} --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially
-        if: runner.os != 'Linux' && (matrix.phase == 'isolated' || matrix.phase == 'runtime-recovery')
+        if: runner.os != 'Linux' && ((matrix.phase == 'isolated' && matrix.shard != '2/2') || matrix.phase == 'runtime-recovery')
         run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Run display-sensitive Electron end-to-end tests under Xvfb

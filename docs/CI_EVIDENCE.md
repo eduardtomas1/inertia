@@ -54,7 +54,8 @@ macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
 remain single-worker; Windows ARM64 retains its portable/native obligations.
 Windows Electron remains one worker, other isolated desktop projects two. The
 desktop Electron projects run in two jobs per complete target, display-sensitive
-and isolated followed by runtime-recovery (see package evidence below). The package job itself has no Playwright
+and isolated followed by runtime-recovery; Windows splits its isolated project
+across two single-worker runners (see package evidence below). The package job itself has no Playwright
 step.
 The isolated browser-evidence CPU budget remains in CI quality and on each
 release target, separate from instrumented coverage.
@@ -125,7 +126,13 @@ with its own `npm run build:packaged` for its exact source/target/configuration:
   both jobs. The first runs the single-worker display-sensitive project and, on
   Linux x64, keeps the provider-settings screenshots. The second runs the
   isolated project and then the sequential runtime-recovery project, followed
-  on Linux x64 by the desktop benchmark when one is planned. Outside the
+  on Linux x64 by the desktop benchmark when one is planned. Windows keeps one
+  Electron instance per runner, so both Windows architectures replace the
+  isolated job with `<label> Electron (isolated 1/2)` and
+  `<label> Electron (isolated 2/2)`, each running
+  `playwright test --project=isolated --shard=N/2` with one worker. Playwright
+  shards by whole spec file in the unsharded order, and only shard 1 runs the
+  runtime-recovery project afterwards. Outside the
   nightly, a sibling architecture runs only the runtime-recovery project as
   `<label> Electron (runtime-recovery)`. Each job builds the exact candidate on
   a separate runner and uploads its compact timing report under its own phase.
@@ -180,8 +187,13 @@ minutes (display 11.4, isolated 13.3, recovery 0.9) and Linux x64 Electron 21.2
 (11.4, 7.5, 0.8). Every complete target therefore runs display-sensitive and
 isolated-plus-recovery as two jobs, which costs one additional install and
 build per target, and the recovery project, about one to two minutes, no
-longer needs a runner of its own. Full-suite jobs precede recovery-only
-siblings in the matrix so the longest jobs start first under `max-parallel`.
+longer needs a runner of its own. After page-driven scenarios moved to the
+isolated lane, Windows x64 carried about 1,190 seconds of single-worker
+isolated test time against about 490 seconds of display-sensitive time, so the
+Windows isolated project is sharded in two rather than run with a second
+worker. Full-suite jobs precede recovery-only siblings in the matrix, and
+outside the nightly the Electron matrix may run ten jobs at once, which covers
+every pull-request tier without queueing behind `max-parallel`.
 The matrices may request six macOS runners across both architectures; hosted
 concurrency limits can queue jobs. The gain must be measured from completed
 hosted runs, not inferred from the sum of phase times.

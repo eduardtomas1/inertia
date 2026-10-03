@@ -63,15 +63,20 @@ export function createEvidencePlan({
         || (domains.has("macos_packaging") && artifact.startsWith("macos-"))
       ));
   const platforms = selectedPlatforms.map(({ artifact }) => artifact);
-  const phaseEntry = (platform, phase) => ({
-    ...platform, phase, check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${phase})`,
-    evidence_artifact: `${platform.artifact}-${phase}`,
+  const shardSlug = (shard) => (shard ? `-${shard.replace("/", "-of-")}` : "");
+  const phaseEntry = (platform, phase, shard = null) => ({
+    ...platform, phase, ...(shard && { shard }),
+    check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${shard ? `${phase} ${shard}` : phase})`,
+    evidence_artifact: `${platform.artifact}-${phase}${shardSlug(shard)}`,
   });
+  const isolatedShards = (platform) => (platform.artifact.startsWith("windows-") ? ["1/2", "2/2"] : [null]);
   const recoveryOnly = (platform) => !completeSiblings
     && !PRIMARY_PLATFORM_ARTIFACTS.includes(platform.artifact);
   const electronPlatforms = [
-    ...selectedPlatforms.filter((platform) => !recoveryOnly(platform)).flatMap((platform) => (
-      ["display-sensitive", "isolated"].map((phase) => phaseEntry(platform, phase)))),
+    ...selectedPlatforms.filter((platform) => !recoveryOnly(platform)).flatMap((platform) => [
+      phaseEntry(platform, "display-sensitive"),
+      ...isolatedShards(platform).map((shard) => phaseEntry(platform, "isolated", shard)),
+    ]),
     ...selectedPlatforms.filter(recoveryOnly).map((platform) => phaseEntry(platform, "runtime-recovery")),
   ];
   const code = lane !== "main-reused" && (!changes.documentationOnly || full);
@@ -122,7 +127,8 @@ export function createEvidencePlan({
       ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
       ...selectedPlatforms.flatMap((platform) => recoveryOnly(platform)
         ? [`${platform.artifact}:electron-recovery`]
-        : [`${platform.artifact}:electron-display-sensitive`, `${platform.artifact}:electron-isolated-recovery`]),
+        : [`${platform.artifact}:electron-display-sensitive`, ...isolatedShards(platform).map((shard) => (
+          `${platform.artifact}:electron-isolated${shardSlug(shard)}${shard === "2/2" ? "" : "-recovery"}`))]),
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },

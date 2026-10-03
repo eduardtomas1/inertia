@@ -69,7 +69,8 @@ describe("explainable CI plan", () => {
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Windows x64", "macOS arm64",
       "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
-      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated)",
+      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated 1/2)",
+      "Windows x64 Electron (isolated 2/2)",
       "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
@@ -80,7 +81,7 @@ describe("explainable CI plan", () => {
     expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
     for (const missingName of [
       "Linux x64", "Windows x64", "macOS arm64", "Linux x64 Electron (display-sensitive)",
-      "Windows x64 Electron (isolated)", "macOS arm64 Electron (isolated)",
+      "Windows x64 Electron (isolated 2/2)", "macOS arm64 Electron (isolated)",
     ]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
@@ -98,7 +99,8 @@ describe("explainable CI plan", () => {
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
       "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
-      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated)",
+      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated 1/2)",
+      "Windows x64 Electron (isolated 2/2)",
       "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
       "Linux ARM64 Electron (runtime-recovery)", "Windows ARM64 Electron (runtime-recovery)",
       "macOS x64 Electron (runtime-recovery)",
@@ -142,7 +144,7 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(9);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(10);
   });
 
   it.each([
@@ -154,7 +156,7 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(6);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(7);
   });
 
   it("missing baseline overrides an apparently harmless latest push", () => {
@@ -168,6 +170,10 @@ describe("explainable CI plan", () => {
     expect(selected.suites).toContain("linux-x64:electron-display-sensitive");
     expect(selected.suites).toContain("linux-x64:electron-isolated-recovery");
     expect(selected.suites).not.toContain("macos-x64:electron-recovery");
+    expect(selected.suites.filter((suite) => suite.startsWith("windows-arm64:electron-"))).toEqual([
+      "windows-arm64:electron-display-sensitive", "windows-arm64:electron-isolated-1-of-2-recovery",
+      "windows-arm64:electron-isolated-2-of-2",
+    ]);
     expect(selected.suites.filter((suite) => suite.includes("upgrade"))).toEqual([
       "windows-x64:published-N-1-installed-upgrade",
       "windows-arm64:published-N-1-installed-upgrade",
@@ -175,7 +181,10 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.electronMatrix.include.map(({ check }) => check)).toEqual(
       ["Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64"].flatMap((label) => [
-        `${label} Electron (display-sensitive)`, `${label} Electron (isolated)`,
+        `${label} Electron (display-sensitive)`,
+        ...(label.startsWith("Windows")
+          ? [`${label} Electron (isolated 1/2)`, `${label} Electron (isolated 2/2)`]
+          : [`${label} Electron (isolated)`]),
       ]),
     );
   });

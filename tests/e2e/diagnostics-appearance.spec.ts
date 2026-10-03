@@ -140,6 +140,13 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
+
+  await page.getByRole("button", { name: "Archive & data", exact: true }).click();
+  await page.getByRole("heading", { name: "Local data", exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByText("Local storage", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy support summary", exact: true })).toHaveCount(0);
+  await app.expectNoViewportOverflow();
+  await capture(page, info, "archive-data-dark-wide");
   expect(app.rendererErrors).toEqual([]);
 });
 

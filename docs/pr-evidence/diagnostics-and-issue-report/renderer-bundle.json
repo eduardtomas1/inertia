@@ -1,0 +1,21 @@
+{
+  "baseline": "1053edf2",
+  "method": "Node 22 production electron-vite builds of origin/main and this branch on macOS arm64. The Diagnostics chunk absorbs the support summary, log folder and lifecycle state from LifecycleIntegritySettings and process health from SettingsView, and adds the capture switch, clear confirmation and merged event list. Its ceiling is main's ceiling plus the measured growth.",
+  "changedBudgets": {
+    "deferredDiagnosticsJavaScript": {
+      "baselineBytes": 12325,
+      "implementationBytes": 18089,
+      "deltaBytes": 5764,
+      "previousBudget": 13312,
+      "budget": 19076
+    }
+  },
+  "unchangedBudgets": {
+    "deferredDiagnosticCatalogJavaScript": { "baselineBytes": 9888, "implementationBytes": 9980, "budget": 12288 },
+    "settingsJavaScript": { "baselineBytes": 68657, "implementationBytes": 67937, "budget": 69397 },
+    "deferredLifecycleIntegritySettingsJavaScript": { "baselineBytes": 5285, "implementationBytes": 2202, "budget": 6222 },
+    "deferredDiscordSettingsJavaScript": { "baselineBytes": 5390, "implementationBytes": 5689, "budget": 6144 },
+    "mainWorkbenchFirstLoadJavaScript": { "baselineBytes": 860500, "implementationBytes": 860500 },
+    "entryCss": { "baselineBytes": 354855, "implementationBytes": 354855 }
+  }
+}

@@ -57,6 +57,7 @@ export class DailyWorkRepository {
         FROM agent_turns
         WHERE agent_turns.conversation_id = conversations.id
           AND agent_turns.association = 'authoritative'
+          AND agent_turns.origin IS NULL
           AND (
             (
               agent_turns.status IN ('completed', 'failed', 'cancelled', 'interrupted')
@@ -74,6 +75,7 @@ export class DailyWorkRepository {
       SELECT agent_turns.*
       FROM agent_turns
       WHERE agent_turns.association = 'authoritative'
+        AND agent_turns.origin IS NULL
         AND (
           (
             agent_turns.status IN ('completed', 'failed', 'cancelled', 'interrupted')

@@ -73,3 +73,13 @@ it("requires an explicit acknowledgment for uncertain report retirement", () => 
   expect(clientCommandSchema.safeParse({ ...command, payload: { ...payload, acknowledgeUncertainPublication: false } }).success).toBe(false);
   expect(clientCommandSchema.safeParse({ ...command, payload: { ...payload, acknowledgeUncertainPublication: true } }).success).toBe(true);
 });
+
+it("accepts only opaque project-scoped CLI import grants at the command boundary", () => {
+  const command = { type: "conversation.cli.import", requestId: "11111111-1111-4111-8111-111111111111",
+    payload: { projectId: "22222222-2222-4222-8222-222222222222", candidateId: "33333333-3333-4333-8333-333333333333", revision: "a".repeat(64) } };
+  expect(clientCommandSchema.safeParse(command).success).toBe(true);
+  for (const payload of [{ ...command.payload, path: "/private/transcript.jsonl" }, { ...command.payload, sessionId: "forged" },
+    { ...command.payload, candidateId: "../escape" }, { ...command.payload, revision: "stale" }]) {
+    expect(clientCommandSchema.safeParse({ ...command, payload }).success).toBe(false);
+  }
+});

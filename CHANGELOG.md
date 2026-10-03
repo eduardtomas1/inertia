@@ -2,6 +2,10 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+- Import existing Codex and Claude Code conversations from project settings. Preview local text history, avoid duplicate imports, and continue the original CLI session in Inertia. Source files stay unchanged.
+
 ## 0.0.65 — 2026-09-30
 
 Find help inside Inertia, hear when a task ends, choose your own light and

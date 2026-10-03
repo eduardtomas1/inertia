@@ -10,6 +10,7 @@ import { LimitResetScheduler, type LimitResetDependencies } from "../../src/serv
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
 import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
 import { queuedRouteIdentity } from "../../src/server/persistence/queued-message-repository";
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { providerUsageLimitsMigration } from "../../src/server/persistence/migrations/provider-usage-limits";
 import { UsageLimitsRepository } from "../../src/server/persistence/usage-limits-repository";
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
@@ -520,7 +521,7 @@ describe("schema 87 usage-limit tags", () => {
     const path = join(directory, "inertia.sqlite");
     store.close();
     const raw = new Database(path);
-    raw.exec("DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version = 87;");
+    raw.exec("DROP TABLE cli_conversation_imports; ALTER TABLE agent_turns DROP COLUMN origin; DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version >= 87;");
     raw.close();
     store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
     dependencies.store = store;
@@ -532,7 +533,7 @@ describe("schema 87 usage-limit tags", () => {
     const check = new Database(path, { readonly: true });
     try {
       expect(check.prepare("SELECT count(*) AS n FROM usage_limited_turns").get()).toEqual({ n: 0 });
-      expect(check.prepare("SELECT max(version) AS v FROM schema_migrations").get()).toEqual({ v: 87 });
+      expect(check.prepare("SELECT max(version) AS v FROM schema_migrations").get()).toEqual({ v: CURRENT_DATABASE_SCHEMA_VERSION });
     } finally { check.close(); }
   });
   it("cannot tag a turn that does not exist", () => {

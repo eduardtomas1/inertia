@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Folders, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
@@ -13,6 +13,8 @@ import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
 import "./ProjectSettings.css";
 
+const CliConversationImportDialog = lazy(async () => ({ default: (await import("./CliConversationImportDialog")).CliConversationImportDialog }));
+
 interface Props {
   initialProjectId?: string;
   projects: Project[];
@@ -23,6 +25,7 @@ interface Props {
   settings: AppSettings;
   disabled: boolean;
   request?: IssueReportSettingsProps["request"];
+  onOpenConversation?: (conversationId: string) => void;
   onUpdateSettings: (settings: Partial<AppSettings>) => void;
 }
 
@@ -40,7 +43,7 @@ function ProjectSelect({ label, value, disabled, options, onChange }: {
   </select>;
 }
 
-function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
+function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onOpenConversation, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
   const preferences = project.preferences ?? defaultProjectPreferences();
   const [budget, setBudget] = useState(String(preferences.claudeMaxBudgetUsd ?? ""));
   const budgetErrorId = useId();
@@ -54,6 +57,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [iconsOpen, setIconsOpen] = useState(false);
+  const [cliImportOpen, setCliImportOpen] = useState(false);
   const [actionOpen, setActionOpen] = useState(false);
   const [actionName, setActionName] = useState("");
   const [executable, setExecutable] = useState("");
@@ -145,7 +149,11 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </Row>
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>
+    {cliImportOpen && request && <Suspense fallback={null}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} onOpenConversation={onOpenConversation} /></Suspense>}
     <section className="project-settings-card" aria-label="Checkout settings">
+      <Row title="CLI conversations" description="Import Codex and Claude Code conversations started in this checkout.">
+        <button type="button" disabled={blocked} onClick={() => setCliImportOpen(true)}>Import conversations…</button>
+      </Row>
       <Row title="Project grouping" description="How this checkout joins project groups in navigation.">
         <ProjectSelect label="Project grouping" value={project.groupingMode ?? ""} disabled={blocked}
           options={{ "": `Use global (${settings.projectGrouping})`, repository: "Group by repository", "repository-path": "Group by repository and folder", separate: "Keep separate" }}

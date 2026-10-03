@@ -38,4 +38,5 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [74, ["usage_limit_sources", "usage_reset_attempts"]],
   [81, ["queued_messages"]],
   [87, ["usage_limit_resume_plans", "usage_limited_turns"]],
+  [88, ["cli_conversation_imports"]],
 ];

@@ -1124,8 +1124,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "backend.default": (value) => value.value === null || backendDefault(value.value),
   "provider.maintenance": (value) => arrayOf(value.providers, providerMaintenanceStatus)
     && uniqueRecordField(value.providers as unknown[], "providerId"),
-  "provider.maintenance.operation": (value) =>
-    providerMaintenanceOperation(value.operation),
+  "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
   "conversation.created": (value) => stringField(value, "conversationId"),
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),

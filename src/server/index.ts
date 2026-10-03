@@ -693,11 +693,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
-      createDuoCommandHandler({
-        coordinator: duoLaunchCoordinator,
-        broadcastSnapshot: flushSnapshot,
-        send,
-      }),
+      createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,

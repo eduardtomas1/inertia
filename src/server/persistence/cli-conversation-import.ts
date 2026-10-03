@@ -11,7 +11,6 @@ export interface CliConversationImportInput {
   sessionId: string;
   title: string;
   messages: readonly CliMessage[];
-  omittedMessages: number;
   selection: ModelSelection;
   continuationIdentity: ContinuationIdentity;
 }
@@ -25,7 +24,12 @@ export function importedCliConversation(database: Database.Database, providerId:
   return resumed?.id ?? null;
 }
 
-/** Transcript, native continuation identity and deduplication receipt commit together. */
+export function cliConversationImportProvider(database: Database.Database, conversationId: string): CliProvider | null {
+  const imported = database.prepare("SELECT provider_id FROM cli_conversation_imports WHERE conversation_id = ?")
+    .get(conversationId) as { provider_id: CliProvider } | undefined;
+  return imported?.provider_id ?? null;
+}
+
 export function importCliConversation(
   database: Database.Database,
   conversations: ConversationRepository,
@@ -39,8 +43,6 @@ export function importCliConversation(
       providerId: input.providerId, modelSelection: input.selection, activate: false,
       interactionMode: "build", accessMode: "supervised",
     });
-    // CLI timestamps can tie, go backwards, or come from a clock ahead of ours.
-    // Preserve transcript order without putting imported messages after future turns.
     const importedAt = new Date().toISOString();
     let before = Date.parse(importedAt);
     const ordered = input.messages.map((message) => ({ ...message }));
@@ -50,10 +52,6 @@ export function importCliConversation(
       message.createdAt = new Date(before).toISOString();
     }
     for (const message of ordered) transcripts.createMessage(conversation.id, message.content, message.role, [], null, message.createdAt, { activateConversation: false });
-    const label = input.providerId === "codex" ? "Codex" : "Claude Code";
-    transcripts.createMessage(conversation.id,
-      `Imported ${input.messages.length} text messages from ${label} CLI${input.omittedMessages ? ` (${input.omittedMessages} earlier messages omitted from this view)` : ""}. Tool output, thinking, and media are not copied. This chat resumes the original native session; close it in the CLI before continuing here.`,
-      "system", [], null, importedAt, { activateConversation: false });
     conversations.update(conversation.id, { providerSessionId: input.sessionId, continuationIdentity: input.continuationIdentity });
     database.prepare("INSERT INTO cli_conversation_imports (source_key, provider_id, session_id, conversation_id, imported_at) VALUES (?, ?, ?, ?, ?)")
       .run(input.sourceKey, input.providerId, input.sessionId, conversation.id, importedAt);

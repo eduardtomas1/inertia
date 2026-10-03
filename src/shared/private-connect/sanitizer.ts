@@ -1,6 +1,5 @@
 import { SECRET_PATTERNS, redactCredentialUrls, removeTrailingSecretFragment } from "./credential-redaction";
 
-
 const DIRECTIONAL_FORMATTING =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
 const CONTENT_CONTROL_CHARACTERS =
@@ -75,11 +74,6 @@ export function privateConnectSanitizerInspectionWindow(
   );
 }
 
-/**
- * Private Connect deliberately omits code/source blocks, absolute paths,
- * credentials, and URL user-info. The result is still untrusted text and the
- * web client must render it through its strict Markdown allowlist.
- */
 export function sanitizePrivateConnectContent(
   value: string,
   maximumCharacters = MAX_PRIVATE_CONNECT_CONTENT_CHARACTERS,
@@ -103,9 +97,6 @@ export function sanitizePrivateConnectContent(
   return removeTrailingSecretFragment(text.slice(0, outputLimit));
 }
 
-// The input is capped before this scanner runs. It visits each line and fence
-// character monotonically, including when a provider is interrupted before a
-// closing fence arrives.
 function redactPrivateConnectCodeBlocks(value: string): string {
   let result = "";
   let copiedUntil = 0;
@@ -343,9 +334,6 @@ function privateConnectLineAt(value: string, start: number): PrivateConnectLine 
   return { contentEnd, nextStart };
 }
 
-// HTML ranges are discovered in one bounded token pass. A fixed-size start
-// table avoids nested-regex behavior and lets the second pass replace
-// disjoint/nested ranges monotonically.
 function redactPrivateConnectHtmlBlocks(value: string): string {
   if (!value.includes("<")) return value;
   const redactionEnds = new Uint32Array(value.length + 1);
@@ -536,8 +524,6 @@ function isHtmlWhitespace(value: string | undefined): boolean {
     || value === "\f";
 }
 
-// Projection schemas cap this input at 64 KiB. The scanner advances
-// monotonically through that bounded text and never backtracks across tokens.
 function redactAbsolutePathTokens(value: string): string {
   let result = "";
   let copiedUntil = 0;

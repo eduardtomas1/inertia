@@ -4,18 +4,26 @@ export const CLI_IMPORT_MAX_MESSAGES = 200;
 export const CLI_IMPORT_MAX_TEXT = 256 * 1024;
 export const cliProviderSchema = z.enum(["codex", "claude"]);
 export type CliProvider = z.infer<typeof cliProviderSchema>;
+export const cliProviderLabel = (provider: CliProvider): string => provider === "codex" ? "Codex" : "Claude Code";
 export const cliMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(32 * 1024),
   createdAt: z.string().datetime(),
 }).strict();
 export type CliMessage = z.infer<typeof cliMessageSchema>;
+export const CLI_OPENING_MAX_TEXT = 400;
+export const cliConversationOpeningSchema = z.object({
+  user: z.string().max(CLI_OPENING_MAX_TEXT),
+  assistant: z.string().max(CLI_OPENING_MAX_TEXT).nullable(),
+}).strict();
+export type CliConversationOpening = z.infer<typeof cliConversationOpeningSchema>;
 export const cliConversationCandidateSchema = z.object({
   id: z.string().uuid(),
   providerId: cliProviderSchema,
   title: z.string().max(160),
   updatedAt: z.string().datetime(),
   importedConversationId: z.string().uuid().nullable(),
+  opening: cliConversationOpeningSchema,
 }).strict();
 export type CliConversationCandidate = z.infer<typeof cliConversationCandidateSchema>;
 export const cliConversationScanSchema = z.object({

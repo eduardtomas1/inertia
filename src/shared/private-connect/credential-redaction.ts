@@ -9,7 +9,6 @@ export const SECRET_PATTERNS = [
   /\b(Bearer|Basic)\s+\S+/giu,
 ] as const;
 
-/** Redact URL user-info with a monotonic scan rather than retrying long schemes. */
 export function redactCredentialUrls(value: string): string {
   let copied = 0;
   let cursor = 0;
@@ -34,7 +33,6 @@ export function redactCredentialUrls(value: string): string {
   return output + value.slice(copied);
 }
 
-/** Remove a credential prefix exposed by truncation, scanning only its final token. */
 export function removeTrailingSecretFragment(value: string): string {
   let tokenStart = value.length;
   while (tokenStart > 0 && !/\s/u.test(value[tokenStart - 1])) tokenStart -= 1;

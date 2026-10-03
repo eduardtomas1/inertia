@@ -29,10 +29,10 @@ describe("native CLI transcript projection", () => {
       { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } }, codex("user", "Replacement")), "codex", date);
     expect(result.messages.map(({ content }) => content)).toEqual(["Keep", "Kept", "Replacement"]);
   });
-  it("follows Claude's latest parent chain, deduplicates streamed messages, and omits sidechains, thinking and tools", () => {
-    const result = parseCliTranscript(lines(claude("u1", null, "user", "Plan the import"), claude("a1", "u1", "assistant", [{ type: "text", text: "First" }]),
-      claude("a1", "u1", "assistant", [{ type: "thinking", thinking: "private" }, { type: "text", text: "Final" }, { type: "tool_use", name: "Read" }]),
-      claude("abandoned", "a1", "user", "Abandoned branch"), claude("u2", "a1", "user", [{ type: "tool_result", content: "private" }, { type: "text", text: "Ship it" }]),
+  it("follows Claude's latest parent chain and omits sidechains, thinking and tools", () => {
+    const result = parseCliTranscript(lines(claude("u1", null, "user", "Plan the import"), claude("a1", "u1", "assistant", [{ type: "thinking", thinking: "private" }]),
+      claude("a2", "a1", "assistant", [{ type: "text", text: "Final" }]), claude("a3", "a2", "assistant", [{ type: "tool_use", name: "Read" }]),
+      claude("abandoned", "a3", "user", "Abandoned branch"), claude("u2", "a3", "user", [{ type: "tool_result", content: "private" }, { type: "text", text: "Ship it" }]),
       { ...claude("agent", "u2", "assistant", "Sidechain output"), isSidechain: true }), "claude", date);
     expect(result.messages.map(({ content }) => content)).toEqual(["Plan the import", "Final", "Ship it"]);
   });
@@ -54,6 +54,28 @@ describe("native CLI transcript projection", () => {
     const result = parseCliTranscript(lines(meta, codex("user", `Inspect Authorization: ${scheme} ${credential}`)), "codex", date);
     expect(JSON.stringify(result)).not.toContain(credential);
     expect(result.title).toContain("redacted");
+  });
+  it("redacts the opening exchange before it is populated", () => {
+    const token = "sk-" + "b".repeat(40);
+    const result = parseCliTranscript(lines(meta, codex("user", `Use ${token} and local-secret`), codex("assistant", "Authorization: Bearer opening-credential-value done")), "codex", date, ["local-secret"]);
+    const serialized = JSON.stringify(result.opening);
+    for (const secret of [token, "local-secret", "opening-credential-value"]) expect(serialized).not.toContain(secret);
+    expect(result.opening.user).toContain("redacted");
+    expect(result.opening.assistant).toContain("done");
+  });
+  it("bounds the opening exchange to 400 characters at a word boundary without an ellipsis", () => {
+    const words = Array.from({ length: 120 }, (_, index) => `word${index}`).join(" \n ");
+    const result = parseCliTranscript(lines(meta, codex("user", words), codex("assistant", "y".repeat(500)), codex("user", "Later"), codex("assistant", "Later reply")), "codex", date);
+    expect(result.opening.user.length).toBeLessThanOrEqual(400);
+    expect(result.opening.user).toMatch(/^word0 word1 .* word\d+$/u);
+    expect(words.replace(/\s+/gu, " ").startsWith(`${result.opening.user} `)).toBe(true);
+    expect(result.opening.user).not.toMatch(/…|\.\.\.$/u);
+    expect(result.opening.assistant).toBe("y".repeat(400));
+  });
+  it("keeps the first exchange even when older messages are omitted and reports a missing reply as null", () => {
+    const long = parseCliTranscript(lines(meta, codex("user", "First request"), codex("assistant", "First reply"), ...Array.from({ length: 205 }, (_, index) => codex("user", `Message ${index}`))), "codex", date);
+    expect(long.opening).toEqual({ user: "First request", assistant: "First reply" });
+    expect(parseCliTranscript(lines(meta, codex("user", "Only a question")), "codex", date).opening).toEqual({ user: "Only a question", assistant: null });
   });
   it("bounds retained text, keeps recent messages and reports omissions", () => {
     const result = parseCliTranscript(lines(meta, ...Array.from({ length: 205 }, (_, index) => codex("user", `Message ${index}`))), "codex", date);

@@ -60,11 +60,6 @@ export interface ResolvedTurnRequest {
   adopt(queued: QueuedTurn): PreparedTurnRequest;
 }
 
-/**
- * Resolves a route and atomically persists the immutable request/turn pair.
- * Live stream resources are intentionally attached by the controller only
- * after this durable preparation succeeds.
- */
 export function prepareTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -82,11 +77,6 @@ export function prepareTurnRequest(
   }
 }
 
-/**
- * Resolves every mutable route and request input without writing persistence.
- * Batch workflows can resolve both sides first, persist both in one database
- * transaction, and only then adopt live in-memory ownership.
- */
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -172,9 +162,6 @@ export function resolveTurnRequest(
   const latestTurnOwnsProviderSession = latestTurn !== null
     && conversation.providerSessionId !== null
     && latestTurn.providerSessionAfter === conversation.providerSessionId;
-  // A turn-level compatibility token is authoritative only for the exact
-  // provider session it produced. If a latest turn and the conversation shell
-  // disagree, neither projection may lend authority to the other's session.
   const previousContinuationIdentity = latestTurn
     ? latestTurnOwnsProviderSession
       ? latestTurn.continuationIdentity
@@ -205,6 +192,7 @@ export function resolveTurnRequest(
   }
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
+    && dependencies.store.cliConversationImportProvider(conversation.id) === null
     && dependencies.store.turnLedgerRepository.savedSessionKeepsFailing(
       conversation.id,
       conversation.providerSessionId!,
@@ -291,9 +279,6 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
-  // The project's optional spend limit maps to the Claude Agent SDK's
-  // maxBudgetUsd, so it is forwarded only on the native Anthropic route.
-  // Other providers and Claude-compatible backends have no such control.
   const maxBudgetUsd = route.providerId === "claude"
     && route.harnessId === "claude-agent-sdk"
     && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID

@@ -1,4 +1,4 @@
-import { CLI_IMPORT_MAX_MESSAGES, CLI_IMPORT_MAX_TEXT, type CliMessage, type CliProvider } from "../../shared/cli-conversations";
+import { CLI_IMPORT_MAX_MESSAGES, CLI_IMPORT_MAX_TEXT, CLI_OPENING_MAX_TEXT, type CliConversationOpening, type CliMessage, type CliProvider } from "../../shared/cli-conversations";
 import { SECRET_PATTERNS, redactCredentialUrls } from "../../shared/private-connect/credential-redaction";
 import { redactHostToolPayload } from "../provider/host-tool-redaction";
 
@@ -29,15 +29,35 @@ export interface ParsedCliTranscript {
   updatedAt: string;
   messages: CliMessage[];
   omittedMessages: number;
+  opening: CliConversationOpening;
 }
 
-/** Select visible main-session text only; never import tools, thinking, images or credentials. */
+function openingExcerpt(text: string): string {
+  const flat = text.replace(/\s+/gu, " ").trim();
+  if (flat.length <= CLI_OPENING_MAX_TEXT) return flat;
+  const space = flat.slice(0, CLI_OPENING_MAX_TEXT + 1).lastIndexOf(" ");
+  return (space > 0 ? flat.slice(0, space) : flat.slice(0, CLI_OPENING_MAX_TEXT).replace(/[\uD800-\uDBFF]$/u, "")).trimEnd();
+}
+
+export function transcriptWorkspace(head: string, provider: CliProvider): string | null {
+  const lines = head.split("\n");
+  lines.pop();
+  for (const line of lines) {
+    let item: RecordValue;
+    try { item = record(JSON.parse(line)); } catch { continue; }
+    const cwd = provider === "codex"
+      ? item.type === "session_meta" ? record(item.payload).cwd : undefined
+      : item.isSidechain === true ? undefined : item.cwd;
+    if (typeof cwd === "string" && cwd) return cwd;
+  }
+  return null;
+}
+
 export function parseCliTranscript(source: string, provider: CliProvider, fallbackDate: string, secrets: readonly string[] = []): ParsedCliTranscript {
   let sessionId = "";
   let cwd = "";
   const messages: Array<CliMessage & { id?: string }> = [];
   const codexTurnStarts: number[] = [];
-  const messageIndexes = new Map<string, number>();
   const parents = new Map<string, string | null>();
   let lastId: string | null = null;
   const lines = source.split("\n");
@@ -47,7 +67,6 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
     if (!line.trim()) continue;
     let item: RecordValue;
     try { item = record(JSON.parse(line)); } catch {
-      // A CLI can be in the middle of appending its final record.
       if (index === lines.length - 1) break;
       throw new Error("The CLI transcript contains an unreadable record.");
     }
@@ -72,12 +91,10 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
         }
         if (remaining > 0) messages.length = 0;
       }
-      // event_msg mirrors response_item; selecting one prevents duplicate messages.
       if (item.type !== "response_item" || payload.type !== "message") continue;
       role = payload.role;
       content = textContent(payload.content);
       if (role === "user" && /^(?:# AGENTS\.md instructions|<environment_context>)/u.test(content.trim())) continue;
-      // Image-only requests still define turns even though their media is omitted.
       if (role === "user") codexTurnStarts.push(messages.length);
     } else {
       if (item.isSidechain === true) continue;
@@ -100,10 +117,7 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
     let clean = redactCredentialUrls(redactHostToolPayload(content, secrets));
     for (const pattern of SECRET_PATTERNS) clean = clean.replace(pattern, "[redacted credential]");
     clean = clean.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
-    const message = { role, content: clean.slice(0, 32 * 1024), createdAt: timestamp(item.timestamp, fallbackDate), ...(id ? { id } : {}) } satisfies CliMessage;
-    const existing = id ? messageIndexes.get(id) ?? -1 : -1;
-    if (existing >= 0) messages[existing] = message;
-    else { if (id) messageIndexes.set(id, messages.length); messages.push(message); }
+    messages.push({ role, content: clean.slice(0, 32 * 1024), createdAt: timestamp(item.timestamp, fallbackDate), ...(id ? { id } : {}) });
   }
   if (!uuid.test(sessionId) || !cwd || cwd.includes("\0")) throw new Error("The CLI transcript has no valid session or workspace.");
   let visible = messages;
@@ -123,5 +137,8 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
     selected.unshift({ role: entry.role, content: entry.content, createdAt: entry.createdAt });
     bytes += size;
   }
-  return { sessionId, cwd, title, updatedAt: visible.at(-1)!.createdAt, messages: selected, omittedMessages: visible.length - selected.length };
+  const firstUser = visible.findIndex((entry) => entry.role === "user");
+  const reply = visible.find((entry, index) => index > firstUser && entry.role === "assistant");
+  const opening = { user: firstUser < 0 ? "" : openingExcerpt(visible[firstUser]!.content), assistant: reply ? openingExcerpt(reply.content) : null };
+  return { sessionId, cwd, title, updatedAt: visible.at(-1)!.createdAt, messages: selected, omittedMessages: visible.length - selected.length, opening };
 }

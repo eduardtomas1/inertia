@@ -27,7 +27,6 @@ export function createCliConversationCommandHandler(deps: {
       deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.scan", scan } });
     } else {
       const value = await discovery.read(projectId, workspace, command.payload.candidateId);
-      // Revalidate the enrolled project after asynchronous filesystem reads.
       if (deps.store.projectPath(projectId) !== workspace) throw new RuntimeRequestError("The project changed. Scan again.");
       if (command.type === "conversation.cli.preview") {
         deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.preview", preview: discovery.preview(command.payload.candidateId, value, imported(value.providerId, value.transcript.sessionId)) } });
@@ -37,7 +36,7 @@ export function createCliConversationCommandHandler(deps: {
         const route = deps.providers.resolveModelRoute(selection);
         const conversationId = deps.store.importCliConversation({
           projectId, sourceKey: value.sourceKey, providerId: value.providerId, sessionId: value.transcript.sessionId,
-          title: value.transcript.title, messages: value.transcript.messages, omittedMessages: value.transcript.omittedMessages,
+          title: value.transcript.title, messages: value.transcript.messages,
           selection, continuationIdentity: route.continuationIdentity,
         });
         deps.broadcastSnapshot();

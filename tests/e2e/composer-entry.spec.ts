@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type Page } from "@playwright/test";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ test("new draft has a painted, clickable composer and can reference a chat", asy
   const testInfo = test.info();
   let sourceId = "";
   const app = await createAppFixture({
-    name: `composer-entry-${theme}`, initialState: "conversation", windowDisplay: "primary",
+    name: `composer-entry-${theme}`, initialState: "conversation",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory,
         { recoverInterruptedRuns: false });

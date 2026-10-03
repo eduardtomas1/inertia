@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
@@ -16,7 +16,6 @@ for (const { projectName, truncated } of [
     const app = await createAppFixture({
       name: "composer-project-picker",
       initialState: "conversation",
-      windowDisplay: "primary",
       beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
         const store = new RuntimeStore(
           join(testDirectory, "data", "inertia.sqlite"),

@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import type { AppFixture } from "./support/app-fixture";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";

@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -47,7 +47,6 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "conversation-context",
     initialState: "conversation",
-    windowDisplay: "primary",
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(
         join(testDirectory, "data", "inertia.sqlite"),

@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,7 +17,6 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "language-aware-files",
     initialState: "conversation",
-    windowDisplay: "primary",
     beforeLaunch: async ({ testDirectory: fixtureDirectory, workspaceDirectory }) => {
       const sourceDirectory = join(workspaceDirectory, "src", "demo");
       await mkdir(sourceDirectory, { recursive: true });

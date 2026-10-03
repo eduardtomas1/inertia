@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 
@@ -129,7 +129,6 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "usage",
     initialState: "conversation",
-    windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(
         join(testDirectory, "data", "inertia.sqlite"),

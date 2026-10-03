@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { execFile } from "node:child_process";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,7 +22,7 @@ const pullScenario = "fast-forwards incoming commits using checkout filters";
 test.beforeEach(async () => {
   const scenario = test.info().title;
   app = await createAppFixture({
-    name: "git-workflows", initialState: "conversation", windowDisplay: "primary",
+    name: "git-workflows", initialState: "conversation",
     beforeLaunch: async ({ workspaceDirectory, testDirectory }) => {
       remote = join(testDirectory, "remote.git");
       await git(testDirectory, "init", "--bare", remote);

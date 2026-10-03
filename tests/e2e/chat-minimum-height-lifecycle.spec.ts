@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
 import { join } from "node:path";
 
@@ -23,7 +23,7 @@ for (const navigation of ["settings", "split"] as const) {
   test(`reserves the tall composer above the terminal after leaving ${navigation}`, async ({ browserName: _browserName }, testInfo) => {
     const name = `chat-minimum-${navigation}`;
     const app = await createAppFixture({
-      name, initialState: "conversation", seedSecondProject: true, windowDisplay: "primary",
+      name, initialState: "conversation", seedSecondProject: true,
       beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
         const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
         try {

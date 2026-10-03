@@ -2,11 +2,16 @@ import { join } from "node:path";
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, SaveDialogOptions, SaveDialogReturnValue } from "electron";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
-import { readDiagnosticsPreferences, writeDiagnosticsPreferences } from "./diagnostics-preferences.js";
+import {
+  readDiagnosticsPreferences,
+  removeStaleDiagnosticsPreferenceFiles,
+  writeDiagnosticsPreferences,
+} from "./diagnostics-preferences.js";
 import { registerLifecycleSupportReportIpc, type CopyLifecycleSupportReportInput } from "./lifecycle-support-report.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 
 export function openRuntimeDiagnostics(userDataDirectory: string): RuntimeDiagnostics {
+  removeStaleDiagnosticsPreferenceFiles(userDataDirectory);
   const capture = readDiagnosticsPreferences(userDataDirectory);
   return new RuntimeDiagnostics(runtimeDiagnosticsDirectory(userDataDirectory), capture ? { capture } : {});
 }

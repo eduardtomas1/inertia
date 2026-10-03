@@ -19,6 +19,7 @@ type DiagnosticFilter = ReturnType<typeof diagnosticQuerySchema.parse>;
 type ExportItem =
   | { kind: "incident"; at: string; id: string; record: DiagnosticRecord }
   | { kind: "event"; at: string; id: string; entry: DiagnosticEventEntry };
+type ProjectedItem = { kind: "incident" | "event"; value: Record<string, unknown>; bytes: number };
 
 interface IncidentIndexOptions {
   now: () => number;
@@ -130,25 +131,35 @@ export class ApplicationIncidentIndex {
   }
 
   export(value: DiagnosticQuery, events: readonly DiagnosticEventEntry[] = []): string {
-    const report = this.render(this.matching(value, events));
-    if (Buffer.byteLength(report) > DIAGNOSTIC_LIMITS.exportBytes) {
-      throw new Error("Select a smaller diagnostics time range before exporting.");
-    }
-    return report;
+    const projected = this.project(this.matching(value, events));
+    const report = this.render(projected, false);
+    return Buffer.byteLength(report) <= DIAGNOSTIC_LIMITS.exportBytes
+      ? report
+      : this.newestWithin(projected, DIAGNOSTIC_LIMITS.exportBytes);
   }
 
   exportWithin(value: DiagnosticQuery, maxBytes: number, events: readonly DiagnosticEventEntry[] = []): string {
-    const items = this.matching(value, events);
-    const fits = (count: number): boolean => Buffer.byteLength(this.render(items.slice(0, count))) <= maxBytes;
-    if (items.length === 0 || !fits(1)) return "";
+    const projected = this.project(this.matching(value, events));
+    return projected.length === 0 ? "" : this.newestWithin(projected, maxBytes);
+  }
+
+  private newestWithin(projected: readonly ProjectedItem[], maxBytes: number): string {
+    const render = (count: number): string => this.render(projected.slice(0, count), count < projected.length);
+    let high = 0;
+    let lowerBound = 0;
+    for (const item of projected) {
+      lowerBound += item.bytes;
+      if (lowerBound > maxBytes) break;
+      high += 1;
+    }
+    if (high === 0 || Buffer.byteLength(render(1)) > maxBytes) return "";
     let low = 1;
-    let high = items.length;
     while (low < high) {
       const middle = Math.ceil((low + high) / 2);
-      if (fits(middle)) low = middle;
+      if (Buffer.byteLength(render(middle)) <= maxBytes) low = middle;
       else high = middle - 1;
     }
-    return this.render(items.slice(0, low));
+    return render(low);
   }
 
   clear(): void {
@@ -186,7 +197,7 @@ export class ApplicationIncidentIndex {
     ].sort(compareDiagnosticEntries);
   }
 
-  private render(items: readonly ExportItem[]): string {
+  private project(items: readonly ExportItem[]): ProjectedItem[] {
     // Per-export pseudonyms preserve correlation within this report without
     // exporting project/chat/turn/request IDs or stable cross-report identifiers.
     const references = new Map<string, string>();
@@ -195,19 +206,30 @@ export class ApplicationIncidentIndex {
       references.set(id, current);
       return current;
     };
-    const safe = items.flatMap((item) => item.kind === "incident" ? [item.record] : [])
-      .map(({ id, correlationId, context, runtimeGeneration: _generation, ...record }) => ({
+    return items.map((item): ProjectedItem => {
+      if (item.kind === "event") {
+        const { id: _id, ...entry } = item.entry;
+        return { kind: "event", value: entry, bytes: Buffer.byteLength(JSON.stringify(entry)) };
+      }
+      const { id, correlationId, context, runtimeGeneration: _generation, ...record } = item.record;
+      const value = {
         ...record,
         id: reference(id), correlation: reference(correlationId),
         ...(context.providerId ? { provider: context.providerId } : {}),
         explanation: diagnosticDefinition(record.code),
-      }));
-    const events = items.flatMap((item) => item.kind === "event" ? [item.entry] : [])
-      .map(({ id: _id, ...entry }) => entry);
+      };
+      return { kind: "incident", value, bytes: Buffer.byteLength(JSON.stringify(value)) };
+    });
+  }
+
+  private render(projected: readonly ProjectedItem[], truncated: boolean): string {
     return JSON.stringify({
       schemaVersion: 1, generatedAt: new Date(this.options.now()).toISOString(),
       privacy: "Context identifiers, names, paths, URLs, credentials and all user/provider content are omitted. Correlation references are local to this export.",
-      persistence: this.persistence, records: safe, events,
+      persistence: this.persistence,
+      ...(truncated ? { truncated: true } : {}),
+      records: projected.flatMap((item) => item.kind === "incident" ? [item.value] : []),
+      events: projected.flatMap((item) => item.kind === "event" ? [item.value] : []),
     }, null, 2);
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { setDiagnosticsReportSource } from "../../src/main/diagnostic-export";
 import { runtimeIssueEvidenceBroker } from "../../src/main/runtime-issue-evidence-broker";
 import { RuntimeIssueEvidenceCoordinator } from "../../src/main/runtime-issue-evidence-coordinator";
 import { isRuntimeSecureFileBrokerEvent, RuntimeSecureFileCoordinator } from "../../src/main/runtime-secure-file-coordinator";
@@ -50,6 +51,16 @@ describe("main issue evidence broker", () => {
     expect(exportDiagnostics).not.toHaveBeenCalled();
     await expect(broker.collect({ attachDiagnostics: true })).resolves.toEqual({ channel: "canary", osVersion: "15.1.0", diagnostics: "incident app.runtime.crash x1" });
     expect(exportDiagnostics).toHaveBeenCalledWith({ sinceMs: 90_000_000 - 24 * 60 * 60 * 1_000, maxBytes: ISSUE_DIAGNOSTICS_MAX_BYTES });
+  });
+
+  it("reads the pseudonymised export from the main-process diagnostics by default", async () => {
+    const exportForReport = vi.fn(() => '{"records":[]}');
+    setDiagnosticsReportSource(() => ({ exportForReport }));
+    try {
+      const broker = runtimeIssueEvidenceBroker({ channel: "stable", now: () => 90_000_000, systemVersion: () => "15.1.0" });
+      await expect(broker.collect({ attachDiagnostics: true })).resolves.toMatchObject({ diagnostics: '{"records":[]}' });
+      expect(exportForReport).toHaveBeenCalledWith(90_000_000 - 24 * 60 * 60 * 1_000, ISSUE_DIAGNOSTICS_MAX_BYTES);
+    } finally { setDiagnosticsReportSource(null); }
   });
 
   it("bounds an oversized export and drops an unrecognised OS version", async () => {

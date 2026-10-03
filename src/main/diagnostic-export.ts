@@ -35,3 +35,7 @@ export async function exportDiagnosticReport(
     await rm(staging, { recursive: true, force: true });
   }
 }
+
+export async function exportDiagnosticsForReport(_options: { sinceMs: number; maxBytes: number }): Promise<string> {
+  return "";
+}

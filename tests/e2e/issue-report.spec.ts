@@ -1,5 +1,6 @@
 // @inertia-e2e-resource isolated
-import { writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
@@ -39,6 +40,15 @@ async function expectLayoutHolds(app: AppFixture): Promise<void> {
   expect(layout.width).toBeLessThanOrEqual(810);
   expect(layout.outside).toEqual([]);
   expect(layout.nested).toBe(0);
+  const gutters = await app.page.locator(".issue-report").evaluate((element) => {
+    const report = element.getBoundingClientRect();
+    const view = element.closest(".settings-view")!.getBoundingClientRect();
+    const navigation = document.querySelector(".settings-navigation")!.getBoundingClientRect();
+    const besideNavigation = navigation.bottom > report.top + 1;
+    return { minimum: besideNavigation ? 20 : 14, left: report.left - (besideNavigation ? navigation.right : view.left), right: view.right - report.right };
+  });
+  expect(gutters.left).toBeGreaterThanOrEqual(gutters.minimum);
+  expect(gutters.right).toBeGreaterThanOrEqual(gutters.minimum);
 }
 
 async function expectAlignedRow(page: Page, selector: string): Promise<void> {
@@ -69,7 +79,11 @@ test("writes a plain report, previews the exact public issue and keeps it review
     await expect(page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Steps to reproduce (optional)", exact: true })).toBeEnabled();
     await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
-    await expect(page.getByRole("button", { name: "Preview issue" })).toBeDisabled();
+    await page.getByRole("button", { name: "Preview issue" }).click();
+    await expect(page.getByText("Describe what happened in at least 10 characters.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
     const provider = page.getByRole("combobox", { name: "Provider", exact: true });
     await expect(provider).toHaveCSS("appearance", "base-select");
     await provider.click();
@@ -139,7 +153,10 @@ test("writes a plain report, previews the exact public issue and keeps it review
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Cancelled chat stays waiting on the next message");
     await app.resizeWindow(1000, 800);
     await expectLayoutHolds(app);
-    await capture(page, info, "issue-report-preview-dark-narrow");
+    for (const theme of ["light", "dark"] as const) {
+      await setAppearanceInPlace(app, theme);
+      await capture(page, info, `issue-report-preview-${theme}-narrow`);
+    }
     await app.resizeWindow(760, 600);
     await expectLayoutHolds(app);
     await capture(page, info, "issue-report-preview-dark-760x600");
@@ -160,7 +177,101 @@ test("says GitHub CLI is not signed in before the user writes", async ({ browser
     await openReport(app);
     await expect(app.page.locator(".issue-report-github")).toHaveText("GitHub CLI is not signed in. Run gh auth login in a terminal, or open GitHub manually.");
     await expectLayoutHolds(app);
+    for (const theme of ["light", "dark"] as const) {
+      await setAppearanceInPlace(app, theme);
+      await capture(app.page, info, `issue-report-signed-out-${theme}-wide`);
+    }
+  } finally { await app.close(); }
+});
+
+const FAKE_GH_AUTH = `const fs = require("fs");
+fs.writeFileSync("auth-checked", "");
+if (fs.existsSync("auth-fail")) {
+  process.stderr.write("You are not logged into any GitHub hosts. To log in, run: gh auth login\\n");
+  process.exit(1);
+}
+`;
+
+const FAKE_GH_ISSUE = `const fs = require("fs");
+if (process.argv[2] === "list") process.exit(0);
+if (fs.existsSync("issue-ok")) {
+  process.stdout.write("https://github.com/eduardtomas1/inertia/issues/999\\n");
+  process.exit(0);
+}
+setTimeout(() => {
+  process.stderr.write("error connecting to api.github.com\\ncheck your internet connection or https://githubstatus.com\\n");
+  process.exit(1);
+}, 2500);
+`;
+
+test("walks a report through failed, submitting, uncertain, retired and submitted with a stub GitHub CLI", async ({ browserName: _browserName }, info) => {
+  test.setTimeout(150_000);
+  let dataDirectory = "";
+  const app = await createAppFixture({
+    name: "issue-report-publication",
+    initialState: "conversation",
+    beforeLaunch: async ({ testDirectory }) => {
+      dataDirectory = join(testDirectory, "data");
+      portableNodeExecutable(join(testDirectory, "provider-bin"), "gh");
+      await writeFile(join(dataDirectory, "auth"), FAKE_GH_AUTH, "utf8");
+      await writeFile(join(dataDirectory, "issue"), FAKE_GH_ISSUE, "utf8");
+    },
+  });
+  const page = app.page;
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  const create = page.getByRole("button", { name: "Create on GitHub" });
+  const describe = async (text: string): Promise<void> => {
+    await page.getByRole("textbox", { name: "What happened", exact: true }).fill(text);
+    await page.getByRole("button", { name: "Preview issue" }).click();
+    await expect(title).toBeFocused();
+  };
+  try {
+    await app.resizeWindow(1440, 920);
+    await openReport(app);
     await setAppearanceInPlace(app, "dark");
-    await capture(app.page, info, "issue-report-signed-out-dark-wide");
+    await describe("The chat stays waiting after a cancelled turn.");
+
+    await expect.poll(() => existsSync(join(dataDirectory, "auth-checked"))).toBe(true);
+    await expect(page.locator(".issue-report-github")).toHaveCount(0);
+    await writeFile(join(dataDirectory, "auth-fail"), "", "utf8");
+    await create.click();
+    await expect(page.getByRole("alert")).toHaveText("GitHub CLI is not signed in. Run gh auth login in a terminal, or open GitHub manually.");
+    await expect(create).toBeEnabled();
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-failed-dark-wide");
+
+    await rm(join(dataDirectory, "auth-fail"));
+    await create.click();
+    await expect(page.locator(".issue-report-actions .primary-button")).toHaveText("Creating…");
+    await capture(page, info, "issue-report-submitting-dark-wide");
+    const check = page.getByRole("button", { name: "Check submission" });
+    await expect(check).toBeFocused({ timeout: 30_000 });
+    await expect(page.locator(".issue-report-messages")).toContainText("GitHub could not be reached. GitHub may still have received the issue.");
+    await expect(create).toHaveCount(0);
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-uncertain-dark-wide");
+
+    await check.click();
+    await expect(page.locator(".issue-report-messages")).toContainText("No matching issue is visible yet.");
+    await expect(check).toBeFocused();
+    await page.getByRole("button", { name: "Retire this report" }).click();
+    await expect(page.getByRole("group", { name: "Retire uncertain publication?" })).toBeFocused();
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-retire-dark-wide");
+    await page.getByRole("button", { name: "Confirm retirement" }).click();
+    await expect(page.locator(".issue-report-messages")).toContainText("Publication tracking retired.");
+    await expect(title).toBeFocused();
+    await expect(title).toHaveAttribute("readonly", "");
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-retired-dark-wide");
+
+    await page.getByRole("button", { name: "Start another report" }).click();
+    await describe("Sending a message after a cancelled turn never starts.");
+    await writeFile(join(dataDirectory, "issue-ok"), "", "utf8");
+    await create.click();
+    await expect(page.getByRole("button", { name: "View issue" })).toBeFocused();
+    await expect(page.locator(".issue-report-messages")).toContainText("Issue created in eduardtomas1/inertia.");
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-submitted-dark-wide");
   } finally { await app.close(); }
 });

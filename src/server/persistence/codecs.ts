@@ -46,6 +46,7 @@ import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
 import { parseCompletionSoundJson } from "../../shared/completion-sound";
+import { DEFAULT_QUOTA_WARNINGS, isQuotaWarningThreshold } from "../../shared/quota-warnings";
 import {
   continuationIdentityForSelection,
   currentKnownHarnessIdSchema,
@@ -443,6 +444,13 @@ export function settingsFromState(state: StateRow): AppSettings {
     autoOpenPlan: state.auto_open_plan === 1,
     confirmDestructiveActions: state.confirm_destructive_actions === 1,
     desktopNotifications: state.desktop_notifications === 1,
+    notifyOnlyInBackground: state.notify_only_in_background === 1,
+    quotaWarnings: {
+      enabled: state.quota_warnings_enabled !== 0,
+      firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
+        ? state.quota_warning_threshold
+        : DEFAULT_QUOTA_WARNINGS.firstThreshold,
+    },
     providerIdentityLabels: providerIdentityLabelsFromJson(
       state.provider_identity_labels_json,
     ),

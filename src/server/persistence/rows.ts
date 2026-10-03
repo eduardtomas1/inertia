@@ -343,6 +343,9 @@ export interface StateRow {
   discord_release_repository_url: string;
   working_indicator_json?: string | null;
   completion_sound_json?: string | null;
+  quota_warnings_enabled?: number;
+  quota_warning_threshold?: number;
+  notify_only_in_background?: number;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

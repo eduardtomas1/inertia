@@ -20,7 +20,7 @@ async function openReport(app: AppFixture): Promise<void> {
   await app.page.clock.setFixedTime(FIXED_NOW);
   await app.page.getByRole("button", { name: "Settings", exact: true }).click();
   await app.page.getByRole("button", { name: "Report an issue", exact: true }).click();
-  await expect(app.page.getByLabel("What happened")).toBeEnabled();
+  await expect(app.page.getByRole("textbox", { name: "What happened", exact: true })).toBeEnabled();
 }
 
 async function expectLayoutHolds(app: AppFixture): Promise<void> {
@@ -67,7 +67,7 @@ test("writes a plain report, previews the exact public issue and keeps it review
     await app.resizeWindow(1440, 920);
     await openReport(app);
     await expect(page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 })).toBeVisible();
-    await expect(page.getByLabel("Steps to reproduce (optional)")).toBeEnabled();
+    await expect(page.getByRole("textbox", { name: "Steps to reproduce (optional)", exact: true })).toBeEnabled();
     await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
     await expect(page.getByRole("button", { name: "Preview issue" })).toBeDisabled();
     const provider = page.getByRole("combobox", { name: "Provider", exact: true });
@@ -101,38 +101,42 @@ test("writes a plain report, previews the exact public issue and keeps it review
     await capture(page, info, "issue-report-form-dark-760x600");
 
     await app.resizeWindow(1440, 920);
-    await page.getByLabel("What happened").fill("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start normally.");
-    await page.getByLabel("Steps to reproduce (optional)").fill("1. Start a turn\n2. Cancel it\n3. Send another message");
+    await page.getByRole("textbox", { name: "What happened", exact: true }).fill("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start normally.");
+    await page.getByRole("textbox", { name: "Steps to reproduce (optional)", exact: true }).fill("1. Start a turn\n2. Cancel it\n3. Send another message");
     await provider.selectOption("claude");
     await page.getByRole("button", { name: "Preview issue" }).click();
-    await expect(page.getByLabel("Title")).toBeFocused();
-    await expect(page.getByLabel("Title")).toHaveValue("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start…");
-    const body = page.getByLabel("Body");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start…");
+    const body = page.getByRole("textbox", { name: "Body", exact: true });
     await expect(body).toHaveValue(/## Steps to reproduce\n\n1\. Start a turn\n2\. Cancel it\n3\. Send another message/u);
     await expect(body).toHaveValue(/## Environment\n\n- Inertia: \S+ \((?:stable|canary)\)\n- OS: /u);
     await expect(body).toHaveValue(/- Provider: claude /u);
-    await expect(body).toHaveValue(/## Diagnostics\n\n/u);
+    await expect(body).toHaveValue(/- Inertia: \S+ \(stable\)\n- OS: (?:macOS|Windows|Linux) [0-9]/u);
+    await expect(body).toHaveValue(/## Diagnostics\n\n(?:Recent diagnostics from the last 24 hours, pseudonymised by Inertia:\n```text\n\{|No diagnostics were recorded in the last 24 hours\.)/u);
+    const bodyPath = info.outputPath("issue-report-body.md");
+    await writeFile(bodyPath, await body.inputValue(), "utf8");
+    await info.attach("issue-report-body.md", { path: bodyPath, contentType: "text/markdown" });
     await expect(page.getByRole("button", { name: "Create on GitHub" })).toBeEnabled();
     await expectAlignedRow(page, ".issue-report-actions");
     await page.getByRole("button", { name: "Open GitHub manually" }).focus();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Create on GitHub" })).toBeFocused();
     await expect(page.getByRole("button", { name: "Create on GitHub" })).toHaveCSS("outline-style", "solid");
-    await page.getByLabel("Title").fill("Cancelled chat stays waiting on the next message");
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Cancelled chat stays waiting on the next message");
     await expectLayoutHolds(app);
     for (const theme of ["light", "dark"] as const) {
       await setAppearanceInPlace(app, theme);
       await capture(page, info, `issue-report-preview-${theme}-wide`);
     }
     await page.locator(".issue-report").getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByLabel("What happened")).toBeFocused();
-    await expect(page.getByLabel("What happened")).toHaveValue(/^After cancelling a running chat/u);
+    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toHaveValue(/^After cancelling a running chat/u);
     await page.getByRole("button", { name: "Preview issue" }).click();
-    await expect(page.getByLabel("Title")).toHaveValue("Cancelled chat stays waiting on the next message");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Cancelled chat stays waiting on the next message");
 
     await page.getByRole("button", { name: "Providers", exact: true }).click();
     await page.getByRole("button", { name: "Report an issue", exact: true }).click();
-    await expect(page.getByLabel("Title")).toHaveValue("Cancelled chat stays waiting on the next message");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Cancelled chat stays waiting on the next message");
     await app.resizeWindow(1000, 800);
     await expectLayoutHolds(app);
     await capture(page, info, "issue-report-preview-dark-narrow");

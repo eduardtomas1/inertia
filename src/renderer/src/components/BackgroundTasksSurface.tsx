@@ -12,6 +12,7 @@ import {
   backgroundTaskItems,
   backgroundTaskTitle,
   type BackgroundTaskItem,
+  type BackgroundTaskItems,
 } from "../utils/backgroundTasks";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { canStopSubagentTrace } from "../utils/subagentDisclosure";
@@ -97,30 +98,52 @@ function useFocusContinuity(): {
   };
 }
 
+const MAX_REVEAL_PAGES = 10;
+
 function useTurnReveal(
   conversationId: string | null,
   regionRef: React.RefObject<HTMLElement | null>,
-  finished: readonly BackgroundTaskItem[],
+  items: BackgroundTaskItems,
+  turns: readonly AgentTurn[],
   finishedOpen: boolean,
   showAllFinished: boolean,
   openFinished: (showAll: boolean) => void,
-  more: { hasMore: boolean; loadMore: () => void } | null,
+  more: { hasMore: boolean; loadMore: () => Promise<boolean> } | null,
 ): void {
   const [turnId, setTurnId] = useState<string | null>(null);
+  const paging = useRef({ pages: 0, pending: false });
+  const [paged, setPaged] = useState(0);
   useLayoutEffect(() => {
     if (!conversationId) return;
     const take = (): void => {
       const requested = takeBackgroundTaskReveal(conversationId);
-      if (requested) setTurnId(requested);
+      if (!requested) return;
+      paging.current = { pages: 0, pending: false };
+      setTurnId(requested);
     };
     take();
     return subscribeBackgroundTaskReveal(take);
   }, [conversationId]);
   useLayoutEffect(() => {
-    if (!turnId) return;
-    const index = finished.findIndex((item) => item.type === "agent" && item.trace.turnId === turnId);
-    if (index < 0 && more?.hasMore) {
-      more.loadMore();
+    if (!turnId || paging.current.pending) return;
+    const ofTurn = (item: BackgroundTaskItem) => item.type === "agent" && item.trace.turnId === turnId;
+    const index = items.finished.findIndex(ofTurn);
+    const requestedAt = turns.find(({ id }) => id === turnId)?.requestedAt;
+    const oldest = items.finished.at(-1)?.startedAt;
+    if (
+      index < 0
+      && !items.active.some(ofTurn)
+      && more?.hasMore
+      && requestedAt !== undefined
+      && (oldest === undefined || oldest >= requestedAt)
+      && paging.current.pages < MAX_REVEAL_PAGES
+    ) {
+      paging.current = { pages: paging.current.pages + 1, pending: true };
+      void more.loadMore().then((loaded) => {
+        paging.current = { ...paging.current, pending: false };
+        if (!loaded) setTurnId(null);
+        else setPaged((count) => count + 1);
+      });
       return;
     }
     const showAll = index >= MAX_COMPACT_FINISHED;
@@ -131,7 +154,7 @@ function useTurnReveal(
     const rows = regionRef.current?.querySelectorAll<HTMLElement>("[data-reveal-turn]") ?? [];
     [...rows].find((row) => row.dataset.revealTurn === turnId)?.scrollIntoView({ block: "nearest" });
     setTurnId(null);
-  }, [finished, finishedOpen, more, openFinished, regionRef, showAllFinished, turnId]);
+  }, [finishedOpen, items, more, openFinished, paged, regionRef, showAllFinished, turnId, turns]);
 }
 
 function toggled(current: ReadonlySet<string>, id: string, on?: boolean): ReadonlySet<string> {
@@ -179,7 +202,7 @@ export function BackgroundTasksSurface({
     setFinishedOpen(true);
     if (showAll) setShowAllFinished(true);
   }, []);
-  useTurnReveal(conversationId, focus.regionRef, items.finished, finishedOpen, showAllFinished, openFinished, feed);
+  useTurnReveal(conversationId, focus.regionRef, items, turns, finishedOpen, showAllFinished, openFinished, feed);
   const latest = useRef({ subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent });
   useLayoutEffect(() => {
     latest.current = { subagents: traces, stopping, onOpenSubagent, onFollowUpSubagent, onStopSubagent };
@@ -248,7 +271,7 @@ export function BackgroundTasksSurface({
       return;
     }
     setShowAllFinished(true);
-    if (showAllFinished || items.finished.length <= MAX_COMPACT_FINISHED) feed?.loadMore();
+    if (showAllFinished || items.finished.length <= MAX_COMPACT_FINISHED) void feed?.loadMore();
   };
   const attention = runtimeStatus === "online"
     ? null
@@ -312,6 +335,7 @@ export function BackgroundTasksSurface({
                   aria-label="Dismiss finished commands"
                   onClick={() => {
                     for (const run of dismissible) onDismissCommand?.(run);
+                    feed?.dismissed(dismissible.map(({ id }) => id));
                   }}
                 >
                   <Trash2 size={13} aria-hidden="true" />

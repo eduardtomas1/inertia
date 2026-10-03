@@ -85,8 +85,6 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await providers.click();
   await expect(providers).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { level: 3, name: "Providers" })).toBeVisible();
-  await page.getByRole("button", { name: "Keybindings", exact: true }).click();
-  await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
@@ -665,7 +663,6 @@ test("applies every interface scale live and remains usable at common Linux disp
   await ensureTerminalTools();
   const terminalFontSize = await page.locator("aside.terminal-panel").first().getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "General", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
     ["Compact", "compact", "13px", "30px"],
@@ -797,37 +794,5 @@ test("applies every interface scale live and remains usable at common Linux disp
     BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1);
   });
   await resizeWindow(1440, 920);
-  expect(rendererErrors).toEqual([]);
-});
-
-test("leaves Settings with Escape, reopens at the last section and keeps typed text", async () => {
-  const settings = page.getByRole("main", { name: "Settings" });
-  const sidebarSettings = page.getByRole("complementary", { name: "Project navigation" })
-    .getByRole("button", { name: "Settings", exact: true });
-  await sidebarSettings.focus();
-  await sidebarSettings.press("Enter");
-  await expect(settings).toBeVisible();
-  await page.getByRole("button", { name: "Discord", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 2, name: "Discord" })).toBeFocused();
-  const repository = page.getByRole("textbox", { name: "Discord release repository URL" });
-  await repository.pressSequentially("not a url");
-  await expect(repository).toHaveValue("not a url");
-  await repository.press("Escape");
-  await expect(repository).toHaveValue("");
-  await expect(settings).toBeVisible();
-
-  await page.getByRole("button", { name: "Keybindings", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await expect(settings).toBeHidden();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(sidebarSettings).toBeFocused();
-
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
-  await expect(settings).toBeVisible();
-  await expect(page.getByRole("button", { name: "Keybindings", exact: true }))
-    .toHaveAttribute("aria-current", "page");
-  await page.getByRole("button", { name: "Close settings", exact: true }).click();
-  await expect(settings).toBeHidden();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });

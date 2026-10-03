@@ -126,7 +126,7 @@ describe("Discord failure-to-diagnostics integration", () => {
     expect(record).toMatchObject({ code, outcome, occurrences: 1 });
     if (stage === "reject") expect(record?.metadata.httpStatus).toBe(403);
     expect(posts).toHaveBeenCalledTimes(stage === "reject" || stage === "timeout" ? 1 : 0);
-    const disk = readFileSync(join(h.root, "logs", "runtime.log"), "utf8");
+    const disk = readFileSync(join(h.root, "logs", "incidents.log"), "utf8");
     const exported = h.diagnostics.exportIncidents({});
     for (const output of [JSON.stringify(result), JSON.stringify(record), disk, exported]) {
       expect(output).not.toContain("NEVER_PERSIST"); expect(output).not.toContain("api/webhooks");
@@ -147,6 +147,6 @@ describe("Discord failure-to-diagnostics integration", () => {
     })).rejects.toThrow(/Secure webhook storage is unavailable\. \[incident:/u);
     h.diagnostics.flushIncidents();
     expect(h.diagnostics.queryIncidents({}).records[0]?.code).toBe("discord.credential-unavailable");
-    expect(readFileSync(join(h.root, "logs", "runtime.log"), "utf8")).not.toContain("PRIVATE_WEBHOOK_CONTENT");
+    expect(readFileSync(join(h.root, "logs", "incidents.log"), "utf8")).not.toContain("PRIVATE_WEBHOOK_CONTENT");
   });
 });

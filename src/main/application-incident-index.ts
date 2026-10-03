@@ -1,16 +1,24 @@
 import { createHash } from "node:crypto";
 import {
   DIAGNOSTIC_LIMITS,
+  compareDiagnosticEntries,
   diagnosticDefinition,
+  diagnosticEventMatches,
   diagnosticMatches,
   diagnosticQuerySchema,
   diagnosticRecordSchema,
   parseDiagnosticIncident,
+  type DiagnosticEventEntry,
   type DiagnosticIncident,
   type DiagnosticPage,
   type DiagnosticQuery,
   type DiagnosticRecord,
 } from "../shared/application-diagnostics.js";
+
+type DiagnosticFilter = ReturnType<typeof diagnosticQuerySchema.parse>;
+type ExportItem =
+  | { kind: "incident"; at: string; id: string; record: DiagnosticRecord }
+  | { kind: "event"; at: string; id: string; entry: DiagnosticEventEntry };
 
 interface IncidentIndexOptions {
   now: () => number;
@@ -98,17 +106,17 @@ export class ApplicationIncidentIndex {
     return record;
   }
 
-  query(value: DiagnosticQuery): DiagnosticPage {
+  query(value: DiagnosticQuery, events: readonly DiagnosticEventEntry[] = []): DiagnosticPage {
     const query = diagnosticQuerySchema.parse(value);
     this.load();
     this.prune();
-    const matching = [...this.records.values()]
-      .filter((record) => diagnosticMatches(record, query))
-      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id, "en"));
-    const records = matching.slice(query.offset, query.offset + query.limit);
+    const matching = this.merged(query, events);
+    const window = matching.slice(query.offset, query.offset + query.limit);
+    const records = window.flatMap((item) => item.kind === "incident" ? [item.record] : []);
     return {
-      records, total: matching.length,
-      nextOffset: query.offset + records.length < matching.length ? query.offset + records.length : null,
+      records, events: window.flatMap((item) => item.kind === "event" ? [item.entry] : []),
+      capture: true, since: null, total: matching.length,
+      nextOffset: query.offset + window.length < matching.length ? query.offset + window.length : null,
       persistence: this.persistence, runtime: this.runtime,
       revision: this.revision, dropped: this.dropped,
       currentIncidentIds: records.filter((record) => record.runtimeGeneration && this.generationHash
@@ -121,38 +129,64 @@ export class ApplicationIncidentIndex {
     };
   }
 
-  export(value: DiagnosticQuery): string {
-    const report = this.render(this.exportRecords(value));
+  export(value: DiagnosticQuery, events: readonly DiagnosticEventEntry[] = []): string {
+    const report = this.render(this.matching(value, events));
     if (Buffer.byteLength(report) > DIAGNOSTIC_LIMITS.exportBytes) {
       throw new Error("Select a smaller diagnostics time range before exporting.");
     }
     return report;
   }
 
-  exportWithin(value: DiagnosticQuery, maxBytes: number): string {
-    const records = this.exportRecords(value);
-    const fits = (count: number): boolean => Buffer.byteLength(this.render(records.slice(0, count))) <= maxBytes;
-    if (records.length === 0 || !fits(1)) return "";
+  exportWithin(value: DiagnosticQuery, maxBytes: number, events: readonly DiagnosticEventEntry[] = []): string {
+    const items = this.matching(value, events);
+    const fits = (count: number): boolean => Buffer.byteLength(this.render(items.slice(0, count))) <= maxBytes;
+    if (items.length === 0 || !fits(1)) return "";
     let low = 1;
-    let high = records.length;
+    let high = items.length;
     while (low < high) {
       const middle = Math.ceil((low + high) / 2);
       if (fits(middle)) low = middle;
       else high = middle - 1;
     }
-    return this.render(records.slice(0, low));
+    return this.render(items.slice(0, low));
   }
 
-  private exportRecords(value: DiagnosticQuery): DiagnosticRecord[] {
+  clear(): void {
+    this.load();
+    this.records.clear();
+    this.pending.clear();
+    this.dropped = 0;
+    this.persistence = "available";
+    this.touch();
+  }
+
+  touch(): void {
+    this.revision += 1;
+    this.schedule();
+  }
+
+  private matching(value: DiagnosticQuery, events: readonly DiagnosticEventEntry[]): ExportItem[] {
     const query = diagnosticQuerySchema.parse(value);
     this.load();
     this.prune();
-    return [...this.records.values()]
-      .filter((record) => diagnosticMatches(record, query))
-      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+    return this.merged(query, events);
   }
 
-  private render(records: DiagnosticRecord[]): string {
+  private merged(query: DiagnosticFilter, events: readonly DiagnosticEventEntry[]): ExportItem[] {
+    const records = [...this.records.values()].filter((record) => diagnosticMatches(record, query));
+    if (events.length === 0) {
+      return records
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id, "en"))
+        .map((record) => ({ kind: "incident", at: record.at, id: record.id, record }));
+    }
+    return [
+      ...records.map((record): ExportItem => ({ kind: "incident", at: record.at, id: record.id, record })),
+      ...events.filter((entry) => diagnosticEventMatches(entry, query))
+        .map((entry): ExportItem => ({ kind: "event", at: entry.at, id: entry.id, entry })),
+    ].sort(compareDiagnosticEntries);
+  }
+
+  private render(items: readonly ExportItem[]): string {
     // Per-export pseudonyms preserve correlation within this report without
     // exporting project/chat/turn/request IDs or stable cross-report identifiers.
     const references = new Map<string, string>();
@@ -161,16 +195,19 @@ export class ApplicationIncidentIndex {
       references.set(id, current);
       return current;
     };
-    const safe = records.map(({ id, correlationId, context, runtimeGeneration: _generation, ...record }) => ({
-      ...record,
-      id: reference(id), correlation: reference(correlationId),
-      ...(context.providerId ? { provider: context.providerId } : {}),
-      explanation: diagnosticDefinition(record.code),
-    }));
+    const safe = items.flatMap((item) => item.kind === "incident" ? [item.record] : [])
+      .map(({ id, correlationId, context, runtimeGeneration: _generation, ...record }) => ({
+        ...record,
+        id: reference(id), correlation: reference(correlationId),
+        ...(context.providerId ? { provider: context.providerId } : {}),
+        explanation: diagnosticDefinition(record.code),
+      }));
+    const events = items.flatMap((item) => item.kind === "event" ? [item.entry] : [])
+      .map(({ id: _id, ...entry }) => entry);
     return JSON.stringify({
       schemaVersion: 1, generatedAt: new Date(this.options.now()).toISOString(),
       privacy: "Context identifiers, names, paths, URLs, credentials and all user/provider content are omitted. Correlation references are local to this export.",
-      persistence: this.persistence, records: safe,
+      persistence: this.persistence, records: safe, events,
     }, null, 2);
   }
 

@@ -149,9 +149,9 @@ describe("main-owned diagnostics journal", () => {
     const { diagnostics, directory, root } = fixture();
     diagnostics.recordIncident(incident());
     diagnostics.flushIncidents();
-    const original = readFileSync(join(directory, "runtime.log"), "utf8");
-    writeFileSync(join(directory, "runtime.log"), `${original.replace("delivery-unknown", "delivery-rejected")}\n{invalid}\n`);
-    const tampered = readFileSync(join(directory, "runtime.log"), "utf8");
+    const original = readFileSync(join(directory, "incidents.log"), "utf8");
+    writeFileSync(join(directory, "incidents.log"), `${original.replace("delivery-unknown", "delivery-rejected")}\n{invalid}\n`);
+    const tampered = readFileSync(join(directory, "incidents.log"), "utf8");
     expect(new RuntimeDiagnostics(directory, { now: () => now }).queryIncidents({}).total).toBe(0);
     const link = join(root, "redirected");
     symlinkSync(directory, link, "junction");
@@ -159,7 +159,7 @@ describe("main-owned diagnostics journal", () => {
     redirected.recordIncident(incident());
     redirected.flushIncidents();
     expect(redirected.queryIncidents({}).persistence).toBe("unavailable");
-    expect(readFileSync(join(directory, "runtime.log"), "utf8")).toBe(tampered);
+    expect(readFileSync(join(directory, "incidents.log"), "utf8")).toBe(tampered);
   });
 
   it("keeps old lifecycle records readable in support summaries without inventing duplicate incidents", () => {

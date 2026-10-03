@@ -36,6 +36,7 @@ export function createIncidentReporter(
       });
       if (!incident) return null;
       const result = sink(incident);
+      if (result === null || result === false) return null;
       // A custom sink may be asynchronous. Observability must never create an
       // unhandled rejection or delay the operation being observed.
       if (result && typeof result === "object" && "then" in result) {

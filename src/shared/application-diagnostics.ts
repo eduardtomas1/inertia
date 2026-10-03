@@ -223,8 +223,20 @@ export const diagnosticQuerySchema = z.object({
   limit: z.number().int().min(1).max(DIAGNOSTIC_LIMITS.maxPageSize).default(DIAGNOSTIC_LIMITS.pageSize),
 }).strict();
 export type DiagnosticQuery = z.input<typeof diagnosticQuerySchema>;
+export interface DiagnosticEventEntry {
+  id: string;
+  at: string;
+  event: string;
+  severity: DiagnosticSeverity;
+  subsystem: DiagnosticSubsystem;
+  title: string;
+  detail: string[];
+}
 export interface DiagnosticPage {
   records: DiagnosticRecord[];
+  events: DiagnosticEventEntry[];
+  capture: boolean;
+  since: string | null;
   total: number;
   nextOffset: number | null;
   persistence: "available" | "unavailable";
@@ -267,4 +279,18 @@ export function diagnosticMatches(record: DiagnosticRecord, query: z.output<type
     && (!query.requestId || record.context.requestId === query.requestId)
     && (!query.search || `${record.code} ${definition.title} ${definition.cause} ${record.correlationId}`
       .toLowerCase().includes(query.search.trim().toLowerCase()));
+}
+
+export function diagnosticEventMatches(entry: DiagnosticEventEntry, query: z.output<typeof diagnosticQuerySchema>): boolean {
+  return (query.severity === "all" || (query.severity === "attention"
+    ? entry.severity !== "info" : entry.severity === query.severity))
+    && (!query.subsystem || entry.subsystem === query.subsystem)
+    && !query.providerId && !query.projectId && !query.incidentId && !query.turnId && !query.requestId
+    && (!query.after || entry.at >= query.after)
+    && (!query.search || `${entry.event} ${entry.title} ${entry.detail.join(" ")}`
+      .toLowerCase().includes(query.search.trim().toLowerCase()));
+}
+
+export function compareDiagnosticEntries(left: { at: string; id: string }, right: { at: string; id: string }): number {
+  return Date.parse(right.at) - Date.parse(left.at) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 }

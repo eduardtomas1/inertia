@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 import type { AppSnapshot, ProviderInfo, ServerEvent } from "../../../shared/contracts";
-import { ISSUE_GITHUB_MESSAGES, ISSUE_REPOSITORY, issueReportSchema, type IssueGitHubState, type IssuePublicationFailure, type IssueReport } from "../../../shared/issue-report";
+import { ISSUE_GITHUB_MESSAGES } from "../../../shared/issue-report-github";
+import { ISSUE_REPOSITORY, issueReportSchema, type IssueGitHubState, type IssuePublicationFailure, type IssueReport } from "../../../shared/issue-report";
 import type { RuntimeStore } from "../../database";
 import { IssuePublicationError, type IssuePublisher } from "../../git/github-issue-report";
 import { editReport, newIssueReport } from "../../issue-report";

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bug, Copy, ExternalLink, TriangleAlert } from "lucide-react";
 import type { ProviderId, ProviderInfo, ServerEvent } from "@shared/contracts";
-import { ISSUE_GITHUB_MESSAGES, ISSUE_REPOSITORY, ISSUE_REPOSITORY_URL, manualIssueUrl, REPORT_BODY_LIMIT, REPORT_TEXT_LIMIT, type IssueGitHubState, type IssueReport } from "@shared/issue-report";
+import { ISSUE_REPOSITORY, ISSUE_REPOSITORY_URL, REPORT_BODY_LIMIT, REPORT_TEXT_LIMIT, type IssueGitHubState, type IssueReport } from "@shared/issue-report";
+import { ISSUE_GITHUB_MESSAGES, manualIssueUrl } from "@shared/issue-report-github";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { writeClipboardText } from "../utils/clipboard";
 import "./IssueReportSettings.css";

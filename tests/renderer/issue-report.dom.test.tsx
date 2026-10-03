@@ -2,7 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { IssueReportSettings } from "../../src/renderer/src/components/IssueReportSettings";
 import type { ProviderInfo, ServerEvent } from "../../src/shared/contracts";
-import { ISSUE_GITHUB_MESSAGES, type IssueGitHubState, type IssueReport } from "../../src/shared/issue-report";
+import type { IssueGitHubState, IssueReport } from "../../src/shared/issue-report";
+import { ISSUE_GITHUB_MESSAGES } from "../../src/shared/issue-report-github";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 
 const providers = [{ id: "claude", label: "Claude" }, { id: "codex", label: "Codex" }] as ProviderInfo[];

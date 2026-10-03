@@ -13,6 +13,8 @@ const longId = "01962fd7-3000-7000-8000-123456789abc";
 const unreadableId = "01962fd7-4000-7000-8000-123456789abc";
 const codexTitle = "Make the project sidebar easier to navigate";
 const claudeTitle = "Review keyboard access in the settings panel";
+const claudeExchange = [["user", claudeTitle], ["assistant", "The settings panel needs a clear focus order, visible focus rings, and Escape to return to the previous view."],
+  ...Array.from({ length: 7 }, (_, index) => [["user", `Check settings section ${index + 2} for keyboard traps.`], ["assistant", `Settings section ${index + 2} keeps focus inside its controls and returns it on Escape.`]]).flat()];
 const providerSource = `
 const fs = require("node:fs");
 const path = require("node:path");
@@ -88,8 +90,8 @@ test("imports both native histories, persists duplicates across restart, and res
           ["assistant", "The sidebar now preserves each project’s expanded state. Unread chats have a small indicator, and arrow keys move between visible conversations."]]
           .map(([role, text]) => ({ type: "response_item", timestamp, payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] } })),
       ].map((item) => JSON.stringify(item)).join("\n");
-      originalClaude = [["user", claudeTitle], ["assistant", "The settings panel needs a clear focus order, visible focus rings, and Escape to return to the previous view."]]
-        .map(([type, content], index) => JSON.stringify({ type, uuid: `message-${index}`, parentUuid: index ? "message-0" : null, sessionId: claudeId, cwd: workspaceDirectory, timestamp, message: { role: type, content } })).join("\n");
+      originalClaude = claudeExchange
+        .map(([type, content], index) => JSON.stringify({ type, uuid: `message-${index}`, parentUuid: index ? `message-${index - 1}` : null, sessionId: claudeId, cwd: workspaceDirectory, timestamp, message: { role: type, content } })).join("\n");
       await writeFile(codexFile, originalCodex); await writeFile(claudeFile, originalClaude);
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
       try { store.updateProject(store.shellSnapshot().projects[0]!.id, { name: "Workspace studio" }); store.updateSettings({ theme: "light", newThreadMode: "local" }); } finally { store.close(); }
@@ -113,7 +115,13 @@ test("imports both native histories, persists duplicates across restart, and res
   await expect(dialog.getByRole("status")).toHaveText("Imported.");
   await dialog.getByRole("button", { name: "Open chat", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(app.page.getByText("The settings panel needs a clear focus order, visible focus rings, and Escape to return to the previous view.", { exact: true })).toBeVisible();
+  const importedTimeline = app.page.locator(".response-turn");
+  await expect(importedTimeline).toHaveCount(claudeExchange.length / 2);
+  await expect(app.page.getByText("Recovered legacy history", { exact: true })).toHaveCount(0);
+  await expect(importedTimeline.first()).toContainText(claudeTitle);
+  await expect(importedTimeline.first()).toContainText("The settings panel needs a clear focus order, visible focus rings, and Escape to return to the previous view.");
+  await expect(importedTimeline.last()).toContainText("Check settings section 8 for keyboard traps.");
+  await expect(app.page.getByText("Settings section 8 keeps focus inside its controls and returns it on Escape.", { exact: true })).toBeVisible();
   await app.page.getByRole("complementary", { name: "Project navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
   await app.page.getByRole("button", { name: "General", exact: true }).click();
   await app.page.getByRole("radio", { name: "Dark", exact: true }).click();

@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
-import { portableFixtureRoot, portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
+import { portableFixtureRoot, portableNodeExecutable, removePortableFixture, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const OWN = "11111111-1111-4111-8111-111111111111";
@@ -80,8 +80,8 @@ describe.each([
   { providerId: "kimi" as const, binary: "kimi", agentName: "Kimi Code CLI", harness: createKimiAcpHarness },
 ])("$providerId reads of this chat's own attachments", ({ providerId, binary, agentName, harness }) => {
   const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    for (const root of roots.splice(0)) await removePortableFixture(root);
   });
 
   it.each([

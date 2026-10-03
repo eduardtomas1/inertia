@@ -24,7 +24,7 @@ const OUTCOME_NAMES: Readonly<Record<DiagnosticRecord["outcome"], string>> = {
 
 export function formatDiagnosticTime(at: string): string {
   return new Date(at).toLocaleString(INTERFACE_LOCALE, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit",
   });
 }
 
@@ -78,7 +78,7 @@ export function DiagnosticsEventRow(props: RowProps): React.JSX.Element {
 function EventDetail({ entry }: { entry: DiagnosticEventEntry }): React.JSX.Element {
   return <dl className="diagnostics-facts">
     <div><dt>Event</dt><dd><code>{entry.event}</code></dd></div>
-    {entry.detail.length > 0 && <div className="is-wide"><dt>Details</dt><dd><code className="diagnostics-detail-code">{entry.detail.join("\n")}</code></dd></div>}
+    {entry.detail.length > 0 && <div className="is-wide"><dt>Details</dt><dd><code className="diagnostics-detail-code" role="region" aria-label="Event details" tabIndex={0}>{entry.detail.join("\n")}</code></dd></div>}
   </dl>;
 }
 

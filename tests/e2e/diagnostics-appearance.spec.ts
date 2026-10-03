@@ -94,6 +94,28 @@ async function expectLayoutHolds(app: AppFixture): Promise<void> {
     clippedControls: 0, narrowControls: 0, shortControls: 0 });
 }
 
+async function switchThumbContrast(page: Page): Promise<number> {
+  return await page.getByRole("switch", { name: "Capture diagnostics" }).evaluate((control) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true })!;
+    const luminance = (color: string): number => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = [...context.getImageData(0, 0, 1, 1).data].map((value) => {
+        const channel = value / 255;
+        return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+    };
+    const track = luminance(getComputedStyle(control).backgroundColor);
+    const thumb = luminance(getComputedStyle(control.querySelector(".switch-thumb")!).backgroundColor);
+    return (Math.max(track, thumb) + 0.05) / (Math.min(track, thumb) + 0.05);
+  });
+}
+
 async function openDiagnostics(page: Page): Promise<void> {
   if (!await page.getByRole("main", { name: "Settings", exact: true }).isVisible()) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -113,6 +135,18 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(list.getByText("The local runtime reported a failure", { exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: "Capture diagnostics" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("group", { name: "Process health" })).toContainText("Memory");
+  const fields = await page.locator(".diagnostics-filters").evaluate((filters) => {
+    const probe = document.createElement("span");
+    probe.style.background = "var(--surface)";
+    filters.append(probe);
+    const surface = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return [...filters.querySelectorAll<HTMLElement>("input, select")].map((control) => ({
+      matchesSurface: getComputedStyle(control).backgroundColor === surface,
+      appearance: control.tagName === "SELECT" ? getComputedStyle(control).appearance : "base-select",
+    }));
+  });
+  expect(fields).toEqual(Array.from({ length: 4 }, () => ({ matchesSurface: true, appearance: "base-select" })));
   await expectLayoutHolds(app);
   await setAppearanceInPlace(app, "light");
   await capture(page, info, "diagnostics-light-wide");
@@ -128,6 +162,9 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(page.getByText("provider.auth-failed", { exact: true })).toBeVisible();
   await expectLayoutHolds(app);
   await capture(page, info, "diagnostics-expanded-dark-wide");
+  await setAppearanceInPlace(app, "light");
+  await capture(page, info, "diagnostics-expanded-light-wide");
+  await setAppearanceInPlace(app, "dark");
   await row.focus();
   await page.keyboard.press("Enter");
   await expect(row).toHaveAttribute("aria-expanded", "false");
@@ -150,6 +187,8 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   const dialog = page.getByRole("dialog", { name: "Clear diagnostics history?" });
   await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
   await capture(page, info, "diagnostics-clear-dialog-dark-wide", true);
+  await setAppearanceInPlace(app, "light");
+  await capture(page, info, "diagnostics-clear-dialog-light-wide", true);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -159,7 +198,16 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(page.getByText("Local storage", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy support summary", exact: true })).toHaveCount(0);
   await app.expectNoViewportOverflow();
+  await capture(page, info, "archive-data-light-wide");
+  await setAppearanceInPlace(app, "dark");
   await capture(page, info, "archive-data-dark-wide");
+  await app.resizeWindow(1000, 800);
+  await setAppearanceInPlace(app, "light");
+  await page.getByRole("heading", { name: "Local data", exact: true }).scrollIntoViewIfNeeded();
+  await app.expectNoViewportOverflow();
+  await capture(page, info, "archive-data-light-narrow");
+  await setAppearanceInPlace(app, "dark");
+  await app.resizeWindow(1440, 920);
   expect(app.rendererErrors).toEqual([]);
 });
 
@@ -183,11 +231,19 @@ test("turns capture off, keeps the always-on events and clears history", async (
   expect(failed).not.toHaveProperty("incidentId");
   const page1 = await page.evaluate(() => window.inertia.queryDiagnostics({ severity: "all", search: "discord.repository-missing" }));
   expect(page1.total).toBe(0);
+  await setAppearanceInPlace(app, "dark");
+  await expect.poll(() => switchThumbContrast(page)).toBeGreaterThanOrEqual(3);
   await capture(page, info, "diagnostics-capture-off-dark-wide");
+  await setAppearanceInPlace(app, "light");
+  await expect.poll(() => switchThumbContrast(page)).toBeGreaterThanOrEqual(3);
+  await capture(page, info, "diagnostics-capture-off-light-wide");
 
   await toggle.focus();
   await page.keyboard.press("Space");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => switchThumbContrast(page)).toBeGreaterThanOrEqual(3);
+  await setAppearanceInPlace(app, "dark");
+  await expect.poll(() => switchThumbContrast(page)).toBeGreaterThanOrEqual(3);
   await page.getByRole("button", { name: "Copy support summary", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Support summary copied" })).toBeVisible();
   const summary = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText());
@@ -210,5 +266,21 @@ test("turns capture off, keeps the always-on events and clears history", async (
   const cleared = await page.evaluate(() => window.inertia.queryDiagnostics({ severity: "all" }));
   expect(cleared.records).toEqual([]);
   expect(cleared.events.at(-1)?.event).toBe("diagnostics.history-cleared");
+
+  await page.getByRole("searchbox", { name: "Search diagnostics" }).fill("no such event");
+  await expect(page.getByText("No events match these filters.", { exact: true })).toBeVisible();
+  await expectLayoutHolds(app);
+  await capture(page, info, "diagnostics-empty-dark-wide");
+
+  await page.evaluate(async () => {
+    await Promise.allSettled(Array.from({ length: 130 }, () => window.inertia.queryDiagnostics({ limit: 1 })));
+  });
+  await page.getByRole("button", { name: "Archive & data", exact: true }).click();
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(page.getByText("Diagnostics could not be read.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("switch", { name: "Capture diagnostics" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+  await capture(page, info, "diagnostics-read-failed-dark-wide");
   expect(app.rendererErrors).toEqual([]);
 });

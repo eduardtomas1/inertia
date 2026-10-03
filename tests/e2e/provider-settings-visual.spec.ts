@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
@@ -64,7 +64,6 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "provider-settings-visual",
     initialState: "conversation",
-    windowDisplay: "primary",
     codexAppServerSource,
     claudeAuthSource: `
 if (process.argv[2] === "status") {

@@ -443,6 +443,7 @@ describe("Claude Agent SDK message projection", () => {
         message: "Claude reached an account rate limit.",
         terminalEvent: "assistant/rate_limit",
         activityId: "assistant-rate-limit",
+        usageLimited: true,
       },
     });
     expect(events).toContainEqual(expect.objectContaining({
@@ -477,6 +478,7 @@ describe("Claude Agent SDK message projection", () => {
         activityId: "assistant-account-error",
       },
     });
+    expect(result.failure?.usageLimited).toBeUndefined();
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
       phase: "failed",
@@ -829,6 +831,7 @@ describe("Claude Agent SDK message projection", () => {
         terminalEvent: "assistant/rate_limit",
         activityId: "assistant-session-limit",
         technicalDetail: limitNotice,
+        usageLimited: true,
       },
     });
   });

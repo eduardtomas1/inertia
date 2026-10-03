@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
+import { previewOwner } from "../../src/main/preview-identity";
 import {
   previewNavigationTarget,
   safeHttpUrl,
@@ -91,20 +92,9 @@ describe("main preview URL boundary", () => {
     expect(broker).toContain("this.options.openExternal");
   });
 
-  it("bounds preview ownership to the four conversation panes", async () => {
-    const identity = await readFile(
-      new URL("../../src/main/preview-identity.ts", import.meta.url),
-      "utf8",
-    );
-    const ownerStart = identity.indexOf("function previewOwner(");
-    const ownerEnd = identity.indexOf("\nexport function previewContext", ownerStart);
-    const ownerBoundary = identity.slice(ownerStart, ownerEnd);
-
-    expect(ownerBoundary).toContain('value !== "primary"');
-    expect(ownerBoundary).toContain('value !== "secondary"');
-    expect(ownerBoundary).toContain('value !== "tertiary"');
-    expect(ownerBoundary).toContain('value !== "quaternary"');
-    expect(ownerBoundary).not.toContain("RegExp");
+  it("bounds preview ownership to the four conversation panes", () => {
+    expect(previewOwner("quaternary")).toBe("quaternary");
+    expect(() => previewOwner("fifth")).toThrow("Invalid preview owner");
   });
 
   it("hardens each shared session once and cancels download fallbacks", async () => {

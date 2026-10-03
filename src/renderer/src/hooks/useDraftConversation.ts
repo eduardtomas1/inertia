@@ -753,9 +753,10 @@ export function useDraftConversation({
   const materializedConversationId = draft?.materialized?.conversationId;
   const workspaceConversation = useMemo(
     () => draftConversation && materializedConversationId
-      ? { ...draftConversation, id: materializedConversationId }
+      ? snapshot?.conversations.find(({ id }) => id === materializedConversationId)
+        ?? { ...draftConversation, id: materializedConversationId }
       : null,
-    [draftConversation, materializedConversationId],
+    [draftConversation, materializedConversationId, snapshot?.conversations],
   );
   const materialized = draft?.materialized;
   const conversation = useMemo(
@@ -771,7 +772,8 @@ export function useDraftConversation({
     workspaceConversation,
     layoutConversationId: draft?.materialized?.conversationId ?? draft?.conversation.id ?? null,
     requiresWorkspaceMaterialization: Boolean(
-      draft?.payload.useWorktree && !draft.conversation.worktreePath,
+      draft && !(workspaceConversation?.worktreePath ?? draft.conversation.worktreePath)
+        && (draft.payload.useWorktree || snapshot?.projects.some((project) => project.id === draft.conversation.projectId && project.workspaceKind === "scratch")),
     ),
     start,
     changeProject,

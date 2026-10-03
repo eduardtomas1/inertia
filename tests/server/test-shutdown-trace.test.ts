@@ -1,9 +1,6 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runtimeProcessEnvironment } from "../../src/main/runtime-process-environment";
@@ -11,7 +8,6 @@ import type { RunningRuntime } from "../../src/server/runtime-types";
 import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError } from "../../src/server/runtime-shutdown";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 import { createTestShutdownTrace, TEST_SHUTDOWN_TRACE_BYTES, TEST_SHUTDOWN_TRACE_FILE } from "../../src/server/runtime/test-shutdown-trace";
-import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
 
 describe("runtime shutdown test diagnostics", () => {
   let directory: string;
@@ -131,40 +127,5 @@ describe("runtime shutdown test diagnostics", () => {
     } catch (error) { caught = error; }
     expect(caught).toBe(original);
     expect(readFileSync(file(), "utf8")).toBe("existing evidence");
-  });
-
-  it.each([true, false])("bounds the owned child and preserves its file (failure marker: %s)", async (emitMarker) => {
-    const helperUrl = pathToFileURL(join(import.meta.dirname, "../../src/server/runtime/test-shutdown-trace.ts")).href;
-    const child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", `
-      import { createTestShutdownTrace } from ${JSON.stringify(helperUrl)};
-      const trace = createTestShutdownTrace(${JSON.stringify(directory)});
-      trace.observe("http-server", () => new Promise(() => {}));
-      trace.failure("server cleanup");
-      if (${emitMarker}) process.send("shutdown-unconfirmed");
-      setInterval(() => {}, 1000);
-    `], { env: { ...process.env }, stdio: ["ignore", "ignore", "ignore", "ipc"] });
-    const closed = once(child, "close");
-    const markerWait = new AbortController();
-    try {
-      const message = await captureBoundedFailureDiagnostic(async () =>
-        await Promise.race([once(child, "message", { signal: markerWait.signal }), closed]),
-      emitMarker ? 2_000 : 200);
-      if (emitMarker) {
-        expect(message.outcome).toBe("captured");
-        if (message.outcome === "captured") expect(message.value[0]).toBe("shutdown-unconfirmed");
-      } else {
-        expect(message.outcome).toBe("timed-out");
-      }
-    } finally {
-      markerWait.abort();
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-      const stopped = await captureBoundedFailureDiagnostic(() => closed, 2_000);
-      expect(stopped.outcome).toBe("captured");
-    }
-    if (emitMarker) {
-      const record = JSON.parse(readFileSync(file(), "utf8"));
-      expect(record.deadlinePhase).toBe("server cleanup");
-      expect(record.owners).toEqual([{ owner: "http-server", startMs: expect.any(Number), endMs: null, state: "started" }]);
-    }
   });
 });

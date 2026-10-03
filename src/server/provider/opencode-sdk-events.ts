@@ -7,6 +7,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 
 import { stableProviderActivityId } from "./activity-lifecycle";
+import { openCodeAttachmentReadAllowed } from "./attachment-read-grant";
 import type { AgentHarnessStartOptions } from "./agent-harness";
 import { createAgentHarnessEmitter } from "./agent-harness";
 import { type ProviderRunFailure } from "./contracts";
@@ -147,6 +148,7 @@ export function handleOpenCodeInteractionEvent(
     if (
       options.input.access === "full"
       || (options.input.access === "auto-edit" && permission === "edit")
+      || openCodeAttachmentReadAllowed(permission, properties, options.input.attachmentReadRoots)
     ) {
       void replies.permission({ protocol, sessionId, nativeId }, "once")
         .catch(onFailure);

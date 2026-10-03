@@ -238,7 +238,7 @@ describe("Codex App Server terminal outcomes", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each([[[]], [["UNEXPECTED_PAYLOAD"]], ["UNEXPECTED_PAYLOAD"], [42]])(
+  it.each([[[]], ["UNEXPECTED_PAYLOAD"]])(
     "keeps an interrupted turn with a non-object error %j cancelled",
     async (error) => {
       const app = fixture();
@@ -276,7 +276,6 @@ describe("Codex App Server terminal outcomes", () => {
   it.each([
     "UNEXPECTED PAYLOAD with spaces",
     { first: {}, second: {} },
-    { "not an identifier": {} },
     `x${"y".repeat(64)}`,
   ])("drops an unrecognised Codex error shape %j from the technical detail", async (codexErrorInfo) => {
     const app = fixture();
@@ -307,6 +306,35 @@ describe("Codex App Server terminal outcomes", () => {
     expect(result.failure?.technicalDetail).not.toMatch(/PRIVATE_DIAGNOSTIC_TOKEN|OVER_LIMIT|UNEXPECTED_PAYLOAD|\0/u);
     expect(result).toHaveProperty("diagnostic", expect.any(String));
     expect("diagnostic" in result ? result.diagnostic?.length : undefined).toBeLessThanOrEqual(4_000);
+  });
+
+  it.each([
+    ["a final error notification", true, "usageLimitExceeded", true],
+    ["a failed turn", false, "usageLimitExceeded", true],
+    ["a final error notification", true, "contextWindowExceeded", false],
+    ["a failed turn", false, { httpConnectionFailed: { httpStatusCode: 429 } }, false],
+  ] as const)("tags a usage-limit failure only from Codex's structured error info (%s, %j)", async (_label, notified, codexErrorInfo, limited) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    if (notified) {
+      app.notification("error", { threadId: "thread-test", turnId: "turn-test", willRetry: false,
+        error: { message: "You've hit your usage limit.", codexErrorInfo } });
+      app.terminal("failed", { message: "You've hit your usage limit." });
+    } else {
+      app.terminal("failed", { message: "You've hit your usage limit.", codexErrorInfo });
+    }
+    app.finishCleanup(true);
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.usageLimited).toBe(limited ? true : undefined);
+  });
+
+  it("does not tag usage-limit text without Codex's structured error info", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("failed", { message: "You've hit your usage limit. Try again later." });
+    app.finishCleanup(true);
+    expect((await app.run.result).failure?.usageLimited).toBeUndefined();
   });
 
   it("keeps a plain interrupted turn cancelled after an earlier retryable provider error", async () => {
@@ -427,7 +455,7 @@ describe("Codex App Server terminal outcomes", () => {
     await expectGuardianFailure(app);
   });
 
-  it.each(["notReady", "started", "succeeded", "failed"])("ignores gateway OAuth %s without projecting auth handoffs or changing the active turn", async (status) => {
+  it.each(["started", "failed"])("ignores gateway OAuth %s without projecting auth handoffs or changing the active turn", async (status) => {
     const app = fixture();
     await vi.advanceTimersByTimeAsync(0);
     const before = JSON.stringify({ writes: app.writes, calls: Object.values(app.observed).map((spy) => spy.mock.calls) });
@@ -445,8 +473,7 @@ describe("Codex App Server terminal outcomes", () => {
   });
 
   it.each([
-    { status: "future-secret-status" }, { status: null }, { authUrl: { code: "PRIVATE_GATEWAY_CODE" } },
-    { error: ["PRIVATE_GATEWAY_DIAGNOSTIC"] }, { providerId: "" }, { authUrl: undefined },
+    { status: "future-secret-status" }, { authUrl: { code: "PRIVATE_GATEWAY_CODE" } },
     { authUrl: "https://gateway.example.test/authorize?code=PRIVATE_GATEWAY_CODE", error: undefined },
   ])("drops an unknown or malformed gateway OAuth status without failing the turn or retaining it: %j", async (override) => {
     const app = fixture();

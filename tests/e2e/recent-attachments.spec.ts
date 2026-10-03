@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type TestInfo } from "@playwright/test";
 import { copyFile, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -16,7 +16,7 @@ async function capture(name: string, testInfo: TestInfo): Promise<void> {
 }
 test.afterAll(async () => { await app?.close(); });
 test("recent attachments show real thumbnails, open retained previews and handle a missing file", async ({ browserName: _browserName }, testInfo) => {
-  app = await createAppFixture({ name: "recent-attachments", initialState: "conversation", windowDisplay: "primary" });
+  app = await createAppFixture({ name: "recent-attachments", initialState: "conversation" });
   await copyFile(resolve("resources/icons/512x512.png"), app.attachmentImagePath);
   const page = app.page;
   await app.electronApp.evaluate(({ dialog }, paths) => {

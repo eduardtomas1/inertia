@@ -20,10 +20,16 @@ const jobs = Array.isArray(plan?.requiredJobs) && Array.isArray(plan?.requiredCh
   && plan.requiredJobs.every((job) => needs[job]?.result === "success")
   ? await settledJobEvidence({ requiredChecks: plan.requiredChecks, sourceHead, runId, readJobs, wait })
   : readJobs();
+const reusedRunId = plan?.lane === "main-reused" ? plan.reusedRun?.runId : null;
+let reusedRunJobs = [];
+if (Number.isSafeInteger(reusedRunId) && reusedRunId > 0) {
+  try { reusedRunJobs = currentRunJobs(process.env.GITHUB_REPOSITORY, reusedRunId); }
+  catch { reusedRunJobs = []; }
+}
 const failures = evaluateMergeEvidence(plan, {
   head, sourceHead, event,
   draft: process.env.PR_DRAFT === "true", runId,
-  needs, jobs,
+  needs, jobs, reusedRunJobs,
 });
 const report = failures.length ? failures.join("\n")
   : `All required evidence succeeded for ${head}; omissions are recorded in the ${plan.lane} plan.`;

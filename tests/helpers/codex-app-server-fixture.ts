@@ -37,6 +37,7 @@ const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-ch
   : "item/commandExecution/requestApproval";
 let threadId = "thread-new";
 let turnId = "turn-1";
+let heldInterruptId;
 const requestInput = () => send({
 id: "input-rpc",
 method: "item/tool/requestUserInput",
@@ -196,21 +197,6 @@ if (message.method === "thread/goal/set") {
     }, 10);
     return;
   }
-  if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering") {
-    sendBatch([
-      { id: message.id, result: { goal } },
-      { method: "thread/goal/cleared", params: { threadId } },
-    ]);
-    return;
-  }
-  if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering") {
-    const terminalGoal = { ...goal, updatedAt: 1800000011 };
-    sendBatch([
-      { method: "thread/goal/updated", params: { threadId, turnId, goal: terminalGoal } },
-      { id: message.id, result: { goal: terminalGoal } },
-    ]);
-    return;
-  }
   send({ id: message.id, result: { goal } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only") {
     setTimeout(() => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }), 10);
@@ -243,35 +229,19 @@ if (message.method === "thread/goal/set") {
   return;
 }
 if (message.method === "thread/goal/clear") {
-  if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering") {
-    sendBatch([
-      { method: "thread/goal/cleared", params: { threadId } },
-      { id: message.id, result: {} },
-    ]);
-    return;
-  }
-  if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering") {
-    const activeGoal = {
-      threadId,
-      objective: "Goal created after clear response",
-      status: "active",
-      tokenBudget: null,
-      tokensUsed: 200,
-      timeUsedSeconds: 2,
-      createdAt: 1800000000,
-      updatedAt: 1800000011,
-    };
-    sendBatch([
-      { id: message.id, result: {} },
-      { method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } },
-    ]);
-    return;
-  }
   send({ id: message.id, result: {} });
   send({ method: "thread/goal/cleared", params: { threadId } });
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress" } } },
+      { id: "approval-rpc", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } },
+      { id: message.id, result: { turn: { id: turnId, status: "inProgress" } } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" || process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     sendBatch([
@@ -316,23 +286,7 @@ if (message.method === "turn/start") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO !== "turn-started-before-response") {
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   }
-  if (
-    process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering"
-    || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering"
-    || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering"
-    || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering"
-    || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering"
-  ) {
-    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-response-ordering") {
-      send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { threadId, objective: "Goal before clear response", status: "active", tokenBudget: null, tokensUsed: 100, timeUsedSeconds: 1, createdAt: 1800000000, updatedAt: 1800000010 } } });
-    }
-    if (
-      process.env.INERTIA_APP_SERVER_SCENARIO === "goal-terminal-response-ordering"
-      || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-clear-terminal-response-ordering"
-    ) {
-      send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { threadId, objective: "Goal awaiting mutation", status: "active", tokenBudget: null, tokensUsed: 100, timeUsedSeconds: 1, createdAt: 1800000000, updatedAt: 1800000010 } } });
-      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
-    }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering") {
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "legacy-large-frame") {
@@ -554,6 +508,7 @@ if (message.method === "turn/start") {
   }
   if (
     process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
+    || process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only"
   ) return;
@@ -567,9 +522,7 @@ if (message.method === "turn/start") {
   const approvalThreadId =
     process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval"
       ? "child-approval"
-      : process.env.INERTIA_APP_SERVER_SCENARIO === "unrelated-approval"
-        ? "thread-unrelated"
-        : threadId;
+      : threadId;
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
     send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-approval", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: [approvalThreadId], prompt: "Run a supervised check", model: null, reasoningEffort: null, agentsStates: { [approvalThreadId]: { status: "running", message: "Waiting for approval" } } } } });
     send({ method: "thread/started", params: { thread: { id: approvalThreadId, parentThreadId: threadId, agentNickname: "Approval verifier", agentRole: "tester", preview: "Run a supervised check" } } });
@@ -628,6 +581,11 @@ if (message.method === "turn/start") {
     }, 10);
     return;
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
+    params.turnId = "child-approval-turn";
+    send({ id: "approval-rpc", method: approvalMethod, params });
+    return send({ method: "turn/started", params: { threadId: approvalThreadId, turn: { id: "child-approval-turn", status: "inProgress" } } });
+  }
   return send({ id: "approval-rpc", method: approvalMethod, params });
 }
 if (message.id === "approval-rpc") {
@@ -667,7 +625,17 @@ if (message.method === "turn/steer") {
   ]);
   return;
 }
+if (message.id === "late-approval" && message.method === undefined) {
+  send({ id: heldInterruptId, result: {} });
+  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+  return;
+}
 if (message.method === "turn/interrupt") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt") {
+    heldInterruptId = message.id;
+    send({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-late", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } });
+    return;
+  }
   send({ id: message.id, result: {} });
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
 }

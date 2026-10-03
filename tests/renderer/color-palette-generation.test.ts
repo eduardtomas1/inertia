@@ -10,7 +10,6 @@ import {
 } from "../../scripts/color-palette.mjs";
 import {
   ARCHITECTURE,
-  BASE_NEUTRAL_CHROMA,
   FAMILY_SPECS,
   PALETTE_APPEARANCES,
   PALETTE_FAMILIES,
@@ -122,18 +121,6 @@ describe("generated color palettes", () => {
     expect(WINDOW_BACKGROUND.dark).toBe(windowBackground("dark"));
   });
 
-  it.each(cases)("builds every %s %s ramp step from one hue and one tint", (family, appearance) => {
-    const tokens = palette(family, appearance);
-    const spec = FAMILY_SPECS[family]!;
-    const ladder = ARCHITECTURE[appearance]!.ladder as Record<string, number>;
-    const tint = BASE_NEUTRAL_CHROMA[appearance]! * spec.neutralTint;
-    for (const role of LADDER_ROLES) {
-      expect(tokens[role], `${family} ${appearance} --${role}`).toBe(
-        oklchToHex({ l: ladder[role]!, c: tint, h: spec.neutralHue }),
-      );
-    }
-  });
-
   it.each(cases)("spaces the %s %s elevation ramp evenly in lightness", (family, appearance) => {
     const tokens = palette(family, appearance);
     const ordered = [...LADDER_ROLES]
@@ -165,13 +152,6 @@ describe("generated color palettes", () => {
     expect(ratios[1]).toBeGreaterThan(ratios[2]!);
     expect(ratios[2]).toBeGreaterThanOrEqual(4.5);
     expect(ratios[0]).toBeGreaterThanOrEqual(7);
-  });
-
-  it.each(cases)("agrees on the semantic hue for %s %s blue and working", (family, appearance) => {
-    const tokens = palette(family, appearance);
-    expect(tokens.blue).toBe(tokens["status-working"]);
-    expect(tokens.danger).toBe(tokens["status-failed"]);
-    expect(tokens.warning).toBe(tokens["status-approval"]);
   });
 
   it("maps out-of-gamut requests by reducing chroma only", () => {

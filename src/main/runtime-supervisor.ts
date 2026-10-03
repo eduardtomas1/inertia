@@ -192,6 +192,7 @@ export class RuntimeSupervisor {
       conversationAttachmentStoreRunner:
         options.conversationAttachmentStoreRunner,
       documentPreparationRunner: options.documentPreparationRunner,
+      conversationAttachmentSourceRoot: options.conversationAttachmentSourceRoot,
       conversationAttachmentStoreAuthority:
         options.conversationAttachmentStoreAuthority,
       agentBrowserBroker: options.agentBrowserBroker,

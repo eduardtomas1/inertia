@@ -1,7 +1,11 @@
 import { z } from "zod";
 
+import { providerNativeModelSelection } from "../../shared/model-routing";
+import type { ProviderId } from "../../shared/contracts";
+import type { NewConversationOptions } from "./types";
+
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
-export const DATABASE_RECOVERY_EXPORT_VERSION = 2;
+export const DATABASE_RECOVERY_EXPORT_VERSION = 3;
 export const DATABASE_RECOVERY_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
 export const DATABASE_RECOVERY_EXPORT_MAX_PROJECTS = 10_000;
 export const DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS = 100_000;
@@ -29,6 +33,7 @@ const recoveryConversationFields = {
     "kimi",
     "opencode",
     "antigravity",
+    "gemini",
   ]),
   model: z.string().max(300),
   reasoningEffort: z.string().max(80),
@@ -36,11 +41,25 @@ const recoveryConversationFields = {
   accessMode: z.enum(["supervised", "auto-edit", "full"]),
 };
 
+function normalizeRecoveryConversation<T extends {
+  providerId: z.infer<typeof recoveryConversationFields.providerId>;
+  model: string;
+  reasoningEffort: string;
+}>(conversation: T) {
+  const { providerId, ...rest } = conversation;
+  return {
+    ...rest,
+    providerId: providerId === "gemini" ? "antigravity" as const : providerId,
+    model: providerId === "gemini" ? "" : conversation.model,
+    reasoningEffort: providerId === "gemini" ? "" : conversation.reasoningEffort,
+  };
+}
+
 const legacyRecoveryConversationSchema = z.object({
   ...recoveryConversationFields,
   messages: z.array(legacyRecoveryMessageSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
-}).strict();
+}).strict().transform(normalizeRecoveryConversation);
 
 const recoveryConversationSchema = z.object({
   ...recoveryConversationFields,
@@ -55,7 +74,7 @@ const recoveryConversationSchema = z.object({
       });
     }
   }
-});
+}).transform(normalizeRecoveryConversation);
 
 const recoveryProjectFields = {
   name: z.string().max(1_000),
@@ -71,8 +90,15 @@ const legacyRecoveryProjectSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
 
+const version2RecoveryProjectSchema = z.object({
+  ...recoveryProjectFields,
+  conversations: z.array(recoveryConversationSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
+}).strict();
+
 const recoveryProjectSchema = z.object({
   ...recoveryProjectFields,
+  workspaceKind: z.literal("scratch").optional(),
   conversations: z.array(recoveryConversationSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
@@ -117,6 +143,14 @@ const legacyDatabaseRecoveryExportSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
 }).strict().superRefine(validateRecoveryExportCounts);
 
+const version2DatabaseRecoveryExportSchema = z.object({
+  format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
+  version: z.literal(2),
+  exportedAt: timestampSchema,
+  projects: z.array(version2RecoveryProjectSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
+}).strict().superRefine(validateRecoveryExportCounts);
+
 export const databaseRecoveryExportSchema = z.object({
   format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
   version: z.literal(DATABASE_RECOVERY_EXPORT_VERSION),
@@ -127,6 +161,7 @@ export const databaseRecoveryExportSchema = z.object({
 
 const supportedDatabaseRecoveryExportSchema = z.union([
   databaseRecoveryExportSchema,
+  version2DatabaseRecoveryExportSchema,
   legacyDatabaseRecoveryExportSchema,
 ]);
 
@@ -171,6 +206,9 @@ export function parseDatabaseRecoveryExport(
   if (result.data.version === DATABASE_RECOVERY_EXPORT_VERSION) {
     return result.data;
   }
+  if (result.data.version === 2) {
+    return { ...result.data, version: DATABASE_RECOVERY_EXPORT_VERSION };
+  }
   return {
     ...result.data,
     version: DATABASE_RECOVERY_EXPORT_VERSION,
@@ -185,4 +223,20 @@ export function parseDatabaseRecoveryExport(
       })),
     })),
   };
+}
+
+export function recoveredConversationModel(conversation: {
+  providerId: ProviderId;
+  model: string;
+  reasoningEffort: string;
+}): Pick<NewConversationOptions, "providerId" | "model" | "modelSelection" | "reasoningEffort"> {
+  return conversation.model
+    ? { providerId: conversation.providerId, model: conversation.model, reasoningEffort: conversation.reasoningEffort }
+    : {
+        providerId: conversation.providerId,
+        modelSelection: providerNativeModelSelection({
+          providerId: conversation.providerId,
+          reasoningEffort: conversation.reasoningEffort,
+        }),
+      };
 }

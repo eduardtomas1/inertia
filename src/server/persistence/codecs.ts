@@ -31,8 +31,11 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  attachmentLimitError,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_BYTES,
   chatAttachmentMimeTypeForName,
-  safeChatAttachmentMimeTypeForName,
+  storedAttachmentTypeMatchesName,
 } from "../../shared/attachments";
 import {
   isContinuationReasonCode,
@@ -76,6 +79,7 @@ import type { StoredConversationWorktreeOwnership } from "./types";
 
 export function projectFromRow(row: ProjectRow): Project {
   return {
+    ...(row.workspace_kind === "scratch" ? { workspaceKind: "scratch" as const } : {}),
     preferences: parseProjectPreferences(row.preferences_json),
     id: row.id,
     name: row.name,
@@ -688,8 +692,8 @@ function isStoredChatAttachment(
     && !/[\0-\x1f\x7f]/u.test(candidate.name)
     && !/[\\/]/u.test(candidate.name)
     && typeof candidate.mimeType === "string"
-    && (CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(candidate.mimeType)
-    && safeChatAttachmentMimeTypeForName(candidate.name) === candidate.mimeType
+    && (ACCEPTED_ATTACHMENT_MIME_TYPES as readonly string[]).includes(candidate.mimeType)
+    && storedAttachmentTypeMatchesName(candidate.name, candidate.mimeType)
     && typeof candidate.path === "string"
     && candidate.path.length >= 1
     && candidate.path.length <= 4_096
@@ -697,20 +701,18 @@ function isStoredChatAttachment(
     && typeof candidate.size === "number"
     && Number.isSafeInteger(candidate.size)
     && candidate.size >= 1
-    && candidate.size <= MAX_CHAT_ATTACHMENT_BYTES;
+    && candidate.size <= MAX_ATTACHMENT_BYTES;
 }
 
 /** Live projection of stored attachments, with snapshot sources, beside migration 56's frozen parser. */
 export function parseStoredAttachments(value: string): ChatAttachment[] {
   const attachments: ChatAttachment[] = [];
   const ids = new Set<string>();
-  let totalBytes = 0;
   for (const attachment of parseJsonArray(value)) {
     if (
       !isStoredChatAttachment(attachment)
       || ids.has(attachment.id)
-      || attachments.length >= MAX_CHAT_ATTACHMENTS
-      || totalBytes + attachment.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+      || attachmentLimitError([...attachments, attachment]) !== null
     ) continue;
     const snapshot = snapshotSourceSchema.safeParse(attachment.snapshot);
     attachments.push({
@@ -722,7 +724,6 @@ export function parseStoredAttachments(value: string): ChatAttachment[] {
       ...(snapshot.success ? { snapshot: snapshot.data } : {}),
     });
     ids.add(attachment.id);
-    totalBytes += attachment.size;
   }
   return attachments;
 }

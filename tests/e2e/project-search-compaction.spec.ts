@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
@@ -6,7 +6,7 @@ import { createAppFixture } from "./support/app-fixture";
 import { closeWorkspaceTools } from "./support/workspace-tools";
 
 test("uses the command palette surface for project search and keeps keyboard focus inside", async () => {
-  const app = await createAppFixture({ name: "project-search", initialState: "conversation", windowDisplay: "primary" });
+  const app = await createAppFixture({ name: "project-search", initialState: "conversation" });
   try {
     await app.resizeWindow(1100, 760);
     const page = app.page;
@@ -48,7 +48,7 @@ test("uses the command palette surface for project search and keeps keyboard foc
 });
 
 test("shows animated provider compaction and honors reduced motion", async ({ browserName: _browserName }, testInfo) => {
-  const app = await createAppFixture({ name: "context-compaction", initialState: "conversation", windowDisplay: "primary" });
+  const app = await createAppFixture({ name: "context-compaction", initialState: "conversation" });
   try {
     const store = new RuntimeStore(join(app.testDirectory, "data", "inertia.sqlite"), app.workspaceDirectory, { recoverInterruptedRuns: false });
     const conversation = store.shellSnapshot().conversations[0]!;

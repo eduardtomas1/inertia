@@ -317,6 +317,24 @@ for (const size of [
       // without forcing those controls or the tool panel out of the viewport.
       // Windows can report a quarter-pixel less at fractional display scales.
       expect(transcriptHeight).toBeGreaterThanOrEqual(71.5);
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+      const palette = page.getByRole("dialog", { name: "Search Inertia" });
+      await palette.getByRole("combobox").fill("help");
+      await palette.getByRole("option", { name: /Open help/u }).click();
+      const help = page.getByRole("dialog", { name: "Help" });
+      await expect(help).toBeVisible();
+      await expect.poll(() => help.evaluate((element) => (
+        element.getAnimations().every((animation) => animation.playState === "finished")
+      ))).toBe(true);
+      const bounds = await help.boundingBox();
+      const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+      await page.keyboard.press("Escape");
+      await expect(help).toHaveCount(0);
     }
 
     expect(rendererErrors).toEqual([]);

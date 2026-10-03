@@ -10,7 +10,7 @@ import {
   validatedPaths,
   type GitPathInspectionOptions,
 } from "./paths";
-import { getRepositoryStatus } from "./status";
+import { resolvedRepositoryStatus } from "./status";
 import { runGit, runGitInspection } from "./runner";
 import {
   GitError,
@@ -142,13 +142,12 @@ function removedMutationPaths(
  * whitespace settings and repository-provided clean filters.
  */
 async function captureRawReview(
-  repositoryPath: string,
+  root: string,
   options: GitPathInspectionOptions = {},
 ): Promise<Omit<GitCommitReviewCapture, "fingerprint" | "prospectiveTree"> & {
   rawFingerprint: string;
 }> {
-  const root = await repositoryRoot(repositoryPath, options);
-  const status = await getRepositoryStatus(root, {
+  const status = await resolvedRepositoryStatus(root, {
     deadlineAt: options.deadlineAt,
   });
   if (status.clean) {
@@ -205,7 +204,16 @@ export async function prepareGitCommitReview(
   repositoryPath: string,
   options: GitPathInspectionOptions = {},
 ): Promise<GitPreparedCommitReview> {
-  const root = await repositoryRoot(repositoryPath, options);
+  return await prepareResolvedGitCommitReview(
+    await repositoryRoot(repositoryPath, options),
+    options,
+  );
+}
+
+export async function prepareResolvedGitCommitReview(
+  root: string,
+  options: GitPathInspectionOptions = {},
+): Promise<GitPreparedCommitReview> {
   const before = await captureRawReview(root, options);
   const selection = await prepareGitCommitSelection(
     root,

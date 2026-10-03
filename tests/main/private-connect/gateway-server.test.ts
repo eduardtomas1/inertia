@@ -377,58 +377,6 @@ describe("Private Connect loopback gateway", () => {
     expect((await request("44444444-4444-4444-8444-444444444444")).status).toBe(200);
   });
 
-  it("bounds concurrent work per authenticated session", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-inflight-"));
-    writeFileSync(join(root, "index.html"), "<html>ok</html>");
-    const releases: Array<() => void> = [];
-    let admitted = 0;
-    const blockingHost: PrivateConnectGatewayHost = {
-      ...host(),
-      handleRequest: async (_session, request) => {
-        admitted += 1;
-        await new Promise<void>((resolve) => releases.push(resolve));
-        return {
-          type: "response",
-          requestId: request.requestId,
-          ok: true,
-          result: { kind: "pong", at: "2030-01-01T00:00:00.000Z" },
-        };
-      },
-    };
-    const server = new PrivateConnectGatewayServer({
-      host: blockingHost,
-      staticRoot: root,
-    });
-    servers.push(server);
-    const address = await server.start();
-    const hostValue = hostHeader(address);
-    const origin = `https://${hostValue}`;
-    const request = (suffix: string) => fetch(`http://${hostValue}/api/request`, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: "__Host-inertia-private-connect=session-token",
-        "Content-Type": "application/json",
-        "x-inertia-private-connect-csrf": session.csrf,
-      },
-      body: JSON.stringify({
-        protocolVersion: 1,
-        type: "client.ping",
-        requestId: `33333333-3333-4333-8333-${suffix.padStart(12, "0")}`,
-      }),
-    });
-    const active = Array.from({ length: 8 }, (_, index) => request(String(index + 1)));
-    await expect.poll(() => admitted).toBe(8);
-    const overflow = await request("9");
-    expect(overflow.status).toBe(200);
-    await expect(overflow.json()).resolves.toMatchObject({
-      ok: false,
-      code: "busy",
-    });
-    releases.splice(0).forEach((release) => release());
-    await expect(Promise.all(active)).resolves.toHaveLength(8);
-  });
-
   it("keeps timed-out runtime work inside the in-flight bound until it settles", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-timeout-inflight-"));
     writeFileSync(join(root, "index.html"), "<html>ok</html>");

@@ -65,6 +65,7 @@ import {
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
 import { MainWindowCreation } from "./main-window-creation.js";
+import { registerEditContextMenu } from "./edit-context-menu.js";
 import { validateDesktopAppUpdateCandidate } from "./app-update-candidate-viability.js";
 import { AppUpdateRuntimeReadiness } from "./app-update-runtime-readiness.js";
 import { startApplicationWithUpdateHandoff } from "./app-update-startup.js";
@@ -104,6 +105,7 @@ import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecuta
 import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
+import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
@@ -786,6 +788,7 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = window;
+  registerEditContextMenu(window, isTrustedRendererLocation);
   mascotMain ??= new MascotMain({
     mainWindow: () => mainWindow, rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
     registerProtocol: (session) => registerRendererProtocol(session.protocol),
@@ -1024,6 +1027,7 @@ async function bootstrap(): Promise<void> {
     runtimeRecoveryBlocked,
     conversationAttachmentStoreRunner,
     documentPreparationRunner,
+    conversationAttachmentSourceRoot: attachmentDirectory(),
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),
     attachmentBroker: {
@@ -1036,12 +1040,7 @@ async function bootstrap(): Promise<void> {
       release: (attachmentId) =>
         attachmentRegistry().release(attachmentId),
     },
-    credentialBroker: {
-      resolve: (secretReference) => credentialVault!.resolve(secretReference),
-      status: (secretReference) => credentialVault!.status(secretReference),
-      clear: (secretReference) => credentialVault!.clear(secretReference),
-      forget: (secretReference) => credentialVault!.forget(secretReference),
-    },
+    credentialBroker: runtimeCredentialBroker(() => credentialVault!),
     secureFileBroker: new SecureFileBroker({
       retryUnconfirmedShutdown: process.platform === "linux",
       spawn: (parent) => utilityProcess.fork(

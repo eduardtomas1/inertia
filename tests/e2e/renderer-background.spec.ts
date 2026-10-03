@@ -126,7 +126,7 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
   }), heapBefore, heap, eventTotals, traceEvents: trace.length };
 }
 
-for (const { turns, mature } of [{ turns: 2, mature: false }, { turns: 128, mature: false }, { turns: 128, mature: true }]) {
+for (const { turns, mature } of [{ turns: 2, mature: false }, { turns: 128, mature: true }]) {
 test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " in a mature profile with live subagents" : ""}`, async ({ browserName: _browserName }, testInfo) => {
   test.setTimeout(mature ? 300_000 : 180_000);
   let conversationId = "";

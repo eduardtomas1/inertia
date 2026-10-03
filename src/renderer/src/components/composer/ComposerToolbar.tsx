@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
+  Folder,
   FolderGit2,
   LoaderCircle,
   MessagesSquare,
@@ -22,7 +23,7 @@ import type {
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
-import { MAX_CHAT_ATTACHMENTS } from "@shared/attachments";
+import { MAX_ATTACHMENT_COUNT } from "@shared/attachments";
 import {
   modelSelectionUsesFastMode,
   routeSupportsNativeFastModeIdentity,
@@ -131,6 +132,7 @@ export interface ComposerToolbarProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext: boolean;
+  scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   onUpdateConversation: (
     update: Partial<Pick<
@@ -209,6 +211,7 @@ export function ComposerToolbar({
   conversation,
   checkoutBranch,
   showCheckoutContext,
+  scratchWorkspace = false,
   newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
@@ -271,13 +274,13 @@ export function ComposerToolbar({
             onClick={() => void onChooseAttachments()}
             disabled={
               attachmentDisabled
-              || attachmentCount >= MAX_CHAT_ATTACHMENTS
+              || attachmentCount >= MAX_ATTACHMENT_COUNT
               || (running && imageInputUnavailableReason !== null)
             }
           >
             <Paperclip size={16} />
           </IconButton>
-          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_CHAT_ATTACHMENTS || imageInputUnavailableReason !== null} /></Suspense>
+          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_ATTACHMENT_COUNT || imageInputUnavailableReason !== null} /></Suspense>
         </div>
         <div
           className="composer-options"
@@ -549,11 +552,11 @@ export function ComposerToolbar({
             <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
-              <FolderGit2 size={12} aria-hidden="true" />
-              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+              {scratchWorkspace ? <Folder size={12} aria-hidden="true" /> : <FolderGit2 size={12} aria-hidden="true" />}
+              <span>{scratchWorkspace ? "Chat folder" : conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}
-          <CheckoutBranchSlot branch={visibleCheckoutBranch} />
+          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
         </div>
       )}
     </div>

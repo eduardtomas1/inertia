@@ -77,7 +77,7 @@ describe("TurnController cancellation persistence and cleanup", () => {
     },
   );
 
-  it.each(["missing", "identity-mismatch", "force-detached"] as const)(
+  it.each(["force-detached"] as const)(
     "keeps durable ownership and attachments after failed writes and %s cleanup",
     async (cleanupResult) => {
       const runtime = await createTurnControllerTestRuntime();

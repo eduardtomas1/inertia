@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -9,7 +9,7 @@ import { loadSeededConversationTurns } from "./support/conversation-history";
 for (const turnCount of [4, 80]) {
 test(`returns to the same historical row after navigating through an empty chat (${turnCount} turns)`, async () => {
   const app = await createAppFixture({
-    name: "scroll-memory", initialState: "conversation", windowDisplay: "primary",
+    name: "scroll-memory", initialState: "conversation",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
       try {

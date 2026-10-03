@@ -30,7 +30,7 @@ import {
   truncatedXlsxFixture,
   validXlsxFixture,
 } from "../fixtures/attachments/malicious-structures";
-import { withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
+import { pngWithoutPalette, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
 const directories: string[] = [];
 
@@ -95,6 +95,11 @@ afterEach(async () => {
 });
 
 describe("private staged attachment validation", () => {
+  it("reports asynchronous native decoder rejection as a content error", async () => {
+    const { operation } = await stage("missing-palette.png", "image/png", pngWithoutPalette());
+    await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({ code: "content" });
+  });
+
   it("validates UTF-16 bytes without rewriting the staged file or digest", async () => {
     const bytes = Buffer.from("\ufeffRésumé 東京\n", "utf16le");
     const { operation, path } = await stage("notes.txt", "text/plain", bytes);
@@ -107,12 +112,17 @@ describe("private staged attachment validation", () => {
     expect(await readFile(path)).toEqual(bytes);
   });
 
-  it("returns a bounded text-content error for an ambiguous encoding", async () => {
-    const { operation } = await stage("notes.txt", "text/plain", Buffer.from("caf\xe9", "latin1"));
-    await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({
-      code: "text-content",
-      message: expect.stringContaining("Convert the file to UTF-8"),
+  it("keeps text with an ambiguous encoding as an opaque file", async () => {
+    const bytes = Buffer.from("caf\xe9", "latin1");
+    const { operation, path } = await stage("notes.txt", "text/plain", bytes);
+    expect(await validateAttachmentImportFile(operation)).toEqual({
+      displayName: "notes.txt",
+      mimeType: "application/octet-stream",
+      extension: "bin",
+      size: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
     });
+    expect(await readFile(path)).toEqual(bytes);
   });
   it.each([
     {

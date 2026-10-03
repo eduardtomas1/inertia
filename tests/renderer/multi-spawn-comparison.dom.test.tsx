@@ -6,7 +6,7 @@ import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import {
-  readPendingMultiSpawnLaunchId,
+  MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
   type MultiSpawnDraft,
   writePendingMultiSpawnLaunchId,
 } from "../../src/renderer/src/utils/multiSpawn";
@@ -874,7 +874,7 @@ describe("Duo third-model comparison dialog", () => {
     expect(statusReads).toBe(2);
     expect(hook.result.current.recoveryStatus?.comparison?.state).toBe("completed");
     expect(hook.result.current.error).toBeNull();
-    expect(readPendingMultiSpawnLaunchId(window.localStorage)).toBeNull();
+    expect(window.localStorage.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY)).toBeNull();
   });
 
   it("clears the pending identity after a synchronous judge cancellation", async () => {
@@ -929,7 +929,7 @@ describe("Duo third-model comparison dialog", () => {
 
     expect(hook.result.current.recoveryStatus?.comparison?.state).toBe("cancelled");
     expect(hook.result.current.launchBlocked).toBe(false);
-    expect(readPendingMultiSpawnLaunchId(window.localStorage)).toBeNull();
+    expect(window.localStorage.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY)).toBeNull();
   });
 
   it("keeps an ambiguous Duo acknowledgement uncertain until status advances", async () => {

@@ -6,8 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
 } from "../../src/shared/contracts";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import {
@@ -32,12 +31,12 @@ function attachment(
 }
 
 describe("composer attachment previews", () => {
-  it("deduplicates current attachments and keeps the eight-item boundary", () => {
+  it("deduplicates current attachments and keeps the 100-item boundary", () => {
     const current = [attachment("one")];
     const incoming = [
       { ...current[0]! },
       { ...current[0]! },
-      ...Array.from({ length: 9 }, (_, index) =>
+      ...Array.from({ length: 101 }, (_, index) =>
         attachment(`new-${index}`, {
           name: `new-${index}.png`,
           path: `/private/tmp/new-${index}.png`,
@@ -47,9 +46,9 @@ describe("composer attachment previews", () => {
 
     const result = mergeComposerAttachments(current, incoming);
 
-    expect(result.attachments).toHaveLength(8);
+    expect(result.attachments).toHaveLength(100);
     expect(result.rejected).toHaveLength(4);
-    expect(new Set(result.attachments.map(({ id }) => id)).size).toBe(8);
+    expect(new Set(result.attachments.map(({ id }) => id)).size).toBe(100);
   });
 
   it("preserves distinct native IDs with identical names, types and sizes", () => {
@@ -60,15 +59,9 @@ describe("composer attachment previews", () => {
     });
   });
 
-  it("enforces the total byte budget across separate import batches", () => {
-    const current = [attachment("first", {
-      size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2 + 1,
-    })];
-    const incoming = [attachment("second", {
-      name: "second.png",
-      path: "/private/tmp/second.png",
-      size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
-    })];
+  it("enforces the image byte budget across separate import batches", () => {
+    const current = Array.from({ length: 8 }, (_, index) => attachment(`current-${index}`, { size: 10 * 1024 * 1024 }));
+    const incoming = [attachment("one-too-many", { size: 1 })];
 
     expect(mergeComposerAttachments(current, incoming)).toEqual({
       attachments: current,
@@ -106,7 +99,7 @@ describe("composer attachment previews", () => {
   });
 
   it("provides an opaque preview route for every accepted attachment type", () => {
-    for (const mimeType of CHAT_ATTACHMENT_MIME_TYPES) {
+    for (const mimeType of ACCEPTED_ATTACHMENT_MIME_TYPES) {
       const candidate = attachment(`type-${mimeType}`, { mimeType });
       expect(attachmentPreviewKind(candidate)).not.toBeNull();
       expect(attachmentPreviewUrl(candidate)).toBe(
@@ -140,20 +133,11 @@ describe("composer attachment previews", () => {
     expect(html).not.toContain("file://");
   });
 
-  it("keeps attachment layout bounded without permitting raw file URLs", () => {
-    const css = readFileSync(
-      new URL("../../src/renderer/src/styles.css", import.meta.url),
-      "utf8",
-    );
+  it("does not permit raw file URLs in the renderer content security policy", () => {
     const html = readFileSync(
       new URL("../../src/renderer/index.html", import.meta.url),
       "utf8",
     );
-
-    expect(css).toMatch(/\.composer-attachments\s*\{[^}]*display:\s*grid[^}]*max-height:\s*calc\(var\(--composer-preview-size\) \+ var\(--composer-preview-size\) \+ 12px\)[^}]*overflow-y:\s*auto/su);
-    expect(css).toMatch(/\.composer-attachment\s*\{[^}]*min-height:\s*var\(--composer-preview-size\)[^}]*border:\s*0;[^}]*background:\s*transparent/su);
-    expect(css).toMatch(/\.composer-attachment-preview\s*\{[^}]*width:\s*var\(--composer-preview-size\);[^}]*height:\s*var\(--composer-preview-size\)/su);
-    expect(css).toMatch(/\.composer-attachment-preview img\s*\{[^}]*object-fit:\s*cover/su);
     // Development loads the renderer over HTTP, so its privileged preview is
     // cross-origin even though packaged windows use inertia://bundle.
     expect(html).toContain("img-src 'self' inertia: data: blob:");

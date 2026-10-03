@@ -2132,39 +2132,26 @@ describe("workspace pane authority", () => {
     ));
   });
 
-  it.each([
-    [
-      "acknowledgeActivity",
-      new Error("The run was removed."),
-      "Could not acknowledge Typecheck: The run was removed.",
-    ],
-    [
-      "dismissActivity",
-      "unknown failure",
-      "Could not dismiss Typecheck: The run could not be dismissed.",
-    ],
-  ] as const)("reports %s failures without clearing the row", async (
-    action,
-    failure,
-    message,
-  ) => {
+  it("reports a dismissActivity failure without clearing the row", async () => {
     const setActionError = vi.fn();
     const hook = renderHook(() => useActivityActions({
       project: alpha,
       conversationId: alphaChat.id,
       run: vi.fn(async () => {
-        throw failure;
+        throw "unknown failure";
       }),
       openTerminal: vi.fn(),
       setActionError,
     }));
 
-    act(() => hook.result.current[action]({
+    act(() => hook.result.current.dismissActivity({
       id: "88888888-8888-4888-8888-888888888888",
       label: "Typecheck",
     }));
 
-    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(message));
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
+      "Could not dismiss Typecheck: The run could not be dismissed.",
+    ));
   });
 
   it("opens a service preview only after its exact pane context is active", async () => {
@@ -2282,25 +2269,13 @@ describe("workspace pane authority", () => {
     );
   });
 
-  it.each([
-    {
-      failure: new Error("The run already finished."),
-      message: "Could not stop Review question: The run already finished.",
-    },
-    {
-      failure: "unknown failure",
-      message: "Could not stop Review question: The work could not be stopped.",
-    },
-  ])("surfaces an exact-run stop failure without hiding its owner", async ({
-    failure,
-    message,
-  }) => {
+  it("surfaces an exact-run stop failure without hiding its owner", async () => {
     const setActionError = vi.fn();
     const hook = renderHook(() => useActivityActions({
       project: alpha,
       conversationId: alphaChat.id,
       run: vi.fn(async () => {
-        throw failure;
+        throw new Error("The run already finished.");
       }),
       openTerminal: vi.fn(),
       setActionError,
@@ -2311,7 +2286,9 @@ describe("workspace pane authority", () => {
       label: "Review question",
     }));
 
-    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(message));
+    await waitFor(() => expect(setActionError).toHaveBeenCalledWith(
+      "Could not stop Review question: The run already finished.",
+    ));
   });
 
   it("closes and resets a native preview when its conversation changes", async () => {

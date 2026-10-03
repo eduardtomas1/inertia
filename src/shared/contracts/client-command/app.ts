@@ -84,7 +84,7 @@ const conversationContextSelectionFields = {
 };
 
 export const appCommandSchemas = [
-  z.strictObject({ ...requestBase, type: z.literal("usage.limits.get"), payload: z.strictObject({ refresh: z.boolean(), force: z.boolean().optional() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("usage.limits.get"), payload: z.strictObject({ refresh: z.boolean(), force: z.boolean().optional(), background: z.boolean().optional() }) }),
   z.strictObject({ ...requestBase, type: z.literal("usage.source.save"), payload: usageSourceInputSchema }),
   z.strictObject({ ...requestBase, type: z.literal("usage.source.remove"), payload: z.strictObject({ id: z.string().uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("usage.reset.prepare"), payload: z.strictObject({ accountId: z.string().min(1).max(256) }) }),
@@ -158,6 +158,13 @@ export const appCommandSchemas = [
       payload: z.object({
         operationId: providerMaintenanceOperationIdSchema,
       }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("project.ensure-scratch"),
+      payload: z.object({}).strict(),
     })
     .strict(),
   z

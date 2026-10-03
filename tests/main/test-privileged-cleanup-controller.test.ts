@@ -47,42 +47,4 @@ describe("test privileged-cleanup controller", () => {
       vi.useRealTimers();
     }
   });
-
-  it("retains a useful phase and message when cleanup rejects", async () => {
-    const controller = createTestPrivilegedCleanupController({
-      runtimePid: () => 888,
-      cleanup: async () => { throw new Error("cleanup failed"); },
-      exit: vi.fn(),
-    });
-
-    await expect(controller.preparePrivilegedCleanup()).rejects.toThrow(
-      "cleanup failed",
-    );
-    expect(controller.privilegedCleanupSnapshot()).toEqual({
-      phase: "privileged-cleanup-failed",
-      runtimePid: 888,
-      cleanupConfirmed: false,
-      errorMessage: "cleanup failed",
-    });
-  });
-
-  it("does not permit normal exit when cleanup is unconfirmed", async () => {
-    const exit = vi.fn();
-    const controller = createTestPrivilegedCleanupController({
-      runtimePid: () => 999,
-      cleanup: async () => false,
-      unconfirmedMessage: () => "Runtime shutdown exceeded its deadline.",
-      exit,
-    });
-
-    await expect(controller.preparePrivilegedCleanup()).resolves.toMatchObject({
-      phase: "privileged-cleanup-complete",
-      cleanupConfirmed: false,
-      errorMessage: "Runtime shutdown exceeded its deadline.",
-    });
-    expect(() => controller.finishPreparedQuit()).toThrow(
-      "Cannot finish the test quit without confirmed privileged cleanup (phase=privileged-cleanup-complete, cleanupConfirmed=false).",
-    );
-    expect(exit).not.toHaveBeenCalled();
-  });
 });

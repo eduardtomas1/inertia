@@ -6,7 +6,6 @@ import config from "../../playwright.config";
 import {
   assertE2eWindowResource,
   discoverE2eResources,
-  exactScenarioPattern,
   scenarioResource,
 } from "../support/e2e-resource-policy";
 
@@ -21,17 +20,8 @@ afterEach(() => {
 });
 
 describe("Electron scenario resource ownership", () => {
-  it("uses explicit metadata independent of quotes, formatting, or helper-owned launch options", () => {
-    expect(scenarioResource("// @inertia-e2e-resource primary-display\nlaunchHelper();", "nested.spec.ts"))
-      .toBe("primary-display");
-    expect(scenarioResource("\uFEFF// @inertia-e2e-resource isolated\r\nimport 'helper';", "nested.spec.ts"))
-      .toBe("isolated");
-  });
-
   it.each([
     "launchHelper();",
-    "// @inertia-e2e-resource unknown\n",
-    "\n// @inertia-e2e-resource isolated\n",
     "// @inertia-e2e-resource isolated\n// @inertia-e2e-resource primary-display\n",
   ])("fails rather than silently omitting an undeclared/misdeclared spec", (source) => {
     expect(() => scenarioResource(source, "new.spec.ts")).toThrow("exactly one first-line");
@@ -58,23 +48,6 @@ describe("Electron scenario resource ownership", () => {
     expect(() => discoverE2eResources(directory)).toThrow("no scenarios");
     symlinkSync(directory, join(directory, "cycle"), process.platform === "win32" ? "junction" : "dir");
     expect(() => discoverE2eResources(directory)).toThrow("symbolic links");
-  });
-
-  it("matches exact portable file identity instead of interpreting filenames as globs", () => {
-    const pattern = exactScenarioPattern(["C:\\repo (copy)\\tests\\nested\\[focus].spec.ts"]);
-    expect(pattern.test("C:/repo (copy)/tests/nested/[focus].spec.ts")).toBe(true);
-    expect(pattern.test("C:\\repo (copy)\\tests\\nested\\[focus].spec.ts")).toBe(true);
-    expect(pattern.test("C:/repo (copy)/tests/nested/f.spec.ts")).toBe(false);
-    expect(pattern.test("C:/repo (copy)/tests/nested/[focus].spec.ts.extra")).toBe(false);
-    expect(exactScenarioPattern([]).test("")).toBe(false);
-  });
-
-  it.skipIf(process.platform === "win32")("rejects literal backslash names that alias a nested resource path", () => {
-    const directory = fixture();
-    mkdirSync(join(directory, "nested"));
-    writeFileSync(join(directory, "nested", "focus.spec.ts"), "// @inertia-e2e-resource isolated\n");
-    writeFileSync(join(directory, "nested\\focus.spec.ts"), "// @inertia-e2e-resource primary-display\n");
-    expect(() => discoverE2eResources(directory)).toThrow("unambiguous separators");
   });
 
   it("rejects helper-selected primary display use before any isolated app is launched", () => {

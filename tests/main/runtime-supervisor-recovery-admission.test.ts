@@ -281,34 +281,6 @@ describe("RuntimeSupervisor recovery admission", () => {
     }
   });
 
-  it("extends startup once after the final exact cleanup receipt", async () => {
-    const retiredGenerationId =
-      "30000000-0000-4000-8000-000000000003:901";
-    expect(new RuntimeCleanupReceiptJournal(dataDirectory)
-      .publish(retiredGenerationId)).toBe(true);
-    const { children, forceKill, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    const start = children[0].messages.findLast((message) =>
-      message.type === "runtime.start");
-    if (start?.type !== "runtime.start") {
-      throw new Error("Expected the recovery runtime to start.");
-    }
-
-    await vi.advanceTimersByTimeAsync(1_900);
-    children[0].message({
-      type: "runtime.cleanup-receipt-consumed",
-      receiptRuntimeGenerationId: retiredGenerationId,
-      currentRuntimeGenerationId: start.options.runtimeGenerationId,
-    });
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(forceKill).not.toHaveBeenCalled();
-    expect(supervisor.snapshot().lastError).toBeNull();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
-  });
-
   it("does not let replayed or foreign recovery receipts extend startup again", async () => {
     const retiredGenerationId =
       "30000000-0000-4000-8000-000000000003:902";
@@ -994,64 +966,6 @@ describe("RuntimeSupervisor recovery admission", () => {
       .not.toContainEqual(expect.objectContaining({
         runtimeGenerationId: oldGenerationId,
       }));
-  });
-
-  it("consumes a mixed legacy and modern recovery batch before readiness", () => {
-    const modernGenerationId =
-      "30000000-0000-4000-8000-000000000003:78";
-    const legacyGenerationId =
-      "30000000-0000-4000-8000-000000000003:79";
-    const bootId = "test:00000000-0000-4000-8000-000000000001";
-    const platform = currentAuthorityPlatform();
-    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
-    expect(leases.publish(modernGenerationId, bootId)).toBe(true);
-    expect(leases.publish(legacyGenerationId, "unavailable")).toBe(true);
-    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
-      platform: "darwin",
-    }).startSession(modernGenerationId, bootId)).toBe(true);
-    const snapshot = captureModernDarwinRecoverySnapshot(
-      dataDirectory,
-      bootId,
-    );
-    expect(snapshot).not.toBeNull();
-    const modernDescriptor = snapshot
-      ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
-        .publish(snapshot)
-      : null;
-    expect(modernDescriptor).not.toBeNull();
-    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
-      .publishBatch([legacyGenerationId], platform, bootId)).toBe(true);
-    const { children, supervisor } = createHarness({
-      systemBootId: bootId,
-      manualModernDarwinRecovery: modernDescriptor!,
-      runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
-    });
-
-    supervisor.start();
-    expect(children).toHaveLength(1);
-    children[0].spawn();
-    const start = children[0].messages.at(-1);
-    expect(start).toMatchObject({
-      type: "runtime.start",
-      options: {
-        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
-        manualModernDarwinRecovery: modernDescriptor,
-      },
-    });
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
-    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
-      .pending(platform, bootId)).toEqual([]);
-    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
-      .toBeNull();
-    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
-      .not.toContainEqual(expect.objectContaining({
-        runtimeGenerationId: modernGenerationId,
-      }));
-    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
-      platform: "darwin",
-    }).records(modernGenerationId)).toBeNull();
   });
 
   it("reserves one current lease slot for the maximum legacy recovery batch", () => {

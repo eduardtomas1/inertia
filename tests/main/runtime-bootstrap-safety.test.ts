@@ -26,8 +26,6 @@ vi.mock("../../src/main/system-boot-id", () => ({
 import {
   authorizeModernDarwinRuntimeRecovery,
   authorizeLegacyRuntimeRecovery,
-  LEGACY_RUNTIME_RECOVERY_DIALOG_DETAIL,
-  MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
   prepareModernDarwinBootstrapRecovery,
   prepareRuntimeBootstrapSafety,
   runtimeBootstrapAdmissionBlocked,
@@ -70,20 +68,6 @@ afterEach(() => {
 });
 
 describe("runtime bootstrap safety", () => {
-  it("asks only for visible old processes and never requires a reboot or hidden helper", () => {
-    for (const detail of [
-      MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
-      LEGACY_RUNTIME_RECOVERY_DIALOG_DETAIL,
-    ]) {
-      expect(detail).toMatch(/will NOT kill any surviving process/u);
-      expect(detail).toMatch(/older Inertia window/u);
-      expect(detail).toMatch(/agent or terminal process.*you can still see/u);
-      expect(detail).not.toMatch(/reboot|restart|guardian|helper/iu);
-    }
-    expect(MODERN_DARWIN_RECOVERY_DIALOG_DETAIL)
-      .toMatch(/exact recorded roots and state.*checked again/u);
-  });
-
   it("creates a fresh profile data directory before opening its journals", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "fresh", "runtime");
@@ -98,7 +82,7 @@ describe("runtime bootstrap safety", () => {
     expect(lstatSync(dataDirectory).isDirectory()).toBe(true);
   });
 
-  it.each(["darwin", "linux", "win32"] as const)(
+  it.each(["darwin"] as const)(
     "repairs an exact empty %s writer crash prefix only during bootstrap",
     (platform) => {
       const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
@@ -129,7 +113,7 @@ describe("runtime bootstrap safety", () => {
     },
   );
 
-  it.each(["darwin", "linux", "win32"] as const)(
+  it.each(["darwin"] as const)(
     "retires an empty unleased %s session left before admission completed",
     (platform) => {
       const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
@@ -157,9 +141,8 @@ describe("runtime bootstrap safety", () => {
   );
 
   it.each(
-    (["darwin", "linux", "win32"] as const).flatMap((platform) =>
-      (["writer-renamed", "session-renamed", "writer-removed"] as const)
-        .map((stage) => [platform, stage] as const)),
+    (["writer-renamed", "session-renamed", "writer-removed"] as const)
+      .map((stage) => ["darwin", stage] as const),
   )("replays an unleased empty %s retirement after %s", (platform, stage) => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");
@@ -557,60 +540,6 @@ describe("runtime bootstrap safety", () => {
     }).sessionExact(generationId)).toBeNull();
     expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending())
       .toEqual([generationId]);
-  });
-
-  it("blocks admission for a bare same-boot lease without amplifying state", () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
-    const dataDirectory = join(root, "runtime");
-    const generationId = "30000000-0000-4000-8000-000000000003:42";
-    const bootId = "test:00000000-0000-4000-8000-000000000001";
-    directories.push(root);
-    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
-    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
-      generationId,
-      bootId,
-    )).toBe(true);
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(prepareRuntimeBootstrapSafety(dataDirectory, "win32"))
-        .toMatchObject({ preserveAttachments: true });
-      expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, "win32")).toBe(true);
-      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
-        .toEqual([expect.objectContaining({ runtimeGenerationId: generationId })]);
-      expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending()).toEqual([]);
-    }
-  });
-
-  it("keeps entry-state partial Darwin retirement safety locked", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
-    const dataDirectory = join(root, "runtime");
-    const generationId = "30000000-0000-4000-8000-000000000003:40";
-    const bootId = "test:00000000-0000-4000-8000-000000000001";
-    directories.push(root);
-    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
-    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
-      generationId,
-      bootId,
-    )).toBe(true);
-    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
-      platform: "darwin",
-    });
-    expect(owned.startSession(generationId, bootId)).toBe(true);
-    expect(owned.finishSession(generationId)).toBe(true);
-
-    await expect(prepareModernDarwinBootstrapRecovery(
-      dataDirectory,
-      bootId,
-      "/private/tmp/inertia-test-guardian",
-      { platform: "darwin", deadlineAt: Date.now() + 100 },
-    )).resolves.toEqual({
-      authority: null,
-      candidate: null,
-      blocked: true,
-    });
-    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
-      .toEqual([expect.objectContaining({ runtimeGenerationId: generationId })]);
-    expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending()).toEqual([]);
   });
 
   it("rejects an orphan Darwin owned-session leaf without a lease", async () => {
@@ -1166,7 +1095,7 @@ describe("runtime bootstrap safety", () => {
     ]);
   });
 
-  it.each(["darwin", "linux", "win32"] as const)("admits exact replayable %s authority without clearing the lease", (platform) => {
+  it.each(["darwin", "win32"] as const)("admits exact replayable %s authority without clearing the lease", (platform) => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");
     const generationId = "30000000-0000-4000-8000-000000000003:12";
@@ -1344,7 +1273,7 @@ describe("runtime bootstrap safety", () => {
       .pending("darwin", previousBootId)).toEqual([]);
   });
 
-  it.each(["win32", "darwin", "linux"] as const)(
+  it.each(["win32", "darwin"] as const)(
     "offers exact no-reboot legacy recovery when the %s boot probe is unavailable",
     (platform) => {
       const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));

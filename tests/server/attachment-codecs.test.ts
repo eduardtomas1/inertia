@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { metadataFromUnknown } from "../../src/node/conversation-attachment-store-metadata";
 import { parseAttachments, parseStoredAttachments } from "../../src/server/persistence/codecs";
 
 describe("stored attachment codec", () => {
@@ -45,7 +46,7 @@ describe("stored attachment codec", () => {
     ]);
   });
 
-  it("keeps the frozen parser's bounds and rejects malformed rows", () => {
+  it("uses the new live bounds while preserving the frozen parser", () => {
     expect(parseStoredAttachments("not-json")).toEqual([]);
     expect(parseStoredAttachments(JSON.stringify([
       null,
@@ -60,9 +61,10 @@ describe("stored attachment codec", () => {
       size: 3 * 1024 * 1024,
     }));
     expect(parseStoredAttachments(JSON.stringify([bounded[0], bounded[0], ...bounded.slice(1)])))
-      .toEqual(bounded.slice(0, 6));
+      .toEqual(bounded);
+    expect(parseAttachments(JSON.stringify(bounded))).toEqual(bounded.slice(0, 6));
     expect(parseStoredAttachments(JSON.stringify(bounded.map((attachment) => ({ ...attachment, size: 1 })))))
-      .toHaveLength(8);
+      .toHaveLength(9);
   });
 
   it("carries a valid snapshot source and drops an invalid one", () => {
@@ -83,5 +85,15 @@ describe("stored attachment codec", () => {
       .toEqual([{ ...image, snapshot }]);
     expect(parseStoredAttachments(JSON.stringify([{ ...image, snapshot: { kind: 7 } }])))
       .toEqual([image]);
+  });
+
+  it("keeps opaque rows and retained metadata when a later release gives their name a type", () => {
+    const id = "66666666-6666-4666-8666-666666666666";
+    const opaque = { id, name: "notes.txt", path: `/private/${id}/${id}.bin`, mimeType: "application/octet-stream", size: 12 };
+    expect(parseStoredAttachments(JSON.stringify([opaque]))).toEqual([opaque]);
+    const metadata = { version: 1, id, name: "notes.txt", mimeType: "application/octet-stream", size: 12, digest: "a".repeat(64) };
+    expect(metadataFromUnknown({ ...metadata, extension: "bin" })).not.toBeNull();
+    expect(metadataFromUnknown({ ...metadata, extension: "txt" })).toBeNull();
+    expect(parseStoredAttachments(JSON.stringify([{ ...opaque, mimeType: "application/pdf" }]))).toEqual([]);
   });
 });

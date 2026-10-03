@@ -1,6 +1,7 @@
 import { AcpSecretRedactor } from "./acp-redaction";
 import { acpStopReasonMessage } from "./acp-stop-reasons";
 import { acpPermissionDetail } from "./acp-permission-detail";
+import { acpAttachmentReadAllowed } from "./attachment-read-grant";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
@@ -23,6 +24,7 @@ import { INERTIA_VERSION } from "../../shared/version";
 import { runtimeOwnedProcessInvocation, spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import {
   createOwnedProcessTreeTermination,
+  posixCleanupDiagnosticOf,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import {
@@ -694,8 +696,10 @@ function startCursorRun(
       // ACP has already produced its terminal response, so no graceful wait
       // window remains useful. Reuse any earlier cancellation request.
       await terminateOwnedProcessTree(true);
-    } catch {
-      const failed = cursorCleanupResult(outcome, child, options.input.cwd, "process-tree");
+    } catch (error) {
+      const failed = cursorCleanupResult(
+        outcome, child, options.input.cwd, "process-tree", posixCleanupDiagnosticOf(error),
+      );
       emitter.status("failed", failed.error);
       return failed;
     }
@@ -803,10 +807,13 @@ async function cursorPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
 ): Promise<RequestPermissionResponse> {
+  const allow = cursorOneShotPermissionOption(params.options, true);
+  if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
+    return { outcome: { outcome: "selected", optionId: allow.optionId } };
+  }
   if (options.input.interactionMode === "plan") {
     return { outcome: { outcome: "cancelled" } };
   }
-  const allow = cursorOneShotPermissionOption(params.options, true);
   const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
   if (
     options.input.access === "full"

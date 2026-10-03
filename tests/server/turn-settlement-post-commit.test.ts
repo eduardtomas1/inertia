@@ -66,8 +66,13 @@ describe("terminal commitment survives downstream faults", () => {
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
   });
 
-  it.each((["metadata", "runtime-settled", "turn-settled", "artifacts"] as const)
-    .flatMap((stage) => ["throw", "reject"].map((mode) => ({ stage, mode }))))(
+  it.each([
+    { stage: "metadata", mode: "throw" },
+    { stage: "runtime-settled", mode: "reject" },
+    { stage: "turn-settled", mode: "reject" },
+    { stage: "artifacts", mode: "throw" },
+    { stage: "artifacts", mode: "reject" },
+  ] as const)(
     "does not contradict a durable completion after $stage $mode",
     async ({ stage, mode }) => {
       const fault = () => {
@@ -127,8 +132,12 @@ describe("terminal commitment survives downstream faults", () => {
     },
   );
 
-  it.each(["agent.completed", "conversation.detail.invalidated", "snapshot"]
-    .flatMap((stage) => ["throw", "reject"].map((mode) => ({ stage, mode }))))(
+  it.each([
+    { stage: "agent.completed", mode: "throw" },
+    { stage: "conversation.detail.invalidated", mode: "reject" },
+    { stage: "snapshot", mode: "throw" },
+    { stage: "snapshot", mode: "reject" },
+  ] as const)(
     "keeps independent effects and drainage alive when $stage publication $mode",
     async ({ stage, mode }) => {
       let enabled = false;

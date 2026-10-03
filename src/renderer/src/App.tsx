@@ -52,6 +52,7 @@ import { useTheme } from "./hooks/useTheme";
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
+import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
 import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationPayload } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
@@ -203,7 +204,7 @@ export default function App(): React.JSX.Element {
     [sendCommand],
   );
   const project = useMemo(
-    () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
+    () => activeWorkspaceProject(connection.snapshot),
     [connection.snapshot],
   );
   const conversationProjection = useStableController(
@@ -252,6 +253,7 @@ export default function App(): React.JSX.Element {
     sendMessageToConversation,
     compactConversation: compactConversationById,
     runQueueCommand,
+    runLimitResetCommand,
     updateConversationById,
     sendingConversationIds,
   } = useAppRuntimeActions({
@@ -335,6 +337,7 @@ export default function App(): React.JSX.Element {
     importProject: confirmProjectImport,
     navigateToView,
     openGlobalChat,
+    openNoProjectChat,
     selectGlobalChatProject,
     selectProject,
     sendMessage,
@@ -348,6 +351,7 @@ export default function App(): React.JSX.Element {
     updateSplitConversationId,
     setSidebarOpen,
     setView,
+    setActionError,
   });
   const composerProject = connection.snapshot?.projects.find(
     ({ id }) => id === draftConversation.conversation?.projectId,
@@ -651,7 +655,7 @@ export default function App(): React.JSX.Element {
     targetProject: Project | null = composerProject,
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
-    if (!targetProject) return;
+    if (!targetProject) { openNoProjectChat(); return; }
     if (!connection.snapshot) return;
     deactivateGlobalChat();
     const payload = defaultConversationPayloadForProject(
@@ -843,6 +847,7 @@ export default function App(): React.JSX.Element {
       run,
       runConversationContextCommand: draftConversation.runConversationContextCommand,
       runQueueCommand,
+      runLimitResetCommand,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view: view === "settings" ? "settings" : "workspace",
@@ -926,6 +931,7 @@ export default function App(): React.JSX.Element {
         sendMessageToConversation,
         compactConversation: compactConversationById,
         runQueueCommand,
+        runLimitResetCommand,
         updateConversationById,
       },
       sendingConversationIds,
@@ -1004,6 +1010,7 @@ export default function App(): React.JSX.Element {
     run: runUserCommand,
     importProject,
     openGlobalChat,
+    openNoProjectChat,
     selectProject,
     selectConversation,
     selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) =>

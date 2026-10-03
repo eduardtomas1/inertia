@@ -146,26 +146,16 @@ describe("CredentialVault", () => {
     expect(await vault.resolve(backendSecretReferenceForProfile("custom"))).toBe("original");
   });
 
-  it("re-encrypts ciphertext when the platform reports key rotation", async () => {
-    const persistence = new MemoryPersistence();
-    const encryption = new TestEncryption();
-    const vault = new CredentialVault(encryption, persistence);
-    await vault.setForProfile("custom", "rotating-secret");
-    encryption.shouldReEncrypt = true;
-
-    expect(await vault.resolve(backendSecretReferenceForProfile("custom")))
-      .toBe("rotating-secret");
-    expect(encryption.encryptCalls).toBe(2);
-  });
-
-  it("preserves credential generation across platform ciphertext rotation", async () => {
+  it("re-encrypts ciphertext when the platform reports key rotation and keeps its generation", async () => {
     const persistence = new MemoryPersistence();
     const encryption = new TestEncryption();
     const vault = new CredentialVault(encryption, persistence);
     const before = await vault.setForProfile("custom", "rotating-secret");
     encryption.shouldReEncrypt = true;
 
-    await vault.resolve(backendSecretReferenceForProfile("custom"));
+    expect(await vault.resolve(backendSecretReferenceForProfile("custom")))
+      .toBe("rotating-secret");
+    expect(encryption.encryptCalls).toBe(2);
     const after = await vault.stateForProfile("custom");
     expect(after.credentialGeneration).toBe(before.credentialGeneration);
   });
@@ -251,6 +241,41 @@ describe("CredentialVault", () => {
     expect(Object.keys(persisted.entries)).toEqual([
       backendSecretReferenceForProfile("live-profile"),
     ]);
+  });
+
+  it("creates one protected random secret for concurrent first resolution", async () => {
+    const persistence = new MemoryPersistence();
+    const encryption = new TestEncryption();
+    const vault = new CredentialVault(encryption, persistence);
+    const reference = "secret:usage:account-identity";
+
+    const [first, second] = await Promise.all([
+      vault.resolveOrCreate(reference),
+      vault.resolveOrCreate(reference),
+    ]);
+
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(second).toBe(first);
+    expect(encryption.encryptCalls).toBe(1);
+    expect(await vault.resolveOrCreate(reference)).toBe(first);
+    expect(persistence.value).not.toContain(first);
+    await vault.clear(reference);
+    const replacement = await vault.resolveOrCreate(reference);
+    expect(replacement).not.toBe(first);
+    expect(await vault.resolve(reference)).toBe(replacement);
+  });
+
+  it("does not create a secret while OS protection is unavailable", async () => {
+    const persistence = new MemoryPersistence();
+    const encryption = new TestEncryption();
+    encryption.available = false;
+    const vault = new CredentialVault(encryption, persistence);
+
+    await expect(vault.resolveOrCreate("secret:usage:account-identity")).rejects.toMatchObject({
+      code: "storage-unavailable",
+    });
+    expect(persistence.value).toBeNull();
+    expect(encryption.encryptCalls).toBe(0);
   });
 
   it("does not restore an older secret during concurrent key rotation", async () => {

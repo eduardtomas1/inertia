@@ -99,10 +99,12 @@ describe("POSIX process tree root observation", () => {
 
   it("stays unconfirmed when a sent stop is never observed within the bounded re-reads", () => {
     const spawnProcessSync = tables("4242 1 R+\n");
+    const pause = vi.fn();
     const result = forceKillPosixProcessTreeWithStatus(4_242, {
       kill: vi.fn(() => true) as never,
       spawnProcessSync: spawnProcessSync as never,
       rootProcessGroup: true,
+      pause,
     });
     expect(result).toMatchObject({
       rootStop: "sent",
@@ -110,6 +112,101 @@ describe("POSIX process tree root observation", () => {
       scanStabilized: false,
     });
     expect(spawnProcessSync).toHaveBeenCalledTimes(9);
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 16, 32, 64, 128]);
+  });
+
+  it("confirms a root that acts on its stop only after nine back-to-back reads", () => {
+    let clock = 0;
+    const spawnProcessSync = vi.fn(() => {
+      clock += 2;
+      return { status: 0, stdout: clock >= 100 ? "4242 1 Tl\n" : "4242 1 Rl\n" };
+    });
+    const pause = vi.fn((ms: number) => { clock += ms; });
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: spawnProcessSync as never,
+      rootProcessGroup: true,
+      deadlineAt: 2_000,
+      now: () => clock,
+      pause,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "stopped",
+      rootRunningObserved: true,
+      scanStabilized: true,
+      snapshotConfirmed: true,
+    });
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 16, 32, 64]);
+    expect(spawnProcessSync).toHaveBeenCalledTimes(8);
+  });
+
+  it("pauses between stop observations only within the deadline", () => {
+    let clock = 0;
+    const spawnProcessSync = vi.fn(() => {
+      clock += 2;
+      return { status: 0, stdout: "4242 1 R\n" };
+    });
+    const pause = vi.fn((ms: number) => { clock += ms; });
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: spawnProcessSync as never,
+      deadlineAt: 40,
+      now: () => clock,
+      pause,
+    });
+    expect(result).toMatchObject({ rootState: "running", scanStabilized: false });
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 15]);
+    expect(clock).toBe(40);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["truncated", "1 0 Ss\n"],
+  ])("never takes a timed-out read that exited 0 with %s output as the process table", (_name, stdout) => {
+    const reads = [
+      { status: 0, signal: null, stdout, error: error("ETIMEDOUT") },
+      { status: 0, signal: null, stdout: "4242 1 Ts\n5000 4242 Ss\n" },
+      { status: 0, signal: null, stdout: "4242 1 Ts\n5000 4242 Ts\n" },
+    ];
+    const spawnProcessSync = vi.fn(() => reads.shift() ?? reads.at(-1));
+    const kill = vi.fn(() => true);
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: kill as never,
+      spawnProcessSync: spawnProcessSync as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "stopped",
+      rootRunningObserved: false,
+      snapshotConfirmed: true,
+      snapshotReads: 3,
+      snapshotTimeouts: 1,
+      descendants: [5_000],
+    });
+    expect(kill).toHaveBeenCalledWith(5_000, "SIGKILL");
+  });
+
+  it.each([
+    ["ENOBUFS", { status: 0, signal: null, stdout: "4242 1 Ts\n", error: error("ENOBUFS") }],
+    ["ENOENT", { status: null, signal: null, stdout: undefined, error: error("ENOENT") }],
+    ["EAGAIN", { status: null, signal: null, stdout: "", error: error("EAGAIN") }],
+  ])("never takes a read that failed with %s as the process table", (_code, read) => {
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: vi.fn(() => read) as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "unknown",
+      snapshotConfirmed: false,
+      scanStabilized: false,
+      snapshotReads: 8,
+      snapshotTimeouts: 0,
+      descendants: [],
+    });
   });
 
   it("stops re-reading at the deadline", () => {

@@ -1,13 +1,13 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 import clsx from "clsx";
-import { Box, Code2, Database, FolderGit2, Globe, Layers3, Sparkles, Terminal } from "lucide-react";
+import { Box, Code2, Database, FolderGit2, Globe, Layers3, MessageSquare, Sparkles, Terminal } from "lucide-react";
 import type { Project } from "@shared/contracts";
 import { projectColorTints, useProjectColorRevision } from "../lib/projectColorTints";
 import "./ProjectIcon.css";
 
 const symbols = { folder: FolderGit2, code: Code2, database: Database, globe: Globe, terminal: Terminal, layers: Layers3, box: Box, sparkles: Sparkles };
 
-export type ProjectMarkSource = Pick<Project, "preferences">;
+export type ProjectMarkSource = Pick<Project, "preferences" | "workspaceKind">;
 
 export function projectTintStyle(project: ProjectMarkSource | null | undefined): CSSProperties | undefined {
   const tints = projectColorTints(project?.preferences?.color);
@@ -20,6 +20,7 @@ export function projectNameTinted(project: ProjectMarkSource | null | undefined)
 
 export function ProjectIcon({ project, size = 15 }: { project?: ProjectMarkSource | null; size?: number }): React.JSX.Element {
   useProjectColorRevision();
+  if (project?.workspaceKind === "scratch") return <MessageSquare size={size} aria-hidden="true" className="project-icon-symbol" />;
   const icon = project?.preferences?.icon;
   const tint = projectTintStyle(project);
   if (icon?.kind === "image") {

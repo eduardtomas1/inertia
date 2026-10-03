@@ -13,11 +13,11 @@ describe("CI change classifier", () => {
       ["../outside"],
       ["brand-new-root-format.xyz"],
       ["resources/runtime-contract.md"],
-      ["docs/ci-hook.mjs"],
     ]) {
       const result = classifyChangedPaths(paths);
       expect(result.allEvidence).toBe(true);
       expect(result.fullCertification).toBe(true);
+      expect(result.nativeArchitecture).toBe(true);
       expect(result.documentationOnly).toBe(false);
       expect(result.domains).toEqual(CHANGE_DOMAINS);
     }
@@ -28,9 +28,12 @@ describe("CI change classifier", () => {
       "README.md",
       "docs/CI_EVIDENCE.md",
       "docs/screenshots/example.png",
+      "docs/pr-evidence/example/evidence.json",
+      "docs/pr-evidence/example/fixture.ts",
     ])).toEqual({
       allEvidence: false,
       fullCertification: false,
+      nativeArchitecture: false,
       documentationOnly: true,
       domains: [],
       reasons: [],
@@ -101,6 +104,39 @@ describe("CI change classifier", () => {
     ]) {
       expect(classifyChangedPaths([path]).fullCertification, path).toBe(false);
     }
+  });
+
+  it("reserves sibling architectures for native, packaging, dependency and CI changes", () => {
+    for (const path of [
+      "package-lock.json",
+      "package.json",
+      ".nvmrc",
+      ".github/workflows/ci.yml",
+      ".github/actions/install-dependencies/action.yml",
+      "scripts/ci/evidence-plan.mjs",
+      "native/runtime-process-guardian/main.c",
+      "build/linux/icon.png",
+      "scripts/electron-builder.release.cjs",
+      "scripts/package-smoke.mjs",
+      "src/main/app-update.ts",
+      "src/node/runtime-owned-processes.ts",
+      "resources/runtime/manifest.json",
+    ]) {
+      expect(classifyChangedPaths([path]).nativeArchitecture, path).toBe(true);
+    }
+    for (const path of [
+      "tests/e2e/app-shell.spec.ts",
+      "tests/support/runtime-event-queue.ts",
+      "src/shared/contracts.ts",
+      "src/server/database.ts",
+      "src/server/runtime/turns/turn-controller.ts",
+      "src/main/runtime-supervisor.ts",
+      "playwright.config.ts",
+      "src/renderer/src/App.tsx",
+    ]) {
+      expect(classifyChangedPaths([path]).nativeArchitecture, path).toBe(false);
+    }
+    expect(classifyChangedPaths(["src/shared/contracts.ts", "package-lock.json"]).nativeArchitecture).toBe(true);
   });
 
   it("routes portable turn and agent changes through every provider domain", () => {
@@ -179,6 +215,7 @@ describe("CI change classifier", () => {
     );
     expect(output).toContain("all_evidence=false\n");
     expect(output).toContain("full_certification=false\n");
+    expect(output).toContain("native_architecture=false\n");
     expect(output).toContain("provider_kimi=true\n");
     expect(output).toContain("provider_codex=false\n");
     expect(output).toContain('domains_json=["quality_shared","provider_common","provider_kimi","turn_session","agent_management"]\n');

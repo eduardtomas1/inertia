@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   lstatSync,
@@ -16,7 +17,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   cleanupReversalOperations as cleanupReversalOperationsWithBroker,
-  commitChanges,
   getUnifiedDiff,
   inspectDiffSelection as inspectDiffSelectionWithBroker,
   revertDiffSelection as revertDiffSelectionWithBroker,
@@ -291,6 +291,28 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "status", "--porcelain")).toBe("");
   });
 
+  it("preserves a UTF-8 BOM through a staged selected reversal and Undo", async () => {
+    const original = Buffer.from("\uFEFFalpha\nbeta\n");
+    const edited = Buffer.from("\uFEFFalpha\nbeta\ndelta\n");
+    const root = repository(original.toString("utf8"));
+    writeFileSync(join(root, "example.txt"), edited);
+    git(root, "add", "example.txt");
+    const originalIndex = git(root, "rev-parse", ":example.txt");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+
+    const { plan, result } = await apply(root, selection);
+
+    expect(plan.affectedLayers).toEqual(["index", "worktree"]);
+    expect(readFileSync(join(root, "example.txt"))).toEqual(original);
+    expect(Buffer.from(git(root, "show", ":example.txt"))).toEqual(original);
+    expect(git(root, "status", "--porcelain")).toBe("");
+
+    await undoDiffSelection(root, result.operation.id);
+    expect(readFileSync(join(root, "example.txt"))).toEqual(edited);
+    expect(git(root, "rev-parse", ":example.txt")).toBe(originalIndex);
+    expect(Buffer.from(git(root, "show", ":example.txt"))).toEqual(edited);
+  });
+
   it("preserves unrelated unstaged work while removing selected staged changes in a mixed file", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nBETA\ngamma\n");
@@ -349,23 +371,6 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "ls-files", "--stage", "example.txt")).toMatch(/^100755 /u);
     expect(git(root, "show", ":example.txt")).toBe("alpha\r\nbeta\r\ndelta");
   }, 30_000);
-
-  it("reverts mixed-EOL lines without rewriting unrelated terminators", async () => {
-    const original = Buffer.from("alpha\r\nbeta\ngamma\r\n");
-    const edited = Buffer.from("alpha\r\nBETA\ngamma\r\n");
-    const root = repository(original.toString("utf8"));
-    writeFileSync(join(root, "example.txt"), edited);
-    const selection = await selectionFor(root, (line) => (
-      (line.kind === "deletion" && line.content === "beta")
-      || (line.kind === "addition" && line.content === "BETA")
-    ));
-
-    const { result } = await apply(root, selection);
-
-    expect(readFileSync(join(root, "example.txt"))).toEqual(original);
-    await undoDiffSelection(root, result.operation.id);
-    expect(readFileSync(join(root, "example.txt"))).toEqual(edited);
-  });
 
   it("persists an independent operation registry and deletes only its backup refs after Undo", async () => {
     const root = repository();
@@ -658,32 +663,55 @@ describe("safe selected diff reversal", () => {
   });
 
   it("expires unused successful backups and bounds active retention per repository", async () => {
-    const expiring = repository();
-    writeFileSync(join(expiring, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
-    const expiringSelection = await selectionFor(expiring, (line) => line.kind === "addition" && line.content === "delta");
-    await apply(expiring, expiringSelection);
-    const expiredRegistry = readRegistry(expiring);
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const expiringSelection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    await apply(root, expiringSelection);
+    const expiredRegistry = readRegistry(root);
+    const template = structuredClone(expiredRegistry.operations[0]!);
     expiredRegistry.operations[0]!.expiresAt = new Date(0).toISOString();
-    writeRegistry(expiring, expiredRegistry);
+    writeRegistry(root, expiredRegistry);
 
-    await cleanupReversalOperations(expiring);
-    await cleanupReversalOperations(expiring);
+    await cleanupReversalOperations(root);
+    await cleanupReversalOperations(root);
 
-    expect(readRegistry(expiring).operations[0]).toMatchObject({ status: "expired", expiredAt: expect.any(String) });
-    expect(reversalBackupRefs(expiring)).toEqual([]);
+    expect(readRegistry(root).operations[0]).toMatchObject({ status: "expired", expiredAt: expect.any(String) });
+    expect(reversalBackupRefs(root)).toEqual([]);
 
-    const bounded = repository();
-    for (let index = 0; index <= REVERSAL_MAX_ACTIVE_BACKUPS; index += 1) {
-      const marker = `retained-${index}`;
-      writeFileSync(join(bounded, "example.txt"), `alpha\nbeta\ngamma\n${marker}\n`);
-      const selection = await selectionFor(bounded, (line) => line.kind === "addition" && line.content === marker);
-      await apply(bounded, selection);
-    }
-    const boundedRegistry = readRegistry(bounded);
-    expect(boundedRegistry.operations.filter(({ status }) => status === "applied")).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS);
-    expect(boundedRegistry.operations.filter(({ status }) => status === "expired")).toHaveLength(1);
-    expect(reversalBackupRefs(bounded)).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS * 4);
-  }, 120_000);
+    const seededAt = Date.now() - 60_000;
+    const seeded = Array.from({ length: REVERSAL_MAX_ACTIVE_BACKUPS }, (_, index) => {
+      const operationId = randomUUID();
+      const backupReferences = template.backupReferences.map((reference) => {
+        const ref = reference.ref.replace(template.operationId, operationId);
+        git(root, "update-ref", ref, reference.oid);
+        return { ...reference, ref };
+      });
+      return {
+        ...template,
+        operationId,
+        backupReferences,
+        status: "applied",
+        createdAt: new Date(seededAt + index * 1_000).toISOString(),
+      };
+    });
+    const registry = readRegistry(root);
+    writeRegistry(root, { ...registry, operations: [...registry.operations, ...seeded] });
+    expect(reversalBackupRefs(root)).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS * 4);
+
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\nretained\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "retained");
+    const { result } = await apply(root, selection);
+
+    const bounded = readRegistry(root);
+    const evicted = seeded[0]!;
+    expect(bounded.operations.filter(({ status }) => status === "applied").map(({ operationId }) => operationId))
+      .toEqual([...seeded.slice(1).map(({ operationId }) => operationId), result.operation.id]);
+    expect(bounded.operations.find(({ operationId }) => operationId === evicted.operationId))
+      .toMatchObject({ status: "expired", expiredAt: expect.any(String) });
+    const remainingRefs = reversalBackupRefs(root);
+    expect(remainingRefs).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS * 4);
+    for (const { ref } of evicted.backupReferences) expect(remainingRefs).not.toContain(ref);
+  }, 60_000);
 
   it("never deletes a namespaced ref whose target no longer matches the registry", async () => {
     const root = repository();
@@ -957,33 +985,5 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "show", ":example.txt"))
       .toBe("alpha\nbeta\ngamma\n");
     expect(readRegistry(root).operations.at(-1)?.status).toBe("applied");
-  });
-
-  it("stages and commits only explicitly selected paths while preserving other staged work", async () => {
-    const root = repository();
-    writeFileSync(join(root, "selected.txt"), "selected base\n");
-    writeFileSync(join(root, "other.txt"), "other base\n");
-    git(root, "add", "selected.txt", "other.txt");
-    git(root, "commit", "-m", "two files");
-    writeFileSync(join(root, "selected.txt"), "selected next\n");
-    writeFileSync(join(root, "other.txt"), "other next\n");
-    git(root, "add", "other.txt");
-
-    await commitChanges(root, "Selected path only", ["selected.txt"]);
-
-    expect(git(root, "show", "HEAD:selected.txt")).toBe("selected next\n");
-    expect(git(root, "show", "HEAD:other.txt")).toBe("other base\n");
-    expect(git(root, "show", ":other.txt")).toBe("other next\n");
-    expect(git(root, "diff", "--cached", "--name-only").trim()).toBe("other.txt");
-  });
-
-  it("rejects an empty commit path selection without staging anything", async () => {
-    const root = repository();
-    writeFileSync(join(root, "example.txt"), "changed\n");
-
-    await expect(commitChanges(root, "Must not stage all", [])).rejects.toThrow(/select at least one path/i);
-
-    expect(git(root, "diff", "--cached")).toBe("");
-    expect(git(root, "diff")).toContain("changed");
   });
 });

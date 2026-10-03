@@ -1,6 +1,6 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { createCanvas } from "@napi-rs/canvas";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Request } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,11 +10,25 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 const largeId = randomUUID();
+const requestedPreviewIds = new Set<string>();
+const pendingPreviewRequests = new Set<Request>();
+let peakPendingPreviews = 0;
 let app: AppFixture;
 
 test.beforeAll(async () => {
   app = await createAppFixture({
-    name: "gallery-visibility", initialState: "conversation", windowDisplay: "primary",
+    name: "gallery-visibility", initialState: "conversation",
+    observePage: (page) => {
+      page.on("request", (request) => {
+        const id = /\/attachment-preview\/([^/]+)$/u.exec(request.url())?.[1];
+        if (!id) return;
+        requestedPreviewIds.add(id);
+        pendingPreviewRequests.add(request);
+        peakPendingPreviews = Math.max(peakPendingPreviews, pendingPreviewRequests.size);
+      });
+      page.on("requestfinished", (request) => pendingPreviewRequests.delete(request));
+      page.on("requestfailed", (request) => pendingPreviewRequests.delete(request));
+    },
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const canvas = createCanvas(8_000, 5_000);
       canvas.getContext("2d").fillRect(0, 0, 8_000, 5_000);
@@ -51,13 +65,26 @@ test.afterAll(async () => { await app?.close(); });
 
 test("keeps offscreen gallery originals unloaded and opens a retained 40-megapixel image by keyboard", async ({ browserName: _browserName }, testInfo) => {
   const { page } = app;
-  const memorySamples: Array<{ stage: string; workingSetKiB: number }> = [];
+  const memorySamples: Array<{ stage: string; workingSetKiB: number; requestedPreviews: number }> = [];
   const sampleMemory = async (stage: string): Promise<void> => {
     const workingSetKiB = await app.electronApp.evaluate(({ app }) => app.getAppMetrics()
       .reduce((total, metric) => total + metric.memory.workingSetSize, 0));
-    memorySamples.push({ stage, workingSetKiB });
+    memorySamples.push({ stage, workingSetKiB, requestedPreviews: requestedPreviewIds.size });
   };
   await app.resizeWindow(1440, 920);
+  const transcript = page.locator(".message-scroll");
+  await expect(transcript.getByRole("button", { name: "Preview attachment gallery-59.png" })).toBeVisible();
+  await expect.poll(() => transcript.evaluate((scroll) => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight)).toBeLessThan(2);
+  await expect.poll(() => transcript.evaluate((scroll) => {
+    const clip = scroll.getBoundingClientRect();
+    const images = [...scroll.querySelectorAll(".sent-attachment-thumbnail img")];
+    return images.length > 0 && images.every((image) => {
+      const rect = image.getBoundingClientRect();
+      return rect.bottom >= clip.top && rect.top <= clip.bottom
+        && rect.bottom >= 0 && rect.top <= innerHeight;
+    });
+  })).toBe(true);
+  await sampleMemory("transcript settled before opening gallery");
   // Recent attachments live in the right panel's Attachments surface.
   await selectWorkspaceTool(await ensureWorkspaceTools(page), "Attachments");
   const gallery = page.getByRole("list", { name: "Chat attachments" });
@@ -86,6 +113,7 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   await expect.poll(() => last.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(8_000);
   await expect(last.locator("img")).toHaveAttribute("src", `inertia://bundle/attachment-preview/${largeId}`);
   await expect.poll(mountedImagesAreVisible).toBe(true);
+  expect(peakPendingPreviews).toBeLessThanOrEqual(2);
   await page.keyboard.press("Enter");
   const preview = page.getByRole("dialog", { name: "gallery-0.png" });
   await expect(preview).toBeVisible();

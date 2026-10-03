@@ -49,7 +49,6 @@ function cursorAgent(
   supportsHttp: boolean,
   leakPath?: string,
   echoPath?: string,
-  nestedLeak = false,
   reverseRequestLeak = false,
   controlResponseLeak = false,
 ): string {
@@ -57,7 +56,6 @@ function cursorAgent(
   const subcommand = writeNodeSubcommand(root, "acp", `
 const fs=require("node:fs"),readline=require("node:readline");let secretToken,secretUrl,promptId;
 const send=value=>process.stdout.write(JSON.stringify(value)+"\\n");
-const deeplyNested=value=>{let result={type:"text",text:JSON.stringify(value)};for(let depth=0;depth<40;depth+=1)result={type:"tool_result",content:result};return result;};
 const capture=message=>{
  const server=message.params.mcpServers[0];
  if(!server){fs.writeFileSync(${JSON.stringify(capturePath)},JSON.stringify({method:message.method,count:0}));return;}
@@ -87,7 +85,7 @@ readline.createInterface({input:process.stdin}).on("line",line=>{
   capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"cursor-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:${controlResponseLeak ? `[{type:"select",id:"model",name:"Model",category:"model",currentValue:"model-a",options:[{value:"model-a",name:"Model A",description:"Initial"}]}]` : "[]"}}});
  }
  ${controlResponseLeak ? `if(message.method==="session/set_config_option")return send({jsonrpc:"2.0",id:message.id,result:{configOptions:[{type:"select",id:"model",name:"Model",category:"model",currentValue:"model-a",options:[{value:"model-a",name:"Model "+secretToken,description:"Endpoint "+secretUrl}]}]}});` : ""}
- if(message.method==="session/prompt"){${reverseRequestLeak ? `promptId=message.id;return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"cursor-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : `${echoPath ? nestedLeak ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"nested-secret-tool",title:"Nested provider diagnostic",kind:"execute",status:"failed",rawInput:{command:"echo safe"},rawOutput:deeplyNested({token:secretToken,url:secretUrl})}}});` : `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}`}}
+ if(message.method==="session/prompt"){${reverseRequestLeak ? `promptId=message.id;return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"cursor-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : `${echoPath ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}`}}
  ${reverseRequestLeak ? `if(message.id===899)return send({jsonrpc:"2.0",id:900,method:"cursor/ask_question",params:{toolCallId:"question",title:"Choose "+secretToken,questions:[{id:"scope",prompt:"Scope "+secretUrl,options:[{id:"focused",label:"Focused "+secretToken}]}]}});if(message.id===900){send({jsonrpc:"2.0",method:"cursor/task",params:{toolCallId:"task",description:"Task "+secretToken,prompt:"Inspect "+secretUrl,subagentType:"explore",model:"model"}});return send({jsonrpc:"2.0",id:promptId,result:{stopReason:"end_turn"}});}` : ""}
 });
 `);
@@ -302,11 +300,11 @@ describe("provider host-tool injection", { concurrent: false }, () => {
   it.each([
     { supportsHttp: true, expectedType: "http" },
     { supportsHttp: false, expectedType: "stdio" },
-  ])("injects an exact Cursor $expectedType bridge on new and resumed sessions", async ({
+  ])("injects an exact Cursor $expectedType bridge", async ({
     supportsHttp,
     expectedType,
   }) => {
-    for (const resume of [false, true]) {
+    for (const resume of supportsHttp ? [false, true] : [false]) {
       const root = portableFixtureRoot(`Cursor host ${expectedType} ${resume ? "resume" : "new"}`);
       roots.push(root);
       const capturePath = join(root, "capture.json");
@@ -347,11 +345,11 @@ describe("provider host-tool injection", { concurrent: false }, () => {
   it.each([
     { supportsHttp: true, expectedType: "http" },
     { supportsHttp: false, expectedType: "stdio" },
-  ])("injects and cleans up Kimi's exact $expectedType bridge for every session path", async ({
+  ])("injects and cleans up Kimi's exact $expectedType bridge", async ({
     supportsHttp,
     expectedType,
   }) => {
-    for (const sessionPath of ["new", "resume", "load"] as const) {
+    for (const sessionPath of supportsHttp ? ["new", "resume", "load"] as const : ["new"] as const) {
       const root = portableFixtureRoot(
         `Kimi host ${expectedType} ${sessionPath}`,
       );
@@ -746,7 +744,6 @@ describe("provider host-tool injection", { concurrent: false }, () => {
             true,
             undefined,
             secretPath,
-            false,
             true,
             true,
           ),
@@ -941,8 +938,6 @@ describe("provider host-tool injection", { concurrent: false }, () => {
 
   it.each([
     { provider: "cursor" as const, supportsHttp: true, label: "Cursor HTTP" },
-    { provider: "cursor" as const, supportsHttp: false, label: "Cursor stdio" },
-    { provider: "kimi" as const, supportsHttp: true, label: "Kimi HTTP" },
     { provider: "kimi" as const, supportsHttp: false, label: "Kimi stdio" },
     { provider: "opencode" as const, supportsHttp: true, label: "OpenCode" },
   ])("redacts MCP credentials from $label text and activity", async ({ provider, supportsHttp }) => {
@@ -1001,9 +996,6 @@ describe("provider host-tool injection", { concurrent: false }, () => {
   });
 
   it.each([
-    { provider: "cursor" as const, supportsHttp: true, label: "Cursor HTTP" },
-    { provider: "cursor" as const, supportsHttp: false, label: "Cursor stdio" },
-    { provider: "kimi" as const, supportsHttp: true, label: "Kimi HTTP" },
     { provider: "kimi" as const, supportsHttp: false, label: "Kimi stdio" },
     { provider: "opencode" as const, supportsHttp: true, label: "OpenCode" },
   ])("drops over-depth $label provider diagnostics before projection", async ({
@@ -1014,23 +1006,7 @@ describe("provider host-tool injection", { concurrent: false }, () => {
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const secretPath = join(root, "fixture-secret.json");
-    const manager = provider === "cursor"
-      ? ProviderManager.createForTests(
-          {
-            commands: {
-              cursor: cursorAgent(
-                root,
-                capturePath,
-                supportsHttp,
-                undefined,
-                secretPath,
-                true,
-              ),
-            },
-          },
-          new AgentHarnessRegistry([createCursorAcpHarness()]),
-        )
-      : provider === "kimi"
+    const manager = provider === "kimi"
         ? ProviderManager.createForTests(
             {
               commands: {

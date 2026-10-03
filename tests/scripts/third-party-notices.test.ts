@@ -76,6 +76,7 @@ describe("third-party notice generation", () => {
     expect(output).toContain("VENDORED THINKING ORBS ENGINE");
     expect(output).toContain("Copyright (c) 2026 Jakub Antalik");
     expect(output).toContain("Copyright (c) 2026 Haplo LLC");
+    expect(output).toContain("musl libc");
   });
 
   it("sorts packages and de-duplicates identical license text deterministically", () => {

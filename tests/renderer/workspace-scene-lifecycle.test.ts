@@ -16,17 +16,4 @@ describe("workspace scene lifecycle", () => {
     expect(splitBoundary).toBeGreaterThan(0);
     expect(primaryDetailBoundary).toBeGreaterThan(splitBoundary);
   });
-
-  it("normalizes split-owned busy actions before building each split pane scene", async () => {
-    const source = await readFile(
-      new URL(
-        "../../src/renderer/src/hooks/useSplitWorkspaceScene.ts",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    expect(source).toContain("const busyPrefix = `split:${owner}:`;");
-    expect(source).toContain("busyAction?.startsWith(busyPrefix)");
-    expect(source).toContain("busyAction.slice(busyPrefix.length)");
-  });
 });

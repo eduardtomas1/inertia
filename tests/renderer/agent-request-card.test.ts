@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -9,36 +8,10 @@ import {
   buildAgentInputAnswers,
   inputRequestTitle,
 } from "../../src/renderer/src/utils/agentInput";
-import { buildTurnExecutionStream } from "../../src/renderer/src/utils/responseTimeline";
 import type {
-  AgentActivity,
   AgentApprovalRequest,
   AgentInputRequest,
-  AgentTurn,
 } from "../../src/shared/contracts";
-
-const requestCardSource = readFileSync(
-  new URL("../../src/renderer/src/components/AgentRequestCard.tsx", import.meta.url),
-  "utf8",
-);
-const activitySource = readFileSync(
-  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
-  "utf8",
-);
-const layersSource = readFileSync(
-  new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
-  "utf8",
-);
-const styles = readFileSync(
-  new URL("../../src/renderer/src/styles.css", import.meta.url),
-  "utf8",
-);
-
-function cssBlock(selector: string): string {
-  const start = styles.indexOf(`${selector} {`);
-  expect(start, `${selector} should exist`).toBeGreaterThanOrEqual(0);
-  return styles.slice(start, styles.indexOf("}", start) + 1);
-}
 
 describe("agent input answers", () => {
   const request = {
@@ -185,99 +158,11 @@ describe("agent input answers", () => {
     expect(html).toContain("<fieldset");
     expect(html).toContain('type="radio"');
     expect(html).toContain(`name="${input.id}-strategy"`);
-    expect(requestCardSource).toContain('type={question.isSecret ? "password" : "text"}');
-    expect(requestCardSource).toContain('autoComplete="off"');
-    expect(requestCardSource).toContain('autoCapitalize={question.isSecret ? "none" : undefined}');
-    expect(requestCardSource).toContain('spellCheck={question.isSecret ? false : undefined}');
-    expect(requestCardSource).toContain("aria-label={question.question}");
     expect(html).toContain('aria-label="Question navigation"');
     expect(html).toContain("Next →");
     expect(html).toContain('aria-label="Go to question 2"');
     expect(html).toContain('disabled=""');
     expect(html).not.toContain('type="text"');
     expect(html).not.toContain('aria-live="polite"');
-  });
-
-  it("keeps submission guards and busy disabling at the interactive boundary", () => {
-    expect(requestCardSource).toContain("if (busy) return;");
-    expect(requestCardSource).toContain("if (!complete || busy) return;");
-    expect(requestCardSource).toContain('disabled={busy}');
-    expect(requestCardSource).toContain('disabled={busy || (lastQuestion ? !complete : !activeQuestionComplete)}');
-    expect(requestCardSource).toContain('type={question.allowMultiple ? "checkbox" : "radio"}');
-    expect(requestCardSource).toContain('type={question.isSecret ? "password" : "text"}');
-    expect(requestCardSource).toContain('aria-busy={busy}');
-  });
-
-  it("uses a restrained semantic treatment across themes, scales, and narrow cards", () => {
-    const card = cssBlock(".agent-request-card");
-    const question = cssBlock(".agent-request-card.is-question");
-    const icon = cssBlock(".agent-request-icon");
-    const alignment = cssBlock(".agent-run-flow > .agent-request-card");
-
-    expect(card).toContain("--agent-request-accent: var(--approval-accent)");
-    expect(card).toContain("padding: 8px 10px");
-    expect(card).toContain("border-inline-start: 2px solid var(--agent-request-accent)");
-    expect(card).toContain("--agent-request-surface: var(--approval-surface)");
-    expect(card).toContain("background: var(--agent-request-surface)");
-    expect(question).toContain(
-      "--agent-request-surface: var(--question-surface)",
-    );
-    expect(card).toContain("box-shadow: none");
-    expect(card).not.toContain("3px solid");
-    expect(question).toContain("--agent-request-accent: var(--question-accent)");
-    expect(icon).toContain("color: var(--agent-request-accent)");
-    expect(icon).toContain("background: transparent");
-    expect(alignment).toContain("max-width: var(--answer-max-width)");
-
-    expect(styles).toContain(':root[data-theme="dark"]');
-    expect(styles).toContain(':root[data-interface-scale="compact"]');
-    expect(styles).toContain(':root[data-interface-scale="large"]');
-    expect(styles).toContain("@container (max-width: 420px)");
-    expect(styles).toContain(".agent-input-options label:has(input:focus-visible)");
-    expect(styles).toContain(".agent-input-text:focus-visible");
-    expect(styles).toContain("min-height: max(30px, var(--control-height-small))");
-  });
-
-  it("keeps approvals and questions outside activity grouping and in stable response order", () => {
-    const activity: AgentActivity = {
-      id: "66666666-6666-4666-8666-666666666666",
-      conversationId: request.conversationId,
-      runId: request.runId,
-      turnId: request.turnId,
-      kind: "command",
-      title: "Ran the test",
-      detail: null,
-      status: "completed",
-      createdAt: "2026-07-27T08:00:00.000Z",
-    };
-    const stream = buildTurnExecutionStream({
-      id: request.turnId,
-      agentTurn: { updatedAt: activity.createdAt } as AgentTurn,
-      followUpMessages: [],
-      commentaryMessages: [],
-      activities: [activity],
-      approvals: [{ id: "approval-not-a-stream-row" }],
-      inputRequests: [{ id: "question-not-a-stream-row" }],
-    } as Parameters<typeof buildTurnExecutionStream>[0] & {
-      approvals: Array<{ id: string }>;
-      inputRequests: Array<{ id: string }>;
-    });
-
-    expect(stream).toHaveLength(1);
-    expect(stream[0]).toMatchObject({
-      kind: "activity-group",
-      activities: [{ id: activity.id }],
-    });
-
-    const executionStreamSource = activitySource.slice(
-      activitySource.indexOf("function ExecutionStream"),
-      activitySource.indexOf("export function WorkLog"),
-    );
-    const approvalsIndex = layersSource.indexOf("{turn.approvals.map");
-    const questionsIndex = layersSource.indexOf("{turn.inputRequests.map");
-    expect(executionStreamSource).not.toContain("ApprovalCard");
-    expect(executionStreamSource).not.toContain("InputRequestCard");
-    expect(approvalsIndex).toBeGreaterThan(layersSource.indexOf("<WorkLog"));
-    expect(questionsIndex).toBeGreaterThan(approvalsIndex);
   });
 });

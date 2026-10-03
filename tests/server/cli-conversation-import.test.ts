@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CliConversationDiscovery, CLI_TRANSCRIPT_MAX_BYTES } from "../../src/server/cli-import/discovery";
 import { RuntimeStore } from "../../src/server/database";
 import { createCliConversationCommandHandler } from "../../src/server/runtime/commands/cli-conversation-commands";
+import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { continuationIdentityForSelection, providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { ProviderManager } from "../../src/server/providers";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
@@ -104,5 +105,23 @@ describe("CLI conversation import authority and persistence", () => {
     expect(retry).toEqual(first);
     expect(first).toMatchObject({ type: "request.result", result: { kind: "conversation.cli.imported" } });
     expect(store.shellSnapshot().conversations.filter((conversation) => conversation.providerSessionId === f.sessionId)).toHaveLength(1);
+  });
+  it("refuses to scan or import into the folder for chats without a project", async () => {
+    const f = await fixture(); const store = new RuntimeStore(join(f.root, "inertia.sqlite"), f.workspace); stores.push(store);
+    const scratch = await new ScratchWorkspace(store, f.root).ensureProject();
+    await writeFile(f.file, f.content(scratch.path));
+    const send = vi.fn(); const broadcastSnapshot = vi.fn();
+    const providers = { resolveModelRoute: (selection: Parameters<ProviderManager["resolveModelRoute"]>[0]) => ({ continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") }) } as Pick<ProviderManager, "resolveModelRoute">;
+    const handler = createCliConversationCommandHandler({ store, providers, discovery: f.discovery, send, broadcastSnapshot });
+    const candidate = (await f.discovery.scan(scratch.id, scratch.path, () => null)).candidates[0]!;
+    for (const command of [
+      { type: "conversation.cli.scan", requestId: "scan", payload: { projectId: scratch.id } },
+      { type: "conversation.cli.import", requestId: "import", payload: { projectId: scratch.id, candidateId: candidate.id, revision: "a".repeat(64) } },
+    ] satisfies ClientCommand[]) {
+      await expect(handler({} as WebSocket, command)).rejects.toThrow("Chats without a project cannot import CLI conversations.");
+    }
+    expect(send).not.toHaveBeenCalled();
+    expect(broadcastSnapshot).not.toHaveBeenCalled();
+    expect(store.shellSnapshot().conversations).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ChatAttachment } from "../../src/shared/contracts";
-import { MAX_CHAT_ATTACHMENTS } from "../../src/shared/attachments";
+import { MAX_ATTACHMENT_COUNT } from "../../src/shared/attachments";
 import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import { composerAttachmentActions } from "../../src/renderer/src/components/composer/composerAttachmentActions";
 import { useComposerSnapshots } from "../../src/renderer/src/components/composer/useComposerSnapshots";
@@ -25,7 +25,7 @@ function fixture(
   const commit = vi.fn(async (_batch: string, _ids: string[]): Promise<void> => undefined);
   const cancel = vi.fn(async (_batch: string): Promise<void> => undefined);
   const release = vi.fn(async (_id: string): Promise<void> => undefined);
-  const existing: ChatAttachment[] = mode === "full" ? Array.from({ length: MAX_CHAT_ATTACHMENTS }, (_, index) => ({
+  const existing: ChatAttachment[] = mode === "full" ? Array.from({ length: MAX_ATTACHMENT_COUNT }, (_, index) => ({
     id: `existing-${index}`, path: `existing-${index}`, name: `${index}.png`, mimeType: "image/png", size: 10,
   })) : [];
   const options: Parameters<typeof composerAttachmentActions>[0] = {

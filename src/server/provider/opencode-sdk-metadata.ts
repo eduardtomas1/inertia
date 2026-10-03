@@ -66,12 +66,12 @@ export function openCodeModels(
   })).slice(0, 128);
 }
 
-export async function readOpenCodeSdkModels(
+export async function readOpenCodeSdkInventory(
   executable: string,
   environment: NodeJS.ProcessEnv,
   cwd: string,
   options: OpenCodeSdkMetadataOptions = {},
-): Promise<ProviderModel[]> {
+): Promise<{ all: Provider[]; default: Record<string, string>; connected: string[] }> {
   if (options.signal?.aborted) {
     throw new Error("OpenCode metadata discovery was cancelled.");
   }
@@ -115,12 +115,13 @@ export async function readOpenCodeSdkModels(
       ),
       options.signal,
     );
-    return openCodeModels(
-      response.data.all,
-      response.data.default,
-      response.data.connected,
-    );
+    return response.data;
   } finally {
     await started.terminate(true);
   }
+}
+
+export async function readOpenCodeSdkModels(...args: Parameters<typeof readOpenCodeSdkInventory>): Promise<ProviderModel[]> {
+  const inventory = await readOpenCodeSdkInventory(...args);
+  return openCodeModels(inventory.all, inventory.default, inventory.connected);
 }

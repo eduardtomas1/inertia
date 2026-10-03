@@ -1,8 +1,8 @@
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
 } from "@shared/attachments";
 import type { ChatAttachment } from "@shared/contracts";
@@ -59,13 +59,13 @@ function queuedAttachment(value: unknown): ChatAttachment | null {
     || typeof candidate.path !== "string"
     || candidate.path !== candidate.id
     || typeof candidate.mimeType !== "string"
-    || !(CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(
+    || !(ACCEPTED_ATTACHMENT_MIME_TYPES as readonly string[]).includes(
       candidate.mimeType,
     )
     || typeof candidate.size !== "number"
     || !Number.isSafeInteger(candidate.size)
     || candidate.size <= 0
-    || candidate.size > MAX_CHAT_ATTACHMENT_BYTES
+    || candidate.size > MAX_ATTACHMENT_BYTES
     || (candidate.snapshot !== undefined && !snapshotSourceSchema.safeParse(candidate.snapshot).success)
   ) return null;
   const attachment = candidate as unknown as ChatAttachment;
@@ -76,7 +76,7 @@ function queuedAttachment(value: unknown): ChatAttachment | null {
 
 function queuedAttachments(value: unknown): ChatAttachment[] | null {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > MAX_CHAT_ATTACHMENTS) return null;
+  if (!Array.isArray(value) || value.length > MAX_ATTACHMENT_COUNT) return null;
   const attachments: ChatAttachment[] = [];
   const ids = new Set<string>();
   let totalBytes = 0;
@@ -84,7 +84,7 @@ function queuedAttachments(value: unknown): ChatAttachment[] | null {
     const attachment = queuedAttachment(valueAttachment);
     if (!attachment || ids.has(attachment.id)) return null;
     totalBytes += attachment.size;
-    if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) return null;
+    if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) return null;
     ids.add(attachment.id);
     attachments.push(attachment);
   }

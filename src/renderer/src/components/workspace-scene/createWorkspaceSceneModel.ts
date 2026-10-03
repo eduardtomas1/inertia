@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
   AgentApprovalDecision,
@@ -201,7 +202,7 @@ export function visibleConversationLatestTurnSummary(
 
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
-  selectGlobalChatProject?: (project: Project) => void;
+  selectGlobalChatProject?: (project: Project | null) => void;
   createConversation: (
     targetProject?: Project | null,
     location?: NewConversationLocation,
@@ -266,6 +267,7 @@ export interface WorkspaceSceneActions {
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
+  runLimitResetCommand?: LimitResetCommandRunner;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -451,7 +453,7 @@ export function createWorkspaceSceneModel({
   if (workspaceToolsUnavailable) {
     for (const surface of WORKSPACE_BOUND_SURFACES) {
       unavailableSurfaces[surface] =
-        "Available after the first message creates this isolated worktree.";
+        "Available after the first message creates this chat's workspace.";
     }
   }
   if (!conversation) {
@@ -723,6 +725,7 @@ export function createWorkspaceSceneModel({
       contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onQueueCommand: actions.runQueueCommand,
+      onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")

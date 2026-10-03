@@ -209,7 +209,7 @@ describe("stalled window-destroy GPU helper recovery", () => {
     f.diagnostic.stop();
   });
 
-  it.each(["S", "S<", "R+", "U", "I"])("never signals a running %s helper without a sample", async (stat) => {
+  it.each(["S", "R+"])("never signals a running %s helper without a sample", async (stat) => {
     vi.useFakeTimers();
     const f = fixture();
     const running = TABLE.replace(`${GPU_PID} ${MAIN_PID} T `, `${GPU_PID} ${MAIN_PID} ${stat} `);

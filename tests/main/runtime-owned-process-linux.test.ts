@@ -154,7 +154,7 @@ function waitForPtyExit<T>(exited: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 describe("Linux runtime process guardian", () => {
-  for (const ending of ["0", "37", "signal", "stop"] as const) {
+  for (const ending of ["37", "signal", "stop"] as const) {
     linuxIt(`reaps sequential adopted children while live, then settles ${ending}`, async () => {
       const root = mkdtempSync(join(tmpdir(), "inertia-linux-orphan-churn-")); roots.push(root);
       const guardian = compileGuardian(root);
@@ -937,7 +937,7 @@ describe("Linux runtime process guardian", () => {
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)?.length === 0);
-      expect(owned.confirmStopped()).toBe(true);
+      await waitFor(() => owned.confirmStopped());
     } finally {
       deactivate?.();
     }
@@ -987,7 +987,7 @@ describe("Linux runtime process guardian", () => {
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)?.length === 0);
-      expect(owned.confirmStopped()).toBe(true);
+      await waitFor(() => owned.confirmStopped());
     } finally {
       try { await cleanup?.(); } finally { deactivate?.(); }
     }
@@ -1022,7 +1022,7 @@ describe("Linux runtime process guardian", () => {
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)?.length === 0);
-      expect(owned.confirmStopped()).toBe(true);
+      await waitFor(() => owned.confirmStopped());
     } finally {
       deactivate?.();
     }

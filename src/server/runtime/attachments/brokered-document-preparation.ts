@@ -7,7 +7,7 @@ import { prepareDocumentAttachments } from "./document-attachment-context";
 
 export function createBrokeredDocumentPreparer(runner: DocumentPreparationRunner): typeof prepareDocumentAttachments {
   return async (payloads, options = {}) => {
-    if (!payloads.some(({ attachment }) => attachment.mimeType === "application/pdf")) {
+    if (!payloads.some(({ attachment, source }) => !source && attachment.mimeType === "application/pdf")) {
       return await prepareDocumentAttachments(payloads, options);
     }
     const now = options.now ?? Date.now;

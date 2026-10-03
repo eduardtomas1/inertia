@@ -254,6 +254,15 @@ describe("WelcomeGuideHost", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("does not count the folder for chats without a project as a user project", async () => {
+    const onlyScratch = {
+      ...snapshot(0),
+      projects: [{ id: "scratch", workspaceKind: "scratch" }],
+    } as unknown as AppSnapshot;
+    render(<WelcomeGuideHost {...hostProps({ snapshot: onlyScratch })} />);
+    expect(await screen.findByRole("dialog", { name: "Welcome guide" })).toBeVisible();
+  });
+
   it("stays out of the way for existing and recovered profiles", async () => {
     const view = render(<WelcomeGuideHost {...hostProps({ snapshot: null })} />);
     expect(window.localStorage.getItem(WELCOME_GUIDE_STORAGE_KEY)).toBeNull();

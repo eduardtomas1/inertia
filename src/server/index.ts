@@ -43,6 +43,8 @@ import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError } from "./runtim
 import { createTestShutdownTrace } from "./runtime/test-shutdown-trace";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
+import { ScratchWorkspace } from "./runtime/scratch-workspace";
+import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   ProjectIdentityRefresher,
   projectIdentityIsUsable,
@@ -100,9 +102,7 @@ import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/age
 import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
-import {
-  TrustedAttachmentResolver,
-} from "./runtime/attachments/trusted-attachment-resolver";
+import { TrustedAttachmentResolver, conversationAttachmentReadRoots } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import { unavailableSecureFileBroker } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
@@ -261,12 +261,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     },
   });
-  const projectIdentityCandidates = store.shellSnapshot().projects.map(
-    ({ id, path }) => ({ id, path }),
-  );
+  const projectIdentityCandidates = store.shellSnapshot().projects
+    .filter(({ workspaceKind }) => workspaceKind !== "scratch")
+    .map(({ id, path }) => ({ id, path }));
   let projectIdentityRefresh: Promise<void> = Promise.resolve();
   const projectIdentityAuthority = {
     revalidate: async (projectId: string, projectPath: string) => {
+      if (store.project(projectId).workspaceKind === "scratch") return true;
       if (projectIdentityIsUsable(projectIdentities.state(projectId))) {
         return true;
       }
@@ -576,6 +577,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   backendProfileController.attachProviderMutationGuard((providerId) => providerMaintenance.hasBlockingAuthority(providerId));
   if (!runtimeSafetyLock && providerMaintenanceRecovery.length === 0) await backendProfileController.initialize();
   const workspacePath = (projectId: string, conversationId?: string): string => {
+    if (!conversationId && store.project(projectId).workspaceKind === "scratch") {
+      throw new RequestError("Choose a chat to use its own workspace folder.");
+    }
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);
     if (conversation.projectId !== projectId) throw new RequestError("The thread does not belong to this project.");
@@ -631,6 +635,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               options.attachments!.release(attachmentId))).then(() => undefined)
           : undefined,
       releaseGeneratedAttachments: (paths) => generatedAttachments.release(paths),
+      attachmentReadRoots: conversationAttachmentReadRoots(store, initializedConversationAttachments),
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
@@ -679,11 +684,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
   queuedMessages.start();
+  const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
+    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+  });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.handler,
-      usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
+      ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
@@ -772,6 +780,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createProjectWorkspaceCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
+        dataDirectory,
         workspaceRuns,
         turns,
         providers,
@@ -905,7 +914,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       .then(() => testOnlyProjectIdentityRefresh))
       .catch(() => undefined);
     postReadyWork = trackRuntimeOperation(() =>
-      duoLaunchCoordinator.resumeComparisons()
+      Promise.all([
+        new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined),
+        duoLaunchCoordinator.resumeComparisons(),
+      ])
         .then(() => {
           if (!closed) broadcastSnapshot();
         }))
@@ -1126,6 +1138,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         if (!operationId) {
           throw new Error("The database recovery import identity is required.");
         }
+        if (isWithinScratchRoot(dataDirectory, targetDirectory)) {
+          throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+        }
         recoveryImportAdmission.begin();
         try {
           if (activeRuntimeCommands > 0) {
@@ -1166,6 +1181,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
                 }
               : {}),
           });
+          await new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined);
           broadcastSnapshot();
           return result;
         } catch (error) {

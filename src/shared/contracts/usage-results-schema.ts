@@ -1,8 +1,10 @@
+import { limitResetResultSchema } from "../limit-reset";
 import { usageLimitsSnapshotSchema, usageResetConfirmationSchema, usageResetOutcomeSchema } from "../provider-usage-limits";
 import { usageDashboardSchema } from "./usage-dashboard-schema";
 import { dailyWorkDashboardSchema } from "./daily-work-schema";
 
 export const usageResultValidators = {
+  "conversation.limit-reset": (value: Record<string, unknown>) => limitResetResultSchema.safeParse(value).success,
   "usage.limits": (value: Record<string, unknown>) => usageLimitsSnapshotSchema.safeParse(value.snapshot).success,
   "usage.reset.confirmation": (value: Record<string, unknown>) => usageResetConfirmationSchema.safeParse(value.confirmation).success,
   "usage.reset.outcome": (value: Record<string, unknown>) => usageResetOutcomeSchema.safeParse(value.outcome).success,

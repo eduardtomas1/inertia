@@ -56,6 +56,15 @@ for (const packageName of ["@crowecawcaw/xa11y", "ffi-rs"]) {
   }
 }
 
+if (process.platform === "darwin") {
+  const { AsyncEntry } = await import("@napi-rs/keyring");
+  if (typeof AsyncEntry.prototype.getPassword !== "function") throw new Error("The native Keychain binding could not load.");
+  await inspectNativeBinaryArchitecture(
+    join(root, "node_modules", "@napi-rs", `keyring-darwin-${process.arch}`, `keyring.darwin-${process.arch}.node`),
+    { expectedArchitecture, platform: process.platform },
+  );
+}
+
 const database = new Database(":memory:");
 try {
   const row = database.prepare("SELECT 27 AS audit_item").get();

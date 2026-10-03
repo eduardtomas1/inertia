@@ -224,6 +224,7 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const regularProjects = useMemo(() => projects.filter(({ workspaceKind }) => workspaceKind !== "scratch"), [projects]);
   const isCanary = appUpdateStatus?.channel === "canary";
   const rootRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -563,7 +564,7 @@ export function SettingsView({
         {section === "projects" && (ProjectSettings
           ? <ProjectSettings key={target?.section === "projects" ? target.projectId ?? "all" : "all"}
               initialProjectId={target?.section === "projects" ? target.projectId : undefined}
-              projects={projects} conversations={conversations} providers={providers} settings={settings}
+              projects={regularProjects} conversations={conversations} providers={providers} settings={settings}
               backendDefaults={backendDefaults} backendProfiles={backendProfiles}
               disabled={disabled} request={onReportCommand} onUpdateSettings={onUpdate} />
           : <SettingsSectionFallback />)}
@@ -1025,7 +1026,7 @@ export function SettingsView({
                 ? target.profileId
                 : undefined}
               defaults={backendDefaults}
-              projects={projects}
+              projects={regularProjects}
               disabled={disabled}
               onLoadDetail={onLoadBackendProfile}
               onCreate={onCreateBackendProfile}
@@ -1042,7 +1043,7 @@ export function SettingsView({
 
         {section === "connections" && (
           ConnectionsAndDevicesSettings ? (
-            <ConnectionsAndDevicesSettings projects={projects} />
+            <ConnectionsAndDevicesSettings projects={regularProjects} />
           ) : <SettingsSectionFallback />
         )}
 
@@ -1119,7 +1120,7 @@ export function SettingsView({
             <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button></div>
           </section>
         )}
-        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={projects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
+        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={regularProjects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
 
         {section === "archive" && (
           <>

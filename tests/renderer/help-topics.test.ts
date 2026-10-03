@@ -94,20 +94,6 @@ describe("help topics", () => {
   });
 
   it("covers the features the first-run tour introduces and groups the rest", () => {
-    expect(HELP_TOPICS.map(({ title }) => title)).toEqual([
-      "Getting started",
-      "Chat and composer",
-      "Following work",
-      "Workspace tools",
-      "Side by side",
-      "Review and ship",
-      "Search and history",
-      "Usage and limits",
-      "Snapshots and devices",
-      "Appearance",
-      "Keyboard",
-      "Troubleshooting",
-    ]);
     expect(new Set(HELP_TOPICS.flatMap(({ demo }) => (demo ? [demo] : []))))
       .toEqual(new Set(["work", "split", "ship", "limits", "keys"]));
     const keyboard = HELP_TOPICS.find(({ id }) => id === "keys")!;

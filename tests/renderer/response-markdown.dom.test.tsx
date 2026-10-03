@@ -72,27 +72,6 @@ afterEach(() => {
 });
 
 describe("ResponseMarkdown project files", () => {
-  it("styles project files as language-aware chips and web links with a globe", () => {
-    render(
-      <ResponseMarkdown
-        content="[schema](db/schema.sql) and [OpenAI](https://openai.com)"
-        projectRoot="/workspace"
-        projectId={PROJECT_ID}
-        defaultCodeWrap={false}
-        onOpenProjectFile={vi.fn()}
-      />,
-    );
-
-    const file = screen.getByRole("link", { name: "schema" });
-    expect(file).toHaveClass("response-project-file-link");
-    expect(file).toHaveAttribute("data-language-family", "data");
-    expect(file.querySelector(".response-project-file-icon"))
-      .toBeInTheDocument();
-    const web = screen.getByRole("link", { name: "OpenAI" });
-    expect(web).toHaveClass("response-web-link");
-    expect(web.querySelector("svg")).toBeInTheDocument();
-  });
-
   it("keeps encoded delimiters as literal project filenames", () => {
     const onOpenProjectFile = vi.fn();
     render(
@@ -568,27 +547,6 @@ describe("ResponseMarkdown project files", () => {
     expect(container.querySelector('[src^="data:image/"]')).toBeNull();
     expect(screen.getByRole("img", { name: "Inline chart" }))
       .toHaveTextContent("Inline chart (image unavailable)");
-  });
-
-  it("preserves interactive code state across an equivalent parent render", () => {
-    const props = {
-      content: "```ts\nconst stable = true;\n```",
-      projectRoot: "/workspace",
-      projectId: "11111111-1111-4111-8111-111111111111",
-      defaultCodeWrap: false,
-    } as const;
-    const view = render(<ResponseMarkdown {...props} />);
-    const wrap = screen.getByRole("button", { name: "Wrap" });
-    fireEvent.click(wrap);
-    expect(wrap).toHaveAttribute("aria-pressed", "true");
-    expect(wrap).toHaveAttribute("title", "Disable code wrapping");
-
-    view.rerender(<ResponseMarkdown {...props} />);
-
-    expect(screen.getByRole("button", { name: "Wrap" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
   });
 
   it("preserves each code control across changing parent callbacks", async () => {

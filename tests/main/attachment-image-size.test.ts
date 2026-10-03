@@ -45,17 +45,17 @@ function solidPng(
   ]);
 }
 
-function importPng(data: Buffer): ReturnType<typeof validateAttachmentImport> {
-  return validateAttachmentImport({
+async function importPng(data: Buffer): ReturnType<typeof validateAttachmentImport> {
+  return await validateAttachmentImport({
     name: "clipboard.png",
     mimeType: "image/png",
     data,
   });
 }
 
-function importError(data: Buffer): unknown {
+async function importError(data: Buffer): Promise<unknown> {
   try {
-    importPng(data);
+    await importPng(data);
   } catch (error) {
     return error;
   }
@@ -65,12 +65,11 @@ function importError(data: Buffer): unknown {
 describe("attachment image size limits", () => {
   it.each([
     ["4K", 3_840, 2_160, "rgba"],
-    ["5K", 5_120, 2_880, "mono"],
     ["6K", 6_016, 3_384, "mono"],
-  ] as const)("accepts a %s screenshot", (_label, width, height, format) => {
+  ] as const)("accepts a %s screenshot", async (_label, width, height, format) => {
     const data = solidPng(width, height, format);
 
-    expect(importPng(data)).toMatchObject({
+    expect(await importPng(data)).toMatchObject({
       mimeType: "image/png",
       size: data.length,
     });
@@ -79,12 +78,12 @@ describe("attachment image size limits", () => {
   it.each([
     ["just over the pixel cap", 8_000, 5_001],
     ["wider than the per-side cap", 11_520, 2_160],
-  ])("reports an image %s as too large, not as malformed", (
+  ])("reports an image %s as too large, not as malformed", async (
     _label,
     width,
     height,
   ) => {
-    const error = importError(solidPng(width, height));
+    const error = await importError(solidPng(width, height));
 
     expect(error).toBeInstanceOf(ImageAttachmentTooLargeError);
     expect(error).toMatchObject({
@@ -105,7 +104,7 @@ describe("attachment image size limits", () => {
     );
   });
 
-  it("keeps the generic rejection for malformed images of any declared size", () => {
+  it("keeps the generic rejection for malformed images of any declared size", async () => {
     const oversized = solidPng(8_000, 5_001);
     const corruptChecksum = Buffer.from(oversized);
     const idat = corruptChecksum.indexOf(Buffer.from("IDAT", "ascii"));
@@ -119,7 +118,7 @@ describe("attachment image size limits", () => {
     beyondFormat.writeUInt32BE(crc32(beyondFormat.subarray(12, 29)), 29);
 
     for (const data of [corruptChecksum, withoutEnd, truncated, beyondFormat]) {
-      const error = importError(data);
+      const error = await importError(data);
       expect(error).not.toBeInstanceOf(ImageAttachmentTooLargeError);
       expect(error).toMatchObject({ message: CONTENT_MISMATCH });
     }

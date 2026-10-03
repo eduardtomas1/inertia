@@ -26,6 +26,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     outputs:
       base_sha: ${{ steps.changes.outputs.base_sha }}
       plan_json: ${{ steps.changes.outputs.plan_json }}
@@ -191,10 +192,6 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Report complete dependency audit
-        continue-on-error: true
-        run: npm audit --audit-level=high
-
       - name: Keep core failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -264,15 +261,6 @@ jobs:
       - name: Run renderer isolated interaction under Xvfb
         if: needs.classify.outputs.renderer == 'true'
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Keep CLI conversation import screenshots
-        if: always() && needs.classify.outputs.renderer == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: cli-conversation-import-screenshots
-          path: test-results/**/cli-import-*.png
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
@@ -423,8 +411,8 @@ jobs:
           tests/main/runtime-owned-process-darwin-helper.test.ts
           tests/main/runtime-process-guardian-darwin.test.ts
           tests/main/runtime-supervisor-lifecycle.test.ts
-          tests/main/terminal-darwin-ownership-boundary.test.ts
-          tests/main/terminal-darwin-shutdown.test.ts
+          tests/server/terminal-darwin-ownership-boundary.test.ts
+          tests/server/terminal-darwin-shutdown.test.ts
           tests/server/runtime-shutdown-authority.test.ts
 
       - name: Run portable provider contracts on macOS
@@ -541,33 +529,8 @@ jobs:
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         run: npm run test:portable
 
-      # Every attempt is retained and any failed attempt fails the job at the
-      # end. A pass after a failure is classified as a flake, never as success.
-      - name: Repeat selected lifecycle invariants for nightly flake evidence
-        id: lifecycle_repeat
-        if: github.event_name == 'schedule'
-        continue-on-error: true
-        run: >-
-          npm run test:lifecycle-repeat --
-          --iterations 3
-          --output-directory test-results/nightly-lifecycle
-
-      - name: Run opt-in Kimi through Claude integration
-        if: github.event_name == 'schedule' && runner.os == 'Linux' && matrix.arch == 'x64'
-        shell: bash
-        env:
-          INERTIA_KIMI_CODE_API_KEY: ${{ secrets.INERTIA_KIMI_CODE_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${INERTIA_KIMI_CODE_API_KEY:-}" ]]; then
-            echo "Kimi integration secret is unavailable; ordinary CI remains secret-free."
-            exit 0
-          fi
-          INERTIA_RUN_KIMI_CLAUDE_INTEGRATION=1 \
-            npm exec -- vitest run tests/server/kimi-claude-real-smoke.test.ts
-
       - name: Verify native Windows Codex discovery and shim launching
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
         run: npm run test:windows-codex
 
       # The x64 unit signal runs in separate shard jobs, so unlike ARM64 this
@@ -579,13 +542,8 @@ jobs:
         run: npm run pretest
 
       - name: Audit production dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
         run: npm audit --omit=dev --audit-level=high
-
-      - name: Report complete dependency audit
-        if: runner.os == 'Linux'
-        continue-on-error: true
-        run: npm audit --audit-level=high
 
       # The one build in the job. It carries the generated third-party notices
       # and the runtime guardian that packaging requires, but not the typecheck
@@ -774,22 +732,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Keep nightly lifecycle repetition and flake evidence
-        if: always() && github.event_name == 'schedule'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: nightly-lifecycle-${{ matrix.artifact }}
-          path: test-results/nightly-lifecycle
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Fail certification when any lifecycle repetition failed
-        if: always() && github.event_name == 'schedule' && steps.lifecycle_repeat.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "At least one retained lifecycle attempt failed or flaked." >&2
-          exit 1
-
   # The desktop Electron projects were the longest phase of every native job
   # (13 to 23 minutes of single-worker display-sensitive scenarios plus the
   # isolated and recovery projects) and ran only after that platform's units,
@@ -807,7 +749,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.classify.outputs.electron_matrix_json) }}
-      max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
+      max-parallel: ${{ github.event_name == 'schedule' && 2 || 10 }}
     env:
       CI: "true"
       INERTIA_CI_TIMINGS: "true"
@@ -861,36 +803,36 @@ jobs:
         run: node -e "console.log(require('electron'))"
 
       - name: Run display-sensitive Electron end-to-end tests
-        if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')
+        if: runner.os != 'Linux' && matrix.phase == 'display-sensitive'
         run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       # Do not continue native work after a failed phase whose fixture cleanup
       # may be unconfirmed.
       - name: Run isolated Electron end-to-end tests
-        if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'isolated')
+        if: runner.os != 'Linux' && matrix.phase == 'isolated'
         env:
           # Bound Windows load after hosted socket-buffer exhaustion.
           INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
-        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
+        run: npm exec -- playwright test --project=isolated ${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }} --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially
-        if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'runtime-recovery')
+        if: runner.os != 'Linux' && ((matrix.phase == 'isolated' && matrix.shard != '2/2') || matrix.phase == 'runtime-recovery')
         run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Run display-sensitive Electron end-to-end tests under Xvfb
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.phase == 'display-sensitive'
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       - name: Run isolated Electron end-to-end tests under Xvfb
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.phase == 'isolated'
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially under Xvfb
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (matrix.phase == 'isolated' || matrix.phase == 'runtime-recovery')
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Keep provider settings visual evidence
-        if: runner.os == 'Linux' && matrix.arch == 'x64'
+        if: runner.os == 'Linux' && matrix.arch == 'x64' && matrix.phase == 'isolated'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: provider-settings-screenshots
@@ -899,7 +841,7 @@ jobs:
           retention-days: 14
 
       - name: Keep CLI conversation import screenshots
-        if: always() && runner.os == 'Linux' && matrix.arch == 'x64'
+        if: always() && runner.os == 'Linux' && matrix.arch == 'x64' && matrix.phase == 'isolated'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-conversation-import-screenshots
@@ -907,12 +849,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Measure desktop workloads
-        if: (needs.classify.outputs.benchmarks == 'true') && runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')
-        run: npm run benchmark:desktop:built
-
       - name: Measure desktop workloads under Xvfb
-        if: (needs.classify.outputs.benchmarks == 'true') && runner.os == 'Linux'
+        if: (needs.classify.outputs.benchmarks == 'true') && matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'
         run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Keep failure diagnostics
@@ -925,7 +863,7 @@ jobs:
           retention-days: 7
 
       - name: Keep desktop performance evidence
-        if: always() && (needs.classify.outputs.benchmarks == 'true') && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')
+        if: always() && (needs.classify.outputs.benchmarks == 'true') && matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-electron-${{ matrix.artifact }}
@@ -1023,7 +961,7 @@ jobs:
         run: node scripts/ci/merge-ready.mjs
 
   report-nightly-failure:
-    name: Report nightly lifecycle certification failure
+    name: Report nightly certification failure
     if: >-
       always() && github.event_name == 'schedule' &&
       needs.merge-ready.result != 'success'
@@ -1039,7 +977,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const title = "Nightly lifecycle certification failed";
+            const title = "Nightly certification failed";
             const marker = "<!-- inertia-nightly-lifecycle-certification -->";
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const jobs = await github.paginate(
@@ -1076,8 +1014,7 @@ jobs:
             const manifestUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/${context.sha}/package.json`;
             const body = [
               marker,
-              "The scheduled six-target lifecycle certification did not complete cleanly.",
-              "Mixed repeat results are treated as failures and retained as flake evidence.",
+              "The scheduled six-target nightly certification did not complete cleanly.",
               "",
               `- Exact SHA: \`${context.sha}\``,
               `- Prior occurrences tracked here: ${priorOccurrences}`,

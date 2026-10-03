@@ -58,29 +58,57 @@ describe("explainable CI plan", () => {
   it.each([
     "tests/e2e/support/electron-app-lifecycle.ts",
     "tests/e2e/runtime-live-recovery.spec.ts",
-  ])("requires all six native targets for a ready PR changing only %s", (path) => {
+  ])("requires the three primary native targets for a ready PR changing only %s", (path) => {
     const selected = plan([path], {
       event: "pull_request", draft: false,
     });
     expect(selected.fullCertification).toBe(true);
-    expect(selected.platforms).toEqual([
-      "linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-arm64", "macos-x64",
-    ]);
+    expect(selected.platforms).toEqual(["linux-x64", "windows-x64", "macos-arm64"]);
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks).toEqual([
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
+      "Linux x64", "Windows x64", "macOS arm64",
+      "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
+      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated 1/2)",
+      "Windows x64 Electron (isolated 2/2)",
+      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
+      "Windows unit tests (1/4)", "Windows unit tests (2/4)",
+      "Windows unit tests (3/4)", "Windows unit tests (4/4)",
+    ]);
+    expect(selected.omittedPlatforms).toEqual(["linux-arm64", "windows-arm64", "macos-x64"].map((platform) => ({
+      platform, reason: "sibling-architecture-certified-nightly-and-release",
+    })));
+    expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
+    for (const missingName of [
+      "Linux x64", "Windows x64", "macOS arm64", "Linux x64 Electron (display-sensitive)",
+      "Windows x64 Electron (isolated 2/2)", "macOS arm64 Electron (isolated)",
+    ]) {
+      const missingNative = evidence(selected);
+      missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
+      expect(evaluateMergeEvidence(selected, missingNative))
+        .toContain(`Required check ${missingName} lacks exact successful evidence.`);
+    }
+  });
+
+  it("requires all six targets for a native dependency change, with sibling recovery projects only", () => {
+    const selected = plan(["package-lock.json"]);
+    expect(selected.platforms).toEqual([
+      "linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-arm64", "macos-x64",
+    ]);
+    expect(selected.requiredChecks).toEqual([
+      "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
-      "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
-      "macOS arm64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)", "macOS x64 Electron (runtime-recovery)",
+      "Linux x64 Electron (display-sensitive)", "Linux x64 Electron (isolated)",
+      "Windows x64 Electron (display-sensitive)", "Windows x64 Electron (isolated 1/2)",
+      "Windows x64 Electron (isolated 2/2)",
+      "macOS arm64 Electron (display-sensitive)", "macOS arm64 Electron (isolated)",
+      "Linux ARM64 Electron (runtime-recovery)", "Windows ARM64 Electron (runtime-recovery)",
+      "macOS x64 Electron (runtime-recovery)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
     ]);
     expect(selected.omittedPlatforms).toEqual([]);
-    expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
-    for (const missingName of [
-      "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
-      "Linux x64 Electron", "Windows ARM64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)", "macOS x64 Electron (runtime-recovery)",
-    ]) {
+    for (const missingName of ["Linux ARM64", "Windows ARM64", "macOS x64", "Windows ARM64 Electron (runtime-recovery)"]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
       expect(evaluateMergeEvidence(selected, missingNative))
@@ -108,17 +136,27 @@ describe("explainable CI plan", () => {
   });
 
   it.each([
-    "src/server/runtime/turns/turn-controller.ts", "src/server/database.ts",
-    "src/node/runtime-owned-processes.ts", "src/shared/contracts.ts",
-    "package-lock.json", "playwright.config.ts", "tests/support/new-fixture.ts",
+    "src/node/runtime-owned-processes.ts", "package-lock.json",
     ".github/workflows/ci.yml", "scripts/new-tool.mjs", "unknown.xyz",
-  ])("keeps shared lifecycle and uncertain verifier changes broad: %s", (path) => {
+  ])("keeps native and uncertain verifier changes on all six targets: %s", (path) => {
     const selected = plan([path]);
     expect(selected.platforms).toEqual(PLATFORMS.map(({ artifact }: { artifact: string }) => artifact));
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(8);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(10);
+  });
+
+  it.each([
+    "src/server/runtime/turns/turn-controller.ts", "src/server/database.ts",
+    "src/shared/contracts.ts", "playwright.config.ts", "tests/support/new-fixture.ts",
+  ])("keeps shared lifecycle and verifier changes on the primary targets: %s", (path) => {
+    const selected = plan([path]);
+    expect(selected.platforms).toEqual(["linux-x64", "windows-x64", "macos-arm64"]);
+    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
+    expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
+      .toHaveLength(4);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(7);
   });
 
   it("missing baseline overrides an apparently harmless latest push", () => {
@@ -129,12 +167,26 @@ describe("explainable CI plan", () => {
     const selected = plan(["README.md"], { event: "schedule" });
     expect(selected.suites).toContain("linux-all-source-coverage");
     expect(selected.suites).toContain("linux-x64:native-units-package-smoke");
-    expect(selected.suites).toContain("linux-x64:electron-display-isolated-recovery");
+    expect(selected.suites).toContain("linux-x64:electron-display-sensitive");
+    expect(selected.suites).toContain("linux-x64:electron-isolated-recovery");
+    expect(selected.suites).not.toContain("macos-x64:electron-recovery");
+    expect(selected.suites.filter((suite) => suite.startsWith("windows-arm64:electron-"))).toEqual([
+      "windows-arm64:electron-display-sensitive", "windows-arm64:electron-isolated-1-of-2-recovery",
+      "windows-arm64:electron-isolated-2-of-2",
+    ]);
     expect(selected.suites.filter((suite) => suite.includes("upgrade"))).toEqual([
       "windows-x64:published-N-1-installed-upgrade",
       "windows-arm64:published-N-1-installed-upgrade",
     ]);
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
+    expect(selected.electronMatrix.include.map(({ check }) => check)).toEqual(
+      ["Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64"].flatMap((label) => [
+        `${label} Electron (display-sensitive)`,
+        ...(label.startsWith("Windows")
+          ? [`${label} Electron (isolated 1/2)`, `${label} Electron (isolated 2/2)`]
+          : [`${label} Electron (isolated)`]),
+      ]),
+    );
   });
 
   it("draft feedback is not the merge tier; ready and merge queue certify the same broad change", () => {
@@ -196,34 +248,60 @@ describe("fail-closed exact-candidate aggregate", () => {
   });
 });
 
-it("enumerates every shadow omission without changing canonical current-candidate obligations", async () => {
-  const { compareEvidencePlans } = await import("../../scripts/ci/evidence-plan.mjs");
-  const current = plan([], { event: "push", base: null });
-  const proposed = plan(["src/renderer/src/components/UsageLimitsPanel.tsx",
-    "tests/renderer/usage-limits-focus.dom.test.tsx"], { event: "push" });
-  const before = JSON.stringify(current);
-  const comparison = compareEvidencePlans(current, proposed);
-  expect(comparison.newlyOmittedChecks).toEqual([
-    "Node 22.13 minimum runtime", "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64",
-    "macOS arm64", "macOS x64",
-    "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
-    "macOS arm64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)", "macOS x64 Electron (runtime-recovery)",
-    "Windows unit tests (1/4)", "Windows unit tests (2/4)",
-    "Windows unit tests (3/4)", "Windows unit tests (4/4)",
-  ]);
-  expect(comparison.newlyRequiredChecks).toEqual(["Linux core and portable conformance", "Linux interaction and lifecycle"]);
-  expect(comparison).toMatchObject({ currentBenchmarks: true, proposedBenchmarks: false });
-  expect(comparison.newlyOmittedSuites).toHaveLength(14);
-  expect(JSON.stringify(current)).toBe(before);
-  // Shadow evidence cannot satisfy the strict plan, nor can a different source
-  // or merge SHA be compared as if it were the candidate.
-  expect(evaluateMergeEvidence(current, evidence(proposed)).length).toBeGreaterThan(0);
-  expect(() => compareEvidencePlans(current, { ...proposed, head: base })).toThrow();
-  expect(() => compareEvidencePlans(current, { ...proposed, sourceHead: base })).toThrow();
-  for (const path of ["README.md", "package-lock.json", "src/node/runtime-owned-processes.ts", "unknown/path"]) {
-    const narrow = plan([path], { event: "push" });
-    const change = compareEvidencePlans(current, narrow);
-    if (path === "README.md") expect(change.newlyOmittedChecks.length).toBeGreaterThan(0);
-    else expect(change.newlyOmittedChecks).toEqual([]);
-  }
+describe("main push reuse of an identical certified pull-request tree", () => {
+  const reusedRun = { runId: 7, pullRequest: 12, sourceHead: "d".repeat(40) };
+  const reusedPlan = () => plan(["src/server/database.ts"], { event: "push", reusedRun });
+  const mergeReady = (override = {}) => ({
+    name: "merge-ready", run_id: 7, head_sha: reusedRun.sourceHead,
+    status: "completed", conclusion: "success", ...override,
+  });
+
+  it("requires only quality and lineage and records the certified run", () => {
+    const selected = reusedPlan();
+    expect(selected.lane).toBe("main-reused");
+    expect(selected.reusedRun).toEqual(reusedRun);
+    expect(selected.requiredJobs).toEqual(["gate", "lineage"]);
+    expect(selected.platforms).toEqual([]);
+    expect(selected.benchmarks).toBe(false);
+    expect(evaluateMergeEvidence(selected, { ...evidence(selected), reusedRunJobs: [mergeReady()] })).toEqual([]);
+  });
+
+  it.each([
+    ["missing", []],
+    ["failed", [mergeReady({ conclusion: "failure" })]],
+    ["foreign run", [mergeReady({ run_id: 8 })]],
+    ["foreign head", [mergeReady({ head_sha: "e".repeat(40) })]],
+    ["duplicated", [mergeReady(), mergeReady()]],
+  ])("rejects %s pull-request merge-ready evidence", (_label, reusedRunJobs) => {
+    const selected = reusedPlan();
+    expect(evaluateMergeEvidence(selected, { ...evidence(selected), reusedRunJobs }))
+      .toContain("Reused pull-request certification lacks exact successful merge-ready evidence.");
+  });
+
+  it("falls back to the complete plan without a valid run, base or with performance changes", () => {
+    for (const options of [
+      { event: "push", reusedRun: null },
+      { event: "push", reusedRun: { ...reusedRun, runId: 0 } },
+      { event: "push", reusedRun: { ...reusedRun, sourceHead: "HEAD" } },
+      { event: "push", reusedRun, base: null },
+      { event: "pull_request", reusedRun },
+    ]) {
+      const selected = plan(["src/server/database.ts"], options);
+      expect(selected.lane).not.toBe("main-reused");
+      expect(selected.reusedRun).toBeNull();
+    }
+    expect(plan(["src/server/database.ts"], { event: "push", reusedRun, base: null }).platforms).toHaveLength(6);
+    const performance = plan(["benchmarks/data-throughput.test.ts"], { event: "push", reusedRun });
+    expect(performance).toMatchObject({ lane: "main", reusedRun, benchmarks: true });
+    expect(performance.reasons).toContain("performance-change-measured-on-main");
+    expect(performance.platforms).toEqual(["linux-x64", "windows-x64", "macos-arm64"]);
+    expect(createEvidencePlan({ ...performance, draft: false })).toEqual(performance);
+    expect(evaluateMergeEvidence(performance, evidence(performance))).toEqual([]);
+  });
+
+  it("cannot be forged by editing the plan", () => {
+    const forged = { ...plan(["src/server/database.ts"], { event: "push" }), lane: "main-reused" };
+    expect(evaluateMergeEvidence(forged, { ...evidence(forged), reusedRunJobs: [mergeReady()] }))
+      .toContain("Plan is not canonical.");
+  });
 });

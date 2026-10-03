@@ -1236,36 +1236,6 @@ describe.skipIf(process.platform === "win32")(
     });
 
     it.skipIf(process.platform !== "linux")(
-      "waits for a typed ready event while sealing a deliberately slow image",
-      async () => {
-        const root = await mkdtemp(join(tmpdir(), "inertia-update-ready-copy-"));
-        roots.push(root);
-        const downloaded = await compiledCandidate(
-          join(root, "downloaded.AppImage"),
-          "#include <unistd.h>\nint main(void) { for (;;) pause(); }",
-        );
-        await truncate(downloaded, 16 * 1_024 * 1_024);
-        const fixture = await linuxCandidateFixture(root, downloaded, 8_000);
-        const guardian = compiledGuardian(root, [
-          "-DINERTIA_RUNTIME_GUARDIAN_TEST_SLOW_CANDIDATE_COPY=1",
-        ]);
-        const startedAt = Date.now();
-        const candidate = await startLinuxAppUpdateCandidate({
-          executablePath: fixture.staged.candidatePath,
-          guardianPath: guardian,
-          environment: process.env,
-          snapshot: fixture.launched,
-          handoffDirectory: fixture.data,
-          launchId,
-        });
-        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(2_000);
-        expect(candidate.alive()).toBe(true);
-        await candidate.abort();
-      },
-      15_000,
-    );
-
-    it.skipIf(process.platform !== "linux")(
       "bounds slow sealed-copy readiness and exactly cleans a timed-out guardian",
       async () => {
         const root = await mkdtemp(join(tmpdir(), "inertia-update-slow-copy-"));

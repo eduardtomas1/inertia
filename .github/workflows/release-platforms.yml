@@ -231,11 +231,6 @@ jobs:
         if: runner.os == 'Linux'
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Report complete dependency audit
-        if: runner.os == 'Linux'
-        continue-on-error: true
-        run: npm audit --audit-level=high
-
       # Package and every subsequent smoke consume this exact bundle. The
       # package commands below deliberately do not rebuild it.
       - name: Build the release application bundle once

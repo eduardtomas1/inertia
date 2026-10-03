@@ -190,6 +190,7 @@ export interface RuntimeSupervisorOptions {
   conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   documentPreparationRunner?: DocumentPreparationRunner;
   conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
+  readonly conversationAttachmentSourceRoot?: string;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
   databaseRecoveryRequestTimeoutMs?: number;

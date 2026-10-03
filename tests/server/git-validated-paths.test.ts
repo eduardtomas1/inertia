@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { validatedPaths } from "../../src/server/git/paths";
+import { revParseValues, validatedPaths } from "../../src/server/git/paths";
 
 const roots: string[] = [];
 
@@ -45,4 +46,44 @@ describe("validated repository paths", () => {
     await expect(validatedPaths(root, ["alias/nested/missing.txt"]))
       .resolves.toEqual(["alias/nested/missing.txt"]);
   });
+});
+
+describe("batched rev-parse values", () => {
+  const queries = [
+    ["--absolute-git-dir"],
+    ["--path-format=absolute", "--git-path", "hooks"],
+    ["--path-format=absolute", "--git-path", "index"],
+    ["--path-format=absolute", "--git-path", "refs/heads/main"],
+  ];
+
+  function repository(name: string): string {
+    const root = join(directory("inertia-rev-parse-"), name);
+    mkdirSync(root);
+    execFileSync("git", ["init", "-q", "--initial-branch=main"], { cwd: root });
+    return root;
+  }
+
+  function direct(root: string): string[] {
+    return queries.map((query) => execFileSync("git", ["rev-parse", ...query], {
+      cwd: root,
+      encoding: "utf8",
+    }).replace(/\n$/u, ""));
+  }
+
+  it("returns the direct answers from one batched query", async () => {
+    const root = repository("repository");
+    await expect(revParseValues(root, queries, { failureMessage: "failed" }))
+      .resolves.toEqual(direct(root));
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "falls back to the direct answers when a path contains a newline",
+    async () => {
+      const root = repository("repository\nline");
+      const expected = direct(root);
+      expect(expected.every((value) => value.includes("\n"))).toBe(true);
+      await expect(revParseValues(root, queries, { failureMessage: "failed" }))
+        .resolves.toEqual(expected);
+    },
+  );
 });

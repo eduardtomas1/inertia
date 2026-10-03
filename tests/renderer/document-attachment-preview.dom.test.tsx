@@ -41,7 +41,7 @@ function workbookBytes(bookType: "xlsx" | "xls" = "xlsx"): Uint8Array {
   }) as Uint8Array;
 }
 
-function previewResponse(bytes: Uint8Array, mimeType: string): Response {
+function previewResponse(bytes: Uint8Array, mimeType: string, truncated = false): Response {
   const body = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(body).set(bytes);
   return new Response(body, {
@@ -49,6 +49,7 @@ function previewResponse(bytes: Uint8Array, mimeType: string): Response {
     headers: {
       "content-length": String(bytes.byteLength),
       "content-type": mimeType,
+      ...(truncated ? { "x-attachment-truncated": "true" } : {}),
     },
   });
 }
@@ -217,16 +218,6 @@ describe("document attachment previews", () => {
       mimeType: "application/vnd.ms-excel",
       bytes: workbookBytes("xls"),
     },
-    {
-      name: "forecast.csv",
-      mimeType: "text/csv",
-      bytes: new TextEncoder().encode("Region,Revenue\nNorth,1200\n"),
-    },
-    {
-      name: "utf16.csv",
-      mimeType: "text/csv",
-      bytes: Buffer.from("\ufeffRegion,Revenue\nNorth,1200\n", "utf16le").swap16(),
-    },
   ] satisfies Array<{
     name: string;
     mimeType: ChatAttachment["mimeType"];
@@ -299,5 +290,54 @@ describe("document attachment previews", () => {
       .toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(trigger).toHaveFocus();
+  });
+
+  it("keeps the truncated-text notice in its own row below the scrollable preview", async () => {
+    const bytes = Buffer.from("INFO first megabyte\n");
+    vi.stubGlobal("fetch", vi.fn(async () => previewResponse(bytes, "text/plain", true)));
+    const user = userEvent.setup();
+    render(<ComposerAttachmentList attachments={[attachment({ name: "service.log", mimeType: "text/plain", size: 4 * 1024 * 1024 })]} onRemove={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Preview attachment service.log" }));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("Showing the first 1 MiB. The complete file is saved and available to the agent.");
+    expect(notice).toHaveClass("text-attachment-preview-notice");
+    const frame = notice.parentElement;
+    expect(frame).toHaveClass("text-attachment-preview-frame");
+    expect(frame?.firstElementChild).toBe(screen.getByLabelText("Text preview of service.log"));
+    expect(frame?.lastElementChild).toBe(notice);
+  });
+
+  it("states a truncated CSV source once, in the workbook note row", async () => {
+    const bytes = Buffer.from("Region,Revenue\nNorth,1200\n");
+    vi.stubGlobal("fetch", vi.fn(async () => previewResponse(bytes, "text/csv", true)));
+    const user = userEvent.setup();
+    render(<ComposerAttachmentList attachments={[attachment({ name: "export.csv", mimeType: "text/csv", size: 4 * 1024 * 1024 })]} onRemove={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Preview attachment export.csv" }));
+    expect(await screen.findByRole("table")).toHaveTextContent("North");
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveClass("spreadsheet-attachment-limit-note");
+    expect(notice).toHaveTextContent("Showing the first 1 MiB.");
+    expect(screen.queryByText(/Preview is bounded for responsiveness/u)).toBeNull();
+  });
+
+  it("presents an opaque file as saved, with a generic file icon and its full name", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const user = userEvent.setup();
+    const name = "build-cache-darwin-arm64-with-a-very-long-descriptive-name.tar.zst";
+    render(<ComposerAttachmentList attachments={[attachment({ name, mimeType: "application/octet-stream", size: 14 })]} onRemove={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: `Preview attachment ${name}` });
+    expect(trigger.querySelector(".lucide-file")).not.toBeNull();
+    expect(trigger.querySelector(".lucide-file-text")).toBeNull();
+    expect(screen.getByText(name, { exact: true })).toHaveAttribute("title", name);
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name });
+    expect(dialog.querySelector(".attachment-preview-header .lucide-file")).not.toBeNull();
+    const block = dialog.querySelector(".attachment-preview-unavailable");
+    expect(block).not.toBeNull();
+    expect(block?.querySelector("strong")).toHaveTextContent("No preview for this file type");
+    expect(block).toHaveTextContent("The complete file is saved. The agent can read or search it with file tools.");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

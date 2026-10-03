@@ -219,11 +219,11 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [about, setAbout] = useState(false); const aboutId = useId();
   const alive = useRef(true); const pending = useRef(false); const publish = context?.setSnapshot;
-  const load = useCallback(async (refresh: boolean, force = false): Promise<void> => {
+  const load = useCallback(async (refresh: boolean, force = false, background = false): Promise<void> => {
     if (pending.current || status !== "online") return;
     pending.current = true; setBusy(true); setError(null);
     try {
-      const result = resultEvent(await request({ type: "usage.limits.get", payload: { refresh, force } })).result;
+      const result = resultEvent(await request({ type: "usage.limits.get", payload: { refresh, force, ...(background ? { background } : {}) } })).result;
       if (result.kind !== "usage.limits") throw new Error();
       if (alive.current) { setSnapshot(result.snapshot); publish?.(result.snapshot); setNow(Date.now()); }
     } catch { if (alive.current) setError("Refresh failed. Previously reported limits may be stale."); }
@@ -238,7 +238,7 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
       if (timer) clearInterval(timer);
       if (document.visibilityState === "hidden") return;
       setNow(Date.now());
-      timer = setInterval(() => { setNow(Date.now()); ticks += 1; if (!compact && ticks % 3 === 0) void load(true); }, 60000);
+      timer = setInterval(() => { setNow(Date.now()); ticks += 1; if (!compact && ticks % 3 === 0) void load(true, false, true); }, 60000);
     };
     visibility(); document.addEventListener("visibilitychange", visibility);
     return () => { alive.current = false; if (timer) clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };

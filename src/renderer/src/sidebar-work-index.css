@@ -22,6 +22,10 @@
   outline-offset: -2px;
 }
 
+.work-thread-section.is-no-project > h2 {
+  padding-left: 10px;
+}
+
 /* Working shows the chat timeline's own 3x3 pixel glyph, so a running thread
    reads the same in the Work tab and in the conversation. The orbit rhythm
    (950ms with a dark centre) keeps a list of several running threads calm.

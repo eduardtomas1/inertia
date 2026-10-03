@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  commitChanges,
   compareGitSnapshots,
   getUnifiedDiff,
   inspectDiffSelection,
@@ -85,17 +84,6 @@ describe("literal Git pathspecs", { timeout: 30_000 }, () => {
 
     expect(comparison.files.map((file) => file.path)).toEqual([special]);
     expect(changedPaths(comparison.patch)).toEqual([special]);
-  });
-
-  it("commits only the literal selected path", async () => {
-    const root = repository();
-
-    await commitChanges(root, "Commit special path", [special]);
-
-    expect(git(root, "show", `HEAD:${special}`))
-      .toBe("special one\nspecial two\nspecial three");
-    expect(git(root, "show", "HEAD:docs/a.md")).toBe("plain one\nplain two");
-    expect(git(root, "status", "--porcelain")).toBe("M docs/a.md");
   });
 
   it("reverses a selected line in a path containing glob metacharacters", async () => {

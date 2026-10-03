@@ -23,6 +23,7 @@ export interface ParsedCodexApprovalRequest {
   request: AgentApprovalRequest;
   protocol: "decision" | "permissions" | "legacy-review";
   providerThreadId?: string;
+  providerTurnId?: string;
   requestedPermissions?: JsonObject;
 }
 
@@ -325,6 +326,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   const cwd = exactFilesystemPath(params.cwd);
   const reason = strictBoundedText(params.reason, 1_000, true);
   const providerThreadId = strictBoundedText(params.threadId, 512);
+  const providerTurnId = strictBoundedText(params.turnId, 512);
   const hasAdditionalPermissions = Object.prototype.hasOwnProperty.call(
     params,
     "additionalPermissions",
@@ -338,6 +340,10 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   if (
     Object.prototype.hasOwnProperty.call(params, "threadId")
     && !providerThreadId
+  ) return undefined;
+  if (
+    Object.prototype.hasOwnProperty.call(params, "turnId")
+    && !providerTurnId
   ) return undefined;
   if (
     Object.prototype.hasOwnProperty.call(params, "cwd")
@@ -457,6 +463,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     return {
       protocol: "decision",
       ...(providerThreadId ? { providerThreadId } : {}),
+      ...(providerTurnId ? { providerTurnId } : {}),
       request: {
         requestId,
         kind: "command",
@@ -481,6 +488,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     return {
       protocol: "decision",
       ...(providerThreadId ? { providerThreadId } : {}),
+      ...(providerTurnId ? { providerTurnId } : {}),
       request: {
         requestId,
         kind: "file-change",
@@ -502,6 +510,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     return {
       protocol: "permissions",
       ...(providerThreadId ? { providerThreadId } : {}),
+      ...(providerTurnId ? { providerTurnId } : {}),
       requestedPermissions: projection.permissions,
       request: {
         requestId,
@@ -516,4 +525,33 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     };
   }
   return undefined;
+}
+
+export function codexApprovalResult(
+  protocol: ParsedCodexApprovalRequest["protocol"],
+  decision: AgentApprovalDecision,
+  requestedPermissions?: JsonObject,
+): JsonObject {
+  return protocol === "permissions"
+    ? {
+        permissions: decision === "approve"
+          ? requestedPermissions ?? {}
+          : {},
+        scope: "turn",
+      }
+    : protocol === "legacy-review"
+      ? {
+          decision: decision === "approve"
+            ? "approved"
+            : decision === "deny"
+              ? { denied: { rejection: "Denied by the user in Inertia." } }
+              : "abort",
+        }
+      : {
+        decision: decision === "approve"
+          ? "accept"
+          : decision === "deny"
+            ? "decline"
+            : "cancel",
+      };
 }

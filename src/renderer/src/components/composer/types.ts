@@ -1,3 +1,4 @@
+import type { LimitResetCommandRunner } from "./limitResetClient";
 import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
@@ -37,6 +38,7 @@ export interface ComposerProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
+  scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   providers: ProviderInfo[];
   actions: ProjectAction[];
@@ -65,6 +67,7 @@ export interface ComposerProps {
   agentContextRequest?: AgentConversationContextRequest | null;
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
+  onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   goal?: ChatGoalControlProps | null;
@@ -123,7 +126,7 @@ export interface NewChatProjectPicker {
   projects: readonly Project[];
   selectedProject: Project;
   disabled: boolean;
-  onChange: (project: Project) => void;
+  onChange: (project: Project | null) => void;
 }
 
 export interface ComposerQueuedPrompt {

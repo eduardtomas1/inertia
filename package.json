@@ -40,8 +40,6 @@
     "pretest:coverage": "node scripts/build-runtime-process-guardian.mjs",
     "test:coverage": "vitest run --coverage",
     "test:browser-evidence-cpu-budget": "node scripts/ci/run-browser-evidence-cpu-budget.mjs",
-    "pretest:lifecycle-repeat": "node scripts/build-runtime-process-guardian.mjs",
-    "test:lifecycle-repeat": "node scripts/ci/run-repeated-lifecycle.mjs",
     "test:watch": "vitest",
     "pretest:portable": "node scripts/build-runtime-process-guardian.mjs",
     "test:portable": "node scripts/ci/run-portable-tests.mjs",
@@ -115,6 +113,7 @@
     "asar": true,
     "asarUnpack": [
       "node_modules/@napi-rs/canvas*/**/*",
+      "node_modules/@napi-rs/keyring*/**/*",
       "node_modules/node-pty/**/*",
       "node_modules/better-sqlite3/**/*",
       "node_modules/@crowecawcaw/xa11y*/**/*",
@@ -224,7 +223,8 @@
         "!node_modules/**/prebuilds/linux-*/**",
         "!node_modules/**/prebuilds/linux-*.node",
         "!node_modules/**/prebuilds/linuxmusl-*/**",
-        "!node_modules/**/prebuilds/linuxmusl-*.node"
+        "!node_modules/**/prebuilds/linuxmusl-*.node",
+        "!node_modules/@napi-rs/keyring*/**"
       ]
     },
     "nsis": {
@@ -260,7 +260,8 @@
         "!node_modules/**/prebuilds/darwin-*/**",
         "!node_modules/**/prebuilds/darwin-*.node",
         "!node_modules/**/prebuilds/linuxmusl-*/**",
-        "!node_modules/**/prebuilds/linuxmusl-*.node"
+        "!node_modules/**/prebuilds/linuxmusl-*.node",
+        "!node_modules/@napi-rs/keyring*/**"
       ]
     }
   },
@@ -271,6 +272,7 @@
     "@crowecawcaw/xa11y": "0.15.0",
     "@modelcontextprotocol/sdk": "1.30.1",
     "@napi-rs/canvas": "1.0.9",
+    "@napi-rs/keyring": "2.1.0",
     "@opencode-ai/sdk": "1.18.32",
     "@tanstack/react-virtual": "3.14.13",
     "@xterm/addon-fit": "^0.11.0",
@@ -291,6 +293,7 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "smol-toml": "1.9.0",
     "ws": "^8.21.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.6.5"

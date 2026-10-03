@@ -1,3 +1,4 @@
+import { NativeSubscriptionReader } from "./native-subscriptions";
 import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -11,6 +12,7 @@ import { withCodexControlClient, type CodexControlClient } from "../codex/contro
 import { parseCodexRateLimits } from "../codex-metadata";
 import type { ProviderManager } from "../providers";
 import { nativeResetCredits, opaqueUsageIdentity, usageWindows } from "./cliproxy";
+import type { NativeUsageAccount } from "./subscription-io";
 
 /** Read only the provider-owned account identity. Tokens never leave this function. */
 async function codexAccountIdentity(environment: NodeJS.ProcessEnv): Promise<string | null> {
@@ -43,8 +45,13 @@ async function verifiedFileIdentity(client: CodexControlClient, environment: Nod
 }
 const accountSchema = z.object({ type: z.string(), email: z.string().max(256).nullable().optional(), planType: z.string().max(200).nullable().optional() }).nullable();
 export class NativeUsageReader {
-  constructor(private readonly providers: ProviderManager, private readonly cwd: string, private readonly signal: AbortSignal) {}
-  async read(info: ProviderInfo): Promise<UsageAccount> {
+  constructor(private readonly providers: ProviderManager, private readonly cwd: string, private readonly signal: AbortSignal, private readonly subscriptions = new NativeSubscriptionReader({ openCodeAccount: (directory, model, signal) => providers.openCodeUsageAccount(directory, model, signal) })) {}
+  async read(info: ProviderInfo, model?: string, cwd = this.cwd, interactive = false): Promise<NativeUsageAccount> {
+    const account = await this.readAccount(info, model, cwd, interactive);
+    if (info.id !== "codex" && info.id !== "claude") return account;
+    return this.subscriptions.withMetadataIdentity(account, this.signal);
+  }
+  private async readAccount(info: ProviderInfo, model: string | undefined, cwd: string, interactive: boolean): Promise<NativeUsageAccount> {
     const base: UsageAccount = { id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
       email: null, plan: null, identityKey: null, sources: ["This computer"], status: "unavailable", detail: null,
       windows: usageWindows(info.rateLimits), updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(), credits: null, canReset: false };
@@ -53,22 +60,22 @@ export class NativeUsageReader {
     if (!info.canRun && (info.id === "codex" || info.id === "claude")
       && (info.installState === "checking" || info.authState === "checking")) {
       this.signal.throwIfAborted();
-      const detection = await this.providers.detect(info.id, { cwd: this.cwd, timeoutMs: 4000, signal: this.signal });
+      const detection = await this.providers.detect(info.id, { cwd, timeoutMs: 4000, signal: this.signal });
       info = { ...info, canRun: detection.canRun, authState: detection.authState };
     }
     if (!info.canRun) return { ...base, detail: `${info.label} is ${info.authState === "unauthenticated" ? "not signed in" : "not ready"}.` };
-    if (info.id !== "codex" && info.id !== "claude") return { ...base, windows: [], status: "unsupported", detail: "This provider does not expose a supported subscription quota API." };
+    if (info.id !== "codex" && info.id !== "claude") return this.subscriptions.read(base, model, this.signal, cwd, interactive);
     if (info.id === "claude") {
-      const result = await this.providers.claudeUsage(this.cwd);
-      const parsed = z.object({ email: z.string().max(256).optional(), subscriptionType: z.string().max(200).optional(), apiProvider: z.string().max(50).optional() }).safeParse(result.account);
+      const result = await this.providers.claudeUsage(cwd);
+      const parsed = z.object({ email: z.string().max(256).optional(), organization: z.string().max(256).optional(), subscriptionType: z.string().max(200).optional(), apiProvider: z.string().max(50).optional() }).safeParse(result.account);
       const account = parsed.success ? parsed.data : null;
       if (account?.apiProvider && account.apiProvider !== "firstParty") return { ...base, windows: [], status: "unsupported", detail: "This Claude API backend does not report subscription limits." };
-      return { ...base, email: account?.email ?? null, plan: account?.subscriptionType ?? null,
+      return { ...base, email: account?.email ?? null, organization: account?.organization ?? null, plan: account?.subscriptionType ?? null,
         windows: usageWindows(result.rateLimits ?? []), updatedAt: result.rateLimits ? base.checkedAt : null,
         status: result.rateLimitsUnavailable ? "unsupported" : result.rateLimits?.length ? "ready" : "unavailable",
         detail: result.rateLimitsUnavailable ? "This Claude route does not report subscription limits." : result.rateLimits?.length ? null : "Claude did not report quota windows." };
     }
-    const context = await this.providers.codexControlContext(this.cwd);
+    const context = await this.providers.codexControlContext(cwd);
     const identityBefore = await codexAccountIdentity(context.environment);
     return await withCodexControlClient<UsageAccount>({ ...context, signal: this.signal }, async (client) => {
       const account = accountSchema.parse((await client.request("account/read", { refreshToken: false })).account);

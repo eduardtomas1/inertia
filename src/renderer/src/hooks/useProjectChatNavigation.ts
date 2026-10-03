@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type Dispatch,
@@ -47,6 +48,7 @@ export function useProjectChatNavigation({
   updateSplitConversationId,
   setSidebarOpen,
   setView,
+  setActionError,
 }: {
   project: Project | null;
   projects: Project[];
@@ -57,10 +59,41 @@ export function useProjectChatNavigation({
   updateSplitConversationId: (conversationId: string | null) => void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
   setView: Dispatch<SetStateAction<AppView>>;
+  setActionError?: (message: string) => void;
 }) {
   const [globalChatActive, setGlobalChatActive] = useState(false);
   const globalChatGenerationRef = useRef(0);
   const resumeSearchDraftRef = useRef(false);
+  const [pendingScratch, setPendingScratch] = useState<{ projectId: string; generation: number; change: boolean } | null>(null);
+
+  const requestScratch = useCallback((change: boolean): void => {
+    const generation = ++globalChatGenerationRef.current;
+    conversationSelectionGenerationRef.current += 1;
+    void selectionCommandQueue("project.ensure-scratch", { type: "project.ensure-scratch", payload: {} }).then((event) => {
+      if (generation !== globalChatGenerationRef.current) return;
+      if (event.type !== "request.result" || event.result.kind !== "project.created") {
+        throw new Error("The local service could not prepare a chat without a project.");
+      }
+      setPendingScratch({ projectId: event.result.projectId, generation, change });
+    }).catch((error: unknown) => {
+      if (generation === globalChatGenerationRef.current) setActionError?.(error instanceof Error ? error.message : "Could not start without a project.");
+    });
+  }, [conversationSelectionGenerationRef, selectionCommandQueue, setActionError]);
+
+  useEffect(() => {
+    if (!pendingScratch) return;
+    if (pendingScratch.generation !== globalChatGenerationRef.current) { setPendingScratch(null); return; }
+    if (!projects.some(({ id }) => id === pendingScratch.projectId)) return;
+    if (pendingScratch.change) draftConversation.changeProject(pendingScratch.projectId);
+    else draftConversation.start(pendingScratch.projectId, true);
+    setPendingScratch(null);
+    updateSplitConversationId(null);
+    setView("home");
+    setSidebarOpen(false);
+    setGlobalChatActive(true);
+  }, [pendingScratch, projects, draftConversation, setView, setSidebarOpen, updateSplitConversationId]);
+
+  const openNoProjectChat = useCallback(() => requestScratch(false), [requestScratch]);
 
   const deactivateGlobalChat = useCallback(() => {
     globalChatGenerationRef.current += 1;
@@ -118,7 +151,7 @@ export function useProjectChatNavigation({
     setView("home");
     setSidebarOpen(false);
     if (!targetProject) {
-      setGlobalChatActive(false);
+      requestScratch(false);
       return;
     }
     if (resumeSearchDraftRef.current || readPersistedDraftConversation()?.resumeAfterSearch) draftConversation.start(targetProject.id, true, true);
@@ -130,14 +163,17 @@ export function useProjectChatNavigation({
     draftConversation,
     project,
     projects,
+    requestScratch,
     setSidebarOpen,
     setView,
     updateSplitConversationId,
   ]);
 
-  const selectGlobalChatProject = useCallback((nextProject: Project): void => {
+  const selectGlobalChatProject = useCallback((nextProject: Project | null): void => {
+    if (!nextProject) { requestScratch(true); return; }
+    globalChatGenerationRef.current += 1;
     draftConversation.changeProject(nextProject.id);
-  }, [draftConversation]);
+  }, [draftConversation, requestScratch]);
 
   const importProject = useCallback(async (input?: ProjectImportInput) => {
     if (busyAction) {
@@ -189,6 +225,7 @@ export function useProjectChatNavigation({
     importProject,
     navigateToView,
     openGlobalChat,
+    openNoProjectChat,
     selectGlobalChatProject,
     selectProject,
     sendMessage,

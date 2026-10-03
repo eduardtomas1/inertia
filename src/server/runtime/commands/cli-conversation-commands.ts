@@ -19,6 +19,7 @@ export function createCliConversationCommandHandler(deps: {
   return defineRuntimeCommandHandler(["conversation.cli.scan", "conversation.cli.preview", "conversation.cli.import"], async (socket, command) => {
     if (command.type !== "conversation.cli.scan" && command.type !== "conversation.cli.preview" && command.type !== "conversation.cli.import") return "not-handled";
     const { projectId } = command.payload;
+    if (deps.store.project(projectId).workspaceKind === "scratch") throw new RuntimeRequestError("Chats without a project cannot import CLI conversations.");
     const workspace = deps.store.projectPath(projectId);
     const imported = (provider: "codex" | "claude", sessionId: string): string | null => deps.store.importedCliConversation(provider, sessionId);
     if (command.type === "conversation.cli.scan") {

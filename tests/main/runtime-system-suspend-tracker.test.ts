@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   lstatSync,
   mkdtempSync,
@@ -101,17 +102,22 @@ describe("RuntimeSystemSuspendTracker", () => {
   it("never evicts unacknowledged intervals when pending capacity is full", () => {
     const path = statePath();
     const diagnostics = vi.fn();
+    const origin = Date.parse("2026-08-25T00:00:00.000Z");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      active: null,
+      intervals: Array.from({ length: 64 }, (_, index) => ({
+        id: randomUUID(),
+        suspendedAt: new Date(origin + index * 2_000).toISOString(),
+        resumedAt: new Date(origin + index * 2_000 + 1_000).toISOString(),
+      })),
+    }), { mode: 0o600 });
     const tracker = new RuntimeSystemSuspendTracker({
       statePath: path,
       onDiagnostic: diagnostics,
     });
-    const origin = Date.parse("2026-08-25T00:00:00.000Z");
-    for (let index = 0; index < 64; index += 1) {
-      tracker.suspend(new Date(origin + index * 2_000).toISOString());
-      expect(tracker.resume(new Date(origin + index * 2_000 + 1_000)
-        .toISOString())).not.toBeNull();
-    }
     const retained = tracker.completed();
+    expect(retained).toHaveLength(64);
     tracker.suspend(new Date(origin + 128_000).toISOString());
     expect(tracker.resume(new Date(origin + 129_000).toISOString())).toBeNull();
     expect(tracker.completed()).toEqual(retained);

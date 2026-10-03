@@ -1119,19 +1119,22 @@ describe("WorkspaceChangesPanel repository scope", () => {
       }],
     ];
 
-    for (const [control, open] of controls) {
-      for (const [scope, change] of switches) {
-        it(`closes the ${control} when the ${scope} changes`, async () => {
-          const { handlers, update } = await renderScoped();
-          await open();
-          await change(update);
+    const cases: Array<[(typeof controls)[number], (typeof switches)[number]]> = [
+      ...switches.map((entry): [(typeof controls)[number], (typeof switches)[number]] => [controls[0]!, entry]),
+      [controls[1]!, switches[0]!],
+      [controls[2]!, switches[3]!],
+    ];
+    for (const [[control, open], [scope, change]] of cases) {
+      it(`closes the ${control} when the ${scope} changes`, async () => {
+        const { handlers, update } = await renderScoped();
+        await open();
+        await change(update);
 
-          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-          expect(document.querySelector(".diff-selection-popover")).toBeNull();
-          expect(screen.queryByDisplayValue(/first scope/u)).not.toBeInTheDocument();
-          for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
-        });
-      }
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        expect(document.querySelector(".diff-selection-popover")).toBeNull();
+        expect(screen.queryByDisplayValue(/first scope/u)).not.toBeInTheDocument();
+        for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+      });
     }
 
     it.each(["project", "conversation"] as const)("closes the commit review when the %s changes", async (scope) => {

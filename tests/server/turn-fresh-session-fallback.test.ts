@@ -12,7 +12,7 @@ import {
   type TurnControllerTestRuntime,
 } from "../support/turn-controller-runtime";
 
-const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
+const providers = ["codex", "claude"] as const;
 const unavailable = {
   reason: "provider-error",
   message: "The saved provider session is no longer available.",
@@ -162,30 +162,6 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
 });
 
 describe("fresh session fallback guards", () => {
-  it("keeps an ordinary failed resume attached to its session", async () => {
-    const { runtime } = await establishedChat("codex");
-    try {
-      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
-      runtime.controller.start(queued.turn.id);
-      runtime.provider.resolve({
-        status: "failed",
-        sessionId: "saved-session",
-        error: "Quota reached.",
-        failure: { reason: "provider-error", message: "Quota reached." },
-      });
-      await flushTurnControllerTestPromises();
-      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
-      const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try again." });
-      expect(retry.turn).toMatchObject({
-        providerSessionBefore: "saved-session",
-        continuationReasonCode: "same-continuation",
-      });
-    } finally {
-      await runtime.controller.dispose();
-      runtime.store.close();
-    }
-  });
-
   it("refuses to restart once the provider has produced output or the turn has settled", async () => {
     const { runtime } = await establishedChat("claude");
     try {

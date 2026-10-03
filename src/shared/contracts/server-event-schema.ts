@@ -151,6 +151,7 @@ function project(value: unknown): boolean {
     "updatedAt",
   )
     && oneOf(value, "status", SERVER_EVENT_OPTIONS.projectStatuses)
+    && (value.workspaceKind === undefined || value.workspaceKind === "scratch")
     && nullableStringField(value, "repositoryIdentity")
     && nullableStringField(value, "repositoryRoot")
     && (value.groupingMode === null

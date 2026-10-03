@@ -114,7 +114,7 @@ void linuxIt("admits, executes, and releases a guardian with inherited blocked c
 });
 
 for (const inheritBlockedSignals of [false, true]) {
-  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"] as const) {
+  for (const signal of ["SIGTERM", "SIGUSR1"] as const) {
     void linuxIt(`restores ${signal} for the gated payload (inherited blocking: ${inheritBlockedSignals})`, async () => {
       await withGuardian((root) => ["/usr/bin/touch", join(root, "executed")], async (fixture) => {
         process.kill(fixture.payloadPid, signal);

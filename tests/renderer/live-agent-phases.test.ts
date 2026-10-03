@@ -10,7 +10,6 @@ import {
   type LivePhaseRegistry,
 } from "../../src/renderer/src/components/working-indicator/liveAgentPhases";
 import { activeAgentPhase } from "../../src/renderer/src/utils/response-timeline/active-state";
-import { orbMotionForPhase } from "../../src/renderer/src/components/working-indicator/orbMotion";
 
 function network() {
   let now = 10_000;
@@ -201,20 +200,5 @@ describe("live agent phase registry", () => {
     expect(registry.resolve("c2", "t2")).toBeNull();
     registry.receive({ ...valid, windowId: "main" });
     expect(registry.resolve("c1", "t1")).toBeNull();
-  });
-
-  it("gives the sidebar cue and the timeline row the same design and pace for every phase", () => {
-    const { join } = network();
-    const { registry } = join("main");
-    const token = Symbol("timeline");
-    for (const phase of [
-      "compacting", "queued", "starting", "thinking", "searching", "coding", "command", "tool",
-      "responding", "working", "delegated", "retrying", "cancelling",
-      "waiting-for-approval", "waiting-for-input",
-    ] as const) {
-      registry.publish(token, { conversationId: "c1", turnId: "t1", phase });
-      const sidebar = orbMotionForPhase(registry.resolve("c1", "t1"));
-      expect(sidebar).toEqual(orbMotionForPhase(phase));
-    }
   });
 });

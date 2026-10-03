@@ -29,6 +29,7 @@ export const usageWindowSchema = z.strictObject({
 });
 export const usageAccountSchema = z.strictObject({
   id: identity, providerId: label, providerLabel: label, label,
+  organization: z.string().max(256).nullable().optional(),
   email: z.string().max(256).nullable(), plan: label.nullable(),
   /** Opaque provider account identity, never inferred from email or plan. */
   identityKey: identity.nullable(), sources: z.array(label).max(8),

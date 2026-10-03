@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
-
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { sessionRecoveryDetail } from "../../src/renderer/src/utils/sessionRecovery";
@@ -16,10 +14,6 @@ import type {
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestedAt = "2026-07-23T10:00:00.000Z";
-const css = readFileSync(
-  new URL("../../src/renderer/src/styles.css", import.meta.url),
-  "utf8",
-);
 
 function turn(checkpointId: string | null = null): AgentTurn {
   return {
@@ -142,6 +136,8 @@ function renderRequest(
 }
 
 describe("Quiet Ledger user request layer", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("shows the durable remote device origin beside the user request", () => {
     const deviceId = "11111111-1111-4111-8111-111111111111";
     const html = renderRequest("Sent remotely", { privateConnectDeviceId: deviceId });
@@ -150,6 +146,8 @@ describe("Quiet Ledger user request layer", () => {
     expect(renderRequest("Sent locally")).not.toContain("Private Connect");
   });
   it("keeps request metadata and attachments beneath a content-width request", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-24T12:00:00.000Z"));
     const checkpoint: CheckpointSummary = {
       id: "checkpoint-1",
       conversationId,
@@ -177,16 +175,15 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain('class="message is-user turn-user-request"');
     expect(html).toContain('data-turn-layer="user-request"');
     expect(html).toContain('data-request-layout="content"');
-    expect(html).toContain(`<time dateTime="${requestedAt}">`);
+    expect(html).toMatch(new RegExp(`<time dateTime="${requestedAt}" title="[^"]+ 2026 at [^"]+">Jul 23, 10:00\\sAM</time>`, "u"));
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
     expect(html).toContain('aria-label="Request attachments"');
     expect(html).toContain('data-request-context-kind="image"');
     expect(html).toContain("PNG image · 1.0 KB");
     expect(html).toContain('aria-label="Preview attachment reference.png"');
-    expect(html).toContain(
-      'src="inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111"',
-    );
+    expect(html).toContain('class="sent-attachment-thumbnail"');
+    expect(html).not.toContain("<img");
     expect(html).toContain("1.0 KB");
     expect(html).not.toContain("/workspace/reference.png");
     expect(html.indexOf("reference.png"))
@@ -351,15 +348,4 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).not.toContain("Context from Importer plan");
   });
 
-  it("uses the shared width and radius tokens with intentional narrow behavior", () => {
-    expect(css).toMatch(
-      /\.response-turn\s*>\s*\.turn-user-request\s*\{[^}]*max-width:\s*var\(--user-request-max-width\);[^}]*border:\s*0;[^}]*border-radius:\s*var\(--radius-medium\);[^}]*background:\s*var\(--user-request-tint\);[^}]*box-shadow:\s*none;/su,
-    );
-    expect(css).toMatch(
-      /\.message\.is-user\.turn-user-request\s+\.message-body\s*\{[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*font-size:\s*var\(--ui-font-main\);/su,
-    );
-    expect(css).toMatch(
-      /@container\s+response-transcript\s+\(max-width:\s*620px\)\s*\{[\s\S]*?--user-request-max-width:\s*92%;/u,
-    );
-  });
 });

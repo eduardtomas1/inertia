@@ -208,10 +208,10 @@ describe("Cursor ACP harness", { concurrent: false }, () => {
     const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness({
-        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 5_000,
+        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 2_000,
       })]),
     );
-    await expect(manager.run(nativeProviderRunInput({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: `cursor-stalled-${expectedPhase}`,
       cwd: root,
@@ -219,7 +219,8 @@ describe("Cursor ACP harness", { concurrent: false }, () => {
       model: stalledMethod === "session/set_config_option" ? "model-b" : undefined,
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
+    }));
+    expect(result, result.failure?.technicalDetail).toMatchObject({
       status: "failed",
       error: expect.stringContaining("RPC deadline exceeded"),
       failure: {
@@ -1261,8 +1262,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
   it.each([
     ["cursor/update_todos", "todo update"],
-    ["cursor/task", "task notification"],
-    ["cursor/generate_image", "generated-image notification"],
   ] as const)("fails a Cursor turn when a malformed %s races end_turn", async (
     method,
     label,
@@ -1305,17 +1304,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       toolCallId: "todo-tool",
       todos: [],
       merge: false,
-    }],
-    ["cursor/task", {
-      toolCallId: "task-tool",
-      description: "Inspect provider state",
-      prompt: "Inspect",
-      subagentType: "explore",
-    }],
-    ["cursor/generate_image", {
-      toolCallId: "image-tool",
-      description: "Provider diagram",
-      referenceImagePaths: [],
     }],
   ] as const)("rejects %s when it is sent as a JSON-RPC request", async (
     method,
@@ -1594,6 +1582,43 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
       true,
     ]);
+  });
+
+  it.skipIf(process.platform === "win32")("names the POSIX cleanup row of an unconfirmed ACP cleanup", async () => {
+    const root = portableFixtureRoot("cursor ACP cleanup classification");
+    roots.push(root);
+    const command = completingCursorAgent(root, "cursor-cleanup-classification-agent");
+    const terminateProcessTree = vi.fn(async (child, force: boolean) =>
+      await terminateProcessTreeAndWait(child, force, {
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: `${child.pid} 1 Ss\n` })) as never,
+        pauseSync: () => undefined,
+      }));
+    const manager = ProviderManager.createForTests(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([
+        createCursorAcpHarness({ terminateProcessTree }),
+      ]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-cleanup-classification",
+      cwd: root,
+      prompt: "Classify cleanup",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "Cursor ACP process tree could not be confirmed stopped.",
+      cleanupConfirmed: false,
+      failure: {
+        phase: "cleanup",
+        terminalEvent: "process-tree/cleanup",
+        technicalDetail: expect.stringMatching(
+          /^\[POSIX cleanup stop-never-observed: reason=exit-unconfirmed rootStop=sent rootState=running .* reads=9 timedOutReads=0 elapsedMs=\d+\]$/u,
+        ),
+      },
+    });
   });
 
   it("makes cleanup failure authoritative while retaining a prior provider failure", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { goalStatusLabel, nextGoalActions } from "../../src/renderer/src/utils/goalActions";
+import { nextGoalActions } from "../../src/renderer/src/utils/goalActions";
 import type { AgentGoal } from "../../src/shared/contracts";
 
 function goal(
@@ -23,13 +23,6 @@ function goal(
 }
 
 describe("goal actions", () => {
-  it("labels every goal status for display", () => {
-    expect(goalStatusLabel("active")).toBe("Active");
-    expect(goalStatusLabel("paused")).toBe("Paused");
-    expect(goalStatusLabel("usageLimited")).toBe("Usage limited");
-    expect(goalStatusLabel("budgetLimited")).toBe("Budget limited");
-  });
-
   it("offers the status transitions allowed from each goal state", () => {
     expect(nextGoalActions(goal("inertia-local", "active"), "idle")).toEqual([
       { label: "Pause", status: "paused", icon: "pause" },

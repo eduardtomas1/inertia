@@ -289,6 +289,13 @@ export class TurnLedgerRepository {
         userMessageId: message.id,
         requestedAt: message.createdAt,
       });
+      if (input.limitResetPlanId) {
+        const accepted = this.context.database.prepare(`
+          UPDATE usage_limit_resume_plans SET state='completed', turn_id=?, error=NULL
+          WHERE id=? AND conversation_id=? AND state='dispatching'
+        `).run(turn.id, input.limitResetPlanId, input.conversationId);
+        if (accepted.changes !== 1) throw new Error("The reset plan no longer owns this dispatch.");
+      }
       if (input.queuedMessageId) {
         const accepted = this.context.database.prepare(`
           UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ?, error = NULL,

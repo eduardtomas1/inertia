@@ -685,8 +685,18 @@
     },
     {
       "version": 86,
+      "name": "PersistScratchProject",
+      "digest": "7c8ba44e6070963b0985107f6d392502cb30fa72f808717e7a73ab09ea114836"
+    },
+    {
+      "version": 87,
+      "name": "PersistUsageLimitResumePlans",
+      "digest": "dde1188240bdcdcd416fc47ba366d27b25565871b9f2460e06eeefe029918a5b"
+    },
+    {
+      "version": 88,
       "name": "CliConversationImports",
-      "digest": "5219774efedb633a15f32a1ecf9b28f6e69cbc9200bb4bf41b7fe54957fc0227"
+      "digest": "78053fd3b9eae5aff9679f2cdd79138f367bdc8af59f02b4e956a632516561c1"
     }
   ]
 }

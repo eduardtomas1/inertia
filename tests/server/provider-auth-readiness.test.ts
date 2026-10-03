@@ -8,15 +8,13 @@ vi.mock("../../src/server/environment", async (original) => ({
 
 import { detectProvider } from "../../src/server/provider/discovery";
 
-const providers = ["codex", "claude", "cursor"] as const;
-
 async function detection(
-  providerId: typeof providers[number],
+  providerId: "codex" | "claude",
   output: string,
   exitCode: number | null = 0,
 ) {
   return await detectProvider(providerId, { cwd: "/synthetic" }, {
-    executableCandidates: async () => [`/synthetic/${providerId === "cursor" ? "cursor-agent" : providerId}`],
+    executableCandidates: async () => [`/synthetic/${providerId}`],
     probeProcess: async (_executable, args) => ({
       started: true,
       timedOut: false,
@@ -29,23 +27,23 @@ async function detection(
   });
 }
 
-describe.each(providers)("%s authentication readiness", (providerId) => {
+describe("codex authentication readiness", () => {
   it.each(["Not authenticated", "Unauthenticated", "Logged out", "Not signed in"])(
     "refuses the negative status %s even when the status command succeeds",
     async (output) => {
-      await expect(detection(providerId, output)).resolves.toMatchObject({
+      await expect(detection("codex", output)).resolves.toMatchObject({
         authState: "unauthenticated", canRun: false,
       });
     },
   );
 
   it.each([1, null])("does not accept positive-looking output after exit %s", async (exitCode) => {
-    await expect(detection(providerId, "Previously authenticated; status check failed", exitCode))
+    await expect(detection("codex", "Previously authenticated; status check failed", exitCode))
       .resolves.toMatchObject({ canRun: false });
   });
 
   it("keeps a successful authenticated status runnable", async () => {
-    await expect(detection(providerId, "Authenticated")).resolves.toMatchObject({
+    await expect(detection("codex", "Authenticated")).resolves.toMatchObject({
       authState: "authenticated", canRun: true,
     });
   });

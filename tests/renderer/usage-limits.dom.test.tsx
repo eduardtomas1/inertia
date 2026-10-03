@@ -153,6 +153,10 @@ describe("Limits interface", () => {
     visibility.mockReturnValue("visible"); await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
     expect(f.request).toHaveBeenCalledTimes(2);
+    expect(f.request.mock.calls.map(([command]) => command)).toEqual([
+      { type: "usage.limits.get", payload: { refresh: true, force: false } },
+      { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
+    ]);
     view.unmount(); await vi.advanceTimersByTimeAsync(180000); expect(f.request).toHaveBeenCalledTimes(2);
   });
 });

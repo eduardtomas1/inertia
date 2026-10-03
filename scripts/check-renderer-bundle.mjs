@@ -64,13 +64,13 @@ const budgets = {
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
   // CLI request policies and named lazy-import metadata add <0.2 KiB per route.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 200,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 200,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 128,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 128,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte + 760,
@@ -84,17 +84,17 @@ const budgets = {
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
-  deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172,
+  deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   // CLI import adds its launch control here; its preview stays separately deferred.
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 1_024,
-  deferredCliConversationImportJavaScript: 8 * kibibyte + 758,
+  deferredCliConversationImportJavaScript: 8_539 + 256,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
@@ -108,7 +108,7 @@ const budgets = {
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
   // bytes to the same deferred chunk. Existing headroom is unchanged, and the
   // lightbox still loads only when an attachment preview is opened.
-  deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418,
+  deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418 + 512 + 459,
   deferredPreviewJavaScript: 8 * kibibyte,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
@@ -171,7 +171,7 @@ const budgets = {
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
   // CLI command policies/shared import icons add <1 KiB; the dialog is accounted separately.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_000,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 1_000,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

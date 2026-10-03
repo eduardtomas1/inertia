@@ -1,8 +1,9 @@
 import {
+  File,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
-  ImageOff,
+  TriangleAlert,
 } from "lucide-react";
 import {
   useCallback,
@@ -21,70 +22,73 @@ import {
   formatAttachmentSize,
   type AttachmentPreviewSource,
 } from "../utils/composerAttachments";
+import { observeAttachmentThumbnail, type AttachmentThumbnailState } from "../utils/attachmentThumbnailQueue";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
-function SentImageThumbnail({
+function SentAttachment({
   attachment,
-  visibleOnly,
-  onUnavailable,
+  metadataId,
+  onPreview,
 }: {
   attachment: AttachmentPreviewSource;
-  visibleOnly?: boolean;
-  onUnavailable?: (id: string) => void;
+  metadataId: string;
+  onPreview: (attachment: AttachmentPreviewSource) => void;
 }): React.JSX.Element {
-  const [state, setState] = useState<"loading" | "ready" | "unavailable">(
-    "loading",
-  );
-  const [visible, setVisible] = useState(false);
+  const { id } = attachment;
+  const [state, setState] = useState<AttachmentThumbnailState>("loading");
   const observe = useCallback((node: HTMLSpanElement | null) => {
-    if (!node || !visibleOnly) return;
-    // The viewport observer also clips against the gallery's scrollport.
-    // Keep observing exits: native lazy loading retains every visited image.
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry!.isIntersecting));
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [visibleOnly]);
-  const PlaceholderIcon = state === "unavailable" ? ImageOff : ImageIcon;
+    if (!node) return;
+    return observeAttachmentThumbnail(node, attachmentPreviewUrl({ id }), setState);
+  }, [id]);
+  const kind = chatAttachmentKind(attachment.mimeType);
+  const previewKind = attachmentPreviewKind(attachment);
+  const unavailable = state === "unavailable";
+  const Icon = kind === "image"
+    ? unavailable ? TriangleAlert : ImageIcon
+    : previewKind === "spreadsheet" ? FileSpreadsheet : previewKind === "file" ? File : FileText;
   return (
-    <span
-      ref={observe}
-      className="sent-attachment-thumbnail"
-      data-thumbnail-state={state}
-      aria-hidden="true"
+    <li
+      className="sent-attachment"
+      data-request-context-kind={kind}
+      data-attachment-preview={previewKind}
+      data-attachment-unavailable={unavailable || undefined}
     >
-      {state !== "ready" && <PlaceholderIcon size={18} />}
-      {(!visibleOnly || visible) && (
-        <img
-          src={attachmentPreviewUrl(attachment)}
-          alt=""
-          onLoad={() => setState("ready")}
-          onError={() => {
-            setState("unavailable");
-            onUnavailable?.(attachment.id);
-          }}
-        />
-      )}
-    </span>
+      <button
+        type="button"
+        className="sent-attachment-open"
+        aria-label={`Preview attachment ${attachment.name}`}
+        aria-describedby={metadataId}
+        onClick={() => onPreview(attachment)}
+      >
+        <span
+          ref={kind === "image" ? observe : undefined}
+          className={`sent-attachment-thumbnail${kind === "image" ? "" : " is-document"}`}
+          data-thumbnail-state={kind === "image" ? state : undefined}
+          aria-hidden="true"
+        >
+          {state !== "ready" && <Icon size={18} />}
+        </span>
+        <span className="sent-attachment-copy">
+          <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
+          <small id={metadataId}>
+            {attachment.snapshot?.windowTitle ?? `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`}
+            {unavailable && " · no longer stored"}
+          </small>
+        </span>
+      </button>
+    </li>
   );
 }
 
 export function SentMessageAttachmentList({
   attachments,
   label = "Message attachments",
-  deferImages,
 }: {
   attachments: readonly AttachmentPreviewSource[];
   label?: string;
-  deferImages?: boolean;
 }): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
     useState<AttachmentPreviewSource | null>(null);
-  // Records evicted or unreadable previews so the row says so instead of
-  // showing a blank tile with no explanation.
-  const [unavailableIds, setUnavailableIds] = useState<ReadonlySet<string>>(() => new Set());
-  const markUnavailable = useCallback((id: string) => {
-    setUnavailableIds((current) => current.has(id) ? current : new Set([...current, id]));
-  }, []);
   const metadataIdPrefix = useId();
   const closePreview = useCallback(() => setPreviewAttachment(null), []);
 
@@ -103,61 +107,14 @@ export function SentMessageAttachmentList({
         className="message-attachments turn-user-request-context sent-attachments"
         aria-label={label}
       >
-        {attachments.map((attachment) => {
-          const kind = chatAttachmentKind(attachment.mimeType);
-          const previewKind = attachmentPreviewKind(attachment);
-          const typeLabel = chatAttachmentTypeLabel(attachment.mimeType);
-          const metadataId = `${metadataIdPrefix}-${attachment.id}`;
-          const unavailable = unavailableIds.has(attachment.id);
-          const copy = (
-            <>
-              {kind === "image"
-                ? (
-                    <SentImageThumbnail
-                      attachment={attachment}
-                      visibleOnly={deferImages}
-                      onUnavailable={markUnavailable}
-                    />
-                  )
-                : (
-                    <span
-                      className="sent-attachment-thumbnail is-document"
-                      aria-hidden="true"
-                    >
-                      {previewKind === "spreadsheet"
-                        ? <FileSpreadsheet size={18} />
-                        : <FileText size={18} />}
-                    </span>
-                  )}
-              <span className="sent-attachment-copy">
-                <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
-                <small id={metadataId}>
-                  {attachment.snapshot?.windowTitle ?? `${typeLabel} · ${formatAttachmentSize(attachment.size)}`}
-                  {unavailable && " · no longer stored"}
-                </small>
-              </span>
-            </>
-          );
-          return (
-            <li
-              className="sent-attachment"
-              data-request-context-kind={kind}
-              data-attachment-preview={previewKind}
-              data-attachment-unavailable={unavailable || undefined}
-              key={attachment.id}
-            >
-              <button
-                type="button"
-                className="sent-attachment-open"
-                aria-label={`Preview attachment ${attachment.name}`}
-                aria-describedby={metadataId}
-                onClick={() => setPreviewAttachment(attachment)}
-              >
-                {copy}
-              </button>
-            </li>
-          );
-        })}
+        {attachments.map((attachment) => (
+          <SentAttachment
+            key={attachment.id}
+            attachment={attachment}
+            metadataId={`${metadataIdPrefix}-${attachment.id}`}
+            onPreview={setPreviewAttachment}
+          />
+        ))}
       </ul>
       {previewAttachment && (
         <AttachmentPreviewDialog

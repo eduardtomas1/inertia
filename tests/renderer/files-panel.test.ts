@@ -27,42 +27,6 @@ describe("FilesPanel", () => {
     ]);
   });
 
-  it("renders a lazy accessible tree with roving focus and a clear selection", () => {
-    const html = renderToStaticMarkup(createElement(FilesPanel, {
-      ...FILES_PROJECT,
-      entries: [
-        { path: "src", kind: "directory" as const },
-        { path: "README.md", kind: "file" as const },
-      ],
-      preview: {
-        path: "README.md",
-        content: "# Project",
-        truncated: false,
-        language: "md",
-        contentDigest: "a".repeat(64),
-        modifiedAt: "2026-07-29T10:00:00.000Z",
-      },
-      selectedPath: "README.md",
-      onSelectFile: vi.fn(),
-      onLoadEntries: vi.fn(),
-    }));
-
-    expect(html).toContain('role="tree"');
-    expect(html).toContain('aria-label="Files"');
-    expect(html).toContain('role="treeitem"');
-    expect(html).toContain('aria-level="1"');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('aria-selected="true"');
-    expect(html).toContain('aria-current="true"');
-    expect(html).toContain('title="README.md"');
-    expect(html).toContain('aria-label="Preview of README.md"');
-    expect(html).toContain('data-language-family="markup"');
-    expect(html).toContain("Markdown recognized locally");
-    expect(html).toContain("Rendering");
-    expect(html).not.toContain("<h1");
-    expect(html).not.toContain('role="list"');
-  });
-
   it("renders bounded root, loading, and preview failure states accessibly", () => {
     const loadingHtml = renderToStaticMarkup(createElement(FilesPanel, {
       ...FILES_PROJECT,

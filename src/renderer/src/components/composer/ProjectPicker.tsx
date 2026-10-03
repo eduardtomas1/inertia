@@ -11,7 +11,7 @@ export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): Rea
   return (
     <div className="composer-project-picker">
       <button ref={trigger} type="button" aria-label="Project" aria-haspopup="dialog" aria-expanded={open && !picker.disabled}
-        className="composer-project-picker-trigger" disabled={picker.disabled || !picker.projects.length}
+        className="composer-project-picker-trigger" disabled={picker.disabled}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
@@ -19,6 +19,7 @@ export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): Rea
         <ProjectIcon project={picker.selectedProject} size={13} /><ProjectName project={picker.selectedProject}>{picker.selectedProject.name}</ProjectName><ChevronDown size={12} aria-hidden="true" />
       </button>
       {open && !picker.disabled && <ProjectSearchDialog projects={picker.projects} selectedId={picker.selectedProject.id}
+        onSelectNoProject={() => { if (picker.selectedProject.workspaceKind !== "scratch") picker.onChange(null); }}
         label="Choose project" trigger={trigger.current} onClose={() => setOpen(false)} onSelect={(id) => {
           const project = picker.projects.find((candidate) => candidate.id === id);
           if (project && project.id !== picker.selectedProject.id) picker.onChange(project);

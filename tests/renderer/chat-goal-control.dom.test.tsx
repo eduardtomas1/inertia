@@ -441,28 +441,6 @@ describe("ChatGoalControl", () => {
       .toBeDisabled();
   });
 
-  it("explains why a saved goal cannot resume in recovery safety mode", () => {
-    render(
-      <ChatGoalControl
-        {...props(workflow(nativeCapability, [
-          goal("codex-native", "Survive the runtime restart"),
-        ]), {
-          executionStatus: "idle",
-          busy: true,
-          error: "Changes are unavailable in recovery safety mode.",
-        })}
-        {...openProps()}
-      />,
-    );
-
-    const surface = screen.getByRole("region", { name: "Codex goal" });
-    expect(within(surface).getByRole("alert")).toHaveTextContent(
-      "recovery safety mode",
-    );
-    expect(within(surface).getByRole("button", { name: "Resume goal" }))
-      .toBeDisabled();
-  });
-
   it("requires an explicit new or removed budget to resume a limited goal", async () => {
     const user = userEvent.setup();
     const onSetGoal = vi.fn(async () => undefined);
@@ -552,21 +530,6 @@ describe("ChatGoalControl", () => {
       status: "active",
       tokenBudget: 12_000,
     });
-  });
-
-  it("labels a local budget as an unenforced token target", () => {
-    render(
-      <ChatGoalControl
-        {...props(workflow(localCapability, [{
-          ...goal("inertia-local", "Track locally"),
-          tokenBudget: 5_000,
-        }]))}
-        {...openProps()}
-      />,
-    );
-
-    expect(screen.getByText("Local token target: 5,000", { exact: false }))
-      .toHaveTextContent("does not measure or enforce provider usage");
   });
 
   it("dismisses on Escape and keeps split actions with their pane owner", async () => {

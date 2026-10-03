@@ -18,45 +18,70 @@ export const EVIDENCE_JOBS = Object.freeze({
 });
 export const ELECTRON_CHECK_SUFFIX = " Electron";
 
+export const PRIMARY_PLATFORM_ARTIFACTS = Object.freeze(["linux-x64", "windows-x64", "macos-arm64"]);
+const SHA = /^[0-9a-f]{40}$/u;
+
+function validReusedRun(reusedRun) {
+  return Boolean(reusedRun) && Number.isSafeInteger(reusedRun.runId) && reusedRun.runId > 0
+    && Number.isSafeInteger(reusedRun.pullRequest) && reusedRun.pullRequest > 0
+    && SHA.test(reusedRun.sourceHead ?? "");
+}
+
 export function createEvidencePlan({
   head, sourceHead = head, base = null, baselineReason = "comparison-base",
-  event = "pull_request", draft = false, paths = [],
+  event = "pull_request", draft = false, paths = [], reusedRun = null,
 }) {
-  if (!/^[0-9a-f]{40}$/u.test(head) || !/^[0-9a-f]{40}$/u.test(sourceHead)) {
+  if (!SHA.test(head) || !SHA.test(sourceHead)) {
     throw new Error("CI requires the exact tested and source commit identities.");
   }
-  if (!base || !/^[0-9a-f]{40}$/u.test(base)) base = null;
+  if (!base || !SHA.test(base)) base = null;
   const changes = classifyChangedPaths(base ? paths : []);
+  const certifiedRun = event === "push" && base !== null && validReusedRun(reusedRun) ? {
+    runId: reusedRun.runId, pullRequest: reusedRun.pullRequest, sourceHead: reusedRun.sourceHead,
+  } : null;
+  const reused = certifiedRun && !changes.domains.includes("performance") ? certifiedRun : null;
+  const reuseReasons = certifiedRun && !reused ? ["performance-change-measured-on-main"] : [];
   const lane = event === "schedule" ? "nightly"
-    : event === "push" ? "main"
+    : event === "push" ? (reused ? "main-reused" : "main")
       : event === "merge_group" ? "merge"
         : event === "pull_request" ? (draft ? "draft" : "merge") : "unknown";
-  const full = lane !== "draft"
-    && (changes.fullCertification || lane === "nightly" || lane === "unknown");
+  const completeSiblings = lane === "nightly" || lane === "unknown";
+  const full = lane !== "draft" && lane !== "main-reused"
+    && (changes.fullCertification || completeSiblings);
   const domains = new Set(changes.domains);
-  const selectedPlatforms = full ? PLATFORMS : lane === "draft" ? []
-    : PLATFORMS.filter(({ artifact }) => (
-      (domains.has("linux_appimage") && artifact.startsWith("linux-"))
-      || (domains.has("windows_packaging") && artifact.startsWith("windows-"))
-      || (domains.has("macos_packaging") && artifact.startsWith("macos-"))
-    ));
+  const selectedPlatforms = full
+    ? (changes.nativeArchitecture || completeSiblings ? PLATFORMS
+      : PLATFORMS.filter(({ artifact }) => PRIMARY_PLATFORM_ARTIFACTS.includes(artifact)))
+    : lane === "draft" || lane === "main-reused" ? []
+      : PLATFORMS.filter(({ artifact }) => (
+        (domains.has("linux_appimage") && artifact.startsWith("linux-"))
+        || (domains.has("windows_packaging") && artifact.startsWith("windows-"))
+        || (domains.has("macos_packaging") && artifact.startsWith("macos-"))
+      ));
   const platforms = selectedPlatforms.map(({ artifact }) => artifact);
-  const electronPlatforms = selectedPlatforms.flatMap((platform) => (
-    platform.artifact === "macos-x64"
-      ? ["display-sensitive", "isolated", "runtime-recovery"].map((phase) => ({
-        ...platform, phase, check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${phase})`,
-        evidence_artifact: `${platform.artifact}-${phase}`,
-      }))
-      : [{ ...platform, phase: "all", check: `${platform.label}${ELECTRON_CHECK_SUFFIX}`,
-        evidence_artifact: platform.artifact }]
-  ));
-  const code = !changes.documentationOnly || full;
+  const shardSlug = (shard) => (shard ? `-${shard.replace("/", "-of-")}` : "");
+  const phaseEntry = (platform, phase, shard = null) => ({
+    ...platform, phase, ...(shard && { shard }),
+    check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${shard ? `${phase} ${shard}` : phase})`,
+    evidence_artifact: `${platform.artifact}-${phase}${shardSlug(shard)}`,
+  });
+  const isolatedShards = (platform) => (platform.artifact.startsWith("windows-") ? ["1/2", "2/2"] : [null]);
+  const recoveryOnly = (platform) => !completeSiblings
+    && !PRIMARY_PLATFORM_ARTIFACTS.includes(platform.artifact);
+  const electronPlatforms = [
+    ...selectedPlatforms.filter((platform) => !recoveryOnly(platform)).flatMap((platform) => [
+      phaseEntry(platform, "display-sensitive"),
+      ...isolatedShards(platform).map((shard) => phaseEntry(platform, "isolated", shard)),
+    ]),
+    ...selectedPlatforms.filter(recoveryOnly).map((platform) => phaseEntry(platform, "runtime-recovery")),
+  ];
+  const code = lane !== "main-reused" && (!changes.documentationOnly || full);
   const provider = domains.has("provider_common");
   const critical = !full && code;
   const jobs = {
     gate: true,
     lineage: true,
-    "node-22-minimum": full || domains.has("ci_test_infrastructure"),
+    "node-22-minimum": full || (code && domains.has("ci_test_infrastructure")),
     "pr-linux-core": code && !platforms.includes("linux-x64"),
     "pr-linux-lifecycle": critical && !platforms.includes("linux-x64")
       && (provider || domains.has("renderer_ui") || lane === "draft"),
@@ -77,34 +102,43 @@ export function createEvidencePlan({
       ? [1, 2, 3, 4].map((shard) => `Windows unit tests (${shard}/4)`)
       : [EVIDENCE_JOBS[job]]);
   return {
-    schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane,
+    schemaVersion: 1, head, sourceHead, base, baselineReason, event, lane, reusedRun: certifiedRun,
     paths: [...paths], domains: changes.domains,
-    reasons: [baselineReason, ...changes.reasons,
-      changes.documentationOnly ? "documentation-only" : full ? "full-native-contract"
-        : "affected-contracts-without-unrelated-installers"],
+    reasons: [baselineReason, ...reuseReasons, ...changes.reasons,
+      lane === "main-reused" ? "certified-identical-tree-in-pull-request-run"
+        : changes.documentationOnly ? "documentation-only" : full ? "full-native-contract"
+          : "affected-contracts-without-unrelated-installers"],
     fullCertification: full, requiredJobs, requiredChecks, platforms,
     omittedPlatforms: PLATFORMS.filter(({ artifact }) => !platforms.includes(artifact))
-      .map(({ artifact }) => ({ platform: artifact, reason: "no-installer-obligation-in-this-lane" })),
+      .map(({ artifact }) => ({ platform: artifact, reason: lane === "main-reused"
+        ? "certified-identical-tree-in-pull-request-run"
+        : full ? "sibling-architecture-certified-nightly-and-release"
+          : "no-installer-obligation-in-this-lane" })),
     suites: ["shared-quality", "migration-lineage",
+      ...(lane === "main-reused" ? ["reused-pull-request-certification"] : []),
       ...(code ? ["linux-all-source-coverage", "portable-provider-contracts"] : []),
       ...(jobs["pr-linux-lifecycle"] ? [domains.has("renderer_ui") ? "linux-full-electron" : "linux-core-bridge", "linux-recovery"] : []),
       ...(jobs["pr-windows-lifecycle"] ? ["windows-portable-and-lifecycle", "windows-codex-discovery"] : []),
       ...(jobs["pr-macos-lifecycle"] ? ["macos-portable-and-lifecycle"] : []),
       ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
-      ...platforms.map((platform) => `${platform}:electron-display-isolated-recovery`),
+      ...selectedPlatforms.flatMap((platform) => recoveryOnly(platform)
+        ? [`${platform.artifact}:electron-recovery`]
+        : [`${platform.artifact}:electron-display-sensitive`, ...isolatedShards(platform).map((shard) => (
+          `${platform.artifact}:electron-isolated${shardSlug(shard)}${shard === "2/2" ? "" : "-recovery"}`))]),
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },
     electronMatrix: { include: electronPlatforms },
     renderer: critical && domains.has("renderer_ui"),
     benchmarks: lane === "nightly" || (lane === "main" && domains.has("performance")),
-    performanceSmoke: lane !== "draft" && ["performance", "renderer_ui", "turn_session",
+    performanceSmoke: code && lane !== "draft" && ["performance", "renderer_ui", "turn_session",
       "runtime_supervisor", "database_migrations"].some((domain) => domains.has(domain)),
     omissions: Object.keys(jobs).filter((job) => !jobs[job]).map((job) => ({
-      job, reason: full ? "covered-by-full-native-matrix"
-        : changes.documentationOnly ? "documentation-does-not-change-runtime"
-          : lane === "draft" ? "draft-feedback-is-not-merge-certification"
-            : "outside-affected-contracts-or-covered-by-selected-native-target",
+      job, reason: lane === "main-reused" ? "certified-identical-tree-in-pull-request-run"
+        : full ? "covered-by-full-native-matrix"
+          : changes.documentationOnly ? "documentation-does-not-change-runtime"
+            : lane === "draft" ? "draft-feedback-is-not-merge-certification"
+              : "outside-affected-contracts-or-covered-by-selected-native-target",
     })),
   };
 }
@@ -126,31 +160,12 @@ export function outputsForEvidencePlan(plan) {
   return Object.entries(outputs).map(([key, value]) => `${key}=${value}`).join("\n") + "\n";
 }
 
-// Read-only comparison. Neither this record nor a shadow baseline can supply
-// workflow outputs or stand in for the canonical current-candidate plan.
-export function compareEvidencePlans(current, proposed) {
-  if (current.head !== proposed.head || current.sourceHead !== proposed.sourceHead
-    || current.event !== proposed.event || current.lane !== proposed.lane) {
-    throw new Error("Cannot compare plans for different candidates or lanes.");
-  }
-  const difference = (left, right) => left.filter((entry) => !right.includes(entry));
-  return {
-    currentBase: current.base, proposedBase: proposed.base,
-    currentFullCertification: current.fullCertification,
-    proposedFullCertification: proposed.fullCertification,
-    proposedDomains: proposed.domains,
-    newlyOmittedChecks: difference(current.requiredChecks, proposed.requiredChecks),
-    newlyRequiredChecks: difference(proposed.requiredChecks, current.requiredChecks),
-    newlyOmittedSuites: difference(current.suites, proposed.suites),
-    newlyRequiredSuites: difference(proposed.suites, current.suites),
-    currentBenchmarks: current.benchmarks, proposedBenchmarks: proposed.benchmarks,
-  };
-}
-
 // Missing evidence is never equivalent to an intentionally omitted job. The
 // REST records additionally prove every matrix member, which `needs.test`
 // alone cannot enumerate. Evidence comes only from this run, not PR artifacts.
-export function evaluateMergeEvidence(plan, { head, sourceHead, event, draft, runId, needs, jobs }) {
+export function evaluateMergeEvidence(plan, {
+  head, sourceHead, event, draft, runId, needs, jobs, reusedRunJobs = [],
+}) {
   const failures = [];
   if (!plan || plan.schemaVersion !== 1 || plan.head !== head || plan.sourceHead !== sourceHead) {
     return ["Plan identity does not match the exact candidate."];
@@ -173,6 +188,16 @@ export function evaluateMergeEvidence(plan, { head, sourceHead, event, draft, ru
       // synthetic merge commit. Every workflow checkout uses the latter.
       || matches[0].head_sha !== sourceHead || matches[0].status !== "completed"
       || matches[0].conclusion !== "success") failures.push(`Required check ${name} lacks exact successful evidence.`);
+  }
+  if (plan.lane === "main-reused") {
+    const reused = plan.reusedRun;
+    const matches = validReusedRun(reused) && Array.isArray(reusedRunJobs)
+      ? reusedRunJobs.filter((job) => job?.name === "merge-ready") : [];
+    if (matches.length !== 1 || matches[0].run_id !== reused.runId
+      || matches[0].head_sha !== reused.sourceHead || matches[0].status !== "completed"
+      || matches[0].conclusion !== "success") {
+      failures.push("Reused pull-request certification lacks exact successful merge-ready evidence.");
+    }
   }
   return failures;
 }

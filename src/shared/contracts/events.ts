@@ -1,3 +1,4 @@
+import type { LimitResetResult } from "../limit-reset";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
 import type { MessageQueueResult } from "../queued-messages";
@@ -208,6 +209,7 @@ export type ServerEvent =
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance
         | MessageQueueResult
+        | LimitResetResult
         | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult

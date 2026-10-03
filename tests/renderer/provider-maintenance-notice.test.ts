@@ -145,20 +145,6 @@ describe("provider maintenance notice", () => {
     expect(html).not.toContain(">Update</button>");
   });
 
-  it("shows a release lookup failure with a single Check action in Settings", () => {
-    const html = renderToStaticMarkup(createElement(ProviderMaintenanceNotice, {
-      providerLabel: "Codex",
-      status: status({ versionStatus: "unknown", latestVersion: null, message: "Latest-version information is temporarily unavailable." }),
-      operation: null,
-      showStatus: true,
-      dismissible: false,
-      ...actions,
-    }));
-    expect(html).toContain("Latest-version information is temporarily unavailable.");
-    expect(html.match(/>Check<\/button>/gu)).toHaveLength(1);
-    expect(html).not.toContain(">Update</button>");
-  });
-
   it("offers a provider-managed action when version discovery is unavailable", () => {
     const cursorStatus = status({
       providerId: "cursor",

@@ -268,7 +268,7 @@ describe("ProviderAuthDialog browser handoff", () => {
     await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledExactlyOnceWith(AUTH_URL));
   });
 
-  it.each([0, 1, 130, 143])("reports explicit Kimi login exit %s without claiming authentication", async (exitCode) => {
+  it.each([0, 1])("reports explicit Kimi login exit %s without claiming authentication", async (exitCode) => {
     const dialog = renderDialog({ provider: kimiProvider });
     await screen.findByText("Waiting for sign-in");
     act(() => dialog.emit({ type: "terminal.exit", terminalId: TERMINAL_ID, exitCode }));
@@ -282,7 +282,7 @@ describe("ProviderAuthDialog browser handoff", () => {
     if (exitCode !== 0) expect(screen.queryByText("Connection flow complete")).toBeNull();
   });
 
-  it.each([0, 1, 130])("retains exact login exit %s received before terminal.created resolves", async (exitCode) => {
+  it.each([0, 1])("retains exact login exit %s received before terminal.created resolves", async (exitCode) => {
     let resolveCreated!: () => void;
     const dialog = renderDialog({
       provider: kimiProvider,

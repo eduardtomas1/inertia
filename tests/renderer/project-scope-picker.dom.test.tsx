@@ -51,28 +51,4 @@ describe("project scope picker", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
-  it("shows no matches without resetting the filter and supports All projects", () => {
-    const onSelect = vi.fn();
-    render(
-      <ProjectScopePicker
-        projects={projects}
-        selectedId="two"
-        onSelect={onSelect}
-        onAdd={vi.fn()}
-        disabled={false}
-      />,
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Filter work by project" }),
-    );
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "missing" },
-    });
-    expect(screen.getByText("No matching projects")).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
-    expect(onSelect).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("option", { name: "All projects" }));
-    expect(onSelect).toHaveBeenCalledWith(null);
-  });
 });

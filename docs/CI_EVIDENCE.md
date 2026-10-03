@@ -24,8 +24,8 @@ It does not select only tests whose filenames changed.
 | --- | --- | --- |
 | Draft feedback | Shared quality/lineage, full canonical Linux coverage for code, selected native interaction/provider sentinels; clean minimum Node when its contract changes | `merge-ready` deliberately fails: draft feedback is not merge approval. |
 | Merge validation | Quality/lineage once; canonical Linux coverage for code; contract-selected interaction, provider/native and package evidence | Ready-for-review and every subsequent head run the required plan. |
-| Main validation | Same policy over the accumulated unproven diff from a trusted compatible successful ancestor | Missing/uncertain baseline requires the complete matrix. |
-| Nightly certification | All six native targets, full units/portable contracts, Electron, packages, performance and retained three-attempt lifecycle checks | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
+| Main validation | Quality/lineage only when the squash commit's tree equals the head of its merged PR, whose CI run has a successful `merge-ready`, and the previous main commit is an ancestor of that head; performance changes still run the complete plan | Any missing PR, run, tree match, ancestry or API answer requires the complete plan. |
+| Nightly certification | All six native targets with every Electron project, full units/portable contracts, packages and the Linux x64 desktop benchmark | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
 | Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
 Docs-only changes require quality and immutable migration lineage, but no
@@ -35,11 +35,14 @@ without native installers. Provider adapters require Linux coverage plus
 three-OS lifecycle/transport proof; Windows/macOS also run the generated
 portable contracts, and Windows retains native Codex shim/discovery proof.
 OS-specific package paths select both architectures of that OS plus canonical
-coverage. Shared lifecycle, startup, containment, migrations, toolchain,
-workflow/test infrastructure, shared contracts and unknown changes expand to
-all six targets. Native Electron verifier changes under `tests/e2e/`, including
-shared support and OS-only scenarios, also require all six targets: running a
-macOS-only test on Linux would skip its changed assertions. This rule precedes
+coverage. Shared lifecycle, startup, containment, migrations, shared contracts,
+test infrastructure and native Electron verifier changes under `tests/e2e/`
+require the primary targets (Linux x64, Windows x64, macOS arm64). Dependency
+graphs, workflows, CI scripts, native and packaging sources, updater and guardian
+code, and unknown changes require all six targets; outside the nightly, the
+sibling architectures (Linux ARM64, Windows ARM64, macOS x64) run only the
+runtime-recovery Electron project. Nightly and release run every project on all
+six. This rule precedes
 renderer matching and does not infer native coverage from a test's UI-facing
 name. Mixed changes take the union; a full native target replaces
 the equivalent same-platform sentinel.
@@ -50,9 +53,9 @@ ARM64 runs the same complete unit suite without duplicate instrumentation;
 macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
 remain single-worker; Windows ARM64 retains its portable/native obligations.
 Windows Electron remains one worker, other isolated desktop projects two. The
-desktop Electron projects run in separate jobs per selected target; macOS x64
-has independent display-sensitive, isolated and runtime-recovery jobs (see
-package evidence below). The package job itself has no Playwright
+desktop Electron projects run in two jobs per complete target, display-sensitive
+and isolated followed by runtime-recovery; Windows splits its isolated project
+across two single-worker runners (see package evidence below). The package job itself has no Playwright
 step.
 The isolated browser-evidence CPU budget remains in CI quality and on each
 release target, separate from instrumented coverage.
@@ -88,23 +91,16 @@ Release ownership remains separate and non-cancellable. Concurrency is not a
 global priority scheduler; queue delay and runner contention must be measured
 separately from execution time.
 
-Main never classifies only `github.event.before`. A bounded read-only Actions
-lookup considers up to 50 successful runs of this exact workflow on repository
-`main` pushes. A candidate must belong to this repository, be older than the
-current run, have a successful exact-head `merge-ready`, be a Git ancestor,
-and have the same verification-contract digest. Failed/cancelled runs,
-PR/fork runs, another workflow, non-ancestors and changed contracts cannot
-nominate a baseline. API permission/rate failures, missing history or no
-compatible run expand to full evidence.
-
-Compatibility hashes the Git mode/blob/path identities of complete
-`.github/`, `scripts/`, `tests/`, `benchmarks/` trees and root non-document
-configuration files. This includes the lockfile, dependency action and verifier.
+Main never classifies only `github.event.before`. A bounded read-only lookup
+reuses certification only for a single-parent main commit whose one merged pull
+request (same repository, base `main`) has a head with the identical Git tree,
+whose previous main commit is an ancestor of that head, and whose CI run for that
+head has exactly one successful `merge-ready` job. The plan records that run, and
+the main `merge-ready` re-reads its job before accepting the reuse. Any other
+outcome, including API permission, rate or timeout failures, expands to the
+complete plan with full migration-lineage history.
 The dependency action uses existing release Node 22.23.2 instead of floating
 Node 22, while the deliberate uncached Node 22.13 install remains separate.
-No runner artifact supplies authority. The lineage reusable job consumes this
-same baseline; unavailable main proof checks full history rather than forgetting
-migration edits in a cancelled predecessor.
 The lineage verifier's explicit `--all-history` fallback compares every reachable
 manifest revision, bounded to 1,000 revisions with bounded Git reads. A root
 commit predating the manifest is not treated as historical proof; unknown formats
@@ -125,20 +121,25 @@ with its own `npm run build:packaged` for its exact source/target/configuration:
   benchmark smoke, package construction, identity/fuse/static-guardian checks,
   packaged launch, final-container smoke, Windows N-1 installed upgrade and
   applicable signature checks. It contains no Playwright step.
-- `<label> Electron` (the `electron` matrix): the display-sensitive, isolated
-  and runtime-recovery Playwright projects, the provider-settings screenshots
-  on Linux x64, the desktop benchmark and the compact timing report.
-  macOS x64 expands this into three required checks named
-  `macOS x64 Electron (display-sensitive)`, `macOS x64 Electron (isolated)` and
-  `macOS x64 Electron (runtime-recovery)`. Each builds the exact candidate on a
-  separate runner. Only the display-sensitive job runs the desktop benchmark,
-  after its end-to-end tests, as the single job did before the split. The
-  recovery job reached its benchmark 4 to 7 minutes after the runner started,
-  and those samples showed inflated long tasks and cold startup.
+- `<label> Electron (display-sensitive)` and `<label> Electron (isolated)` (the
+  `electron` matrix): every target that runs the complete Electron suite gets
+  both jobs. The first runs the single-worker display-sensitive project and, on
+  Linux x64, keeps the provider-settings screenshots. The second runs the
+  isolated project and then the sequential runtime-recovery project, followed
+  on Linux x64 by the desktop benchmark when one is planned. Windows keeps one
+  Electron instance per runner, so both Windows architectures replace the
+  isolated job with `<label> Electron (isolated 1/2)` and
+  `<label> Electron (isolated 2/2)`, each running
+  `playwright test --project=isolated --shard=N/2` with one worker. Playwright
+  shards by whole spec file in the unsharded order, and only shard 1 runs the
+  runtime-recovery project afterwards. Outside the
+  nightly, a sibling architecture runs only the runtime-recovery project as
+  `<label> Electron (runtime-recovery)`. Each job builds the exact candidate on
+  a separate runner and uploads its compact timing report under its own phase.
   Display and recovery retain their serial project settings internally.
 
 All are required checks in the plan (`requiredChecks` lists every Electron
-phase for macOS x64) and all are enumerated by `merge-ready` from the
+job) and all are enumerated by `merge-ready` from the
 REST job records. Neither transfers an artifact to the other: the Electron job
 runs against its own built bundle and the downloaded Electron binary, exactly
 as the Linux interaction sentinel already did, so no cross-job artifact
@@ -179,11 +180,23 @@ comparison, and the runner budget rises by one install and build per target.
 The later macOS x64 phase split responds to main run
 [36244548680](https://github.com/eduardtomas1/inertia/actions/runs/36244548680):
 its Electron job took 48m04s, including display 26m04s, isolated 13m59s and
-recovery 2m03s. Splitting those phases permits independent execution at the
-cost of two additional installs/builds. The matrices may now request six macOS
-runners across both architectures; hosted concurrency limits can queue jobs.
-The gain must be measured from completed hosted runs, not inferred from the
-sum of phase times.
+recovery 2m03s. Pull-request run
+[37114090261](https://github.com/eduardtomas1/inertia/actions/runs/37114090261)
+showed the same shape on the primary tier: Windows x64 Electron took 30.3
+minutes (display 11.4, isolated 13.3, recovery 0.9) and Linux x64 Electron 21.2
+(11.4, 7.5, 0.8). Every complete target therefore runs display-sensitive and
+isolated-plus-recovery as two jobs, which costs one additional install and
+build per target, and the recovery project, about one to two minutes, no
+longer needs a runner of its own. After page-driven scenarios moved to the
+isolated lane, Windows x64 carried about 1,190 seconds of single-worker
+isolated test time against about 490 seconds of display-sensitive time, so the
+Windows isolated project is sharded in two rather than run with a second
+worker. Full-suite jobs precede recovery-only siblings in the matrix, and
+outside the nightly the Electron matrix may run ten jobs at once, which covers
+every pull-request tier without queueing behind `max-parallel`.
+The matrices may request six macOS runners across both architectures; hosted
+concurrency limits can queue jobs. The gain must be measured from completed
+hosted runs, not inferred from the sum of phase times.
 
 Opt-in authenticated Kimi smoke runs only on trusted scheduled Linux x64,
 never under PR/merge-group source. Missing secret is explicitly not exercised.

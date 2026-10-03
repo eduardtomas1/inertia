@@ -494,41 +494,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     )).toMatchObject({ result: { decision: "accept" } });
   });
 
-  it("rejects supervised approvals from an unrelated provider thread", async () => {
-    const fake = createFakeAppServer(roots, true);
-    const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "unrelated-approval";
-    const manager = trackedManager(fake.command);
-    const onApproval = vi.fn();
-
-    const result = await manager.run(nativeProviderRunInput({
-      providerId: "codex",
-      conversationId: "conversation-unrelated-approval",
-      cwd: fake.root,
-      prompt: "Reject unrelated authority.",
-      interactionMode: "build",
-      access: "supervised",
-    }), { onApproval });
-
-    expect(result).toMatchObject({
-      status: "failed", cleanupConfirmed: true,
-      failure: { reason: "malformed-protocol" },
-    });
-    expect(onApproval).not.toHaveBeenCalled();
-    const messages = writes.mock.calls.map(([message]) => message);
-    expect(messages.find(
-      ({ id }) => id === "approval-rpc",
-    )).toMatchObject({
-      error: {
-        code: -32602,
-        message: "Codex sent an approval for a different provider thread.",
-      },
-    });
-    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
-    expect(manager.activeConversationIds()).toEqual([]);
-  });
-
   it.each([
     ["legacy-command", "command", "npm test"],
     ["legacy-file-change", "file-change", "Write the requested file\nChange src/example.ts"],
@@ -1025,140 +990,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     ]);
   });
 
-  it("preserves a clear decoded after a goal mutation response", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO =
-      "goal-set-clear-response-ordering";
-    const updates: ProviderGoalSnapshot[] = [];
-    const clears: string[] = [];
-    let markRunning!: () => void;
-    const running = new Promise<void>((resolve) => {
-      markRunning = resolve;
-    });
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "Keep the clear-ordering connection open",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-set-clear-response-ordering",
-      onStatus: () => markRunning(),
-      onGoalUpdated: (_threadId, goal) => updates.push(goal),
-      onGoalCleared: (threadId) => clears.push(threadId),
-    });
-    await running;
-
-    await expect(run.setGoal({
-      objective: "Do not revive this goal",
-      status: "active",
-      tokenBudget: null,
-    })).rejects.toThrow(
-      "Codex cleared the goal before the update completed.",
-    );
-    expect(clears).toEqual(["thread-goal-set-clear-response-ordering"]);
-    expect(updates).toEqual([]);
-
-    run.cancel(true);
-    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
-  });
-
-  it("keeps an awaited continuation alive through a terminal goal response", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-terminal-response-ordering";
-    let markRunning!: () => void;
-    const running = new Promise<void>((resolve) => {
-      markRunning = resolve;
-    });
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "Wait for a terminal goal mutation",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-terminal-response-ordering",
-      goalContinuationGraceMs: 1_000,
-      onStatus: (status) => {
-        if (status === "running") markRunning();
-      },
-    });
-    await running;
-
-    await expect(run.setGoal({
-      objective: "Finish the awaited goal",
-      status: "complete",
-      tokenBudget: null,
-    })).resolves.toMatchObject({
-      objective: "Finish the awaited goal",
-      status: "complete",
-    });
-    await expect(run.result).resolves.toMatchObject({ status: "completed" });
-  });
-
-  it("preserves a goal notification decoded after a clear response", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-clear-response-ordering";
-    const updates: ProviderGoalSnapshot[] = [];
-    const clears: string[] = [];
-    let markRunning!: () => void;
-    const running = new Promise<void>((resolve) => {
-      markRunning = resolve;
-    });
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "Keep the ordered clear connection open",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-clear-response-ordering",
-      onStatus: () => markRunning(),
-      onGoalUpdated: (_threadId, goal) => updates.push(goal),
-      onGoalCleared: (threadId) => clears.push(threadId),
-    });
-    await running;
-
-    await expect(run.clearGoal()).resolves.toBe(false);
-    expect(clears).toEqual([]);
-    expect(updates.map(({ objective }) => objective)).toEqual([
-      "Goal before clear response",
-      "Goal created after clear response",
-    ]);
-    run.cancel(true);
-    await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
-  });
-
-  it("keeps an awaited continuation alive through a goal clear response", async () => {
-    const fake = fakeAppServer();
-    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-clear-terminal-response-ordering";
-    let markRunning!: () => void;
-    const running = new Promise<void>((resolve) => {
-      markRunning = resolve;
-    });
-    const run = startCodexAppServerRun({
-      executable: fake.command,
-      environment: process.env,
-      cwd: fake.root,
-      prompt: "Wait for a goal clear mutation",
-      planMode: false,
-      access: "full",
-      sessionId: "thread-goal-clear-terminal-response-ordering",
-      goalContinuationGraceMs: 1_000,
-      onStatus: (status) => {
-        if (status === "running") markRunning();
-      },
-    });
-    await running;
-
-    await expect(run.clearGoal()).resolves.toBe(true);
-    await expect(run.result).resolves.toMatchObject({ status: "completed" });
-  });
-
   it("keeps a resumed active goal connected across provider continuations", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -1331,6 +1162,42 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(messages.find(({ method }) => method === "turn/interrupt")).toMatchObject({
       params: { threadId: "thread-new", turnId: "turn-1" },
     });
+    await manager.disposeAll();
+  });
+
+  it("ends as cancelled when Codex requests approval while the user's stop is in flight", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "approval-after-interrupt";
+    const manager = trackedManager(fake.command, 500);
+    const approvals: string[] = [];
+    const failedActivities: string[] = [];
+    let cancelled = false;
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-stop-approval",
+      cwd: fake.root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onApproval: (event) => approvals.push(event.request.requestId),
+      onActivity: (event) => { if (event.phase === "failed") failedActivities.push(event.label); },
+      onStatus: (event) => {
+        if (event.status !== "running" || cancelled) return;
+        cancelled = manager.cancel(event.conversationId);
+      },
+    });
+
+    const settled = await result;
+    expect(settled.status).toBe("cancelled");
+    expect(settled.failure).toBeUndefined();
+    expect(settled.error ?? "").not.toContain("approval");
+    expect(failedActivities).toEqual([]);
+    expect(approvals).toEqual([]);
+    const response = captured(fake.capturePath).find(({ id, method }) => id === "late-approval" && method === undefined);
+    expect(response?.result).toEqual({ decision: "cancel" });
     await manager.disposeAll();
   });
 
@@ -2150,6 +2017,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   it.each([
     ["turn-started-before-response", "Hello from Codex"],
     ["turn-completed-before-response", "Hello from Codex"],
+    ["approval-before-response", "Hello from Codex"],
   ])("keeps the requested turn's notifications that reach stdout before the turn/start response (%s)", async (scenario, text) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;

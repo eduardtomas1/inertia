@@ -1,4 +1,4 @@
-// @inertia-e2e-resource primary-display
+// @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -37,7 +37,6 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "quiet-ledger",
     initialState: "conversation",
-    windowDisplay: "primary",
   });
   electronApp = app.electronApp;
   page = app.page;

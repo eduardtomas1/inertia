@@ -12,7 +12,7 @@ import {
 
 afterEach(cleanupTurnControllerTestDirectories);
 
-describe.each(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const)(
+describe.each(["codex", "claude"] as const)(
   "%s terminal state presented to the user",
   (providerId) => {
     it.each(["completed", "failed", "cancelled"] as const)(

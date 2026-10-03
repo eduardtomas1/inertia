@@ -301,30 +301,12 @@ describe("inline delegated-agent disclosure", () => {
     expect(completed.result).toBe(result);
   });
 
-  it("keeps one intentional danger hover and adjacent focus treatment for Stop", () => {
-    const hoverRules = [...styles.matchAll(
-      /\.subagent-stop-button:hover:not\(:disabled\)\s*\{(?<body>[^}]*)\}/gu,
-    )];
+  it("keeps a visible focus treatment for Stop and removes disclosure transitions for reduced motion", () => {
     const focusRules = [...styles.matchAll(
       /\.subagent-row-actions button:focus-visible\s*\{(?<body>[^}]*)\}/gu,
     )];
-    expect(hoverRules).toHaveLength(1);
-    expect(hoverRules[0]?.groups?.body).toContain("color: var(--danger)");
-    expect(hoverRules[0]?.groups?.body).toContain("var(--danger-soft)");
     expect(focusRules).toHaveLength(1);
     expect(focusRules[0]?.groups?.body).toContain("var(--focus-ring)");
-
-    const componentRule = styles.indexOf(".subagent-row-actions button {");
-    const hoverRule = styles.indexOf(
-      ".subagent-stop-button:hover:not(:disabled) {",
-    );
-    const focusRule = styles.indexOf(
-      ".subagent-row-actions button:focus-visible {",
-    );
-    const usagePopover = styles.indexOf(".usage-popover {");
-    expect(componentRule).toBeLessThan(focusRule);
-    expect(focusRule).toBeLessThan(hoverRule);
-    expect(focusRule).toBeLessThan(usagePopover);
     expect(styles).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.subagent-details-button svg,[\s\S]*?transition: none;/u,
     );

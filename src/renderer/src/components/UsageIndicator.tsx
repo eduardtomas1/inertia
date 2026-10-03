@@ -57,10 +57,6 @@ export function displayPercent(value: number): number | null {
   return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
 }
 
-export function contextRemaining(usage: ThreadUsageSnapshot | null): number | null {
-  return contextUsageDisplayValue(usage, usage ? "current" : "unavailable").remainingPercent;
-}
-
 function dateLabel(
   value: string | null,
   prefix: "Resets" | "Updated",

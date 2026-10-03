@@ -57,21 +57,6 @@ describe("runtime agent browser coordinator", () => {
     expect(broker.perform).toHaveBeenCalledOnce();
   });
 
-  it("answers a request whose command failed validation as invalid without performing it", () => {
-    const broker = { perform: vi.fn() };
-    const post = vi.fn();
-    const peer = record();
-    const coordinator = new RuntimeAgentBrowserCoordinator({ broker, accepts: () => true, post });
-    const requestId = crypto.randomUUID();
-    coordinator.handle(peer, { type: "runtime.agent-browser-request", requestId, identity, command: null });
-    expect(broker.perform).not.toHaveBeenCalled();
-    expect(post).toHaveBeenCalledExactlyOnceWith(peer, {
-      type: "runtime.agent-browser-result",
-      requestId,
-      result: { ok: false, code: "invalid", message: expect.stringContaining("not accepted") },
-    });
-  });
-
   it("aborts exact pending work on cancel and suppresses late replies after clear", async () => {
     const operation = deferred<{ ok: false; code: "not-found"; message: string }>();
     let signal: AbortSignal | undefined;

@@ -7,9 +7,9 @@ import { pathToFileURL } from "node:url";
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
 import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_IMAGE_ATTACHMENT_BYTES as MAX_ATTACHMENT_BYTES,
+  MAX_IMAGE_ATTACHMENT_TOTAL_BYTES as MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
   chatAttachmentKind,
   isSpreadsheetAttachmentMimeType,
@@ -309,8 +309,52 @@ function checkExtractionPending(
   if (now() >= deadlineAt) throw new DocumentExtractionDeadlineError();
 }
 
+interface PdfCanvasAndContext {
+  canvas: { width: number; height: number } | null;
+  context: unknown;
+}
+
+class PdfNodeCanvasFactory {
+  create(width: number, height: number): PdfCanvasAndContext {
+    if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");
+    const canvas = (require("@napi-rs/canvas") as typeof import("@napi-rs/canvas"))
+      .createCanvas(width, height);
+    return { canvas, context: canvas.getContext("2d") };
+  }
+
+  reset(target: PdfCanvasAndContext, width: number, height: number): void {
+    if (!target.canvas) throw new Error("Canvas is not specified");
+    if (width <= 0 || height <= 0) throw new Error("Invalid canvas size");
+    target.canvas.width = width;
+    target.canvas.height = height;
+  }
+
+  destroy(target: PdfCanvasAndContext): void {
+    if (!target.canvas) throw new Error("Canvas is not specified");
+    target.canvas.width = 0;
+    target.canvas.height = 0;
+    target.canvas = null;
+    target.context = null;
+  }
+}
+
+class PdfNodeFilterFactory {
+  addFilter(): string { return "none"; }
+  addHCMFilter(): string { return "none"; }
+  addAlphaFilter(): string { return "none"; }
+  addLuminosityFilter(): string { return "none"; }
+  addKnockoutFilter(): string { return "none"; }
+  addHighlightHCMFilter(): string { return "none"; }
+  addSelectionHCMFilter(): string { return "none"; }
+  addSelectionFilter(): string { return "none"; }
+  createSelectionStyle(): null { return null; }
+  destroy(): void {}
+}
+
 function pdfDocumentOptions(bytes: Uint8Array): Parameters<PdfTextModule["getDocument"]>[0] {
   return {
+    CanvasFactory: PdfNodeCanvasFactory,
+    FilterFactory: PdfNodeFilterFactory,
     data: new Uint8Array(bytes),
     disableFontFace: true,
     isImageDecoderSupported: false,
@@ -402,9 +446,9 @@ async function rasterizePdfPages(
         checkExtractionPending(signal, deadlineAt, now);
         const jpeg = await canvas.encode("jpeg", 82);
         checkExtractionPending(signal, deadlineAt, now);
-        if (jpeg.byteLength > MAX_CHAT_ATTACHMENT_BYTES) {
+        if (jpeg.byteLength > MAX_ATTACHMENT_BYTES) {
           throw new ScannedPdfRasterizationError(
-            `${analysis.attachment.name} produced a page image above the 10 MB limit.`,
+            `${analysis.attachment.name} produced a page image above the 10 MiB limit.`,
           );
         }
         if (budget.remainingCount < 1 || jpeg.byteLength > budget.remainingBytes) {
@@ -630,19 +674,19 @@ export async function prepareDocumentAttachments(
   const existingImages = payloads.filter(({ attachment }) =>
     chatAttachmentKind(attachment.mimeType) === "image");
   const existingImageBytes = existingImages.reduce(
-    (total, { bytes }) => total + bytes.byteLength,
+    (total, { attachment }) => total + attachment.size,
     0,
   );
   if (
-    existingImages.length > MAX_CHAT_ATTACHMENTS
-    || existingImageBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+    existingImages.length > MAX_ATTACHMENT_COUNT
+    || existingImageBytes > MAX_ATTACHMENT_TOTAL_BYTES
   ) throw new DocumentAttachmentError("Image attachments exceed the shared turn limits.");
   const rasterBudget: PdfRasterBudget = {
-    remainingBytes: MAX_CHAT_ATTACHMENT_TOTAL_BYTES - existingImageBytes,
-    remainingCount: MAX_CHAT_ATTACHMENTS - existingImages.length,
+    remainingBytes: MAX_ATTACHMENT_TOTAL_BYTES - existingImageBytes,
+    remainingCount: Math.max(0, MAX_DOCUMENT_EXTRACTION_COUNT - existingImages.length),
   };
   const documents = payloads.flatMap((payload) =>
-    payload.attachment.mimeType.startsWith("image/")
+    (payload.source || payload.attachment.mimeType.startsWith("image/"))
       ? []
       : [payload]);
   if (documents.length === 0) {
@@ -856,7 +900,7 @@ export async function prepareDocumentAttachments(
     );
     if (unreadablePdf) {
       throw new ScannedPdfRasterizationError(
-        `${unreadablePdf.attachment.name} needs a page image, but the turn's 20 MB image budget is exhausted.`,
+        `${unreadablePdf.attachment.name} needs a page image, but the turn's 80 MiB image budget is exhausted.`,
       );
     }
 

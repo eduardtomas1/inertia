@@ -7,8 +7,6 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
-import { installRuntimeRecoveryConsent } from
-  "./support/runtime-crash-safety";
 import { closeWorkspaceTools } from "./support/workspace-tools";
 import { observePendingAttachment } from "./support/pending-attachment-observation";
 
@@ -74,10 +72,6 @@ test.afterAll(async () => {
 test("previews, validates, removes, and cleans up secure composer attachments", {
   tag: "@runtime-recovery",
 }, async ({ browserName: _browserName }, testInfo) => {
-  // The deliberate macOS crash can consume the complete bounded 20-second
-  // recovery path before this long attachment journey performs its final
-  // restart assertions. Keep the inner recovery bound authoritative while
-  // leaving enough outer headroom for the remaining real desktop checks.
   test.setTimeout(75_000);
   await resizeWindow(1440, 920);
   await electronApp.evaluate(({ dialog }, paths) => {
@@ -367,54 +361,6 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 
-  const shell = page.locator(".app-shell");
-  const beforeRuntimeGeneration = await shell.getAttribute(
-    "data-runtime-generation",
-  );
-  expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
-  const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
-    electronApp,
-  );
-  let recoveryOperationError: unknown = null;
-  let recoveryOperationFailed = false;
-  try {
-    await electronApp.evaluate(() => {
-      const runtime = Reflect.get(
-        globalThis,
-        "__inertiaTestRuntime",
-      ) as { crash: () => unknown } | undefined;
-      if (!runtime) {
-        throw new Error("The test runtime supervisor is unavailable");
-      }
-      runtime.crash();
-    });
-    await expect.poll(async () => {
-      const [connectionStatus, runtimeGeneration] = await Promise.all([
-        shell.getAttribute("data-connection-status", { timeout: 500 })
-          .catch(() => null),
-        shell.getAttribute("data-runtime-generation", { timeout: 500 })
-          .catch(() => null),
-      ]);
-      return connectionStatus === "online"
-        && runtimeGeneration !== null
-        && runtimeGeneration !== beforeRuntimeGeneration;
-    }, { timeout: 20_000 }).toBe(true);
-  } catch (error) {
-    recoveryOperationFailed = true;
-    recoveryOperationError = error;
-  }
-  try {
-    await restoreRuntimeRecoveryConsent();
-  } catch (recoveryConsentError) {
-    if (recoveryOperationFailed) {
-      throw new AggregateError(
-        [recoveryOperationError, recoveryConsentError],
-        "Runtime recovery and recovery-consent restoration both failed.",
-      );
-    }
-    throw recoveryConsentError;
-  }
-  if (recoveryOperationFailed) throw recoveryOperationError;
   await expect(sentAttachments).toBeVisible();
   await expect.poll(() => sentPreview.evaluate((element) => {
     const image = element as HTMLImageElement;

@@ -148,27 +148,19 @@ describe("WorkspaceHeader Git split button", () => {
     await waitFor(() => expect(more).toHaveFocus());
   });
 
-  it("promotes Pull when a clean checkout is behind", async () => {
-    const props = await renderHeader(status(true, { upstream: "origin/feature/pr", behind: 2 }));
+  it.each([
+    ["Pull", status(true, { upstream: "origin/feature/pr", behind: 2 }), "onPull"],
+    ["Push & create PR", status(true, { upstream: "origin/feature/pr", ahead: 2 }), "onPushAndCreatePullRequest"],
+    ["Push", status(false, { upstream: "origin/feature/pr", ahead: 1 }), "onPush"],
+    ["Create branch", status(true, { branch: null }), "onRefreshBranches"],
+  ] as const)("dispatches the %s primary action to its own handler", async (name, gitStatus, handler) => {
+    const props = await renderHeader(gitStatus);
 
-    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
-    expect(props.onPull).toHaveBeenCalledOnce();
-  });
-
-  it("pushes and opens a pull request from a clean feature branch that is ahead", async () => {
-    const props = await renderHeader(status(true, { upstream: "origin/feature/pr", ahead: 2 }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Push & create PR" }));
-    expect(props.onPushAndCreatePullRequest).toHaveBeenCalledOnce();
-    expect(props.onPush).not.toHaveBeenCalled();
-  });
-
-  it("pushes plainly when the forge cannot open pull requests", async () => {
-    const props = await renderHeader(status(false, { upstream: "origin/feature/pr", ahead: 1 }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Push" }));
-    expect(props.onPush).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Pull request" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name }));
+    expect(props[handler]).toHaveBeenCalled();
+    for (const other of ["onPull", "onPushAndCreatePullRequest", "onPush"] as const) {
+      if (other !== handler) expect(props[other]).not.toHaveBeenCalled();
+    }
   });
 
   it("keeps a disabled primary hoverable and explains why", async () => {
@@ -181,13 +173,6 @@ describe("WorkspaceHeader Git split button", () => {
     expect(primary).toHaveAccessibleDescription("Branch is up to date. Nothing to commit or push.");
     fireEvent.click(primary);
     expect(props.onCommit).not.toHaveBeenCalled();
-  });
-
-  it("offers Create branch on a detached HEAD", async () => {
-    const props = await renderHeader(status(true, { branch: null }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Create branch" }));
-    expect(props.onRefreshBranches).toHaveBeenCalled();
   });
 
   it("moves focus through all Git explanations and restores the trigger on Escape", async () => {

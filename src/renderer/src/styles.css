@@ -2724,6 +2724,8 @@ button.header-breadcrumb-project:hover {
   box-shadow: var(--shadow);
 }
 
+.welcome-scratch-button { margin-top: 10px; }
+
 .welcome-mark img {
   width: 50px;
   height: 50px;
@@ -9773,6 +9775,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .backend-edit-profile { min-height: 31px; flex: 0 0 auto; font-size: 8.5px; }
+
+.backend-profile-editor > fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 
 .backend-form-section {
   padding: 16px 0;

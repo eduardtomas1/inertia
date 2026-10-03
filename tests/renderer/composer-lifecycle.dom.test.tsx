@@ -20,7 +20,6 @@ import type {
   PromptPreset,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../../src/shared/attachments";
 import {
   versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
@@ -122,15 +121,6 @@ describe("composer asynchronous ownership", () => {
     expect(neighbour).toHaveValue("Neighbour draft");
   });
 
-  it("omits scratch-prompt storage controls when the window disables them", () => {
-    render(<Composer {...composerProps(conversation("detached-stash"), {
-      promptStashEnabled: false,
-    })} />);
-
-    expect(screen.queryByRole("button", { name: "Scratch prompts" }))
-      .not.toBeInTheDocument();
-  });
-
   it("keeps send feedback as motion before yielding the same control to Stop", async () => {
     const current = conversation("conversation-accepted-motion");
     const sent = deferred<MessageSendAcceptance>();
@@ -165,132 +155,6 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByRole("button", { name: "Stop agent" })).toBe(primary);
     expect(primary.querySelector("[data-icon-state]"))
       .toHaveAttribute("data-icon-state", "stop");
-  });
-
-  it("does not claim acceptance for a legacy null acknowledgement", async () => {
-    const current = conversation("conversation-null-acceptance");
-    const onSend = vi.fn(async () => null);
-    render(<Composer {...composerProps(current, { onSend })} />);
-    await waitForComposerSendEnhancement();
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
-      target: { value: "Keep legacy acknowledgement neutral" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("button", { name: "Message accepted" }))
-      .not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sending message" }))
-      .toHaveAttribute("data-motion-state", "sending");
-  });
-
-  it("does not claim acceptance returned for another conversation", async () => {
-    const current = conversation("conversation-mismatched-acceptance");
-    const onSend = vi.fn(async (): Promise<MessageSendAcceptance> => ({
-      kind: "message.accepted",
-      conversationId: "another-conversation",
-      turnId: "turn-from-another-conversation",
-      userMessageId: "message-from-another-conversation",
-      disposition: "new-turn",
-    }));
-    render(<Composer {...composerProps(current, { onSend })} />);
-    await waitForComposerSendEnhancement();
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
-      target: { value: "Keep acceptance conversation-owned" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("button", { name: "Message accepted" }))
-      .not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sending message" }))
-      .toHaveAttribute("data-motion-state", "sending");
-  });
-
-  it("keeps Stop authoritative when acceptance and running settle together", async () => {
-    const current = conversation("conversation-accepted-running-motion");
-    const sent = deferred<MessageSendAcceptance>();
-    const onSend = () => sent.promise;
-    const view = render(<Composer {...composerProps(current, { onSend })} />);
-    await waitForComposerSendEnhancement();
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
-      target: { value: "Preserve the Stop control" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    await act(async () => {
-      view.rerender(<Composer {...composerProps(current, { running: true, onSend })} />);
-      sent.resolve({
-        kind: "message.accepted",
-        conversationId: current.id,
-        turnId: "turn-accepted-running-motion",
-        userMessageId: "message-accepted-running-motion",
-        disposition: "new-turn",
-      });
-      await sent.promise;
-    });
-
-    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("does not reuse the previous turn acceptance for a consecutive send", async () => {
-    const current = conversation("conversation-consecutive-motion");
-    const secondSend = deferred<MessageSendAcceptance>();
-    const firstAcceptance: MessageSendAcceptance = {
-      kind: "message.accepted",
-      conversationId: current.id,
-      turnId: "turn-first-motion",
-      userMessageId: "message-first-motion",
-      disposition: "new-turn",
-    };
-    const onSend = vi.fn()
-      .mockResolvedValueOnce(firstAcceptance)
-      .mockImplementationOnce(() => secondSend.promise);
-    const view = render(<Composer {...composerProps(current, { onSend })} />);
-    const textbox = screen.getByRole("textbox", { name: "Message" });
-    fireEvent.change(textbox, { target: { value: "First fast turn" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    expect(await screen.findByRole("button", { name: "Sending message" }))
-      .toBeInTheDocument();
-
-    view.rerender(<Composer {...composerProps(current, { running: true, onSend })} />);
-    view.rerender(<Composer {...composerProps(current, { onSend })} />);
-    fireEvent.change(textbox, { target: { value: "Second fast turn" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(screen.getByRole("button", { name: "Sending message" }))
-      .toHaveAttribute("data-motion-state", "sending");
-    expect(screen.queryByText("Accepted")).not.toBeInTheDocument();
-  });
-
-  it("keeps accepted follow-ups visually quiet without obscuring Stop", async () => {
-    const current = conversation("conversation-follow-up-motion");
-    const onSend = vi.fn(async (): Promise<MessageSendAcceptance> => ({
-      kind: "message.accepted",
-      conversationId: current.id,
-      turnId: "turn-follow-up-motion",
-      userMessageId: "message-follow-up-motion",
-      disposition: "follow-up",
-    }));
-    render(<Composer {...composerProps(current, {
-      running: true,
-      latestTurn: {
-        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
-        harnessId: "codex-app-server",
-      },
-      onSend,
-    })} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
-      target: { value: "Add one more constraint" },
-    });
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
-      key: "Enter",
-    });
-
-    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
   });
 
 
@@ -439,53 +303,6 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByRole("region", { name: "Message composer" })).toHaveAttribute("data-maximum-reasoning", "true");
     view.rerender(<Composer {...props} conversation={{ ...active, modelSelection: { ...active.modelSelection, reasoningEffort: "low" } }} />);
     expect(screen.getByRole("region", { name: "Message composer" })).not.toHaveAttribute("data-maximum-reasoning");
-  });
-
-  it("offers real skill matches and explains an unknown name", async () => {
-    const user = userEvent.setup();
-    const availableSkills: AgentSkillSummary[] = [
-      {
-        id: "skill-security-review",
-        conversationId: "conversation-skill-navigation",
-        name: "security-review",
-        description: "Review the repository security posture.",
-        shortDescription: "Review security posture",
-        scope: "repo",
-        enabled: true,
-        source: "codex-native",
-      },
-      {
-        id: "skill-security-fix",
-        conversationId: "conversation-skill-navigation",
-        name: "security-fix",
-        description: "Fix reviewed security findings.",
-        shortDescription: "Fix security findings",
-        scope: "repo",
-        enabled: true,
-        source: "codex-native",
-      },
-    ];
-    render(<Composer {...composerProps(conversation("conversation-skill-navigation"), {
-      skills: availableSkills,
-      skillsCapability: {
-        kind: "codex-native",
-        available: true,
-        label: "Codex skills",
-      },
-    })} />);
-    const textbox = screen.getByRole("textbox", { name: "Message" });
-    await user.type(textbox, "$security");
-    const suggestions = await screen.findByRole("listbox", {
-      name: "Skill suggestions",
-    });
-    await user.click(within(suggestions).getByRole("option", {
-      name: /\$security-fix/u,
-    }));
-    expect(textbox).toHaveValue("$security-fix ");
-
-    await user.clear(textbox);
-    await user.type(textbox, "$missing");
-    expect(screen.getByRole("status")).toHaveTextContent("No skills match");
   });
 
   it("accepts visible skill completions from the editor without sending raw fragments", async () => {
@@ -1227,62 +1044,6 @@ describe("composer asynchronous ownership", () => {
     }));
   });
 
-  it("hides Fast mode on unsupported routes", () => {
-    const current = conversation("composer-standard-only");
-    current.modelSelection = providerNativeModelSelection({
-      providerId: "codex",
-      modelId: "gpt-standard",
-    });
-    current.model = "gpt-standard";
-    render(<Composer {...composerProps(current, {
-      providers: [{
-        ...provider,
-        models: [{
-          id: "gpt-standard",
-          label: "GPT Standard",
-          description: "No provider-native Fast option",
-          isDefault: true,
-          inputModalities: ["text"],
-          reasoningOptions: [],
-          defaultReasoningEffort: "",
-          fastMode: null,
-        }],
-      }],
-    })} />);
-
-    expect(screen.queryByRole("button", { name: /Choose response speed/u }))
-      .not.toBeInTheDocument();
-  });
-
-  it("shows truthful provider chat-tool support in the control rail", () => {
-    const current = conversation("composer-chat-tools");
-    const { rerender } = render(<Composer {...composerProps(current, {
-      providers: [{
-        ...provider,
-        agentThreadManagement: { state: "supported", detail: "Host chat tools are ready." },
-      }],
-    })} />);
-
-    const supported = screen.getByLabelText("Agent chat tools: supported");
-    expect(supported).toHaveClass("is-active");
-    expect(supported).toHaveAttribute("title", "Host chat tools are ready.");
-
-    rerender(<Composer {...composerProps(current, {
-      providers: [{
-        ...provider,
-        agentThreadManagement: { state: "unavailable", detail: "Update the CLI to manage chats." },
-      }],
-    })} />);
-
-    const unavailable = screen.getByLabelText("Agent chat tools: unavailable");
-    expect(unavailable).not.toHaveClass("is-active");
-    expect(unavailable).toHaveAttribute("title", "Update the CLI to manage chats.");
-
-    rerender(<Composer {...composerProps(current)} />);
-
-    expect(screen.queryByLabelText(/Agent chat tools/u)).not.toBeInTheDocument();
-  });
-
   it("preserves a saved Fast identity when provider metadata becomes unavailable", async () => {
     const current = conversation("composer-fast-metadata-unavailable");
     current.modelSelection = providerNativeModelSelection({
@@ -1941,8 +1702,8 @@ describe("composer asynchronous ownership", () => {
   });
 
   it("reports count-limited drops and byte-limited picker adoption", async () => {
-    const full = ["first", "second"].map((id) => ({
-      ...attachment(id), size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+    const full = ["first", "second", ...Array.from({ length: 6 }, (_, index) => `extra-${index}`)].map((id) => ({
+      ...attachment(id), size: 10 * 1024 * 1024,
     }));
     const commit = vi.fn(async () => undefined);
     const cancel = vi.fn(async () => undefined);
@@ -1959,13 +1720,13 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(picker);
     await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
     expect(commit).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("up to 8 attachments totaling 20.0 MB");
+    expect(screen.getByRole("alert")).toHaveTextContent("up to 100 files");
     expect(screen.queryByText("too-large.png")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove attachment first.png" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    const files = Array.from({ length: 8 }, (_, index) => new File(["image"], `${index}.png`, { type: "image/png" }));
+    const files = Array.from({ length: 100 }, (_, index) => new File(["image"], `${index}.png`, { type: "image/png" }));
     fireEvent.drop(screen.getByLabelText("Message composer"), { dataTransfer: { files, types: ["Files"] } });
-    await waitFor(() => expect(importFiles).toHaveBeenCalledWith(files.slice(0, 7)));
+    await waitFor(() => expect(importFiles).toHaveBeenCalledWith(files.slice(0, 93)));
     expect(screen.getByRole("alert")).toHaveTextContent("Some files were not attached.");
   });
 

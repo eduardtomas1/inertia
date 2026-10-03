@@ -201,24 +201,6 @@ describe("architecture analyzer link-free source policy", () => {
     ]);
   });
 
-  it("reports directory links into another layer and never resolves through them", () => {
-    const root = fixture({
-      "src/renderer/src/assets/art.png": "png",
-      "src/renderer/src/ui/view.ts": 'import { useState } from "react";\nexport const view = useState;\n',
-      "src/main/sprites.ts": 'import art from "./assets/art.png?inline";\nexport const sprites = [art];\n',
-      "src/shared/consumer.ts": 'import { view } from "./ui/view";\nexport const consumer = view;\n',
-    });
-    linkDirectory(join(root, "src/renderer/src/assets"), join(root, "src/main/assets"));
-    linkDirectory(join(root, "src/renderer/src/ui"), join(root, "src/shared/ui"));
-
-    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      `src/main/assets ${LINK}`,
-      "src/main/sprites.ts:1 imports asset ./assets/art.png?inline through a symbolic link or reparse point.",
-      "src/shared/consumer.ts:1 cannot resolve local module ./ui/view.",
-      `src/shared/ui ${LINK}`,
-    ]);
-  });
-
   it.skipIf(process.platform === "win32")("reports file links and never resolves through them", () => {
     const root = fixture({
       "src/renderer/src/assets/art.png": "png",

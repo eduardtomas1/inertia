@@ -1,5 +1,5 @@
 import { createUsageCommandHandler, type UsageCommandDependencies } from "./usage-commands";
-import { createBackgroundTaskCommandHandler } from "./background-task-commands";
+import { createBackgroundTaskCommandHandler, type BackgroundTaskCommandDependencies } from "./background-task-commands";
 import { createMessageSearchCommandHandler, MessageSearchController } from "./message-search-commands";
 import type { MessageSearchTarget } from "../../../shared/message-search";
 import type { RuntimeCommandHandler } from "./command-router";
@@ -8,6 +8,7 @@ export function createReadCommandHandlers(input: UsageCommandDependencies & {
   databasePath: string;
   lifetimeSignal: AbortSignal;
   reveal(target: MessageSearchTarget): void;
+  canStopWorkspaceRun?: BackgroundTaskCommandDependencies["canStopWorkspaceRun"];
 }): RuntimeCommandHandler[] {
   const searches = new MessageSearchController(input.databasePath);
   // Every search remains in the runtime's tracked-command drain until its

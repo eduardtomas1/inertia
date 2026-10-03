@@ -68,7 +68,7 @@
   width: 100%;
 }
 
-.setting-field-error {
+.setting-field-control .setting-field-error {
   color: var(--danger);
   font-size: var(--ui-font-micro);
   line-height: 1.4;

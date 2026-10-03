@@ -286,8 +286,9 @@ async function captureProjectStates(viewport: Viewport): Promise<void> {
   await scrollContentTo(Math.max(0, Math.floor((await offsetWithinContent(budget)).top) - 160));
   await budget.click();
   await page.keyboard.type("12.345");
+  await budget.blur();
   await expect(budget).toHaveAttribute("aria-invalid", "true");
-  await capture(evidenceName("projects", "spend-limit-invalid", viewport)(null), { keepFocus: true });
+  await capture(evidenceName("projects", "spend-limit-invalid", viewport)(null));
   await budget.fill("");
   await expect(budget).toHaveAttribute("aria-invalid", "false");
 }
@@ -338,7 +339,9 @@ async function captureDiscordStates(viewport: Viewport): Promise<void> {
   await repository.click();
   await page.keyboard.type("not-a-url", { delay: 150 });
   await expect(repository).toHaveValue("not-a-url");
-  await capture(evidenceName("discord", "invalid-url", viewport)(null), { keepFocus: true });
+  await repository.blur();
+  await expect(repository).toHaveAttribute("aria-invalid", "true");
+  await capture(evidenceName("discord", "invalid-url", viewport)(null));
   await repository.fill("");
   await repository.blur();
 }
@@ -429,9 +432,12 @@ async function captureEntryAndExit(viewport: Viewport): Promise<void> {
   await openSection(sectionLabel("keybindings"));
   await settingsNavigation(sectionLabel("keybindings")).focus();
   await page.keyboard.press("Escape");
+  await expect(settings).toHaveCount(0);
   await page.waitForTimeout(300);
   await capture(evidenceName("exit", "escape", viewport)(null), { keepFocus: true });
 
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(settings).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(settings).toHaveCount(0);
   await page.waitForTimeout(300);
@@ -488,6 +494,7 @@ test("keeps Settings inside a 760x600 window", async () => {
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
+  await settingsNavigation("General").click();
   await expect(settingsNavigation("General")).toHaveAttribute("aria-current", "page");
   await app.resizeWindow(760, 600);
   await app.expectNoViewportOverflow();

@@ -68,13 +68,6 @@ function optionLabels(select: HTMLElement): string[] {
 }
 
 describe("settings project lists", () => {
-  it("keeps the folder for chats without a project out of the issue report scope", async () => {
-    Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
-    render(<SettingsView {...props({ section: "support" })} />);
-    const scope = await screen.findByRole("combobox", { name: "Diagnostic scope" });
-    expect(optionLabels(scope)).toEqual(["App only", "Studio · counts only"]);
-  });
-
   it("keeps the folder for chats without a project out of project model defaults", async () => {
     Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
     render(<SettingsView {...props({ section: "backends" })} />);

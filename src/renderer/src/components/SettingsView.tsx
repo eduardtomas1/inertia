@@ -556,7 +556,6 @@ export function SettingsView({
         section === "backends" && "is-backends",
         section === "providers" && "is-providers",
         section === "diagnostics" && "is-diagnostics",
-        section === "support" && "is-issue-report",
       )}>
         <h2 className="visually-hidden">
           {SETTINGS_SECTIONS.find((item) => item.id === section)?.label ?? "Settings"}
@@ -1108,6 +1107,7 @@ export function SettingsView({
           </section>
         )}
 
+        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} disabled={disabled} request={onReportCommand} />}
         {section === "support" && (
           <section className="settings-card" aria-labelledby="storage-support-heading">
             <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="storage-support-heading">Storage & backups</h3><p>Check local usage, retention and the last validated backup.</p></span></div>
@@ -1120,7 +1120,6 @@ export function SettingsView({
             <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button></div>
           </section>
         )}
-        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={regularProjects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
 
         {section === "archive" && (
           <>

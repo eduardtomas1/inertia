@@ -290,10 +290,7 @@ describe("detached chat leaf controls", () => {
       providers: [],
       activeProjectId: project.id,
       activeConversationId: conversation.id,
-      settings: {
-        ...defaultSettings,
-        sidebarMode: "classic",
-      },
+      settings: defaultSettings,
     };
     render(
       <Sidebar

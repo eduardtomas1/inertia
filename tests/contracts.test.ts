@@ -704,6 +704,44 @@ describe("client command contract", () => {
     }
   });
 
+  it("rejects the removed startup surface and sidebar mode settings", () => {
+    const requestId = crypto.randomUUID();
+    for (const payload of [
+      { workspaceStartupSurface: "summary" },
+      { sidebarMode: "activity" },
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        type: "settings.update",
+        requestId,
+        payload,
+      }).success).toBe(false);
+    }
+  });
+
+  it("accepts only empty or HTTPS GitHub and GitLab release repository URLs", () => {
+    const requestId = crypto.randomUUID();
+    const parse = (discordReleaseRepositoryUrl: string) => clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId,
+      payload: { discordReleaseRepositoryUrl },
+    }).success;
+    for (const value of [
+      "",
+      "https://github.com/eduardtomas1/inertia",
+      "https://gitlab.com/group/subgroup/project",
+      " https://github.com/org/repo.git ",
+    ]) expect(parse(value)).toBe(true);
+    for (const value of [
+      "github.com/org/repo",
+      "not a url",
+      "http://github.com/org/repo",
+      "https://example.com/org/repo",
+      "https://github.com/org",
+      "https://user:secret@github.com/org/repo",
+      "https://github.com:8443/org/repo",
+    ]) expect(parse(value)).toBe(false);
+  });
+
   it("accepts provider authentication terminals at their dimension boundaries", () => {
     for (const [cols, rows] of [[40, 10], [240, 80]] as const) {
       const command = {

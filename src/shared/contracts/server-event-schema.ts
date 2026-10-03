@@ -329,8 +329,6 @@ function appSettings(value: unknown): boolean {
     usageDisplayMode: ["expanded", "compact", "hidden"],
     interfaceScale: ["compact", "default", "comfortable", "large"],
     responseDensity: ["compact", "default", "comfortable"],
-    workspaceStartupSurface: ["summary", "tools"],
-    sidebarMode: ["classic", "activity"],
     projectGrouping: PROJECT_GROUPING,
     defaultInteractionMode: INTERACTION_MODES,
   } as const;

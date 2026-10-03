@@ -44,10 +44,8 @@ export type AccessMode = "supervised" | "auto-edit" | "full";
 export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
 export type AgentApprovalDecision = "approve" | "deny" | "cancel";
 export type ResponseDensity = "compact" | "default" | "comfortable";
-export type WorkspaceStartupSurface = "summary" | "tools";
 export type InterfaceScale = "compact" | "default" | "comfortable" | "large";
 export type UsageDisplayMode = "expanded" | "compact" | "hidden";
-export type SidebarMode = "classic" | "activity";
 export type ProjectGroupingMode = "repository" | "repository-path" | "separate";
 export type ThreadAttentionKind = "approval" | "input";
 export type AttentionState = "unseen" | "seen" | "acknowledged" | "dismissed";
@@ -196,12 +194,10 @@ export interface AppSettings {
   usageDisplayMode: UsageDisplayMode;
   interfaceScale: InterfaceScale;
   responseDensity: ResponseDensity;
-  workspaceStartupSurface: WorkspaceStartupSurface;
   defaultCodeWrap: boolean;
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
   autoScrollToFinalAnswer: boolean;
-  sidebarMode: SidebarMode;
   projectGrouping: ProjectGroupingMode;
   autoOpenPlan: boolean;
   confirmDestructiveActions: boolean;
@@ -363,12 +359,10 @@ export const defaultSettings: AppSettings = {
   usageDisplayMode: "compact",
   interfaceScale: "default",
   responseDensity: "default",
-  workspaceStartupSurface: "summary",
   defaultCodeWrap: false,
   autoCollapseWorkLog: true,
   showChangedFileSummaries: true,
   autoScrollToFinalAnswer: true,
-  sidebarMode: "activity",
   projectGrouping: "separate",
   autoOpenPlan: false,
   confirmDestructiveActions: true,

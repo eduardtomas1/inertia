@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { providerIdSchema } from "./contracts/client-command/common";
+import type { ProviderId } from "./contracts";
+
+export const REPORT_PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const satisfies readonly ProviderId[];
+const providerIdSchema = z.enum(REPORT_PROVIDER_IDS);
 
 export const ISSUE_REPOSITORY = "eduardtomas1/inertia";
 export const ISSUE_REPOSITORY_URL = `https://github.com/${ISSUE_REPOSITORY}/issues`;

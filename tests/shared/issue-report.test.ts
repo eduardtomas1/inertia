@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { scrubReportText } from "../../src/shared/issue-report";
+import { providerIdSchema } from "../../src/shared/contracts/client-command/common";
+import { REPORT_PROVIDER_IDS, scrubReportText } from "../../src/shared/issue-report";
 
 it.each([
   "ENOENT: no such file or directory, open 'config.json'",
@@ -33,4 +34,8 @@ it("redacts a later secret on a line whose earlier label is ordinary", () => {
 
 it("removes a whole unquoted secret phrase, not only its first word", () => {
   expect(scrubReportText("db_password: correct horse battery")).toBe("[redacted secret]");
+});
+
+it("accepts exactly the providers the command contracts accept", () => {
+  expect([...REPORT_PROVIDER_IDS].sort()).toEqual([...providerIdSchema.options].sort());
 });

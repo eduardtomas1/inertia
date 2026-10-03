@@ -27,7 +27,8 @@ Detached chats retain their existing failure details/copy action.
 Capture is on by default. The choice is stored by the main process in
 `userData/diagnostics-preferences.json` (no-follow open, 512-byte cap, strict
 two-key parse, atomic private write) and read before the journal is created, so
-it applies from the first event of a launch. Turning capture off flushes pending
+it applies from the first event of a launch. A temporary file left by a write
+interrupted by a crash is removed when the journal opens. Turning capture off flushes pending
 incidents, writes a `diagnostics.capture-stopped` marker, then stops all other
 recording: incidents and gated lifecycle events are dropped before they reach
 memory or disk and are not counted as dropped writes. Turning it on writes
@@ -45,8 +46,9 @@ renderer validation) return no incident reference while capture is off.
 ## Clear history
 
 *Clear history…* asks once (Cancel has initial focus; Escape cancels; focus
-returns to the trigger). The main process revalidates the fixed
-`logs/runtime` directory (not a link, mode 0700), deletes only files matching
+returns to the trigger). The main process checks that neither `logs` nor
+`logs/runtime` is a link, revalidates the fixed directory (mode 0700), deletes
+only files matching
 the journal names (`runtime*.log`, `incidents*.log`) and leftover
 `.runtime-diagnostics-*.prune.tmp` files without following links, resets the
 in-memory index and counters, and then writes `diagnostics.history-cleared`,
@@ -115,9 +117,12 @@ outcomes. Deleted/unavailable conversation references cannot launch new work.
   `setDiagnosticsCapture(enabled)` and `clearDiagnostics()`.
 - `src/main/diagnostic-export.ts` also exports
   `exportDiagnosticsForReport({ sinceMs, maxBytes })` for issue reports:
-  incidents and events at or after the `sinceMs` epoch time, with the same
-  identifier omission and pseudonyms as the user export, newest first, trimmed
-  to `maxBytes` (at most 512 KiB); an empty string when nothing was captured.
+  incidents, warning and error events, and the capture and clear markers at or
+  after the `sinceMs` epoch time (routine info events are left out so they
+  cannot push incidents out), with the same identifier omission and pseudonyms
+  as the user export, newest first, trimmed at a record boundary to `maxBytes`
+  (at most 512 KiB) and marked `"truncated": true` when trimmed; an empty
+  string when nothing was captured.
 
 Incident context accepts existing provider IDs and validated UUID references,
 not labels. Friendly project/chat names are resolved from existing renderer
@@ -150,7 +155,9 @@ and dropped-write information shown in the UI. Memory-only records cannot surviv
 an app exit. The existing clean-shutdown path flushes pending records.
 
 Copy and export work after runtime/SQLite termination. Export includes the
-filtered lifecycle events next to the incidents. Both omit context IDs and
+filtered lifecycle events next to the incidents. When the result would exceed
+512 KiB, it keeps the newest records that fit and adds `"truncated": true`.
+Both omit context IDs and
 generation identities and use per-export correlation pseudonyms. Export uses the
 native Save dialog and a main-owned, bounded, private-permission atomic writer.
 It rejects link/non-file destinations, never accepts renderer-supplied content or
@@ -249,7 +256,7 @@ See the [visual evidence gallery](pr-evidence/offline-diagnostics/README.md).
 ### Capture switch rework (2026-10)
 
 macOS arm64, Node 22.23.2, Electron 44.4.5: `npm run check:quality`, `npm test`
-(11,411 passed, 140 skipped) and `npm run build:bundle` passed.
+(11,473 passed, 140 skipped) and `npm run build:bundle` passed.
 `diagnostics.spec.ts`, `diagnostics-appearance.spec.ts` and `settings.spec.ts`
 each passed three times in a row. Unit coverage: `diagnostics-capture`,
 `diagnostics-preferences`, `runtime-stderr-journal`, `diagnostic-export`,

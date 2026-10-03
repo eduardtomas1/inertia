@@ -9578,7 +9578,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .runtime-log-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
 .settings-inline-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .app-health-setting > span > strong { display: inline-flex; align-items: center; gap: 6px; }
-.app-health-grid { display: grid; grid-template-columns: repeat(4, minmax(72px, 1fr)); gap: 8px; margin-top: 8px; max-width: 620px; }
+.app-health-grid { display: grid; grid-template-columns: repeat(3, minmax(72px, 1fr)); gap: 8px; margin-top: 8px; max-width: 620px; }
 .app-health-grid > span { display: flex; flex-direction: column; gap: 2px; padding: 8px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); }
 .app-health-grid b { color: var(--text); font-size: 10px; font-weight: 650; }
 .app-health-grid small { font-size: 7.5px; }

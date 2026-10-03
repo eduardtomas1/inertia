@@ -90,7 +90,7 @@ const budgets = {
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128,
-  deferredDiagnosticsJavaScript: 13 * kibibyte,
+  deferredDiagnosticsJavaScript: 13 * kibibyte + 5_764,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte,

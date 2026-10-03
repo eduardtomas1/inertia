@@ -278,7 +278,7 @@ export function SettingsView({
   );
   const LifecycleIntegritySettings = useLoadedSurface(
     loadLifecycleIntegritySettings,
-    section === "providers" || section === "archive",
+    section === "providers",
   );
   const previousTarget = useRef(target);
   useEffect(() => {
@@ -555,7 +555,6 @@ export function SettingsView({
         "settings-content",
         section === "backends" && "is-backends",
         section === "providers" && "is-providers",
-        section === "diagnostics" && "is-diagnostics",
       )}>
         <h2 className="visually-hidden">
           {SETTINGS_SECTIONS.find((item) => item.id === section)?.label ?? "Settings"}
@@ -1059,6 +1058,8 @@ export function SettingsView({
         {section === "diagnostics" && (DiagnosticsSettings ? <DiagnosticsSettings
           projects={projects} conversations={[...conversations, ...archived]} providers={providers}
           selection={target?.section === "diagnostics" ? target.selection : undefined}
+          lifecycleDiagnostics={lifecycleDiagnostics} appUpdateStatus={appUpdateStatus}
+          onRevealRuntimeLogs={onRevealRuntimeLogs} onCopyRuntimeDiagnosticReport={onCopyRuntimeDiagnosticReport}
         /> : <SettingsSectionFallback />)}
 
         {section === "source" && (
@@ -1144,15 +1145,6 @@ export function SettingsView({
                 </div>
               </div>
               {recoveryStatus && <p className="settings-card-note" role="status">{recoveryStatus}</p>}
-              {LifecycleIntegritySettings && (
-                <LifecycleIntegritySettings
-                  surface="runtime-diagnostics"
-                  diagnostics={lifecycleDiagnostics}
-                  appUpdateStatus={appUpdateStatus}
-                  onRevealRuntimeLogs={onRevealRuntimeLogs}
-                  onCopyRuntimeDiagnosticReport={onCopyRuntimeDiagnosticReport}
-                />
-              )}
             </section>
           </>
         )}

@@ -24,6 +24,9 @@ export const issueReportSchema = z.object({
   notice: z.string().max(600),
   issueUrl: z.string().regex(/^https:\/\/github\.com\/eduardtomas1\/inertia\/issues\/[1-9][0-9]*$/u).nullable(),
 }).strict();
+export const ISSUE_GITHUB_STATES = ["ready", "missing", "signed-out", "offline", "rate-limited", "repository", "timeout", "unknown"] as const;
+export type IssueGitHubState = typeof ISSUE_GITHUB_STATES[number];
+export type IssuePublicationFailure = Exclude<IssueGitHubState, "ready">;
 export type IssueReport = z.infer<typeof issueReportSchema>;
 export type IssueReportInput = z.infer<typeof issueReportInputSchema>;
 

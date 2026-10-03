@@ -6,7 +6,7 @@ import type WebSocket from "ws";
 import { RuntimeStore } from "../../src/server/database";
 import { createIssueReportCommandHandler } from "../../src/server/runtime/commands/issue-report-commands";
 import { collectIssueEvidence, newIssueReport, parseReportAnswer, reportPrompt } from "../../src/server/issue-report";
-import { issueReportInputSchema, scrubReportText, type IssueReport } from "../../src/shared/issue-report";
+import { issueReportInputSchema, scrubReportText, type IssueGitHubState, type IssueReport } from "../../src/shared/issue-report";
 import { providerNativeModelSelection, modelSelectionSchema } from "../../src/shared/model-routing";
 import type { AppSnapshot, ClientCommand, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import type { IsolatedRunController } from "../../src/server/runtime/reviews/isolated-run-controller";
@@ -19,7 +19,7 @@ afterEach(() => { stores.splice(0).forEach((store) => store.close()); });
 function setup() {
   const store = new RuntimeStore(":memory:", process.cwd()); stores.push(store);
   const snapshot = () => store.shellSnapshot([]);
-  const publisher = { create: vi.fn(async (value: { beforePublish(): void }) => { value.beforePublish(); return "https://github.com/eduardtomas1/inertia/issues/999"; }), find: vi.fn(async (): Promise<string | null> => null) };
+  const publisher = { status: vi.fn(async (): Promise<IssueGitHubState> => "ready"), create: vi.fn(async (value: { beforePublish(): void }) => { value.beforePublish(); return "https://github.com/eduardtomas1/inertia/issues/999"; }), find: vi.fn(async (): Promise<string | null> => null) };
   const run = vi.fn(async () => ({ value: "The evidence cannot confirm reproduction. Does cancelling and sending again reproduce it?" }));
   const isolatedRuns = { has: vi.fn(() => false), run, stopConversation: vi.fn() } as unknown as IsolatedRunController<WebSocket>;
   const send = vi.fn<(socket: WebSocket, event: ServerEvent) => void>();

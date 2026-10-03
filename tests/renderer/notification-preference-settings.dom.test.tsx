@@ -1,0 +1,78 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  BackgroundNotificationSetting,
+  QuotaWarningSettings,
+} from "../../src/renderer/src/components/settings/NotificationPreferenceRows";
+
+function row(container: HTMLElement, id: string): HTMLElement {
+  return container.querySelector<HTMLElement>(`[data-setting-id="${id}"]`)!;
+}
+
+describe("background-only notifications row", () => {
+  it("saves the choice and shows Saved", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    const { container } = render(<BackgroundNotificationSetting settings={{ desktopNotifications: true, notifyOnlyInBackground: false }} disabled={false} onUpdate={onUpdate} />);
+    const control = screen.getByRole("switch", { name: "Only when Inertia is in the background" });
+    expect(control).not.toHaveAttribute("aria-disabled");
+    await act(async () => { fireEvent.click(control); });
+    expect(onUpdate).toHaveBeenCalledWith({ notifyOnlyInBackground: true });
+    expect(within(row(container, "notify-only-in-background")).getByRole("status")).toHaveTextContent("Saved");
+  });
+
+  it("is unavailable but focusable while desktop notifications are off", () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(<BackgroundNotificationSetting settings={{ desktopNotifications: false, notifyOnlyInBackground: true }} disabled={false} onUpdate={onUpdate} />);
+    const control = screen.getByRole("switch", { name: "Only when Inertia is in the background" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toBeChecked();
+    control.focus();
+    expect(control).toHaveFocus();
+    fireEvent.click(control);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("quota warning rows", () => {
+  it("turns warnings off and on, keeping the chosen threshold", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    const { container } = render(<QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 15 }} disabled={false} onUpdate={onUpdate} />);
+    await act(async () => { fireEvent.click(screen.getByRole("switch", { name: "Quota warnings" })); });
+    expect(onUpdate).toHaveBeenCalledWith({ quotaWarnings: { enabled: false, firstThreshold: 15 } });
+    expect(within(row(container, "quota-warnings")).getByRole("status")).toHaveTextContent("Saved");
+  });
+
+  it("offers the three fixed levels and saves the first one to warn at", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    const { container } = render(<QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 25 }} disabled={false} onUpdate={onUpdate} />);
+    const select = screen.getByRole("combobox", { name: "Warn when below" });
+    expect(select).toHaveValue("25");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["25% remaining", "15% remaining", "5% remaining"]);
+    await act(async () => { fireEvent.change(select, { target: { value: "5" } }); });
+    expect(onUpdate).toHaveBeenCalledWith({ quotaWarnings: { enabled: true, firstThreshold: 5 } });
+    expect(within(row(container, "quota-warning-threshold")).getByRole("status")).toHaveTextContent("Saved");
+  });
+
+  it("keeps the threshold focusable but unavailable while warnings are off", () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(<QuotaWarningSettings warnings={{ enabled: false, firstThreshold: 15 }} disabled={false} onUpdate={onUpdate} />);
+    const select = screen.getByRole("combobox", { name: "Warn when below" });
+    expect(select).toHaveAttribute("aria-disabled", "true");
+    expect(select).not.toBeDisabled();
+    select.focus();
+    expect(select).toHaveFocus();
+    fireEvent.change(select, { target: { value: "5" } });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(select).toHaveValue("15");
+  });
+
+  it("reports a failed save in the row", async () => {
+    const onUpdate = vi.fn(async () => { throw new Error("offline"); });
+    const { container } = render(<QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 25 }} disabled={false} onUpdate={onUpdate} />);
+    await act(async () => { fireEvent.click(screen.getByRole("switch", { name: "Quota warnings" })); });
+    expect(within(row(container, "quota-warnings")).getByRole("alert")).toHaveTextContent("Couldn't save. Try again.");
+    expect(screen.getByRole("switch", { name: "Quota warnings" })).toBeChecked();
+  });
+});

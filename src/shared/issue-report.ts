@@ -40,15 +40,30 @@ function exposeSensitiveJsonKeys(text: string): string {
   });
 }
 
+const SECRET_NAME_PART = /^(?:[A-Z0-9]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|COOKIE)S?|PASS|PWD|AUTHORIZATION)$/u;
+const ASSIGNMENT_NAME = /(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*)["']?[ \t]*[:=][ \t]*/gu;
+const ASSIGNMENT_VALUE = /(?!\[redacted)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[^\n]+)/uy;
+
+function redactSecretAssignments(text: string): string {
+  let result = "";
+  let last = 0;
+  for (const match of text.matchAll(ASSIGNMENT_NAME)) {
+    if (match.index < last || !match[1]!.toUpperCase().split(/[_-]/u).some((part) => SECRET_NAME_PART.test(part))) continue;
+    ASSIGNMENT_VALUE.lastIndex = match.index + match[0].length;
+    if (!ASSIGNMENT_VALUE.exec(text)) continue;
+    result += `${text.slice(last, match.index)}[redacted secret]`;
+    last = ASSIGNMENT_VALUE.lastIndex;
+  }
+  return result + text.slice(last);
+}
+
 /** Deliberately lossy scrub for user-authored text, never a raw-log sanitizer. */
 export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string {
-  return exposeSensitiveJsonKeys(text.slice(0, limit))
+  return redactSecretAssignments(exposeSensitiveJsonKeys(text.slice(0, limit))
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/gu, "[redacted key]")
     .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|xox[baprs])[-_][A-Za-z0-9_-]+/giu, "[redacted token]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[redacted token]")
-    .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]")
-    .replace(/^.*\b(?:[A-Z][A-Z0-9_]{2,}|(?:api[_ -]?(?:key|token)|(?:access|refresh)[_ -]?token|client[_ -]?secret|password|authorization|cookies?|credentials?|secret[_ -]?(?:access[_ -]?)?key|secrets?|tokens?))["']?\s*[:=].*$/gmu, "[redacted configuration]")
-    .replace(/\b(?:api[_ -]?(?:key|token)|(?:access|refresh)[_ -]?token|client[_ -]?secret|password|authorization|cookies?|credentials?|secret[_ -]?(?:access[_ -]?)?key|secrets?|tokens?)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[^\s,;]+)/giu, "[redacted secret]")
+    .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]"))
     .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]+/giu, "[redacted URL]")
     .replace(/(?:[A-Za-z]:[\\/]|\\\\|~?\/)[^\s<>"']+/gu, "[private path]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")

@@ -594,6 +594,7 @@ export const AppLayout = memo(function AppLayout({
           activeConversationVisible={activeConversationVisible}
           splitConversationIds={splitConversationIds}
           enabled={settings.desktopNotifications}
+          onlyInBackground={settings.notifyOnlyInBackground}
           onActivate={notificationActions.activate}
         />
         {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}

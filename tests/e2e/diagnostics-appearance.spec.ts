@@ -60,6 +60,19 @@ async function capture(page: Page, info: TestInfo, name: string, keepFocus = fal
 
 async function expectLayoutHolds(app: AppFixture): Promise<void> {
   await app.expectNoViewportOverflow();
+  const gutters = await app.page.locator(".settings-content").evaluate((element) => {
+    const content = element.getBoundingClientRect();
+    const view = element.closest(".settings-view")!.getBoundingClientRect();
+    const navigation = document.querySelector(".settings-navigation")!.getBoundingClientRect();
+    const besideNavigation = navigation.bottom > content.top + 1;
+    return {
+      minimum: besideNavigation ? 20 : 14,
+      left: content.left - (besideNavigation ? navigation.right : view.left),
+      right: view.right - content.right,
+    };
+  });
+  expect(gutters.left).toBeGreaterThanOrEqual(gutters.minimum);
+  expect(gutters.right).toBeGreaterThanOrEqual(gutters.minimum);
   const layout = await app.page.locator(".diagnostics").evaluate((root) => {
     const content = root.closest(".settings-content")!.getBoundingClientRect();
     const bounds = root.getBoundingClientRect();

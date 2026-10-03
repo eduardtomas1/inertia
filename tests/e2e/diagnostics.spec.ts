@@ -61,11 +61,12 @@ test("real operation failures survive restart and remain readable/copyable after
     await app.expectNoViewportOverflow();
     const column = await page.locator(".diagnostics").evaluate((element) => {
       const content = element.closest(".settings-content")!.getBoundingClientRect();
-      const inner = element.getBoundingClientRect();
-      return { left: inner.left - content.left, right: content.right - inner.right, width: content.width };
+      const view = element.closest(".settings-view")!.getBoundingClientRect();
+      const navigation = document.querySelector(".settings-navigation")!.getBoundingClientRect();
+      return { left: content.left - navigation.right, right: view.right - content.right, width: content.width };
     });
-    expect(column.left).toBeGreaterThanOrEqual(0);
-    expect(column.right).toBeGreaterThanOrEqual(0);
+    expect(column.left).toBeGreaterThanOrEqual(20);
+    expect(column.right).toBeGreaterThanOrEqual(20);
     expect(column.width).toBeLessThanOrEqual(810);
     const path = testInfo.outputPath(`diagnostics-${theme}.png`);
     await page.screenshot({ path, animations: "disabled" });

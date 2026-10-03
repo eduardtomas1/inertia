@@ -10,5 +10,6 @@ export const cliConversationImportsMigration: DatabaseMigrationDefinition = {
     conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
     imported_at TEXT NOT NULL,
     UNIQUE(provider_id, session_id)
-  );`,
+  );
+  ALTER TABLE agent_turns ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin = 'cli-import');`,
 };

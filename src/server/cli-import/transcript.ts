@@ -61,7 +61,7 @@ function withoutWrappers(text: string): string {
     const closing = text.indexOf(`</${tag}>`, pattern.lastIndex);
     if (closing < 0) { unclosed.add(tag); continue; }
     result += text.slice(copied, match.index);
-    if (tag === "codex_delegation") result += delegatedInput(text.slice(pattern.lastIndex, closing));
+    if (tag.endsWith("_delegation")) result += delegatedInput(text.slice(pattern.lastIndex, closing));
     copied = closing + tag.length + 3;
     pattern.lastIndex = copied;
   }
@@ -163,10 +163,8 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
         role = payload.role;
         content = textContent(payload.content);
       } else continue;
-      if (role === "user") {
-        codexTurnStarts.push(messages.length);
-        content = userProse(content, provider);
-      }
+      if (role === "user") codexTurnStarts.push(messages.length);
+      content = role === "user" ? userProse(content, provider) : withoutWrappers(content).trim();
     } else {
       if (item.isSidechain === true) continue;
       if (typeof item.sessionId === "string") {
@@ -191,7 +189,7 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
       if (message.model === "<synthetic>") continue;
       role = message.role ?? item.type;
       content = textContent(message.content);
-      if (role === "user") content = userProse(content, provider);
+      content = role === "user" ? userProse(content, provider) : withoutWrappers(content).trim();
     }
     if (role !== "user" && role !== "assistant") continue;
     const clean = redact(content, secrets).slice(0, 32 * 1024);

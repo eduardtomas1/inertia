@@ -192,4 +192,21 @@ describe("native CLI transcript projection", () => {
     expect(result.title).toBe("Fix the sidebar");
     expect(result.opening).toEqual({ user: "Fix the sidebar", assistant: "Fixed" });
   });
+  it("unwraps any delegation wrapper that carries an input", () => {
+    const result = parseCliTranscript(lines(meta,
+      codex("user", "<realtime_delegation><session>voice</session><input>Summarise the call notes</input></realtime_delegation>"),
+      codex("assistant", "Summarised"),
+      codex("user", "<realtime_delegation><session>voice</session></realtime_delegation>")), "codex", date);
+    expect(result.messages.map(({ content }) => content)).toEqual(["Summarise the call notes", "Summarised"]);
+    expect(result.title).toBe("Summarise the call notes");
+  });
+  it("strips wrappers from assistant replies and drops replies that are only wrappers", () => {
+    const codexResult = parseCliTranscript(lines(meta, codex("user", "Check in"), codex("assistant", "<heartbeat>tick</heartbeat>"),
+      codex("assistant", "<heartbeat>tick</heartbeat>\nAll <b>good</b>")), "codex", date);
+    expect(codexResult.messages.map(({ content }) => content)).toEqual(["Check in", "All <b>good</b>"]);
+    expect(codexResult.opening).toEqual({ user: "Check in", assistant: "All <b>good</b>" });
+    const claudeResult = parseCliTranscript(lines(claude("u1", null, "user", "Check in"), claude("a1", "u1", "assistant", [{ type: "text", text: "<heartbeat>tick</heartbeat>" }]),
+      claude("a2", "a1", "assistant", [{ type: "text", text: "Done <system-reminder>x</system-reminder>" }])), "claude", date);
+    expect(claudeResult.messages.map(({ content }) => content)).toEqual(["Check in", "Done"]);
+  });
 });

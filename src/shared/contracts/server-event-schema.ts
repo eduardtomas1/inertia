@@ -930,7 +930,7 @@ function agentTurn(value: unknown): boolean {
     && (value.usageAtStart === null || turnUsage(value.usageAtStart))
     && (value.usageAtCompletion === null || turnUsage(value.usageAtCompletion))
     && integerField(value, "configurationRevision")
-    && oneOf(value, "association", ["authoritative", "inferred"]);
+    && oneOf(value, "association", ["authoritative", "inferred"]) && (!("origin" in value) || value.origin === "cli-import");
 }
 
 function turnGitArtifactFile(value: unknown): boolean {

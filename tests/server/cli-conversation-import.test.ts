@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, truncate, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -10,12 +11,14 @@ import { CliConversationDiscovery, CLI_TRANSCRIPT_MAX_BYTES, cliConversationRoot
 import { providerChildEnvironment } from "../../src/server/environment";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { RuntimeStore } from "../../src/server/database";
+import { buildResponseTimeline } from "../../src/renderer/src/utils/responseTimeline";
 import { createCliConversationCommandHandler } from "../../src/server/runtime/commands/cli-conversation-commands";
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { continuationIdentityForSelection, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { cliConversationScanSchema } from "../../src/shared/cli-conversations";
 import type { ProviderManager } from "../../src/server/providers";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
 import { claudeSuccessResult, claudeSystem, CLAUDE_PROTOCOL_SESSION_ID, fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises } from "../support/turn-controller-runtime";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -366,5 +369,51 @@ describe("CLI conversation import authority and persistence", () => {
     expect(await f.both({ headerBytes: 256 * 1024 }).scan("project", f.workspace, unowned)).toMatchObject({ limited: true, candidates: [] });
     await rollouts(f, 2, f.workspace);
     expect(await f.both({ bytes: 1 }).scan("project", f.workspace, unowned)).toMatchObject({ limited: true, candidates: [{ providerId: "codex" }] });
+  });
+  it("imports each exchange as a completed imported turn that renders as ordinary history and leaves dashboards alone", async () => {
+    const f = await fixture(); const dbPath = join(f.root, "inertia.sqlite");
+    const store = new RuntimeStore(dbPath, f.workspace); stores.push(store);
+    const project = store.createProject("Studio", f.workspace);
+    const selection = providerNativeModelSelection({ providerId: "codex" });
+    const messages = Array.from({ length: 30 }, (_, index) => ({ role: index % 2 === 0 ? "user" as const : "assistant" as const, content: `Message ${index}`, createdAt: new Date(Date.parse("2026-06-10T10:00:00.000Z") + index * 60_000).toISOString() }));
+    const input = { projectId: project.id, sourceKey: "c".repeat(64), providerId: "codex" as const, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") };
+    const dailyRange = { date: "2026-06-10", fromInclusive: "2026-06-10T00:00:00.000Z", toExclusive: "2026-06-11T00:00:00.000Z", timeZone: "UTC" };
+    const usageRange = { days: 30 as const, fromInclusive: "2026-06-01T00:00:00.000Z", toExclusive: "2026-07-01T00:00:00.000Z", endDate: "2026-06-30", timeZone: "UTC" };
+    const dashboards = () => JSON.parse(JSON.stringify({ daily: store.dailyWork(dailyRange), usage: store.usageDashboard(usageRange) }).replace(/"generatedAt":"[^"]+"/gu, '"generatedAt":""')) as unknown;
+    const before = dashboards();
+    const conversationId = store.importCliConversation(input);
+    const detail = store.conversationDetail(conversationId)!;
+    expect(detail.agentTurns).toHaveLength(15);
+    const byId = new Map(detail.messages.map((message) => [message.id, message]));
+    detail.agentTurns.forEach((turn, index) => {
+      expect(turn).toMatchObject({ conversationId, providerId: "codex", status: "completed", association: "authoritative", origin: "cli-import", runState: { state: "completed" }, providerSessionAfter: f.sessionId });
+      expect(byId.get(turn.userMessageId)).toMatchObject({ role: "user", content: `Message ${index * 2}`, turnId: turn.id });
+      expect(byId.get(turn.terminalAssistantMessageId!)).toMatchObject({ role: "assistant", content: `Message ${index * 2 + 1}`, turnId: turn.id });
+      expect(turn.requestedAt <= turn.completedAt!).toBe(true);
+      if (index > 0) expect(detail.agentTurns[index - 1]!.completedAt! < turn.requestedAt).toBe(true);
+    });
+    const timeline = buildResponseTimeline({ turns: detail.agentTurns, messages: detail.messages, activities: detail.activities, reasonings: detail.reasonings, plans: detail.plans, checkpoints: detail.checkpoints });
+    expect(timeline.map(({ kind }) => kind)).toEqual(Array.from({ length: 15 }, () => "turn"));
+    expect(serverEventSchema.safeParse({ type: "request.result", requestId: "detail", result: { kind: "conversation.detail", conversationId, state: "ready", detail } }).success).toBe(true);
+    expect(dashboards()).toEqual(before);
+    const replyless = store.importCliConversation({ ...input, sourceKey: "d".repeat(64), sessionId: randomUUID(), messages: [{ role: "assistant", content: "Greeting", createdAt: "2026-06-10T09:00:00.000Z" }, { role: "user", content: "Question", createdAt: "2026-06-10T09:01:00.000Z" }] });
+    const replylessDetail = store.conversationDetail(replyless)!;
+    expect(replylessDetail.agentTurns).toHaveLength(1);
+    expect(replylessDetail.messages.every(({ turnId }) => turnId === replylessDetail.agentTurns[0]!.id)).toBe(true);
+    store.deleteConversation(conversationId);
+    const raw = new Database(dbPath, { readonly: true });
+    try { expect(raw.prepare("SELECT count(*) AS count FROM agent_turns WHERE conversation_id = ?").get(conversationId)).toEqual({ count: 0 }); } finally { raw.close(); }
+  });
+  it("rolls the receipt, turns and messages back together when the import fails", async () => {
+    const f = await fixture(); const dbPath = join(f.root, "inertia.sqlite");
+    const store = new RuntimeStore(dbPath, f.workspace); stores.push(store);
+    const project = store.createProject("Studio", f.workspace);
+    const selection = providerNativeModelSelection({ providerId: "claude" });
+    const messages = [{ role: "user" as const, content: "Question", createdAt: "2026-06-10T10:00:00.000Z" }, { role: "assistant" as const, content: "Answer", createdAt: "2026-06-10T10:01:00.000Z" }];
+    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "invalid", providerId: "claude", sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") })).toThrow();
+    const raw = new Database(dbPath, { readonly: true });
+    try {
+      expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });
+    } finally { raw.close(); }
   });
 });

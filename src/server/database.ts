@@ -418,7 +418,7 @@ export class RuntimeStore {
 
   createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
   importedCliConversation(providerId: "codex" | "claude", sessionId: string): string | null { return importedCliConversation(this.database, providerId, sessionId); }
-  importCliConversation(input: CliConversationImportInput): string { return importCliConversation(this.database, this.conversationRepository, this.transcriptRepository, input); }
+  importCliConversation(input: CliConversationImportInput): string { return importCliConversation(this.database, this.conversationRepository, this.transcriptRepository, this.turnLedgerRepository, input); }
   cliConversationImport(conversationId: string): { providerId: "codex" | "claude"; cwd: string } | null { return cliConversationImport(this.database, conversationId); }
   cliSessionOwnership(providerId: "codex" | "claude", sessionId: string): CliSessionOwnership { return cliSessionOwnership(this.database, providerId, sessionId); }
   createPairedConversations(

@@ -521,7 +521,7 @@ describe("schema 87 usage-limit tags", () => {
     const path = join(directory, "inertia.sqlite");
     store.close();
     const raw = new Database(path);
-    raw.exec("DROP TABLE cli_conversation_imports; DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version >= 87;");
+    raw.exec("DROP TABLE cli_conversation_imports; ALTER TABLE agent_turns DROP COLUMN origin; DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DELETE FROM schema_migrations WHERE version >= 87;");
     raw.close();
     store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
     dependencies.store = store;

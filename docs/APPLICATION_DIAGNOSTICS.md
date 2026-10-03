@@ -246,3 +246,16 @@ explicit feature-byte allowances account for navigation and bounded file badges;
 existing safety, lifecycle, packaging and test gates are retained.
 
 See the [visual evidence gallery](pr-evidence/offline-diagnostics/README.md).
+
+### Capture switch rework (2026-10)
+
+macOS arm64, Node 22.23.2, Electron 44.4.5: `npm run check:quality`, `npm test`
+(11,411 passed, 140 skipped) and `npm run build:bundle` passed.
+`diagnostics.spec.ts`, `diagnostics-appearance.spec.ts` and `settings.spec.ts`
+each passed three times in a row. Unit coverage: `diagnostics-capture`,
+`diagnostics-preferences`, `runtime-stderr-journal`, `diagnostic-export`,
+`application-diagnostics-ipc`, the preload bridge and the Diagnostics and
+Discord DOM tests. A real main-window renderer crash and real runtime stderr from
+a failing database backup were not reproduced in Electron; both paths are
+covered at the unit layer. Linux and Windows were not run locally. Screenshots
+are in the [rework gallery](pr-evidence/diagnostics-and-issue-report/README.md).

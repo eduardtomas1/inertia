@@ -13,7 +13,7 @@ const candidates: CliConversationCandidate[] = [
 ];
 const importedId = "44444444-4444-4444-8444-444444444444";
 const result = (value: Extract<ServerEvent, { type: "request.result" }>["result"]): ServerEvent => ({ type: "request.result", requestId: "test", result: value });
-const scanOf = (items: CliConversationCandidate[]): ServerEvent => result({ kind: "conversation.cli.scan", scan: { candidates: items, limited: false, skipped: 0 } });
+const scanOf = (items: CliConversationCandidate[]): ServerEvent => result({ kind: "conversation.cli.scan", scan: { candidates: items, limited: false, skipped: 0, oversized: 0 } });
 const scan = scanOf([candidates[1]!, candidates[0]!]);
 const previewOf = (candidate: CliConversationCandidate, user: string, reply?: string): ServerEvent => result({ kind: "conversation.cli.preview", preview: { candidate, revision: "a".repeat(64), omittedMessages: 0,
   messages: [{ role: "user", content: user, createdAt: candidate.updatedAt }, ...reply ? [{ role: "assistant" as const, content: reply, createdAt: candidate.updatedAt }] : []] } });
@@ -103,7 +103,7 @@ describe("CLI import dialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(onOpenConversation).toHaveBeenCalledWith(importedId);
   });
-  it("imports with the platform shortcut and shows Already imported for earlier imports", async () => {
+  it("imports with the platform shortcut and falls back to Already imported when the chat cannot be opened from here", async () => {
     const earlier = { ...candidates[1]!, importedConversationId: importedId };
     const request = requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(scanOf([candidates[0]!, earlier]))
       : command.type === "conversation.cli.preview" && command.payload.candidateId === earlier.id ? Promise.resolve(previewOf(earlier, "Accessibility request")) : undefined);
@@ -208,5 +208,72 @@ describe("CLI import dialog", () => {
     expect(dialog.querySelector("main, nav, aside, section section, [role=region], [role=complementary], h4, small, .dialog-icon")).toBeNull();
     expect(dialog).not.toHaveTextContent(/Codex and Claude Code conversations started|skipped|recent history|Close it in your terminal|Text history only|keeps its full history|text messages?/u);
     expect(dialog.querySelector(".cli-import-status")).toBeNull();
+  });
+  it("shows the scanning sentence from the very first render", () => {
+    const pendingScan = deferred<ServerEvent>();
+    let firstPaint: string | null | undefined;
+    const request = requester((command) => {
+      if (command.type !== "conversation.cli.scan") return undefined;
+      firstPaint = document.querySelector(".cli-import-body")?.textContent;
+      return pendingScan.promise;
+    });
+    render(<CliConversationImportDialog project={project} request={request} onClose={vi.fn()} />);
+    expect(firstPaint).toBe("Looking for conversations…");
+    expect(screen.getByRole("status")).toHaveTextContent(/^Looking for conversations…$/u);
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(document.querySelector(".cli-import-note")).toBeNull();
+  });
+  it.each([
+    ["oversized and unreadable files", { limited: false, skipped: 5, oversized: 3 }, "3 conversations are too large to import; 2 conversations could not be read."],
+    ["one unreadable file", { limited: false, skipped: 1, oversized: 0 }, "1 conversation could not be read."],
+    ["a limited scan", { limited: true, skipped: 0, oversized: 0 }, "Showing recent conversations only."],
+    ["every case at once", { limited: true, skipped: 2, oversized: 1 }, "1 conversation is too large to import; 1 conversation could not be read; showing recent conversations only."],
+  ])("summarises %s in one muted line under the gallery", async (_case, counts, sentence) => {
+    const summary = { candidates: [candidates[0]!], ...counts };
+    const request = requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(result({ kind: "conversation.cli.scan", scan: summary })) : undefined);
+    render(<CliConversationImportDialog project={project} request={request} onClose={vi.fn()} />);
+    await screen.findByRole("list", { name: "CLI conversations" });
+    const notes = document.querySelectorAll(".cli-import-note");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toHaveTextContent(new RegExp(`^${sentence.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u"));
+    expect(notes[0]!.compareDocumentPosition(screen.getByRole("list")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    fireEvent.click(card(/Build the sidebar/u));
+    await screen.findByRole("group", { name: "Build the sidebar" });
+    expect(document.querySelector(".cli-import-note")).toBeNull();
+  });
+  it("shows no note when the scan read everything", async () => {
+    render(<CliConversationImportDialog project={project} request={requester()} onClose={vi.fn()} />);
+    await screen.findByRole("list", { name: "CLI conversations" });
+    expect(document.querySelector(".cli-import-note")).toBeNull();
+  });
+  it("offers Open chat for a conversation imported earlier and opens it with a click or the shortcut", async () => {
+    const earlier = { ...candidates[1]!, importedConversationId: importedId };
+    const request = requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(scanOf([candidates[0]!, earlier]))
+      : command.type === "conversation.cli.preview" && command.payload.candidateId === earlier.id ? Promise.resolve(previewOf(earlier, "Accessibility request")) : undefined);
+    const onClose = vi.fn(); const onOpenConversation = vi.fn();
+    render(<CliConversationImportDialog project={project} request={request} onClose={onClose} onOpenConversation={onOpenConversation} />);
+    fireEvent.click(await findCard(/Review accessibility/u));
+    const openChat = await screen.findByRole("button", { name: "Open chat" });
+    expect(openChat).toHaveClass("primary-button");
+    expect(openChat).toHaveAttribute("aria-disabled", "false");
+    expect(screen.queryByRole("button", { name: "Already imported" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.keyDown(openChat, shortcut(openChat));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onOpenConversation).toHaveBeenCalledWith(importedId);
+    fireEvent.click(openChat);
+    expect(onOpenConversation).toHaveBeenCalledTimes(2);
+    expect(commands(request, "conversation.cli.import")).toBe(0);
+  });
+  it("matches the search against the opening exchange as well as the title", async () => {
+    render(<CliConversationImportDialog project={project} request={requester()} onClose={vi.fn()} />);
+    await screen.findByRole("list", { name: "CLI conversations" });
+    const search = screen.getByRole("textbox", { name: "Search CLI conversations" });
+    fireEvent.change(search, { target: { value: "accessibility REQUEST" } });
+    expect(within(screen.getByRole("list")).getAllByRole("button").map((button) => button.getAttribute("aria-label")?.split(",")[0])).toEqual(["Review accessibility"]);
+    fireEvent.change(search, { target: { value: "sidebar answer" } });
+    expect(within(screen.getByRole("list")).getAllByRole("button").map((button) => button.getAttribute("aria-label")?.split(",")[0])).toEqual(["Build the sidebar"]);
+    fireEvent.change(search, { target: { value: "nothing like this" } });
+    expect(screen.getByText("No conversations match your search.")).toBeInTheDocument();
   });
 });

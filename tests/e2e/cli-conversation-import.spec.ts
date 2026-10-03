@@ -119,7 +119,7 @@ test("imports both native histories, persists duplicates across restart, and res
   await app.page.getByRole("radio", { name: "Dark", exact: true }).click();
   await openImporter(app.page);
   await dialog.getByRole("button", { name: new RegExp(codexTitle, "u") }).click();
-  await expect(dialog.getByRole("button", { name: "Already imported", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Open chat", exact: true })).toBeEnabled();
   await capture(info, "cli-import-imported-dark");
   await app.resizeWindow(900, 700);
   await capture(info, "cli-import-compact-dark");
@@ -136,7 +136,9 @@ test("imports both native histories, persists duplicates across restart, and res
   await app.restart();
   await openImporter(app.page);
   await app.page.getByRole("dialog").getByRole("button", { name: new RegExp(codexTitle, "u") }).click();
-  await expect(app.page.getByRole("button", { name: "Already imported", exact: true })).toBeDisabled();
+  await app.page.getByRole("dialog").getByRole("button", { name: "Open chat", exact: true }).click();
+  await expect(app.page.getByRole("dialog", { name: "Import CLI conversations" })).toHaveCount(0);
+  await expect(app.page.getByText("Continued the original CLI conversation.", { exact: true })).toBeVisible();
   expect(await readFile(codexFile, "utf8")).toBe(originalCodex);
   expect(await readFile(claudeFile, "utf8")).toBe(originalClaude);
   expect(app.rendererErrors).toEqual([]);

@@ -111,6 +111,18 @@
   text-align: center;
 }
 
+.cli-import-note {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .cli-import-gallery {
   display: grid;
   min-height: 0;

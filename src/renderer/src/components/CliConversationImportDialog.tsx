@@ -18,6 +18,17 @@ const importShortcut = mac ? "Meta+Enter" : "Control+Enter";
 const cardLabel = (date: Date): string => date.toLocaleString(undefined, date.getFullYear() === new Date().getFullYear()
   ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
   : { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+const scanNote = ({ limited, skipped, oversized }: Pick<CliConversationScan, "limited" | "skipped" | "oversized">): string | null => {
+  const unreadable = Math.max(0, skipped - oversized);
+  const parts = [
+    oversized > 0 ? `${plural(oversized, "conversation")} ${oversized === 1 ? "is" : "are"} too large to import` : null,
+    unreadable > 0 ? `${plural(unreadable, "conversation")} could not be read` : null,
+    limited ? "showing recent conversations only" : null,
+  ].filter((part): part is string => part !== null);
+  if (!parts.length) return null;
+  const sentence = parts.join("; ");
+  return `${sentence[0]!.toLocaleUpperCase()}${sentence.slice(1)}.`;
+};
 const fullLabel = (date: Date): string => date.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
 const accessibleName = (item: CliConversationCandidate): string =>
   `${item.title}, ${cliProviderLabel(item.providerId)}, ${fullLabel(new Date(item.updatedAt))}${item.importedConversationId ? ", imported" : ""}`;
@@ -34,7 +45,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
   const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("all");
-  const [busy, setBusy] = useState<"scan" | "preview" | "import" | null>(null);
+  const [busy, setBusy] = useState<"scan" | "preview" | "import" | null>(disabled ? null : "scan");
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState(false);
   const epoch = useRef(0);
@@ -110,7 +121,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
 
   const rows = (scan?.candidates ?? [])
     .filter((item) => (provider === "all" || item.providerId === provider)
-      && `${item.title} ${cliProviderLabel(item.providerId)}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+      && [item.title, cliProviderLabel(item.providerId), item.opening.user, item.opening.assistant ?? ""].join("\n").toLocaleLowerCase().includes(query.toLocaleLowerCase()))
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
   const cardId = (id: string): string => `${idPrefix}-card-${id}`;
   useLayoutEffect(() => {
@@ -133,7 +144,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
     cards[Math.min(Math.max(target, 0), cards.length - 1)]?.focus();
   };
 
-  const openedId = imported && preview?.candidate.importedConversationId && onOpenConversation ? preview.candidate.importedConversationId : null;
+  const openedId = preview?.candidate.importedConversationId && onOpenConversation ? preview.candidate.importedConversationId : null;
   const openChat = (): void => {
     if (!openedId || !onOpenConversation) return;
     onClose();
@@ -145,6 +156,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
   const importUnavailable = !preview || Boolean(busy) || disabled || alreadyImported;
   const scanUnavailable = Boolean(busy) || disabled;
   const status = error ? diagnosticErrorReference(error).message : imported ? "Imported." : null;
+  const note = scan && busy !== "scan" && !openId ? scanNote(scan) : null;
   const galleryState = busy === "scan" ? "Looking for conversations…"
     : error ? diagnosticErrorReference(error).message
       : scan && !rows.length ? scan.candidates.length ? "No conversations match your search." : "No CLI conversations found." : null;
@@ -230,6 +242,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
                   </div>;
                 })}
               </div>}
+          {note && <p className="cli-import-note">{note}</p>}
         </div>
       </section>
     </div>, document.body,

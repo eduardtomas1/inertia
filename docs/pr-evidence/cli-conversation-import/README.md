@@ -36,12 +36,14 @@ candidate or preview title may be clipped.
   fresh preview so an import uses the current revision. Escape goes back to
   the gallery and returns focus to the card; Escape in the gallery closes the
   importer.
-- After an import the button becomes "Open chat", which closes the importer
-  and opens the chat. Cmd+Enter on macOS or Ctrl+Enter elsewhere runs the
-  button. "Already imported" stays a quiet secondary button; busy buttons
-  use `aria-disabled`, so focus stays put.
-- Empty, scanning and error states are one centred muted sentence, and all
-  motion is off under reduced motion.
+- After an import, and for conversations imported earlier, the button is
+  "Open chat", which closes the importer and opens the chat. Cmd+Enter on
+  macOS or Ctrl+Enter elsewhere runs the button. Busy buttons use
+  `aria-disabled`, so focus stays put.
+- Empty, scanning and error states are one centred muted sentence, shown
+  from the first paint. When a scan was limited or left files out, one muted
+  line under the gallery says so. All motion is off under reduced motion.
+- Search matches titles and the opening request and reply.
 - The settings entry is one Row in the Checkout card: "Import Codex and
   Claude Code conversations started in this checkout."
 

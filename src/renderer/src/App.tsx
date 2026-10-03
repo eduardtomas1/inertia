@@ -18,6 +18,7 @@ import {
 } from "@shared/contracts";
 import type { MessageSearchHit } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
+import { DEFAULT_QUOTA_WARNINGS } from "@shared/quota-warnings";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
@@ -99,7 +100,10 @@ export default function App(): React.JSX.Element {
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
   const providerQuotaNotices = useStableController(
-    useProviderQuotaNotices(connection.snapshot?.providers ?? []),
+    useProviderQuotaNotices(
+      connection.snapshot?.providers ?? [],
+      connection.snapshot?.settings.quotaWarnings ?? DEFAULT_QUOTA_WARNINGS,
+    ),
   );
   const documentPresence = useDocumentPresence();
   const documentActive = documentPresence > 1;

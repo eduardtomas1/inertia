@@ -1,25 +1,68 @@
-# Guided issue reporting
+# Issue reporting
 
-Open **Settings → Report an issue**. Describe the observed and expected behavior and reproduction steps, choose the agent/model/reasoning, and optionally select a project for counts. **Create private report chat** saves a scrubbed local draft and shows exactly which safe evidence was collected.
+Open **Settings → Report an issue**. The form has four fields:
 
-Automatic validation currently supports **Claude Agent SDK** with existing native or configured backend authentication. **Validate with selected model** runs one isolated assessment of the user's observations against the collected metadata. It cannot reproduce arbitrary application behavior. The result separates evidence from unconfirmed observations and suggests reproduction questions to address in the issue preview. Other provider routes retain the same manual preview, editing and submission flow. Provider setup is linked when authentication is missing. Configured backends use their own readiness and vault authentication; a separate native Claude login is not required.
+- **What happened** (required, at least 10 characters).
+- **Steps to reproduce** (optional).
+- **Provider**: one of the app's providers, or **Not sure** (the default).
+- **Attach diagnostics** (on by default).
 
-The provider receives the scrubbed description and only these diagnostics:
+**Preview issue** builds the exact public title and body in the local runtime and shows them in an editable editor. Nothing is sent anywhere until you choose **Create on GitHub**. **Back** returns to the form and keeps any edits you made to the preview; previewing again without changing the form reopens that edited preview instead of rebuilding it. **Copy** copies the title and body. **Open GitHub manually** opens `/issues/new` in your browser with the title and body filled in; when the issue is too long for a link (4,096 characters), Inertia copies it and opens the page with only the title.
 
-- Inertia version, OS family and architecture.
-- Validated lifecycle state, blocker/quarantine/cleanup codes, resource and unresolved-interaction counts, active maintenance states and bounded Windows cleanup codes.
-- Optional counts of chats and pending interactions for the explicitly selected project. Project identifiers and names are excluded.
+## What the issue contains
 
-The collector does not read logs, source, files, paths, environment values or conversation content. It uses the existing validated lifecycle projection, discarding malformed metadata. Description/preview scrubbing removes recognized secrets, configuration assignments, authorization strings, URLs, emails and portable private paths; the user must still review their own prose before sharing it.
+The body is generated from code, never from text supplied by the renderer:
 
-The dedicated report run uses the existing isolated-run controller, temporary app-owned working directory, supervised access and fail-closed interaction handling. The Claude SDK receives a native empty tools list, an empty strict MCP configuration, no filesystem settings, and a deny-all native tool callback. Unsupported harnesses are rejected before launch; a prompt prohibition alone is insufficient. The assessment stops at 90 seconds or 8,000 output characters, accepts only a small structured response and inherits owned-process cleanup. No resumable provider session is retained. No new dependencies or embedded credentials are introduced.
+```markdown
+## What happened
 
-**Edit issue preview → Save and review preview** updates the exact public title and body. **Submit issue to GitHub** is the sole in-app publication action. Publication uses the existing restricted CLI runner and the user's GitHub CLI authentication, pins `eduardtomas1/inertia`, sends the bounded body through stdin and verifies the exact result URL. The aggregate discovery/publication deadline is 30 seconds with a 16 KiB output ceiling. No auth environment variables are forwarded.
+After cancelling a running chat, sending the next message leaves it waiting.
 
-The latest report is stored in the application database through append-only schema 69. Revision checks reject stale writes; cancellation, provider failures and auth failures preserve the report. Interrupted validation becomes retryable. An attempted publication with no confirmed result becomes **uncertain** and cannot automatically submit again; **Check submission** performs a bounded read-only search for the exact report marker. Interrupted publication retains that protection across restart. Missing GitHub CLI/auth has `gh auth login` instructions and copy/browser continuation.
+## Steps to reproduce
 
-**Retire this report → Confirm retirement** ends tracking of an uncertain publication after an explicit warning that the original issue may already exist. Pending publication or GitHub checks must finish first. A retired report cannot be edited, validated, checked or submitted again. Its preview remains readable and copyable across restart until you deliberately create another draft. **Start another draft** opens a blank description for an unrelated issue; creating it replaces the saved report with a fresh identity. Older report commands cannot affect the new draft. Only the latest report is retained.
+1. Start a turn
+2. Cancel it
+3. Send another message
 
-Tests use synthetic input and mocked publication; they never create public test issues. Related incident context is [#298](https://github.com/eduardtomas1/inertia/issues/298), which remains independently scoped.
+## Environment
 
-The current [visual evidence gallery](pr-evidence/offline-diagnostics/README.md) includes dark/light report forms, the saved private chat, reviewed publication controls and a narrow-window layout. Primary actions align with the form; copy/manual continuation and saved-progress/new-draft actions have separate groups. No issue was published during capture.
+- Inertia: 0.0.65 (stable)
+- OS: macOS 15.1.0 (arm64)
+- Electron: 38.2.0
+- Provider: claude (claude-agent-sdk 2.0.14)
+- Lifecycle: safe-and-ready · blockers none · quarantine none · cleanup current-generation-lease · owned resources none · unresolved turns 0, interactions 0
+
+## Diagnostics
+
+Recent diagnostics from the last 24 hours, pseudonymised by Inertia:
+(the bounded diagnostics export in a text block)
+```
+
+- The release channel and OS version come from the main process. The app version, architecture, Electron version and the validated lifecycle codes come from the runtime. The provider line uses the active provider's harness and version when the lifecycle snapshot has it, otherwise the installed CLI version when it is a plain version string, otherwise "version unknown".
+- With **Attach diagnostics** on, the runtime asks the main process for the pseudonymised diagnostics export of the last 24 hours, bounded to 6,000 bytes. The renderer sends only the on/off choice; it cannot supply evidence text. The request travels over the runtime-to-main broker (`runtime.issue-evidence-request` / `runtime.issue-evidence-result`), is validated on both sides and has a 10-second deadline. When nothing was recorded, the section says so; when the export cannot be collected, it says that instead. With the box off, the section reads "Not attached."
+- No project names, paths, conversation content, prompts, provider output or credentials are collected.
+
+The description, steps, title and body are scrubbed before they are stored and again before publication. The scrubber removes private keys, known token formats, JWTs, authorization headers, the values of secret-looking assignments (for example `GITHUB_TOKEN=…`, `password: …`, `"api_key": "…"`), URLs, absolute paths and email addresses. Ordinary labelled lines such as `ENOENT: …`, `ERROR: …` or `HTTP: 500` are kept, as are relative paths. Review your own text before publishing it.
+
+## Publication
+
+**Create on GitHub** first saves any edits, then publishes. If the final scrub changes the text, nothing is published and the updated preview is shown for review. Publication uses the user's existing GitHub CLI login through the restricted CLI runner: `gh auth status`, then `gh issue create --repo eduardtomas1/inertia --body-file -` with the body on stdin and a hidden report marker. No auth environment variables are forwarded. The deadline is 30 seconds with a 16 KiB output ceiling, and only a URL in the fixed repository is accepted.
+
+When the page opens, a read-only `gh auth status` check (10-second deadline) reports problems before you write anything. Failures are classified from the CLI's error output, which never leaves the runtime:
+
+| State | Message |
+| --- | --- |
+| GitHub CLI missing | GitHub CLI is not installed. Install gh and run gh auth login, or open GitHub manually. |
+| Not signed in | GitHub CLI is not signed in. Run gh auth login in a terminal, or open GitHub manually. |
+| Offline | GitHub could not be reached. Check your connection and try again. |
+| Rate limited | GitHub is limiting requests right now. Wait a few minutes and try again. |
+| Repository unreachable | The eduardtomas1/inertia repository could not be reached or does not accept issues. Open GitHub manually instead. |
+| Timed out | GitHub did not respond in time. Try again, or open GitHub manually. |
+
+A failure before the issue is sent, or a rejection GitHub states explicitly afterwards (not signed in, rate limited, repository unreachable), leaves the report retryable. Any other failure after the request was sent marks the report **uncertain**: it cannot be submitted again, and **Check submission** performs a bounded read-only search for the report marker. An interrupted publication becomes uncertain after a restart. **Retire this report → Confirm retirement** ends tracking of an uncertain report after a warning that the issue may already exist; a retired report cannot be edited, checked or submitted again, and its preview stays readable until you start another report.
+
+## Storage
+
+The latest report is stored in the application database. Schema 69 added the table; schema 88 converts reports saved by earlier versions to the current shape (drafts and reports from the removed validation step become editable previews). Revision checks reject stale writes. Only the latest report is kept, and **Start another report** replaces it when the new one is previewed.
+
+Tests use synthetic input and a stubbed GitHub CLI; they never create public issues.

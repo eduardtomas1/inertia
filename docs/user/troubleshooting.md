@@ -54,7 +54,7 @@ Follow the [profile recovery steps](../WINDOWS_STARTUP_RECOVERY.md).
 
 ## Report a problem
 
-- **Settings → Report an issue** guides you through a private report. You review the exact text before anything is submitted to GitHub. See [Guided issue reporting](../ISSUE_REPORTING.md).
+- **Settings → Report an issue** builds the exact issue for you to review and edit. Nothing is submitted until you choose **Create on GitHub**. See [Issue reporting](../ISSUE_REPORTING.md).
 - **Settings → Diagnostics → Copy support summary** copies a bounded summary you can attach to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml).
 
 Don't share raw logs, databases or credentials.

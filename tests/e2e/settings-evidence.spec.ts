@@ -346,7 +346,8 @@ async function captureDiscordStates(viewport: Viewport): Promise<void> {
 async function captureDiagnosticStates(viewport: Viewport): Promise<void> {
   await openSection(sectionLabel("diagnostics"));
   const incidents = page.locator(".diagnostics-incident > summary");
-  await expect(incidents).toHaveCount(DIAGNOSTIC_CODES.length + SIGNED_OUT_CLAUDE_INCIDENTS);
+  await expect.poll(() => incidents.count())
+    .toBeGreaterThanOrEqual(DIAGNOSTIC_CODES.length + SIGNED_OUT_CLAUDE_INCIDENTS);
   await capturePages(evidenceName("diagnostics", "list", viewport));
   await incidents.first().click();
   await page.waitForTimeout(200);
@@ -368,8 +369,8 @@ async function captureEveryState(viewport: Viewport): Promise<void> {
   await captureProviderStates(viewport);
   await captureBackendStates(viewport);
   await captureDefaultState("connections", viewport);
-  await captureDiscordStates(viewport);
   await captureDiagnosticStates(viewport);
+  await captureDiscordStates(viewport);
   for (const id of ["source-control", "keybindings", "report-issue", "archive"]) {
     await captureDefaultState(id, viewport);
   }

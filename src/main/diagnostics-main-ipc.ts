@@ -21,7 +21,7 @@ export interface DiagnosticsMainIpcOptions {
   revealChannel: string;
   supportReportChannel: string;
   supportReportInput: () => Omit<CopyLifecycleSupportReportInput, "lifecycleInput" | "diagnostics">;
-  writeClipboard: (text: string) => void;
+  writeClipboard: (text: string) => void | Promise<void>;
   openPath: (path: string) => Promise<string>;
   showSaveDialog: (window: BrowserWindow, options: SaveDialogOptions) => Promise<SaveDialogReturnValue>;
   revealsHostFolder: boolean;

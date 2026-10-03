@@ -43,9 +43,7 @@ export function prefetchSettingsSection(section: string): void {
   if (section === "snapshots") void loadSnapshotSettings();
   if (section === "projects") void loadProjectSettings();
   if (section === "diagnostics") void loadDiagnosticsSettings();
-  if (section === "providers" || section === "archive") {
-    void loadLifecycleIntegritySettings();
-  }
+  if (section === "providers") void loadLifecycleIntegritySettings();
   if (section === "backends") {
     void loadModelBackendsSettings();
   } else if (section === "connections") {

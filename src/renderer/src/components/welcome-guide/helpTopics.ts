@@ -344,7 +344,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Diagnostics",
-        detail: "Settings → Diagnostics keeps a local history of incidents that you can search, filter and export.",
+        detail: "Settings → Diagnostics keeps a local history of app events and incidents that you can search, filter, export or clear. Capture can be turned off there.",
       },
       {
         name: "Report an issue",
@@ -352,7 +352,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Support summary",
-        detail: "Copy support summary, under Runtime diagnostics in Settings → Archive & data, copies a bounded summary to attach to a bug report.",
+        detail: "Copy support summary, in Settings → Diagnostics, copies a bounded summary to attach to a bug report.",
       },
       {
         name: "Updates",

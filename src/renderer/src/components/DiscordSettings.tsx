@@ -32,6 +32,15 @@ export function DiscordSettings({
     useState<BackendCredentialState | null>(null);
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [incidentId, setIncidentId] = useState<string | null>(null);
+  const [captureOff, setCaptureOff] = useState(false);
+  useEffect(() => {
+    if (!releaseInfoError || incidentId) return;
+    let active = true;
+    void window.inertia.queryDiagnostics({ limit: 1 })
+      .then((page) => { if (active) setCaptureOff(!page.capture); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [releaseInfoError, incidentId]);
   const reportValidation = async (code: RendererDiagnostic["code"]): Promise<void> => {
     try {
       const result = await window.inertia.reportValidationDiagnostic({ code, correlationId: crypto.randomUUID() });
@@ -248,6 +257,7 @@ export function DiscordSettings({
           {releaseInfoStatus}
         </p>
       )}
+      {releaseInfoError && !incidentId && captureOff && <p className="settings-card-note">Diagnostics capture is off, so this was not recorded.</p>}
       {incidentId && <button type="button" className="secondary-button discord-diagnostic-link" onClick={() => navigateDiagnosticContext({
         section: "diagnostics", selection: { incidentId },
       })}>View diagnostics</button>}

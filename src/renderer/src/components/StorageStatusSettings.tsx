@@ -41,17 +41,15 @@ export function StorageStatusSettings({
   return <>
     <div className="codex-binary-path runtime-log-setting app-health-setting">
       <span>
-        <strong><Activity size={14} />Local resource health</strong>
-        <small>Sampled only while open; covers Inertia processes and app storage, never project files.</small>
+        <strong><Activity size={14} />Local storage</strong>
+        <small>Sampled only while open; covers app storage, never project files.</small>
         {health ? <>
           <span className="app-health-grid">
-            <span><b>{formatHealthBytes(health.totalMemoryBytes)}</b><small>App memory</small></span>
             <span><b>{formatHealthBytes(health.databaseBytes)}</b><small>Database</small></span>
             <span><b>{formatHealthBytes(health.cacheBytes)}</b><small>Browser cache</small></span>
             <span><b>{formatHealthBytes(health.temporaryAttachmentBytes)}</b><small>Temporary attachments</small></span>
           </span>
           <small>Measured <time dateTime={health.sampledAt}>{new Date(health.sampledAt).toLocaleTimeString(INTERFACE_LOCALE)}</time>. Database includes its active journal; backup files and saved attachment files are not included in these storage totals.</small>
-          <small>Memory breakdown: main {health.mainProcess ? `${formatStorageBytes(health.mainProcess.memoryBytes)} (${health.mainProcess.cpuPercent.toFixed(1)}% CPU)` : "unavailable"} · UI {health.rendererProcesses ? `${formatStorageBytes(health.rendererProcesses.reduce((total, process) => total + process.memoryBytes, 0))} across ${health.rendererProcesses.length} ${health.rendererProcesses.length === 1 ? "process" : "processes"}` : "unavailable"} · local service {health.runtimeProcess ? formatStorageBytes(health.runtimeProcess.memoryBytes) : "unavailable"} ({health.runtimePhase ?? "state unavailable"}).</small>
           {health.warnings.length > 0 && <small className="settings-card-note" role="status">
             <strong>Partial health data</strong>
             {`: ${health.warnings.map(({ message }) => message).join(" ")}`}

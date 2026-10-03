@@ -181,6 +181,9 @@ describe("Settings composite updates", () => {
       value: {
         getPlatform: () => "linux",
         getAppHealth: vi.fn(async () => null),
+        queryDiagnostics: vi.fn(async () => ({ records: [], events: [], capture: true, since: null, total: 0,
+          nextOffset: null, persistence: "available", runtime: "ready", dropped: 0, revision: 1,
+          currentIncidentIds: [], facets: { providerIds: [], projectIds: [] } })),
       },
     });
     const lifecycleDiagnostics: RuntimeLifecycleDiagnosticSnapshot = {
@@ -214,12 +217,10 @@ describe("Settings composite updates", () => {
       {...properties}
       lifecycleDiagnostics={lifecycleDiagnostics}
     />);
-    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
-    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }));
 
-    expect(await screen.findByText("Waiting for provider cleanup")).toBeVisible();
-    expect(screen.getByText(/1 active turn · 1 open interaction/u))
-      .toHaveTextContent("generation 123456789abc");
+    const health = await screen.findByRole("group", { name: "Process health" });
+    expect(health).toHaveTextContent("Waiting for provider cleanup · 1 active turn · 1 open interaction");
     expect(document.body).not.toHaveTextContent("conversation-secret-id");
 
     const blockedUpdate: AppUpdateStatus = {
@@ -247,7 +248,7 @@ describe("Settings composite updates", () => {
       }}
       appUpdateStatus={blockedUpdate}
     />);
-    expect(await screen.findByText("Update blocked by active work")).toBeVisible();
+    expect(await screen.findByText(/Update blocked by active work/u)).toBeVisible();
   });
 
   it("keeps healthy local metrics visible beside bounded partial warnings", async () => {
@@ -287,10 +288,9 @@ describe("Settings composite updates", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Browser cache storage could not be measured.",
     );
-    expect(screen.getByText("30 MB")).toBeVisible();
     expect(screen.getByText("4.0 KB")).toBeVisible();
     expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.getByText(/UI 20 MB across 1 process/u)).toBeVisible();
+    expect(screen.queryByText("App memory")).toBeNull();
     expect(screen.getByText("Partial health data").parentElement)
       .toBe(screen.getByRole("status"));
   });

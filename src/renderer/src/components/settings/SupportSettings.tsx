@@ -28,12 +28,12 @@ export function SupportSettings({
   const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, true);
   return (
     <>
-      <SettingsGroup title="Storage & backups" description="Check local usage, retention and the last validated backup." icon={Database}>
+      <SettingsGroup title="Storage & backups" headingId="storage-support-heading" description="Check local usage, retention and the last validated backup." icon={Database}>
         <div className="settings-toolbar">
           <button type="button" className="secondary-button" onClick={() => onNavigate("archive")}><Database size={14} />View storage & backups</button>
         </div>
       </SettingsGroup>
-      <SettingsGroup title="Welcome guide" description="Replay the quick tour of split view, the Work tab, Duo, review and limits." icon={Compass}>
+      <SettingsGroup title="Welcome guide" headingId="welcome-guide-heading" description="Replay the quick tour of split view, the Work tab, Duo, review and limits." icon={Compass}>
         <div className="settings-toolbar" data-setting-id="welcome-guide">
           <button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button>
         </div>

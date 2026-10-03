@@ -16,7 +16,7 @@ export function SourceControlSettings({
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
 }): React.JSX.Element {
   return (
-    <SettingsGroup title="Changes" description="Keep diffs easy to review." icon={GitCompareArrows}>
+    <SettingsGroup title="Changes" headingId="source-heading" description="Keep diffs easy to review." icon={GitCompareArrows}>
       <div className="settings-rows">
         <SettingSwitch
           id="wrap-diffs"

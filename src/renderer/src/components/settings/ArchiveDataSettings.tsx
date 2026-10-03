@@ -122,7 +122,7 @@ export function ArchiveDataSettings({
 
   return (
     <>
-      <SettingsGroup title="Archived threads" description="Restore work with its original context." icon={ArchiveRestore}>
+      <SettingsGroup title="Archived threads" headingId="archive-heading" description="Restore work with its original context." icon={ArchiveRestore}>
         <div data-setting-id="archived-threads">
           {archived.length > 0 ? (
             <div className="archive-list">
@@ -147,7 +147,7 @@ export function ArchiveDataSettings({
           )}
         </div>
       </SettingsGroup>
-      <SettingsGroup title="Local data" description="Database backups and portable recovery exports." icon={Database}>
+      <SettingsGroup title="Local data" headingId="data-heading" description="Database backups and portable recovery exports." icon={Database}>
         <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
         <StorageStatusSettings
           health={appHealth}

@@ -156,6 +156,7 @@ export function DiscordSettings({
     <SettingsGroup
       className="discord-settings"
       title="Discord"
+      headingId="discord-heading"
       description="Prepare release details before publishing them to Discord."
       icon={MessageSquare}
     >

@@ -119,7 +119,7 @@ export function GeneralSettings({
         onUpdate={onUpdate}
       />
 
-      <SettingsGroup title="Appearance" description="Choose an appearance mode, then make the whole workbench feel like yours." icon={Sun} notice={appearanceAction.notice}>
+      <SettingsGroup title="Appearance" headingId="appearance-heading" description="Choose an appearance mode, then make the whole workbench feel like yours." icon={Sun} notice={appearanceAction.notice}>
         <ThemeLibrary settings={settings} disabled={disabled} onUpdate={updateAppearance} />
         <SettingRadioGroup
           id="interface-scale"
@@ -134,7 +134,7 @@ export function GeneralSettings({
         <WorkingIndicatorSettings settings={settings.workingIndicator} disabled={disabled} onUpdate={onUpdate} />
       </SettingsGroup>
 
-      <SettingsGroup title="Workspace" description="Choose which quiet details help you stay oriented." icon={PanelLeft}>
+      <SettingsGroup title="Workspace" headingId="workspace-heading" description="Choose which quiet details help you stay oriented." icon={PanelLeft}>
         <SettingRadioGroup
           id="project-grouping"
           className="project-grouping-setting"
@@ -166,14 +166,14 @@ export function GeneralSettings({
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Notifications" description="Decide how Inertia tells you a task has finished or needs you." icon={Bell}>
+      <SettingsGroup title="Notifications" headingId="notifications-heading" description="Decide how Inertia tells you a task has finished or needs you." icon={Bell}>
         <div className="settings-rows">
           <SettingSwitch id="desktop-notifications" title="Desktop notifications" description="Show privacy-safe completion and attention alerts without prompt or response text." checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
           <CompletionSoundSettings settings={settings.completionSound} disabled={disabled} onUpdate={onUpdate} />
         </div>
       </SettingsGroup>
 
-      <SettingsGroup title="Agent responses" description="Choose how final answers and the work behind them are presented." icon={FileCode2}>
+      <SettingsGroup title="Agent responses" headingId="responses-heading" description="Choose how final answers and the work behind them are presented." icon={FileCode2}>
         <SettingRadioGroup
           id="response-density"
           title="Response density"
@@ -191,7 +191,7 @@ export function GeneralSettings({
         </div>
       </SettingsGroup>
 
-      <SettingsGroup title="Terminal" description="Keep command output comfortable to read." icon={TerminalSquare}>
+      <SettingsGroup title="Terminal" headingId="terminal-heading" description="Keep command output comfortable to read." icon={TerminalSquare}>
         <TerminalFontSize value={settings.terminalFontSize} disabled={disabled} onUpdate={onUpdate} />
       </SettingsGroup>
 

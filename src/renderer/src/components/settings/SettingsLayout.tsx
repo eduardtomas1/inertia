@@ -26,6 +26,7 @@ export function SettingsPage({
 
 export function SettingsGroup({
   title,
+  headingId: requestedHeadingId,
   description,
   icon: Icon,
   notice,
@@ -33,13 +34,15 @@ export function SettingsGroup({
   children,
 }: {
   title: string;
+  headingId?: string;
   description?: ReactNode;
   icon?: LucideIcon;
   notice?: SettingNotice | null;
   className?: string;
   children: ReactNode;
 }): React.JSX.Element {
-  const headingId = useId();
+  const generatedHeadingId = useId();
+  const headingId = requestedHeadingId ?? generatedHeadingId;
   return (
     <section className={clsx("settings-card", className)} aria-labelledby={headingId}>
       <div className="settings-card-heading">

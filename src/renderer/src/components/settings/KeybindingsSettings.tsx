@@ -61,7 +61,7 @@ export function KeybindingsSettings({
   const atDefaults = Object.entries(DEFAULT_APP_KEYBINDINGS)
     .every(([shortcut, key]) => draft[shortcut as AppShortcutAction] === key);
   return (
-    <SettingsGroup title="Keyboard shortcuts" description="Fast paths for common actions." icon={Keyboard}>
+    <SettingsGroup title="Keyboard shortcuts" headingId="keybindings-heading" description="Fast paths for common actions." icon={Keyboard}>
       <div className="shortcut-list">
         {SHORTCUT_ROWS.map(([shortcut, label]) => (
           <label key={shortcut} data-setting-id={`shortcut-${shortcut}`}>

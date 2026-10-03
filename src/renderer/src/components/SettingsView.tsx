@@ -118,9 +118,10 @@ const SettingsShell = memo(function SettingsShell({
     onSectionChange?.(section);
   }, [onSectionChange, section]);
   const navigate = useCallback((next: SettingsSection) => {
+    if (next === section) return;
     setSection(next);
     focusRequest.current = {};
-  }, []);
+  }, [section]);
   const regularProjects = useMemo(
     () => view.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch"),
     [view.projects],

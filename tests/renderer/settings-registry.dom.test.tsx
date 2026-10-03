@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
@@ -108,6 +108,19 @@ describe("Settings anchors", () => {
     await waitFor(() => expect(row).toHaveFocus());
     expect(row).toHaveAttribute("tabindex", "-1");
     expect(row.className).toBe("");
+  });
+
+  it("keeps focus on a control after the current section is chosen again and a snapshot arrives", async () => {
+    const target = { section: "source" as const };
+    const view = render(<SettingsView {...settingsViewProps({ target })} />);
+    const navigation = screen.getByRole("button", { name: "Source control" });
+    navigation.focus();
+    fireEvent.click(navigation);
+    const wrap = screen.getByRole("switch", { name: "Wrap long diff lines" });
+    wrap.focus();
+    view.rerender(<SettingsView {...settingsViewProps({ target, settings: { ...defaultSettings, wrapDiffs: false } })} />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(wrap).toHaveFocus();
   });
 
   it("falls back to the section title for an unknown anchor", async () => {

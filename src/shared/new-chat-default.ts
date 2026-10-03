@@ -6,6 +6,7 @@ import type {
   ProviderId,
   ProviderInfo,
 } from "./contracts";
+import { effectiveDefaultProviderId } from "./default-provider";
 import {
   providerIdForHarness,
   providerNativeModelSelection,
@@ -60,9 +61,10 @@ function validBackendDefault(
 
 export function newChatDefaultProvider(
   settings: NewChatDefaultSettings,
-  _providers: readonly ProviderInfo[],
+  providers: readonly ProviderInfo[],
 ): { providerId: ProviderId; fallback: boolean } {
-  return { providerId: settings.defaultProvider, fallback: false };
+  const providerId = effectiveDefaultProviderId(settings.defaultProvider, providers);
+  return { providerId, fallback: providerId !== settings.defaultProvider };
 }
 
 function fromSelection(source: NewChatDefaultSource, selection: ModelSelection): NewChatDefault {

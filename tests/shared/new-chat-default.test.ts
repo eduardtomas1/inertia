@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultSettings, type ModelBackendDefault } from "../../src/shared/contracts";
+import { defaultSettings, type ModelBackendDefault, type ProviderInfo } from "../../src/shared/contracts";
 import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { effectiveNewChatDefault } from "../../src/shared/new-chat-default";
 
@@ -60,5 +60,17 @@ describe("effective new-chat default", () => {
       backendProfiles: [],
       backendDefaults: [{ scope: "global", projectId: null, selection, updatedAt: "2026-08-01T00:00:00.000Z" }],
     }, defaultSettings)).toMatchObject({ source: "settings", providerId: "codex", modelId: "provider-default", reasoning: null });
+  });
+
+  it("falls back to the first runnable provider with its default model when the stored one cannot run", () => {
+    const provider = (id: "codex" | "claude", canRun: boolean) => ({
+      id, available: true, installState: canRun ? "installed" : "missing", authState: "authenticated", canRun,
+      models: [], metadataState: { models: { freshness: "unavailable" } },
+    }) as unknown as ProviderInfo;
+    expect(effectiveNewChatDefault({ providers: [provider("codex", false), provider("claude", true)], backendProfiles: [], backendDefaults: [] }, {
+      defaultProvider: "codex",
+      defaultModel: "gpt-5",
+      defaultReasoningEffort: "high",
+    })).toMatchObject({ source: "fallback", providerId: "claude", modelId: "provider-default", reasoning: null });
   });
 });

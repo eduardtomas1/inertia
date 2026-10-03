@@ -24,6 +24,7 @@ import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
 import { runGitInspection } from "../../src/server/git/runner";
 import {
   GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
+  GIT_SCAN_GLOBAL_PROCESS_BUDGET,
   GIT_SCAN_MAX_CONCURRENT_KEYS,
   GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
   GIT_SCAN_PROCESS_BUDGET_PER_KEY,
@@ -89,6 +90,7 @@ interface LinuxProcessMetrics {
   }>;
   peakAdmissionHelpers: number;
   peakReleaseHelpers: number;
+  peakInspectionsWithControlHelpers: number;
   releaseHandoffSamples: number;
   controlHelperViolations: unknown[];
   peakDescendants: number;
@@ -158,6 +160,9 @@ function expectControlHelpersWithinBudget(
 ): void {
   const detail = JSON.stringify(metrics.peakControlHelperDetail);
   expect(metrics.controlHelperViolations, detail).toEqual([]);
+  expect(metrics.peakInspectionsWithControlHelpers, detail).toBeLessThanOrEqual(
+    activeInspections,
+  );
   expect(metrics.peakAdmissionHelpers, detail).toBeLessThanOrEqual(
     activeInspections * ADMISSION_HELPERS_PER_ACTIVE_INSPECTION,
   );
@@ -408,10 +413,7 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
       );
-      expectControlHelpersWithinBudget(
-        metrics,
-        GIT_SCAN_MAX_CONCURRENT_KEYS * GIT_SCAN_PROCESS_BUDGET_PER_KEY,
-      );
+      expectControlHelpersWithinBudget(metrics, GIT_SCAN_GLOBAL_PROCESS_BUDGET);
       expect(metrics.peakDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET
           + GIT_SCAN_MAX_CONCURRENT_KEYS

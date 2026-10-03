@@ -15,7 +15,13 @@ describe("Linux control helper census", () => {
       helper(47724, 47710, "exec"),
       helper(47723, 47716, "exec"),
       helper(47722, 47713, "exec"),
-    ], childFree)).toEqual({ admission: 3, release: 1, handoffs: 1, violations: [] });
+    ], childFree)).toEqual({
+      admission: 3,
+      release: 1,
+      guardians: 3,
+      handoffs: 1,
+      violations: [],
+    });
   });
 
   it("counts the CI global peak's admissions without a handoff", () => {
@@ -24,7 +30,26 @@ describe("Linux control helper census", () => {
       helper(48571, 48564, "claim"),
       helper(48570, 48567, "claim"),
       helper(48559, 48555, "exec"),
-    ], childFree)).toEqual({ admission: 4, release: 0, handoffs: 0, violations: [] });
+    ], childFree)).toEqual({
+      admission: 4,
+      release: 0,
+      guardians: 4,
+      handoffs: 0,
+      violations: [],
+    });
+  });
+
+  it("counts one inspection's release beside another inspection's claim as two inspections", () => {
+    expect(controlHelperCensus([
+      helper(21, 10, "release"),
+      helper(22, 20, "claim"),
+    ], childFree)).toEqual({
+      admission: 1,
+      release: 1,
+      guardians: 2,
+      handoffs: 0,
+      violations: [],
+    });
   });
 
   it("rejects two admission helpers for one guardian", () => {

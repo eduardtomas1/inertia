@@ -1,34 +1,57 @@
 import { z } from "zod";
-import { modelSelectionSchema } from "./model-routing";
+import { providerIdSchema } from "./contracts/client-command/common";
 
 export const ISSUE_REPOSITORY = "eduardtomas1/inertia";
 export const ISSUE_REPOSITORY_URL = `https://github.com/${ISSUE_REPOSITORY}/issues`;
 export const REPORT_TEXT_LIMIT = 8_000;
 export const REPORT_BODY_LIMIT = 24_000;
+export const MANUAL_ISSUE_URL_LIMIT = 4_096;
 export const issueReportInputSchema = z.object({
   description: z.string().trim().min(10).max(REPORT_TEXT_LIMIT),
-  projectId: z.string().uuid().nullable(),
-  selection: modelSelectionSchema,
+  steps: z.string().trim().max(REPORT_TEXT_LIMIT),
+  providerId: providerIdSchema.nullable(),
+  attachDiagnostics: z.boolean(),
 }).strict();
 export const issueReportSchema = z.object({
   id: z.string().uuid(),
   revision: z.number().int().nonnegative(),
-  status: z.enum(["draft", "validating", "preview", "cancelled", "failed", "submitting", "uncertain", "submitted", "retired"]),
+  status: z.enum(["preview", "failed", "submitting", "uncertain", "submitted", "retired"]),
   description: z.string().max(REPORT_TEXT_LIMIT),
-  projectId: z.string().uuid().nullable(),
-  selection: modelSelectionSchema,
-  evidence: z.string().max(8_000),
-  answer: z.string().max(REPORT_TEXT_LIMIT),
+  steps: z.string().max(REPORT_TEXT_LIMIT),
+  providerId: providerIdSchema.nullable(),
+  attachDiagnostics: z.boolean(),
   title: z.string().max(200),
   body: z.string().max(REPORT_BODY_LIMIT),
   notice: z.string().max(600),
   issueUrl: z.string().regex(/^https:\/\/github\.com\/eduardtomas1\/inertia\/issues\/[1-9][0-9]*$/u).nullable(),
 }).strict();
 export const ISSUE_GITHUB_STATES = ["ready", "missing", "signed-out", "offline", "rate-limited", "repository", "timeout", "unknown"] as const;
+export const issueGitHubStateSchema = z.enum(ISSUE_GITHUB_STATES);
 export type IssueGitHubState = typeof ISSUE_GITHUB_STATES[number];
 export type IssuePublicationFailure = Exclude<IssueGitHubState, "ready">;
 export type IssueReport = z.infer<typeof issueReportSchema>;
 export type IssueReportInput = z.infer<typeof issueReportInputSchema>;
+
+export const ISSUE_GITHUB_MESSAGES: Record<IssuePublicationFailure, string> = {
+  missing: "GitHub CLI is not installed. Install gh and run gh auth login, or open GitHub manually.",
+  "signed-out": "GitHub CLI is not signed in. Run gh auth login in a terminal, or open GitHub manually.",
+  offline: "GitHub could not be reached. Check your connection and try again.",
+  "rate-limited": "GitHub is limiting requests right now. Wait a few minutes and try again.",
+  repository: `The ${ISSUE_REPOSITORY} repository could not be reached or does not accept issues. Open GitHub manually instead.`,
+  timeout: "GitHub did not respond in time. Try again, or open GitHub manually.",
+  unknown: "The issue could not be created on GitHub. Try again, or open GitHub manually.",
+};
+
+export function issueReportResult(value: Record<string, unknown>): boolean {
+  return (value.report === null || issueReportSchema.safeParse(value.report).success)
+    && (value.github === undefined || issueGitHubStateSchema.safeParse(value.github).success);
+}
+
+export function manualIssueUrl(title: string, body?: string): string | null {
+  const query = new URLSearchParams(body === undefined ? { title } : { title, body });
+  const url = `${ISSUE_REPOSITORY_URL}/new?${query.toString()}`;
+  return url.length <= MANUAL_ISSUE_URL_LIMIT ? url : null;
+}
 
 const SENSITIVE_REPORT_KEY = /^(?:api[_ -]?(?:key|token)|(?:access|refresh)[_ -]?token|client[_ -]?secret|password|authorization|cookies?|credentials?|secret[_ -]?(?:access[_ -]?)?key|secrets?|tokens?)$/iu;
 
@@ -72,9 +95,4 @@ export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "")
     .slice(0, limit).trim();
-}
-
-export function reportAllowsAgent(harnessId: string): boolean {
-  // This harness has an audited native empty tools list and deny-all callback.
-  return harnessId === "claude-agent-sdk";
 }

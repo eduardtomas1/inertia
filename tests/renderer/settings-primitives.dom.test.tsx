@@ -111,6 +111,51 @@ describe("SettingSelect and SettingRadioGroup", () => {
   });
 });
 
+describe("inactive controls", () => {
+  it("keeps an inactive switch focusable, marks it aria-disabled and ignores activation", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<SettingSwitch id="background" title="Only in the background" checked={false} inactive onChange={onChange} />);
+    const control = screen.getByRole("switch", { name: "Only in the background" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).not.toBeDisabled();
+    control.focus();
+    expect(control).toHaveFocus();
+
+    fireEvent.click(control);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(control).not.toBeChecked();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+
+    rerender(<SettingSwitch id="background" title="Only in the background" checked={false} onChange={onChange} />);
+    expect(control).not.toHaveAttribute("aria-disabled");
+    expect(control).toHaveFocus();
+    fireEvent.click(control);
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps an inactive select focusable, marks it aria-disabled and snaps back to the stored value", () => {
+    const onChange = vi.fn();
+    const options = [{ value: "25", label: "25 %" }, { value: "15", label: "15 %" }] as const;
+    const { rerender } = render(<SettingSelect id="threshold" title="Warn when below" value="25" options={options} inactive onChange={onChange} />);
+    const control = screen.getByRole("combobox", { name: "Warn when below" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).not.toBeDisabled();
+    control.focus();
+    expect(control).toHaveFocus();
+
+    fireEvent.change(control, { target: { value: "15" } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(control).toHaveValue("25");
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+
+    rerender(<SettingSelect id="threshold" title="Warn when below" value="25" options={options} onChange={onChange} />);
+    expect(control).not.toHaveAttribute("aria-disabled");
+    fireEvent.change(control, { target: { value: "15" } });
+    expect(onChange).toHaveBeenCalledWith("15");
+    expect(control).toHaveValue("15");
+  });
+});
+
 describe("SettingTextField", () => {
   it("saves once on blur without dropping keystrokes or snapping back while the save is pending", async () => {
     const save = deferred();

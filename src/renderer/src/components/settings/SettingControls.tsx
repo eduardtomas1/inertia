@@ -14,6 +14,7 @@ export function SettingSwitch({
   description,
   checked,
   disabled = false,
+  inactive = false,
   label,
   onChange,
 }: {
@@ -22,6 +23,7 @@ export function SettingSwitch({
   description?: ReactNode;
   checked: boolean;
   disabled?: boolean;
+  inactive?: boolean;
   label?: string;
   onChange: Persist<boolean>;
 }): React.JSX.Element {
@@ -29,7 +31,7 @@ export function SettingSwitch({
   const { value, save } = useOptimisticSetting(checked, action, onChange);
   return (
     <SettingRow id={id} title={title} description={description} notice={action.notice}>
-      <Switch label={label ?? title} checked={value} disabled={disabled} onChange={save} />
+      <Switch label={label ?? title} checked={value} disabled={disabled} inactive={inactive} onChange={save} />
     </SettingRow>
   );
 }
@@ -48,6 +50,7 @@ export function SettingSelect<T extends string>({
   value: authoritative,
   options,
   disabled = false,
+  inactive = false,
   className,
   onChange,
 }: {
@@ -58,6 +61,7 @@ export function SettingSelect<T extends string>({
   value: T;
   options: readonly SettingOption<T>[];
   disabled?: boolean;
+  inactive?: boolean;
   className?: string;
   onChange: Persist<T>;
 }): React.JSX.Element {
@@ -68,9 +72,10 @@ export function SettingSelect<T extends string>({
       <select
         className="setting-select"
         aria-label={label ?? title}
+        aria-disabled={inactive || undefined}
         value={value}
         disabled={disabled}
-        onChange={(event) => save(event.currentTarget.value as T)}
+        onChange={(event) => { if (!inactive) save(event.currentTarget.value as T); }}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>

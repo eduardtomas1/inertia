@@ -27,11 +27,13 @@ export function Switch({
   onChange,
   label,
   disabled = false,
+  inactive = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   disabled?: boolean;
+  inactive?: boolean;
 }): React.JSX.Element {
   return (
     <button
@@ -39,10 +41,11 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-disabled={inactive || undefined}
       className="switch-control"
       data-checked={checked}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      onClick={() => { if (!inactive) onChange(!checked); }}
     >
       <span className="switch-thumb" />
     </button>

@@ -79,11 +79,6 @@ test("writes a plain report, previews the exact public issue and keeps it review
     await expect(page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Steps to reproduce (optional)", exact: true })).toBeEnabled();
     await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
-    await page.getByRole("button", { name: "Preview issue" }).click();
-    await expect(page.getByText("Describe what happened in at least 10 characters.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toBeFocused();
-    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
     const provider = page.getByRole("combobox", { name: "Provider", exact: true });
     await expect(provider).toHaveCSS("appearance", "base-select");
     await provider.click();
@@ -115,6 +110,11 @@ test("writes a plain report, previews the exact public issue and keeps it review
     await capture(page, info, "issue-report-form-dark-760x600");
 
     await app.resizeWindow(1440, 920);
+    await page.getByRole("button", { name: "Preview issue" }).click();
+    await expect(page.getByText("Describe what happened in at least 10 characters.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByRole("textbox", { name: "What happened", exact: true })).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
     await page.getByRole("textbox", { name: "What happened", exact: true }).fill("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start normally.");
     await page.getByRole("textbox", { name: "Steps to reproduce (optional)", exact: true }).fill("1. Start a turn\n2. Cancel it\n3. Send another message");
     await provider.selectOption("claude");

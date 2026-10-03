@@ -47,7 +47,7 @@ Wide is 1440×920, narrow 1000×800, and the tight size 760×600.
 
 ## Report an issue
 
-Spec: `tests/e2e/issue-report.spec.ts` (`capture()` per state; the same spec asserts no viewport overflow, controls inside the shared 810 px column, no nested buttons, the primary button aligned with the fields, one baseline for the action row, and focus order). The renderer clock is frozen at 2026-10-03T16:20:00Z; GitHub CLI is a stub in the fixture provider folder and no issue was published. Before images come from the same states on a build of `origin/main` (1053edf2); the old flow has no signed-out state.
+Spec: `tests/e2e/issue-report.spec.ts` (`capture()` per state; the same spec asserts no viewport overflow, controls inside the shared 810 px column, Settings gutters of at least 20 px beside the navigation (14 px at 760×600), no nested buttons, the primary button aligned with the fields, one baseline for the action row, focus after each step, and focus order). The renderer clock is frozen at 2026-10-03T16:20:00Z. GitHub CLI is a stub in the fixture's provider folder whose `auth` and `issue` commands fail or succeed on cue, so failed, submitting, uncertain, retired and submitted are real runtime states; no issue was published. Before images come from the same states on a build of `origin/main` (1053edf2); the old flow has none of the publication states below.
 
 | State | Before | After |
 | --- | --- | --- |
@@ -58,8 +58,16 @@ Spec: `tests/e2e/issue-report.spec.ts` (`capture()` per state; the same spec ass
 | Form, dark, 760×600 | ![](before-issue-report-form-dark-760x600.png) | ![](issue-report-form-dark-760x600.png) |
 | Preview, light, 1440×920 | ![](before-issue-report-preview-light-wide.png) | ![](issue-report-preview-light-wide.png) |
 | Preview, dark, 1440×920 | ![](before-issue-report-preview-dark-wide.png) | ![](issue-report-preview-dark-wide.png) |
+| Preview, light, 1000×800 | | ![](issue-report-preview-light-narrow.png) |
 | Preview, dark, 1000×800 | ![](before-issue-report-preview-dark-narrow.png) | ![](issue-report-preview-dark-narrow.png) |
-| Preview, dark, 760×600 | | ![](issue-report-preview-dark-760x600.png) |
+| Preview, dark, 760×600 | ![](before-issue-report-preview-dark-760x600.png) | ![](issue-report-preview-dark-760x600.png) |
+| GitHub CLI not signed in, light | | ![](issue-report-signed-out-light-wide.png) |
 | GitHub CLI not signed in, dark | | ![](issue-report-signed-out-dark-wide.png) |
+| Failed (sign-in check), dark | | ![](issue-report-failed-dark-wide.png) |
+| Submitting, dark | | ![](issue-report-submitting-dark-wide.png) |
+| Uncertain, dark | | ![](issue-report-uncertain-dark-wide.png) |
+| Retire confirmation, dark | | ![](issue-report-retire-dark-wide.png) |
+| Retired, dark | | ![](issue-report-retired-dark-wide.png) |
+| Submitted, dark | | ![](issue-report-submitted-dark-wide.png) |
 
-What changed: the page uses the shared Settings type scale and column instead of its own 20 px heading and full-width layout. The step list, privacy box, model and reasoning selects, project scope and the simulated report chat are gone with the validation run. The form is What happened, Steps to reproduce, Provider and Attach diagnostics; Preview issue shows the exact title and body in an editor with Back, Copy, Open GitHub manually and Create on GitHub. A GitHub CLI problem shows under the form when the page opens. The Storage & backups and Welcome guide cards now sit below the form.
+What changed: the page uses the shared Settings type scale, column and field colours instead of its own 20 px heading and full-width layout. The step list, privacy box, model and reasoning selects, project scope and the simulated report chat are gone with the validation run. The form is What happened, Steps to reproduce, Provider and Attach diagnostics; Preview issue shows the exact title and body in an editor with Back, Copy, Open GitHub manually and Create on GitHub. A GitHub CLI problem shows directly under the card heading when the page opens. Too-short input is explained instead of disabling the button. The Storage & backups and Welcome guide cards now sit below the form.

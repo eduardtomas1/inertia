@@ -15,14 +15,14 @@ test("real operation failures survive restart and remain readable/copyable after
   });
   let page = app.page;
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Discord", exact: true }).click();
+  await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
   // Invoke the actual privileged Discord operation through its production bridge.
   // Unsupported host validation must prevent both network and credential access.
   const failed = await page.evaluate(async () => window.inertia.sendDiscordReleaseInfo({ repositoryUrl: "https://unsupported.invalid/project" }));
   expect(failed).toMatchObject({ sent: false, code: "discord.repository-missing", incidentId: expect.any(String) });
   if (!failed.incidentId) throw new Error("Main did not return an incident reference");
   const originalId = failed.incidentId;
-  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.getByRole("button", { name: "Help", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Diagnostics", exact: true, level: 3 })).toBeVisible();
   await expect(page.getByText("A release repository is needed")).toBeVisible();
   await expect.poll(async () => (await page.evaluate(() => window.inertia.queryDiagnostics({ subsystem: "provider", providerId: "codex" }))).total)
@@ -34,9 +34,9 @@ test("real operation failures survive restart and remain readable/copyable after
   await expect(page.getByRole("button", { name: "Open provider settings", exact: true })).toBeVisible();
 
   for (const theme of ["dark", "light"] as const) {
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: theme === "dark" ? "Dark" : "Light", exact: true }).click();
-    await page.getByRole("button", { name: "Discord", exact: true }).click();
+    await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Discord release repository URL" })).toBeVisible();
     // Discord must own its field styles; obsolete provider selectors previously
     // left labels, help text and inputs running together on direct navigation.
@@ -56,7 +56,7 @@ test("real operation failures survive restart and remain readable/copyable after
     const discord = testInfo.outputPath(`discord-${theme}.png`);
     await page.screenshot({ path: discord, animations: "disabled" });
     await testInfo.attach(`discord-${theme}`, { path: discord, contentType: "image/png" });
-    await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+    await page.getByRole("button", { name: "Help", exact: true }).click();
     await expect(page.locator(".diagnostics-incident").first()).toBeVisible();
     await app.expectNoViewportOverflow();
     const gutters = await page.locator(".diagnostics-center").evaluate((element) => {
@@ -87,7 +87,7 @@ test("real operation failures survive restart and remain readable/copyable after
   const restarted = await app.restart(); page = restarted.page;
   await app.resizeWindow(1440, 1050);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.getByRole("button", { name: "Help", exact: true }).click();
   await expect.poll(async () => (await page.evaluate((incidentId) => window.inertia.queryDiagnostics({ incidentId }), originalId)).records[0]?.id)
     .toBe(originalId);
   const cleanup = await prepareElectronPrivilegedCleanup(restarted.electronApp);

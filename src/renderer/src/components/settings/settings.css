@@ -48,6 +48,39 @@
   max-width: 50%;
 }
 
+.setting-select,
+.setting-select::picker(select) {
+  appearance: base-select;
+}
+
+.setting-select {
+  align-items: center;
+}
+
+.setting-select::picker(select) {
+  max-height: min(320px, 70dvh);
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-medium);
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  font-family: inherit;
+}
+
+.setting-select option {
+  min-height: 32px;
+  padding: 7px 9px;
+  border-radius: var(--radius-small);
+  overflow-wrap: anywhere;
+}
+
+.setting-select option:hover,
+.setting-select option:focus-visible {
+  outline: none;
+  background: var(--surface-muted);
+}
+
 .setting-select-group {
   display: flex;
   flex: 0 0 auto;
@@ -142,11 +175,6 @@
   .setting-disclosure-chevron {
     transition: transform var(--motion-fast) var(--motion-ease);
   }
-}
-
-.settings-toolbar {
-  align-items: center;
-  gap: 8px;
 }
 
 .settings-keybinding-actions {

@@ -273,7 +273,7 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   }
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("button", { name: "General", exact: true }))
+  await expect(page.getByRole("button", { name: "Appearance", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await brand.click();
   await expect(page.getByRole("heading", {

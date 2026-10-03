@@ -29,7 +29,7 @@ test("keeps branded model sources and rows legible across themes and narrow wind
   // Disable them through Settings before photographing an ordinary
   // setup, also proving unavailable profiles do not leave empty rail icons.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Model backends", exact: true }).click();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
   const profiles = page.getByLabel("Backend profiles");
   const gateways = profiles.getByRole("button", { name: /^Catalog gateway /u });
   await expect(gateways).toHaveCount(5);
@@ -79,7 +79,7 @@ test("keeps branded model sources and rows legible across themes and narrow wind
   for (const theme of ["Light", "Dark"] as const) {
     await resizeWindow(1440, 920);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: theme, exact: true }).click();
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await trigger.click();

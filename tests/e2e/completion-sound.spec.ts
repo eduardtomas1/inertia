@@ -53,13 +53,13 @@ test("configures, imports and plays the sound for finished tasks", async ({ brow
     const starts = (): Promise<number> => page.evaluate(() => Number(Reflect.get(window, "__completionSoundStarts")));
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
-    const card = page.locator('section[aria-labelledby="notifications-heading"]');
+    await page.getByRole("button", { name: "Notifications", exact: true }).click();
+    const card = page.locator(".settings-content");
     const toggle = card.getByRole("switch", { name: "Sound when a task ends" });
     await toggle.scrollIntoViewIfNeeded();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await expect(card.getByRole("switch", { name: "Desktop notifications" })).toHaveAttribute("aria-checked", "true");
-    await expect(card.getByRole("heading", { name: "Notifications", level: 3 })).toBeVisible();
+    await expect(card.getByRole("heading", { name: "Sound", level: 3 })).toBeVisible();
     const capture = async (name: string): Promise<void> => {
       await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
       await page.addStyleTag({ content: "::-webkit-scrollbar { display: none; }" });

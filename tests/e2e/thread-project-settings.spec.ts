@@ -120,7 +120,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   await page.getByRole("button", { name: "Choose project", exact: true }).click();
   await capture(info, "project-chooser-light");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("button", { name: "Use Ocean for light", exact: true }).click();
   await page.getByRole("button", { name: "Use Iris for dark", exact: true }).click();
   await page.getByRole("group", { name: "Colour theme", exact: true }).scrollIntoViewIfNeeded();

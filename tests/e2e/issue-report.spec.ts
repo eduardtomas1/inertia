@@ -9,9 +9,9 @@ test("preserves the private report chat and requires a reviewed preview before p
     await app.resizeWindow(1440, 1050);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     for (const theme of ["Dark", "Light"]) {
-      await page.getByRole("button", { name: "General", exact: true }).click();
+      await page.getByRole("button", { name: "Appearance", exact: true }).click();
       await page.getByRole("radio", { name: theme, exact: true }).click();
-      await page.getByRole("button", { name: "Report an issue", exact: true }).click();
+      await page.getByRole("button", { name: "Help", exact: true }).click();
       await expect(page.getByLabel("What happened?")).toBeEnabled();
       await app.expectNoViewportOverflow();
       const layout = await page.locator(".issue-report").evaluate((element) => {
@@ -75,8 +75,8 @@ test("preserves the private report chat and requires a reviewed preview before p
     await page.screenshot({ path: preview, animations: "disabled" });
     await testInfo.attach("Reviewed public issue preview", { path: preview, contentType: "image/png" });
     // External publication is exercised with mocks in the server tests, never this real desktop.
-    await page.getByRole("button", { name: "Providers", exact: true }).click();
-    await page.getByRole("button", { name: "Report an issue", exact: true }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.getByRole("button", { name: "Help", exact: true }).click();
     await expect(page.getByText("Cancelled chat remains waiting on the next message", { exact: true })).toBeVisible();
     await app.resizeWindow(900, 850);
     await app.expectNoViewportOverflow();

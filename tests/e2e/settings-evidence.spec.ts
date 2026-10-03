@@ -106,14 +106,7 @@ type Viewport = (typeof VIEWPORTS)[number];
 
 type Card = readonly [state: string, heading: string | null];
 
-const GENERAL_CARDS: readonly Card[] = [
-  ["appearance", null],
-  ["workspace", "workspace-heading"],
-  ["notifications", "notifications-heading"],
-  ["responses", "responses-heading"],
-  ["terminal", "terminal-heading"],
-  ["updates", "application-update-heading"],
-];
+const ARCHIVED_PAGE_FILLER = 8;
 
 const SECTIONS: ReadonlyArray<{
   id: string;
@@ -122,24 +115,50 @@ const SECTIONS: ReadonlyArray<{
   select?: string;
   cards?: readonly Card[];
 }> = [
-  { id: "general", label: "General", overview: "appearance", cards: GENERAL_CARDS },
-  { id: "snapshots", label: "Snapshots", overview: "default" },
-  { id: "projects", label: "Projects", overview: "all" },
-  { id: "providers", label: "Providers", overview: "codex", select: "Configure Codex" },
-  { id: "model-backends", label: "Model backends", overview: "profile" },
-  { id: "connections", label: "Connections & devices", overview: "default" },
-  { id: "discord", label: "Discord", overview: "default" },
-  { id: "diagnostics", label: "Diagnostics", overview: "list" },
-  { id: "source-control", label: "Source control", overview: "default" },
-  { id: "keybindings", label: "Keybindings", overview: "default" },
-  { id: "report-issue", label: "Report an issue", overview: "default" },
   {
-    id: "archive",
-    label: /^Archive & data/u,
-    overview: "default",
-    cards: [["default", null], ["local-data", "data-heading"]],
+    id: "appearance",
+    label: "Appearance",
+    overview: "theme",
+    cards: [["theme", null], ["scale", "interface-scale-heading"], ["working-indicator", "working-indicator-heading"]],
+  },
+  {
+    id: "chats",
+    label: "Chats",
+    overview: "new-chats",
+    cards: [["new-chats", null], ["transcript", "transcript-heading"], ["review-terminal", "source-heading"]],
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    overview: "alerts",
+    cards: [["alerts", null], ["sound", "completion-sound-heading"], ["mascot", "desktop-mascot-heading"]],
+  },
+  { id: "keyboard", label: "Keyboard", overview: "default" },
+  { id: "projects", label: "Projects", overview: "all" },
+  { id: "agents", label: "Agents", overview: "codex", select: "Configure Codex" },
+  {
+    id: "devices",
+    label: "Devices & integrations",
+    overview: "private-connect",
+    cards: [["private-connect", null], ["snapshots", "snapshot-capture-heading"], ["discord", "discord-heading"]],
+  },
+  {
+    id: "data",
+    label: /^Data(?: \d+)?$/u,
+    overview: "storage",
+    cards: [["storage", null], ["recovery", "recovery-heading"], ["archived", "archive-heading"], ["defaults", "restore-defaults-heading"]],
+  },
+  {
+    id: "help",
+    label: "Help",
+    overview: "report-issue",
+    cards: [["report-issue", null], ["diagnostics", "diagnostics-heading"], ["support", "support-heading"], ["updates", "application-update-heading"]],
   },
 ];
+
+function sectionCards(id: string): readonly Card[] {
+  return SECTIONS.find((section) => section.id === id)!.cards!;
+}
 
 let app!: AppFixture;
 let page!: Page;
@@ -293,70 +312,88 @@ async function captureProjectStates(viewport: Viewport): Promise<void> {
   await expect(budget).toHaveAttribute("aria-invalid", "false");
 }
 
-async function captureProviderStates(viewport: Viewport): Promise<void> {
-  await openSection(sectionLabel("providers"));
+async function captureAgentStates(viewport: Viewport): Promise<void> {
+  await openSection(sectionLabel("agents"));
   const editor = page.locator(".provider-settings-editor-body");
   await page.getByRole("button", { name: "Configure Codex" }).click();
   await waitForSettledSection();
-  await capturePages(evidenceName("providers", "codex", viewport), { scroller: editor });
+  await capturePages(evidenceName("agents", "codex", viewport), { scroller: editor });
   await scrollContentTo(0, editor);
 
-  const advanced = page.getByRole("button", { name: "Advanced", exact: true });
-  await advanced.click();
-  await expect(advanced).toHaveAttribute("aria-expanded", "true");
-  const { top } = await offsetWithinContent(advanced);
-  await capturePages(evidenceName("providers", "advanced", viewport), { start: Math.max(0, Math.floor(top) - 16) });
-  await advanced.click();
-  await expect(advanced).toHaveAttribute("aria-expanded", "false");
-
-  await scrollContentTo(0);
   await page.getByRole("button", { name: "Configure Claude" }).click();
   await waitForSettledSection();
-  await capture(evidenceName("providers", "claude-signed-out", viewport)(null));
+  await capture(evidenceName("agents", "claude-signed-out", viewport)(null));
 
   await page.getByRole("button", { name: "Configure Cursor" }).click();
   await waitForSettledSection();
-  await capture(evidenceName("providers", "cli-missing", viewport)(null));
-}
+  await capture(evidenceName("agents", "cli-missing", viewport)(null));
 
-async function captureBackendStates(viewport: Viewport): Promise<void> {
-  await openSection(sectionLabel("model-backends"));
-  await capturePages(evidenceName("model-backends", "profile", viewport));
+  const backends = page.locator(".backend-settings");
+  const backendsTop = Math.max(0, Math.floor((await offsetWithinContent(backends)).top) - 16);
+  await capturePages(evidenceName("agents", "custom-backends", viewport), { start: backendsTop });
   await page.getByRole("button", { name: "New profile" }).click();
   const cancel = page.getByRole("button", { name: "Cancel profile editing" });
   await expect(cancel).toBeVisible();
   await waitForSettledSection();
-  await capturePages(evidenceName("model-backends", "new-profile", viewport));
-  await scrollContentTo(0);
+  await capturePages(evidenceName("agents", "new-profile", viewport), { start: backendsTop });
   await cancel.click();
   await expect(cancel).toHaveCount(0);
+  await scrollContentTo(0);
 }
 
 async function captureDiscordStates(viewport: Viewport): Promise<void> {
-  await openSection(sectionLabel("discord"));
-  await capturePages(evidenceName("discord", "default", viewport));
   const repository = page.getByRole("textbox", { name: "Discord release repository URL" });
   await repository.click();
   await page.keyboard.type("not-a-url", { delay: 150 });
   await expect(repository).toHaveValue("not-a-url");
   await repository.blur();
   await expect(repository).toHaveAttribute("aria-invalid", "true");
-  await capture(evidenceName("discord", "invalid-url", viewport)(null));
+  await capture(evidenceName("devices", "discord-invalid-url", viewport)(null));
+  await repository.fill("https://github.com/eduardtomas1/inertia");
+  await repository.blur();
+  await expect(repository).not.toHaveAttribute("aria-invalid");
+  const webhook = page.getByRole("textbox", { name: "Discord webhook URL" });
+  await webhook.fill("https://discord.com/api/webhooks/evidence/fixture");
+  const post = page.getByRole("button", { name: "Post release to Discord…" });
+  await post.click();
+  const confirm = page.getByRole("group", { name: "Confirm Discord post" });
+  await expect(confirm).toBeVisible();
+  await confirm.scrollIntoViewIfNeeded();
+  await capture(evidenceName("devices", "discord-post-confirm", viewport)(null), { keepFocus: true });
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await webhook.fill("");
   await repository.fill("");
   await repository.blur();
+  await scrollContentTo(0);
+}
+
+async function captureArchivedStates(viewport: Viewport): Promise<void> {
+  const filter = page.getByRole("searchbox", { name: "Filter archived chats" });
+  await filter.scrollIntoViewIfNeeded();
+  await filter.fill("investigate");
+  await page.waitForTimeout(200);
+  await capture(evidenceName("data", "archived-filter", viewport)(null));
+  await filter.fill("");
+  const more = page.getByRole("button", { name: /^Show \d+ more$/u });
+  await more.scrollIntoViewIfNeeded();
+  await more.click();
+  await page.waitForTimeout(200);
+  await capture(evidenceName("data", "archived-all", viewport)(null), { keepFocus: true });
+  await scrollContentTo(0);
 }
 
 async function captureDiagnosticStates(viewport: Viewport): Promise<void> {
-  await openSection(sectionLabel("diagnostics"));
   const incidents = page.locator(".diagnostics-incident > summary");
   await expect.poll(() => incidents.count())
     .toBeGreaterThanOrEqual(DIAGNOSTIC_CODES.length + SIGNED_OUT_CLAUDE_INCIDENTS);
-  await capturePages(evidenceName("diagnostics", "list", viewport));
   await incidents.first().click();
   await page.waitForTimeout(200);
-  await capturePages(evidenceName("diagnostics", "incident", viewport));
-  await scrollContentTo(0);
+  const { top } = await offsetWithinContent(incidents.first());
+  await scrollContentTo(Math.max(0, Math.floor(top) - 120));
+  await capture(evidenceName("help", "diagnostics-incident", viewport)(null));
   await incidents.first().click();
+  await scrollContentTo(0);
 }
 
 async function captureDefaultState(id: string, viewport: Viewport): Promise<void> {
@@ -364,19 +401,22 @@ async function captureDefaultState(id: string, viewport: Viewport): Promise<void
   await capturePages(evidenceName(id, "default", viewport));
 }
 
+async function captureCardSection(id: string, viewport: Viewport): Promise<void> {
+  await openSection(sectionLabel(id));
+  await captureCards(id, sectionCards(id), viewport, true);
+}
+
 async function captureEveryState(viewport: Viewport): Promise<void> {
-  await openSection(sectionLabel("general"));
-  await captureCards("general", GENERAL_CARDS, viewport, true);
-  await captureDefaultState("snapshots", viewport);
+  for (const id of ["appearance", "chats", "notifications"]) await captureCardSection(id, viewport);
+  await captureDefaultState("keyboard", viewport);
   await captureProjectStates(viewport);
-  await captureProviderStates(viewport);
-  await captureBackendStates(viewport);
-  await captureDefaultState("connections", viewport);
-  await captureDiagnosticStates(viewport);
+  await captureAgentStates(viewport);
+  await captureCardSection("devices", viewport);
   await captureDiscordStates(viewport);
-  for (const id of ["source-control", "keybindings", "report-issue", "archive"]) {
-    await captureDefaultState(id, viewport);
-  }
+  await captureCardSection("data", viewport);
+  await captureArchivedStates(viewport);
+  await captureCardSection("help", viewport);
+  await captureDiagnosticStates(viewport);
 }
 
 async function captureSections(viewport: Viewport): Promise<void> {
@@ -429,8 +469,8 @@ async function captureEntryAndExit(viewport: Viewport): Promise<void> {
   await waitForSettledSection();
   await capture(evidenceName("entry", "opened", viewport)(null), { keepFocus: true });
 
-  await openSection(sectionLabel("keybindings"));
-  await settingsNavigation(sectionLabel("keybindings")).focus();
+  await openSection(sectionLabel("keyboard"));
+  await settingsNavigation(sectionLabel("keyboard")).focus();
   await page.keyboard.press("Escape");
   await expect(settings).toHaveCount(0);
   await page.waitForTimeout(300);
@@ -471,7 +511,7 @@ test.beforeAll(async () => {
           await mkdir(path, { recursive: true });
           projectIds.push(store.createProject(name, path).id);
         }
-        for (const title of ARCHIVED_TITLES) {
+        for (const title of [...ARCHIVED_TITLES, ...Array.from({ length: ARCHIVED_PAGE_FILLER }, (_, index) => `Archived follow-up ${index + 1}`)]) {
           const conversation = store.createConversation(projectIds[0], title);
           store.archiveConversation(conversation.id, true);
         }
@@ -494,8 +534,8 @@ test("keeps Settings inside a 760x600 window", async () => {
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
-  await settingsNavigation("General").click();
-  await expect(settingsNavigation("General")).toHaveAttribute("aria-current", "page");
+  await settingsNavigation("Appearance").click();
+  await expect(settingsNavigation("Appearance")).toHaveAttribute("aria-current", "page");
   await app.resizeWindow(760, 600);
   await app.expectNoViewportOverflow();
   await expect(page.locator(".settings-content button button")).toHaveCount(0);

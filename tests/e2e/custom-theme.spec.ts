@@ -20,7 +20,7 @@ test("selects custom colors per appearance, follows System, and restores them af
   try {
     await app.resizeWindow(1440, 1100);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: "Light", exact: true }).click();
     const light = page.getByRole("textbox", { name: "Light colour", exact: true });
     await light.fill("#0d9488");

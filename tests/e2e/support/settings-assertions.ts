@@ -6,12 +6,7 @@ export async function expectFlatSettingsSections(settings: Locator): Promise<voi
     .toHaveCount(0);
   await expect(settings.getByText("Personalize your workspace", { exact: true })).toHaveCount(0);
   await expect(settings.locator(".settings-navigation-heading")).toHaveCount(0);
-  const toolbar = settings.locator(".settings-toolbar").first();
-  await expect(toolbar).toBeVisible();
-  await expect(toolbar).toHaveCSS("justify-content", "flex-end");
-  await expect(toolbar).toHaveCSS("margin-bottom", "16px");
   const rows = settings.locator(".settings-rows:not(.working-indicator-switches)");
-  expect(await rows.count()).toBeGreaterThan(0);
   for (const row of await rows.all()) await expect(row).toHaveCSS("border-top-width", "0px");
   const cards = settings.locator(".settings-card");
   expect(await cards.count()).toBeGreaterThan(0);

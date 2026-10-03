@@ -27,7 +27,7 @@ test("applies paired color themes and restores them after restart", async ({
 }, testInfo) => {
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.emulateMedia({ colorScheme: "light" });
   await page.getByRole("radio", { name: "System", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");

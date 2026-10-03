@@ -71,7 +71,7 @@ test("recovers an initially unavailable catalog through Settings Refresh without
 
   const page = app.page;
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
   await page.getByRole("tab", { name: "Models", exact: true }).click();
   await expect(page.getByText("No models reported yet", { exact: true })).toBeVisible();
   await expect(page.getByText("Refresh or connect this provider to load its model catalog.", { exact: true })).toBeVisible();

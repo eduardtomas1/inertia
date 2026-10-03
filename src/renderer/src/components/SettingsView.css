@@ -272,15 +272,13 @@
   gap: 7px;
 }
 
-.provider-settings-field > span,
-.provider-settings-advanced-heading > strong {
+.provider-settings-field > span {
   color: var(--text-soft);
   font-size: var(--ui-font-secondary);
   font-weight: 620;
 }
 
 .provider-settings-field > small,
-.provider-settings-advanced-heading > small,
 .provider-settings-privacy-note {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
@@ -549,43 +547,17 @@
   line-height: 1.45;
 }
 
-.provider-settings-advanced-toggle {
-  display: flex;
-  width: 100%;
-  min-height: 42px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 2px;
-  color: var(--text-muted);
-  background: transparent;
-  font-size: var(--ui-font-micro);
-  text-align: left;
-}
-
-.provider-settings-advanced-toggle:hover { color: var(--text); }
-
-.provider-settings-advanced-toggle svg {
-  transition: transform var(--motion-fast) var(--motion-ease);
-}
-
-.provider-settings-advanced-toggle svg.is-open { transform: rotate(180deg); }
-
-.provider-settings-advanced {
-  padding: 7px 2px 26px;
-}
-
-/* Keep these menus in Chromium's top layer instead of a separate OS popup. */
-:is(.provider-settings-advanced, .issue-report) select,
-:is(.provider-settings-advanced, .issue-report) select::picker(select) {
+.issue-report select,
+.issue-report select::picker(select) {
   appearance: base-select;
 }
 
-:is(.provider-settings-advanced, .issue-report) select {
+.issue-report select {
   align-items: center;
   font-family: inherit;
 }
 
-:is(.provider-settings-advanced, .issue-report) select::picker(select) {
+.issue-report select::picker(select) {
   max-height: min(320px, 70dvh);
   padding: 4px;
   border: 1px solid var(--border-strong);
@@ -596,31 +568,23 @@
   font-family: inherit;
 }
 
-:is(.provider-settings-advanced, .issue-report) select option {
+.issue-report select option {
   min-height: 32px;
   padding: 7px 9px;
   border-radius: 4px;
   overflow-wrap: anywhere;
 }
 
-:is(.provider-settings-advanced, .issue-report) select option:hover,
-:is(.provider-settings-advanced, .issue-report) select option:focus-visible {
+.issue-report select option:hover,
+.issue-report select option:focus-visible {
   outline: none;
   background: var(--surface-muted);
 }
 
-:is(.provider-settings-advanced, .issue-report) select:disabled {
+.issue-report select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-
-.provider-settings-advanced-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 14px;
-}
-
 
 @media (max-width: 760px) {
   .settings-content.is-providers {

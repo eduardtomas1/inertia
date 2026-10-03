@@ -7,7 +7,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { createIssueReportCommandHandler } from "../../src/server/runtime/commands/issue-report-commands";
 import { collectIssueEnvironment, newIssueReport } from "../../src/server/issue-report";
 import { issueReportInputSchema, issueReportSchema, scrubReportText, type IssueGitHubState, type IssueReport, type IssueReportInput } from "../../src/shared/issue-report";
-import { ISSUE_GITHUB_MESSAGES } from "../../src/shared/issue-report-github";
+import { ISSUE_GITHUB_MESSAGES, ISSUE_UNCERTAIN_REASONS } from "../../src/shared/issue-report-github";
 import type { AppSnapshot, ClientCommand, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import { IssuePublicationError, verifiedIssueUrl } from "../../src/server/git/github-issue-report";
 import type { IssueHostEvidence } from "../../src/node/runtime-issue-evidence-protocol";
@@ -122,27 +122,26 @@ describe("issue reports", () => {
     expect(publisher.create).toHaveBeenCalledWith(expect.objectContaining({ title: "Cancelled chat stays waiting", body }));
   });
 
-  it.each([
-    ["missing", false],
-    ["signed-out", false],
-    ["offline", false],
-    ["rate-limited", true],
-    ["repository", true],
-    ["signed-out", true],
-  ] as const)("keeps a %s failure retryable with its own message (attempted=%s)", async (reason, attempted) => {
+  it.each(["missing", "signed-out", "offline", "rate-limited", "repository", "timeout", "unknown"] as const)("keeps a %s failure of the sign-in check retryable with its own message", async (reason) => {
     const { dispatch, publisher } = setup();
     const draft = await dispatch({ type: "support.report.prepare", payload: input });
-    publisher.create.mockImplementationOnce(async ({ beforePublish }) => { if (attempted) beforePublish(); throw new IssuePublicationError(reason); });
+    publisher.create.mockImplementationOnce(async () => { throw new IssuePublicationError(reason); });
     const failed = await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: draft.revision } });
     expect(failed).toMatchObject({ status: "failed", notice: ISSUE_GITHUB_MESSAGES[reason] });
     expect((await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: failed.revision } })).status).toBe("submitted");
   });
 
-  it.each(["offline", "timeout", "unknown"] as const)("treats a %s failure after the attempt as uncertain", async (reason) => {
+  it.each(["signed-out", "rate-limited", "repository", "offline", "timeout", "unknown"] as const)("never resubmits after a %s failure once publication started; Check submission resolves it", async (reason) => {
     const { dispatch, publisher } = setup();
     const draft = await dispatch({ type: "support.report.prepare", payload: input });
     publisher.create.mockImplementationOnce(async ({ beforePublish }) => { beforePublish(); throw new IssuePublicationError(reason); });
-    expect((await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: draft.revision } })).status).toBe("uncertain");
+    const uncertain = await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: draft.revision } });
+    expect(uncertain.status).toBe("uncertain");
+    expect(uncertain.notice).toBe(`${ISSUE_UNCERTAIN_REASONS[reason]}GitHub may still have received the issue. Check submission before trying again; a second issue is never created automatically.`);
+    await expect(dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: uncertain.revision } })).rejects.toThrow("pending submission");
+    publisher.find.mockResolvedValueOnce("https://github.com/eduardtomas1/inertia/issues/999");
+    expect((await dispatch({ type: "support.report.reconcile", payload: { id: draft.id, revision: uncertain.revision } })).status).toBe("submitted");
+    expect(publisher.create).toHaveBeenCalledOnce();
   });
 
   it("blocks duplicate submits and reconciles uncertain delivery without posting again", async () => {

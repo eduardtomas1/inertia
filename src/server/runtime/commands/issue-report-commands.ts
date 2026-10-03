@@ -1,7 +1,7 @@
 import type WebSocket from "ws";
 import type { AppSnapshot, ProviderInfo, ServerEvent } from "../../../shared/contracts";
-import { ISSUE_GITHUB_MESSAGES } from "../../../shared/issue-report-github";
-import { ISSUE_REPOSITORY, issueReportSchema, type IssueGitHubState, type IssuePublicationFailure, type IssueReport } from "../../../shared/issue-report";
+import { ISSUE_GITHUB_MESSAGES, ISSUE_UNCERTAIN_REASONS } from "../../../shared/issue-report-github";
+import { ISSUE_REPOSITORY, issueReportSchema, type IssueGitHubState, type IssueReport } from "../../../shared/issue-report";
 import type { RuntimeStore } from "../../database";
 import { IssuePublicationError, type IssuePublisher } from "../../git/github-issue-report";
 import { editReport, newIssueReport } from "../../issue-report";
@@ -18,8 +18,7 @@ interface Dependencies {
   send(socket: WebSocket, event: ServerEvent): void;
 }
 
-const REJECTED_AFTER_ATTEMPT: readonly IssuePublicationFailure[] = ["signed-out", "rate-limited", "repository"];
-const UNCERTAIN_NOTICE = "GitHub may have received the issue. Check submission before trying again; a second issue is never created automatically.";
+const UNCERTAIN_NOTICE = "GitHub may still have received the issue. Check submission before trying again; a second issue is never created automatically.";
 
 export function createIssueReportCommandHandler(deps: Dependencies): RuntimeCommandHandler {
   let stored: unknown = null;
@@ -81,9 +80,8 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
           save({ ...latest, status: "submitted", revision: latest.revision + 1, issueUrl: url, notice: `Issue created in ${ISSUE_REPOSITORY}.` });
         } catch (error) {
           const reason = error instanceof IssuePublicationError ? error.reason : "unknown";
-          const uncertain = attempted && !REJECTED_AFTER_ATTEMPT.includes(reason);
           const latest = current(value.id);
-          save({ ...latest, status: uncertain ? "uncertain" : "failed", revision: latest.revision + 1, notice: uncertain ? UNCERTAIN_NOTICE : ISSUE_GITHUB_MESSAGES[reason] });
+          save({ ...latest, status: attempted ? "uncertain" : "failed", revision: latest.revision + 1, notice: attempted ? `${ISSUE_UNCERTAIN_REASONS[reason]}${UNCERTAIN_NOTICE}` : ISSUE_GITHUB_MESSAGES[reason] });
         } finally { publicationBusy = false; }
         break;
       }

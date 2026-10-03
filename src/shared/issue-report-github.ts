@@ -12,6 +12,16 @@ export const ISSUE_GITHUB_MESSAGES: Record<IssuePublicationFailure, string> = {
   unknown: "The issue could not be created on GitHub. Try again, or open GitHub manually.",
 };
 
+export const ISSUE_UNCERTAIN_REASONS: Record<IssuePublicationFailure, string> = {
+  missing: "GitHub CLI could not be started. ",
+  "signed-out": "GitHub CLI reported that it is not signed in. ",
+  offline: "GitHub could not be reached. ",
+  "rate-limited": "GitHub is limiting requests. ",
+  repository: "The repository could not be reached. ",
+  timeout: "GitHub did not respond in time. ",
+  unknown: "",
+};
+
 export function manualIssueUrl(title: string, body?: string): string | null {
   const query = new URLSearchParams(body === undefined ? { title } : { title, body });
   const url = `${ISSUE_REPOSITORY_URL}/new?${query.toString()}`;

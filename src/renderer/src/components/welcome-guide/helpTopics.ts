@@ -55,6 +55,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         shortcut: "new-chat",
       },
       {
+        name: "Chats without a project",
+        detail: "Choose No project from the composer's Project button, or Start without a project in the command palette. The chat works in its own chat folder, appears under No project in the sidebar and keeps that folder when it is deleted.",
+      },
+      {
         name: "Access modes",
         detail: "Supervised keeps provider approvals, Auto-accept edits allows supported file edits, and Full access lets the agent act without asking. Choose Full access only for a workspace and task you trust.",
       },
@@ -77,7 +81,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Attachments",
-        detail: "Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets with the paperclip, or drop them on the composer. Up to 100 files, 50 MiB each. Images are resized to 10 MiB each (80 MiB combined). Text pasted at 32 KiB becomes a file; Shift-paste keeps it inline. Agents receive file paths and read the contents as needed.",
+        detail: "Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets with the paperclip, or drop them on the composer: up to 100 files, 50 MiB each. Credential and key files (.env, .pem, .key) are refused.",
+      },
+      {
+        name: "Large files and pasted text",
+        detail: "Text pasted at 32 KiB becomes a file; Shift-paste keeps it inline. Images are resized to 10 MiB each (80 MiB combined), and agents receive file paths and read the contents as needed.",
       },
       {
         name: "Mentions and skills",
@@ -103,6 +111,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Custom backends",
         detail: "Add a backend profile in Settings → Model backends to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
         jump: "Open Settings → Model backends",
+      },
+      {
+        name: "Provider sessions",
+        detail: "A chat stays with the provider it started on; choosing another provider offers Start a new chat. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
       },
     ],
     jumps: [
@@ -137,6 +149,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         detail: "Turn on desktop notifications or the desktop mascot in Settings → General. Notifications leave out prompt and response text.",
         jump: "Open Settings → General",
       },
+      {
+        name: "Sound when a task ends",
+        detail: "Turn it on in Settings → General to play a short sound when an agent finishes or stops with an error. Choose a built-in sound or import your own, and Only after long tasks keeps quick questions quiet.",
+        jump: "Open Settings → General",
+      },
     ],
     jumps: [
       { label: "Open Daily work", command: "daily-work" },
@@ -164,6 +181,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Browser",
         detail: "Open local development pages for the selected chat. Supported agents can use the same pages, and Evidence keeps a local record of what happened.",
+      },
+      {
+        name: "Attachment previews",
+        detail: "The Attachments surface shows the files sent in this chat; choose one to preview it. Zoom an image with + and -, drag or use the arrow keys to pan, and press 0 to reset.",
       },
       {
         name: "Project navigation",
@@ -268,6 +289,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         jump: "Open Usage",
       },
       {
+        name: "Resume at reset",
+        detail: "When a chat stops at a subscription limit, the composer offers Resume at reset and Snooze until reset. Inertia must be running to resume, and a resume missed by more than an hour waits for you to choose Resume now.",
+      },
+      {
         name: "In the composer",
         detail: "The usage indicator shows the context window and the selected account's quota.",
       },
@@ -285,6 +310,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Snapshots",
         detail: "Turn on Snapshots in Settings → Snapshots to attach a screenshot of the foreground window with its accessibility context, using the capture shortcut you choose there.",
         jump: "Open Settings → Snapshots",
+      },
+      {
+        name: "Reviewed screenshots",
+        detail: "On Linux, Take reviewed screenshot beside the attachment button captures a window or screen. Crop it and mask sensitive areas, then approve it before it is attached.",
       },
       {
         name: "Private Connect",
@@ -309,6 +338,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Themes",
         detail: "Choose System, Light or Dark and a color theme from the theme library in Settings → General.",
+        jump: "Open Settings → General",
+      },
+      {
+        name: "Custom colors",
+        detail: "Under Custom colors in Settings → General, pick one color for the light appearance and one for dark. Inertia adapts the shades to keep the workbench readable, and Reset returns that appearance to its previous preset.",
         jump: "Open Settings → General",
       },
       {

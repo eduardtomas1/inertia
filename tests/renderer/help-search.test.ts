@@ -122,7 +122,10 @@ describe("help search", () => {
 
   it("indexes every Help entry once", () => {
     expect(HELP_INDEX).toHaveLength(new Set(HELP_INDEX.map(({ entry }) => entry)).size);
-    expect(searchHelp("snooz", macLabel).hits.map(({ entry }) => entry.name)).toContain("Organize chats");
+    expect(searchHelp("snooz", macLabel).hits.map(({ entry }) => entry.name))
+      .toEqual(["Organize chats", "Resume at reset"]);
+    expect(searchHelp("no project", macLabel).hits.map(({ entry }) => entry.name))
+      .toEqual(["Chats without a project"]);
   });
 });
 

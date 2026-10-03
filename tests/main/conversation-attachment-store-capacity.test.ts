@@ -160,38 +160,6 @@ describe("durable conversation attachment capacity", () => {
       .rejects.toBeInstanceOf(ConversationAttachmentStorageFullError);
   });
 
-  it("keeps every settled image below a configured record budget and evicts only past it", async () => {
-    const { root: directory, references } = await seededHistory(4_095, 256 * 1024);
-    const reads: string[] = [];
-    const store = await ConversationAttachmentStore.open(directory, {
-      maxRecords: 4_096, autoRemoveOldAttachments: true,
-      readOperationRunner(operation, signal) {
-        reads.push(operation.id);
-        return runConversationAttachmentStoreChild(operation, signal);
-      },
-    });
-    stores.push(store);
-    // No child read per kept record is the property; wall time is not asserted
-    // because hosted Windows shards make a 4,095-directory scan itself slow.
-    await reconciled(store, references);
-    expect(reads).toEqual([]);
-    await expect(store.usage()).resolves.toEqual({ records: 4_095, bytes: 4_095 * 256 * 1024 });
-    const order = () => references.map(({ id }) => id);
-
-    const [belowBudget] = await store.retain([image()], undefined, randomUUID(), order);
-    await expect(readFile(belowBudget!.path)).resolves.toEqual(png);
-    await expect(store.usage()).resolves.toEqual({ records: 4_096, bytes: 4_095 * 256 * 1024 + png.length });
-    await expect(readFile(join(directory, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`)))
-      .resolves.toEqual(png);
-
-    await store.retain([image()], undefined, randomUUID(), order);
-    await expect(store.usage()).resolves.toEqual({ records: 4_096, bytes: 4_094 * 256 * 1024 + 2 * png.length });
-    await expect(readFile(join(directory, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`)))
-      .rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(directory, "conversation-attachments", references[1]!.id, `${references[1]!.id}.png`)))
-      .resolves.toEqual(png);
-  }, 60_000);
-
   it("evicts the oldest history once the configured 2 GiB byte budget would be exceeded", async () => {
     const { root: directory, references } = await seededHistory(4, 512 * 1024 * 1024 - 1_024);
     const store = await openStore({ maxBytes: 2 * 1024 ** 3 }, directory);
@@ -268,31 +236,33 @@ it("serializes cleanup with imports and holds the admission authority until ever
   await expect(store.usage()).resolves.toEqual({ records: 2, bytes: 2 * png.length });
 });
 
-it("retains more than 4,096 images without evicting history under the new default", async () => {
-  const { root, references } = await seededHistory(4_097, png.length);
-  const store = await openStore({ autoRemoveOldAttachments: false, reconciliationBatchTimeoutMs: 1 }, root);
-  await reconciled(store, references);
-  await expect(store.usage()).resolves.toEqual({ records: 4_097, bytes: 4_097 * png.length });
-  await sent(store, [image()]);
-  await expect(store.usage()).resolves.toEqual({ records: 4_098, bytes: 4_098 * png.length });
-  await expect(readFile(join(root, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`))).resolves.toEqual(png);
-}, 60_000);
-
 it("never evicts history on the full-looking usage reported while restart reconciliation is still running", async () => {
-  const { root, references } = await seededHistory(4_097, png.length);
-  const store = await openStore({ maxRecords: 4_098, reconciliationBatchTimeoutMs: 1 }, root);
+  const { root, references } = await seededHistory(3, png.length);
+  await Promise.all(Array.from({ length: 40 }, (_, index) =>
+    writeFile(join(root, "conversation-attachments", `.stale-${index}`), "stale")));
+  const store = await ConversationAttachmentStore.open(root, {
+    maxRecords: 4,
+    autoRemoveOldAttachments: true,
+    reconciliationBatchEntries: 1,
+    operationRunner(operation, signal) {
+      if (operation.operation !== "remove") return runConversationAttachmentStoreChild(operation, signal);
+      const result = rm(join(operation.root, operation.name), { recursive: true, force: true });
+      return { result, stopped: result.then(() => undefined, () => undefined) };
+    },
+  });
+  stores.push(store);
   const order = () => references.map(({ id }) => id);
   const oldest = join(root, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`);
   await store.reconcile(references);
   await expect(store.storageStatus(order)).resolves.toMatchObject({
     state: "reconciling", records: null, bytes: null, removableRecords: 0,
   });
-  await expect(store.usage()).resolves.toEqual({ records: 4_098, bytes: 16 * 1024 ** 3 });
+  await expect(store.usage()).resolves.toEqual({ records: 4, bytes: 16 * 1024 ** 3 });
   await expect(store.retain([image()], undefined, randomUUID(), order))
     .rejects.toBeInstanceOf(ConversationAttachmentStoreReconcilingError);
   await expect(readFile(oldest)).resolves.toEqual(png);
   await settled(store);
   await sent(store, [image()]);
-  await expect(store.usage()).resolves.toEqual({ records: 4_098, bytes: 4_098 * png.length });
+  await expect(store.usage()).resolves.toEqual({ records: 4, bytes: 4 * png.length });
   await expect(readFile(oldest)).resolves.toEqual(png);
-}, 60_000);
+});

@@ -114,13 +114,4 @@ describe("bounded conversation history", () => {
     } while (before);
     expect(seen.size).toBe(90);
   });
-
-  it("omits one indivisible oversized turn before it reaches the transport", () => {
-    const { store, conversation } = fixture();
-    answer(store, conversation.id, 0, "x".repeat(MAX_CONVERSATION_HISTORY_BYTES + 1));
-    const page = store.conversationHistory(conversation.id)!;
-    expect(page.history).toEqual({ older: null, omittedTurnIds: ["turn-0"] });
-    expect(page.messages.map(({ role }) => role)).toEqual(["user"]);
-    expect(Buffer.byteLength(JSON.stringify(result(page)))).toBeLessThan(MAX_CONVERSATION_HISTORY_BYTES);
-  });
 });

@@ -670,10 +670,10 @@ test.skipIf(process.platform === "win32")(
           INERTIA_PROBE_PID_FILE: pidFile,
           INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
         },
-        timeoutMs: 5_000,
+        timeoutMs: 2_500,
       });
       probeOutcome = probe.then(() => null, (error: unknown) => error);
-      const pidFileDeadline = Date.now() + 4_000;
+      const pidFileDeadline = Date.now() + 2_000;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
           descendantPid = Number(await readFile(pidFile, "utf8"));
@@ -691,14 +691,14 @@ test.skipIf(process.platform === "win32")(
       expect(Number(group.stdout.trim())).toBe(descendantPid);
       rootPid = Number(await readFile(rootPidFile, "utf8"));
       expect(Number.isSafeInteger(rootPid) && rootPid > 1).toBe(true);
-      const rootExitDeadline = Date.now() + 4_000;
+      const rootExitDeadline = Date.now() + 2_000;
       while (processExists(rootPid) && Date.now() < rootExitDeadline) {
         await new Promise((resolveWait) => setTimeout(resolveWait, 10));
       }
       expect(processExists(rootPid)).toBe(false);
       expect(processExists(descendantPid)).toBe(true);
       await expect(probeOutcome).resolves.toMatchObject({
-        message: expect.stringContaining("exceeded its 5000ms deadline"),
+        message: expect.stringContaining("exceeded its 2500ms deadline"),
       });
       const terminalState = await waitForTermination(descendantPid);
       if (process.platform === "linux") {
@@ -817,10 +817,10 @@ test.skipIf(process.platform !== "win32")(
           INERTIA_PROBE_PID_FILE: pidFile,
           INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
         },
-        timeoutMs: 5_000,
+        timeoutMs: 2_500,
       });
       probeOutcome = probe.then(() => null, (error: unknown) => error);
-      const pidFileDeadline = Date.now() + 4_000;
+      const pidFileDeadline = Date.now() + 2_000;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
           descendantPid = Number(await readFile(pidFile, "utf8"));
@@ -830,7 +830,7 @@ test.skipIf(process.platform !== "win32")(
       }
       expect(Number.isSafeInteger(descendantPid) && descendantPid > 1).toBe(true);
       await expect(probeOutcome).resolves.toMatchObject({
-        message: expect.stringContaining("exceeded its 5000ms deadline"),
+        message: expect.stringContaining("exceeded its 2500ms deadline"),
       });
       await waitForTermination(descendantPid);
     } finally {
@@ -895,7 +895,7 @@ test.skipIf(process.platform === "win32")(
           INERTIA_PTY_PID_FILE: pidFile,
         },
         startAfterOwnership: true,
-        timeoutMs: 10_000,
+        timeoutMs: 3_000,
       }, {
         // Pipe-token discovery has focused coverage above. Keep this native
         // PTY cleanup case independent of full-suite lsof process-table load,
@@ -936,7 +936,7 @@ test.skipIf(process.platform === "win32")(
         },
       });
       probeOutcome = probe.then(() => null, (error: unknown) => error);
-      const pidFileDeadline = Date.now() + 8_000;
+      const pidFileDeadline = Date.now() + 2_500;
       while (!ptyPid && Date.now() < pidFileDeadline) {
         try {
           ptyPid = Number(await readFile(pidFile, "utf8"));
@@ -953,7 +953,7 @@ test.skipIf(process.platform === "win32")(
       expect(group.status).toBe(0);
       expect(Number(group.stdout.trim())).toBe(ptyPid);
       await expect(probeOutcome).resolves.toMatchObject({
-        message: expect.stringContaining("exceeded its 10000ms deadline"),
+        message: expect.stringContaining("exceeded its 3000ms deadline"),
       });
       await waitForTermination(ptyPid);
     } finally {

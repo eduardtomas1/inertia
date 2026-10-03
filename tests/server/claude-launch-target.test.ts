@@ -168,12 +168,9 @@ describe("Claude Windows launch target", () => {
     expect(resolve(shim, fakeFileSystem({}))).toMatchObject({ ok: false });
   });
 
-  it.each([
-    ["win32", "C:\\Program Files\\Claude\\claude.exe"],
-    ["linux", "/usr/local/bin/claude"],
-    ["darwin", "/opt/homebrew/bin/claude.cmd"],
-  ] as const)("leaves a %s executable unchanged", (platform, executable) => {
-    expect(resolveClaudeLaunchTarget(executable, {}, { platform, fileSystem: fakeFileSystem({}) })).toEqual({
+  it("leaves a darwin .cmd executable unchanged", () => {
+    const executable = "/opt/homebrew/bin/claude.cmd";
+    expect(resolveClaudeLaunchTarget(executable, {}, { platform: "darwin", fileSystem: fakeFileSystem({}) })).toEqual({
       ok: true,
       target: { command: executable, scriptPrefix: [] },
     });

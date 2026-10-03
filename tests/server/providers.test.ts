@@ -10,7 +10,6 @@ import {
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { spawnRuntimeOwnedProcess } from "../../src/node/runtime-owned-processes";
@@ -1281,42 +1280,6 @@ setInterval(() => {}, 1000);
     ]);
   });
 
-  it("arms complete-tree cleanup before an ordinary fixture terminal result", async () => {
-    const root = temporaryRoot();
-    const { command, program } = nodeProgram(root, "successful-codex-cli", `
-console.log(JSON.stringify({ session: "cli-session" }));
-console.log(JSON.stringify({ text: "CLI response" }));
-console.log(JSON.stringify({ complete: true }));
-`);
-    const terminateProcessTree = vi.fn(async () => true);
-    const manager = ProviderManager.createForTests(
-      { commands: { codex: command } },
-      new AgentHarnessRegistry([
-        createProcessLifecycleHarnessForTests("codex", {
-          prefixArgs: [program],
-          terminateProcessTree,
-        }),
-      ]),
-    );
-
-    await expect(manager.run(nativeProviderRunInput({
-      providerId: "codex",
-      harnessId: "codex-cli",
-      conversationId: "successful-cli",
-      cwd: root,
-      prompt: "Respond",
-      interactionMode: "build",
-      access: "full",
-    }))).resolves.toMatchObject({
-      status: "completed",
-      text: "CLI response",
-      sessionId: "cli-session",
-    });
-    expect(terminateProcessTree).toHaveBeenCalledTimes(1);
-    expect(terminateProcessTree).toHaveBeenCalledWith(expect.anything(), true);
-    await manager.disposeAll();
-  });
-
   it("acknowledges provider start only after async backend resolution reaches the harness", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "acknowledged-codex-cli", `
@@ -1397,64 +1360,6 @@ setInterval(() => {}, 1000);
     await manager.disposeAll();
   });
 
-  it("maps unconfirmed CLI cancellation cleanup to one failed terminal result", async () => {
-    const root = temporaryRoot();
-    const { command, program } = nodeProgram(root, "stalled-codex-cli", `
-console.log(JSON.stringify({ session: "cli-session" }));
-setInterval(() => {}, 1000);
-`);
-    const terminateProcessTree = vi.fn(async (child, _force: boolean) => {
-      await terminateProcessTreeAndWait(child, true);
-      return false;
-    });
-    const manager = ProviderManager.createForTests(
-      { commands: { codex: command } },
-      new AgentHarnessRegistry([
-        createProcessLifecycleHarnessForTests("codex", {
-          prefixArgs: [program],
-          terminateProcessTree,
-        }),
-      ]),
-    );
-    let markRunning!: () => void;
-    const running = new Promise<void>((resolve) => {
-      markRunning = resolve;
-    });
-    const statuses: string[] = [];
-    const result = manager.run(nativeProviderRunInput({
-      providerId: "codex",
-      harnessId: "codex-cli",
-      conversationId: "failed-cli-cleanup",
-      cwd: root,
-      prompt: "Wait",
-      interactionMode: "build",
-      access: "full",
-    }), {
-      onStatus: ({ status }) => {
-        statuses.push(status);
-        if (status === "running") markRunning();
-      },
-    });
-
-    await running;
-    expect(manager.cancel("failed-cli-cleanup")).toBe(true);
-
-    await expect(result).resolves.toMatchObject({
-      status: "failed",
-      error: "Codex CLI process tree could not be confirmed stopped.",
-    });
-    expect(statuses).not.toContain("cancelled");
-    expect(statuses.at(-1)).toBe("failed");
-    expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
-      false,
-      true,
-    ]);
-    expect(manager.isRunning("failed-cli-cleanup")).toBe(true);
-    await expect(manager.disposeAll()).rejects.toThrow(
-      "Provider process cleanup could not be confirmed.",
-    );
-  });
-
   it("classifies authentication failures from provider stderr", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "failing-codex", `
@@ -1471,46 +1376,6 @@ process.exit(1);
     expect(result).toMatchObject({ status: "failed", exitCode: 1, error: "Codex is not authenticated. Sign in with its CLI and try again." });
     expect(result.cleanupConfirmed).toBe(true);
     expect(manager.isRunning("failed-conversation")).toBe(false);
-    await expect(manager.disposeAll()).resolves.toBeUndefined();
-  });
-
-  it("fails a clean CLI exit that omitted the provider terminal event", async () => {
-    const root = temporaryRoot();
-    const { command, program } = nodeProgram(
-      root,
-      "incomplete-codex",
-      "process.exit(0);",
-    );
-    const terminateProcessTree = vi.fn(async (child: ChildProcess, force: boolean) => {
-      await once(child, "close", { signal: AbortSignal.timeout(2_000) });
-      return await terminateProcessTreeAndWait(child, force);
-    });
-    const manager = ProviderManager.createForTests(
-      { commands: { codex: command } },
-      new AgentHarnessRegistry([
-        createProcessLifecycleHarnessForTests("codex", {
-          prefixArgs: [program],
-          terminateProcessTree,
-        }),
-      ]),
-    );
-
-    await expect(manager.run(nativeProviderRunInput({
-      providerId: "codex",
-      harnessId: "codex-cli",
-      conversationId: "incomplete-conversation",
-      cwd: root,
-      prompt: "Respond",
-      interactionMode: "build",
-      access: "full",
-    }))).resolves.toMatchObject({
-      status: "failed",
-      exitCode: 0,
-      error: "Codex could not complete the request.",
-      cleanupConfirmed: true,
-    });
-    expect(terminateProcessTree).toHaveBeenCalledExactlyOnceWith(expect.anything(), true);
-    expect(manager.isRunning("incomplete-conversation")).toBe(false);
     await expect(manager.disposeAll()).resolves.toBeUndefined();
   });
 

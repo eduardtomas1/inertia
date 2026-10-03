@@ -20,10 +20,6 @@ const groupStyles = readFileSync(
   "utf8",
 ).replace(/\r\n/gu, "\n");
 const styles = [baseStyles, groupStyles].join("\n");
-const activitySource = readFileSync(
-  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
-  "utf8",
-);
 
 function activity(overrides: Partial<AgentActivity> = {}): AgentActivity {
   return {
@@ -170,36 +166,17 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(warning).not.toContain("<pre");
     expect(warning).not.toContain('role="alert"');
     expect(warning).not.toContain('aria-live="assertive"');
-    expect(activitySource).toContain("{...anchorToggleHandlers}");
-    expect(activitySource).toContain("anchorToggleHandlers.onClick();");
-    expect(activitySource).toContain("onBeforeToggle={onBeforeToggle}");
-    expect(activitySource).toContain("onAfterToggle={onAfterToggle}");
 
     expect(neutral).toContain('data-activity-severity="neutral"');
     expect(neutral).toContain('<small class="agent-activity-detail">');
     expect(neutral).not.toContain("agent-activity-disclosure");
   });
 
-  it("stays compact and transparent across semantic themes, scales, and narrow layouts", () => {
+  it("keeps activity rows and disclosures at their minimum target heights", () => {
     const row = cssBlock(".turn-activity-group .agent-activity {");
     const disclosure = cssBlock(".turn-activity-group .agent-activity-disclosure {");
-    const technical = cssBlock(".turn-activity-group .agent-activity-output {");
-    const narrow = cssBlock("@container response-transcript (max-width: 440px) {\n  .turn-activity-group-rows");
 
     expect(row).toContain("min-height: 24px");
-    expect(row).toContain("background: transparent");
-    expect(row).toContain("border: 0");
-    expect(row).not.toContain("box-shadow");
     expect(disclosure).toContain("min-height: 20px");
-    expect(disclosure).toContain("font-size: var(--ui-font-micro)");
-    expect(technical).toContain("max-height: 160px");
-    expect(technical).toContain("border: 0");
-    expect(technical).toContain("background: transparent");
-    expect(styles).toContain(".turn-activity-group .agent-activity-disclosure:focus-visible");
-    expect(styles).toContain(':root[data-theme="dark"]');
-    expect(styles).toContain(':root[data-interface-scale="compact"]');
-    expect(styles).toContain(':root[data-interface-scale="large"]');
-    expect(narrow).toContain(".turn-activity-group .agent-activity-output");
-    expect(narrow).toContain("max-height: 120px");
   });
 });

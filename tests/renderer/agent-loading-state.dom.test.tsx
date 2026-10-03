@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -384,28 +383,6 @@ describe("agent loading and trace DOM", () => {
     }
   });
 
-  it("keeps the live thinking strip stylesheet policy", () => {
-    const styles = readFileSync("src/renderer/src/styles.css", "utf8");
-    expect(styles).toMatch(
-      /\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u,
-    );
-    expect(styles).toContain(
-      "mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);",
-    );
-    expect(styles).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{[^@]*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u,
-    );
-    expect(styles).toMatch(
-      /\.turn-thinking-line \{[^}]*min-height: 3em;[^}]*align-items: center;/u,
-    );
-    expect(styles).toMatch(
-      /\.turn-thinking-line > span \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/u,
-    );
-    expect(styles).toMatch(
-      /\.turn-thinking\[data-thinking-state="live"\]\[data-thinking-hold\] \.turn-thinking-pulse \{\s*animation-play-state: paused;/u,
-    );
-  });
-
   it("holds a mid-sentence fragment back until it finishes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
@@ -621,15 +598,6 @@ describe("agent loading and trace DOM", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("shares the thinking sweep stylesheet policy with live compaction", () => {
-    const styles = readFileSync("src/renderer/src/styles.css", "utf8");
-    const sweep = '.context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,';
-    expect(styles).toMatch(/\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u);
-    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
-    expect(styles).toMatch(/@media \(forced-colors: active\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
-    expect(styles.split(sweep)).toHaveLength(4);
   });
 
   it("keeps a settled turn's compaction visible outside its folded work", () => {
@@ -918,20 +886,6 @@ describe("agent loading and trace DOM", () => {
     expect(screen.getByRole("button", {
       name: "Stop Codex · Codex App Server run",
     })).toBeInTheDocument();
-  });
-
-  it("pauses the loader for waiting states and announces no timer changes", () => {
-    const { container } = renderState({ status: "waiting-for-approval" });
-    const grid = container.querySelector(".agent-pixel-loader");
-
-    expect(container.querySelector("[data-active-agent-phase=waiting-for-approval]"))
-      .toBeInTheDocument();
-    expect(container.querySelector(".turn-working-status"))
-      .toHaveTextContent("Codex · Codex App Server needs approval");
-    expect(grid).toHaveAttribute("data-animated", "false");
-    expect(grid).toHaveAttribute("data-phase", "waiting-for-approval");
-    expect(container.querySelector(".turn-working-elapsed"))
-      .toHaveAttribute("aria-live", "off");
   });
 
   it("renders delegated, retrying, and exact-process cancellation as live states", () => {

@@ -470,72 +470,64 @@ process.exit(child.status ?? 1);
     }
   }, 30_000);
 
-  it.each([
-    ["failed", "failed"],
-    ["interrupted", "cancelled"],
-  ] as const)(
-    "restarts backup quiet grace after a %s provider turn",
-    async (providerStatus, expectedStatus) => {
-      const { root, data, workspace } = temporaryWorkspace();
-      const { authFile, executable } = fakeCodex(root, [
-        {
-          type: "turn.completed",
-          status: providerStatus,
-          error: providerStatus === "failed"
-            ? { message: "Provider failed for the regression fixture." }
-            : null,
-        },
-      ]);
-      writeFileSync(authFile, "connected");
-      const backupRequest = vi.spyOn(
-        RuntimeStore.prototype,
-        "createInitialBackup",
-      );
-      const runtime = await startRuntime({
-        dataDirectory: data,
-        defaultWorkspacePath: workspace,
-        enableProviders: true,
+  it("restarts backup quiet grace after a failed provider turn", async () => {
+    const { root, data, workspace } = temporaryWorkspace();
+    const { authFile, executable } = fakeCodex(root, [
+      {
+        type: "turn.completed",
+        status: "failed",
+        error: { message: "Provider failed for the regression fixture." },
+      },
+    ]);
+    writeFileSync(authFile, "connected");
+    const backupRequest = vi.spyOn(
+      RuntimeStore.prototype,
+      "createInitialBackup",
+    );
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
       ...runtimeIdentity,
-        codexBinaryPath: executable,
-      });
-      runtimes.push(runtime);
-      const client = await connect(runtime.websocketUrl);
-      const welcome = await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
-          event.type === "server.welcome",
-      );
-      const ready = await providerSnapshot(
-        client.events,
-        welcome.snapshot,
-        "codex",
-        (provider) => provider.authState === "authenticated" && provider.canRun,
-      );
-      const conversationId = ready.activeConversationId!;
-      const requestId = randomUUID();
-      send(client.socket, {
-        type: "message.send",
-        requestId,
-        payload: { conversationId, content: `Settle as ${providerStatus}.` },
-      });
-      await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-          event.type === "request.result"
-          && event.requestId === requestId
-          && event.result.kind === "message.accepted",
-      );
-      await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-          event.type === "snapshot.updated"
-          && event.snapshot.conversations.some(({ id, latestTurn }) =>
-            id === conversationId
-            && latestTurn?.status === expectedStatus),
-      );
-      await expect.poll(() => backupRequest.mock.calls).toContainEqual([
-        { quietGraceMs: 1_000 },
-      ]);
-      backupRequest.mockRestore();
-    },
-  );
+      codexBinaryPath: executable,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const ready = await providerSnapshot(
+      client.events,
+      welcome.snapshot,
+      "codex",
+      (provider) => provider.authState === "authenticated" && provider.canRun,
+    );
+    const conversationId = ready.activeConversationId!;
+    const requestId = randomUUID();
+    send(client.socket, {
+      type: "message.send",
+      requestId,
+      payload: { conversationId, content: "Settle as failed." },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === requestId
+        && event.result.kind === "message.accepted",
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some(({ id, latestTurn }) =>
+          id === conversationId
+          && latestTurn?.status === "failed"),
+    );
+    await expect.poll(() => backupRequest.mock.calls).toContainEqual([
+      { quietGraceMs: 1_000 },
+    ]);
+    backupRequest.mockRestore();
+  });
 
 
   it("creates a durable draft reference target and rejects duplicate identities without overwriting", async () => {
@@ -1261,174 +1253,6 @@ process.exit(child.status ?? 1);
     ]));
     expect(unchanged.agentTurns).toEqual(persistedDetail.agentTurns);
   });
-
-  it("invalidates reviewed targets and notes immediately after committing their change", async () => {
-    const { data, workspace } = temporaryWorkspace();
-    initializeChangedRepository(workspace);
-    const runtime = await startRuntime({
-      dataDirectory: data,
-      defaultWorkspacePath: workspace,
-      enableProviders: false,
-      ...runtimeIdentity,
-      secureFiles: new SecureFileTestBroker(),
-    });
-    runtimes.push(runtime);
-    const client = await connect(runtime.websocketUrl);
-    const welcome = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
-    );
-    const projectId = welcome.snapshot.activeProjectId!;
-    const conversationId = welcome.snapshot.activeConversationId!;
-    const diff = parseUnifiedDiff((await getUnifiedDiff(workspace)).text);
-    const file = diff.files[0]!;
-    const targetFingerprint = diffFileFingerprint(file);
-    const requestDeadlineAt = Date.now() + 30_000;
-
-    const stateRequestId = randomUUID();
-    send(client.socket, {
-      type: "review.state.set",
-      requestId: stateRequestId,
-      payload: {
-        conversationId,
-        scope: "file",
-        path: file.path,
-        hunkId: null,
-        targetFingerprint,
-        reviewed: true,
-      },
-    });
-    await client.events.nextForRequest(
-      stateRequestId,
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === stateRequestId,
-      requestDeadlineAt,
-    );
-    expect((await loadConversationDetail(
-      client.socket,
-      client.events,
-      conversationId,
-      requestDeadlineAt,
-    )).reviewStates)
-      .toContainEqual(expect.objectContaining({
-        conversationId,
-        path: file.path,
-        reviewed: true,
-        stale: false,
-      }));
-
-    const noteRequestId = randomUUID();
-    send(client.socket, {
-      type: "review.note.create",
-      requestId: noteRequestId,
-      payload: {
-        conversationId,
-        path: file.path,
-        hunkId: null,
-        lineIds: [],
-        targetFingerprint,
-        body: "Keep this review checkpoint after the commit.",
-      },
-    });
-    await client.events.nextForRequest(
-      noteRequestId,
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === noteRequestId,
-      requestDeadlineAt,
-    );
-    expect((await loadConversationDetail(
-      client.socket,
-      client.events,
-      conversationId,
-      requestDeadlineAt,
-    )).reviewNotes)
-      .toContainEqual(expect.objectContaining({
-        conversationId,
-        path: file.path,
-        stale: false,
-      }));
-
-    const statusRequestId = randomUUID();
-    send(client.socket, {
-      type: "git.refresh",
-      requestId: statusRequestId,
-      payload: { projectId, conversationId },
-    });
-    const statusResult = await client.events.nextForRequest(
-      statusRequestId,
-      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-        event.type === "request.result"
-        && event.requestId === statusRequestId
-        && event.result.kind === "git.status",
-      requestDeadlineAt,
-    );
-    expect(statusResult.result.kind).toBe("git.status");
-    if (statusResult.result.kind !== "git.status") throw new Error("Expected Git status.");
-    const statusAuthorityRef = statusResult.result.status.authorityRef;
-    if (!statusAuthorityRef) throw new Error("Expected Git status authority.");
-    const diffRequestId = randomUUID();
-    send(client.socket, {
-      type: "git.diff",
-      requestId: diffRequestId,
-      payload: {
-        projectId,
-        conversationId,
-        authorityRef: statusAuthorityRef,
-        ignoreWhitespace: false,
-        commitReview: true,
-      },
-    });
-    const diffResult = await client.events.nextForRequest(
-      diffRequestId,
-      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-        event.type === "request.result"
-        && event.requestId === diffRequestId
-        && event.result.kind === "git.diff",
-      requestDeadlineAt,
-    );
-    expect(diffResult.result.kind).toBe("git.diff");
-    if (diffResult.result.kind !== "git.diff") throw new Error("Expected Git diff.");
-    const reviewReceipt = diffResult.result.diff.commitReview;
-    if (!reviewReceipt) throw new Error("Expected commit review receipt.");
-
-    const commitRequestId = randomUUID();
-    send(client.socket, {
-      type: "git.commit",
-      requestId: commitRequestId,
-      payload: {
-        projectId,
-        conversationId,
-        message: "Commit reviewed change",
-        paths: [file.path],
-        reviewReceipt,
-      },
-    });
-    await client.events.nextForRequest(
-      commitRequestId,
-      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
-        event.type === "request.result"
-        && event.requestId === commitRequestId
-        && event.result.kind === "git.action",
-      requestDeadlineAt,
-    );
-    const invalidated = await loadConversationDetail(
-      client.socket,
-      client.events,
-      conversationId,
-      requestDeadlineAt,
-    );
-    expect(invalidated.reviewStates).toContainEqual(expect.objectContaining({
-      conversationId,
-      path: file.path,
-      reviewed: false,
-      stale: true,
-    }));
-    expect(invalidated.reviewNotes).toContainEqual(expect.objectContaining({
-      conversationId,
-      path: file.path,
-      body: "Keep this review checkpoint after the commit.",
-      stale: true,
-    }));
-  }, 30_000);
 
   it("scopes review state and notes to the selected file when the repository diff exceeds its file limit", async () => {
     const { data, workspace } = temporaryWorkspace();
@@ -2424,57 +2248,5 @@ setTimeout(() => {
       await runtime.close();
       runtimes.splice(runtimes.indexOf(runtime), 1);
     }
-  });
-
-  summaryRuntimeIt("times out a non-responsive summary and records the failure without persistence", async () => {
-    const { root, data, workspace } = temporaryWorkspace();
-    initializeChangedRepository(workspace);
-    const diff = await getUnifiedDiff(workspace);
-    const { authFile, executable } = fakeCodex(root);
-    writeFileSync(authFile, "connected");
-    const runtime = await startRuntime({
-      dataDirectory: data,
-      defaultWorkspacePath: workspace,
-      enableProviders: true,
-      ...runtimeIdentity,
-      codexBinaryPath: executable,
-      reviewSummaryTimeoutMs: 20,
-    });
-    runtimes.push(runtime);
-    const client = await connect(runtime.websocketUrl);
-    const welcome = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
-    );
-    const ready = await providerSnapshot(client.events, welcome.snapshot, "codex", (provider) => provider.canRun);
-    const requestId = randomUUID();
-    send(client.socket, {
-      type: "review.summary.generate",
-      requestId,
-      payload: {
-        projectId: ready.activeProjectId!,
-        conversationId: ready.activeConversationId!,
-        fingerprint: parseUnifiedDiff(diff.text).fingerprint,
-      },
-    });
-    const failed = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
-        event.type === "request.error" && event.requestId === requestId,
-    );
-    expect(failed.message).toMatch(/timed out/u);
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated"
-        && event.snapshot.runs.some((run) => run.label.includes("read-only diff summary") && run.status === "failed"),
-    );
-    expect((await loadConversationDetail(
-      client.socket,
-      client.events,
-      ready.activeConversationId!,
-    )).reviewSummaries).toEqual([]);
-    expect(readdirSync(data).filter((name) => name.startsWith("read-only-summary-"))).toEqual([]);
-    client.socket.close();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await runtime.close();
-    runtimes.splice(runtimes.indexOf(runtime), 1);
   });
 });

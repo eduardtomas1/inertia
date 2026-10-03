@@ -60,7 +60,7 @@ export {
   type WorktreeFilesystemReceipt,
   worktreeFilesystemIdentitiesEqual,
 } from "./worktree-filesystem-identity";
-export { commitChanges, commitReviewedChanges } from "./git/commits";
+export { commitReviewedChanges } from "./git/commits";
 export { recoverReviewedCommitTransaction } from "./git/commit-recovery";
 export {
   captureGitCommitReview,

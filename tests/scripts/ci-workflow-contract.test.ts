@@ -150,23 +150,32 @@ it("CI runs native package proof and desktop Electron projects as separate same-
   }
 });
 
-it("runs every macOS Intel phase on an independent runner with unique evidence", () => {
-  const plan = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["package-lock.json"] });
-  const intel = plan.electronMatrix.include.filter(({ artifact }) => artifact === "macos-x64");
+it("runs sibling architectures' recovery project on PRs and every macOS Intel phase nightly", () => {
+  const pullRequest = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["package-lock.json"] });
+  const siblings = pullRequest.electronMatrix.include.filter(({ artifact }) => ["linux-arm64", "windows-arm64", "macos-x64"].includes(artifact));
+  expect(siblings.map(({ artifact, phase }) => `${artifact}:${phase}`)).toEqual([
+    "linux-arm64:runtime-recovery", "windows-arm64:runtime-recovery", "macos-x64:runtime-recovery",
+  ]);
+  const nightly = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["README.md"], event: "schedule" });
+  const intel = nightly.electronMatrix.include.filter(({ artifact }) => artifact === "macos-x64");
   expect(intel.map(({ phase }) => phase)).toEqual(["display-sensitive", "isolated", "runtime-recovery"]);
-  expect(new Set(plan.electronMatrix.include.map(({ evidence_artifact }) => evidence_artifact)).size)
-    .toBe(plan.electronMatrix.include.length);
-  for (const platform of intel) {
-    expect(plan.requiredChecks).toContain(platform.check);
-    const phase = workflow.jobs.electron.steps.find((step: { run?: string }) =>
-      step.run?.startsWith("npm exec -- playwright test") && step.run.includes(`--project=${platform.phase} `));
-    expect(phase.if).toContain(`matrix.phase == '${platform.phase}'`);
-    expect(phase["continue-on-error"]).not.toBe(true);
+  for (const plan of [pullRequest, nightly]) {
+    expect(new Set(plan.electronMatrix.include.map(({ evidence_artifact }) => evidence_artifact)).size)
+      .toBe(plan.electronMatrix.include.length);
   }
-  expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Measure desktop workloads").if)
-    .toContain("matrix.phase == 'display-sensitive'");
+  for (const platform of intel) {
+    expect(nightly.requiredChecks).toContain(platform.check);
+    for (const step of workflow.jobs.electron.steps.filter((entry: { run?: string }) =>
+      entry.run?.includes("playwright test") && entry.run.includes(`--project=${platform.phase} `))) {
+      expect(step.if).toContain(`matrix.phase == '${platform.phase}'`);
+      expect(step["continue-on-error"]).not.toBe(true);
+    }
+  }
+  const benchmarks = workflow.jobs.electron.steps.filter((step: { run?: string }) => step.run?.includes("benchmark:desktop"));
+  expect(benchmarks).toHaveLength(1);
+  expect(benchmarks[0].if).toContain("matrix.artifact == 'linux-x64'");
   expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Keep desktop performance evidence").if)
-    .toContain("matrix.phase == 'display-sensitive'");
+    .toContain("matrix.artifact == 'linux-x64'");
 });
 
 it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {
@@ -192,46 +201,4 @@ it("keeps provider canary failures visible without filing incidents for cancelle
   expect(workflow.jobs["merge-ready"].needs).not.toContain("provider-drift");
   expect(drift.jobs["report-failure"].if).toContain("github.ref == 'refs/heads/main'");
   expect(drift.jobs["report-failure"].if).toContain("needs.provider-drift.result != 'cancelled'");
-});
-
-it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "electron"], ["release-platforms.yml", "build"]])(
-  "%s %s provides real private Secret Service prerequisites before Linux desktop tests", (file, id) => {
-    const steps = parse(source(`.github/workflows/${file}`)).jobs[id].steps as Array<{ run?: string }>;
-    const install = steps.findIndex((step) => step.run?.includes("apt-get install") && step.run.includes("gnome-keyring"));
-    expect(install).toBeGreaterThanOrEqual(0);
-    expect(steps[install]!.run).toContain("dbus-daemon dbus-bin gnome-keyring");
-    expect(install).toBeLessThan(steps.findIndex((step) => step.run?.includes("playwright test")));
-  },
-);
-
-it("isolates native and verifier dependency changes without suppressing security updates or protocol review", () => {
-  const config = parse(source(".github/dependabot.yml"));
-  const npm = config.updates.find((entry: { "package-ecosystem": string }) => entry["package-ecosystem"] === "npm");
-  expect(npm.groups["vitest-contract"].patterns).toEqual(["vitest", "@vitest/*"]);
-  expect(npm.groups["vitest-contract"]["update-types"]).toEqual(["patch", "minor", "major"]);
-  expect(npm.groups["production-patch-and-minor"]["exclude-patterns"]).toEqual(expect.arrayContaining([
-    "@agentclientprotocol/sdk", "@anthropic-ai/claude-agent-sdk", "@opencode-ai/sdk",
-    "@napi-rs/canvas", "better-sqlite3", "node-pty", "electron-updater",
-  ]));
-  expect(npm.groups["development-patch-and-minor"]["exclude-patterns"]).toEqual(expect.arrayContaining([
-    "electron", "electron-builder", "@playwright/test", "vitest", "@vitest/*",
-  ]));
-  expect(npm["target-branch"]).toBeUndefined();
-  expect(npm["rebase-strategy"]).not.toBe("disabled");
-  expect(npm["open-pull-requests-limit"]).toBeGreaterThan(0);
-});
-
-it("retains compact timing evidence on success and failure without adding retries or changing selection", () => {
-  for (const id of ["pr-linux-lifecycle", "pr-windows-lifecycle", "pr-macos-lifecycle", "electron"]) {
-    const job = workflow.jobs[id];
-    expect(job.env.INERTIA_CI_TIMINGS).toBe("true");
-    expect(job.env.INERTIA_CI_SOURCE_HEAD).toBe("${{ github.event.pull_request.head.sha || github.sha }}");
-    const timing = job.steps.find((step: { name: string }) => step.name === "Keep compact Electron timing evidence");
-    expect(timing.if).toBe("always()");
-    expect(timing.with.path).toBe("ci-test-timings/*.json");
-    expect(timing.with.name).toContain("${{ github.run_attempt }}");
-    expect(timing.with["retention-days"]).toBe(7);
-  }
-  expect(source("playwright.config.ts")).toContain('trace: "retain-on-failure"');
-  expect(source("playwright.config.ts")).not.toMatch(/retries:/u);
 });

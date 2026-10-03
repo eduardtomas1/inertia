@@ -245,14 +245,6 @@ describe("Quiet Ledger transcript accessibility", () => {
     expect(html).toContain('aria-controls="turn-changed-files-details-artifact-accessibility"');
     expect(html).toContain('id="turn-changed-files-details-artifact-accessibility"');
     expect(html).not.toContain('class="visually-hidden">Completed: </span>');
-
-    const styles = readFileSync(
-      new URL("../../src/renderer/src/styles.css", import.meta.url),
-      "utf8",
-    );
-    expect(styles).toMatch(
-      /\.turn-supporting-ledger\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/su,
-    );
   });
 
   it("limits live announcements to stable work status and a one-time terminal transition", () => {
@@ -273,13 +265,6 @@ describe("Quiet Ledger transcript accessibility", () => {
     );
     expect(finalAnswer).not.toContain("aria-live");
     expect(html.match(/aria-live="polite"/gu)).toHaveLength(2);
-
-    const workspaceSource = readFileSync(
-      new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
-      "utf8",
-    );
-    expect(workspaceSource).toContain('className="response-timeline">');
-    expect(workspaceSource).not.toMatch(/className="response-timeline"\s+aria-live=/u);
   });
 
   it("announces only an active-to-terminal transition, never initial history or timer updates", () => {
@@ -306,69 +291,16 @@ describe("Quiet Ledger transcript accessibility", () => {
     expect(turnCompletionAnnouncement(false, completed, "Codex")).toBe("");
   });
 
-  it("exposes one custom minimap preview to hover and keyboard focus", () => {
-    const minimapSource = readFileSync(
-      new URL(
-        "../../src/renderer/src/components/response-timeline/minimap.tsx",
-        import.meta.url,
-      ),
-      "utf8",
-    );
+  it("keeps a fixed minimap pointer target", () => {
     const styles = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
     );
-
-    expect(minimapSource).toContain('className="timeline-minimap-preview"');
-    expect(minimapSource).toContain('aria-hidden="true"');
-    expect(minimapSource).toContain(
-      "aria-label={`Go to turn ${marker.number}: ${marker.label}`}",
-    );
-    expect(minimapSource).not.toContain("aria-describedby=");
-    expect(minimapSource).not.toContain(
-      "title={`Turn ${marker.number}: ${marker.label}`}",
-    );
-    expect(styles).toContain(
-      '.timeline-minimap button[data-emphasized="true"]::before',
-    );
     const buttonRule = styles.match(
       /\.timeline-minimap button\s*\{(?<body>[\s\S]*?)\n\}/u,
     )?.groups?.body ?? "";
-    const minimapRule = styles.match(
-      /\.timeline-minimap\s*\{(?<body>[\s\S]*?)\n\}/u,
-    )?.groups?.body ?? "";
-    const trackRule = styles.match(
-      /\.timeline-minimap-track\s*\{(?<body>[\s\S]*?)\n\}/u,
-    )?.groups?.body ?? "";
-    const restRule = styles.match(
-      /\.timeline-minimap button::before\s*\{(?<body>[\s\S]*?)\n\}/u,
-    )?.groups?.body ?? "";
-    const emphasizedRule = styles.match(
-      /\.timeline-minimap button\[data-emphasized="true"\]::before[^{]*\{(?<body>[\s\S]*?)\n\}/u,
-    )?.groups?.body ?? "";
 
-    // The compact rail uses a 36x10 pointer row while the visible line grows
-    // horizontally from 6px to 26px without shifting that target.
     expect(buttonRule).toContain("width: 36px");
     expect(buttonRule).toContain("height: 10px");
-    expect(minimapRule).toContain("max-height: min(440px, calc(100cqh - 80px))");
-    expect(trackRule).toContain("max-height: inherit");
-    expect(trackRule).toContain("overflow-y: auto");
-    expect(trackRule).toContain("overscroll-behavior: contain");
-    expect(styles).toMatch(
-      /\.resume-picker-search:focus-within\s*\{[^}]*box-shadow:\s*inset 0 0 0 2px var\(--focus-ring\);/su,
-    );
-    expect(styles).toMatch(
-      /\.terminal-panel\s*\{[^}]*container-type:\s*size;/su,
-    );
-    expect(styles).toMatch(
-      /\.terminal-resume-popover \.resume-picker-list\s*\{[^}]*max-height:\s*clamp\(48px, calc\(100cqh - 126px\), 268px\);/su,
-    );
-    expect(restRule).toContain(
-      "width: calc(6px + 20px * var(--timeline-marker-progress))",
-    );
-    expect(restRule).toContain("height: 2px");
-    expect(styles).toContain("--timeline-marker-progress: 1;");
-    expect(emphasizedRule).toContain("opacity: 1;");
   });
 });

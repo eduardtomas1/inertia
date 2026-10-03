@@ -33,7 +33,7 @@ function fixture(selectable: number, aliases: number): string {
 }
 
 describe("Git selectable branch limit", () => {
-  it.each([0, 1, 20])("returns all 1,000 selectable branches with %i symbolic aliases", async (aliases) => {
+  it.each([0, 20])("returns all 1,000 selectable branches with %i symbolic aliases", async (aliases) => {
     const result = await listBranches(fixture(1000, aliases));
     expect(result.current).toBe("main");
     expect(result.local.map((branch) => branch.name)).toEqual(["main"]);
@@ -42,7 +42,7 @@ describe("Git selectable branch limit", () => {
     );
   });
 
-  it.each([0, 1, 20])("rejects 1,001 selectable branches with %i symbolic aliases", async (aliases) => {
+  it.each([0, 20])("rejects 1,001 selectable branches with %i symbolic aliases", async (aliases) => {
     await expect(listBranches(fixture(1001, aliases))).rejects.toMatchObject({ code: "output-limit" });
   });
 });

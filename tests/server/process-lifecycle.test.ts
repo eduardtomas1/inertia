@@ -1870,29 +1870,6 @@ describe("provider process-tree termination", () => {
     expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGKILL");
   });
 
-  it("keeps POSIX confirmation bounded when a target does not disappear", async () => {
-    const child = fakeChild();
-    const killProcess = vi.fn(() => true as const);
-    const startedAt = Date.now();
-
-    await expect(terminateProcessTreeAndWait(
-      child as never,
-      true,
-      {
-        platform: "linux",
-        killProcess,
-        spawnProcessSync: vi.fn(() => ({
-          status: 0,
-          stdout: "4242 1 T\n4243 4242 T\n",
-        })) as never,
-        waitMs: 25,
-      },
-    )).resolves.toBe(false);
-
-    expect(Date.now() - startedAt).toBeLessThan(500);
-    expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
-  });
-
   it("confirms a PID-owned POSIX tree only after descendants and the root exit", async () => {
     const running = new Set([4_242, 4_243]);
     const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {

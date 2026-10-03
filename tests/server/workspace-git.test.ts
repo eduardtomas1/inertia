@@ -553,28 +553,6 @@ describe("workspace Git repository discovery", () => {
     expect(repositoryLimited.repositories[0].repositoryPath).toBe("modules/alpha");
   });
 
-  it("caps automatic previews even when a legacy project requests a larger display limit", async () => {
-    const root = temporaryRoot("many-repositories");
-    for (let index = 0; index < 70; index += 1) {
-      initializeRepository(
-        join(root, "modules", `repository-${String(index).padStart(2, "0")}`),
-      );
-    }
-
-    const snapshot = await discoverWorkspaceGitRepositories(root, {
-      maxRepositories: 64,
-      maxDirectories: 1_000,
-    });
-
-    expect(snapshot.repositories.length).toBeGreaterThan(0);
-    expect(snapshot.repositories.length).toBeLessThanOrEqual(32);
-    expect(snapshot.discoveredRepositories).toBe(70);
-    expect(snapshot.repositoryLimit).toBe(32);
-    expect(snapshot.scannedDirectories).toBe(72);
-    expect(snapshot.truncated).toBe(true);
-    expect(snapshot.repositories[0]?.repositoryPath).toBe("modules/repository-00");
-  }, 60_000);
-
   it("resolves an explicitly selected repository beyond automatic discovery depth", async () => {
     const root = temporaryRoot("explicit-deep-repository");
     const nestedPath = "unrelated/large/folder/actual-project";

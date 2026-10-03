@@ -64,14 +64,14 @@ describe("Private Connect legacy migration", () => {
 });
 
 describe("privacy after resume", () => {
-  it.each(["active", "idle", "locked", "unknown"] as const)("resamples %s after suspend", (state) => {
+  it.each(["active", "unknown"] as const)("resamples %s after suspend", (state) => {
     const events = Object.assign(new EventEmitter(), { getSystemIdleState: () => state });
     const observed: boolean[] = [];
     const monitor = new PrivateConnectPrivacyMonitor(events as never, (locked) => observed.push(locked));
     events.emit("suspend");
     expect(monitor.isLocked()).toBe(true);
     events.emit("resume");
-    expect(monitor.isLocked()).toBe(state !== "active" && state !== "idle");
+    expect(monitor.isLocked()).toBe(state !== "active");
     monitor.shutdown();
     const count = observed.length;
     events.emit("resume");

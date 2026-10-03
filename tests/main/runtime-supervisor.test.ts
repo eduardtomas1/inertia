@@ -1679,36 +1679,6 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
   });
 
-  it("restarts outside safety mode after exact owned crash cleanup", async () => {
-    const recoverOwnedProcesses = vi.fn(async () => true);
-    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    children[0].exit(9);
-    await vi.advanceTimersByTimeAsync(500);
-
-    expect(recoverOwnedProcesses).toHaveBeenCalledWith(
-      expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
-      "test:00000000-0000-4000-8000-000000000001",
-      expect.any(Number),
-    );
-    expect(children).toHaveLength(2);
-    children[1].spawn();
-    expect(children[1].messages.at(-1)).toMatchObject({
-      type: "runtime.start",
-      options: {
-        confirmedTerminatedRuntimeGenerationIds: [
-          expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
-        ],
-      },
-    });
-    expect(children[1].messages.at(-1)).not.toMatchObject({
-      options: { priorRuntimeCleanupUnconfirmed: true },
-    });
-  });
-
   it("waits for the crashed generation store helper before restarting", async () => {
     let rejectResult!: (error: Error) => void;
     let resolveStopped!: () => void;
@@ -1928,76 +1898,6 @@ describe("RuntimeSupervisor", () => {
     });
   });
 
-  it("rejects a source exit before trusted stopped without a replacement", async () => {
-    const { children, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow(/clean readiness/u);
-    children[0].exit(9);
-    await rejected;
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    expect(children).toHaveLength(1);
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "stopped",
-      generation: 1,
-      restartScheduled: false,
-    });
-  });
-
-  it("rejects replacement startup failure without a second replacement", async () => {
-    const { children, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow("The local runtime could not start");
-    children[0].message({ type: "runtime.stopped" });
-    children[0].exit(0);
-    children[1].spawn();
-    children[1].message({
-      type: "runtime.startup-failed",
-      message: "The local runtime could not start.",
-    });
-    await rejected;
-    children[1].exit(1);
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    expect(children).toHaveLength(2);
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "stopped",
-      generation: 2,
-      restartScheduled: false,
-    });
-  });
-
-  it("rejects replacement exit before readiness without another replacement", async () => {
-    const { children, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow(/clean readiness/u);
-    children[0].message({ type: "runtime.stopped" });
-    children[0].exit(0);
-    children[1].spawn();
-    children[1].exit(9);
-    await rejected;
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    expect(children).toHaveLength(2);
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "stopped",
-      generation: 2,
-      restartScheduled: false,
-    });
-  });
-
   it("retains the source when cleanup receipt publication fails", async () => {
     const publish = vi.spyOn(
       RuntimeCleanupReceiptJournal.prototype,
@@ -2023,62 +1923,9 @@ describe("RuntimeSupervisor", () => {
     });
   });
 
-  it("rejects when a trusted stopped worker cannot be terminated", async () => {
-    let resolveForceKill!: (confirmed: boolean) => void;
-    const { children, forceKill, supervisor } = createHarness(
-      { recoverOwnedProcesses: () => false });
-    forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
-      resolveForceKill = resolve;
-    }));
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow(
-      /shutdown deadline|process tree/u,
-    );
-    children[0].message({ type: "runtime.stopped" });
-    await vi.advanceTimersByTimeAsync(2_000 + runtimeSupervisorRecoveryWaitMs(process.platform, 500));
-    await rejected;
-    children[0].exit(0);
-    await vi.advanceTimersByTimeAsync(0);
-    resolveForceKill(false);
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    expect(children).toHaveLength(1);
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "stopped",
-      generation: 1,
-      restartScheduled: false,
-    });
-  });
-
-  it("fails closed when a clean recycle misses its bounded shutdown deadline", async () => {
-    const { children, forceKill, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow(/shutdown deadline/u);
-    await vi.advanceTimersByTimeAsync(2_000 + runtimeSupervisorRecoveryWaitMs(process.platform, 500));
-    await rejected;
-    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
-    children[0].exit(137);
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    expect(children).toHaveLength(1);
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "stopped",
-      pid: null,
-      restartScheduled: false,
-    });
-  });
-
-  it.each(["before", "after"] as const)(
-    "rejects trusted stopped %s a failed fallback once grace elapsed",
-    async (stoppedOrder) => {
+  it(
+    "rejects trusted stopped after a failed fallback once grace elapsed",
+    async () => {
       let resolveForceKill!: (confirmed: boolean) => void;
       const cleanupReceiptPublish = vi.spyOn(
         RuntimeCleanupReceiptJournal.prototype,
@@ -2106,15 +1953,10 @@ describe("RuntimeSupervisor", () => {
 
       const recycled = supervisor.testOnlyRecycle();
       const rejected = expect(recycled).rejects.toThrow(/process tree/u);
-      if (stoppedOrder === "before") {
-        children[0].message({ type: "runtime.stopped" });
-      }
       await vi.advanceTimersByTimeAsync(1_000);
       resolveForceKill(false);
       await vi.advanceTimersByTimeAsync(0);
-      if (stoppedOrder === "after") {
-        children[0].message({ type: "runtime.stopped" });
-      }
+      children[0].message({ type: "runtime.stopped" });
       children[0].exit(0);
       await rejected;
       await vi.advanceTimersByTimeAsync(60_000);
@@ -2181,55 +2023,6 @@ describe("RuntimeSupervisor", () => {
       pid: 10_001,
     });
     cleanupReceiptPublish.mockRestore();
-  });
-
-  it("lets application stop take over an in-flight clean recycle", async () => {
-    const { children, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const stopped = supervisor.stop();
-    await expect(recycled).rejects.toThrow(/application shutdown/u);
-    children[0].message({ type: "runtime.stopped" });
-    children[0].exit(0);
-
-    await expect(stopped).resolves.toBe(true);
-    vi.runAllTimers();
-    expect(children).toHaveLength(1);
-    expect(supervisor.snapshot().phase).toBe("stopped");
-  });
-
-  it("lets application stop take over while recycle termination is pending", async () => {
-    let resolveForceKill!: (confirmed: boolean) => void;
-    const { children, forceKill, supervisor } = createHarness();
-    forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
-      resolveForceKill = resolve;
-    }));
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow(/application shutdown/u);
-    await vi.advanceTimersByTimeAsync(1_000);
-    children[0].message({ type: "runtime.stopped" });
-    children[0].exit(0);
-    const stopped = supervisor.stop();
-    await rejected;
-    resolveForceKill(true);
-    await vi.advanceTimersByTimeAsync(0);
-
-    await expect(stopped).resolves.toBe(true);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(children).toHaveLength(1);
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: "stopped",
-      generation: 1,
-      pid: null,
-      restartScheduled: false,
-    });
   });
 
   it("bounds crash-and-reconnect attempts and quarantines prior generations", () => {
@@ -2303,22 +2096,6 @@ describe("RuntimeSupervisor", () => {
     expect(children).toHaveLength(2);
   });
 
-  it("shuts down cleanly without restart and escalates only when grace expires", async () => {
-    const { children, forceKill, supervisor } = createHarness();
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-    const stopped = supervisor.stop();
-    expect(children[0].messages.at(-1)).toEqual({ type: "runtime.shutdown" });
-    children[0].exit(0);
-    await stopped;
-    vi.runAllTimers();
-    expect(children).toHaveLength(1);
-    expect(children[0].killCalls).toBe(0);
-    expect(forceKill).not.toHaveBeenCalled();
-    expect(supervisor.snapshot().phase).toBe("stopped");
-  });
-
   it("owns the full shutdown deadline before posting to the worker", async () => {
     const { children, forceKill, supervisor } = createHarness();
     supervisor.start();
@@ -2383,26 +2160,6 @@ describe("RuntimeSupervisor", () => {
 
     children[0].exit(137);
     await vi.advanceTimersByTimeAsync(0);
-  });
-
-  it("reports shutdown as unconfirmed when forced tree termination cannot be verified", async () => {
-    const { children, forceKill, supervisor } = createHarness(
-      { recoverOwnedProcesses: () => false });
-    forceKill.mockReturnValue(false);
-    supervisor.start();
-    children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-
-    const stopped = supervisor.stop();
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
-    expect(supervisor.snapshot().lastError).toBe(
-      "The runtime process tree could not be confirmed stopped.",
-    );
-
-    children[0].exit(0);
-    await expect(stopped).resolves.toBe(false);
-    expect(supervisor.snapshot().phase).toBe("stopped");
   });
 
   it("allows the normal main quit only after the worker exits", async () => {

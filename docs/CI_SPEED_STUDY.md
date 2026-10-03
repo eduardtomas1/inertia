@@ -46,18 +46,6 @@ successful `merge-ready` evidence. API errors use fixed failure classes. Lookup
 retains the 50-candidate and bounded Git/API limits and adds a two-minute shared
 deadline. Missing/malformed/truncated job totals fail closed.
 
-Normal execution retains the original strict fingerprint and canonical plan.
-For a future measured case, setting `INERTIA_CI_BASELINE_SHADOW=true` when invoking
-`scripts/ci/plan-workflow.mjs` opts into a read-only comparison. **No workflow sets
-this flag.** The hypothesis masks only the content hash of existing regular
-`tests/renderer/**/*.dom.test.tsx` files with conventional names. It retains the
-path inventory and Git modes, so additions, deletions, renames and symlinks still
-invalidate compatibility. Other tests, helpers, setup, native resources,
-configuration, dependency graphs and verifier changes retain exact identities.
-Unknown paths still expand the normal classifier. Shadow API failures cannot
-replace strict evidence; shadow data never enters workflow outputs or the
-canonical `merge-ready` plan.
-
 Each Electron CI invocation retains a compact report with candidate/source SHA,
 run/attempt, runner image identity when available, project/shard, current test
 identity set, file counts, status and all per-test attempt durations. Identity
@@ -67,19 +55,6 @@ Artifacts survive success or failure for seven days. Existing line output,
 first-failure traces, screenshots, deadlines, retries and worker limits stay the
 same. The benchmark configuration remains separate and uncontended.
 
-The read-only collector can be run locally with authenticated `gh`:
-
-```sh
-node scripts/ci/collect-workflow-timings.mjs OWNER/REPO OUTPUT.json 25
-```
-
-It reads the latest completed CI runs, including failed/cancelled runs, and all
-attempts (maximum 50 runs, ten attempts per run, three pages of jobs per attempt).
-It records labels, run/head/attempt identities, admission intervals, job and step
-durations without downloading logs or artifacts. It rejects ambiguous identities
-and incomplete pagination. Missing/negative timestamps remain unavailable, not
-zero. REST labels cannot establish exact image versions or cache hits; the
-collector explicitly records those limits.
 PR REST heads are source heads, not the tested synthetic merge SHA; exact
 candidate and lane identity comes from the plan and Electron reports.
 

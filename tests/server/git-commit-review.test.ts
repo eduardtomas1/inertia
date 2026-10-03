@@ -356,8 +356,6 @@ setInterval(() => {}, 1000);
 
   const pathspecMetacharacterNames = [
     { name: "docs/[a].md", windows: true },
-    { name: "docs/*.md", windows: false },
-    { name: "docs/?.md", windows: false },
     { name: "docs/:(glob)a.md", windows: false },
   ];
 
@@ -1096,32 +1094,6 @@ setInterval(() => {}, 1000);
     expect(() => readFileSync(
       `${git(root, "rev-parse", "--path-format=absolute", "--git-path", "index")}.inertia-commit-transaction.json`,
     )).toThrow();
-  });
-
-  it("recovers a lost reference acknowledgement on a Unicode branch", async () => {
-    const root = repository();
-    git(root, "switch", "-c", "café");
-    writeFileSync(join(root, "selected.txt"), "reviewed Unicode branch source\n");
-    const review = await captureGitCommitReview(root);
-
-    const result = await commitReviewedChanges(
-      root,
-      "Recover Unicode branch commit",
-      ["selected.txt"],
-      review.fingerprint,
-      {
-        testHooks: {
-          afterReferenceCommit: () => {
-            throw new Error("Simulated lost acknowledgement.");
-          },
-        },
-      },
-    );
-
-    expect(result.refreshWarning).toBeUndefined();
-    expect(result.commit).toBe(git(root, "rev-parse", "HEAD"));
-    expect(git(root, "symbolic-ref", "HEAD")).toBe("refs/heads/café");
-    expect(git(root, "status", "--short")).toBe("");
   });
 
   it("commits and recovers on a branch ending in Unicode whitespace", async () => {

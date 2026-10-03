@@ -41,12 +41,6 @@ describe("final answer identity", () => {
     );
   });
 
-  it("uses the persisted harness, backend, and friendly model identity", () => {
-    expect(finalAnswerIdentityLabel(selection())).toBe(
-      "Claude · Anthropic · Sonnet 4.5",
-    );
-  });
-
   it("labels Kimi-through-Claude from route identity without matching its backend display name", () => {
     expect(finalAnswerIdentityLabel(selection({
       backendProfileId: "builtin:kimi-code",

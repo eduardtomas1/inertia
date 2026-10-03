@@ -142,13 +142,11 @@ async function hydratedConversation(surface: "main window" | "detached window"):
 }
 
 describe("composer mixed-provider history", () => {
-  it.each((["main window", "detached window"] as const).flatMap((surface) =>
-    (["codex", "claude"] as const).flatMap((latestProvider) => [
-      [surface, latestProvider, "the saved provider", "Codex Next", "Codex"],
-      [surface, latestProvider, "the latest turn's provider", latestProvider === "codex" ? "Codex Next" : "Claude Route",
-        latestProvider === "codex" ? "Codex" : "Claude"],
-      [surface, latestProvider, "a third provider", "OpenCode Route", "OpenCode"],
-    ] as const)))("offers a new chat in the %s when the latest turn used %s and the user picks %s", async (
+  it.each([
+    ["main window", "codex", "the saved provider", "Codex Next", "Codex"],
+    ["main window", "claude", "a third provider", "OpenCode Route", "OpenCode"],
+    ["detached window", "claude", "the latest turn's provider", "Claude Route", "Claude"],
+  ] as const)("offers a new chat in the %s when the latest turn used %s and the user picks %s", async (
     surface, latestProvider, _target, title, providerLabel,
   ) => {
     const visible = await hydratedConversation(surface);

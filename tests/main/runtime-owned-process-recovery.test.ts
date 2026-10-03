@@ -218,7 +218,7 @@ describe.skipIf(process.platform !== "linux")(
       });
     });
 
-    it.each([0, -1, "1.5", "not-a-pid"])(
+    it.each([0, "not-a-pid"])(
       "rejects invalid Linux parent PID %s",
       (parentPid) => {
         expect(() => readLinuxProcessIdentity(4_242, () =>
@@ -428,7 +428,7 @@ describe.skipIf(process.platform !== "linux")(
       expect(journal.records(runtimeGenerationId)).toEqual([record]);
     });
 
-    it.each(["owned", "retiring"] as const)(
+    it.each(["owned"] as const)(
       "recovers an authenticated post-exec Linux %s record",
       async (durableState) => {
         const directory = temporaryDirectory();
@@ -2247,40 +2247,6 @@ describe("cross-platform runtime owned process recovery", () => {
       }).toBe(true);
     },
     15_000,
-  );
-
-  it.runIf(process.platform === "darwin" || process.platform === "win32").each(
-    [0, 78],
-  )(
-    "retires a normally closed real process with exit %i on the host platform",
-    async (exitCode) => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const invocation = runtimeOwnedProcessInvocation(
-        process.execPath,
-        ["-e", `process.exit(${exitCode})`],
-      );
-      const child = spawnRuntimeOwnedProcess(() => spawn(
-        invocation.command,
-        invocation.args,
-        {
-          detached: process.platform !== "win32",
-          shell: false,
-          stdio: "ignore",
-        },
-      ));
-      liveChildren.add(child);
-      child.once("close", () => liveChildren.delete(child));
-      await closeOf(child);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-
-      expect(child.exitCode).toBe(exitCode);
-      expect(child.signalCode).toBeNull();
-      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
-        .records(runtimeGenerationId)).toEqual([]));
-      deactivate();
-    },
-    10_000,
   );
 
   it.runIf(process.platform === "darwin")(

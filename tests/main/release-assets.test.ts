@@ -264,15 +264,11 @@ function runReleaseAssets(
   };
 }
 
-async function expectExactUnsignedAssetUnion(
-  finalDirectory: string,
-  channel: "stable" | "canary",
-): Promise<void> {
-  const selectedPolicies = channel === "canary" ? canaryPolicies : policies;
+async function expectExactUnsignedCanaryUnion(finalDirectory: string): Promise<void> {
   const expected = [
-    ...Object.values(selectedPolicies).flatMap((policy) => policy.packages),
-    channel === "canary" ? "canary-linux.yml" : "latest-linux.yml",
-    channel === "canary" ? "canary-linux-arm64.yml" : "latest-linux-arm64.yml",
+    ...Object.values(canaryPolicies).flatMap((policy) => policy.packages),
+    "canary-linux.yml",
+    "canary-linux-arm64.yml",
     releaseSbomName,
     "SHA256SUMS.txt",
   ].sort();
@@ -316,13 +312,16 @@ afterEach(async () => {
 });
 
 describe("release asset staging", () => {
-  it("validates and consolidates the disjoint Canary artifact and metadata union", async () => {
+  it("publishes the exact 11-file unsigned canary union without desktop feed metadata or blockmaps", async () => {
     const fixtureRoot = await temporaryDirectory();
     const sourceRoot = join(fixtureRoot, "source");
     const stageRoot = join(fixtureRoot, "stage");
     await mkdir(sourceRoot);
-    for (const platform of Object.keys(canaryPolicies) as Array<keyof typeof canaryPolicies>) {
-      await writeFixture(sourceRoot, platform, { channel: "canary" });
+    for (const platform of Object.keys(canaryPolicies) as Array<keyof typeof policies>) {
+      await writeFixture(sourceRoot, platform, {
+        channel: "canary",
+        delivery: platform.startsWith("linux-") ? "in-app" : "manual",
+      });
       const staged = runReleaseAssets(["stage", platform], {
         INERTIA_RELEASE_CHANNEL: "canary",
         RELEASE_TAG: `canary-v${version}`,
@@ -337,78 +336,8 @@ describe("release asset staging", () => {
       INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
     });
     expect(finalized.status, finalized.stderr).toBe(0);
-    const entries = (await readdir(join(stageRoot, "final"))).sort();
-    expect(Object.keys(canaryPolicies)).toEqual([
-      "macos-x64",
-      "macos-arm64",
-      "windows-x64",
-      "windows-arm64",
-      "linux-x64",
-      "linux-arm64",
-    ]);
-    expect(entries).toEqual([...new Set([
-      ...Object.values(canaryPolicies).flatMap((policy) => [
-        ...policy.packages,
-        policy.metadata,
-        ...policy.companions,
-      ]),
-      releaseSbomName,
-      "SHA256SUMS.txt",
-    ])].sort());
-    for (const [metadata, platforms] of [
-      ["canary-mac.yml", ["macos-x64", "macos-arm64"]],
-      ["canary.yml", ["windows-x64", "windows-arm64"]],
-    ] as const) {
-      const document = parse(
-        await readFile(join(stageRoot, "final", metadata), "utf8"),
-      ) as { files: Array<{ url: string }> };
-      expect(document.files.map(({ url }) => url)).toEqual(
-        platforms.flatMap((platform) => canaryPolicies[platform].packages),
-      );
-    }
+    await expectExactUnsignedCanaryUnion(join(stageRoot, "final"));
   });
-
-  it.each(["stable", "canary"] as const)(
-    "publishes the exact 11-file unsigned %s union without desktop feed metadata or blockmaps",
-    async (channel) => {
-      const fixtureRoot = await temporaryDirectory();
-      const sourceRoot = join(fixtureRoot, "source");
-      const stageRoot = join(fixtureRoot, "stage");
-      await mkdir(sourceRoot);
-      const selectedPolicies = channel === "canary" ? canaryPolicies : policies;
-      for (const platform of Object.keys(selectedPolicies) as Array<keyof typeof policies>) {
-        await writeFixture(sourceRoot, platform, {
-          channel,
-          delivery: platform.startsWith("linux-") ? "in-app" : "manual",
-        });
-        const staged = runReleaseAssets(["stage", platform], {
-          INERTIA_RELEASE_CHANNEL: channel,
-          RELEASE_TAG: channel === "canary" ? `canary-v${version}` : releaseTag,
-          INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
-          INERTIA_RELEASE_STAGE_DIR: stageRoot,
-        });
-        expect(staged.status, staged.stderr).toBe(0);
-      }
-      const finalized = runReleaseAssets(["finalize"], {
-        INERTIA_RELEASE_CHANNEL: channel,
-        RELEASE_TAG: channel === "canary" ? `canary-v${version}` : releaseTag,
-        INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
-      });
-      expect(finalized.status, finalized.stderr).toBe(0);
-      const finalDirectory = join(stageRoot, "final");
-      await expectExactUnsignedAssetUnion(finalDirectory, channel);
-      if (channel === "stable") {
-        const checksumPath = join(finalDirectory, "SHA256SUMS.txt");
-        const checksumSource = await readFile(checksumPath, "utf8");
-        const duplicate = checksumSource.split("\n")[0];
-        if (!duplicate) throw new Error("The checksum fixture has no first row.");
-        await writeFile(checksumPath, `${checksumSource}${duplicate}\n`);
-        await expect(expectExactUnsignedAssetUnion(finalDirectory, channel)).rejects.toThrow(
-          "SHA256SUMS.txt must contain exactly one row per public asset",
-        );
-      }
-    },
-  );
 
   it("validates and consolidates the exact updater asset union", async () => {
     const fixtureRoot = await temporaryDirectory();

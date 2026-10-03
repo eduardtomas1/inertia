@@ -24,8 +24,8 @@ It does not select only tests whose filenames changed.
 | --- | --- | --- |
 | Draft feedback | Shared quality/lineage, full canonical Linux coverage for code, selected native interaction/provider sentinels; clean minimum Node when its contract changes | `merge-ready` deliberately fails: draft feedback is not merge approval. |
 | Merge validation | Quality/lineage once; canonical Linux coverage for code; contract-selected interaction, provider/native and package evidence | Ready-for-review and every subsequent head run the required plan. |
-| Main validation | Same policy over the accumulated unproven diff from a trusted compatible successful ancestor | Missing/uncertain baseline requires the complete matrix. |
-| Nightly certification | All six native targets, full units/portable contracts, Electron, packages, performance and retained three-attempt lifecycle checks | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
+| Main validation | Quality/lineage only when the squash commit's tree equals the head of its merged PR, whose CI run has a successful `merge-ready`, and the previous main commit is an ancestor of that head; performance changes still run the complete plan | Any missing PR, run, tree match, ancestry or API answer requires the complete plan. |
+| Nightly certification | All six native targets with every Electron project, full units/portable contracts, packages and the Linux x64 desktop benchmark | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
 | Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
 Docs-only changes require quality and immutable migration lineage, but no
@@ -35,11 +35,14 @@ without native installers. Provider adapters require Linux coverage plus
 three-OS lifecycle/transport proof; Windows/macOS also run the generated
 portable contracts, and Windows retains native Codex shim/discovery proof.
 OS-specific package paths select both architectures of that OS plus canonical
-coverage. Shared lifecycle, startup, containment, migrations, toolchain,
-workflow/test infrastructure, shared contracts and unknown changes expand to
-all six targets. Native Electron verifier changes under `tests/e2e/`, including
-shared support and OS-only scenarios, also require all six targets: running a
-macOS-only test on Linux would skip its changed assertions. This rule precedes
+coverage. Shared lifecycle, startup, containment, migrations, shared contracts,
+test infrastructure and native Electron verifier changes under `tests/e2e/`
+require the primary targets (Linux x64, Windows x64, macOS arm64). Dependency
+graphs, workflows, CI scripts, native and packaging sources, updater and guardian
+code, and unknown changes require all six targets; outside the nightly, the
+sibling architectures (Linux ARM64, Windows ARM64, macOS x64) run only the
+runtime-recovery Electron project. Nightly and release run every project on all
+six. This rule precedes
 renderer matching and does not infer native coverage from a test's UI-facing
 name. Mixed changes take the union; a full native target replaces
 the equivalent same-platform sentinel.
@@ -50,7 +53,7 @@ ARM64 runs the same complete unit suite without duplicate instrumentation;
 macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
 remain single-worker; Windows ARM64 retains its portable/native obligations.
 Windows Electron remains one worker, other isolated desktop projects two. The
-desktop Electron projects run in separate jobs per selected target; macOS x64
+desktop Electron projects run in separate jobs per selected target; nightly macOS x64
 has independent display-sensitive, isolated and runtime-recovery jobs (see
 package evidence below). The package job itself has no Playwright
 step.
@@ -88,23 +91,16 @@ Release ownership remains separate and non-cancellable. Concurrency is not a
 global priority scheduler; queue delay and runner contention must be measured
 separately from execution time.
 
-Main never classifies only `github.event.before`. A bounded read-only Actions
-lookup considers up to 50 successful runs of this exact workflow on repository
-`main` pushes. A candidate must belong to this repository, be older than the
-current run, have a successful exact-head `merge-ready`, be a Git ancestor,
-and have the same verification-contract digest. Failed/cancelled runs,
-PR/fork runs, another workflow, non-ancestors and changed contracts cannot
-nominate a baseline. API permission/rate failures, missing history or no
-compatible run expand to full evidence.
-
-Compatibility hashes the Git mode/blob/path identities of complete
-`.github/`, `scripts/`, `tests/`, `benchmarks/` trees and root non-document
-configuration files. This includes the lockfile, dependency action and verifier.
+Main never classifies only `github.event.before`. A bounded read-only lookup
+reuses certification only for a single-parent main commit whose one merged pull
+request (same repository, base `main`) has a head with the identical Git tree,
+whose previous main commit is an ancestor of that head, and whose CI run for that
+head has exactly one successful `merge-ready` job. The plan records that run, and
+the main `merge-ready` re-reads its job before accepting the reuse. Any other
+outcome, including API permission, rate or timeout failures, expands to the
+complete plan with full migration-lineage history.
 The dependency action uses existing release Node 22.23.2 instead of floating
 Node 22, while the deliberate uncached Node 22.13 install remains separate.
-No runner artifact supplies authority. The lineage reusable job consumes this
-same baseline; unavailable main proof checks full history rather than forgetting
-migration edits in a cancelled predecessor.
 The lineage verifier's explicit `--all-history` fallback compares every reachable
 manifest revision, bounded to 1,000 revisions with bounded Git reads. A root
 commit predating the manifest is not treated as historical proof; unknown formats
@@ -127,14 +123,14 @@ with its own `npm run build:packaged` for its exact source/target/configuration:
   applicable signature checks. It contains no Playwright step.
 - `<label> Electron` (the `electron` matrix): the display-sensitive, isolated
   and runtime-recovery Playwright projects, the provider-settings screenshots
-  on Linux x64, the desktop benchmark and the compact timing report.
-  macOS x64 expands this into three required checks named
+  on Linux x64, the Linux x64 desktop benchmark and the compact timing report.
+  Outside the nightly, a sibling architecture runs only the runtime-recovery
+  project as `<label> Electron (runtime-recovery)`. On the nightly, macOS x64
+  expands into three required checks named
   `macOS x64 Electron (display-sensitive)`, `macOS x64 Electron (isolated)` and
   `macOS x64 Electron (runtime-recovery)`. Each builds the exact candidate on a
-  separate runner. Only the display-sensitive job runs the desktop benchmark,
-  after its end-to-end tests, as the single job did before the split. The
-  recovery job reached its benchmark 4 to 7 minutes after the runner started,
-  and those samples showed inflated long tasks and cold startup.
+  separate runner. Only Linux x64 runs the desktop benchmark, after its
+  end-to-end tests.
   Display and recovery retain their serial project settings internally.
 
 All are required checks in the plan (`requiredChecks` lists every Electron

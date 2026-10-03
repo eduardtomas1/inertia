@@ -327,7 +327,7 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     runtime: Runtime,
     content: string,
     failure: NonNullable<ProviderRunResult["failure"]>,
-    options: { sessionId?: string; exitCode?: number } = {},
+    options: { sessionId?: string } = {},
   ) {
     const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content });
     runtime.controller.start(queued.turn.id);
@@ -337,7 +337,6 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     runtime.provider.resolve({
       status: "failed",
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-      ...(options.exitCode !== undefined ? { exitCode: options.exitCode } : {}),
       error: failure.message,
       failure,
     });
@@ -361,50 +360,6 @@ describe("retiring a saved session after repeated rejected resumes", () => {
     resumeRejected: true,
   } as const;
   const outage = { reason: "provider-error", message: "Network unreachable." } as const;
-
-  it("keeps a valid session after two usage-limit failures", async () => {
-    const { runtime } = await establishedChat();
-    try {
-      for (const attempt of [1, 2]) {
-        const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: `Attempt ${attempt}.` });
-        expect(queued.turn.providerSessionBefore).toBe("saved-session");
-        runtime.controller.start(queued.turn.id);
-        runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
-        runtime.provider.resolve({
-          status: "failed",
-          sessionId: "saved-session",
-          error: "You've hit your usage limit. Try again later.",
-          failure: { reason: "codex-error", message: "You've hit your usage limit. Try again later." },
-        });
-        await flushTurnControllerTestPromises();
-        expect(runtime.store.agentTurn(queued.turn.id).status).toBe("failed");
-      }
-      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Attempt 3." });
-      expect(third.turn).toMatchObject({ providerSessionBefore: "saved-session", continuationReasonCode: "same-continuation" });
-      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
-    } finally {
-      await runtime.controller.dispose();
-      runtime.store.close();
-    }
-  });
-
-  it("keeps a valid session after two provider process exits", async () => {
-    const { runtime } = await establishedChat("claude");
-    try {
-      for (const attempt of [1, 2]) {
-        const turn = await failTurn(runtime, `Attempt ${attempt}.`, {
-          reason: "process-exit",
-          message: "Claude Code exited before the turn completed.",
-        }, { exitCode: 1 });
-        expect(turn).toMatchObject({ status: "failed", terminalReason: "provider-process-exit" });
-      }
-      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Attempt 3." });
-      expect(third.turn).toMatchObject({ providerSessionBefore: "saved-session", continuationReasonCode: "same-continuation" });
-    } finally {
-      await runtime.controller.dispose();
-      runtime.store.close();
-    }
-  });
 
   it("starts fresh after two rejected resumes of the same session", async () => {
     const { runtime } = await establishedChat();

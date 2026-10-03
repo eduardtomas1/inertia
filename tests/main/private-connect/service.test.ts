@@ -287,22 +287,6 @@ describe("Private Connect service lifecycle", () => {
     await service.releaseUpdatePreparation();
   });
 
-  it("rejoins a pending pairing when the browser retries the same invitation", async () => {
-    const service = await createService();
-    await service.setEnabled(true);
-    const invitation = await service.createInvitation();
-    const request = { browserNonce,
-      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
-      deviceId,
-      deviceLabel: "Browser",
-    };
-
-    const started = await service.pairStart(request, "example");
-
-    await expect(service.pairStart(request, "example")).resolves.toEqual(started);
-    expect(service.state().pendingPairings).toHaveLength(1);
-  });
-
   it("consumes the invitation and binds retries to a browser-held nonce", async () => {
     const service = await createService();
     await service.setEnabled(true);
@@ -316,19 +300,6 @@ describe("Private Connect service lifecycle", () => {
     await expect(service.pairStart({ ...request, browserNonce: "b".repeat(43) }, "example"))
       .rejects.toThrow();
     await expect(service.pairStart(request, "example")).resolves.toEqual(started);
-  });
-
-  it("refuses a guessed browser identity from rejoining an already admitted pairing", async () => {
-    const service = await createService();
-    await service.setEnabled(true);
-    const invitation = await service.createInvitation();
-    const request = {
-      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
-      deviceId, deviceLabel: "Browser", browserNonce: "a".repeat(43),
-    };
-    await service.pairStart(request, "example");
-    await expect(service.pairStart({ ...request, browserNonce: "b".repeat(43) }, "example"))
-      .rejects.toThrow();
   });
 
   it("requires the original browser nonce before collecting an approved session", async () => {

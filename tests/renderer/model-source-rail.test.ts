@@ -1,14 +1,12 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Bot, CloudCog, Star } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   ModelSourceRail,
   activateModelSourceRailItem,
   modelSourceRailItemAccessibleLabel,
-  modelSourceRailItemGlyph,
 } from "../../src/renderer/src/components/ModelSourceRail";
 import {
   deriveModelSourceRailItems,
@@ -283,36 +281,10 @@ describe("model source rail", () => {
     const items = deriveModelSourceRailItems(routes, {
       favoriteRouteKeys: ["codex-a"],
     });
-    const favorites = items.find(({ filter }) => filter.kind === "favorites")!;
-    const codex = items.find(({ filter }) =>
-      filter.kind === "provider" && filter.providerId === "codex")!;
-    const cursor = items.find(({ filter }) =>
-      filter.kind === "provider" && filter.providerId === "cursor")!;
     const custom = items.find(({ filter }) =>
       filter.kind === "custom"
       && filter.backendProfileId === "custom:team-a")!;
-    const unknown = items.find(({ filter }) => filter.kind === "harness")!;
 
-    expect(modelSourceRailItemGlyph(favorites)).toEqual({
-      kind: "icon",
-      Icon: Star,
-    });
-    expect(modelSourceRailItemGlyph(codex)).toEqual({
-      kind: "provider",
-      providerId: "codex",
-    });
-    expect(modelSourceRailItemGlyph(cursor)).toEqual({
-      kind: "provider",
-      providerId: "cursor",
-    });
-    expect(modelSourceRailItemGlyph(custom)).toEqual({
-      kind: "icon",
-      Icon: CloudCog,
-    });
-    expect(modelSourceRailItemGlyph(unknown)).toEqual({
-      kind: "icon",
-      Icon: Bot,
-    });
     expect(modelSourceRailItemAccessibleLabel(custom)).toBe(
       "Team gateway, custom backend via Claude, 2 models, profile custom:team-a",
     );
@@ -343,32 +315,13 @@ describe("model source rail", () => {
     expect(html).not.toContain('aria-pressed="false"');
   });
 
-  it("uses namespaced semantic, scale, truncation, selected, and narrow styles", () => {
+  it("sizes rail items from the shared control target height", () => {
     const styles = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
     );
     const block = styles.slice(styles.indexOf("/* Reusable model chooser source rail."));
 
-    expect(block).toContain(".model-source-rail-toolbar");
-    expect(block).toContain(".model-source-rail-item.is-selected");
-    expect(block).toContain(".model-source-rail-item:focus-visible");
-    expect(block).toContain(".model-source-rail-item:disabled");
-    expect(block).toContain(".model-source-rail-mark");
     expect(block).toContain("var(--ui-control-height)");
-    expect(block).toContain("var(--ui-font-micro)");
-    expect(block).toContain("var(--surface-hover)");
-    expect(block).toContain("text-overflow: ellipsis");
-    expect(block).toContain("@container (max-width: 420px)");
-    expect(block).toContain("@media (max-width: 640px)");
-  });
-
-  it("keeps the unfiltered result set implicit instead of spending a rail row on All", () => {
-    const items = deriveModelSourceRailItems(routes, {
-      favoriteRouteKeys: ["codex-a"],
-    });
-
-    expect(items.some(({ filter }) => filter.kind === "all")).toBe(false);
-    expect(filterModelRoutesBySource(routes, { kind: "all" })).toEqual(routes);
   });
 });

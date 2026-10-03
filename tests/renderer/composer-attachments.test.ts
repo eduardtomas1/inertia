@@ -140,20 +140,11 @@ describe("composer attachment previews", () => {
     expect(html).not.toContain("file://");
   });
 
-  it("keeps attachment layout bounded without permitting raw file URLs", () => {
-    const css = readFileSync(
-      new URL("../../src/renderer/src/styles.css", import.meta.url),
-      "utf8",
-    );
+  it("does not permit raw file URLs in the renderer content security policy", () => {
     const html = readFileSync(
       new URL("../../src/renderer/index.html", import.meta.url),
       "utf8",
     );
-
-    expect(css).toMatch(/\.composer-attachments\s*\{[^}]*display:\s*grid[^}]*max-height:\s*calc\(var\(--composer-preview-size\) \+ var\(--composer-preview-size\) \+ 12px\)[^}]*overflow-y:\s*auto/su);
-    expect(css).toMatch(/\.composer-attachment\s*\{[^}]*min-height:\s*var\(--composer-preview-size\)[^}]*border:\s*0;[^}]*background:\s*transparent/su);
-    expect(css).toMatch(/\.composer-attachment-preview\s*\{[^}]*width:\s*var\(--composer-preview-size\);[^}]*height:\s*var\(--composer-preview-size\)/su);
-    expect(css).toMatch(/\.composer-attachment-preview img\s*\{[^}]*object-fit:\s*cover/su);
     // Development loads the renderer over HTTP, so its privileged preview is
     // cross-origin even though packaged windows use inertia://bundle.
     expect(html).toContain("img-src 'self' inertia: data: blob:");

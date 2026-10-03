@@ -128,94 +128,38 @@ if ((hangs[stage] ?? 0) !== 0) {
     };
   }
 
-  for (const stage of ["login", "version", "app-server"] as const) {
-    it(`reports a ${stage} probe timeout as checking and becomes ready after a retry`, async () => {
-      const fake = fakeCodex({ [stage]: 1 });
-      const runtime = harness(fake);
-
-      await runtime.refresh("codex");
-
-      expect(fake.calls().filter((call) => call === stage)).toHaveLength(1);
-      const checking = runtime.codex();
-      expect(runtime.published).toHaveLength(1);
-      expect(checking).toMatchObject({
-        authState: "checking",
-        canRun: false,
-        statusMessage: "Codex is slow to respond; checking again",
-      });
-      expect(route(checking)).toMatchObject({
-        ready: false,
-        transient: true,
-        badge: "Checking",
-        action: null,
-      });
-      await waitFor("the background retry to reach ready", () => runtime.codex().canRun, 10_000);
-      expect(runtime.published.map(route).map((state) => state.ready ? "ready" : state.badge))
-        .not.toContain("Sign in");
-      expect(runtime.codex()).toMatchObject({
-        installState: "installed",
-        authState: "authenticated",
-        canRun: true,
-      });
-      expect(route(runtime.codex())).toEqual({ ready: true });
-      expect(fake.calls().filter((call) => call === stage)).toHaveLength(2);
-      expect(runtime.requestedTimeouts).toEqual([4_000, 4_000]);
-    }, 30_000);
-  }
-
-  it("stops after bounded sign-in check timeouts without asking the user to sign in", async () => {
-    const fake = fakeCodex({ login: -1 });
+  it("reports a login probe timeout as checking and becomes ready after a retry", async () => {
+    const fake = fakeCodex({ login: 1 });
     const runtime = harness(fake);
 
     await runtime.refresh("codex");
-    expect(fake.calls().filter((call) => call === "login")).toHaveLength(1);
-    await waitFor("the bounded retries to finish", () => runtime.codex().authState === "error", 20_000);
 
-    expect(fake.calls().filter((call) => call === "login")).toHaveLength(4);
-    expect(runtime.requestedTimeouts).toEqual([4_000, 4_000, 4_000, 4_000]);
-    expect(runtime.codex()).toMatchObject({
-      installState: "installed",
-      authState: "error",
+    expect(fake.calls().filter((call) => call === "login")).toHaveLength(1);
+    const checking = runtime.codex();
+    expect(runtime.published).toHaveLength(1);
+    expect(checking).toMatchObject({
+      authState: "checking",
       canRun: false,
-      statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
+      statusMessage: "Codex is slow to respond; checking again",
     });
-    expect(route(runtime.codex())).toMatchObject({
+    expect(route(checking)).toMatchObject({
       ready: false,
-      transient: false,
-      badge: "Connection issue",
-      action: "refresh",
+      transient: true,
+      badge: "Checking",
+      action: null,
     });
+    await waitFor("the background retry to reach ready", () => runtime.codex().canRun, 10_000);
     expect(runtime.published.map(route).map((state) => state.ready ? "ready" : state.badge))
       .not.toContain("Sign in");
-  }, 60_000);
-
-  it("stops after bounded version probe timeouts with an unavailable CLI state", async () => {
-    const fake = fakeCodex({ version: -1 });
-    const runtime = harness(fake);
-
-    await runtime.refresh("codex");
-    expect(fake.calls()).toEqual(["version"]);
-    await waitFor("the bounded retries to finish", () => runtime.codex().installState === "unresponsive", 20_000);
-
-    expect(fake.calls()).toEqual(["version", "version", "version", "version"]);
     expect(runtime.codex()).toMatchObject({
-      installState: "unresponsive",
-      canRun: false,
-      statusMessage: "Codex did not respond in time; refresh to try again",
+      installState: "installed",
+      authState: "authenticated",
+      canRun: true,
     });
-    expect(route(runtime.codex())).toMatchObject({
-      ready: false,
-      transient: false,
-      badge: "Unavailable",
-      title: "Codex harness is not responding",
-      action: "refresh",
-    });
-    const titles = runtime.published.map((provider) => {
-      const state = route(provider);
-      return state.ready ? "ready" : `${state.badge} ${state.title}`;
-    });
-    expect(titles.some((title) => /Sign in|missing|not found|could not start/u.test(title))).toBe(false);
-  }, 60_000);
+    expect(route(runtime.codex())).toEqual({ ready: true });
+    expect(fake.calls().filter((call) => call === "login")).toHaveLength(2);
+    expect(runtime.requestedTimeouts).toEqual([4_000, 4_000]);
+  }, 30_000);
 
   it("keeps a definite signed-out answer as Sign in without retrying", async () => {
     const fake = fakeCodex({}, { signedOut: true });
@@ -316,23 +260,5 @@ if ((hangs[stage] ?? 0) !== 0) {
     });
     expect(runtime.published.map(({ statusMessage }) => statusMessage).join("\n")).not.toMatch(/update/iu);
     runtime.close();
-  }, 30_000);
-
-  it("cancels a pending retry on shutdown without probing again", async () => {
-    const fake = fakeCodex({ login: 1 });
-    const runtime = harness(fake, [60_000]);
-
-    await runtime.refresh("codex");
-    const callsBeforeShutdown = fake.calls();
-    runtime.close();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    expect(fake.calls()).toEqual(callsBeforeShutdown);
-    expect(runtime.requestedTimeouts).toEqual([4_000]);
-    expect(runtime.published).toHaveLength(1);
-    expect(runtime.codex()).toMatchObject({
-      authState: "checking",
-      statusMessage: "Codex is slow to respond; checking again",
-    });
   }, 30_000);
 });

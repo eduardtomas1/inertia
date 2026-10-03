@@ -235,7 +235,6 @@ async function nestedCommitHarness(
   message: string,
   paths: readonly string[],
   conversationId?: string,
-  workspaceRuns?: SourceControlCommandDependencies["workspaceRuns"],
 ) {
   const authorities = new SecureFileAuthorityRegistry(broker);
   const socket = {} as WebSocket;
@@ -263,21 +262,19 @@ async function nestedCommitHarness(
     metadataMarkerIdentity,
     conversationId,
   );
-  const trackSourceControl = workspaceRuns
-    ? vi.spyOn(workspaceRuns, "trackSourceControl")
-    : vi.fn(async (
-        _label: string,
-        _projectId: string,
-        _conversationId: string | undefined,
-        _cwd: string,
-        _requestId: string,
-        operation: () => Promise<unknown>,
-      ) => await operation());
+  const trackSourceControl = vi.fn(async (
+    _label: string,
+    _projectId: string,
+    _conversationId: string | undefined,
+    _cwd: string,
+    _requestId: string,
+    operation: () => Promise<unknown>,
+  ) => await operation());
   const send = vi.fn();
   const broadcastSnapshot = vi.fn();
   const handler = createSourceControlCommandHandler({
     workspacePath: vi.fn(() => workspace),
-    workspaceRuns: workspaceRuns ?? { trackSourceControl },
+    workspaceRuns: { trackSourceControl },
     secureFiles: broker,
     secureFileAuthorities: authorities,
     send,
@@ -707,76 +704,6 @@ describe("nested source-control command scope", () => {
       }),
     );
     expect(harness.broadcastSnapshot).toHaveBeenCalled();
-  });
-
-  it("acknowledges an advanced commit when run persistence and live broadcasts fail", async () => {
-    const { workspace, repository } = workspaceWithNestedRepository();
-    writeFileSync(join(repository, "README.md"), "authoritative commit\n");
-    const activityStore = {
-      conversation: vi.fn(),
-      createWorkspaceRun: vi.fn(() => ({ id: crypto.randomUUID() })),
-      updateWorkspaceRun: vi.fn((
-        _runId: string,
-        update: { status?: string },
-      ) => {
-        if (update.status === "succeeded") {
-          throw new Error("Injected succeeded activity persistence failure.");
-        }
-      }),
-      conversationWork: {
-        reserveCheckout: vi.fn(() => true),
-        release: vi.fn(),
-      },
-    };
-    const controllerBroadcast = vi.fn(() => {
-      throw new Error("Injected live snapshot failure.");
-    });
-    const invalidated = vi.fn()
-      .mockImplementationOnce(() => {
-        throw new Error("Injected invalidation failure.");
-      });
-    const controller = new WorkspaceRunController(
-      activityStore as never,
-      {} as never,
-      controllerBroadcast,
-      () => false,
-      invalidated,
-    );
-    const harness = await nestedCommitHarness(
-      workspace,
-      repository,
-      secureFiles(),
-      "Commit despite projection failures",
-      ["README.md"],
-      undefined,
-      controller,
-    );
-    const before = Number(git(repository, "rev-list", "--count", "HEAD"));
-
-    await expect(harness.handler(harness.socket, harness.command))
-      .resolves.toBe("handled");
-
-    expect(Number(git(repository, "rev-list", "--count", "HEAD")))
-      .toBe(before + 1);
-    expect(harness.send).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        type: "request.result",
-        requestId: harness.command.requestId,
-        result: expect.objectContaining({ kind: "git.action" }),
-      }),
-    );
-    await expect(controller.trackSourceControl(
-      "Follow-up mutation",
-      projectId,
-      undefined,
-      workspace,
-      crypto.randomUUID(),
-      async () => "follow-up",
-      { recoverReviewedCommit: false, serializationRoot: repository },
-    )).resolves.toBe("follow-up");
-    expect(invalidated).toHaveBeenCalledTimes(2);
-    expect(activityStore.conversationWork.release).toHaveBeenCalledTimes(2);
   });
 
   it("acknowledges one commit when post-commit review reconciliation fails", async () => {

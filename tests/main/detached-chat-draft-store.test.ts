@@ -115,15 +115,21 @@ describe("detached chat draft store", () => {
 
   it("keeps the newest 16 worst-case valid drafts within the file budget", () => {
     const { path } = statePath();
-    const store = new DetachedChatDraftStore(path);
     const worstCaseDraft = "\u0000".repeat(20_000);
-
-    for (let index = 0; index <= MAX_PENDING_DETACHED_CHAT_DRAFTS; index += 1) {
-      store.put({
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      drafts: Array.from({ length: MAX_PENDING_DETACHED_CHAT_DRAFTS }, (_, index) => ({
         conversationId: conversationId(index),
         draft: worstCaseDraft,
-      });
-    }
+        handoffId: `22222222-2222-4222-8222-${index.toString().padStart(12, "0")}`,
+      })),
+    }), { mode: 0o600 });
+    const store = new DetachedChatDraftStore(path);
+    expect(store.snapshot()).toHaveLength(MAX_PENDING_DETACHED_CHAT_DRAFTS);
+    store.put({
+      conversationId: conversationId(MAX_PENDING_DETACHED_CHAT_DRAFTS),
+      draft: worstCaseDraft,
+    });
 
     const snapshot = store.snapshot();
     expect(snapshot).toHaveLength(MAX_PENDING_DETACHED_CHAT_DRAFTS);

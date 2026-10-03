@@ -41,15 +41,6 @@ async function start() {
   return (snapshot.mock.calls[0] as unknown as [{ reviewId: string }])[0].reviewId;
 }
 
-it("emulates Chromium focus rules for controls that become disabled", () => {
-  const { container } = render(<fieldset><button type="button">Mask</button></fieldset>);
-  const button = screen.getByRole("button", { name: "Mask" }); button.focus();
-  container.querySelector("fieldset")!.setAttribute("disabled", "");
-  expect(document.activeElement).toBe(document.body);
-  button.focus();
-  expect(document.activeElement).toBe(document.body);
-});
-
 it("returns focus to Take reviewed screenshot after the dialog closes", async () => {
   render(<ReviewedScreenshotControl conversationId={chat} />);
   await start();

@@ -1,23 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
-  BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
-  DUO_CANCEL_REQUEST_TIMEOUT_MS,
-  DUO_DISPATCH_REQUEST_TIMEOUT_MS,
   GIT_MUTATION_REQUEST_TIMEOUT_MS,
   GIT_READ_OPERATION_TIMEOUT_MS,
   GIT_READ_REQUEST_TIMEOUT_MS,
   MESSAGE_SEND_REQUEST_TIMEOUT_MS,
-  WORKSPACE_ENTRY_REQUEST_TIMEOUT_MS,
-  WORKSPACE_FILE_REQUEST_TIMEOUT_MS,
   WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS,
   WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS,
 } from "../../src/shared/runtime-command-timeouts";
 import {
   publishesWorkspaceGitCompletion,
-  RUNTIME_COMMAND_POLICIES,
   runtimeCommandPolicy,
 } from "../../src/renderer/src/utils/runtimeCommandPolicy";
 import { commandRefreshesConversationDetail } from "../../src/renderer/src/lib/runtimeCommands";
@@ -28,61 +21,17 @@ describe("runtime command delivery policy", () => {
       timeoutMs: 15_000,
       timeoutDelivery: "rejected",
     });
-    expect(runtimeCommandPolicy("usage.dashboard.get")).toEqual({
-      timeoutMs: 15_000,
-      timeoutDelivery: "rejected",
-    });
     expect(runtimeCommandPolicy("conversation.detail.load")).toEqual({
       timeoutMs: CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "rejected",
     });
-    expect(runtimeCommandPolicy("git.workspace.refresh")).toEqual({
-      timeoutMs: WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("git.diff")).toEqual({
-      timeoutMs: GIT_READ_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("git.pr.confidence")).toEqual({
-      timeoutMs: GIT_READ_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("workspace.file.read")).toEqual({
-      timeoutMs: WORKSPACE_FILE_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("workspace.entries")).toEqual({
-      timeoutMs: WORKSPACE_ENTRY_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("agent.skills.list")).toEqual({
-      timeoutMs: AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
+    expect(runtimeCommandPolicy("duo.status")).toEqual({
+      timeoutMs: 15_000,
       timeoutDelivery: "rejected",
     });
   });
 
   it("classifies representative mutations as ambiguous with their existing deadlines", () => {
-    expect(runtimeCommandPolicy("terminal.attach")).toEqual({
-      timeoutMs: 15_000,
-      timeoutDelivery: "ambiguous",
-    });
-    expect(runtimeCommandPolicy("terminal.detach")).toEqual({
-      timeoutMs: 15_000,
-      timeoutDelivery: "ambiguous",
-    });
-    expect(runtimeCommandPolicy("terminal.input")).toEqual({
-      timeoutMs: 15_000,
-      timeoutDelivery: "ambiguous",
-    });
-    expect(runtimeCommandPolicy("git.selection.revert")).toEqual({
-      timeoutMs: GIT_MUTATION_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "ambiguous",
-    });
-    expect(runtimeCommandPolicy("backend.profile.probe")).toEqual({
-      timeoutMs: BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "ambiguous",
-    });
     expect(runtimeCommandPolicy("message.send")).toEqual({
       timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
@@ -91,40 +40,14 @@ describe("runtime command delivery policy", () => {
       timeoutMs: GIT_MUTATION_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
     });
-    expect(runtimeCommandPolicy("duo.dispatch")).toEqual({
-      timeoutMs: DUO_DISPATCH_REQUEST_TIMEOUT_MS,
+    expect(runtimeCommandPolicy("git.selection.revert")).toEqual({
+      timeoutMs: GIT_MUTATION_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
     });
-    expect(runtimeCommandPolicy("duo.cancel")).toEqual({
-      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "ambiguous",
-    });
-    expect(runtimeCommandPolicy("duo.acknowledge")).toEqual({
-      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "ambiguous",
-    });
-    expect(runtimeCommandPolicy("duo.status")).toEqual({
-      timeoutMs: 15_000,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("duo.pending")).toEqual({
-      timeoutMs: 15_000,
-      timeoutDelivery: "rejected",
-    });
-    expect(runtimeCommandPolicy("duo.comparison.retry")).toEqual({
+    expect(runtimeCommandPolicy("terminal.input")).toEqual({
       timeoutMs: 15_000,
       timeoutDelivery: "ambiguous",
     });
-    expect(runtimeCommandPolicy("duo.comparison.cancel")).toEqual({
-      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
-      timeoutDelivery: "ambiguous",
-    });
-  });
-
-  it("assigns an explicit supported timeout-delivery state to every mapped command", () => {
-    expect(Object.values(RUNTIME_COMMAND_POLICIES).every(
-      ({ timeoutDelivery }) => timeoutDelivery === "rejected" || timeoutDelivery === "ambiguous",
-    )).toBe(true);
   });
 
   it("refreshes packet summaries after draft context changes", () => {

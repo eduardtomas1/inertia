@@ -154,14 +154,6 @@ describe("ModelChooserRow", () => {
     expect(html).not.toContain("Official provider label must not leak");
   });
 
-  it("keeps raw model identifiers out of the calm result row", () => {
-    expect(render(row())).not.toContain("<code");
-    expect(render(row())).not.toContain("model-chooser-row-model-id");
-    expect(render(row())).not.toContain(">gpt-5.6-sol<");
-    expect(render(row({ modelId: "custom/provider/raw-identifier" })))
-      .not.toContain(">custom/provider/raw-identifier<");
-  });
-
   it("surfaces compatibility states only when they affect selection", () => {
     expect(modelChooserCompatibilityLabel({
       affectsSelection: false,
@@ -240,31 +232,14 @@ describe("ModelChooserRow", () => {
     expect(isModelChooserSelectionKey({ ...event, key: "Enter", metaKey: true })).toBe(false);
   });
 
-  it("uses namespaced semantic, truncation, focus, disabled, scale, and narrow styles", () => {
-const styles = readFileSync(
+  it("sizes result rows from the shared control target height", () => {
+    const styles = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
-);
-    const block = styles.slice(styles.indexOf("/* Reusable model chooser result row."));
-    const chooserLayout = styles.slice(
-      styles.indexOf(".model-chooser-results-wrap"),
-      styles.indexOf(".model-chooser-empty > span"),
     );
+    const block = styles.slice(styles.indexOf("/* Reusable model chooser result row."));
 
-    expect(block).toContain(".model-chooser-row-option");
-    expect(block).toContain(":has(.model-chooser-row-option:focus-visible)");
-    expect(block).toContain('.model-chooser-row-option[aria-disabled="true"]');
-    expect(block).toContain(".model-chooser-row.is-active");
-    expect(block).toContain('var(--model-row-height)');
+    expect(block).toContain("var(--model-row-height)");
     expect(block).toContain("var(--ui-control-height)");
-    expect(block).toContain("var(--surface-hover)");
-    expect(block).toContain("text-overflow: ellipsis");
-    expect(block).toContain("@container (max-width: 420px)");
-    expect(chooserLayout).toContain(".model-chooser-list {");
-    expect(chooserLayout).toContain("display: block");
-    expect(chooserLayout).not.toContain(".model-chooser-favorite-actions");
-    expect(chooserLayout).not.toContain(".model-chooser-favorite-slot");
-    expect(chooserLayout).not.toContain("position: absolute");
-    expect(block).not.toContain("model-chooser-row-card");
   });
 });

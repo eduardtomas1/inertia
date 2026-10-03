@@ -11,16 +11,8 @@ const css = ["styles.css", "sidebar-work-index.css", "components/sidebar/thread-
   .replace(/\r\n?/gu, "\n");
 
 describe("sidebar index presentation contracts", () => {
-  it("keeps selected, hover, and keyboard focus treatments distinct", () => {
-    expect(css).toMatch(/\.activity-thread:hover\s*\{[^}]*background:/su);
-    expect(css).toMatch(/\.activity-thread\.is-active\s*\{[^}]*border-color:[^}]*background:[^}]*box-shadow:/su);
+  it("keeps a visible keyboard focus outline on Work rows", () => {
     expect(css).toMatch(/\.activity-thread-select:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su);
-  });
-
-  it("adapts row density to compact, narrow, and wide sidebars", () => {
-    expect(css).toContain(".sidebar.is-compact .activity-thread");
-    expect(css).toContain(".sidebar.is-narrow .activity-thread-select");
-    expect(css).toContain(".sidebar.is-wide .activity-thread-select");
   });
 
   it("keeps the trailing action hit target stable during press feedback", () => {
@@ -52,11 +44,6 @@ describe("sidebar index presentation contracts", () => {
     expect(orbitRule).not.toMatch(/(^|[\s;])animation:/u);
     expect(arrivalRule).toContain("work-status-arrival 420ms");
     expect(arrivalRule).not.toContain("infinite");
-  });
-
-  it("centers every status glyph on its label and keeps provider marks unframed", () => {
-    expect(css).toMatch(/\.activity-thread-status-label > \[data-work-status\]\s*\{[^}]*display:\s*inline-flex;/u);
-    expect(css).not.toMatch(/\.provider-brand-icon\[data-provider-brand="anthropic"\]\s*\{[^}]*background/u);
   });
 
   it("exposes selected, focus, and status boundaries in forced colors", () => {

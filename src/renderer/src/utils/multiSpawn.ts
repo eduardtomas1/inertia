@@ -71,19 +71,6 @@ export interface MultiSpawnDraft {
   rememberPreset: boolean;
 }
 
-export function readPendingMultiSpawnLaunchId(
-  storage: Pick<Storage, "getItem">,
-): string | null {
-  try {
-    const value = storage.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY);
-    return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export function writePendingMultiSpawnLaunchId(
   storage: Pick<Storage, "setItem">,
   launchId: string,

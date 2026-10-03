@@ -192,26 +192,6 @@ test("keeps cold process discovery inside the existing total drain deadline", as
   expect(snapshot).toHaveBeenCalledOnce();
 });
 
-test("retains discovery phase stderr in the original bounded timeout error", async () => {
-  const { runBounded } = await installerSmokeModule();
-  const markers = [
-    "INERTIA_INSTALL_ROOT_PHASE|script-entered|0|0|0",
-    "INERTIA_INSTALL_ROOT_PHASE|cim-start|10|0|0",
-    "INERTIA_INSTALL_ROOT_PHASE|path-lookup-start|25|1|1",
-  ];
-  // Allow cold Node startup on Windows before this deliberate timeout.
-  const error = await runBounded(process.execPath, ["-e", [
-    'process.stderr.write("#< CLIXML\\n");',
-    `process.stderr.write(${JSON.stringify(markers.join("\n") + "\n")});`,
-    "setInterval(() => {}, 1000);",
-  ].join("")], { label: "Discovery phase timeout control", timeoutMs: 5_000 }).catch(
-    (cause: unknown) => cause,
-  );
-  expect(error).toMatchObject({ name: "BoundedProcessTimeoutError", cleanupConfirmed: true });
-  expect((error as Error).message).toContain("complete process tree was terminated");
-  for (const marker of markers) expect((error as Error).message).toContain(marker);
-});
-
 test("keeps discovery phase stderr out of successful process JSON", async () => {
   const { runBounded } = await installerSmokeModule();
   const result = await runBounded(process.execPath, ["-e", [
@@ -656,21 +636,28 @@ test("terminates the complete owned process tree on a gate timeout", async () =>
   const pidFile = join(temporaryRoot, "descendant.pid");
   let rootPid = 0;
   let descendantPid = 0;
+  const markers = [
+    "INERTIA_INSTALL_ROOT_PHASE|script-entered|0|0|0",
+    "INERTIA_INSTALL_ROOT_PHASE|cim-start|10|0|0",
+    "INERTIA_INSTALL_ROOT_PHASE|path-lookup-start|25|1|1",
+  ];
   try {
     const script = [
       'const { spawn } = require("node:child_process");',
       'const { writeFileSync } = require("node:fs");',
+      'process.stderr.write("#< CLIXML\\n");',
+      `process.stderr.write(${JSON.stringify(markers.join("\n") + "\n")});`,
       'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
       "writeFileSync(process.argv[1], JSON.stringify({ root: process.pid, descendant: child.pid }));",
       "setInterval(() => {}, 1000);",
     ].join("");
-    // The gate must fire only after the fixture has started Node, spawned its
-    // descendant and written the pid file; a loaded Intel macOS runner needs
-    // more than 500 ms for that startup, which left nothing to read back.
-    await expect(runBounded(process.execPath, ["-e", script, pidFile], {
+    const error = await runBounded(process.execPath, ["-e", script, pidFile], {
       label: "Installer timeout fixture",
       timeoutMs: 3_000,
-    })).rejects.toThrow("complete process tree was terminated");
+    }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({ name: "BoundedProcessTimeoutError", cleanupConfirmed: true });
+    expect((error as Error).message).toContain("complete process tree was terminated");
+    for (const marker of markers) expect((error as Error).message).toContain(marker);
     const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
       root: number;
       descendant: number;

@@ -59,7 +59,6 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
       running,
       promptHistory,
       onStop,
-      newChatProjectPicker,
     }: {
       onSend(
         content: string,
@@ -69,12 +68,6 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
       running: boolean;
       promptHistory?: readonly { id: string; content: string }[];
       onStop: () => Promise<void>;
-      newChatProjectPicker?: {
-        projects: readonly Project[];
-        selectedProject: Project;
-        disabled: boolean;
-        onChange: (project: Project) => void;
-      };
     }): React.JSX.Element {
       composerRenderCount.value += 1;
       composerHistoryProjection.value = [...(promptHistory ?? [])];
@@ -83,22 +76,6 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           <span data-testid="composer-running-state">
             {running ? "running" : "settled"}
           </span>
-          {newChatProjectPicker && (
-            <select
-              aria-label="Project"
-              value={newChatProjectPicker.selectedProject.id}
-              disabled={newChatProjectPicker.disabled}
-              onChange={(event) => newChatProjectPicker.onChange(
-                newChatProjectPicker.projects[event.currentTarget.selectedIndex]!,
-              )}
-            >
-              {newChatProjectPicker.projects.map((candidate) => (
-                <option value={candidate.id} key={candidate.id}>
-                  {candidate.name}
-                </option>
-              ))}
-            </select>
-          )}
           <button
             type="button"
             onClick={() => {
@@ -523,15 +500,6 @@ describe("draft turn anchoring", () => {
       name: "What should we build in Anchor project?",
       level: 3,
     })).toBeVisible();
-    expect(document.querySelector(".empty-thread-project"))
-      .toHaveTextContent("Anchor project");
-    expect(document.querySelector(".chat-workspace"))
-      .toHaveClass("is-empty-thread");
-    expect(document.querySelector(".empty-thread-icon")).toBeNull();
-    expect(screen.queryByText(
-      "Describe the outcome you want. The details can take shape together.",
-      { exact: true },
-    )).not.toBeInTheDocument();
 
     view.rerender(
       <ChatWorkspace
@@ -541,18 +509,6 @@ describe("draft turn anchoring", () => {
     );
     expect(screen.getByRole("heading", {
       name: "What should we build in this project?",
-      level: 3,
-    })).toBeVisible();
-
-    const longName = "A long project identity that must wrap without escaping the transcript canvas";
-    view.rerender(
-      <ChatWorkspace
-        {...workspaceProps(conversation("conversation-empty"), async () => null)}
-        project={{ ...project, name: longName }}
-      />,
-    );
-    expect(screen.getByRole("heading", {
-      name: `What should we build in ${longName}?`,
       level: 3,
     })).toBeVisible();
   });
@@ -606,61 +562,6 @@ describe("draft turn anchoring", () => {
     expect(earlier).toHaveFocus();
     fireEvent.click(earlier);
     expect(loadOlder).toHaveBeenCalledOnce();
-  });
-
-  it("passes project choice into the empty-chat composer", () => {
-    const studioProject: Project = {
-      ...project,
-      id: "22222222-2222-4222-8222-222222222222",
-      name: "Studio",
-      path: "/workspace/studio",
-      normalizedPath: "/workspace/studio",
-      color: "#2d8a64",
-    };
-    const onChange = vi.fn();
-    render(
-      <ChatWorkspace
-        {...workspaceProps(conversation("conversation-global"), async () => null)}
-        newChatProjectPicker={{
-          projects: [project, studioProject],
-          selectedProject: project,
-          disabled: false,
-          onChange,
-        }}
-      />,
-    );
-
-    expect(screen.getByRole("heading", {
-      name: "What should we build today?",
-      level: 3,
-    })).toBeVisible();
-    const picker = screen.getByRole("combobox", { name: "Project" });
-    expect(picker).toHaveValue(project.id);
-    expect(screen.getByRole("option", { name: "Anchor project" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "Studio" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Send materialized draft" }))
-      .toBeVisible();
-
-    fireEvent.change(picker, { target: { value: studioProject.id } });
-
-    expect(onChange).toHaveBeenCalledOnce();
-    expect(onChange).toHaveBeenCalledWith(studioProject);
-  });
-
-  it("locks the in-chat project dropdown during project switching", () => {
-    render(
-      <ChatWorkspace
-        {...workspaceProps(conversation("conversation-switching"), async () => null)}
-        newChatProjectPicker={{
-          projects: [project],
-          selectedProject: project,
-          disabled: true,
-          onChange: vi.fn(),
-        }}
-      />,
-    );
-
-    expect(screen.getByRole("combobox", { name: "Project" })).toBeDisabled();
   });
 
   it("keeps the timeline mounted behind an owner-correct detail-loading boundary", async () => {
@@ -949,29 +850,6 @@ describe("draft turn anchoring", () => {
       await act(async () => vi.runOnlyPendingTimers());
       vi.useRealTimers();
     }
-  });
-
-  it("shows Jump when a followed transcript is moved away from the bottom", async () => {
-    const activeConversation = conversation("conversation-programmatic-history");
-    HTMLElement.prototype.scrollTo = vi.fn();
-    render(
-      <ChatWorkspace
-        {...workspaceProps(activeConversation, async () => null)}
-      />,
-    );
-    await screen.findByTestId("turn-anchor-projection");
-    const transcript = screen.getByLabelText("Thread transcript");
-    Object.defineProperties(transcript, {
-      clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, value: 500 },
-      scrollTop: { configurable: true, writable: true, value: 200 },
-    });
-
-    fireEvent.wheel(transcript);
-    fireEvent.scroll(transcript);
-
-    expect(await screen.findByRole("button", { name: "Jump to latest" }))
-      .toBeVisible();
   });
 
   it("yields an awaited turn to explicit response timeline navigation", async () => {

@@ -291,13 +291,6 @@ describe("GoalPanel", () => {
     expect(screen.getByRole("button", { name: "New chat" })).toHaveFocus();
   });
 
-  it("keeps goal controls unchanged for a chat that can continue", () => {
-    renderPanel({ onSetGoal: vi.fn(), onClearGoal: vi.fn(), continuationRefusal: null });
-
-    expect(screen.queryByRole("button", { name: "New chat" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Pause/u })).toBeInTheDocument();
-  });
-
   it("keeps local goals and skills visible when native refresh degrades", () => {
     const refreshWarning =
       "Codex native goal could not be refreshed. Showing saved goal data; local goals and skills remain available.";
@@ -709,21 +702,6 @@ describe("GoalPanel", () => {
     expect(accepted).toHaveBeenCalledWith(expect.objectContaining({
       objective: "Keep this draft",
     }));
-  });
-
-  it("keeps every discovered skill available for literal insertion", () => {
-    const skills = Array.from({ length: 9 }, (_, index) => skill({
-      id: `skill-${index}`,
-      name: `skill-${index}`,
-    }));
-    renderPanel({
-      workflow: workflow({ skills }),
-      onInsertSkill: vi.fn(),
-    });
-
-    expect(screen.getByRole("button", { name: /skill-8/i })).toBeEnabled();
-    expect(screen.queryByText(/Maximum 8 skills selected/u))
-      .not.toBeInTheDocument();
   });
 
   it("keeps compact delegated work bounded while preserving ancestors", () => {

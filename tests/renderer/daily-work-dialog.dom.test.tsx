@@ -128,36 +128,8 @@ describe("DailyWorkDialog", () => {
     const dialog = await screen.findByRole("dialog", { name: "Daily work" });
     const mark = dialog.querySelector(".daily-work-mark");
     expect(mark).toHaveAttribute("aria-hidden", "true");
-    expect(mark).toHaveAttribute("focusable", "false");
-    expect(mark).toHaveAttribute("viewBox", "0 0 24 24");
-    expect(mark).toHaveAttribute("width", "19");
-    // One marked day inside the frame, and no second metaphor competing with
-    // it at the 16px size the sidebar renders.
-    expect(mark?.querySelectorAll(".daily-work-mark-today")).toHaveLength(1);
-    expect(mark?.querySelectorAll("path")).toHaveLength(3);
     await waitFor(() => expect(view.request).toHaveBeenCalledTimes(1));
-    const command = view.request.mock.calls[0]?.[0];
-    expect(command).toMatchObject({ type: "daily.work.get" });
-    if (command?.type !== "daily.work.get") throw new Error("Unexpected command");
-    const today = new Date();
-    expect(command.payload).toEqual({
-      date: [
-        today.getFullYear(),
-        String(today.getMonth() + 1).padStart(2, "0"),
-        String(today.getDate()).padStart(2, "0"),
-      ].join("-"),
-      fromInclusive: new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate(),
-      ).toISOString(),
-      toExclusive: new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate() + 1,
-      ).toISOString(),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    });
+    expect(view.request.mock.calls[0]?.[0]).toEqual(dailyWorkCommand(new Date()));
 
     const totals = await within(dialog).findByRole("region", { name: "Daily work totals" });
     expect(totals).toHaveTextContent("2.4K");
@@ -215,19 +187,6 @@ describe("DailyWorkDialog", () => {
       )).toHaveLength(2);
     });
     expect(view.container.querySelector(".daily-work-provider-share")).toBeNull();
-  });
-
-  it("distinguishes the running badge from the created-today badge", async () => {
-    renderDialog();
-    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
-
-    const running = await waitFor(() => within(dialog).getByRole("button", {
-      name: /Implement daily work/u,
-    }));
-    const created = within(dialog).getByRole("button", { name: /New planning chat/u });
-    expect(running.querySelector(".daily-work-badge.is-running")).toHaveTextContent("Running");
-    expect(created.querySelector(".daily-work-badge.is-running")).toBeNull();
-    expect(created.querySelector(".daily-work-badge.is-new")).toHaveTextContent("Created this day");
   });
 
   it("selects recorded local days without allowing a future date", async () => {

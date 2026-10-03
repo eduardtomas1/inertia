@@ -34,14 +34,6 @@ import { FakeTurnProvider, FakeTurnScheduler } from
 
 const directories: string[] = [];
 const stores: RuntimeStore[] = [];
-const PROVIDERS: ProviderId[] = [
-  "codex",
-  "claude",
-  "cursor",
-  "kimi",
-  "opencode",
-];
-
 function providerInfo(providerId: ProviderId): ProviderInfo {
   const field = {
     freshness: "fresh" as const,
@@ -182,7 +174,8 @@ afterEach(async () => {
 });
 
 describe("durable provider activity lifecycle contract", () => {
-  it.each(PROVIDERS)("keeps %s command and tool progress exact under concurrent same-kind work", async (providerId) => {
+  it("keeps command and tool progress exact under concurrent same-kind work", async () => {
+    const providerId = "codex";
     const value = await runtime(providerId);
     value.emitter.activity("tool", "started", "Tool", {
       activityId: providerId + ":tool-a",

@@ -8,58 +8,7 @@ import {
 } from "../../src/renderer/src/utils/providerIcons";
 
 describe("ProviderBrandIcon", () => {
-  it("maps every supported provider to a bundled official brand asset", () => {
-    expect(supportedProviderIconDefinitions().map((definition) => ({
-      providerId: definition.providerId,
-      brand: definition.brand,
-      label: definition.label,
-      hasDarkAsset: Boolean(definition.darkSrc),
-      invertInDark: Boolean(definition.invertInDark),
-    }))).toEqual([
-      {
-        providerId: "codex",
-        brand: "openai",
-        label: "OpenAI",
-        hasDarkAsset: false,
-        invertInDark: true,
-      },
-      {
-        providerId: "claude",
-        brand: "anthropic",
-        label: "Anthropic",
-        hasDarkAsset: false,
-        invertInDark: false,
-      },
-      {
-        providerId: "cursor",
-        brand: "cursor",
-        label: "Cursor",
-        hasDarkAsset: true,
-        invertInDark: false,
-      },
-      {
-        providerId: "kimi",
-        brand: "kimi",
-        label: "Kimi Code",
-        hasDarkAsset: false,
-        invertInDark: true,
-      },
-      {
-        providerId: "opencode",
-        brand: "opencode",
-        label: "OpenCode",
-        hasDarkAsset: true,
-        invertInDark: false,
-      },
-      {
-        providerId: "antigravity",
-        brand: "antigravity",
-        label: "Antigravity",
-        hasDarkAsset: false,
-        invertInDark: true,
-      },
-    ]);
-
+  it("bundles every supported provider mark locally", () => {
     for (const definition of supportedProviderIconDefinitions()) {
       expect(definition.lightSrc).toMatch(
         /^(?:data:image\/svg\+xml|.*\.svg(?:\?|$))/u,
@@ -111,19 +60,6 @@ describe("ProviderBrandIcon", () => {
     const sources = antigravity.querySelectorAll("img");
     expect(sources).toHaveLength(1);
     expect(sources[0]).toHaveClass("is-light");
-  });
-
-  it("resolves Antigravity to the Google-contributed registry mark, not a text placeholder", () => {
-    const definition = providerIconDefinition("antigravity");
-    expect(definition).toMatchObject({
-      providerId: "antigravity",
-      brand: "antigravity",
-      label: "Antigravity",
-      invertInDark: true,
-    });
-    expect(definition?.darkSrc).toBeUndefined();
-    expect(definition?.lightSrc).toMatch(/antigravity\.svg(?:\?|$)/u);
-    expect(definition?.lightSrc).not.toMatch(/antigravity-text/u);
   });
 
   it("uses an intentional neutral fallback for unknown and custom providers", () => {

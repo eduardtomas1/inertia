@@ -350,19 +350,6 @@ describe("runtime generation lease journal", () => {
     expect(lstatSync(retained).isFile()).toBe(true);
   });
 
-  it("enforces the 32-generation bound", () => {
-    const path = directory();
-    const journal = new RuntimeGenerationLeaseJournal(path);
-    for (let index = 0; index < 32; index += 1) {
-      const suffix = index.toString(16).padStart(12, "0");
-      expect(journal.publish(
-        `00000000-0000-4000-8000-${suffix}:1`,
-        bootA,
-      )).toBe(true);
-    }
-    expect(journal.publish(generationA, bootA)).toBe(false);
-  });
-
   it("reserves one current slot for an exact modern batch across a boot-probe transition", () => {
     const path = directory();
     const journal = new RuntimeGenerationLeaseJournal(path);
@@ -373,6 +360,7 @@ describe("runtime generation lease journal", () => {
       authorized.push(generationId);
       expect(journal.publish(generationId, bootA)).toBe(true);
     }
+    expect(journal.publish(generationA, bootA)).toBe(false);
     expect(journal.publishWithModernRecoveryReserve(
       generationA,
       "unavailable",

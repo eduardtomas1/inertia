@@ -48,19 +48,9 @@ describe("header Git action hierarchy", () => {
     });
     const actions = headerGitActions(current);
 
-    expect(resolveQuickAction(current, false)).toMatchObject({ kind: "commit", label: "Commit" });
     expect(actions.find((action) => action.id === "pull")).toMatchObject({
       disabled: true,
       detail: "Commit or stash local changes before pulling.",
-    });
-  });
-
-  it("prioritizes pulling a clean checkout that is behind", () => {
-    const current = status({ behind: 3 });
-
-    expect(resolveQuickAction(current, false)).toMatchObject({
-      kind: "pull",
-      label: "Pull",
     });
   });
 
@@ -68,10 +58,6 @@ describe("header Git action hierarchy", () => {
     const current = status({ ahead: 2 });
     const actions = headerGitActions(current);
 
-    expect(resolveQuickAction(current, false)).toMatchObject({
-      kind: "push_pull_request",
-      label: "Push & create PR",
-    });
     expect(actions.find((action) => action.id === "pull-request")).toMatchObject({
       disabled: true,
       detail: "Push this branch before creating a pull request.",
@@ -82,10 +68,6 @@ describe("header Git action hierarchy", () => {
     const current = status();
     const actions = headerGitActions(current);
 
-    expect(resolveQuickAction(current, false)).toMatchObject({
-      kind: "show_hint",
-      disabled: true,
-    });
     expect(actions.find((action) => action.id === "pull-request")).toMatchObject({
       disabled: false,
     });

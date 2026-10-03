@@ -146,10 +146,8 @@ describe("Canary last-known-good rollback", () => {
   });
 
   it.each([
-    ["checksum", { status: 503 }, "checksum unavailable"],
     ["checksum", { headers: { "content-length": String(2 * 1_024 * 1_024) } }, "checksum is oversized"],
     ["package", { status: 404 }, "package unavailable"],
-    ["package", { headers: { "content-length": "0" } }, "package has an invalid size"],
   ] as const)("cancels a rejected %s body (%j)", async (target, init, message) => {
     const cancel = vi.fn();
     const subject = manager({

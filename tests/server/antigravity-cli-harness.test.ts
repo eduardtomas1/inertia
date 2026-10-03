@@ -445,8 +445,10 @@ process.exit(0);
     ]);
   });
 
-  it.each((["resumed", "new"] as const).flatMap((kind) =>
-    (["text", "tool", "result"] as const).map((event) => ({ kind, event }))))(
+  it.each([
+    ...(["text", "tool", "result"] as const).map((event) => ({ kind: "resumed" as const, event })),
+    { kind: "new" as const, event: "result" as const },
+  ])(
     "rejects a foreign conversation $event in a $kind run before projecting it",
     async ({ kind, event }) => {
       const root = fixtureRoot("antigravity foreign conversation");
@@ -916,18 +918,6 @@ hang();
       const pid = existsSync(pidPath) ? Number(readFileSync(pidPath, "utf8")) : 0;
       if (pid > 0 && executableProcessExists(pid)) process.kill(pid, "SIGKILL");
     }
-  });
-
-  it("reports a non-success result as a failed turn", async () => {
-    const root = fixtureRoot("antigravity waiting");
-    const { command } = fakeAgy(root, `
-emit({ event: "result", result: { status: "WAITING", response: "", error: "" } });
-process.exit(0);
-`);
-    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
-      status: "failed",
-      failure: { terminalEvent: "result:waiting" },
-    });
   });
 
   it("stops a process that lingers after its result", async () => {

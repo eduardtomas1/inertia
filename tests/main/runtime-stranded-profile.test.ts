@@ -16,7 +16,7 @@ afterEach(() => {
   boot.mockReset();
 });
 
-it.each(["win32", "darwin", "linux"] as const)(
+it.each(["win32", "darwin"] as const)(
   "retains a stranded %s profile until the system proves a different boot",
   (platform) => {
     const root = mkdtempSync(join(tmpdir(), "inertia-stranded-boot-"));

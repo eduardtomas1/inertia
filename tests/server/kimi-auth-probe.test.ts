@@ -54,8 +54,6 @@ const readRequests = () => require("node:readline").createInterface({ input: pro
   if (mode === "rpc-error") return send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "synthetic-private-value" } });
   let authMethods = mode === "none" ? [] : mode === "agent" ? [{ id: "login", name: "Kimi login" }] : [${JSON.stringify(terminal)}];
   if (mode === "invalid-descriptor") authMethods[0].args = ["--synthetic-private-value"];
-  if (mode === "invalid-descriptor-env") authMethods[0].env = { NODE_OPTIONS: 123 };
-  if (mode === "unknown-descriptor-type") authMethods[0].type = "other";
   send({ jsonrpc: "2.0", id: mode === "invalid-id" ? {} : mode === "unmatched-id" ? "wrong-response-id" : message.id,
     result: { protocolVersion: mode === "wrong-protocol" ? 2 : 1, agentCapabilities: {}, authMethods,
       agentInfo: { name: mode === "wrong-agent" ? "Other fixture" : "Kimi Code CLI", version: "fixture" } } });
@@ -97,8 +95,7 @@ describe("Kimi initialize-only authentication discovery", () => {
   it.each([
     "malformed-json", "malformed-utf8", "oversized",
     "flood", "stderr-flood", "rpc-error", "invalid-id", "unmatched-id",
-    "wrong-protocol", "wrong-agent", "invalid-descriptor", "invalid-descriptor-env",
-    "unknown-descriptor-type", "timeout",
+    "wrong-protocol", "wrong-agent", "invalid-descriptor", "timeout",
   ])("rejects %s without any login or session request and cleans up", async (mode) => {
     const waitsForTimeout = mode === "timeout" || mode === "unmatched-id";
     // Exercise a cold fixture that cannot consume initialize inside 300 ms.

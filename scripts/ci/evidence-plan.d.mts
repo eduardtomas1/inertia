@@ -20,6 +20,12 @@ export interface EvidencePlanOptions {
   event?: string;
   draft?: boolean;
   paths?: string[];
+  reusedRun?: ReusedRun | null;
+}
+export interface ReusedRun {
+  runId: number;
+  pullRequest: number;
+  sourceHead: string;
 }
 export interface EvidencePlan {
   schemaVersion: 1;
@@ -29,6 +35,7 @@ export interface EvidencePlan {
   baselineReason: string;
   event: string;
   lane: string;
+  reusedRun: ReusedRun | null;
   paths: string[];
   domains: string[];
   reasons: string[];
@@ -57,15 +64,9 @@ export interface JobEvidence {
 export const PLATFORMS: readonly NativePlatform[];
 export const EVIDENCE_JOBS: Readonly<Record<string, string>>;
 export const ELECTRON_CHECK_SUFFIX: string;
+export const PRIMARY_PLATFORM_ARTIFACTS: readonly string[];
 export function createEvidencePlan(options: EvidencePlanOptions): EvidencePlan;
 export function outputsForEvidencePlan(plan: EvidencePlan): string;
-export function compareEvidencePlans(current: EvidencePlan, proposed: EvidencePlan): {
-  currentBase: string | null; proposedBase: string | null;
-  currentFullCertification: boolean; proposedFullCertification: boolean;
-  proposedDomains: string[]; newlyOmittedChecks: string[]; newlyRequiredChecks: string[];
-  newlyOmittedSuites: string[]; newlyRequiredSuites: string[];
-  currentBenchmarks: boolean; proposedBenchmarks: boolean;
-};
 export function evaluateMergeEvidence(plan: EvidencePlan | null, evidence: {
   head: string;
   sourceHead: string;
@@ -74,4 +75,5 @@ export function evaluateMergeEvidence(plan: EvidencePlan | null, evidence: {
   runId: number;
   needs: Record<string, { result: string } | undefined>;
   jobs: JobEvidence[];
+  reusedRunJobs?: JobEvidence[];
 }): string[];

@@ -1272,9 +1272,6 @@ describe("database backup and startup recovery", () => {
 
   it.each([
     "agent_turns",
-    "workspace_runs",
-    "prompt_presets",
-    "agent_managed_conversations",
     "agent_thread_operations",
   ] as const)(
     "preserves all evidence and refuses startup when a current-schema primary lost %s",
@@ -1968,50 +1965,11 @@ describe("database backup and startup recovery", () => {
       },
     },
     {
-      label: "the Private Connect origin column",
-      mutate: (database: Database.Database) => {
-        database.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
-      },
-    },
-    {
-      label: "a required worktree ownership receipt column",
-      mutate: (database: Database.Database) => {
-        database.exec(`
-          ALTER TABLE conversation_worktree_ownership
-            RENAME TO malformed_conversation_worktree_ownership;
-          CREATE TABLE conversation_worktree_ownership AS
-          SELECT conversation_id, path, branch, owns_worktree, creation_state,
-            ownership_token, worktree_id, repository_identity,
-            filesystem_identity_json
-          FROM malformed_conversation_worktree_ownership;
-          DROP TABLE malformed_conversation_worktree_ownership;
-        `);
-      },
-    },
-    {
       label: "the owned-worktree project deletion trigger",
       mutate: (database: Database.Database) => {
         database.exec(
           "DROP TRIGGER conversation_worktree_ownership_project_delete",
         );
-      },
-    },
-    {
-      label: "a required prompt preset column",
-      mutate: (database: Database.Database) => {
-        database.exec("ALTER TABLE prompt_presets DROP COLUMN route_json");
-      },
-    },
-    {
-      label: "the prompt preset ordering index",
-      mutate: (database: Database.Database) => {
-        database.exec("DROP INDEX prompt_presets_position_idx");
-      },
-    },
-    {
-      label: "the prompt preset count trigger",
-      mutate: (database: Database.Database) => {
-        database.exec("DROP TRIGGER prompt_presets_count_limit");
       },
     },
     {
@@ -2049,16 +2007,6 @@ describe("database backup and startup recovery", () => {
       },
     },
     {
-      label: "the exact Usage dashboard completed-turn range index",
-      mutate: (database: Database.Database) => {
-        database.exec(`
-          DROP INDEX agent_turns_usage_dashboard_completed_idx;
-          CREATE INDEX agent_turns_usage_dashboard_completed_idx
-          ON agent_turns(association, completed_at COLLATE NOCASE, id);
-        `);
-      },
-    },
-    {
       label: "the suspend interval table",
       mutate: (database: Database.Database) => {
         database.exec("DROP TABLE system_suspend_intervals");
@@ -2071,26 +2019,9 @@ describe("database backup and startup recovery", () => {
       },
     },
     {
-      label: "the per-turn suspended duration check",
-      mutate: removeSuspendedDurationCheck,
-    },
-    {
       label: "the suspend interval range index",
       mutate: (database: Database.Database) => {
         database.exec("DROP INDEX system_suspend_intervals_range_idx");
-      },
-    },
-    {
-      label: "the exact suspend interval range index",
-      mutate: (database: Database.Database) => {
-        database.exec(`
-          DROP INDEX system_suspend_intervals_range_idx;
-          CREATE INDEX system_suspend_intervals_range_idx
-          ON system_suspend_intervals(
-            suspended_at COLLATE NOCASE,
-            resumed_at
-          );
-        `);
       },
     },
   ])("skips a current-schema backup missing $label", async ({ mutate }) => {

@@ -94,6 +94,47 @@ afterEach(() => {
   }
 });
 
+
+type TargetSubstitution = "file" | "symlink" | "directory" | "directory link";
+
+function substituteTarget(kind: TargetSubstitution, root: string, target: string): void {
+  if (kind === "file") {
+    writeFileSync(target, "concurrent\n");
+  } else if (kind === "symlink") {
+    writeFileSync(join(root, "concurrent.ts"), "concurrent\n");
+    symlinkSync("concurrent.ts", target);
+  } else if (kind === "directory") {
+    mkdirSync(target);
+  } else {
+    const concurrentDirectory = join(root, "concurrent-directory");
+    mkdirSync(concurrentDirectory);
+    writeFileSync(join(concurrentDirectory, "marker.txt"), "concurrent\n");
+    symlinkSync(
+      concurrentDirectory,
+      target,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+  }
+}
+
+function expectSubstitutedTarget(kind: TargetSubstitution, target: string): void {
+  if (kind === "file") {
+    expect(readFileSync(target, "utf8")).toBe("concurrent\n");
+  } else if (kind === "symlink") {
+    expect(lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("concurrent\n");
+  } else if (kind === "directory") {
+    expect(lstatSync(target).isDirectory()).toBe(true);
+  } else {
+    expect(lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(target, "marker.txt"), "utf8")).toBe("concurrent\n");
+  }
+}
+
+const cleanupSubstitutions: TargetSubstitution[] = process.platform === "win32"
+  ? ["file", "directory", "directory link"]
+  : ["file", "symlink", "directory", "directory link"];
+
 describe("secure file worker", () => {
   it.skipIf(process.platform === "win32")(
     "reads and replaces a POSIX filename containing a literal backslash",
@@ -207,80 +248,41 @@ describe("secure file worker", () => {
     }
   });
 
-  it("preserves a directory substituted in the final claim gap", async () => {
-    const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "inertia-secure-final-directory-gap-")),
-    );
-    roots.push(root);
-    const target = join(root, "example.ts");
-    const displaced = join(root, "displaced.ts");
-    writeFileSync(target, "before\n");
-    const request = requestFor(
-      root,
-      "example.ts",
-      "replace",
-      Buffer.from("edited\n"),
-    );
-    process.chdir(root);
-    try {
-      const result = await performSecureFileOperation(request, {
-        beforeClaimRename: () => {
-          renameSync(target, displaced);
-          mkdirSync(target);
-        },
-      });
-      expect(result).toMatchObject({ ok: false, code: "unsafe" });
-      expect(lstatSync(target).isDirectory()).toBe(true);
-      expect(readFileSync(displaced, "utf8")).toBe("before\n");
-      expect(readdirSync(root).filter((name) => (
-        name.startsWith(".inertia-save-")
-      ))).toEqual([]);
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
-
-  it("preserves a directory link substituted in the final claim gap", async () => {
-    const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "inertia-secure-final-link-gap-")),
-    );
-    roots.push(root);
-    const target = join(root, "example.ts");
-    const displaced = join(root, "displaced.ts");
-    const concurrentDirectory = join(root, "concurrent-directory");
-    mkdirSync(concurrentDirectory);
-    writeFileSync(join(concurrentDirectory, "marker.txt"), "concurrent\n");
-    writeFileSync(target, "before\n");
-    const request = requestFor(
-      root,
-      "example.ts",
-      "replace",
-      Buffer.from("edited\n"),
-    );
-    process.chdir(root);
-    try {
-      const result = await performSecureFileOperation(request, {
-        beforeClaimRename: () => {
-          renameSync(target, displaced);
-          symlinkSync(
-            concurrentDirectory,
-            target,
-            process.platform === "win32" ? "junction" : "dir",
-          );
-        },
-      });
-      expect(result).toMatchObject({ ok: false, code: "unsafe" });
-      expect(lstatSync(target).isSymbolicLink()).toBe(true);
-      expect(readFileSync(join(target, "marker.txt"), "utf8"))
-        .toBe("concurrent\n");
-      expect(readFileSync(displaced, "utf8")).toBe("before\n");
-      expect(readdirSync(root).filter((name) => (
-        name.startsWith(".inertia-save-")
-      ))).toEqual([]);
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
+  it.each(["directory", "directory link"] as const)(
+    "preserves a %s substituted in the final claim gap",
+    async (kind) => {
+      const root = realpathSync(
+        mkdtempSync(join(tmpdir(), "inertia-secure-final-gap-")),
+      );
+      roots.push(root);
+      const target = join(root, "example.ts");
+      const displaced = join(root, "displaced.ts");
+      writeFileSync(target, "before\n");
+      const request = requestFor(
+        root,
+        "example.ts",
+        "replace",
+        Buffer.from("edited\n"),
+      );
+      process.chdir(root);
+      try {
+        const result = await performSecureFileOperation(request, {
+          beforeClaimRename: () => {
+            renameSync(target, displaced);
+            substituteTarget(kind, root, target);
+          },
+        });
+        expect(result).toMatchObject({ ok: false, code: "unsafe" });
+        expectSubstitutedTarget(kind, target);
+        expect(readFileSync(displaced, "utf8")).toBe("before\n");
+        expect(readdirSync(root).filter((name) => (
+          name.startsWith(".inertia-save-")
+        ))).toEqual([]);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    },
+  );
 
   it("does not overwrite a concurrently created claim destination", async () => {
     const root = realpathSync(
@@ -524,57 +526,16 @@ describe("secure file worker", () => {
     }
   });
 
-  it("preserves a substituted cleanup target instead of unlinking it", async () => {
-    const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "inertia-secure-cleanup-race-")),
-    );
-    roots.push(root);
-    const target = join(root, "example.ts");
-    const displaced = join(root, "displaced-replacement.ts");
-    writeFileSync(target, "before\n");
-    const request = requestFor(
-      root,
-      "example.ts",
-      "replace",
-      Buffer.from("after\n"),
-    );
-    let substituted = false;
-    let installed = false;
-    process.chdir(root);
-    try {
-      const result = await performSecureFileOperation(request, {
-        afterInstall: () => {
-          installed = true;
-          throw new Error("Force rollback after install.");
-        },
-        beforeQuarantine: (name) => {
-          if (!installed || name !== "example.ts" || substituted) return;
-          substituted = true;
-          renameSync(target, displaced);
-          writeFileSync(target, "concurrent\n");
-        },
-      });
-      expect(result).toMatchObject({ ok: false, code: "unsafe" });
-      expect(substituted).toBe(true);
-      expect(readFileSync(target, "utf8")).toBe("concurrent\n");
-      expect(readFileSync(displaced, "utf8")).toBe("after\n");
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
-
-  it.skipIf(process.platform === "win32")(
-    "preserves a raced-in cleanup symlink at its requested path",
-    async () => {
+  it.each(cleanupSubstitutions)(
+    "preserves a raced-in cleanup %s at its requested path",
+    async (kind) => {
       const root = realpathSync(
-        mkdtempSync(join(tmpdir(), "inertia-secure-cleanup-symlink-")),
+        mkdtempSync(join(tmpdir(), "inertia-secure-cleanup-race-")),
       );
       roots.push(root);
       const target = join(root, "example.ts");
       const displaced = join(root, "displaced-replacement.ts");
-      const concurrent = join(root, "concurrent.ts");
       writeFileSync(target, "before\n");
-      writeFileSync(concurrent, "concurrent\n");
       const request = requestFor(
         root,
         "example.ts",
@@ -594,106 +555,18 @@ describe("secure file worker", () => {
             if (!installed || name !== "example.ts" || substituted) return;
             substituted = true;
             renameSync(target, displaced);
-            symlinkSync("concurrent.ts", target);
+            substituteTarget(kind, root, target);
           },
         });
         expect(result).toMatchObject({ ok: false, code: "unsafe" });
         expect(substituted).toBe(true);
-        expect(lstatSync(target).isSymbolicLink()).toBe(true);
-        expect(readFileSync(target, "utf8")).toBe("concurrent\n");
+        expectSubstitutedTarget(kind, target);
         expect(readFileSync(displaced, "utf8")).toBe("after\n");
       } finally {
         process.chdir(originalCwd);
       }
     },
   );
-
-  it("preserves a raced-in cleanup directory at its requested path", async () => {
-    const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "inertia-secure-cleanup-directory-")),
-    );
-    roots.push(root);
-    const target = join(root, "example.ts");
-    const displaced = join(root, "displaced-replacement.ts");
-    writeFileSync(target, "before\n");
-    const request = requestFor(
-      root,
-      "example.ts",
-      "replace",
-      Buffer.from("after\n"),
-    );
-    let substituted = false;
-    let installed = false;
-    process.chdir(root);
-    try {
-      const result = await performSecureFileOperation(request, {
-        afterInstall: () => {
-          installed = true;
-          throw new Error("Force rollback after install.");
-        },
-        beforeQuarantine: (name) => {
-          if (!installed || name !== "example.ts" || substituted) return;
-          substituted = true;
-          renameSync(target, displaced);
-          mkdirSync(target);
-        },
-      });
-      expect(result).toMatchObject({ ok: false, code: "unsafe" });
-      expect(substituted).toBe(true);
-      expect(lstatSync(target).isDirectory()).toBe(true);
-      expect(readFileSync(displaced, "utf8")).toBe("after\n");
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
-
-  it("preserves a raced-in cleanup directory link at its requested path", async () => {
-    const root = realpathSync(
-      mkdtempSync(join(tmpdir(), "inertia-secure-cleanup-directory-link-")),
-    );
-    roots.push(root);
-    const target = join(root, "example.ts");
-    const displaced = join(root, "displaced-replacement.ts");
-    const concurrentDirectory = join(root, "concurrent-directory");
-    mkdirSync(concurrentDirectory);
-    writeFileSync(join(concurrentDirectory, "marker.txt"), "concurrent\n");
-    writeFileSync(target, "before\n");
-    const request = requestFor(
-      root,
-      "example.ts",
-      "replace",
-      Buffer.from("after\n"),
-    );
-    let substituted = false;
-    let installed = false;
-    process.chdir(root);
-    try {
-      const result = await performSecureFileOperation(request, {
-        afterInstall: () => {
-          installed = true;
-          throw new Error("Force rollback after install.");
-        },
-        beforeQuarantine: (name) => {
-          if (!installed || name !== "example.ts" || substituted) return;
-          substituted = true;
-          renameSync(target, displaced);
-          symlinkSync(
-            concurrentDirectory,
-            target,
-            process.platform === "win32" ? "junction" : "dir",
-          );
-        },
-      });
-      expect(result).toMatchObject({ ok: false, code: "unsafe" });
-      expect(substituted).toBe(true);
-      expect(lstatSync(target).isSymbolicLink()).toBe(true);
-      expect(readFileSync(join(target, "marker.txt"), "utf8"))
-        .toBe("concurrent\n");
-      expect(readFileSync(displaced, "utf8")).toBe("after\n");
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
 
   it("restores the verified backup when the staged source is substituted before install", async () => {
     const root = realpathSync(

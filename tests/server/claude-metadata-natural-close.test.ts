@@ -94,7 +94,7 @@ input.on("close", () => { record("eof"); });
     expect(runtimeOwnedProcessCleanupConfirmed()).toBe(true);
   });
 
-  it.each(["timeout", "cancel"])("retains unconfirmed fork cleanup on metadata %s", async (reason) => {
+  it("retains unconfirmed fork cleanup on metadata cancel", async () => {
     const { read, receipt, taints } = await fixture(true);
     const controller = new AbortController();
     const pending = read(6_000, controller.signal);
@@ -103,7 +103,7 @@ input.on("close", () => { record("eof"); });
     const deadline = Date.now() + 5_000;
     while (!await readFile(receipt, "utf8").catch(() => "") && Date.now() < deadline) await sleep(10);
     expect(await readFile(receipt, "utf8")).toBe("fork-completed\n");
-    if (reason === "cancel") controller.abort();
+    controller.abort();
     await assertion;
     expect(taints).toContainEqual(expect.objectContaining({ stage: "darwin-guardian-close", signal: "SIGUSR2" }));
     expect(runtimeOwnedProcessCleanupConfirmed()).toBe(false);

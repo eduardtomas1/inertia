@@ -37,20 +37,6 @@ describe("preview panel URL routing", () => {
     });
   });
 
-  it("preserves the accessible preview and external-open controls", () => {
-    const html = renderToStaticMarkup(createElement(PreviewPanel, {
-      owner: "primary",
-      url: "",
-      onNavigate: () => undefined,
-      onOpenExternal: () => undefined,
-    }));
-
-    expect(html).toContain('aria-label="Browser preview"');
-    expect(html).toContain('aria-label="Preview address"');
-    expect(html).toContain('aria-label="Open in system browser"');
-    expect(html).toContain("localhost:3000 or https://example.com");
-  });
-
   it("labels an untitled page whose address is not absolute without failing", () => {
     const tabId = "11111111-1111-4111-8111-111111111111";
     const html = renderToStaticMarkup(createElement(PreviewPanel, {

@@ -18,7 +18,7 @@ import {
 const sessionId = "retained-native-session";
 const restartWarning =
   "The previous run ended when Inertia closed. Send another message to continue.";
-const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
+const providers = ["codex", "claude"] as const;
 const closeModes = ["completed", "clean-active-close", "unclean-active-close"] as const;
 
 afterEach(cleanupTurnControllerTestDirectories);

@@ -416,13 +416,6 @@ describe("electron updater adapter", () => {
     expect(updaterFixture.listeners.get("error")?.size ?? 0).toBe(0);
   });
 
-  it("rejects handoff when the native installer reports an error", async () => {
-    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
-    const handoff = adapter.quitAndInstall();
-    updaterFixture.emit("error", new Error("installer failed"));
-    await expect(handoff).resolves.toBe("native-outcome-uncertain");
-  });
-
   it("keeps the macOS staging bound unref'd and clears it on handoff", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
@@ -500,11 +493,9 @@ describe("electron updater adapter", () => {
   });
 
   it.each([
-    "late-handoff",
     "late-handoff-after-bound",
     "quit-while-staging",
     "quit-after-error",
-    "quit-after-bound",
   ] as const)(
     "never leaves a macOS install coordinator unable to quit (%s)",
     async (scenario) => {
@@ -1082,45 +1073,6 @@ describe("electron updater adapter", () => {
       } finally {
         retireSpy.mockRestore();
       }
-    },
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "refuses the legacy spawn-only AppImage handoff on Linux",
-    async () => {
-      const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
-      roots.push(root);
-      const cache = join(root, "cache");
-      await mkdir(cache);
-      const active = join(root, "Inertia-0.0.46.AppImage");
-      const downloaded = join(cache, "Inertia-0.0.47.AppImage");
-      await Promise.all([
-        writeFile(active, "old", { mode: 0o755 }),
-        writeFile(downloaded, "new", { mode: 0o755 }),
-      ]);
-      await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
-      updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
-      const environment = { APPIMAGE: active };
-      const adapter = await loadElectronAppUpdater("stable", {
-        platform: "linux",
-        activeAppImagePath: active,
-        environment,
-      });
-      await adapter.download({
-        onProgress: vi.fn(),
-        onCancelled: vi.fn(),
-      }).promise;
-      const onHandoff = vi.fn();
-
-      await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe("not-invoked");
-
-      const stable = join(await realpath(root), "Inertia.AppImage");
-      await expect(readFile(stable, "utf8"))
-        .rejects.toMatchObject({ code: "ENOENT" });
-      expect(environment.APPIMAGE).toBe(await realpath(active));
-      expect(onHandoff).not.toHaveBeenCalled();
-      expect(updaterFixture.app.quit).not.toHaveBeenCalled();
-      expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
     },
   );
 

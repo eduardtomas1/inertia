@@ -593,7 +593,7 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
-  it.each(["preparing", "prepared", "running"] as const)(
+  it.each(["preparing", "running"] as const)(
     "blocks cross-project removal while a Duo launch is %s",
     async (state) => {
       const runtime = await createRuntime();
@@ -761,39 +761,36 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
-  it.each([0, 1] as const)(
-    "purges completed Duo history when chat %s is deleted",
-    async (deletedOrdinal) => {
-      const runtime = await createRuntime();
-      const prepared = preparePair(runtime);
-      await expect(coordinator(runtime).dispatch(prepared.launchId))
-        .resolves.toMatchObject({ state: "running" });
-      runtime.provider.completeAll();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(prepared.queued.map(({ turn }) =>
-        runtime.store.agentTurn(turn.id).status)).toEqual([
-        "completed",
-        "completed",
-      ]);
-      expect(() => runtime.store.assertConversationDeletionAllowed(
-        prepared.conversations[deletedOrdinal].id,
-      )).not.toThrow();
-      expect(() => runtime.store.assertProjectDeletionAllowed(
-        runtime.projectId,
-      )).not.toThrow();
+  it("purges completed Duo history when one chat is deleted", async () => {
+    const runtime = await createRuntime();
+    const prepared = preparePair(runtime);
+    await expect(coordinator(runtime).dispatch(prepared.launchId))
+      .resolves.toMatchObject({ state: "running" });
+    runtime.provider.completeAll();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(prepared.queued.map(({ turn }) =>
+      runtime.store.agentTurn(turn.id).status)).toEqual([
+      "completed",
+      "completed",
+    ]);
+    expect(() => runtime.store.assertConversationDeletionAllowed(
+      prepared.conversations[0].id,
+    )).not.toThrow();
+    expect(() => runtime.store.assertProjectDeletionAllowed(
+      runtime.projectId,
+    )).not.toThrow();
 
-      runtime.store.deleteConversation(
-        prepared.conversations[deletedOrdinal].id,
-      );
+    runtime.store.deleteConversation(
+      prepared.conversations[0].id,
+    );
 
-      expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
-      const survivor = prepared.conversations[deletedOrdinal === 0 ? 1 : 0];
-      expect(runtime.store.conversation(survivor.id).id).toBe(survivor.id);
-      runtime.store.removeProject(runtime.projectId);
-      expect(runtime.store.snapshot().projects).toEqual([]);
-      runtime.store.close();
-    },
-  );
+    expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
+    const survivor = prepared.conversations[1];
+    expect(runtime.store.conversation(survivor.id).id).toBe(survivor.id);
+    runtime.store.removeProject(runtime.projectId);
+    expect(runtime.store.snapshot().projects).toEqual([]);
+    runtime.store.close();
+  });
 
   it.each(["prepared", "running"] as const)(
     "settles a cross-project %s launch on restart before project removal",

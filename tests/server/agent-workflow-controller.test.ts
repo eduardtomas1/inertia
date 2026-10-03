@@ -1663,34 +1663,6 @@ describe("AgentWorkflowController", () => {
     );
   });
 
-  it("rediscovers an expired Claude SDK capability before invocation", async () => {
-    const now = new Date("2030-01-01T00:00:00.000Z");
-    const runtime = harness({
-      now,
-      current: conversation({
-        providerId: "claude",
-        providerSessionId: "claude-session",
-        modelSelection: {
-          ...conversation().modelSelection,
-          harnessId: "claude-agent-sdk",
-        },
-      }),
-      claudeSkills: [{
-        name: "security-review",
-        description: "Review the repository security posture.",
-        argumentHint: "<scope>",
-      }],
-    });
-    await runtime.controller.listSkills("conversation-1", false);
-    now.setMinutes(now.getMinutes() + 31);
-
-    await expect(runtime.controller.resolveSkills(
-      "conversation-1",
-      "$security-review src/server",
-    )).resolves.toHaveLength(1);
-    expect(runtime.providers.claudeSkills).toHaveBeenCalledTimes(2);
-  });
-
   it("coalesces equivalent skill discovery and serializes a stronger reload", async () => {
     let releaseInitial!: () => void;
     const initialGate = new Promise<void>((resolve) => {

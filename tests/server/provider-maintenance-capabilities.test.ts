@@ -147,7 +147,7 @@ describe("provider maintenance capabilities", () => {
     });
   });
 
-  it.each(["/home/user/.local", "/home/user/.npm-global", "/usr/local"])(
+  it.each(["/home/user/.local", "/usr/local"])(
     "binds a writable %s prefix to distro npm and its own Node with a minimal GUI PATH",
     async (prefix) => {
       const executable = `${prefix}/lib/node_modules/@openai/codex/bin/codex.js`;

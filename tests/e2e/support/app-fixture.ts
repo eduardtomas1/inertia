@@ -72,7 +72,7 @@ export interface AppFixture {
 
 interface AppFixtureOptions {
   name: string;
-  initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>; welcomeGuide?: boolean;
+  initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>;
   workspaceGit?: boolean; observePage?: (page: Page) => void;
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
@@ -788,7 +788,7 @@ export async function createAppFixture(
     ).waitFor();
     if (options.initialState === "empty") {
       await page.getByRole("button", { name: "Add your first project" }).waitFor();
-      if (!options.welcomeGuide) await dismissWelcomeGuide(page);
+      await dismissWelcomeGuide(page);
     } else {
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }

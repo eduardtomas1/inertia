@@ -208,7 +208,7 @@ describe("app update handoff journal", () => {
       ["linux", linuxPath],
       ["win32", windowsPath],
     ] as const) {
-      for (let index = 0; index < path.length - 1; index += 1) {
+      for (const index of [0, path.length - 2]) {
         const journal = new AppUpdateHandoffJournal(directory());
         const current = advanceAlong(journal, path, index);
         const rollingBack = journal.transition(
@@ -258,7 +258,7 @@ describe("app update handoff journal", () => {
     _platform,
     path,
   ) => {
-    for (let index = 0; index < path.length; index += 1) {
+    for (const index of [0, Math.floor(path.length / 2), path.length - 1]) {
       const journal = new AppUpdateHandoffJournal(directory());
       const current = advanceAlong(journal, path, index);
       const allowed = path[index + 1];

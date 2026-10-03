@@ -146,26 +146,16 @@ describe("CredentialVault", () => {
     expect(await vault.resolve(backendSecretReferenceForProfile("custom"))).toBe("original");
   });
 
-  it("re-encrypts ciphertext when the platform reports key rotation", async () => {
-    const persistence = new MemoryPersistence();
-    const encryption = new TestEncryption();
-    const vault = new CredentialVault(encryption, persistence);
-    await vault.setForProfile("custom", "rotating-secret");
-    encryption.shouldReEncrypt = true;
-
-    expect(await vault.resolve(backendSecretReferenceForProfile("custom")))
-      .toBe("rotating-secret");
-    expect(encryption.encryptCalls).toBe(2);
-  });
-
-  it("preserves credential generation across platform ciphertext rotation", async () => {
+  it("re-encrypts ciphertext when the platform reports key rotation and keeps its generation", async () => {
     const persistence = new MemoryPersistence();
     const encryption = new TestEncryption();
     const vault = new CredentialVault(encryption, persistence);
     const before = await vault.setForProfile("custom", "rotating-secret");
     encryption.shouldReEncrypt = true;
 
-    await vault.resolve(backendSecretReferenceForProfile("custom"));
+    expect(await vault.resolve(backendSecretReferenceForProfile("custom")))
+      .toBe("rotating-secret");
+    expect(encryption.encryptCalls).toBe(2);
     const after = await vault.stateForProfile("custom");
     expect(after.credentialGeneration).toBe(before.credentialGeneration);
   });

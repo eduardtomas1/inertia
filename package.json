@@ -40,8 +40,6 @@
     "pretest:coverage": "node scripts/build-runtime-process-guardian.mjs",
     "test:coverage": "vitest run --coverage",
     "test:browser-evidence-cpu-budget": "node scripts/ci/run-browser-evidence-cpu-budget.mjs",
-    "pretest:lifecycle-repeat": "node scripts/build-runtime-process-guardian.mjs",
-    "test:lifecycle-repeat": "node scripts/ci/run-repeated-lifecycle.mjs",
     "test:watch": "vitest",
     "pretest:portable": "node scripts/build-runtime-process-guardian.mjs",
     "test:portable": "node scripts/ci/run-portable-tests.mjs",

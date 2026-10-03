@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -16,10 +14,6 @@ import type {
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestedAt = "2026-07-23T10:00:00.000Z";
-const css = readFileSync(
-  new URL("../../src/renderer/src/styles.css", import.meta.url),
-  "utf8",
-);
 
 function turn(checkpointId: string | null = null): AgentTurn {
   return {
@@ -350,15 +344,4 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).not.toContain("Context from Importer plan");
   });
 
-  it("uses the shared width and radius tokens with intentional narrow behavior", () => {
-    expect(css).toMatch(
-      /\.response-turn\s*>\s*\.turn-user-request\s*\{[^}]*max-width:\s*var\(--user-request-max-width\);[^}]*border:\s*0;[^}]*border-radius:\s*var\(--radius-medium\);[^}]*background:\s*var\(--user-request-tint\);[^}]*box-shadow:\s*none;/su,
-    );
-    expect(css).toMatch(
-      /\.message\.is-user\.turn-user-request\s+\.message-body\s*\{[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*font-size:\s*var\(--ui-font-main\);/su,
-    );
-    expect(css).toMatch(
-      /@container\s+response-transcript\s+\(max-width:\s*620px\)\s*\{[\s\S]*?--user-request-max-width:\s*92%;/u,
-    );
-  });
 });

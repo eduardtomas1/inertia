@@ -94,7 +94,7 @@ test("real operation failures survive restart and remain readable/copyable after
     .toBe(originalId);
   const cleanup = await prepareElectronPrivilegedCleanup(restarted.electronApp);
   expect(cleanup.cleanupConfirmed).toBe(true);
-  await expect(page.getByRole("group", { name: "Process health" })).toContainText(/Local service (?:stopped|offline)/u);
+  await expect(page.getByRole("group", { name: "Process health" })).toContainText("Local service offline");
   // Search and native keyboard expansion still work after runtime/SQLite shutdown.
   await page.getByRole("searchbox", { name: "Search diagnostics" }).fill("discord.repository-missing");
   await expect(page.locator(".diagnostics-event")).toHaveCount(1);

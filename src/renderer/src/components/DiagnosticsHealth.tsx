@@ -53,7 +53,8 @@ export function DiagnosticsHealth({ runtime, lifecycleDiagnostics, appUpdateStat
         `Local service ${megabytes(health.runtimeProcess?.memoryBytes ?? null)}`,
       ].join(" · ")
     : failed ? "Process health is unavailable." : "Measuring…";
-  const phase = health?.runtimePhase ?? (runtime === "ready" ? "ready" : runtime === "unavailable" ? "offline" : null);
+  const reported = health?.runtimePhase ?? (runtime === "ready" ? "ready" : runtime === "unavailable" ? "idle" : null);
+  const phase = reported === null || ["ready", "starting", "restarting", "stopping"].includes(reported) ? reported : "offline";
   const state = [
     phase ? `Local service ${phase}` : null,
     lifecycleDiagnostics

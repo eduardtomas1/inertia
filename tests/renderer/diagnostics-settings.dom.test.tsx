@@ -211,6 +211,15 @@ describe("Diagnostics settings", () => {
     expect(block.querySelectorAll("p")).toHaveLength(2);
   });
 
+  it("calls a stopped or idle local service offline", async () => {
+    const h = setup([]);
+    h.getAppHealth.mockResolvedValue({ ...health, runtimePhase: "idle", runtimeProcess: null });
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    const block = screen.getByRole("group", { name: "Process health" });
+    expect(block).toHaveTextContent("Local service unavailable");
+    expect(block).toHaveTextContent("Local service offline");
+  });
+
   it("opens a linked operation with one Show all link and explains a missing one", async () => {
     const incident = { ...record(1, "turn.inactivity"), outcome: "observing" as const };
     const h = setup([incident], [], { runtime: "ready" });

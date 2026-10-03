@@ -99,6 +99,8 @@ function retained(visible: readonly CliMessage[], firstUser: number): CliMessage
     ...tail(visible.slice(firstUser + 1), CLI_IMPORT_MAX_MESSAGES - 1, CLI_IMPORT_MAX_TEXT - Buffer.byteLength(first.content))];
 }
 
+export class EmptyCliTranscript extends Error {}
+
 export function transcriptWorkspace(head: string, provider: CliProvider): string | null | undefined {
   const lines = head.split("\n");
   lines.pop();
@@ -204,15 +206,14 @@ export function parseCliTranscript(source: string, provider: CliProvider, fallba
     while (cursor && !lineage.has(cursor)) { lineage.add(cursor); cursor = parents.get(cursor) ?? null; }
     visible = messages.filter((entry) => !entry.id || lineage.has(entry.id));
   }
-  if (visible.length === 0) throw new Error("The CLI transcript has no visible messages.");
   const firstUser = visible.findIndex((entry) => entry.role === "user");
-  const lead = visible[firstUser] ?? visible.find((entry) => entry.role === "assistant");
-  const leadText = lead?.content ?? "";
+  if (firstUser < 0) throw new EmptyCliTranscript("The CLI transcript has no user message.");
+  const leadText = visible[firstUser]!.content;
   const providerTitle = [named.custom, named.generated, named.summary, named.thread]
     .map((value) => excerpt(redact(value ?? "", secrets), TITLE_MAX_TEXT)).find(Boolean);
   const title = providerTitle ?? (excerpt(leadText, TITLE_MAX_TEXT) || UNTITLED);
   const selected = retained(visible, firstUser);
-  const reply = firstUser < 0 ? undefined : visible.find((entry, index) => index > firstUser && entry.role === "assistant");
+  const reply = visible.find((entry, index) => index > firstUser && entry.role === "assistant");
   const opening = { user: excerpt(leadText, CLI_OPENING_MAX_TEXT) || UNTITLED, assistant: reply ? excerpt(reply.content, CLI_OPENING_MAX_TEXT) : null };
   return { sessionId, cwd, title, updatedAt: visible.at(-1)!.createdAt, messages: selected, omittedMessages: visible.length - selected.length, opening };
 }

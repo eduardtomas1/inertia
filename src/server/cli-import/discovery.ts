@@ -9,7 +9,7 @@ import { environmentValue, expandHomePath } from "../environment";
 import { acpEnvironmentSecretValues } from "../provider/acp-redaction";
 import type { CliSessionOwnership } from "../persistence/cli-conversation-import";
 import { RuntimeRequestError } from "../runtime-errors";
-import { parseCliTranscript, transcriptWorkspace, type ParsedCliTranscript } from "./transcript";
+import { EmptyCliTranscript, parseCliTranscript, transcriptWorkspace, type ParsedCliTranscript } from "./transcript";
 
 export const CLI_TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 const HEAD_CHUNK_BYTES = 16 * 1024;
@@ -230,6 +230,7 @@ export class CliConversationDiscovery {
           candidate: { providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId, opening: transcript.opening },
         });
       } catch (error) {
+        if (error instanceof EmptyCliTranscript) continue;
         skipped += 1;
         if (error instanceof OversizedTranscript) oversized += 1;
       }

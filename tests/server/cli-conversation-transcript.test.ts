@@ -1,6 +1,6 @@
 // @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
-import { parseCliTranscript } from "../../src/server/cli-import/transcript";
+import { EmptyCliTranscript, parseCliTranscript } from "../../src/server/cli-import/transcript";
 
 const sessionId = "01962fd7-1000-7000-8000-123456789abc";
 const date = "2026-09-25T10:00:00.000Z";
@@ -83,7 +83,7 @@ describe("native CLI transcript projection", () => {
     expect(result.messages.slice(0, 2).map(({ content }) => content)).toEqual(["Message 0", "Message 6"]);
     expect(result.messages.at(-1)?.content).toBe("Message 204");
     expect(result.omittedMessages).toBe(5);
-    const large = parseCliTranscript(lines(meta, ...Array.from({ length: 20 }, () => codex("assistant", "x".repeat(40_000)))), "codex", date);
+    const large = parseCliTranscript(lines(meta, codex("user", "Start"), ...Array.from({ length: 20 }, () => codex("assistant", "x".repeat(40_000)))), "codex", date);
     expect(large.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0)).toBeLessThanOrEqual(256 * 1024);
     expect(large.messages.every((message) => message.content.length <= 32 * 1024)).toBe(true);
   });
@@ -144,7 +144,7 @@ describe("native CLI transcript projection", () => {
     expect(result.title).toBe("Build the importer");
     expect(result.opening).toEqual({ user: "Build the importer", assistant: "Built" });
   });
-  it("titles from the provider's own records first, then the first real prompt, then the first reply", () => {
+  it("titles from the provider's own records first, then the first real prompt, and rejects transcripts without one", () => {
     const base = [claude("u1", null, "user", "First   real\nprompt"), claude("a1", "u1", "assistant", "Reply")];
     const named = (...records: unknown[]) => parseCliTranscript(lines(...base, ...records), "claude", date).title;
     const custom = { type: "custom-title", customTitle: "Renamed by me", sessionId };
@@ -156,9 +156,7 @@ describe("native CLI transcript projection", () => {
     expect(named()).toBe("First real prompt");
     expect(named({ type: "custom-title", customTitle: "Uses sk-" + "c".repeat(40), sessionId })).toContain("redacted");
     expect(parseCliTranscript(lines(meta, codex("user", "Prompt"), { type: "event_msg", payload: { type: "thread_name_updated", thread_name: "Codex thread name" } }), "codex", date).title).toBe("Codex thread name");
-    const replyOnly = parseCliTranscript(lines(meta, codex("user", "<user_action>x</user_action>"), codex("assistant", "Only the assistant spoke")), "codex", date);
-    expect(replyOnly.title).toBe("Only the assistant spoke");
-    expect(replyOnly.opening).toEqual({ user: "Only the assistant spoke", assistant: null });
+    expect(() => parseCliTranscript(lines(meta, codex("user", "<user_action>x</user_action>"), codex("assistant", "Only the assistant spoke")), "codex", date)).toThrow(EmptyCliTranscript);
     expect(parseCliTranscript(lines(meta, codex("assistant", "\u0001\u0002"), codex("user", "Real")), "codex", date).messages.map(({ content }) => content)).toEqual(["Real"]);
   });
   it("cuts long titles at a word boundary", () => {

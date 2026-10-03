@@ -57,10 +57,7 @@ function importTurns(
     if (message.role === "user") groups.push({ user: message, replies: [] });
     else (groups.at(-1)?.replies ?? leading).push(message);
   }
-  if (!groups.length) {
-    for (const message of leading) transcripts.createMessage(conversationId, message.content, message.role, [], null, message.createdAt, { activateConversation: false });
-    return;
-  }
+  if (!groups.length) throw new Error("This CLI conversation has no user message to import.");
   groups[0]!.replies.unshift(...leading);
   const complete = database.prepare(`
     UPDATE agent_turns SET status = 'completed', run_state = 'completed', origin = 'cli-import',

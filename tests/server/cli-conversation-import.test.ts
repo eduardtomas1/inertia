@@ -416,4 +416,24 @@ describe("CLI conversation import authority and persistence", () => {
       expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });
     } finally { raw.close(); }
   });
+  it("neither lists nor imports a session whose only user records are injected context", async () => {
+    const f = await fixture();
+    const id = randomUUID();
+    await writeFile(join(f.sessions, `rollout-${id}.jsonl`), [
+      { type: "session_meta", payload: { id, cwd: f.workspace, model_provider: "openai" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<user_action>opened</user_action>" }] } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<recommended_plugins>p</recommended_plugins>" }] } },
+      ...["One", "Two", "Three"].map((text) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } })),
+    ].map((item) => JSON.stringify(item)).join("\n"));
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ title: "Continue the sidebar work" }], skipped: 0, oversized: 0 });
+    const dbPath = join(f.root, "inertia.sqlite");
+    const store = new RuntimeStore(dbPath, f.workspace); stores.push(store);
+    const project = store.createProject("Studio", f.workspace);
+    const selection = providerNativeModelSelection({ providerId: "codex" });
+    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "e".repeat(64), providerId: "codex", sessionId: id, cwd: f.workspace, title: "Assistant only", messages: ["One", "Two", "Three"].map((content, index) => ({ role: "assistant" as const, content, createdAt: `2026-06-10T10:0${index}:00.000Z` })), selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") })).toThrow("This CLI conversation has no user message to import.");
+    const raw = new Database(dbPath, { readonly: true });
+    try {
+      expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });
+    } finally { raw.close(); }
+  });
 });

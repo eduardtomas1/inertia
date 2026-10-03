@@ -34,5 +34,5 @@ export function controlHelperCensus(helpers, guardianChildCount) {
       handoffs += 1;
     }
   }
-  return { admission, release, handoffs, violations };
+  return { admission, release, guardians: byGuardian.size, handoffs, violations };
 }

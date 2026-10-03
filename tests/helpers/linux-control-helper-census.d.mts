@@ -14,6 +14,7 @@ export interface LinuxControlHelperViolation {
 export interface LinuxControlHelperCensus {
   readonly admission: number;
   readonly release: number;
+  readonly guardians: number;
   readonly handoffs: number;
   readonly violations: LinuxControlHelperViolation[];
 }

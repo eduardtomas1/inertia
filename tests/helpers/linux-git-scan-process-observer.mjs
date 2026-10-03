@@ -20,6 +20,7 @@ let peakControlHelpers = 0;
 let peakControlHelperDetail = [];
 let peakAdmissionHelpers = 0;
 let peakReleaseHelpers = 0;
+let peakInspectionsWithControlHelpers = 0;
 let releaseHandoffSamples = 0;
 const controlHelperViolations = [];
 let peakDescendants = 0;
@@ -163,6 +164,10 @@ function sample() {
   );
   peakAdmissionHelpers = Math.max(peakAdmissionHelpers, census.admission);
   peakReleaseHelpers = Math.max(peakReleaseHelpers, census.release);
+  peakInspectionsWithControlHelpers = Math.max(
+    peakInspectionsWithControlHelpers,
+    census.guardians,
+  );
   if (census.handoffs > 0) releaseHandoffSamples += 1;
   if (census.violations.length > 0 && controlHelperViolations.length < 8) {
     controlHelperViolations.push({
@@ -215,6 +220,7 @@ async function finish() {
       peakControlHelperDetail,
       peakAdmissionHelpers,
       peakReleaseHelpers,
+      peakInspectionsWithControlHelpers,
       releaseHandoffSamples,
       controlHelperViolations,
       peakDescendants,

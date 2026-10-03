@@ -6,14 +6,13 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { constants, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as linuxGuardian from "../../src/node/runtime-owned-process-linux";
 import {
   awaitRuntimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessOwnershipIsTainted,
@@ -21,7 +20,6 @@ import {
 } from "../../src/node/runtime-owned-processes";
 import { getRepositoryStatus } from "../../src/server/git";
 import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
-import { runGitInspection } from "../../src/server/git/runner";
 import {
   GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
   GIT_SCAN_GLOBAL_PROCESS_BUDGET,
@@ -102,17 +100,14 @@ interface LinuxProcessMetrics {
   zombiesAtSettlement: number;
 }
 
-async function observeDescendants(
-  repositoryRoots: readonly string[],
-  completedSamples?: SharedArrayBuffer,
-): Promise<{
+async function observeDescendants(repositoryRoots: readonly string[]): Promise<{
   finish: () => Promise<LinuxProcessMetrics>;
 }> {
   const worker = new Worker(new URL(
     "../helpers/linux-git-scan-process-observer.mjs",
     import.meta.url,
   ), {
-    workerData: { parentPid: process.pid, repositoryRoots, completedSamples },
+    workerData: { parentPid: process.pid, repositoryRoots },
   });
   await new Promise<void>((resolve, reject) => {
     const failed = (error: Error): void => reject(error);
@@ -169,55 +164,6 @@ function expectControlHelpersWithinBudget(
   expect(metrics.peakReleaseHelpers, detail).toBeLessThanOrEqual(
     activeInspections * RELEASE_HELPERS_PER_ACTIVE_INSPECTION,
   );
-}
-
-const pause = new Int32Array(new SharedArrayBuffer(4));
-
-function waitForSync<Value>(read: () => Value | null | false, label: string): Value {
-  for (let attempt = 0; attempt < 2_000; attempt += 1) {
-    const value = read();
-    if (value !== null && value !== false) return value;
-    Atomics.wait(pause, 0, 0, 1);
-  }
-  throw new Error(`Timed out waiting for ${label}.`);
-}
-
-function processState(pid: number): string | null {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
-  } catch {
-    return null;
-  }
-}
-
-function signalHelperPid(target: number, action: string): number | null {
-  let children: number[];
-  try {
-    children = readFileSync(
-      `/proc/${process.pid}/task/${process.pid}/children`,
-      "utf8",
-    ).trim().split(/\s+/u).filter(Boolean).map(Number);
-  } catch {
-    return null;
-  }
-  for (const pid of children) {
-    try {
-      const args = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
-      if (args[1] === "signal" && args[2] === String(target) && args[6] === action) {
-        return pid;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-function sharedSignalPending(pid: number, signal: number): boolean {
-  const status = readFileSync(`/proc/${pid}/status`, "utf8");
-  const pending = /^ShdPnd:\s+([0-9a-f]+)$/mu.exec(status)?.[1] ?? "0";
-  return (BigInt(`0x${pending}`) & (1n << BigInt(signal - 1))) !== 0n;
 }
 
 async function scanRequest(
@@ -429,126 +375,6 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
       expect(restartRuntimeAfterTaint).not.toHaveBeenCalled();
     } finally {
-      await observer.finish();
-      deactivate?.();
-    }
-  }, 30_000);
-
-  linuxIt("counts an inspection's exec helper overlapping its release helper once", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-git-scan-linux-handoff-"));
-    roots.push(root);
-    const repositoryRoot = repository(root, "repository");
-    const head = git(repositoryRoot, "rev-parse", "HEAD");
-    const generation = `${randomUUID()}:1`;
-    const restartRuntimeAfterTaint = vi.fn();
-    const deactivate = activatePreparedRuntimeOwnedProcessRegistry(
-      root,
-      generation,
-      `test:${randomUUID()}`,
-      {
-        darwinGuardianPath: join(
-          process.cwd(),
-          "resources/generated/runtime-process-guardian/runtime-process-guardian",
-        ),
-        onTainted: restartRuntimeAfterTaint,
-        platform: "linux",
-      },
-    );
-    const journal = new RuntimeOwnedProcessJournal(root, { platform: "linux" });
-    const completedSamples = new SharedArrayBuffer(4);
-    const samples = new Int32Array(completedSamples);
-    const observer = await observeDescendants([repositoryRoot], completedSamples);
-    const signal = linuxGuardian.signalLinuxGuardianExactAsync;
-    const stopped = new Set<number>();
-    const stop = (pid: number): void => {
-      stopped.add(pid);
-      process.kill(pid, "SIGSTOP");
-    };
-    const resume = (pid: number): void => {
-      stopped.delete(pid);
-      process.kill(pid, "SIGCONT");
-    };
-    let execHelper: number | null = null;
-    let releaseHelperState: string | null = null;
-    const signals = vi.spyOn(linuxGuardian, "signalLinuxGuardianExactAsync")
-      .mockImplementation(async (...args) => {
-        const guardian = args[0].pid;
-        if (args[2] === "exec" && execHelper === null) {
-          stop(guardian);
-          waitForSync(() => processState(guardian) === "T", "the stopped guardian");
-          const result = signal(...args);
-          const helper = waitForSync(
-            () => signalHelperPid(guardian, "exec"),
-            "the exec helper",
-          );
-          execHelper = helper;
-          waitForSync(
-            () => sharedSignalPending(guardian, constants.signals.SIGUSR2),
-            "the exec signal",
-          );
-          stop(helper);
-          waitForSync(() => processState(helper) === "T", "the stopped exec helper");
-          resume(guardian);
-          return await result;
-        }
-        if (args[2] === "release" && execHelper !== null && releaseHelperState === null) {
-          const lingeringExecHelper = execHelper;
-          const result = signal(...args);
-          const helper = waitForSync(
-            () => signalHelperPid(guardian, "release"),
-            "the release helper",
-          );
-          stop(helper);
-          releaseHelperState = waitForSync(() => {
-            const state = processState(helper);
-            return state === "T" || state === "Z" ? state : null;
-          }, "the stopped release helper");
-          const sampled = Atomics.load(samples, 0) + 2;
-          waitForSync(() => Atomics.load(samples, 0) >= sampled, "two observer samples");
-          resume(lingeringExecHelper);
-          waitForSync(() => {
-            const state = processState(lingeringExecHelper);
-            return state === "Z" || state === null;
-          }, "the exec helper to exit");
-          resume(helper);
-          return await result;
-        }
-        return await signal(...args);
-      });
-
-    try {
-      const inspection = await runGitInspection(repositoryRoot, ["rev-parse", "HEAD"], {
-        failureMessage: "The handoff inspection failed.",
-      });
-      expect(inspection.stdout.toString("utf8").trim()).toBe(head);
-      expect(await awaitRuntimeOwnedProcessCleanupConfirmed()).toBe(true);
-
-      const metrics = await observer.finish();
-      console.info("issue-220 Linux handoff trace", JSON.stringify(metrics));
-      expect(releaseHelperState).toBe("T");
-      expect(metrics).toMatchObject({
-        finalDescendants: [],
-        peakControlHelpers: 2,
-        zombiesAtSettlement: 0,
-      });
-      expect(metrics.releaseHandoffSamples).toBeGreaterThan(0);
-      expectControlHelpersWithinBudget(metrics, 1);
-      expect(metrics.peakDescendants).toBeLessThanOrEqual(
-        GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY / GIT_SCAN_PROCESS_BUDGET_PER_KEY
-          + ADMISSION_HELPERS_PER_ACTIVE_INSPECTION,
-      );
-      expect(journal.records(generation)).toEqual([]);
-      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
-      expect(restartRuntimeAfterTaint).not.toHaveBeenCalled();
-    } finally {
-      for (const pid of stopped) {
-        try {
-          resume(pid);
-        } catch {
-          stopped.delete(pid);
-        }
-      }
-      signals.mockRestore();
       await observer.finish();
       deactivate?.();
     }

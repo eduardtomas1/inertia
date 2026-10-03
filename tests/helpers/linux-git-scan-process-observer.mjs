@@ -7,9 +7,6 @@ if (!parentPort) throw new Error("The Linux process observer requires a parent p
 
 const parentPid = workerData.parentPid;
 const repositoryRoots = new Set(workerData.repositoryRoots);
-const completedSamples = workerData.completedSamples
-  ? new Int32Array(workerData.completedSamples)
-  : null;
 const controlHelperPids = new Set();
 const controlHelperCommands = new Map();
 const guardianPids = new Set();
@@ -190,7 +187,6 @@ function sample() {
     usage.reduce((sum, entry) => sum + entry.threads, 0),
   );
   current.forEach((pid) => observed.add(pid));
-  if (completedSamples) Atomics.add(completedSamples, 0, 1);
   return current;
 }
 

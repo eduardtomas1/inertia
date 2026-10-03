@@ -1,6 +1,6 @@
 import type { RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
 import { chmodSync, lstatSync, mkdirSync, writeSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { ApplicationIncidentIndex } from "./application-incident-index.js";
 import {
   diagnosticDefinition,
@@ -137,6 +137,10 @@ export class RuntimeDiagnostics {
   }
 
   clearHistory(): void {
+    const parent = lstatSync(dirname(this.directory));
+    if (!parent.isDirectory() || parent.isSymbolicLink()) {
+      throw new Error("The runtime diagnostics path is not a local directory.");
+    }
     this.revalidateDirectory(false);
     this.incidents.clear();
     this.lifecycle.clear();
@@ -165,7 +169,7 @@ export class RuntimeDiagnostics {
     return this.incidents.exportWithin(
       { severity: "all", after: new Date(sinceMs).toISOString() },
       maxBytes,
-      this.eventEntries(),
+      this.eventEntries().filter((entry) => entry.severity !== "info" || entry.event.startsWith("diagnostics.")),
     );
   }
   flushIncidents(): void { this.incidents.flush(); }

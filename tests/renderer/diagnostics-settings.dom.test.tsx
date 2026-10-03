@@ -90,7 +90,10 @@ describe("Diagnostics settings", () => {
       title: "The local runtime reported a failure", detail: ["phase=restarting", "Runtime startup timed out."] })]);
     await settle();
     expect(screen.getByRole("heading", { name: "Diagnostics", level: 3 })).toBeVisible();
+    expect(screen.getByText("Events and failures recorded on this device.")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Recent events", level: 3 })).toBeVisible();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(rows()[0]!.querySelector("time")).toHaveTextContent("Sep 9, 8:00:03 AM");
     expect(rows().map((row) => row.querySelector("strong")?.textContent)).toEqual([
       "The local runtime reported a failure", "Discord delivery could not be confirmed", "Inertia started",
     ]);
@@ -99,7 +102,9 @@ describe("Diagnostics settings", () => {
     expect(document.querySelector(".diagnostics-outcome")).toBeNull();
     fireEvent.click(rows()[0]!);
     expect(screen.getByRole("button", { name: /The local runtime reported a failure/u })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/phase=restarting/u)).toBeVisible();
+    const details = screen.getByRole("region", { name: "Event details" });
+    expect(details).toHaveTextContent("phase=restarting");
+    expect(details).toHaveAttribute("tabindex", "0");
   });
 
   it("expands an incident to its explanation, facts and actions, copies it, and never opens offline work", async () => {
@@ -129,7 +134,20 @@ describe("Diagnostics settings", () => {
     await settle();
     expect(h.queryDiagnostics).toHaveBeenLastCalledWith({ severity: "all", offset: 0 });
     expect(rows()).toHaveLength(25);
-    fireEvent.click(screen.getByRole("button", { name: "Next" })); await settle();
+    let release = (): void => undefined;
+    const slow = h.queryDiagnostics.getMockImplementation()!;
+    h.queryDiagnostics.mockImplementationOnce((query) => new Promise((resolve) => { release = () => resolve(slow(query)); }));
+    const next = screen.getByRole("button", { name: "Next" });
+    next.focus();
+    fireEvent.click(next); await settle();
+    expect(next).toHaveAttribute("aria-disabled", "true");
+    expect(next).not.toBeDisabled();
+    expect(next).toHaveFocus();
+    const calls = h.queryDiagnostics.mock.calls.length;
+    fireEvent.click(next); await settle();
+    expect(h.queryDiagnostics.mock.calls.length).toBe(calls);
+    await act(async () => release());
+    await settle();
     expect(rows()).toHaveLength(5);
     fireEvent.click(screen.getByRole("button", { name: "Previous" })); await settle();
     const cutoff = new Date(Date.now() - 3_600_000).toISOString();
@@ -147,13 +165,19 @@ describe("Diagnostics settings", () => {
     expect(screen.getByRole("button", { name: "Export…" })).toBeDisabled();
   });
 
-  it("turns capture off and on, explaining what is still kept, and keeps the switch focused while saving", async () => {
+  it("turns capture off and on, explaining what is still kept, and ignores repeat clicks while saving", async () => {
     const h = setup([], [event(1)]);
     await settle();
     const toggle = screen.getByRole("switch", { name: "Capture diagnostics" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
     toggle.focus();
-    await act(async () => fireEvent.click(toggle));
+    let release = (): void => undefined;
+    const save = h.setDiagnosticsCapture.getMockImplementation()!;
+    h.setDiagnosticsCapture.mockImplementationOnce((enabled) => new Promise((resolve) => { release = () => resolve(save(enabled)); }));
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveFocus();
+    await act(async () => release());
     await settle();
     expect(h.setDiagnosticsCapture).toHaveBeenCalledExactlyOnceWith(false);
     expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -180,6 +204,36 @@ describe("Diagnostics settings", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Export cancelled.");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Export…" })));
     expect(screen.getByRole("status")).toHaveTextContent("Diagnostics exported.");
+    let release = (): void => undefined;
+    h.onCopyRuntimeDiagnosticReport.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ copied: true, eventCount: 1 });
+    }));
+    const copy = screen.getByRole("button", { name: "Copy support summary" });
+    copy.focus();
+    fireEvent.click(copy);
+    expect(copy).toHaveTextContent("Copying…");
+    expect(copy).toHaveAttribute("aria-disabled", "true");
+    expect(copy).toHaveFocus();
+    fireEvent.click(copy);
+    await act(async () => release());
+    expect(h.onCopyRuntimeDiagnosticReport).toHaveBeenCalledTimes(2);
+    expect(copy).toHaveTextContent("Copy support summary");
+    expect(screen.getByRole("status")).toHaveTextContent("Support summary copied · 1 event.");
+  });
+
+  it("keeps the dialog open and says so when Clear history fails", async () => {
+    const h = setup([record(1)]);
+    await settle();
+    h.clearDiagnostics.mockRejectedValueOnce(new Error("Diagnostics history could not be cleared."));
+    fireEvent.click(screen.getByRole("button", { name: "Clear history…" }));
+    const dialog = screen.getByRole("dialog", { name: "Clear diagnostics history?" });
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" })));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("The history could not be cleared. Try again.");
+    expect(screen.getByText("Discord delivery could not be confirmed")).toBeVisible();
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" })));
+    expect(h.clearDiagnostics).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("confirms Clear history in a dialog that starts on Cancel and returns focus to the trigger", async () => {
@@ -202,13 +256,12 @@ describe("Diagnostics settings", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Diagnostics history cleared.");
   });
 
-  it("shows sampled process health in two quiet lines", async () => {
+  it("shows sampled process health as a usage line and a state line", async () => {
     setup([]);
     await settle();
     const block = screen.getByRole("group", { name: "Process health" });
-    expect(block).toHaveTextContent("Memory 420 MB · Main 120 MB, 1.3% CPU · Interface 200 MB · Local service 92 MB");
-    expect(block).toHaveTextContent("Local service ready");
-    expect(block.querySelectorAll("p")).toHaveLength(2);
+    expect(within(block).getByText("Memory 420 MB · Main 120 MB, 1.3% CPU · Interface 200 MB · Local service 92 MB")).toBeVisible();
+    expect(within(block).getByText("Local service ready · Measured Sep 9, 8:01:00 AM")).toBeVisible();
   });
 
   it("calls a stopped or idle local service offline", async () => {
@@ -244,6 +297,44 @@ describe("Diagnostics settings", () => {
     h.rerender(<DiagnosticsSettings {...h.props} selection={{ turnId: id(5) }} />);
     await settle();
     expect(screen.getByText("Diagnostics capture is off, so this was not recorded.")).toBeVisible();
+  });
+
+  it("expands a linked row once and keeps it collapsed after the user collapses it", async () => {
+    const incident = { ...record(1), context: { ...record(1).context, turnId: id(5) } };
+    const h = setup([incident]);
+    await settle();
+    h.rerender(<DiagnosticsSettings {...h.props} selection={{ turnId: id(5) }} />);
+    await settle();
+    const row = screen.getByRole("button", { name: /Discord delivery/u });
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    h.publish();
+    await act(() => vi.advanceTimersByTimeAsync(1_100));
+    expect(screen.getByRole("button", { name: /Discord delivery/u })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("explains a failed first read quietly, keeps capture unknown, and retries on request", async () => {
+    const h = setup([record(1)]);
+    const answer = h.queryDiagnostics.getMockImplementation()!;
+    h.queryDiagnostics.mockReset();
+    h.queryDiagnostics.mockRejectedValueOnce(new Error("offline"));
+    await settle();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("Diagnostics could not be read.")).toBeVisible();
+    const toggle = screen.getByRole("switch", { name: "Capture diagnostics" });
+    expect(toggle).not.toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+    h.queryDiagnostics.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry" })));
+    await settle();
+    expect(screen.getByRole("alert")).toHaveTextContent("Diagnostics could not be read.");
+    h.queryDiagnostics.mockImplementation(answer);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry" })));
+    await settle();
+    expect(screen.queryByText("Diagnostics could not be read.")).toBeNull();
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(rows()).toHaveLength(1);
   });
 
   it("coalesces change notifications and reports disk failure plainly", async () => {

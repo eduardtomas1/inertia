@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Download, FolderOpen, Search, Trash2 } from "lucide-react";
+import { Activity, Copy, Download, FolderOpen, History, Search, Trash2 } from "lucide-react";
 import {
   DIAGNOSTIC_LIMITS,
   compareDiagnosticEntries,
@@ -38,7 +38,9 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
   const [selectionDismissed, setSelectionDismissed] = useState(false);
   const [page, setPage] = useState<DiagnosticPage | null>(null);
   const [loading, setLoading] = useState(true);
-  const [readFailed, setReadFailed] = useState(false);
+  const [readFailed, setReadFailed] = useState<"quiet" | "announced" | null>(null);
+  const retrying = useRef(false);
+  const autoExpanded = useRef<DiagnosticSelection | undefined>(undefined);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -76,11 +78,12 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
         if (active) {
           setPage(result);
           setCapture({ enabled: result.capture, since: result.since });
-          setReadFailed(false);
+          setReadFailed(null);
         }
       } catch {
-        if (active) setReadFailed(true);
+        if (active) setReadFailed(retrying.current ? "announced" : "quiet");
       } finally {
+        retrying.current = false;
         pending = false;
         if (active) {
           setLoading(false);
@@ -101,7 +104,9 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
   ].sort(compareDiagnosticEntries) : [], [page]);
 
   useEffect(() => {
-    if (activeSelection && !activeSelection.incidentId && entries.length === 1) setExpanded(entries[0]!.id);
+    if (!activeSelection || activeSelection.incidentId || entries.length !== 1 || autoExpanded.current === activeSelection) return;
+    autoExpanded.current = activeSelection;
+    setExpanded(entries[0]!.id);
   }, [activeSelection, entries]);
 
   const update = (value: Partial<DiagnosticQuery>): void => {
@@ -182,30 +187,32 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
 
   return <div className="diagnostics">
     <section className="settings-card diagnostics-overview" aria-labelledby="diagnostics-heading">
-      <div className="settings-card-heading"><span><h3 id="diagnostics-heading">Diagnostics</h3></span></div>
+      <div className="settings-card-heading"><div><Activity size={18} /></div>
+        <span><h3 id="diagnostics-heading">Diagnostics</h3><p>Events and failures recorded on this device.</p></span></div>
       <div className="setting-row diagnostics-capture">
         <span className="setting-copy"><strong>Capture diagnostics</strong>
-          <small>{captureOn
-            ? "Failures and app events are kept on this device for 7 days."
-            : `Off since ${capture?.since ? formatDiagnosticTime(capture.since) : "an earlier session"}. App start, quit and failures are still kept.`}</small>
+          <small>{!capture
+            ? readFailed ? "The capture setting could not be read." : "Reading…"
+            : capture.enabled ? "Events are kept for 7 days."
+              : `Off since ${capture.since ? formatDiagnosticTime(capture.since) : "an earlier session"}. App start, quit and failures are still kept.`}</small>
         </span>
-        <Switch label="Capture diagnostics" checked={captureOn} disabled={!capture} onChange={(enabled) => void toggleCapture(enabled)} />
+        <Switch label="Capture diagnostics" checked={capture?.enabled === true} disabled={!capture} onChange={(enabled) => void toggleCapture(enabled)} />
       </div>
       <div className="diagnostics-actions">
         <button type="button" className="secondary-button" disabled={!page || page.total === 0} aria-disabled={busy === "export"} onClick={() => void exportEvents()}>
-          <Download size={14} aria-hidden="true" />Export…
+          <Download size={14} aria-hidden="true" />{busy === "export" ? "Exporting…" : "Export…"}
         </button>
         <button type="button" className="secondary-button" aria-disabled={busy === "summary"} onClick={() => void copySummary()}>
-          <Copy size={14} aria-hidden="true" />Copy support summary
+          <Copy size={14} aria-hidden="true" />{busy === "summary" ? "Copying…" : "Copy support summary"}
         </button>
         <button type="button" className="secondary-button" aria-disabled={busy === "logs"} onClick={() => void revealLogs()}>
-          <FolderOpen size={14} aria-hidden="true" />Reveal log folder
+          <FolderOpen size={14} aria-hidden="true" />{busy === "logs" ? "Opening…" : "Reveal log folder"}
         </button>
         <button type="button" className="secondary-button" onClick={() => setConfirmingClear(true)}>
           <Trash2 size={14} aria-hidden="true" />Clear history…
         </button>
       </div>
-      <p className="diagnostics-status" role="status">{notice ?? ""}</p>
+      {notice && <p className="diagnostics-status" role="status">{notice}</p>}
       {failure && <p className="diagnostics-status is-error" role="alert">{failure}</p>}
       {page?.persistence === "unavailable" && <p className="diagnostics-status is-error">Diagnostics cannot be saved to disk right now. New events are kept until you quit.</p>}
       {page && page.dropped > 0 && <p className="diagnostics-status">{page.dropped} {page.dropped === 1 ? "event" : "events"} could not be saved.</p>}
@@ -213,7 +220,8 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
     </section>
 
     <section className="settings-card diagnostics-events" aria-labelledby="diagnostics-events-heading">
-      <div className="settings-card-heading"><span><h3 id="diagnostics-events-heading">Recent events</h3></span></div>
+      <div className="settings-card-heading"><div><History size={18} /></div>
+        <span><h3 id="diagnostics-events-heading">Recent events</h3></span></div>
       <div className="diagnostics-filters" role="search" aria-label="Filter diagnostics">
         <label className="diagnostics-search"><span className="visually-hidden">Search diagnostics</span><Search size={14} aria-hidden="true" />
           <input type="search" maxLength={160} disabled={Boolean(activeSelection)} placeholder="Search events" value={filters.search ?? ""}
@@ -243,8 +251,11 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
       </div>
       {activeSelection && <p className="diagnostics-linked">Showing the linked event · <button type="button" className="diagnostics-link"
         onClick={() => { setSelectionDismissed(true); setOffset(0); }}>Show all</button></p>}
-      {readFailed && <p className="diagnostics-status is-error" role="alert">Diagnostics could not be read. Try again in a moment.</p>}
-      {page && entries.length === 0 ? <p className="diagnostics-empty">{emptyMessage}</p>
+      {readFailed && <p className="diagnostics-status is-error diagnostics-read-failed">
+        <span key={refresh} role={readFailed === "announced" ? "alert" : undefined}>Diagnostics could not be read.</span>
+        <button type="button" className="diagnostics-link" onClick={() => { retrying.current = true; setRefresh((value) => value + 1); }}>Retry</button>
+      </p>}
+      {!page ? null : entries.length === 0 ? <p className="diagnostics-empty">{emptyMessage}</p>
         : <ul className="diagnostics-list" aria-label="Recent events" aria-busy={loading}>
           {entries.map((item) => <DiagnosticsEventRow key={item.id} item={item} expanded={expanded === item.id}
             onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
@@ -256,8 +267,10 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
             conversationTitle={(conversationId) => conversationById.get(conversationId)?.title} />)}
         </ul>}
       {page && (offset > 0 || page.nextOffset !== null) && <div className="diagnostics-pages">
-        <button type="button" className="secondary-button" disabled={!offset || loading} onClick={() => setOffset(Math.max(0, offset - DIAGNOSTIC_LIMITS.pageSize))}>Previous</button>
-        <button type="button" className="secondary-button" disabled={page.nextOffset === null || loading} onClick={() => setOffset(page.nextOffset ?? 0)}>Next</button>
+        <button type="button" className="secondary-button" aria-disabled={!offset || loading}
+          onClick={() => { if (offset && !loading) setOffset(Math.max(0, offset - DIAGNOSTIC_LIMITS.pageSize)); }}>Previous</button>
+        <button type="button" className="secondary-button" aria-disabled={page.nextOffset === null || loading}
+          onClick={() => { if (page.nextOffset !== null && !loading) setOffset(page.nextOffset); }}>Next</button>
       </div>}
     </section>
     {confirmingClear && <DiagnosticsClearDialog onClear={clearHistory} onClose={() => setConfirmingClear(false)} />}

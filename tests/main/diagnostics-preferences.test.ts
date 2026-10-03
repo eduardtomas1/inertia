@@ -49,6 +49,15 @@ it("opens the journal with the saved capture choice, defaulting to on", () => {
   expect(diagnostics.directory).toBe(join(root, "logs", "runtime"));
 });
 
+it("removes a temporary preference file left by an interrupted write when the journal opens", () => {
+  const root = directory();
+  const leftover = join(root, ".diagnostics-preferences-3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b.json");
+  writeFileSync(leftover, "{\"enabled\":");
+  writeFileSync(join(root, "unrelated.json"), "keep");
+  openRuntimeDiagnostics(root);
+  expect(readdirSync(root).sort()).toEqual(["unrelated.json"]);
+});
+
 it.skipIf(process.platform === "win32")("does not follow a preferences symlink", () => {
   const root = directory();
   const outside = join(root, "outside.json");

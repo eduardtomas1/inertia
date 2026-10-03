@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -211,7 +211,91 @@ describe("recent events", () => {
     expect(exported.records).toHaveLength(1);
     expect(exported.events).toMatchObject([{ event: "app.start", title: "Inertia started" }]);
     expect(exported.events[0]).not.toHaveProperty("id");
-    const report = JSON.parse(diagnostics.exportForReport(clock - 60_000, 64 * 1_024)) as { events: unknown[] };
-    expect(report.events).toHaveLength(1);
+  });
+
+  it("reads an incident written into runtime.log by an older version and keeps it out of the event list", () => {
+    const { directory, diagnostics } = fixture();
+    diagnostics.recordIncident(incident());
+    diagnostics.flushIncidents();
+    renameSync(join(directory, "incidents.log"), join(directory, "runtime.log"));
+    const reopened = new RuntimeDiagnostics(directory, { now: () => clock });
+    const page = reopened.query({ severity: "all" });
+    expect(page.records.map((record) => record.code)).toEqual(["discord.delivery-unknown"]);
+    expect(page.events).toEqual([]);
+    expect((JSON.parse(reopened.exportForReport(clock - 3_600_000, 6_000)) as { records: unknown[] }).records).toHaveLength(1);
+  });
+});
+
+describe("diagnostics exports", () => {
+  it("keeps incidents, warnings, errors and capture markers in an issue report ahead of routine events", () => {
+    const { diagnostics } = fixture();
+    diagnostics.recordIncident(incident());
+    diagnostics.flushIncidents();
+    tick();
+    diagnostics.record("runtime.failure", { phase: "restarting", message: "Runtime startup timed out." });
+    tick();
+    diagnostics.setCapture(false);
+    tick();
+    diagnostics.setCapture(true);
+    for (let generation = 0; generation < 30; generation += 1) {
+      tick();
+      diagnostics.record("runtime.state", { phase: "ready", generation });
+    }
+    const report = JSON.parse(diagnostics.exportForReport(clock - 3_600_000, 6_000)) as {
+      records: unknown[]; events: { event: string }[];
+    };
+    expect(report.records).toHaveLength(1);
+    expect(report.events.map(({ event }) => event)).toEqual([
+      "diagnostics.capture-started", "diagnostics.capture-stopped", "runtime.failure",
+    ]);
+  });
+
+  it("truncates a full user export newest first at a record boundary and says so in the file", () => {
+    const { diagnostics } = fixture({ maxFileBytes: 4 * 1_024 * 1_024 });
+    for (let index = 0; index < 4_000; index += 1) {
+      clock += 100;
+      diagnostics.record("runtime.state", { phase: "ready", generation: index, processId: 4_242, restartAttempt: 0, restartScheduled: false });
+    }
+    const text = diagnostics.exportDiagnostics({ severity: "all" });
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(512 * 1_024);
+    const exported = JSON.parse(text) as { truncated?: boolean; events: { at: string }[] };
+    expect(exported.truncated).toBe(true);
+    expect(exported.events.length).toBeGreaterThan(0);
+    expect(exported.events.length).toBeLessThan(4_000);
+    expect(exported.events[0]!.at).toBe(new Date(clock).toISOString());
+    const small = JSON.parse(fixture().diagnostics.exportDiagnostics({ severity: "all" })) as { truncated?: boolean };
+    expect(small).not.toHaveProperty("truncated");
+  });
+});
+
+describe("bounded report search", () => {
+  it("starts the size search from what can fit instead of half of a long history", () => {
+    const { diagnostics } = fixture({ maxFileBytes: 4 * 1_024 * 1_024 });
+    for (let index = 0; index < 400; index += 1) {
+      clock += 100;
+      diagnostics.record("runtime.failure", { phase: "restarting", generation: index, message: "Runtime startup timed out." });
+    }
+    const stringify = vi.spyOn(JSON, "stringify");
+    try {
+      const report = diagnostics.exportForReport(clock - 3_600_000, 1_500);
+      expect((JSON.parse(report) as { events: unknown[] }).events.length).toBeGreaterThan(0);
+      expect(stringify.mock.calls.filter((call) => call[2] === 2).length).toBeLessThanOrEqual(6);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+});
+
+describe("diagnostics directory safety", () => {
+  it.skipIf(process.platform === "win32")("refuses to clear when the logs folder above the journal is a link", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-capture-"));
+    roots.push(root);
+    const real = join(root, "elsewhere");
+    mkdirSync(join(real, "runtime"), { recursive: true });
+    symlinkSync(real, join(root, "logs"));
+    const linked = new RuntimeDiagnostics(join(root, "logs", "runtime"), { now: () => clock });
+    writeFileSync(join(real, "runtime", "runtime.log"), "{}\n");
+    expect(() => linked.clearHistory()).toThrow("not a local directory");
+    expect(readdirSync(join(real, "runtime"))).toEqual(["runtime.log"]);
   });
 });

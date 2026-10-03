@@ -5,7 +5,7 @@ import {
 } from "@shared/app-update-preparation-diagnostic";
 import type { RuntimeLifecycleDiagnosticSnapshot } from "@shared/contracts";
 import type { AppHealthSnapshot, AppUpdateStatus } from "@shared/desktop";
-import { INTERFACE_LOCALE } from "../lib/locale";
+import { formatDiagnosticTime } from "./DiagnosticsEventRow";
 
 const LIFECYCLE_LABELS: Readonly<Record<RuntimeLifecycleDiagnosticSnapshot["actionableState"], string>> = {
   "safe-and-ready": "Safe and ready",
@@ -64,7 +64,7 @@ export function DiagnosticsHealth({ runtime, lifecycleDiagnostics, appUpdateStat
       ? `${lifecycleDiagnostics.ownedResources.turns} active ${lifecycleDiagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`
         + ` · ${lifecycleDiagnostics.ownedResources.interactions} open ${lifecycleDiagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`
       : null,
-    health ? `Measured ${new Date(health.sampledAt).toLocaleTimeString(INTERFACE_LOCALE)}` : null,
+    health ? `Measured ${formatDiagnosticTime(health.sampledAt)}` : null,
   ].filter(Boolean).join(" · ");
   return <div className="diagnostics-health" role="group" aria-labelledby="diagnostics-health-label">
     <span id="diagnostics-health-label" className="diagnostics-section-label">Process health</span>

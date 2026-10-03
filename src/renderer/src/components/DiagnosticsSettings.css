@@ -7,6 +7,10 @@
   margin-bottom: 6px;
 }
 
+.diagnostics-events .settings-card-heading {
+  margin-bottom: 10px;
+}
+
 .diagnostics-capture {
   min-height: 0;
   padding: 10px 0 12px;
@@ -28,7 +32,6 @@
 }
 
 .diagnostics-status {
-  min-height: 1.5em;
   margin: 8px 2px 0;
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
@@ -36,8 +39,14 @@
 }
 
 .diagnostics-status.is-error {
-  min-height: 0;
   color: var(--danger);
+}
+
+.diagnostics-read-failed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .diagnostics-health {
@@ -89,7 +98,6 @@
   border-radius: var(--radius-small);
   outline: 0;
   color: var(--text);
-  background: var(--surface-muted);
   font: inherit;
   font-size: var(--ui-font-secondary);
 }

@@ -7,6 +7,7 @@ import {
   lstatSync,
   openSync,
   readSync,
+  readdirSync,
   realpathSync,
   renameSync,
   unlinkSync,
@@ -18,6 +19,7 @@ import type { DiagnosticCaptureState } from "./runtime-diagnostics.js";
 
 const FILE_NAME = "diagnostics-preferences.json";
 const MAX_BYTES = 512;
+const TEMPORARY_PATTERN = /^\.diagnostics-preferences-[0-9a-f-]{36}\.json$/u;
 
 function parse(value: unknown): DiagnosticCaptureState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -80,6 +82,20 @@ export function writeDiagnosticsPreferences(directory: string, input: Diagnostic
     renameSync(temporary, path);
   } finally {
     if (lstatExists(temporary)) unlinkSync(temporary);
+  }
+}
+
+export function removeStaleDiagnosticsPreferenceFiles(directory: string): void {
+  try {
+    const root = realpathSync(directory);
+    for (const name of readdirSync(root)) {
+      if (!TEMPORARY_PATTERN.test(name)) continue;
+      const path = join(root, name);
+      const metadata = lstatSync(path);
+      if (metadata.isFile() || metadata.isSymbolicLink()) unlinkSync(path);
+    }
+  } catch {
+    return;
   }
 }
 

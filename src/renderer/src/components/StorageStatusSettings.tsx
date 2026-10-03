@@ -1,4 +1,4 @@
-import { Activity, Trash2 } from "lucide-react";
+import { HardDrive, Trash2 } from "lucide-react";
 import type { DatabaseBackupStatus } from "@shared/contracts";
 import type { AppHealthSnapshot } from "@shared/desktop";
 import {
@@ -41,7 +41,7 @@ export function StorageStatusSettings({
   return <>
     <div className="codex-binary-path runtime-log-setting app-health-setting">
       <span>
-        <strong><Activity size={14} />Local storage</strong>
+        <strong><HardDrive size={14} aria-hidden="true" />Local storage</strong>
         <small>Sampled only while open; covers app storage, never project files.</small>
         {health ? <>
           <span className="app-health-grid">

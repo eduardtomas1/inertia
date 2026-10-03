@@ -2,6 +2,7 @@ import {
   Activity,
   ArchiveRestore,
   Bot,
+  Bug,
   FolderOpen,
   GitCompareArrows,
   Keyboard,
@@ -37,6 +38,6 @@ export const SETTINGS_SECTIONS: ReadonlyArray<{ id: SettingsSection; label: stri
   { id: "diagnostics", label: "Diagnostics", icon: Activity },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
-  { id: "support", label: "Report an issue", icon: Bot },
+  { id: "support", label: "Report an issue", icon: Bug },
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
 ];

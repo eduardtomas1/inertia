@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { Bug } from "lucide-react";
 import { IssueReportSettings } from "../../src/renderer/src/components/IssueReportSettings";
+import { SETTINGS_SECTIONS } from "../../src/renderer/src/components/settingsSections";
 import type { ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import type { IssueGitHubState, IssueReport } from "../../src/shared/issue-report";
 import { ISSUE_GITHUB_MESSAGES } from "../../src/shared/issue-report-github";
@@ -26,14 +28,22 @@ function saved(status: IssueReport["status"], overrides: Partial<IssueReport> = 
   return { id, revision: 3, status, description: "The chat fails after I cancel a running turn.", steps: "", providerId: null, attachDiagnostics: true, title: "Cancellation issue", body: "## What happened\n\nThe chat fails after I cancel a running turn.", notice: "", issueUrl: null, ...overrides };
 }
 
-function fixture(initial: IssueReport | null = null, github: IssueGitHubState = "ready") {
+function fixture(initial: IssueReport | null = null, github: IssueGitHubState = "ready", outcome: { submit?: IssueReport["status"]; found?: boolean } = {}) {
   let report = initial;
   const respond = (extra: { github?: IssueGitHubState } = {}): ServerEvent => ({ type: "request.result", requestId: crypto.randomUUID(), result: { kind: "support.report", report, ...extra } });
   const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
     if (command.type === "support.report.github") return respond({ github });
     if (command.type === "support.report.prepare") report = { ...saved("preview"), revision: 0, ...command.payload, title: command.payload.description.split("\n")[0]!, body: `## What happened\n\n${command.payload.description}` };
-    if (command.type === "support.report.edit" && report) report = { ...report, title: command.payload.title.trim(), body: command.payload.body.trim(), status: "preview", revision: report.revision + 1 };
-    if (command.type === "support.report.submit" && report) report = { ...report, status: "submitted", revision: report.revision + 1, issueUrl: "https://github.com/eduardtomas1/inertia/issues/999", notice: "Issue created in eduardtomas1/inertia." };
+    if (command.type === "support.report.edit" && report) {
+      const body = command.payload.body.trim().replace("/Users/me/secret-project", "[private path]");
+      report = { ...report, title: command.payload.title.trim(), body, status: "preview", revision: report.revision + 1, notice: body === command.payload.body.trim() ? "" : "Potential private information was removed. Review the issue before creating it." };
+    }
+    if (command.type === "support.report.submit" && report) report = outcome.submit === "uncertain"
+      ? { ...report, status: "uncertain", revision: report.revision + 1, notice: "GitHub may still have received the issue." }
+      : { ...report, status: "submitted", revision: report.revision + 1, issueUrl: "https://github.com/eduardtomas1/inertia/issues/999", notice: "Issue created in eduardtomas1/inertia." };
+    if (command.type === "support.report.reconcile" && report) report = outcome.found
+      ? { ...report, status: "submitted", revision: report.revision + 1, issueUrl: "https://github.com/eduardtomas1/inertia/issues/999", notice: "Existing issue found. No duplicate was created." }
+      : { ...report, revision: report.revision + 1, notice: "No matching issue is visible yet." };
     if (command.type === "support.report.retire" && report) report = { ...report, status: "retired", revision: report.revision + 1, notice: "Publication tracking retired. The original issue may already exist on GitHub." };
     return respond();
   });
@@ -46,7 +56,7 @@ it("previews the code-generated issue from a plain form and publishes only on re
   const { props, request } = fixture();
   render(<IssueReportSettings {...props} />);
   await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "support.report.github" }));
-  expect(screen.getByRole("button", { name: "Preview issue" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Preview issue" })).toBeEnabled();
   fireEvent.change(screen.getByLabelText("What happened"), { target: { value: "The chat fails after I cancel a running turn." } });
   fireEvent.change(screen.getByLabelText("Steps to reproduce (optional)"), { target: { value: "Start, cancel, send again" } });
   fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "codex" } });
@@ -179,4 +189,115 @@ it("opens a new form after a published report instead of the finished one", asyn
   render(<IssueReportSettings {...props} />);
   await waitFor(() => expect(screen.getByLabelText("What happened")).toBeEnabled());
   expect(screen.getByLabelText("What happened")).toHaveValue("");
+});
+
+it("moves focus to the title after confirming retirement", async () => {
+  const { props } = fixture(saved("uncertain", { notice: "GitHub may still have received the issue." }));
+  render(<IssueReportSettings {...props} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Retire this report" }));
+  const confirm = await screen.findByRole("button", { name: "Confirm retirement" });
+  confirm.focus();
+  fireEvent.click(confirm);
+  await screen.findByText(/Publication tracking retired/u);
+  await waitFor(() => expect(screen.getByLabelText("Title")).toHaveFocus());
+});
+
+it("moves focus to Check submission when publication ends uncertain, and to View issue once found", async () => {
+  const { props, request } = fixture(saved("preview"), "ready", { submit: "uncertain", found: true });
+  render(<IssueReportSettings {...props} />);
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  const create = await screen.findByRole("button", { name: "Create on GitHub" });
+  create.focus();
+  fireEvent.click(create);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Check submission" })).toHaveFocus());
+  fireEvent.click(screen.getByRole("button", { name: "Check submission" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "View issue" })).toHaveFocus());
+});
+
+it("keeps focus on Check submission while the issue is still not found", async () => {
+  const { props } = fixture(saved("uncertain"), "ready", { found: false });
+  render(<IssueReportSettings {...props} />);
+  const check = await screen.findByRole("button", { name: "Check submission" });
+  check.focus();
+  fireEvent.click(check);
+  await screen.findByText("No matching issue is visible yet.");
+  expect(screen.getByRole("button", { name: "Check submission" })).toHaveFocus();
+});
+
+it("explains a too-short description instead of disabling Preview issue", async () => {
+  const { props, request } = fixture();
+  render(<IssueReportSettings {...props} />);
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  const description = screen.getByLabelText("What happened");
+  expect(description).toHaveAttribute("aria-required", "true");
+  fireEvent.change(description, { target: { value: "Broken" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  const error = await screen.findByText("Describe what happened in at least 10 characters.");
+  expect(description).toHaveAttribute("aria-invalid", "true");
+  expect(description.getAttribute("aria-describedby")?.split(" ")).toContain(error.id);
+  expect(commands(request, "support.report.prepare")).toHaveLength(0);
+  fireEvent.change(description, { target: { value: "The chat fails after I cancel a running turn." } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  await screen.findByLabelText("Title");
+  expect(commands(request, "support.report.prepare")).toHaveLength(1);
+});
+
+it("explains a too-short title or body instead of disabling Create on GitHub", async () => {
+  const { props, request } = fixture(saved("preview"));
+  render(<IssueReportSettings {...props} />);
+  fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "" } });
+  const create = screen.getByRole("button", { name: "Create on GitHub" });
+  expect(create).toBeEnabled();
+  fireEvent.click(create);
+  const error = await screen.findByText("Add a title of at least 3 characters and a body of at least 10.");
+  expect(screen.getByLabelText("Title").getAttribute("aria-describedby")?.split(" ")).toContain(error.id);
+  expect(commands(request, "support.report.edit")).toHaveLength(0);
+  expect(commands(request, "support.report.submit")).toHaveLength(0);
+});
+
+it("shows the GitHub CLI notice under the card heading, before the form", async () => {
+  const { props } = fixture(null, "signed-out");
+  render(<IssueReportSettings {...props} />);
+  const notice = await screen.findByText(ISSUE_GITHUB_MESSAGES["signed-out"]);
+  expect(notice.compareDocumentPosition(screen.getByLabelText("What happened")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it.each(["Copy", "Open GitHub manually"])("scrubs private text before %s and asks for another look", async (name) => {
+  const { props } = fixture(saved("preview"));
+  render(<IssueReportSettings {...props} />);
+  fireEvent.change(await screen.findByLabelText("Body"), { target: { value: "It failed in /Users/me/secret-project today." } });
+  fireEvent.click(screen.getByRole("button", { name }));
+  await screen.findByText("Potential private information was removed. Review the issue before creating it.");
+  expect(screen.getByLabelText("Body")).toHaveValue("It failed in [private path] today.");
+  expect(bridge.copyText).not.toHaveBeenCalled();
+  expect(bridge.openExternal).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name }));
+  if (name === "Copy") await waitFor(() => expect(bridge.copyText).toHaveBeenCalledWith("Cancellation issue\n\nIt failed in [private path] today."));
+  else await waitFor(() => expect(new URL(bridge.openExternal.mock.calls[0]![0]).searchParams.get("body")).toBe("It failed in [private path] today."));
+});
+
+it("asks before replacing an edited preview when the form changed", async () => {
+  const { props, request } = fixture(saved("preview"));
+  render(<IssueReportSettings {...props} />);
+  fireEvent.change(await screen.findByLabelText("Body"), { target: { value: "My careful hand-written body text." } });
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await waitFor(() => expect(screen.getByLabelText("What happened")).toHaveFocus());
+  fireEvent.change(screen.getByLabelText("Steps to reproduce (optional)"), { target: { value: "Cancel twice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  const choice = await screen.findByRole("group", { name: "Replace your edited preview?" });
+  await waitFor(() => expect(choice).toHaveFocus());
+  expect(commands(request, "support.report.prepare")).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+  expect(await screen.findByLabelText("Body")).toHaveValue("My careful hand-written body text.");
+  expect(commands(request, "support.report.prepare")).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  fireEvent.change(await screen.findByLabelText("Steps to reproduce (optional)"), { target: { value: "Cancel twice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
+  await waitFor(() => expect(commands(request, "support.report.prepare")).toHaveLength(1));
+  expect(await screen.findByLabelText("Body")).toHaveValue(`## What happened\n\n${saved("preview").description}`);
+});
+
+it("uses the bug icon for Report an issue in the settings navigation", () => {
+  expect(SETTINGS_SECTIONS.find(({ id }) => id === "support")?.icon).toBe(Bug);
 });

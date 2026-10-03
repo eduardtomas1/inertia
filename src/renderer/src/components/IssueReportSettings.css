@@ -111,7 +111,7 @@
   margin-right: auto;
 }
 
-.issue-report-retire {
+.issue-report-confirm {
   display: grid;
   gap: 8px;
   padding: 11px 12px;
@@ -119,21 +119,21 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.issue-report-retire h4 {
+.issue-report-confirm h4 {
   margin: 0;
   color: var(--text);
   font-size: var(--ui-font-secondary);
   font-weight: 600;
 }
 
-.issue-report-retire p {
+.issue-report-confirm p {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
   line-height: 1.5;
 }
 
-.issue-report-retire:focus-visible {
+.issue-report-confirm:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -160,8 +160,18 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  margin: 0 0 14px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  line-height: 1.5;
 }
 
+.issue-report-error {
+  margin-top: -8px;
+  color: var(--danger);
+  font-size: var(--ui-font-micro);
+  line-height: 1.5;
+}
 .issue-report-github svg {
   flex: 0 0 auto;
   margin-top: 1px;
@@ -169,7 +179,7 @@
 }
 
 @media (forced-colors: active) {
-  .issue-report-retire {
+  .issue-report-confirm {
     border: 1px solid CanvasText;
   }
 }

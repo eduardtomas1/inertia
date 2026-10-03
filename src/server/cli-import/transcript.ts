@@ -69,8 +69,8 @@ function withoutWrappers(text: string): string {
 }
 
 function userProse(text: string, provider: CliProvider): string {
-  if (provider === "codex" && text.trim().startsWith("# AGENTS.md instructions")) return "";
   const prose = withoutWrappers(text).trim();
+  if (provider === "codex" && prose.startsWith("# AGENTS.md instructions")) return "";
   return /^\[Request interrupted by user[^\]]*\]$/u.test(prose) ? "" : prose;
 }
 

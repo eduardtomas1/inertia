@@ -181,4 +181,15 @@ describe("native CLI transcript projection", () => {
     const typed = parseCliTranscript(lines(meta, { type: "event_msg", payload: { type: "user_message", message: delegated } }, codex("assistant", "Done")), "codex", date);
     expect(typed.opening).toEqual({ user: "Refactor the export module", assistant: "Done" });
   });
+  it("drops Codex AGENTS.md context that arrives after injected wrapper blocks in the same request", () => {
+    const injected = { type: "response_item", timestamp: date, payload: { type: "message", role: "user", content: [
+      { type: "input_text", text: "<recommended_plugins>\n- Example (example@curated)\n</recommended_plugins>" },
+      { type: "input_text", text: "# AGENTS.md instructions for /workspace/project\n\n<INSTRUCTIONS>\nRules\n</INSTRUCTIONS>" },
+      { type: "input_text", text: "<environment_context>\n  <cwd>/workspace/project</cwd>\n</environment_context>" },
+    ] } };
+    const result = parseCliTranscript(lines(meta, injected, codex("user", "Fix the sidebar"), codex("assistant", "Fixed")), "codex", date);
+    expect(result.messages.map(({ role, content }) => [role, content])).toEqual([["user", "Fix the sidebar"], ["assistant", "Fixed"]]);
+    expect(result.title).toBe("Fix the sidebar");
+    expect(result.opening).toEqual({ user: "Fix the sidebar", assistant: "Fixed" });
+  });
 });

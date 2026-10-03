@@ -167,4 +167,18 @@ describe("native CLI transcript projection", () => {
     expect(title.length).toBeLessThanOrEqual(160);
     expect(words.startsWith(`${title} `)).toBe(true);
   });
+  it("unwraps Codex delegations to the delegated input and strips heartbeats", () => {
+    const delegated = "<codex_delegation><source_thread_id>01962fd7-1000-7000-8000-000000000001</source_thread_id><input>Refactor the\n  export module</input><note>x</note></codex_delegation>";
+    const result = parseCliTranscript(lines(meta,
+      codex("user", "<heartbeat>tick</heartbeat>"),
+      codex("user", delegated),
+      codex("assistant", "Refactored"),
+      codex("user", "<heartbeat interval=\"5\">tick</heartbeat>\nAnd the <code>tests</code>"),
+      codex("user", "<codex_delegation><source_thread_id>x</source_thread_id></codex_delegation>")), "codex", date);
+    expect(result.messages.map(({ role, content }) => [role, content])).toEqual([["user", "Refactor the\n  export module"], ["assistant", "Refactored"], ["user", "And the <code>tests</code>"]]);
+    expect(result.title).toBe("Refactor the export module");
+    expect(result.opening).toEqual({ user: "Refactor the export module", assistant: "Refactored" });
+    const typed = parseCliTranscript(lines(meta, { type: "event_msg", payload: { type: "user_message", message: delegated } }, codex("assistant", "Done")), "codex", date);
+    expect(typed.opening).toEqual({ user: "Refactor the export module", assistant: "Done" });
+  });
 });

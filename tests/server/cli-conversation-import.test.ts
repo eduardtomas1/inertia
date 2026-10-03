@@ -352,4 +352,19 @@ describe("CLI conversation import authority and persistence", () => {
       runtime.store.close();
     }
   });
+  it("keeps header reads on their own byte budget so large headers do not limit the scan", async () => {
+    const f = await fixture();
+    await utimes(f.file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+    for (let index = 0; index < 12; index += 1) {
+      const id = randomUUID();
+      await writeFile(join(f.sessions, `rollout-${id}.jsonl`), [
+        JSON.stringify({ type: "session_meta", payload: { id, cwd: f.other, model_provider: "openai", base_instructions: { text: "i".repeat(100 * 1024) } } }),
+        JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Other" }] } }),
+      ].join("\n"));
+    }
+    expect(await f.both({ bytes: 512 * 1024 }).scan("project", f.workspace, unowned)).toMatchObject({ limited: false, candidates: [{ title: "Continue the sidebar work" }] });
+    expect(await f.both({ headerBytes: 256 * 1024 }).scan("project", f.workspace, unowned)).toMatchObject({ limited: true, candidates: [] });
+    await rollouts(f, 2, f.workspace);
+    expect(await f.both({ bytes: 1 }).scan("project", f.workspace, unowned)).toMatchObject({ limited: true, candidates: [{ providerId: "codex" }] });
+  });
 });

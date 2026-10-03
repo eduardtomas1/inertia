@@ -16,8 +16,8 @@ const HEAD_CHUNK_BYTES = 16 * 1024;
 const HEAD_MAX_BYTES = 1024 * 1024;
 const MAX_CANDIDATES = 100;
 const GRANT_LIFETIME_MS = 10 * 60 * 1000;
-export interface CliScanLimits { entries: number; reads: number; bytes: number; milliseconds: number }
-const DEFAULT_SCAN_LIMITS: CliScanLimits = { entries: 3_000, reads: 1_000, bytes: 64 * 1024 * 1024, milliseconds: 5_000 };
+export interface CliScanLimits { entries: number; reads: number; headerBytes: number; bytes: number; milliseconds: number }
+const DEFAULT_SCAN_LIMITS: CliScanLimits = { entries: 3_000, reads: 1_000, headerBytes: 32 * 1024 * 1024, bytes: 64 * 1024 * 1024, milliseconds: 5_000 };
 interface Root { providerId: CliProvider; path: string }
 interface Grant { projectId: string; workspace: string; root: string; path: string; providerId: CliProvider; expiresAt: number }
 interface Found { grant: Grant; candidate: Omit<CliConversationCandidate, "id"> }
@@ -171,11 +171,12 @@ export class CliConversationDiscovery {
     let oversized = 0;
     let entries = 0;
     let reads = 0;
+    let headerBytes = 0;
     let bytes = 0;
     const deadline = Date.now() + this.limits.milliseconds;
     const exhausted = (): boolean => {
       this.signal?.throwIfAborted();
-      if (reads < this.limits.reads && bytes < this.limits.bytes && Date.now() < deadline && found.length < MAX_CANDIDATES) return false;
+      if (reads < this.limits.reads && headerBytes < this.limits.headerBytes && Date.now() < deadline) return false;
       limited = true;
       return true;
     };
@@ -212,8 +213,9 @@ export class CliConversationDiscovery {
       reads += 1;
       let head: { cwd: string | null; bytes: number };
       try { head = await readHead(file.root, file.path, providerId); } catch { continue; }
-      bytes += head.bytes;
+      headerBytes += head.bytes;
       if (!head.cwd || !await inWorkspace(head.cwd)) continue;
+      if (found.length >= MAX_CANDIDATES || bytes >= this.limits.bytes) { limited = true; break; }
       if (file.size > CLI_TRANSCRIPT_MAX_BYTES) { oversized += 1; skipped += 1; continue; }
       try {
         const read = await readTranscript(file.root, file.path);

@@ -34,7 +34,7 @@ export interface ParsedCliTranscript {
 
 const TITLE_MAX_TEXT = 160;
 const UNTITLED = "Untitled conversation";
-const WRAPPER_TAG = /<([a-z][a-z0-9]*(?:[-_][a-z0-9]+)+)(?:\s[^<>]*)?>/gu;
+const WRAPPER_TAG = /<([a-z][a-z0-9]*(?:[-_][a-z0-9]+)+|heartbeat)(?:\s[^<>]*)?>/gu;
 
 function excerpt(text: string, limit: number): string {
   const flat = text.replace(/\s+/gu, " ").trim();
@@ -43,19 +43,27 @@ function excerpt(text: string, limit: number): string {
   return (space > 0 ? flat.slice(0, space) : flat.slice(0, limit).replace(/[\uD800-\uDBFF]$/u, "")).trimEnd();
 }
 
+function delegatedInput(inner: string): string {
+  const open = /<input(?:\s[^<>]*)?>/u.exec(inner);
+  const close = inner.lastIndexOf("</input>");
+  if (!open || close < open.index + open[0].length) return "";
+  return withoutWrappers(inner.slice(open.index + open[0].length, close));
+}
+
 function withoutWrappers(text: string): string {
+  const pattern = new RegExp(WRAPPER_TAG);
   const unclosed = new Set<string>();
   let result = "";
   let copied = 0;
-  WRAPPER_TAG.lastIndex = 0;
-  for (let match = WRAPPER_TAG.exec(text); match; match = WRAPPER_TAG.exec(text)) {
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     const tag = match[1]!;
     if (unclosed.has(tag)) continue;
-    const closing = text.indexOf(`</${tag}>`, WRAPPER_TAG.lastIndex);
+    const closing = text.indexOf(`</${tag}>`, pattern.lastIndex);
     if (closing < 0) { unclosed.add(tag); continue; }
     result += text.slice(copied, match.index);
+    if (tag === "codex_delegation") result += delegatedInput(text.slice(pattern.lastIndex, closing));
     copied = closing + tag.length + 3;
-    WRAPPER_TAG.lastIndex = copied;
+    pattern.lastIndex = copied;
   }
   return result + text.slice(copied);
 }

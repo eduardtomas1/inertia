@@ -7,6 +7,7 @@ import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import type { CliConversationCandidate, CliConversationPreview, CliConversationScan, CliProvider } from "../../shared/cli-conversations";
 import { environmentValue, expandHomePath } from "../environment";
 import { acpEnvironmentSecretValues } from "../provider/acp-redaction";
+import type { CliSessionOwnership } from "../persistence/cli-conversation-import";
 import { RuntimeRequestError } from "../runtime-errors";
 import { parseCliTranscript, transcriptWorkspace, type ParsedCliTranscript } from "./transcript";
 
@@ -29,6 +30,7 @@ export function cliConversationRoots(environment: NodeJS.ProcessEnv = process.en
   };
   return [
     { providerId: "codex", path: join(root("CODEX_HOME", ".codex"), "sessions") },
+    { providerId: "codex", path: join(root("CODEX_HOME", ".codex"), "archived_sessions") },
     { providerId: "claude", path: join(root("CLAUDE_CONFIG_DIR", ".claude"), "projects") },
   ];
 }
@@ -63,16 +65,19 @@ async function readHead(root: string, path: string, provider: CliProvider): Prom
       head = Buffer.concat([head, chunk.subarray(0, bytesRead)]);
       const ended = bytesRead < chunk.length;
       const cwd = transcriptWorkspace(`${head.toString("utf8")}${ended ? "\n" : ""}`, provider);
-      if (cwd || ended) return { cwd, bytes: head.length };
+      if (cwd !== undefined || ended) return { cwd: cwd ?? null, bytes: head.length };
     }
     return { cwd: null, bytes: head.length };
   } finally { await handle.close(); }
 }
 
+class OversizedTranscript extends Error {}
+
 async function readTranscript(root: string, path: string): Promise<{ source: string; date: string; bytes: number; revision: string }> {
   const { handle, before, pinned } = await openTranscript(root, path);
   try {
-    if (before.size > CLI_TRANSCRIPT_MAX_BYTES || pinned.size !== before.size) throw new Error("Unsupported transcript file.");
+    if (before.size > CLI_TRANSCRIPT_MAX_BYTES || pinned.size > CLI_TRANSCRIPT_MAX_BYTES) throw new OversizedTranscript("Transcript is too large.");
+    if (pinned.size !== before.size) throw new Error("Transcript changed.");
     const buffer = Buffer.alloc(pinned.size + 1);
     let offset = 0;
     while (offset < buffer.length) {
@@ -103,7 +108,7 @@ export class CliConversationDiscovery {
     this.limits = { ...DEFAULT_SCAN_LIMITS, ...limits };
   }
 
-  scan(projectId: string, workspacePath: string, imported: (provider: CliProvider, sessionId: string) => string | null): Promise<CliConversationScan> {
+  scan(projectId: string, workspacePath: string, imported: (provider: CliProvider, sessionId: string) => CliSessionOwnership): Promise<CliConversationScan> {
     const key = `${projectId}\0${workspacePath}`;
     if (this.latest?.key === key) return this.latest.scan;
     const entry = { key, scan: this.queue.then(() => this.collect(projectId, workspacePath, imported)) };
@@ -113,7 +118,7 @@ export class CliConversationDiscovery {
     return entry.scan;
   }
 
-  private async collect(projectId: string, workspacePath: string, imported: (provider: CliProvider, sessionId: string) => string | null): Promise<CliConversationScan> {
+  private async collect(projectId: string, workspacePath: string, imported: (provider: CliProvider, sessionId: string) => CliSessionOwnership): Promise<CliConversationScan> {
     this.signal?.throwIfAborted();
     const workspace = await realpath(workspacePath);
     const resolved = new Map<string, Promise<boolean>>();
@@ -130,11 +135,15 @@ export class CliConversationDiscovery {
     const found: Found[] = [];
     let limited = false;
     let skipped = 0;
-    for (const source of this.roots) {
-      const result = await this.scanRoot(source, projectId, workspace, inWorkspace, imported);
+    let oversized = 0;
+    for (const providerId of ["codex", "claude"] as const) {
+      const roots = this.roots.filter((root) => root.providerId === providerId);
+      if (!roots.length) continue;
+      const result = await this.scanProvider(providerId, roots, projectId, workspace, inWorkspace, imported);
       found.push(...result.found);
       limited ||= result.limited;
       skipped += result.skipped;
+      oversized += result.oversized;
     }
     found.sort((left, right) => right.candidate.updatedAt.localeCompare(left.candidate.updatedAt, "en"));
     if (found.length > MAX_CANDIDATES) limited = true;
@@ -145,21 +154,21 @@ export class CliConversationDiscovery {
       return { id, ...candidate };
     });
     while (this.grants.size > 400) this.grants.delete(this.grants.keys().next().value!);
-    return { candidates, limited, skipped };
+    return { candidates, limited, skipped, oversized };
   }
 
-  private async scanRoot(
-    source: Root,
+  private async scanProvider(
+    providerId: CliProvider,
+    sources: readonly Root[],
     projectId: string,
     workspace: string,
     inWorkspace: (cwd: string) => Promise<boolean>,
-    imported: (provider: CliProvider, sessionId: string) => string | null,
-  ): Promise<{ found: Found[]; limited: boolean; skipped: number }> {
+    imported: (provider: CliProvider, sessionId: string) => CliSessionOwnership,
+  ): Promise<{ found: Found[]; limited: boolean; skipped: number; oversized: number }> {
     const found: Found[] = [];
     let limited = false;
     let skipped = 0;
-    let root: string;
-    try { root = await realpath(source.path); } catch { return { found, limited, skipped }; }
+    let oversized = 0;
     let entries = 0;
     let reads = 0;
     let bytes = 0;
@@ -170,49 +179,60 @@ export class CliConversationDiscovery {
       limited = true;
       return true;
     };
-    const codex = source.providerId === "codex";
-    const files: Array<{ path: string; mtime: number }> = [];
-    const pending = [{ path: root, depth: 0, mtime: 0 }];
-    while (pending.length && entries < this.limits.entries && !exhausted()) {
-      pending.sort(codex ? (a, b) => b.path.localeCompare(a.path, "en") : (a, b) => b.mtime - a.mtime);
-      const directory = pending.shift()!;
-      try {
-        if (relative(directory.path, await realpath(directory.path)) !== "") continue;
-        for await (const entry of await opendir(directory.path)) {
-          if (entries >= this.limits.entries) { limited = true; break; }
-          entries += 1;
-          if (exhausted()) break;
-          const path = join(directory.path, entry.name);
-          if (entry.isDirectory() && directory.depth < (codex ? 3 : 1)) pending.push({ path, depth: directory.depth + 1, mtime: codex ? 0 : (await lstat(path)).mtimeMs });
-          else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push({ path, mtime: (await lstat(path)).mtimeMs });
-        }
-      } catch { continue; }
+    const codex = providerId === "codex";
+    const files: Array<{ root: string; path: string; mtime: number; size: number }> = [];
+    for (const source of sources) {
+      let root: string;
+      try { root = await realpath(source.path); } catch { continue; }
+      const pending = [{ path: root, depth: 0, mtime: 0 }];
+      while (pending.length && entries < this.limits.entries && !exhausted()) {
+        pending.sort(codex ? (a, b) => b.path.localeCompare(a.path, "en") : (a, b) => b.mtime - a.mtime);
+        const directory = pending.shift()!;
+        try {
+          if (relative(directory.path, await realpath(directory.path)) !== "") continue;
+          for await (const entry of await opendir(directory.path)) {
+            if (entries >= this.limits.entries) { limited = true; break; }
+            entries += 1;
+            if (exhausted()) break;
+            const path = join(directory.path, entry.name);
+            if (entry.isDirectory() && directory.depth < (codex ? 3 : 1)) pending.push({ path, depth: directory.depth + 1, mtime: codex ? 0 : (await lstat(path)).mtimeMs });
+            else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+              const info = await lstat(path);
+              files.push({ root, path, mtime: info.mtimeMs, size: info.size });
+            }
+          }
+        } catch { continue; }
+      }
+      if (pending.length) limited = true;
     }
-    if (pending.length) limited = true;
     files.sort((left, right) => right.mtime - left.mtime);
     const seen = new Set<string>();
     for (const file of files) {
       if (exhausted()) break;
       reads += 1;
       let head: { cwd: string | null; bytes: number };
-      try { head = await readHead(root, file.path, source.providerId); } catch { continue; }
+      try { head = await readHead(file.root, file.path, providerId); } catch { continue; }
       bytes += head.bytes;
       if (!head.cwd || !await inWorkspace(head.cwd)) continue;
+      if (file.size > CLI_TRANSCRIPT_MAX_BYTES) { oversized += 1; skipped += 1; continue; }
       try {
-        const read = await readTranscript(root, file.path);
+        const read = await readTranscript(file.root, file.path);
         bytes += read.bytes;
-        const transcript = parseCliTranscript(read.source, source.providerId, read.date, this.secrets);
-        if (!await inWorkspace(transcript.cwd)) continue;
-        const key = transcript.sessionId;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const transcript = parseCliTranscript(read.source, providerId, read.date, this.secrets);
+        if (!await inWorkspace(transcript.cwd) || seen.has(transcript.sessionId)) continue;
+        seen.add(transcript.sessionId);
+        const ownership = imported(providerId, transcript.sessionId);
+        if (ownership.owned) continue;
         found.push({
-          grant: { projectId, workspace, root, path: file.path, providerId: source.providerId, expiresAt: Date.now() + GRANT_LIFETIME_MS },
-          candidate: { providerId: source.providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: imported(source.providerId, transcript.sessionId), opening: transcript.opening },
+          grant: { projectId, workspace, root: file.root, path: file.path, providerId, expiresAt: Date.now() + GRANT_LIFETIME_MS },
+          candidate: { providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId, opening: transcript.opening },
         });
-      } catch { skipped += 1; }
+      } catch (error) {
+        skipped += 1;
+        if (error instanceof OversizedTranscript) oversized += 1;
+      }
     }
-    return { found, limited, skipped };
+    return { found, limited, skipped, oversized };
   }
 
   async read(projectId: string, workspacePath: string, candidateId: string): Promise<ReadCliConversation> {

@@ -21,6 +21,7 @@ import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, 
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const directories: string[] = [];
+const unowned = () => ({ importedConversationId: null, owned: false });
 const stores: RuntimeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) store.close(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }); await cleanupTurnControllerTestDirectories(); });
 async function fixture() {
@@ -59,7 +60,7 @@ describe("CLI conversation import authority and persistence", () => {
     const f = await fixture();
     await writeFile(join(f.sessions, "other.jsonl"), f.content(f.other));
     await writeFile(join(f.sessions, "broken.jsonl"), "invalid\n");
-    const scan = await f.discovery.scan("project", f.workspace, () => null);
+    const scan = await f.discovery.scan("project", f.workspace, unowned);
     expect(scan.candidates).toHaveLength(1); expect(scan.skipped).toBe(0);
     const id = scan.candidates[0]!.id;
     const read = await f.discovery.read("project", f.workspace, id);
@@ -67,7 +68,7 @@ describe("CLI conversation import authority and persistence", () => {
     await expect(f.discovery.read("wrong-project", f.workspace, id)).rejects.toThrow(/expired/u);
     await expect(f.discovery.read("project", f.other, id)).rejects.toThrow(/changed/u);
     await expect(f.discovery.read("project", f.workspace, "../../file")).rejects.toThrow(/expired/u);
-    await f.discovery.scan("project", f.workspace, () => null);
+    await f.discovery.scan("project", f.workspace, unowned);
     await expect(f.discovery.read("project", f.workspace, id)).rejects.toThrow(/expired/u);
   });
   it.skipIf(process.platform === "win32")("refuses file and directory symlinks and a symlink swapped in after scanning", async () => {
@@ -75,7 +76,7 @@ describe("CLI conversation import authority and persistence", () => {
     await symlink(f.file, join(f.sessions, "linked.jsonl"));
     await symlink(f.other, join(f.sessions, "linked-directory"), "dir");
     await writeFile(join(f.other, "hidden.jsonl"), f.content());
-    const scan = await f.discovery.scan("project", f.workspace, () => null);
+    const scan = await f.discovery.scan("project", f.workspace, unowned);
     expect(scan.candidates).toHaveLength(1);
     await rm(f.file); await symlink(join(f.other, "hidden.jsonl"), f.file);
     await expect(f.discovery.read("project", f.workspace, scan.candidates[0]!.id)).rejects.toThrow(/no longer readable/u);
@@ -83,10 +84,10 @@ describe("CLI conversation import authority and persistence", () => {
   it("skips oversized files and cancels scans without publishing candidates", async () => {
     const f = await fixture();
     await truncate(f.file, CLI_TRANSCRIPT_MAX_BYTES + 1);
-    expect(await f.discovery.scan("project", f.workspace, () => null)).toMatchObject({ candidates: [], skipped: 1 });
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [], skipped: 1 });
     const controller = new AbortController(); controller.abort();
     const discovery = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions }], [], controller.signal);
-    await expect(discovery.scan("project", f.workspace, () => null)).rejects.toThrow();
+    await expect(discovery.scan("project", f.workspace, unowned)).rejects.toThrow();
   });
   it.each(["codex", "claude"] as const)("imports %s atomically, retains native resume identity and deduplicates after restart", async (providerId) => {
     const f = await fixture(); const dbPath = join(f.root, "inertia.sqlite");
@@ -94,7 +95,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId });
     const identity = continuationIdentityForSelection(selection, "native-fixture");
-    const input = { projectId: project.id, sourceKey: "a".repeat(64), providerId, sessionId: f.sessionId, title: "CLI session", messages: [{ role: "user" as const, content: "Earlier work", createdAt: "2099-09-25T10:00:00.000Z" }, { role: "assistant" as const, content: "Preserved order", createdAt: "2026-09-25T10:00:00.000Z" }, { role: "user" as const, content: "Same timestamp", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity: identity };
+    const input = { projectId: project.id, sourceKey: "a".repeat(64), providerId, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages: [{ role: "user" as const, content: "Earlier work", createdAt: "2099-09-25T10:00:00.000Z" }, { role: "assistant" as const, content: "Preserved order", createdAt: "2026-09-25T10:00:00.000Z" }, { role: "user" as const, content: "Same timestamp", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity: identity };
     const previous = store.shellSnapshot().activeConversationId;
     const conversationId = store.importCliConversation(input);
     expect(store.conversation(conversationId)).toMatchObject({ projectId: project.id, providerId, providerSessionId: f.sessionId, continuationIdentity: identity, accessMode: "supervised", interactionMode: "build" });
@@ -116,7 +117,7 @@ describe("CLI conversation import authority and persistence", () => {
     const providers = { resolveModelRoute: (selection: Parameters<ProviderManager["resolveModelRoute"]>[0]) => ({ continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") }) } as Pick<ProviderManager, "resolveModelRoute">;
     const handler = createCliConversationCommandHandler({ store, providers, discovery: f.discovery, send, broadcastSnapshot });
     const call = async (command: ClientCommand) => { await handler({} as WebSocket, command); return send.mock.lastCall?.[1] as ServerEvent; };
-    const candidate = (await f.discovery.scan(project.id, f.workspace, () => null)).candidates[0]!;
+    const candidate = (await f.discovery.scan(project.id, f.workspace, unowned)).candidates[0]!;
     const preview = await call({ type: "conversation.cli.preview", requestId: "preview", payload: { projectId: project.id, candidateId: candidate.id } });
     if (preview.type !== "request.result" || preview.result.kind !== "conversation.cli.preview") throw new Error("Missing preview");
     const command: ClientCommand = { type: "conversation.cli.import", requestId: "import", payload: { projectId: project.id, candidateId: candidate.id, revision: preview.result.preview.revision } };
@@ -136,7 +137,7 @@ describe("CLI conversation import authority and persistence", () => {
     const send = vi.fn(); const broadcastSnapshot = vi.fn();
     const providers = { resolveModelRoute: (selection: Parameters<ProviderManager["resolveModelRoute"]>[0]) => ({ continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") }) } as Pick<ProviderManager, "resolveModelRoute">;
     const handler = createCliConversationCommandHandler({ store, providers, discovery: f.discovery, send, broadcastSnapshot });
-    const candidate = (await f.discovery.scan(scratch.id, scratch.path, () => null)).candidates[0]!;
+    const candidate = (await f.discovery.scan(scratch.id, scratch.path, unowned)).candidates[0]!;
     for (const command of [
       { type: "conversation.cli.scan", requestId: "scan", payload: { projectId: scratch.id } },
       { type: "conversation.cli.import", requestId: "import", payload: { projectId: scratch.id, candidateId: candidate.id, revision: "a".repeat(64) } },
@@ -153,21 +154,21 @@ describe("CLI conversation import authority and persistence", () => {
     await writeFile(join(f.sessions, "other-large.jsonl"), f.content(f.other)); await truncate(join(f.sessions, "other-large.jsonl"), CLI_TRANSCRIPT_MAX_BYTES + 1);
     await writeFile(join(f.sessions, "missing-folder.jsonl"), f.content(join(f.root, "deleted")) + "\n{broken\n{}");
     await writeFile(join(f.sessions, "headerless.jsonl"), "invalid\n");
-    expect(await f.discovery.scan("project", f.workspace, () => null)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 0 });
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 0, oversized: 0 });
     await writeFile(join(f.sessions, "own-broken.jsonl"), `${f.content()}\n{broken\n{}`);
     await writeFile(join(f.sessions, "own-large.jsonl"), f.content()); await truncate(join(f.sessions, "own-large.jsonl"), CLI_TRANSCRIPT_MAX_BYTES + 1);
-    expect(await f.discovery.scan("project", f.workspace, () => null)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 2 });
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 2, oversized: 1 });
   });
   it("gives each provider its own scan budget so a large Codex history cannot hide Claude conversations", async () => {
     const f = await fixture();
     await rm(f.file);
     await rollouts(f, 6, f.other);
     await f.claude("project", f.workspace);
-    const scan = await f.both({ entries: 4 }).scan("project", f.workspace, () => null);
+    const scan = await f.both({ entries: 4 }).scan("project", f.workspace, unowned);
     expect(scan.limited).toBe(true);
     expect(scan.candidates.map(({ providerId, opening }) => [providerId, opening])).toEqual([["claude", { user: "Plan the Claude work", assistant: null }]]);
     await f.claude("project", f.workspace, randomUUID(), "Second Claude session");
-    const budgeted = await f.both({ bytes: 1 }).scan("project", f.workspace, () => null);
+    const budgeted = await f.both({ bytes: 1 }).scan("project", f.workspace, unowned);
     expect(budgeted.limited).toBe(true);
     expect(budgeted.candidates.map(({ providerId }) => providerId)).toEqual(["claude"]);
   });
@@ -175,7 +176,7 @@ describe("CLI conversation import authority and persistence", () => {
     const f = await fixture();
     await utimes(f.file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
     await rollouts(f, 3, f.other, 2 * 1024 * 1024);
-    const scan = await f.both({ bytes: 1024 * 1024 }).scan("project", f.workspace, () => null);
+    const scan = await f.both({ bytes: 1024 * 1024 }).scan("project", f.workspace, unowned);
     expect(scan).toMatchObject({ limited: false, skipped: 0, candidates: [{ providerId: "codex", opening: { user: "Continue the sidebar work", assistant: null } }] });
     expect(cliConversationScanSchema.parse(scan)).toEqual(scan);
   });
@@ -186,7 +187,7 @@ describe("CLI conversation import authority and persistence", () => {
     await utimes(join(f.claudeRoot, "a-older"), new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
     await utimes(join(f.claudeRoot, "z-newer"), new Date("2026-09-01T00:00:00Z"), new Date("2026-09-01T00:00:00Z"));
     const discovery = new CliConversationDiscovery([{ providerId: "claude", path: f.claudeRoot }], [], undefined, { entries: 3 });
-    const scan = await discovery.scan("project", f.workspace, () => null);
+    const scan = await discovery.scan("project", f.workspace, unowned);
     expect(scan.limited).toBe(true);
     expect(scan.candidates.map(({ title }) => title)).toEqual(["Newer session"]);
   });
@@ -198,7 +199,7 @@ describe("CLI conversation import authority and persistence", () => {
     await f.claude("via-real", f.workspace, randomUUID(), "Started in the real folder");
     const discovery = new CliConversationDiscovery([{ providerId: "claude", path: f.claudeRoot }], []);
     for (const workspace of [f.workspace, link]) {
-      const scan = await discovery.scan("project", workspace, () => null);
+      const scan = await discovery.scan("project", workspace, unowned);
       expect(scan.candidates.map(({ title }) => title).sort()).toEqual(["Started in the real folder", "Started through the link"]);
       await expect(discovery.read("project", workspace, scan.candidates[0]!.id)).resolves.toMatchObject({ providerId: "claude" });
     }
@@ -208,9 +209,9 @@ describe("CLI conversation import authority and persistence", () => {
     await f.claude("other", f.other);
     const discovery = f.both();
     const [first, duplicate, other] = await Promise.all([
-      discovery.scan("project", f.workspace, () => null),
-      discovery.scan("project", f.workspace, () => null),
-      discovery.scan("other", f.other, () => null),
+      discovery.scan("project", f.workspace, unowned),
+      discovery.scan("project", f.workspace, unowned),
+      discovery.scan("other", f.other, unowned),
     ]);
     expect(duplicate).toBe(first);
     expect(first.candidates.map(({ providerId }) => providerId)).toEqual(["codex"]);
@@ -225,7 +226,7 @@ describe("CLI conversation import authority and persistence", () => {
     expect(roots).toEqual([{ providerId: "claude", path: f.claudeRoot }]);
     await f.claude("project", f.workspace, CLAUDE_PROTOCOL_SESSION_ID);
     const discovery = new CliConversationDiscovery(roots, []);
-    const candidate = (await discovery.scan("project", f.workspace, () => null)).candidates[0]!;
+    const candidate = (await discovery.scan("project", f.workspace, unowned)).candidates[0]!;
     const sessionId = (await discovery.read("project", f.workspace, candidate.id)).transcript.sessionId;
     const options: Array<Record<string, unknown>> = [];
     const harness = createClaudeAgentSdkHarness({
@@ -250,7 +251,7 @@ describe("CLI conversation import authority and persistence", () => {
       const sessionId = randomUUID();
       const selection = providerNativeModelSelection({ providerId });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
-      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity });
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity });
       const unavailable = { reason: "provider-error", message: "The saved provider session is no longer available.", sessionUnavailable: true } as const;
       const label = providerId === "codex" ? "Codex" : "Claude Code";
       for (const content of ["Continue.", "Try again."]) {
@@ -268,6 +269,84 @@ describe("CLI conversation import authority and persistence", () => {
         expect(runtime.store.importedCliConversation(providerId, sessionId)).toBe(conversationId);
       }
       expect(runtime.controller.queue({ conversationId, content: "Once more." }).turn).toMatchObject({ providerSessionBefore: sessionId, continuationReasonCode: "same-continuation" });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+  it("lists imported sessions with their chat, hides sessions Inertia already owns, and records the transcript's cwd", async () => {
+    const f = await fixture(); const store = new RuntimeStore(join(f.root, "inertia.sqlite"), f.workspace); stores.push(store);
+    const project = store.createProject("Studio", f.workspace); const send = vi.fn();
+    const providers = { resolveModelRoute: (selection: Parameters<ProviderManager["resolveModelRoute"]>[0]) => ({ continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") }) } as Pick<ProviderManager, "resolveModelRoute">;
+    const handler = createCliConversationCommandHandler({ store, providers, discovery: f.discovery, send, broadcastSnapshot: vi.fn() });
+    const call = async (command: ClientCommand) => { await handler({} as WebSocket, command); const event = send.mock.lastCall?.[1] as ServerEvent; if (event.type !== "request.result") throw new Error("Missing result"); return event.result; };
+    const ownedId = randomUUID();
+    await writeFile(join(f.sessions, "owned.jsonl"), [JSON.stringify({ type: "session_meta", payload: { id: ownedId, cwd: f.workspace, model_provider: "openai" } }), JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Inertia's own chat" }] } })].join("\n"));
+    const own = store.createConversation(project.id, "Native chat", { providerId: "codex", model: "gpt-test", reasoningEffort: "high" });
+    store.updateConversation(own.id, { providerSessionId: ownedId });
+    const scan = await call({ type: "conversation.cli.scan", requestId: "scan", payload: { projectId: project.id } });
+    if (scan.kind !== "conversation.cli.scan") throw new Error("Missing scan");
+    expect(scan.scan.candidates.map(({ title, importedConversationId }) => [title, importedConversationId])).toEqual([["Continue the sidebar work", null]]);
+    const preview = await call({ type: "conversation.cli.preview", requestId: "preview", payload: { projectId: project.id, candidateId: scan.scan.candidates[0]!.id } });
+    if (preview.kind !== "conversation.cli.preview") throw new Error("Missing preview");
+    const imported = await call({ type: "conversation.cli.import", requestId: "import", payload: { projectId: project.id, candidateId: scan.scan.candidates[0]!.id, revision: preview.preview.revision } });
+    if (imported.kind !== "conversation.cli.imported") throw new Error("Missing import");
+    expect(store.cliConversationImport(imported.conversationId)).toEqual({ providerId: "codex", cwd: f.workspace });
+    const rescan = await call({ type: "conversation.cli.scan", requestId: "rescan", payload: { projectId: project.id } });
+    if (rescan.kind !== "conversation.cli.scan") throw new Error("Missing scan");
+    expect(rescan.scan.candidates.map(({ importedConversationId }) => importedConversationId)).toEqual([imported.conversationId]);
+    const again = await call({ type: "conversation.cli.preview", requestId: "again", payload: { projectId: project.id, candidateId: rescan.scan.candidates[0]!.id } });
+    if (again.kind !== "conversation.cli.preview") throw new Error("Missing preview");
+    expect(again.preview.candidate.importedConversationId).toBe(imported.conversationId);
+  });
+  it("skips Codex subagent rollouts from their header without reading them in full or counting them", async () => {
+    const f = await fixture();
+    await utimes(f.file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+    for (let index = 0; index < 3; index += 1) {
+      const id = randomUUID();
+      await writeFile(join(f.sessions, `rollout-${id}.jsonl`), [
+        JSON.stringify({ type: "session_meta", payload: { id, cwd: f.workspace, model_provider: "openai", source: { subagent: { thread_spawn: { parent_thread_id: f.sessionId } } } } }),
+        JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "x".repeat(2 * 1024 * 1024) }] } }),
+      ].join("\n"));
+    }
+    const scan = await f.both({ bytes: 1024 * 1024 }).scan("project", f.workspace, unowned);
+    expect(scan).toMatchObject({ limited: false, skipped: 0, oversized: 0, candidates: [{ title: "Continue the sidebar work" }] });
+  });
+  it("finds archived Codex sessions under the same budget", async () => {
+    const f = await fixture();
+    const codexHome = join(f.root, "codex-home");
+    const roots = cliConversationRoots({ CODEX_HOME: codexHome }).filter(({ providerId }) => providerId === "codex");
+    expect(roots.map(({ path }) => path)).toEqual([join(codexHome, "sessions"), join(codexHome, "archived_sessions")]);
+    await mkdir(join(codexHome, "archived_sessions"), { recursive: true });
+    await writeFile(join(codexHome, "archived_sessions", `rollout-${f.sessionId}.jsonl`), f.content(f.workspace, "Archived work"));
+    const discovery = new CliConversationDiscovery(roots, []);
+    const scan = await discovery.scan("project", f.workspace, unowned);
+    expect(scan.candidates.map(({ title }) => title)).toEqual(["Archived work"]);
+    await expect(discovery.read("project", f.workspace, scan.candidates[0]!.id)).resolves.toMatchObject({ providerId: "codex" });
+    expect((await new CliConversationDiscovery(roots, [], undefined, { entries: 0 }).scan("project", f.workspace, unowned)).candidates).toEqual([]);
+  });
+  it.skipIf(process.platform === "win32")("resumes an imported Claude session under the cwd spelling it was recorded with", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) });
+    try {
+      const checkout = runtime.store.conversationPath(runtime.conversationId);
+      const link = `${checkout}-link`;
+      await symlink(checkout, link, "dir");
+      const selection = providerNativeModelSelection({ providerId: "claude" });
+      const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
+      const projectId = runtime.store.conversation(runtime.conversationId).projectId;
+      const importChat = (cwd: string) => runtime.store.importCliConversation({ projectId, sourceKey: randomUUID().replaceAll("-", "").padEnd(64, "0"), providerId: "claude", sessionId: randomUUID(), cwd, title: "Imported", messages: [{ role: "user", content: "Earlier", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity });
+      const cwdFor = async (conversationId: string) => {
+        const queued = runtime.controller.queue({ conversationId, content: "Continue." });
+        runtime.controller.start(queued.turn.id);
+        const cwd = runtime.provider.input?.cwd;
+        runtime.provider.resolve({ status: "completed", sessionId: runtime.provider.input!.sessionId!, text: "" });
+        await flushTurnControllerTestPromises();
+        return cwd;
+      };
+      expect(await cwdFor(importChat(link))).toBe(link);
+      expect(await cwdFor(importChat(join(runtime.store.conversationPath(runtime.conversationId), "..", "elsewhere")))).toBe(checkout);
+      const stale = importChat(`${checkout}-gone`);
+      expect(await cwdFor(stale)).toBe(checkout);
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

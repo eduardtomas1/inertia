@@ -21,21 +21,21 @@ export function createCliConversationCommandHandler(deps: {
     const { projectId } = command.payload;
     if (deps.store.project(projectId).workspaceKind === "scratch") throw new RuntimeRequestError("Chats without a project cannot import CLI conversations.");
     const workspace = deps.store.projectPath(projectId);
-    const imported = (provider: "codex" | "claude", sessionId: string): string | null => deps.store.importedCliConversation(provider, sessionId);
+    const ownership = (provider: "codex" | "claude", sessionId: string) => deps.store.cliSessionOwnership(provider, sessionId);
     if (command.type === "conversation.cli.scan") {
-      const scan = await discovery.scan(projectId, workspace, imported);
+      const scan = await discovery.scan(projectId, workspace, ownership);
       deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.scan", scan } });
     } else {
       const value = await discovery.read(projectId, workspace, command.payload.candidateId);
       if (deps.store.projectPath(projectId) !== workspace) throw new RuntimeRequestError("The project changed. Scan again.");
       if (command.type === "conversation.cli.preview") {
-        deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.preview", preview: discovery.preview(command.payload.candidateId, value, imported(value.providerId, value.transcript.sessionId)) } });
+        deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.preview", preview: discovery.preview(command.payload.candidateId, value, ownership(value.providerId, value.transcript.sessionId).importedConversationId) } });
       } else {
         if (value.revision !== command.payload.revision) throw new RuntimeRequestError("The CLI conversation changed since your preview. Preview it again before importing.");
         const selection = providerNativeModelSelection({ providerId: value.providerId });
         const route = deps.providers.resolveModelRoute(selection);
         const conversationId = deps.store.importCliConversation({
-          projectId, sourceKey: value.sourceKey, providerId: value.providerId, sessionId: value.transcript.sessionId,
+          projectId, sourceKey: value.sourceKey, providerId: value.providerId, sessionId: value.transcript.sessionId, cwd: value.transcript.cwd,
           title: value.transcript.title, messages: value.transcript.messages,
           selection, continuationIdentity: route.continuationIdentity,
         });

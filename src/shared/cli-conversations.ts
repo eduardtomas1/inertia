@@ -30,6 +30,7 @@ export const cliConversationScanSchema = z.object({
   candidates: z.array(cliConversationCandidateSchema).max(100),
   limited: z.boolean(),
   skipped: z.number().int().nonnegative(),
+  oversized: z.number().int().nonnegative(),
 }).strict();
 export type CliConversationScan = z.infer<typeof cliConversationScanSchema>;
 export const cliConversationPreviewSchema = z.object({

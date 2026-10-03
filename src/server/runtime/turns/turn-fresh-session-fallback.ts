@@ -29,7 +29,7 @@ export function importedSessionUnavailableMessage(
   active: ActiveTurn,
   result: ProviderRunResult,
 ): string | null {
-  const provider = providerSessionUnavailable(result) ? store.cliConversationImportProvider(active.conversation.id) : null;
+  const provider = providerSessionUnavailable(result) ? store.cliConversationImport(active.conversation.id)?.providerId : null;
   return provider ? `The original ${cliProviderLabel(provider)} session for this imported chat is no longer available.` : null;
 }
 
@@ -37,7 +37,7 @@ export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,
 ): void {
-  if (store.cliConversationImportProvider(active.conversation.id)) return;
+  if (store.cliConversationImport(active.conversation.id)) return;
   active.sessionAfter = null;
   store.updateConversation(active.conversation.id, {
     providerSessionId: null,
@@ -63,7 +63,7 @@ export function applyFreshSessionFallback(
     || active.reasoningId !== null
     || active.approvalIds.size > 0
     || active.inputIds.size > 0
-    || store.cliConversationImportProvider(active.conversation.id) !== null
+    || store.cliConversationImport(active.conversation.id) !== null
     || store.turnLedgerRepository.turnHasProviderActivity(
       active.conversation.id,
       active.turn.id,

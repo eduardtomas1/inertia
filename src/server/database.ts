@@ -1,6 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
-import { cliConversationImportProvider, importedCliConversation, importCliConversation, type CliConversationImportInput } from "./persistence/cli-conversation-import";
+import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
 import Database from "better-sqlite3";
@@ -419,7 +419,8 @@ export class RuntimeStore {
   createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
   importedCliConversation(providerId: "codex" | "claude", sessionId: string): string | null { return importedCliConversation(this.database, providerId, sessionId); }
   importCliConversation(input: CliConversationImportInput): string { return importCliConversation(this.database, this.conversationRepository, this.transcriptRepository, input); }
-  cliConversationImportProvider(conversationId: string): "codex" | "claude" | null { return cliConversationImportProvider(this.database, conversationId); }
+  cliConversationImport(conversationId: string): { providerId: "codex" | "claude"; cwd: string } | null { return cliConversationImport(this.database, conversationId); }
+  cliSessionOwnership(providerId: "codex" | "claude", sessionId: string): CliSessionOwnership { return cliSessionOwnership(this.database, providerId, sessionId); }
   createPairedConversations(
     launchId: string,
     sides: readonly [DuoConversationPlan, DuoConversationPlan],

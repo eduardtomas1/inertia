@@ -9,6 +9,7 @@ export interface CliConversationImportInput {
   sourceKey: string;
   providerId: CliProvider;
   sessionId: string;
+  cwd: string;
   title: string;
   messages: readonly CliMessage[];
   selection: ModelSelection;
@@ -24,10 +25,20 @@ export function importedCliConversation(database: Database.Database, providerId:
   return resumed?.id ?? null;
 }
 
-export function cliConversationImportProvider(database: Database.Database, conversationId: string): CliProvider | null {
-  const imported = database.prepare("SELECT provider_id FROM cli_conversation_imports WHERE conversation_id = ?")
-    .get(conversationId) as { provider_id: CliProvider } | undefined;
-  return imported?.provider_id ?? null;
+export interface CliSessionOwnership { importedConversationId: string | null; owned: boolean }
+
+export function cliSessionOwnership(database: Database.Database, providerId: CliProvider, sessionId: string): CliSessionOwnership {
+  const imported = database.prepare("SELECT conversation_id FROM cli_conversation_imports WHERE provider_id = ? AND session_id = ?")
+    .get(providerId, sessionId) as { conversation_id: string } | undefined;
+  if (imported) return { importedConversationId: imported.conversation_id, owned: false };
+  const owned = database.prepare("SELECT 1 FROM conversations WHERE provider_id = ? AND provider_session_id = ? LIMIT 1").get(providerId, sessionId);
+  return { importedConversationId: null, owned: owned !== undefined };
+}
+
+export function cliConversationImport(database: Database.Database, conversationId: string): { providerId: CliProvider; cwd: string } | null {
+  const imported = database.prepare("SELECT provider_id, cwd FROM cli_conversation_imports WHERE conversation_id = ?")
+    .get(conversationId) as { provider_id: CliProvider; cwd: string } | undefined;
+  return imported ? { providerId: imported.provider_id, cwd: imported.cwd } : null;
 }
 
 export function importCliConversation(
@@ -53,8 +64,8 @@ export function importCliConversation(
     }
     for (const message of ordered) transcripts.createMessage(conversation.id, message.content, message.role, [], null, message.createdAt, { activateConversation: false });
     conversations.update(conversation.id, { providerSessionId: input.sessionId, continuationIdentity: input.continuationIdentity });
-    database.prepare("INSERT INTO cli_conversation_imports (source_key, provider_id, session_id, conversation_id, imported_at) VALUES (?, ?, ?, ?, ?)")
-      .run(input.sourceKey, input.providerId, input.sessionId, conversation.id, importedAt);
+    database.prepare("INSERT INTO cli_conversation_imports (source_key, provider_id, session_id, cwd, conversation_id, imported_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(input.sourceKey, input.providerId, input.sessionId, input.cwd, conversation.id, importedAt);
     return conversation.id;
   })();
 }

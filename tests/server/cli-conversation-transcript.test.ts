@@ -80,7 +80,8 @@ describe("native CLI transcript projection", () => {
   it("bounds retained text, keeps recent messages and reports omissions", () => {
     const result = parseCliTranscript(lines(meta, ...Array.from({ length: 205 }, (_, index) => codex("user", `Message ${index}`))), "codex", date);
     expect(result.messages).toHaveLength(200);
-    expect(result.messages[0]?.content).toBe("Message 5");
+    expect(result.messages.slice(0, 2).map(({ content }) => content)).toEqual(["Message 0", "Message 6"]);
+    expect(result.messages.at(-1)?.content).toBe("Message 204");
     expect(result.omittedMessages).toBe(5);
     const large = parseCliTranscript(lines(meta, ...Array.from({ length: 20 }, () => codex("assistant", "x".repeat(40_000)))), "codex", date);
     expect(large.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0)).toBeLessThanOrEqual(256 * 1024);
@@ -91,5 +92,79 @@ describe("native CLI transcript projection", () => {
       expect(() => parseCliTranscript(lines({ ...meta, payload }, codex("user", "Hello")), "codex", date)).toThrow();
     }
     expect(() => parseCliTranscript(lines(claude("u1", null, "user", "Hello"), { ...claude("a1", "u1", "assistant", "No"), sessionId: "different" }), "claude", date)).toThrow(/identity/u);
+  });
+  it("drops injected Codex context blocks and keeps real prose around them", () => {
+    const result = parseCliTranscript(lines(meta,
+      codex("user", "<recommended_plugins>\n- plugin\n</recommended_plugins>"),
+      codex("user", "<codex_internal_context source=\"x\">state</codex_internal_context>\n<user_action>open</user_action>"),
+      codex("user", "<in-app-browser-context>page</in-app-browser-context> <external_codex_apps_open_page>app</external_codex_apps_open_page>"),
+      codex("user", "<environment_context><cwd>/workspace</cwd></environment_context>"),
+      codex("user", "<user_action>clicked</user_action>\nFix the <b>bold</b> header"),
+      codex("assistant", "Fixed it")), "codex", date);
+    expect(result.messages.map(({ content }) => content)).toEqual(["Fix the <b>bold</b> header", "Fixed it"]);
+    expect(result.title).toBe("Fix the <b>bold</b> header");
+  });
+  it("prefers what the Codex user typed over the injected response copy of the same turn", () => {
+    const result = parseCliTranscript(lines(meta,
+      codex("user", "<environment_context>ctx</environment_context>"),
+      codex("user", "# AGENTS.md instructions for /workspace\n\nRules"),
+      codex("user", "<recommended_plugins>p</recommended_plugins>\nShip the export"),
+      { type: "event_msg", payload: { type: "user_message", message: "Ship the export" } },
+      codex("assistant", "Shipped"),
+      { type: "event_msg", payload: { type: "user_message", message: "" } },
+      codex("assistant", "Image reviewed"),
+      { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } }), "codex", date);
+    expect(result.messages.map(({ role, content }) => [role, content])).toEqual([["user", "Ship the export"], ["assistant", "Shipped"]]);
+  });
+  it("drops Claude slash-command markup, reminders, notifications, interruptions, compact summaries and synthetic API errors", () => {
+    const result = parseCliTranscript(lines(
+      claude("u1", null, "user", "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"),
+      claude("u2", "u1", "user", "<local-command-stdout>cleared</local-command-stdout>"),
+      claude("u3", "u2", "user", [{ type: "text", text: "<system-reminder>Be careful</system-reminder>" }]),
+      claude("u4", "u3", "user", "<task-notification><status>done</status></task-notification>"),
+      claude("u5", "u4", "user", "<system-reminder>context</system-reminder>\nReview the parser"),
+      claude("a1", "u5", "assistant", [{ type: "text", text: "Reviewed" }]),
+      { ...claude("a2", "a1", "assistant", [{ type: "text", text: "API Error: 500" }]), isApiErrorMessage: true },
+      { ...claude("a3", "a2", "assistant", "Synthetic"), message: { role: "assistant", model: "<synthetic>", content: "Synthetic" } },
+      claude("u6", "a3", "user", "[Request interrupted by user]"),
+      { ...claude("u7", "u6", "user", "This session is being continued"), isCompactSummary: true },
+      claude("u8", "u7", "user", "Thanks")), "claude", date);
+    expect(result.messages.map(({ content }) => content)).toEqual(["Review the parser", "Reviewed", "Thanks"]);
+    expect(result.title).toBe("Review the parser");
+    expect(result.opening).toEqual({ user: "Review the parser", assistant: "Reviewed" });
+  });
+  it("follows a Claude compaction boundary back to the earlier history", () => {
+    const result = parseCliTranscript(lines(
+      claude("u1", null, "user", "Build the importer"), claude("a1", "u1", "assistant", "Built"),
+      claude("u2", "a1", "user", "Add paging"), claude("a2", "u2", "assistant", "Paged"),
+      { type: "system", subtype: "compact_boundary", uuid: "b1", parentUuid: null, logicalParentUuid: "a2", sessionId, cwd: "/workspace/project", timestamp: date },
+      { ...claude("s1", "b1", "user", "This session is being continued from a previous conversation"), isCompactSummary: true },
+      claude("u3", "s1", "user", "Now add tests"), claude("a3", "u3", "assistant", "Added")), "claude", date);
+    expect(result.messages.map(({ content }) => content)).toEqual(["Build the importer", "Built", "Add paging", "Paged", "Now add tests", "Added"]);
+    expect(result.title).toBe("Build the importer");
+    expect(result.opening).toEqual({ user: "Build the importer", assistant: "Built" });
+  });
+  it("titles from the provider's own records first, then the first real prompt, then the first reply", () => {
+    const base = [claude("u1", null, "user", "First   real\nprompt"), claude("a1", "u1", "assistant", "Reply")];
+    const named = (...records: unknown[]) => parseCliTranscript(lines(...base, ...records), "claude", date).title;
+    const custom = { type: "custom-title", customTitle: "Renamed by me", sessionId };
+    const generated = { type: "ai-title", aiTitle: "Generated title", sessionId };
+    const summary = { type: "summary", summary: "Summary title", leafUuid: "a1" };
+    expect(named(summary, generated, custom)).toBe("Renamed by me");
+    expect(named(summary, generated)).toBe("Generated title");
+    expect(named(summary)).toBe("Summary title");
+    expect(named()).toBe("First real prompt");
+    expect(named({ type: "custom-title", customTitle: "Uses sk-" + "c".repeat(40), sessionId })).toContain("redacted");
+    expect(parseCliTranscript(lines(meta, codex("user", "Prompt"), { type: "event_msg", payload: { type: "thread_name_updated", thread_name: "Codex thread name" } }), "codex", date).title).toBe("Codex thread name");
+    const replyOnly = parseCliTranscript(lines(meta, codex("user", "<user_action>x</user_action>"), codex("assistant", "Only the assistant spoke")), "codex", date);
+    expect(replyOnly.title).toBe("Only the assistant spoke");
+    expect(replyOnly.opening).toEqual({ user: "Only the assistant spoke", assistant: null });
+    expect(parseCliTranscript(lines(meta, codex("assistant", "\u0001\u0002"), codex("user", "Real")), "codex", date).messages.map(({ content }) => content)).toEqual(["Real"]);
+  });
+  it("cuts long titles at a word boundary", () => {
+    const words = Array.from({ length: 60 }, (_, index) => `word${index}`).join(" ");
+    const title = parseCliTranscript(lines(meta, codex("user", words)), "codex", date).title;
+    expect(title.length).toBeLessThanOrEqual(160);
+    expect(words.startsWith(`${title} `)).toBe(true);
   });
 });

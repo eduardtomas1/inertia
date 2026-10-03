@@ -88,6 +88,15 @@ describe("issue reports", () => {
     for (const value of ["password", "/home", "secrets", "PRIVATE", process.cwd()]) expect(JSON.stringify(report)).not.toContain(value);
   });
 
+  it("shortens a long first line into a title at a word boundary", () => {
+    const { snapshot } = setup();
+    const description = `${"Sending the next message after cancelling a running chat leaves it waiting ".repeat(3)}forever.\nMore detail.`;
+    const report = newIssueReport({ ...input, description }, { snapshot: snapshot(), providers: [], host });
+    expect(report.title).toBe("Sending the next message after cancelling a running chat leaves it waiting Sending the next message after cancelling a…");
+    expect(report.title.length).toBeLessThanOrEqual(120);
+    expect(newIssueReport({ ...input, description: "Short title line.\nBody" }, { snapshot: snapshot(), providers: [], host }).title).toBe("Short title line.");
+  });
+
   it("uses the installed provider version when it is safe", () => {
     const { snapshot } = setup();
     expect(collectIssueEnvironment({ ...input, providerId: "codex" }, { snapshot: snapshot(), providers: [{ id: "codex", version: "0.46.0" } as ProviderInfo], host })).toContain("- Provider: codex 0.46.0");

@@ -1,97 +1,162 @@
 // @inertia-e2e-resource isolated
-import { expect, test } from "@playwright/test";
-import { createAppFixture } from "./support/app-fixture";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { setAppearanceInPlace } from "./support/appearance";
 
-test("preserves the private report chat and requires a reviewed preview before publication", async ({ browserName: _browserName }, testInfo) => {
-  const app = await createAppFixture({ name: "issue-report", initialState: "conversation" });
+const FIXED_NOW = Date.parse("2026-10-03T16:20:00.000Z");
+
+async function capture(page: Page, info: TestInfo, name: string): Promise<void> {
+  const path = info.outputPath(`${name}.png`);
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.screenshot({ path, animations: "disabled" });
+  await info.attach(name, { path, contentType: "image/png" });
+}
+
+async function openReport(app: AppFixture): Promise<void> {
+  await app.page.clock.setFixedTime(FIXED_NOW);
+  await app.page.getByRole("button", { name: "Settings", exact: true }).click();
+  await app.page.getByRole("button", { name: "Report an issue", exact: true }).click();
+  await expect(app.page.getByLabel("What happened")).toBeEnabled();
+}
+
+async function expectLayoutHolds(app: AppFixture): Promise<void> {
+  await app.expectNoViewportOverflow();
+  const layout = await app.page.locator(".issue-report").evaluate((element) => {
+    const content = element.closest(".settings-content")!.getBoundingClientRect();
+    const report = element.getBoundingClientRect();
+    const outside = [...element.querySelectorAll("button, input, textarea, select")].flatMap((control) => {
+      const rect = control.getBoundingClientRect();
+      return rect.width === 0 || (rect.left >= report.left - 1 && rect.right <= report.right + 1) ? [] : [control.textContent || control.getAttribute("aria-label") || control.tagName];
+    });
+    const nested = [...element.querySelectorAll("button")].filter((button) => button.parentElement?.closest("button")).length;
+    return { inside: report.left >= content.left - 1 && report.right <= content.right + 1, width: content.width, outside, nested };
+  });
+  expect(layout.inside).toBe(true);
+  expect(layout.width).toBeLessThanOrEqual(810);
+  expect(layout.outside).toEqual([]);
+  expect(layout.nested).toBe(0);
+}
+
+async function expectAlignedRow(page: Page, selector: string): Promise<void> {
+  await page.mouse.move(0, 0);
+  await expect.poll(() => page.locator(selector).first().evaluate((row) => {
+    const centres = [...row.querySelectorAll(":scope > button")].map((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.top + rect.height / 2;
+    });
+    return Math.max(...centres) - Math.min(...centres);
+  })).toBeLessThan(0.5);
+}
+
+test("writes a plain report, previews the exact public issue and keeps it reviewable", async ({ browserName: _browserName }, info) => {
+  test.setTimeout(150_000);
+  const app = await createAppFixture({
+    name: "issue-report",
+    initialState: "conversation",
+    beforeLaunch: async ({ testDirectory }) => {
+      portableNodeExecutable(join(testDirectory, "provider-bin"), "gh");
+      await writeFile(join(testDirectory, "data", "auth"), "process.exit(0);\n", "utf8");
+    },
+  });
   const page = app.page;
   try {
-    await app.resizeWindow(1440, 1050);
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
-    for (const theme of ["Dark", "Light"]) {
-      await page.getByRole("button", { name: "General", exact: true }).click();
-      await page.getByRole("radio", { name: theme, exact: true }).click();
-      await page.getByRole("button", { name: "Report an issue", exact: true }).click();
-      await expect(page.getByLabel("What happened?")).toBeEnabled();
-      await app.expectNoViewportOverflow();
-      const layout = await page.locator(".issue-report").evaluate((element) => {
-        const content = element.closest(".settings-content")!.getBoundingClientRect();
-        const report = element.getBoundingClientRect();
-        const primary = element.querySelector(".issue-report-create-actions .primary-button")!.getBoundingClientRect();
-        const field = element.querySelector("textarea")!.getBoundingClientRect();
-        return { left: report.left - content.left, right: content.right - report.right, aligned: Math.abs(field.right - primary.right) < 1 };
-      });
-      expect(layout.left).toBeGreaterThanOrEqual(20);
-      expect(layout.right).toBeGreaterThanOrEqual(20);
-      expect(layout.aligned).toBe(true);
-      const path = testInfo.outputPath(`issue-report-${theme.toLowerCase()}.png`);
-      await page.screenshot({ path, animations: "disabled" });
-      await testInfo.attach(`issue-report-${theme.toLowerCase()}`, { path, contentType: "image/png" });
-    }
-    // Settings menus must stay in Chromium's top layer on Linux too.
-    for (const name of ["Report agent and model", "Report reasoning", "Diagnostic scope"]) {
-      const control = page.getByRole("combobox", { name, exact: true });
-      await expect(control).toHaveCSS("appearance", "base-select");
-      if (await control.isDisabled()) continue;
-      await control.click();
-      await expect.poll(() => control.evaluate((element) => element.matches(":open"))).toBe(true);
-      await expect(control.getByRole("option").last()).toBeVisible();
-      if (name === "Diagnostic scope") {
-        const picker = testInfo.outputPath("issue-report-scope-picker.png");
-        await page.screenshot({ path: picker, animations: "disabled" });
-        await testInfo.attach("In-page issue-report picker", { path: picker, contentType: "image/png" });
-      }
-      await page.keyboard.press("Escape");
-      await expect(control).toBeFocused();
-    }
-    await page.getByLabel("What happened?").fill("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start normally. Steps: start a turn, cancel it, then send another message.");
-    const form = testInfo.outputPath("issue-report-describe.png");
-    await page.screenshot({ path: form, animations: "disabled" });
-    await testInfo.attach("Report description and controls", { path: form, contentType: "image/png" });
-    await page.getByRole("button", { name: "Create private report chat" }).click();
-    await expect(page.getByLabel("Private report chat")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Edit issue preview" }).click();
-    await page.getByLabel("Issue title").fill("Cancelled chat remains waiting on the next message");
-    await page.getByRole("button", { name: "Save and review preview" }).click();
-    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toBeEnabled();
-    const actionAlignment = await page.locator(".issue-report-publication-actions").evaluate((element) => {
-      const primary = element.querySelector(".primary-button")!.getBoundingClientRect();
-      const secondary = element.querySelector(".secondary-button")!.getBoundingClientRect();
-      return Math.abs(primary.top + primary.height / 2 - secondary.top - secondary.height / 2);
+    await app.resizeWindow(1440, 920);
+    await openReport(app);
+    await expect(page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 })).toBeVisible();
+    await expect(page.getByLabel("Steps to reproduce (optional)")).toBeEnabled();
+    await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Preview issue" })).toBeDisabled();
+    const provider = page.getByRole("combobox", { name: "Provider", exact: true });
+    await expect(provider).toHaveCSS("appearance", "base-select");
+    await provider.click();
+    await expect.poll(() => provider.evaluate((element) => element.matches(":open"))).toBe(true);
+    await expect(provider.getByRole("option", { name: "Not sure" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(provider).toBeFocused();
+    const form = await page.locator(".issue-report").evaluate((element) => {
+      const field = element.querySelector("textarea")!.getBoundingClientRect();
+      const primary = element.querySelector(".issue-report-actions .primary-button")!.getBoundingClientRect();
+      const storage = [...document.querySelectorAll("button")].find((button) => button.textContent === "View storage & backups")!.getBoundingClientRect();
+      return { aligned: Math.abs(field.right - primary.right) < 1, below: storage.top > element.getBoundingClientRect().bottom };
     });
-    expect(actionAlignment).toBeLessThan(1);
-    await expect(page.locator(".issue-report-footer").getByRole("button", { name: "Start another draft" })).toBeVisible();
+    expect(form).toEqual({ aligned: true, below: true });
+    await expect(page.locator(".issue-report-github")).toHaveCount(0);
+    await expectLayoutHolds(app);
+    for (const theme of ["light", "dark"] as const) {
+      await setAppearanceInPlace(app, theme);
+      await capture(page, info, `issue-report-form-${theme}-wide`);
+    }
+    await app.resizeWindow(1000, 800);
+    await expectLayoutHolds(app);
+    for (const theme of ["light", "dark"] as const) {
+      await setAppearanceInPlace(app, theme);
+      await capture(page, info, `issue-report-form-${theme}-narrow`);
+    }
+    await app.resizeWindow(760, 600);
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-form-dark-760x600");
+
+    await app.resizeWindow(1440, 920);
+    await page.getByLabel("What happened").fill("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start normally.");
+    await page.getByLabel("Steps to reproduce (optional)").fill("1. Start a turn\n2. Cancel it\n3. Send another message");
+    await provider.selectOption("claude");
+    await page.getByRole("button", { name: "Preview issue" }).click();
+    await expect(page.getByLabel("Title")).toBeFocused();
+    await expect(page.getByLabel("Title")).toHaveValue("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start…");
+    const body = page.getByLabel("Body");
+    await expect(body).toHaveValue(/## Steps to reproduce\n\n1\. Start a turn\n2\. Cancel it\n3\. Send another message/u);
+    await expect(body).toHaveValue(/## Environment\n\n- Inertia: \S+ \((?:stable|canary)\)\n- OS: /u);
+    await expect(body).toHaveValue(/- Provider: claude /u);
+    await expect(body).toHaveValue(/## Diagnostics\n\n/u);
+    await expect(page.getByRole("button", { name: "Create on GitHub" })).toBeEnabled();
+    await expectAlignedRow(page, ".issue-report-actions");
     await page.getByRole("button", { name: "Open GitHub manually" }).focus();
     await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toBeFocused();
-    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toHaveCSS("outline-style", "solid");
-    const chat = testInfo.outputPath("issue-report-chat.png");
-    await page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 }).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: chat, animations: "disabled" });
-    await testInfo.attach("Saved private report chat", { path: chat, contentType: "image/png" });
-    await page.getByRole("heading", { name: "Public issue preview", exact: true }).evaluate((element) => element.scrollIntoView({ block: "start" }));
-    const preview = testInfo.outputPath("issue-report-preview.png");
-    await page.screenshot({ path: preview, animations: "disabled" });
-    await testInfo.attach("Reviewed public issue preview", { path: preview, contentType: "image/png" });
-    // External publication is exercised with mocks in the server tests, never this real desktop.
+    await expect(page.getByRole("button", { name: "Create on GitHub" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Create on GitHub" })).toHaveCSS("outline-style", "solid");
+    await page.getByLabel("Title").fill("Cancelled chat stays waiting on the next message");
+    await expectLayoutHolds(app);
+    for (const theme of ["light", "dark"] as const) {
+      await setAppearanceInPlace(app, theme);
+      await capture(page, info, `issue-report-preview-${theme}-wide`);
+    }
+    await page.locator(".issue-report").getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page.getByLabel("What happened")).toBeFocused();
+    await expect(page.getByLabel("What happened")).toHaveValue(/^After cancelling a running chat/u);
+    await page.getByRole("button", { name: "Preview issue" }).click();
+    await expect(page.getByLabel("Title")).toHaveValue("Cancelled chat stays waiting on the next message");
+
     await page.getByRole("button", { name: "Providers", exact: true }).click();
     await page.getByRole("button", { name: "Report an issue", exact: true }).click();
-    await expect(page.getByText("Cancelled chat remains waiting on the next message", { exact: true })).toBeVisible();
-    await app.resizeWindow(900, 850);
-    await app.expectNoViewportOverflow();
-    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toBeEnabled();
-    const overflowing = await page.locator(".issue-report").evaluate((element) => {
-      const container = element.getBoundingClientRect();
-      return [...element.querySelectorAll("button, input, textarea, select")].flatMap((control) => {
-        const rect = control.getBoundingClientRect();
-        return rect.width === 0 || rect.left >= container.left - 1 && rect.right <= container.right + 1 ? []
-          : [{ text: control.textContent, left: rect.left, right: rect.right, container: [container.left, container.right] }];
-      });
-    });
-    const narrow = testInfo.outputPath("issue-report-narrow.png");
-    await page.screenshot({ path: narrow, animations: "disabled" });
-    await testInfo.attach("issue-report-narrow", { path: narrow, contentType: "image/png" });
-    expect(overflowing).toEqual([]);
+    await expect(page.getByLabel("Title")).toHaveValue("Cancelled chat stays waiting on the next message");
+    await app.resizeWindow(1000, 800);
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-preview-dark-narrow");
+    await app.resizeWindow(760, 600);
+    await expectLayoutHolds(app);
+    await capture(page, info, "issue-report-preview-dark-760x600");
+  } finally { await app.close(); }
+});
+
+test("says GitHub CLI is not signed in before the user writes", async ({ browserName: _browserName }, info) => {
+  const app = await createAppFixture({
+    name: "issue-report-signed-out",
+    initialState: "conversation",
+    beforeLaunch: async ({ testDirectory }) => {
+      portableNodeExecutable(join(testDirectory, "provider-bin"), "gh");
+      await writeFile(join(testDirectory, "data", "auth"), "process.stderr.write('You are not logged into any GitHub hosts. To log in, run: gh auth login\\n');\nprocess.exit(1);\n", "utf8");
+    },
+  });
+  try {
+    await app.resizeWindow(1440, 920);
+    await openReport(app);
+    await expect(app.page.locator(".issue-report-github")).toHaveText("GitHub CLI is not signed in. Run gh auth login in a terminal, or open GitHub manually.");
+    await expectLayoutHolds(app);
+    await setAppearanceInPlace(app, "dark");
+    await capture(app.page, info, "issue-report-signed-out-dark-wide");
   } finally { await app.close(); }
 });

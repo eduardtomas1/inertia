@@ -73,12 +73,20 @@ export function reportBody(input: IssueReportInput, context: IssueEvidenceContex
   ].join("\n\n");
 }
 
+function issueTitle(description: string): string {
+  const line = scrubReportText(description.trim().split("\n")[0]!, 200);
+  if (line.length <= 120) return line;
+  const cut = line.slice(0, 119);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 60 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 export function newIssueReport(input: IssueReportInput, context: IssueEvidenceContext): IssueReport {
   return issueReportSchema.parse({
     id: randomUUID(), revision: 0, status: "preview",
     description: scrubReportText(input.description), steps: scrubReportText(input.steps),
     providerId: input.providerId, attachDiagnostics: input.attachDiagnostics,
-    title: scrubReportText(input.description.trim().split("\n")[0]!, 120),
+    title: issueTitle(input.description),
     body: scrubReportText(reportBody(input, context), REPORT_BODY_LIMIT),
     notice: "", issueUrl: null,
   });

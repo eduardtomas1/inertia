@@ -21,7 +21,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
   color: var(--text);
-  background: var(--surface-muted);
+  background: var(--surface-strong);
   font: inherit;
   font-weight: 450;
   line-height: 1.5;
@@ -33,6 +33,7 @@
 }
 
 .issue-report-field .issue-report-body {
+  height: clamp(200px, 45vh, 420px);
   font-family: var(--font-mono);
   font-size: var(--ui-font-micro);
   line-height: 1.6;

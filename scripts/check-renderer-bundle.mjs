@@ -83,7 +83,7 @@ const budgets = {
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,

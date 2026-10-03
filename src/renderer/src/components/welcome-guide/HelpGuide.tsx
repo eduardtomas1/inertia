@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useRef } from "react";
 import { ArrowRight } from "lucide-react";
 import type { AppShortcutAction } from "@shared/keybindings";
 
-import type { SettingsSection } from "../settingsSections";
+import type { SettingsSection } from "../../lib/settingsTarget";
 import {
   GuideDemo,
   GuideDialog,

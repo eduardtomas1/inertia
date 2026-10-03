@@ -6,7 +6,8 @@ import {
   type DiagnosticPage, type DiagnosticQuery, type DiagnosticRecord,
 } from "@shared/application-diagnostics";
 import type { Conversation, Project, ProviderInfo } from "@shared/contracts";
-import { navigateDiagnosticContext, type DiagnosticSelection } from "../utils/diagnosticNavigation";
+import type { DiagnosticSelection } from "../lib/settingsTarget";
+import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
 import "./DiagnosticsSettings.css";
 
 interface Props {

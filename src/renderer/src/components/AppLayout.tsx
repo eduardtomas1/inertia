@@ -46,7 +46,7 @@ import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
-import type { SettingsSection } from "./settingsSections";
+import type { SettingsSection } from "../lib/settingsTarget";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
@@ -118,6 +118,7 @@ interface AppLayoutActions {
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
   openSettingsSection: (section: SettingsSection) => void;
+  closeSettings: () => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -710,6 +711,7 @@ export const AppLayout = memo(function AppLayout({
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onOpenSettings={() => setView("settings")}
+            onCloseSettings={actions.closeSettings}
             {...(project ? {
               onCreateConversationInProject: () => actions.createConversation(project),
             } : {})}

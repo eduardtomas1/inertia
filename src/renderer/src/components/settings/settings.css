@@ -1,0 +1,126 @@
+.setting-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.setting-title > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setting-status,
+.setting-note-status {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 500;
+}
+
+.setting-status {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.setting-status.is-error,
+.setting-note-status.is-error {
+  color: var(--danger);
+}
+
+.setting-note-status:empty {
+  margin-top: -5px;
+}
+
+.setting-select,
+.setting-input {
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--surface-muted);
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+}
+
+.setting-select {
+  max-width: 50%;
+}
+
+.setting-select:disabled,
+.setting-input:disabled {
+  opacity: var(--disabled-opacity);
+}
+
+.setting-field-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-text-field .setting-field-control {
+  width: min(320px, 50%);
+}
+
+.setting-input {
+  width: 100%;
+}
+
+.setting-field-error {
+  color: var(--danger);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+}
+
+.setting-field {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.setting-disclosure > summary {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-soft);
+  cursor: default;
+  list-style: none;
+}
+
+.setting-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.setting-disclosure > summary:hover {
+  color: var(--text);
+}
+
+.setting-disclosure-chevron {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transform: rotate(-90deg);
+}
+
+.setting-disclosure[open] > summary .setting-disclosure-chevron {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .setting-disclosure-chevron {
+    transition: transform var(--motion-fast) var(--motion-ease);
+  }
+}
+
+.settings-toolbar {
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-keybinding-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

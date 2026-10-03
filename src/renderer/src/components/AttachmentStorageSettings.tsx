@@ -64,7 +64,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
     }
   };
   const blocked = disabled || busy;
-  return <div className="codex-binary-path runtime-log-setting attachment-storage-setting">
+  return <div className="setting-action-row runtime-log-setting attachment-storage-setting">
     <span>
       <strong>Attachment storage · all chats</strong>
       <small>Original images and documents kept on this device. This disk budget does not reserve RAM.</small>

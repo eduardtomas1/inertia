@@ -77,7 +77,7 @@ async function renderHeader(
     actions: [],
     busy: false,
     onOpenSidebar: vi.fn(),
-    onOpenSettings: vi.fn(),
+    onOpenSettings: vi.fn(), onCloseSettings: vi.fn(),
    
     onOpenFolder: vi.fn(),
     onRevealFolder: vi.fn(),

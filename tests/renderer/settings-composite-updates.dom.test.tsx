@@ -284,15 +284,13 @@ describe("Settings composite updates", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
 
     expect(await screen.findByText("Partial health data")).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Browser cache storage could not be measured.",
-    );
-    expect(screen.getByText("30 MB")).toBeVisible();
-    expect(screen.getByText("4.0 KB")).toBeVisible();
+    const warning = screen.getByText("Partial health data").parentElement;
+    expect(warning).toHaveAttribute("role", "status");
+    expect(warning).toHaveTextContent("Browser cache storage could not be measured.");
+    expect(screen.getByText("30 MiB")).toBeVisible();
+    expect(screen.getByText("4.0 KiB")).toBeVisible();
     expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.getByText(/UI 20 MB across 1 process/u)).toBeVisible();
-    expect(screen.getByText("Partial health data").parentElement)
-      .toBe(screen.getByRole("status"));
+    expect(screen.getByText(/UI 20 MiB across 1 process/u)).toBeVisible();
   });
 
   it.each([
@@ -373,7 +371,7 @@ describe("Settings composite updates", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(await screen.findByText("The update download could not be started."))
-      .toHaveAttribute("role", "status");
+      .toHaveAttribute("role", "alert");
   });
 
   it("shows persisted default sentinels and saves the concrete provider default", () => {
@@ -595,6 +593,8 @@ describe("Settings composite updates", () => {
         value: "https://github.com/eduardtomas1/inertia",
       },
     });
+    expect(onUpdate).not.toHaveBeenCalled();
+    fireEvent.blur(repository);
 
     expect(onUpdate).toHaveBeenLastCalledWith({
       discordReleaseRepositoryUrl: "https://github.com/eduardtomas1/inertia",

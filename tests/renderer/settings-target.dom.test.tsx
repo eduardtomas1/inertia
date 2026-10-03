@@ -185,10 +185,10 @@ describe("Settings external section targets", () => {
     expect(getAppHealth).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "View storage & backups" }));
     await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("5.0 MB")).toBeVisible();
+    expect(await screen.findByText("5.0 MiB")).toBeVisible();
     expect(screen.getByText("Unavailable")).toBeVisible();
     expect(screen.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
-    expect(screen.getByText(/targeting 5 copies and 512 MB/u)).toBeVisible();
+    expect(screen.getByText(/targeting 5 copies and 512 MiB/u)).toBeVisible();
     expect(screen.getByText(/The newest validated copy is kept even above that target/u)).toBeVisible();
     expect(screen.getByText(/Chats stay stored until you delete them/u)).toBeVisible();
     expect(screen.getByText("Full local database backup")).toBeVisible();

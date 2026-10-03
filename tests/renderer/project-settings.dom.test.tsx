@@ -67,6 +67,9 @@ describe("project settings", () => {
     expect(screen.getByText(/subagents count toward it/u)).toBeInTheDocument();
     for (const value of ["0", "-1", "10000.01", "1.234", "abc"]) {
       fireEvent.change(field, { target: { value } });
+      expect(field).toHaveAttribute("aria-invalid", "false");
+      expect(screen.queryByText(/0\.01 to 10,000/u)).not.toBeInTheDocument();
+      fireEvent.blur(field);
       expect(field).toHaveAttribute("aria-invalid", "true");
       expect(field).toHaveAccessibleDescription(/0\.01 to 10,000/u);
       expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();

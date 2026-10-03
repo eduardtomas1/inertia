@@ -9570,10 +9570,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   font-size: 9.5px;
 }
 
-.codex-binary-path { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
-.codex-binary-path > span { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.codex-binary-path small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.codex-binary-path > div { display: flex; flex: 0 0 auto; gap: 8px; }
+.setting-action-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+.setting-action-row > span { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.setting-action-row small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setting-action-row > div { display: flex; flex: 0 0 auto; gap: 8px; }
 .runtime-log-setting { align-items: flex-start; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
 .runtime-log-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
 .settings-inline-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }

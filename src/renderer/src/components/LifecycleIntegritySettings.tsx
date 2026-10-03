@@ -146,7 +146,7 @@ export function LifecycleIntegritySettings(
   const diagnostics = props.diagnostics;
   return (
     <>
-      <div className="codex-binary-path runtime-log-setting">
+      <div className="setting-action-row runtime-log-setting">
         <span>
           <strong>Runtime diagnostics</strong>
           <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>

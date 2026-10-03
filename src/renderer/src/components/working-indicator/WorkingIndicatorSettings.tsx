@@ -150,7 +150,7 @@ export function WorkingIndicatorSettings({
 
   return (
     <WorkingIndicatorProvider settings={preview}>
-      <section className="working-indicator-settings" aria-labelledby="working-indicator-heading">
+      <section className="working-indicator-settings" aria-labelledby="working-indicator-heading" data-setting-id="working-indicator">
         <div className="working-indicator-heading">
           <span>
             <h4 id="working-indicator-heading">Agent activity</h4>

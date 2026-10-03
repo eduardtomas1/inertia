@@ -64,6 +64,7 @@ import {
 } from "../../utils/goalExecution";
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
+import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -272,12 +273,9 @@ export interface WorkspaceSceneActions {
 
 export interface WorkspaceSceneModelInput {
   view: "workspace" | "settings";
-  settingsTarget: {
-    section: import("../settingsSections").SettingsSection;
-    projectId?: string;
-    profileId?: string;
-    selection?: import("../../utils/diagnosticNavigation").DiagnosticSelection;
-  } | null;
+  settingsTarget: SettingsTarget | null;
+  settingsSection?: SettingsSection;
+  onSettingsSectionChange?: (section: SettingsSection) => void;
   settings: AppSettings;
   busyAction: string | null;
   project: Project | null;
@@ -318,6 +316,8 @@ export function runtimeConversationReference(
 export function createWorkspaceSceneModel({
   view,
   settingsTarget,
+  settingsSection,
+  onSettingsSectionChange,
   settings,
   busyAction,
   project,
@@ -583,6 +583,8 @@ export function createWorkspaceSceneModel({
     view,
     settings: {
       target: settingsTarget,
+      initialSection: settingsSection,
+      onSectionChange: onSettingsSectionChange,
       settings,
       disabled: connection.status !== "online",
       providers: connection.snapshot?.providers ?? [],

@@ -81,7 +81,7 @@ export function ThemeLibrary({
   };
 
   return (
-    <div className="theme-library">
+    <div className="theme-library" data-setting-id="appearance-mode">
       <div>
         <h4>Color scheme</h4>
         <p>Follow your system or hold the workbench in one appearance.</p>

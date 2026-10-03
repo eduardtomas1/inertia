@@ -40,7 +40,7 @@ export default function CanaryRollbackSetting(): React.JSX.Element {
 
   return (
     <>
-      <div className="codex-binary-path application-update-setting canary-rollback-setting">
+      <div className="setting-action-row application-update-setting canary-rollback-setting">
         <span>
           <strong>Canary channel · isolated profile</strong>
           <small role="status" aria-live="polite" aria-atomic="true">

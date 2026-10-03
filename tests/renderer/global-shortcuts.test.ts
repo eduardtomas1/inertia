@@ -42,6 +42,7 @@ function actions(createConversation: () => void): GlobalShortcutActions {
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
+    toggleSettings: vi.fn(),
   };
 }
 
@@ -153,6 +154,49 @@ describe("global shortcuts", () => {
 
     expect(shifted.defaultPrevented).toBe(false);
     expect(current.current.setPaletteOpen).not.toHaveBeenCalled();
+    dispose();
+  });
+  it.each([
+    ["darwin", { metaKey: true }],
+    ["linux", { ctrlKey: true }],
+    ["win32", { ctrlKey: true }],
+  ] as const)("toggles Settings with the fixed comma chord on %s", (platform, modifiers) => {
+    const target = new EventTarget();
+    const current = { current: actions(vi.fn()) };
+    const dispose = installGlobalShortcuts(
+      target as unknown as Parameters<typeof installGlobalShortcuts>[0],
+      current,
+      platform,
+    );
+    const chord = new ShortcutEvent("keydown", ",", modifiers);
+    target.dispatchEvent(chord);
+    expect(current.current.toggleSettings).toHaveBeenCalledOnce();
+    expect(chord.defaultPrevented).toBe(true);
+
+    target.dispatchEvent(new ShortcutEvent("keydown", ",", { ...modifiers, shiftKey: true }));
+    target.dispatchEvent(new ShortcutEvent("keydown", ","));
+    expect(current.current.toggleSettings).toHaveBeenCalledOnce();
+
+    current.current = { ...current.current, suspended: true };
+    const suspended = new ShortcutEvent("keydown", ",", modifiers);
+    target.dispatchEvent(suspended);
+    expect(current.current.toggleSettings).toHaveBeenCalledOnce();
+    expect(suspended.defaultPrevented).toBe(true);
+    dispose();
+  });
+
+  it("leaves Control+comma alone on macOS", () => {
+    const target = new EventTarget();
+    const current = { current: actions(vi.fn()) };
+    const dispose = installGlobalShortcuts(
+      target as unknown as Parameters<typeof installGlobalShortcuts>[0],
+      current,
+      "darwin",
+    );
+    const chord = new ShortcutEvent("keydown", ",", { ctrlKey: true });
+    target.dispatchEvent(chord);
+    expect(current.current.toggleSettings).not.toHaveBeenCalled();
+    expect(chord.defaultPrevented).toBe(false);
     dispose();
   });
 });

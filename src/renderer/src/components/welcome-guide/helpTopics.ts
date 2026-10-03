@@ -1,6 +1,6 @@
 import type { AppShortcutAction } from "@shared/keybindings";
 
-import type { SettingsSection } from "../settingsSections";
+import type { SettingsSection } from "../../lib/settingsTarget";
 import type { WelcomeTopicId } from "./welcomeGuideModel";
 
 export const HELP_COMMANDS = [

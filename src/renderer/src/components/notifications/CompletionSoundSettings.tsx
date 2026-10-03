@@ -196,7 +196,7 @@ export function CompletionSoundSettings({
   };
 
   return (
-    <div className="completion-sound-settings">
+    <div className="completion-sound-settings" data-setting-id="completion-sound">
       <div className="setting-row">
         <span className="setting-copy">
           <strong>Sound when a task ends</strong>

@@ -93,7 +93,7 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
     setReport({ ...report, status: "validating", notice: "Validating your observations against the safe local evidence…" });
     await command({ type: "support.report.validate", payload: { id: report.id, revision: report.revision } });
   };
-  return <section className="settings-card issue-report" aria-labelledby="issue-report-heading">
+  return <section className="settings-card issue-report" aria-labelledby="issue-report-heading" data-setting-id="report-issue">
     <div className="settings-card-heading"><div><Bug size={18} /></div><span><h3 id="issue-report-heading">Report an issue</h3><p>Turn a problem into a useful GitHub issue for eduardtomas1/inertia.</p></span></div>
     <ol className="issue-report-steps" aria-label="Report progress">
       <li aria-current={!report ? "step" : undefined}>1 · Describe</li><li aria-current={report && !["preview", "submitted", "submitting", "uncertain", "retired"].includes(report.status) ? "step" : undefined}>2 · Validate</li><li aria-current={report?.status === "preview" ? "step" : undefined}>3 · Review & submit</li>

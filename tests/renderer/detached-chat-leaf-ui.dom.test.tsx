@@ -206,6 +206,7 @@ describe("detached chat leaf controls", () => {
         }}
         onOpenSidebar={noOp}
         onOpenSettings={noOp}
+        onCloseSettings={noOp}
         onOpenFolder={noOp}
         onRevealFolder={noOp}
         onOpenFiles={noOp}

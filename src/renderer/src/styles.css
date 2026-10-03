@@ -9513,7 +9513,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .settings-content {
   width: min(810px, calc(100% - 52px));
-  max-width: 810px;
+  max-width: min(810px, calc(100% - 257px));
   min-height: 0;
   height: 100%;
   flex: 1;
@@ -10808,7 +10808,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .settings-navigation { width: 100%; min-width: 0; min-height: 49px; flex: 0 0 auto; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--panel-border); }
   .settings-navigation nav { display: flex; gap: 2px; overflow-x: auto; }
   .settings-navigation nav button { min-height: 35px; flex: 0 0 auto; }
-  .settings-content { width: min(760px, calc(100% - 32px)); padding-top: 32px; }
+  .settings-content { width: min(760px, calc(100% - 32px)); max-width: none; padding-top: 32px; }
 
   .backend-settings-grid {
     grid-template-columns: 180px minmax(0, 1fr);

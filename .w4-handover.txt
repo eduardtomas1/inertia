@@ -1,0 +1,33 @@
+W4 handover: rows still to slot into W2's sections (worktree-local note, untracked)
+
+Notifications
+- desktop-notifications (existing switch) -> directly below it:
+  BackgroundNotificationSetting from settings/NotificationPreferenceRows.tsx
+  id notify-only-in-background, title "Only when Inertia is in the background",
+  inactive while settings.desktopNotifications is false. Props: settings, disabled, onUpdate.
+- QuotaWarningSettings from settings/NotificationPreferenceRows.tsx (after completion sound rows)
+  ids quota-warnings (switch "Quota warnings") and quota-warning-threshold
+  (select "Warn when below": 25% / 15% / 5% remaining, inactive while off).
+  Props: warnings = settings.quotaWarnings, disabled, onUpdate.
+- mascot-motion: "Animate mascot" switch, already rendered inside MascotSettings.tsx under desktop-mascot.
+
+Projects (per selected project, next to the workspace override)
+- project-default-access: select "Default access"; options "" -> "Default (<global access label>)",
+  supervised "Supervised", auto-edit "Auto-accept edits", full "Full access";
+  saves preferences.defaultAccessMode (null for Default). When the override is "full", muted one-sentence
+  description: "Choose Full access only for a workspace and task you trust."
+- project-repository-limit: under an "Advanced" disclosure, select "Repository display limit" with
+  PROJECT_REPOSITORY_DISPLAY_LIMITS from src/shared/project-repository-limit.ts ("Show up to 16 repositories",
+  "Show up to 32 repositories"), value projectRepositoryDisplayLimit(project.gitRepositoryLimit),
+  saves project.update { gitRepositoryLimit } (AppLayout setProjectGitRepositoryLimit already does this).
+
+Chats > New chats
+- default provider row shows "Default (<effective label>)" when effectiveDefaultProviderId(settings.defaultProvider,
+  providers) differs from the stored id (src/shared/default-provider.ts), unless W2's effective-default row already does.
+
+Registry rows metadata (settingsSections.ts): add the ids above with keywords
+- notify-only-in-background: background, focused, foreground, notifications, alerts
+- quota-warnings / quota-warning-threshold: quota, limits, usage, warning, percent, remaining
+- mascot-motion: mascot, animation, motion, pause
+- project-default-access: access, full access, supervised, auto-edit, permissions, project
+- project-repository-limit: repositories, nested, limit, sidebar, advanced

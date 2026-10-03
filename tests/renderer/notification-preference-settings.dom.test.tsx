@@ -5,6 +5,8 @@ import {
   BackgroundNotificationSetting,
   QuotaWarningSettings,
 } from "../../src/renderer/src/components/settings/NotificationPreferenceRows";
+import { NotificationsSettings } from "../../src/renderer/src/components/settings/sections/NotificationsSettings";
+import { defaultSettings } from "../../src/shared/contracts";
 
 function row(container: HTMLElement, id: string): HTMLElement {
   return container.querySelector<HTMLElement>(`[data-setting-id="${id}"]`)!;
@@ -74,5 +76,24 @@ describe("quota warning rows", () => {
     await act(async () => { fireEvent.click(screen.getByRole("switch", { name: "Quota warnings" })); });
     expect(within(row(container, "quota-warnings")).getByRole("alert")).toHaveTextContent("Couldn't save. Try again.");
     expect(screen.getByRole("switch", { name: "Quota warnings" })).toBeChecked();
+  });
+});
+
+describe("notifications section", () => {
+  it("places the background-only row under desktop notifications and the quota rows in their own group", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    const { container, rerender } = render(<NotificationsSettings settings={defaultSettings} disabled={false} onUpdate={onUpdate} />);
+    const ids = [...container.querySelectorAll("[data-setting-id]")].map((element) => element.getAttribute("data-setting-id"));
+    expect(ids.indexOf("notify-only-in-background")).toBe(ids.indexOf("desktop-notifications") + 1);
+    expect(screen.getByRole("heading", { name: "Quota warnings" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Quota warnings" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Warn when below" })).toHaveValue("25");
+    expect(screen.getByRole("switch", { name: "Only when Inertia is in the background" })).not.toHaveAttribute("aria-disabled");
+
+    rerender(<NotificationsSettings settings={{ ...defaultSettings, desktopNotifications: false, quotaWarnings: { enabled: false, firstThreshold: 5 } }} disabled={false} onUpdate={onUpdate} />);
+    expect(screen.getByRole("switch", { name: "Only when Inertia is in the background" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("combobox", { name: "Warn when below" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("combobox", { name: "Warn when below" })).toHaveValue("5");
+    await act(async () => {});
   });
 });

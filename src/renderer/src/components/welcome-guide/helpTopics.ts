@@ -21,6 +21,7 @@ export interface HelpEntry {
   name: string;
   detail: string;
   shortcut?: AppShortcutAction;
+  jump?: string;
 }
 
 export interface HelpTopic {
@@ -41,15 +42,21 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Add a project",
         detail: "Open a local folder or clone a repository from an HTTPS or SSH Git URL. Use Add project in the sidebar or the command palette.",
+        jump: "Add a project",
       },
       {
         name: "Connect an agent",
         detail: "Inertia uses the accounts you already have with Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Each provider keeps its own sign-in. Connect or refresh one in Settings → Providers.",
+        jump: "Open Settings → Providers",
       },
       {
         name: "Start a chat",
         detail: "Choose New chat in the sidebar, then describe the task in the composer.",
         shortcut: "new-chat",
+      },
+      {
+        name: "Chats without a project",
+        detail: "Choose No project from the composer's Project button, or Start without a project in the command palette. The chat works in its own chat folder, appears under No project in the sidebar and keeps that folder when it is deleted.",
       },
       {
         name: "Access modes",
@@ -58,6 +65,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Welcome guide",
         detail: "Replay the first-run tour at any time.",
+        jump: "Show welcome guide",
       },
     ],
     jumps: [
@@ -73,7 +81,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Attachments",
-        detail: "Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets with the paperclip, or drop them on the composer. Up to 100 files, 50 MiB each. Images are resized to 10 MiB each (80 MiB combined). Text pasted at 32 KiB becomes a file; Shift-paste keeps it inline. Agents receive file paths and read the contents as needed.",
+        detail: "Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets with the paperclip, or drop them on the composer: up to 100 files, 50 MiB each. Credential and key files (.env, .pem, .key) are refused.",
+      },
+      {
+        name: "Large files and pasted text",
+        detail: "Text pasted at 32 KiB becomes a file; Shift-paste keeps it inline. Images are resized to 10 MiB each (80 MiB combined), and agents receive file paths and read the contents as needed.",
       },
       {
         name: "Mentions and skills",
@@ -98,6 +110,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Custom backends",
         detail: "Add a backend profile in Settings → Model backends to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
+        jump: "Open Settings → Model backends",
+      },
+      {
+        name: "Provider sessions",
+        detail: "A chat stays with the provider it started on; choosing another provider offers Start a new chat. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
       },
     ],
     jumps: [
@@ -125,10 +142,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Daily work",
         detail: "Daily work in the sidebar summarizes processed tokens, agent runtime and conversations for a day.",
+        jump: "Open Daily work",
       },
       {
         name: "Notifications and mascot",
         detail: "Turn on desktop notifications or the desktop mascot in Settings → General. Notifications leave out prompt and response text.",
+        jump: "Open Settings → General",
+      },
+      {
+        name: "Sound when a task ends",
+        detail: "Turn it on in Settings → General to play a short sound when an agent finishes or stops with an error. Choose a built-in sound or import your own, and Only after long tasks keeps quick questions quiet.",
+        jump: "Open Settings → General",
       },
     ],
     jumps: [
@@ -157,6 +181,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Browser",
         detail: "Open local development pages for the selected chat. Supported agents can use the same pages, and Evidence keeps a local record of what happened.",
+      },
+      {
+        name: "Attachment previews",
+        detail: "The Attachments surface shows the files sent in this chat; choose one to preview it. Zoom an image with + and -, drag or use the arrow keys to pan, and press 0 to reset.",
       },
       {
         name: "Project navigation",
@@ -227,6 +255,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Search everything",
         detail: "Find commands, projects, chats and saved messages. Type at least two characters to search your messages and final answers across unarchived chats.",
         shortcut: "search",
+        jump: "Open search",
       },
       {
         name: "Earlier messages",
@@ -235,6 +264,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Archive",
         detail: "Archive thread hides a chat and keeps its data. Restore it from Settings → Archive & data.",
+        jump: "Open Settings → Archive & data",
       },
     ],
     jumps: [
@@ -251,10 +281,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "History",
         detail: "Usage in the sidebar shows locally recorded usage across chats and providers.",
+        jump: "Open Usage",
       },
       {
         name: "Limits",
         detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. Refresh limits asks the providers again; a countdown reaching zero does not refill a bar.",
+        jump: "Open Usage",
+      },
+      {
+        name: "Resume at reset",
+        detail: "When a chat stops at a subscription limit, the composer offers Resume at reset and Snooze until reset. Inertia must be running to resume, and a resume missed by more than an hour waits for you to choose Resume now.",
       },
       {
         name: "In the composer",
@@ -273,10 +309,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Snapshots",
         detail: "Turn on Snapshots in Settings → Snapshots to attach a screenshot of the foreground window with its accessibility context, using the capture shortcut you choose there.",
+        jump: "Open Settings → Snapshots",
+      },
+      {
+        name: "Reviewed screenshots",
+        detail: "On Linux, Take reviewed screenshot beside the attachment button captures a window or screen. Crop it and mask sensitive areas, then approve it before it is attached.",
       },
       {
         name: "Private Connect",
         detail: "Settings → Connections & devices pairs a browser on another device over your Tailscale network while this computer stays online. Each paired device gets Monitor or Collaborate access.",
+        jump: "Open Settings → Connections & devices",
       },
       {
         name: "Discord",
@@ -296,14 +338,22 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Themes",
         detail: "Choose System, Light or Dark and a color theme from the theme library in Settings → General.",
+        jump: "Open Settings → General",
+      },
+      {
+        name: "Custom colors",
+        detail: "Under Custom colors in Settings → General, pick one color for the light appearance and one for dark. Inertia adapts the shades to keep the workbench readable, and Reset returns that appearance to its previous preset.",
+        jump: "Open Settings → General",
       },
       {
         name: "Interface scale",
         detail: "Choose Compact, Default, Comfortable or Large.",
+        jump: "Open Settings → General",
       },
       {
         name: "Working indicator",
         detail: "Choose how running work is shown in the Work list and the working cue.",
+        jump: "Open Settings → General",
       },
     ],
     jumps: [
@@ -316,10 +366,30 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     summary: "Common actions without the mouse. On macOS the modifier is ⌘; elsewhere it is Ctrl.",
     demo: "keys",
     entries: [
-      { name: "Search everything", detail: "Open the command palette.", shortcut: "search" },
-      { name: "New chat", detail: "Start a chat in the current project.", shortcut: "new-chat" },
-      { name: "Project navigation", detail: "Show or hide the sidebar.", shortcut: "toggle-sidebar" },
-      { name: "Terminal", detail: "Show or hide the terminal.", shortcut: "toggle-terminal" },
+      {
+        name: "Search everything",
+        detail: "Open the command palette.",
+        shortcut: "search",
+        jump: "Open Settings → Keybindings",
+      },
+      {
+        name: "New chat",
+        detail: "Start a chat in the current project.",
+        shortcut: "new-chat",
+        jump: "Open Settings → Keybindings",
+      },
+      {
+        name: "Project navigation",
+        detail: "Show or hide the sidebar.",
+        shortcut: "toggle-sidebar",
+        jump: "Open Settings → Keybindings",
+      },
+      {
+        name: "Terminal",
+        detail: "Show or hide the terminal.",
+        shortcut: "toggle-terminal",
+        jump: "Open Settings → Keybindings",
+      },
       {
         name: "Chats and transcript",
         detail: "Shift+F10 opens a focused chat's actions. In the transcript, Alt+↑ and Alt+↓ move between turns.",
@@ -345,10 +415,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         name: "Diagnostics",
         detail: "Settings → Diagnostics keeps a local history of incidents that you can search, filter and export.",
+        jump: "Open Settings → Diagnostics",
       },
       {
         name: "Report an issue",
         detail: "Settings → Report an issue drafts a report. You review the exact text before anything is submitted to GitHub. Storage & backups on the same page shows local storage and backups.",
+        jump: "Open Settings → Report an issue",
       },
       {
         name: "Support summary",

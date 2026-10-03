@@ -67,9 +67,16 @@ describe("Settings external section targets", () => {
         }),
         updatePrivateConnectDevice,
         getAppHealth,
+        getBackendCredentialState: vi.fn(async () => ({
+          profileId: "discord-release-webhook",
+          hasSecret: false,
+          maskedValue: null,
+          credentialGeneration: null,
+          storage: { available: true, provider: "keychain" as const, message: null },
+        })),
       },
     });
-    const providersTarget = { section: "providers" as const };
+    const providersTarget = { section: "agents" as const };
     const onUpdate = vi.fn(async () => undefined);
     const props: ComponentProps<typeof SettingsView> = {
       target: providersTarget,
@@ -85,6 +92,8 @@ describe("Settings external section targets", () => {
         lastValidatedAt: "2026-08-03T10:15:00.000Z",
       },
       onUpdate,
+      onSetDefaultModel: vi.fn(async () => undefined),
+      onRestoreDefaults: vi.fn(async () => undefined),
       onConnectProvider: vi.fn(),
       onRefreshProvider: vi.fn(),
       maintenanceOperations: new Map(),
@@ -119,31 +128,31 @@ describe("Settings external section targets", () => {
     };
     const view = render(<SettingsView {...props} />);
     expect(screen.getByRole("main", { name: "Settings" })).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Providers" }))
+    expect(screen.getByRole("button", { name: "Agents" }))
       .toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { level: 2, name: "Providers" }))
+    expect(screen.getByRole("heading", { level: 2, name: "Agents" }))
       .toHaveClass("visually-hidden");
 
-    fireEvent.click(screen.getByRole("button", { name: "General" }));
-    expect(screen.getByRole("button", { name: "General" }))
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { level: 2, name: "General" }))
+    expect(screen.getByRole("heading", { level: 2, name: "Chats" }))
       .toHaveClass("visually-hidden");
     const answerScrollSwitch = screen.getByRole("switch", {
-      name: "Jump to completed answers",
+      name: "Scroll to the start of new answers",
     });
     expect(answerScrollSwitch).toBeChecked();
     fireEvent.click(answerScrollSwitch);
     expect(onUpdate).toHaveBeenCalledWith({ autoScrollToFinalAnswer: false });
     view.rerender(<SettingsView {...props} disabled />);
-    expect(screen.getByRole("button", { name: "General" }))
+    expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
 
-    const connectionsTarget = { section: "connections" as const };
+    const connectionsTarget = { section: "devices" as const };
     view.rerender(<SettingsView {...props} target={connectionsTarget} />);
     expect(screen.getByRole("heading", {
       level: 2,
-      name: "Connections & devices",
+      name: "Devices & integrations",
     })).toHaveClass("visually-hidden");
     const phoneAccess = await screen.findByLabelText("Phone access");
     fireEvent.change(phoneAccess, {
@@ -170,20 +179,20 @@ describe("Settings external section targets", () => {
       }),
     ));
 
-    fireEvent.click(screen.getByRole("button", { name: "General" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     view.rerender(<SettingsView {...props} target={connectionsTarget} disabled />);
-    expect(screen.getByRole("button", { name: "General" }))
+    expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
 
     view.rerender(<SettingsView
       {...props}
-      target={{ section: "connections" }}
+      target={{ section: "devices" }}
     />);
     expect(await screen.findByLabelText("Phone access")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Report an issue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
     expect(getAppHealth).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "View storage & backups" }));
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
     await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("5.0 MiB")).toBeVisible();
     expect(screen.getByText("Unavailable")).toBeVisible();

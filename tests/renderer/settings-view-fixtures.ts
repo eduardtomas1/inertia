@@ -43,6 +43,8 @@ export function settingsViewProps(
     conversations: [],
     archived: [],
     onUpdate: vi.fn(async () => undefined),
+    onSetDefaultModel: vi.fn(async () => undefined),
+    onRestoreDefaults: vi.fn(async () => undefined),
     onConnectProvider: vi.fn(),
     onRefreshProvider: vi.fn(),
     maintenanceOperations: new Map(),

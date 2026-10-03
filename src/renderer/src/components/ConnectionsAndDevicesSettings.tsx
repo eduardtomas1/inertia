@@ -124,7 +124,7 @@ export function ConnectionsAndDevicesSettings({
           <div className="settings-row">
             <span>
               <strong>Open on another device</strong>
-              <small>{state.externalUrl ?? "Enable Private Connect to create a private link."}</small>
+              <small>{state.externalUrl ?? "Turn on Private Connect to create a private link."}</small>
             </span>
             <button
               type="button"

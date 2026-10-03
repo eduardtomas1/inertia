@@ -48,7 +48,7 @@ describe("Settings saving", () => {
     const save = deferredSave();
     const onUpdate = vi.fn(() => save.promise);
     render(<SettingsView {...settingsViewProps({ onUpdate })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
     const repository = await screen.findByLabelText("Discord release repository URL");
 
     let typed = "";
@@ -78,7 +78,7 @@ describe("Settings saving", () => {
   it("drags the terminal font size locally and saves once when the slider is released", async () => {
     const save = deferredSave();
     const onUpdate = vi.fn(() => save.promise);
-    render(<SettingsView {...settingsViewProps({ onUpdate })} />);
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, onUpdate })} />);
     const slider = screen.getByRole("slider", { name: "Terminal font size" });
 
     for (const value of ["14", "15", "16"]) fireEvent.input(slider, { target: { value } });
@@ -95,7 +95,7 @@ describe("Settings saving", () => {
 
   it("returns the terminal font size to the saved value when the save fails", async () => {
     const save = deferredSave();
-    render(<SettingsView {...settingsViewProps({ onUpdate: () => save.promise })} />);
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, onUpdate: () => save.promise })} />);
     const slider = screen.getByRole("slider", { name: "Terminal font size" });
     fireEvent.change(slider, { target: { value: "18" } });
     await act(async () => save.reject(new Error("offline")));
@@ -106,7 +106,7 @@ describe("Settings saving", () => {
 
   it("shows a failed switch save in its own row instead of swallowing it", async () => {
     const save = deferredSave();
-    render(<SettingsView {...settingsViewProps({ onUpdate: () => save.promise })} />);
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, onUpdate: () => save.promise })} />);
     const timestamps = screen.getByRole("switch", { name: "Message timestamps" });
 
     fireEvent.click(timestamps);

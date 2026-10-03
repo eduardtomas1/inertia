@@ -107,7 +107,7 @@ describe("Settings as a mode", () => {
     render(<Harness />);
     openFrom("Open settings");
     pressEscape(screen.getByRole("menuitem", { name: "Menu item" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keybindings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
     pressEscape(screen.getByLabelText("Search everything key"));
     pressEscape(screen.getByLabelText("New chat key").querySelector("option")!);
     const dialog = document.createElement("div");
@@ -125,7 +125,7 @@ describe("Settings as a mode", () => {
   it("reverts an unsaved text field on the first Escape and leaves on the second", async () => {
     render(<Harness />);
     openFrom("Open settings");
-    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
     const repository = await screen.findByLabelText("Discord release repository URL");
     repository.focus();
     fireEvent.change(repository, { target: { value: "not a url" } });
@@ -146,7 +146,7 @@ describe("Settings as a mode", () => {
   it("leaves on the first Escape when the text field matches the saved value", async () => {
     render(<Harness />);
     openFrom("Open settings");
-    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
     const repository = await screen.findByLabelText("Discord release repository URL");
     repository.focus();
     fireEvent.change(repository, { target: { value: " " } });
@@ -157,12 +157,12 @@ describe("Settings as a mode", () => {
   it("remembers the last section when Settings opens again and moves focus to the section title", async () => {
     render(<Harness />);
     openFrom("Open settings");
-    fireEvent.click(screen.getByRole("button", { name: "Keybindings" }));
-    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Keybindings" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Keyboard" })).toHaveFocus());
     pressEscape();
 
     openFrom("Open settings");
-    expect(screen.getByRole("button", { name: "Keybindings" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Keyboard" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("main", { name: "Settings" })).toHaveFocus();
   });
 

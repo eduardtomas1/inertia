@@ -109,7 +109,7 @@ describe("Diagnostics settings", () => {
     fireEvent.click(screen.getByText("Discord delivery could not be confirmed"));
     const navigation = vi.fn(); window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigation);
     fireEvent.click(screen.getByRole("button", { name: "Open Discord settings" }));
-    expect((navigation.mock.calls[0]![0] as CustomEvent).detail).toEqual({ section: "discord" });
+    expect((navigation.mock.calls[0]![0] as CustomEvent).detail).toEqual({ section: "devices", anchor: "discord-repository" });
     window.removeEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigation);
     for (let n = 0; n < 50; n++) h.publish();
     await act(() => vi.advanceTimersByTimeAsync(1_000));

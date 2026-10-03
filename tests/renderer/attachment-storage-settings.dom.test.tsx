@@ -15,7 +15,7 @@ it("shows global disk usage and changes the budget without deleting attachments"
   const onUpdate = vi.fn().mockResolvedValue(undefined);
   render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={onUpdate} />);
   expect(await screen.findByText(/100 MiB used · 70 of 65,536 files/u)).toBeVisible();
-  fireEvent.change(screen.getByRole("combobox", { name: "Global attachment disk budget" }), { target: { value: "64" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Attachment storage limit" }), { target: { value: "64" } });
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ attachmentStorageGiB: 64 }));
   expect(request.mock.calls.every(([command]) => command.type === "attachment.storage.get")).toBe(true);
   expect(screen.getByText(/This disk budget does not reserve RAM/u)).toBeVisible();
@@ -39,11 +39,11 @@ it("requires confirmation for both explicit deletion and automatic eviction and 
   expect(await screen.findByText("Removed 64 files and freed 80 MiB.")).toBeVisible();
   expect(request).toHaveBeenCalledWith({ type: "attachment.storage.cleanup" });
   await waitFor(() => expect(remove).toHaveFocus());
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("switch", { name: "Free space automatically when full" }));
   expect(onUpdate).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Allow automatic removal" }));
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ autoRemoveOldAttachments: true }));
-  await waitFor(() => expect(screen.getByRole("checkbox")).toHaveFocus());
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Free space automatically when full" })).toHaveFocus());
 });
 
 it("returns keyboard focus to the panel after failed updates and when cleanup leaves nothing removable", async () => {
@@ -51,7 +51,7 @@ it("returns keyboard focus to the panel after failed updates and when cleanup le
     ? response({ records: 64, bytes: 80 * 1024 ** 2 }, 0) : response());
   const onUpdate = vi.fn().mockRejectedValue(new Error("fixture update failed"));
   render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={onUpdate} />);
-  const checkbox = screen.getByRole("checkbox");
+  const checkbox = screen.getByRole("switch", { name: "Free space automatically when full" });
   await screen.findByRole("button", { name: /Remove oldest files \(64/u });
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByRole("button", { name: "Allow automatic removal" }));

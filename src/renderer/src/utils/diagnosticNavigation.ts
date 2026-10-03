@@ -1,4 +1,4 @@
-import { parseSettingsTarget, type SettingsTarget } from "../lib/settingsTarget";
+import { parseSettingsTarget, type SettingsTarget, type SettingsTargetInput } from "../lib/settingsTarget";
 
 export type DiagnosticNavigation = SettingsTarget | { conversationId: string };
 export const DIAGNOSTIC_NAVIGATION_EVENT = "inertia:open-diagnostics-context";
@@ -11,7 +11,7 @@ export function parseDiagnosticNavigation(value: unknown): DiagnosticNavigation 
   return parseSettingsTarget(value);
 }
 
-export function navigateDiagnosticContext(target: DiagnosticNavigation): void {
+export function navigateDiagnosticContext(target: DiagnosticNavigation | SettingsTargetInput): void {
   const safe = parseDiagnosticNavigation(target);
   if (safe) window.dispatchEvent(new CustomEvent(DIAGNOSTIC_NAVIGATION_EVENT, { detail: safe }));
 }

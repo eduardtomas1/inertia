@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +31,8 @@ function props(target: ComponentProps<typeof SettingsView>["target"]): Component
     archived: [],
     databaseBackup: { lastValidatedAt: "2026-08-03T10:15:00.000Z" },
     onUpdate: vi.fn(async () => undefined),
+    onSetDefaultModel: vi.fn(async () => undefined),
+    onRestoreDefaults: vi.fn(async () => undefined),
     onConnectProvider: vi.fn(),
     onRefreshProvider: vi.fn(),
     maintenanceOperations: new Map(),
@@ -70,16 +72,17 @@ function optionLabels(select: HTMLElement): string[] {
 describe("settings project lists", () => {
   it("keeps the folder for chats without a project out of the issue report scope", async () => {
     Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
-    render(<SettingsView {...props({ section: "support" })} />);
+    render(<SettingsView {...props({ section: "help" })} />);
     const scope = await screen.findByRole("combobox", { name: "Diagnostic scope" });
     expect(optionLabels(scope)).toEqual(["App only", "Studio · counts only"]);
   });
 
-  it("keeps the folder for chats without a project out of project model defaults", async () => {
+  it("keeps the folder for chats without a project out of the project chooser", async () => {
     Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
-    render(<SettingsView {...props({ section: "backends" })} />);
-    const heading = await screen.findByRole("heading", { name: "New chat defaults" });
-    const card = heading.closest("section")!;
-    expect(optionLabels(within(card).getByRole("combobox", { name: "Project" }))).toEqual(["Studio"]);
+    render(<SettingsView {...props({ section: "projects" })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose project" }));
+    const dialog = screen.getByRole("dialog", { name: "Choose project" });
+    expect(within(dialog).getByText("Studio")).toBeInTheDocument();
+    expect(within(dialog).queryByText("No project")).toBeNull();
   });
 });

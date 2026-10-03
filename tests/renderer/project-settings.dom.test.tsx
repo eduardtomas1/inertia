@@ -102,7 +102,7 @@ describe("project settings", () => {
       return { type: "request.ok", requestId: "saved" };
     });
     const view = setup({ request });
-    const workspace = screen.getByRole("combobox", { name: "Project default workspace" });
+    const workspace = screen.getByRole("combobox", { name: "Where new chats run in this project" });
     await act(async () => {
       fireEvent.click(screen.getByRole("radio", { name: "Pink" }));
       fireEvent.change(workspace, { target: { value: "worktree" } });
@@ -133,7 +133,7 @@ describe("project settings", () => {
       .mockResolvedValue({ type: "request.ok", requestId: "saved" })
       .mockReturnValueOnce(pending.promise);
     setup({ request });
-    const workspace = screen.getByRole("combobox", { name: "Project default workspace" });
+    const workspace = screen.getByRole("combobox", { name: "Where new chats run in this project" });
     const colour = screen.getByRole("radio", { name: "Pink" });
     const emphasis = screen.getByRole("radio", { name: "Icon and name" });
     const pinned = screen.getByRole("switch", { name: "Pin to top of project lists" });

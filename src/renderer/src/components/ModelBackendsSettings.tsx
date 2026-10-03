@@ -604,7 +604,7 @@ export function ModelBackendsSettings({
 
               {selected.preset !== "native" && (
                 <div className="backend-profile-controls">
-                  <label><Switch label={`Enable ${selected.displayName}`} checked={selected.enabled} disabled={disabled || Boolean(busy)} onChange={(enabled) => { void run("enable", () => onUpdate(selected.id, { enabled })); }} /><span><strong>Enabled</strong><small>Custom profiles require exact compatibility evidence before enabling.</small></span></label>
+                  <label><Switch label="Enabled" checked={selected.enabled} disabled={disabled || Boolean(busy)} onChange={(enabled) => { void run("enable", () => onUpdate(selected.id, { enabled })); }} /><span><strong>Enabled</strong><small>Custom profiles require exact compatibility evidence before enabling.</small></span></label>
                   <button type="button" className="secondary-button" disabled={disabled || Boolean(busy) || selected.authState === "missing"} onClick={() => { void run("probe", () => onProbe(selected.id, selected.models[0]!.id)); }}><RefreshCw size={14} className={busy === "probe" ? "is-spinning" : undefined} />{busy === "probe" ? "Testing…" : "Test connection"}</button>
                 </div>
               )}

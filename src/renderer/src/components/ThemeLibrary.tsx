@@ -83,7 +83,7 @@ export function ThemeLibrary({
   return (
     <div className="theme-library" data-setting-id="appearance-mode">
       <div>
-        <h4>Color scheme</h4>
+        <h4>Colour scheme</h4>
         <p>Follow your system or hold the workbench in one appearance.</p>
       </div>
       <div
@@ -124,7 +124,7 @@ export function ThemeLibrary({
       <div
         className="color-theme-options"
         role="group"
-        aria-label="Color theme"
+        aria-label="Colour theme"
       >
         {COLOR_THEME_OPTIONS.map((option) => {
           const lightActive = !settings.lightCustomColor && (settings.lightColorTheme ?? settings.colorTheme) === option.id;
@@ -164,10 +164,10 @@ export function ThemeLibrary({
         })}
       </div>
       <div className="theme-library-heading">
-        <h4>Custom colors</h4>
-        <p>Pick a color for each appearance. Inertia adapts its shades to keep the workbench readable.</p>
+        <h4>Custom colours</h4>
+        <p>Pick a colour for each appearance. Inertia adapts its shades to keep the workbench readable.</p>
       </div>
-      <div className="custom-theme-options" role="group" aria-label="Custom colors">
+      <div className="custom-theme-options" role="group" aria-label="Custom colours">
         <CustomThemeColor mode="light" value={settings.lightCustomColor} disabled={disabled}
           onChange={(lightCustomColor) => onUpdate({ lightCustomColor })} />
         <CustomThemeColor mode="dark" value={settings.darkCustomColor} disabled={disabled}

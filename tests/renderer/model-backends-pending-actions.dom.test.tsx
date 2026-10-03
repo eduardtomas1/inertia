@@ -78,8 +78,6 @@ function settingsProps(
   };
   return {
     profiles,
-    defaults: [],
-    projects: [],
     disabled: false,
     onLoadDetail: detail,
     onCreate: vi.fn(async () => {
@@ -96,8 +94,6 @@ function settingsProps(
       throw new Error("Unexpected probe");
     }),
     onDelete: vi.fn(async () => undefined),
-    onSetDefault: vi.fn(async () => undefined),
-    onClearDefault: vi.fn(async () => undefined),
   };
 }
 

@@ -1,59 +1,15 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
-import { defaultSettings, type AppSettings } from "../../src/shared/contracts";
-
-function settingsProps(
-  settings: AppSettings,
-  onUpdate: ComponentProps<typeof SettingsView>["onUpdate"],
-): ComponentProps<typeof SettingsView> {
-  return {
-    settings,
-    disabled: false,
-    providers: [],
-    backendProfiles: [],
-    backendDefaults: [],
-    projects: [],
-    conversations: [],
-    archived: [],
-    onUpdate,
-    onConnectProvider: vi.fn(),
-    onRefreshProvider: vi.fn(),
-    maintenanceOperations: new Map(),
-    maintenanceStatuses: new Map(),
-    onRefreshProviderMaintenance: vi.fn(async () => undefined),
-    onUpdateProvider: vi.fn(async () => undefined),
-    onCancelProviderUpdate: vi.fn(async () => undefined),
-    onOpenProviderUpdateInstructions: vi.fn(),
-    onChooseCodexBinary: vi.fn(),
-    onRevealRuntimeLogs: vi.fn(async () => ""),
-    onCopyRuntimeDiagnosticReport: vi.fn(async () => ({ copied: true, eventCount: 0 })),
-    appUpdateStatus: null,
-    checkingAppUpdate: false,
-    onCheckAppUpdate: vi.fn(async () => undefined),
-    onDownloadAppUpdate: vi.fn(async () => undefined),
-    onCancelAppUpdateDownload: vi.fn(async () => undefined),
-    onInstallAppUpdate: vi.fn(async () => undefined),
-    onOpenAppRelease: vi.fn(async () => undefined),
-    onUnarchive: vi.fn(),
-    onLoadBackendProfile: vi.fn(),
-    onCreateBackendProfile: vi.fn(),
-    onUpdateBackendProfile: vi.fn(),
-    onSetBackendCredential: vi.fn(),
-    onClearBackendCredential: vi.fn(),
-    onProbeBackendProfile: vi.fn(),
-    onDeleteBackendProfile: vi.fn(async () => undefined),
-    onSetBackendDefault: vi.fn(async () => undefined),
-    onClearBackendDefault: vi.fn(async () => undefined),
-  };
-}
+import type { SettingsSection } from "../../src/renderer/src/lib/settingsTarget";
+import { defaultSettings } from "../../src/shared/contracts";
+import { settingsViewProps } from "./settings-view-fixtures";
 
 beforeEach(() => {
   Object.defineProperty(window, "inertia", {
     configurable: true,
-    value: { getPlatform: () => "darwin" },
+    value: { getPlatform: () => "darwin", getAppHealth: vi.fn(async () => null) },
   });
 });
 
@@ -62,16 +18,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("General settings controls", () => {
+describe("Settings radio controls", () => {
   it.each([
-    ["Interface scale", "Default", "Comfortable", "Compact", { interfaceScale: "comfortable" }],
-    ["Logical project grouping", "Keep separate", "Repository", "Repo + folder", { projectGrouping: "repository" }],
-    ["Usage and context display", "Compact", "Hidden", "Expanded", { usageDisplayMode: "hidden" }],
-    ["Response density", "Default", "Comfortable", "Compact", { responseDensity: "comfortable" }],
-  ] as const)("moves the %s choice with arrow keys and a single tab stop", (group, checked, next, previous, update) => {
+    ["appearance", "Interface scale", "Default", "Comfortable", "Compact", { interfaceScale: "comfortable" }],
+    ["projects", "Group projects", "Keep separate", "By repository", "By repository and folder", { projectGrouping: "repository" }],
+    ["chats", "Usage display", "Compact", "Hidden", "Expanded", { usageDisplayMode: "hidden" }],
+    ["appearance", "Text density", "Default", "Comfortable", "Compact", { responseDensity: "comfortable" }],
+  ] as const)("moves the %s › %s choice with arrow keys and a single tab stop", async (section: SettingsSection, group, checked, next, previous, update) => {
     const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsProps(defaultSettings, onUpdate)} />);
-    const radios = within(screen.getByRole("radiogroup", { name: group }));
+    render(<SettingsView {...settingsViewProps({ target: { section }, onUpdate })} />);
+    const radios = within(await screen.findByRole("radiogroup", { name: group }));
     const current = radios.getByRole("radio", { name: checked });
 
     expect(current).toHaveAttribute("aria-checked", "true");
@@ -86,56 +42,37 @@ describe("General settings controls", () => {
     fireEvent.keyDown(current, { key: "ArrowLeft" });
     expect(radios.getByRole("radio", { name: previous })).toHaveFocus();
   });
+});
 
-  it("asks before restoring every setting to its default", () => {
+describe("Restore defaults confirmation", () => {
+  it("asks before restoring and restores only after confirmation", async () => {
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsProps(defaultSettings, onUpdate)} />);
+    const onRestoreDefaults = vi.fn(async () => undefined);
+    render(<SettingsView {...settingsViewProps({ target: { section: "data" }, onRestoreDefaults })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore defaults" }));
     expect(confirm).toHaveBeenCalledOnce();
-    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onRestoreDefaults).not.toHaveBeenCalled();
 
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
-    expect(onUpdate).toHaveBeenCalledWith(defaultSettings);
+    expect(onRestoreDefaults).toHaveBeenCalledOnce();
   });
 
-  it("resets the completion sound choice but keeps imported sounds when restoring defaults", () => {
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirm);
-    const onUpdate = vi.fn(async () => undefined);
-    const library = [
-      { file: "0123456789abcdef.wav", name: "Ding" },
-      { file: "fedcba9876543210.mp3", name: "Rain" },
-    ] as AppSettings["completionSound"]["library"];
-    render(<SettingsView {...settingsProps({
-      ...defaultSettings,
-      completionSound: { enabled: true, sound: library[0]!.file, library, longRunsOnly: true, longRunSeconds: 300 },
-    }, onUpdate)} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
-
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Imported completion sounds are kept."));
-    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({
-      ...defaultSettings,
-      completionSound: { ...defaultSettings.completionSound, library },
-    });
-  });
-
-  it("restores defaults without asking when destructive confirmations are off", () => {
+  it("restores defaults without asking when destructive confirmations are off", async () => {
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsProps(
-      { ...defaultSettings, confirmDestructiveActions: false },
-      onUpdate,
-    )} />);
+    const onRestoreDefaults = vi.fn(async () => undefined);
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "data" },
+      settings: { ...defaultSettings, confirmDestructiveActions: false },
+      onRestoreDefaults,
+    })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore defaults" }));
 
     expect(confirm).not.toHaveBeenCalled();
-    expect(onUpdate).toHaveBeenCalledWith(defaultSettings);
+    expect(onRestoreDefaults).toHaveBeenCalledOnce();
   });
 });

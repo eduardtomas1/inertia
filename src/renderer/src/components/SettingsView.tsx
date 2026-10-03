@@ -53,7 +53,7 @@ function useStableSettingsProps(props: SettingsViewProps): SettingsViewProps {
 
 function focusSettingRow(row: HTMLElement): void {
   row.scrollIntoView?.({ block: "center" });
-  const control = row.querySelector<HTMLElement>(FOCUSABLE);
+  const control = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].find((element) => element.tabIndex >= 0);
   if (control) {
     control.focus();
     return;

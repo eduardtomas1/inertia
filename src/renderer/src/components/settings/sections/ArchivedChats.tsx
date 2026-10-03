@@ -8,8 +8,8 @@ import { SettingsGroup } from "../SettingsLayout";
 export const ARCHIVED_CHATS_PAGE_SIZE = 20;
 
 function newestFirst(left: Conversation, right: Conversation): number {
-  const archived = (right.archivedAt ?? "").localeCompare(left.archivedAt ?? "");
-  return archived !== 0 ? archived : left.id.localeCompare(right.id);
+  const archived = (right.archivedAt ?? "").localeCompare(left.archivedAt ?? "", "en");
+  return archived !== 0 ? archived : left.id.localeCompare(right.id, "en");
 }
 
 export function ArchivedChats({

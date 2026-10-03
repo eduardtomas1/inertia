@@ -1,10 +1,12 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { startTransition, Suspense, useRef, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import { useComposerSnapshots } from "../../src/renderer/src/components/composer/useComposerSnapshots";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import { SnapshotSettings } from "../../src/renderer/src/components/SnapshotSettings";
+import { KeyboardSettings } from "../../src/renderer/src/components/settings/sections/KeyboardSettings";
+import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
 import { SnapshotControl } from "../../src/renderer/src/components/composer/SnapshotControl";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
@@ -36,12 +38,17 @@ it("shows only capture failures in the composer and restores focus on close or u
 
 it.each(["Linux x86_64", "MacIntel", "Win32"])("offers only supported snapshot shortcuts on %s", async (platform) => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
-  window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
+  window.inertia = { ...original, getPlatform: () => "darwin", snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
   render(<SnapshotSettings />);
-  await waitFor(() => expect(screen.getByRole("switch", { name: "Enable Snapshots" })).toBeChecked());
-  expect(screen.getByText(/Experimental capture of the foreground window/u)).toBeVisible();
-  expect(screen.getByText(/Detected editable fields are masked.*may still contain sensitive information.*Review before sending/u)).toBeVisible();
-  expect(screen.queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Window snapshots" })).toBeChecked());
+  expect(screen.getByText(/foreground window and its accessibility context.*Experimental/u)).toBeVisible();
+  expect(screen.getByText(/Detected editable fields are masked.*may still contain sensitive information/u)).toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "Window snapshot" })).toBeNull();
+  cleanup();
+  render(<KeyboardSettings keybindings={DEFAULT_APP_KEYBINDINGS} disabled={false} onUpdate={vi.fn(async () => undefined)} />);
+  const shortcut = await screen.findByRole("combobox", { name: "Window snapshot" });
+  await waitFor(() => expect(shortcut).toBeEnabled());
+  expect(within(shortcut).queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
 });
 
 it("routes a delivered snapshot only to its captured conversation and cancels stale leases", async () => {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -58,8 +58,6 @@ function settingsProps(
   const detail = profile();
   return {
     profiles: [detail],
-    defaults: [],
-    projects: [],
     disabled: false,
     onLoadDetail: vi.fn(async () => detail),
     onCreate: vi.fn(async () => detail),
@@ -68,8 +66,6 @@ function settingsProps(
     onClearCredential: vi.fn(async () => detail),
     onProbe: vi.fn(async () => detail),
     onDelete: vi.fn(async () => undefined),
-    onSetDefault: vi.fn(async () => undefined),
-    onClearDefault: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -117,81 +113,6 @@ describe("model backend settings controls", () => {
     expect(simple).toHaveFocus();
     expect(simple).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByLabelText("Subagents")).not.toBeInTheDocument();
-  });
-
-  it("reports a rejected new chat default instead of silently reverting it", async () => {
-    const onSetDefault = vi.fn(async () => {
-      throw new Error("The default could not be stored.");
-    });
-    render(<ModelBackendsSettings {...settingsProps({ onSetDefault })} />);
-    await screen.findByText("custom-a.example.test");
-
-    fireEvent.change(screen.getByLabelText("Global default"), {
-      target: { value: "custom:a\0custom-a-model" },
-    });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The default could not be stored.",
-    );
-    expect(onSetDefault).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    ["Global default", null],
-    ["Project default", "11111111-1111-4111-8111-111111111111"],
-  ] as const)("keeps the %s select enabled and focused while its change is saved", async (label, projectId) => {
-    let finish!: () => void;
-    const onSetDefault = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
-    const projects = [{ id: "11111111-1111-4111-8111-111111111111", name: "Inertia" }] as ComponentProps<typeof ModelBackendsSettings>["projects"];
-    render(<ModelBackendsSettings {...settingsProps({ onSetDefault, projects })} />);
-    await screen.findByText("custom-a.example.test");
-    const select = screen.getByLabelText(label);
-    select.focus();
-
-    fireEvent.change(select, { target: { value: "custom:a\0custom-a-model" } });
-    expect(onSetDefault).toHaveBeenCalledExactlyOnceWith(projectId, expect.objectContaining({ modelId: "custom-a-model" }));
-    expect(select).toBeEnabled();
-    expect(select).toHaveFocus();
-
-    fireEvent.change(select, { target: { value: "" } });
-    expect(onSetDefault).toHaveBeenCalledOnce();
-    await act(async () => finish());
-  });
-
-  it("reports a rejected default reset", async () => {
-    const onClearDefault = vi.fn(async () => {
-      throw new Error("The default could not be cleared.");
-    });
-    const detail = profile();
-    render(<ModelBackendsSettings {...settingsProps({
-      onClearDefault,
-      defaults: [{
-        scope: "global",
-        projectId: null,
-        selection: {
-          harnessId: "claude-agent-sdk",
-          backendProfileId: detail.id,
-          backendProfileDisplayName: detail.displayName,
-          modelId: "custom-a-model",
-          alias: "Profile A model",
-          reasoningEffort: null,
-          contextWindowOverride: 128_000,
-          providerOptions: {},
-          capabilities: [],
-          backendConfigurationRevision: 1,
-        },
-        updatedAt: "2026-07-29T10:00:00.000Z",
-      }],
-    })} />);
-    await screen.findByText("custom-a.example.test");
-
-    fireEvent.change(screen.getByLabelText("Global default"), {
-      target: { value: "" },
-    });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The default could not be cleared.",
-    );
   });
 
   it("moves focus into the delete confirmation and back to Delete on cancel", async () => {

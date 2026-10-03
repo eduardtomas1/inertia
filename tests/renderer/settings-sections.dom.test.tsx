@@ -22,12 +22,11 @@ afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
 });
 
-describe("Source control settings", () => {
+describe("Review settings", () => {
   it("saves diff preferences and confirms each save in its row", async () => {
     const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsViewProps({ target: { section: "source" }, onUpdate })} />);
-    expect(screen.getByRole("heading", { level: 3, name: "Changes" })).toBeVisible();
-    expect(screen.getByText("Git actions always use the current project repository.")).toBeVisible();
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, onUpdate })} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Review and terminal" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("switch", { name: "Wrap long diff lines" }));
     expect(onUpdate).toHaveBeenCalledWith({ wrapDiffs: !defaultSettings.wrapDiffs });
@@ -38,12 +37,12 @@ describe("Source control settings", () => {
   });
 });
 
-describe("Keybindings settings", () => {
+describe("Keyboard settings", () => {
   it("resets custom shortcuts to the defaults and is unavailable at the defaults", async () => {
     const onUpdate = vi.fn(async () => undefined);
     const custom = { ...DEFAULT_APP_KEYBINDINGS, search: "g" as const };
     const view = render(<SettingsView {...settingsViewProps({
-      target: { section: "keybindings" },
+      target: { section: "keyboard" },
       settings: { ...defaultSettings, keybindings: custom },
       onUpdate,
     })} />);
@@ -56,50 +55,48 @@ describe("Keybindings settings", () => {
     expect(reset).toBeDisabled();
     expect(await within(row("reset-shortcuts")).findByText("Saved")).toHaveAttribute("role", "status");
 
-    view.rerender(<SettingsView {...settingsViewProps({ target: { section: "keybindings" }, onUpdate })} />);
+    view.rerender(<SettingsView {...settingsViewProps({ target: { section: "keyboard" }, onUpdate })} />);
     expect(reset).toBeDisabled();
   });
 
   it("restores the saved shortcuts and shows an error when the save fails", async () => {
     const onUpdate = vi.fn(async () => { throw new Error("offline"); });
-    render(<SettingsView {...settingsViewProps({ target: { section: "keybindings" }, onUpdate })} />);
+    render(<SettingsView {...settingsViewProps({ target: { section: "keyboard" }, onUpdate })} />);
     fireEvent.change(screen.getByLabelText("New chat key"), { target: { value: "h" } });
-    expect(await within(row("reset-shortcuts")).findByRole("alert")).toHaveTextContent("Couldn't save. Try again.");
+    expect(await within(row("shortcut-new-chat")).findByRole("alert")).toHaveTextContent("Couldn't save. Try again.");
     expect(screen.getByLabelText("New chat key")).toHaveValue("n");
   });
 });
 
-describe("Archive settings", () => {
-  it("restores an archived thread and counts archived threads in the navigation", () => {
+describe("Archived chats", () => {
+  it("restores an archived chat and counts archived chats in the navigation", async () => {
     const archived = { ...conversation("33333333-3333-4333-8333-333333333333"), title: "Old investigation", archivedAt: "2026-09-01T00:00:00.000Z" };
     const onUnarchive = vi.fn();
     render(<SettingsView {...settingsViewProps({
-      target: { section: "archive" },
+      target: { section: "data" },
       providers: [settingsProvider("codex", "Codex")],
       archived: [archived],
       onUnarchive,
     })} />);
-    expect(screen.getByRole("button", { name: /^Archive & data 1$/u })).toHaveAttribute("aria-current", "page");
-    const thread = within(row("archived-threads"));
+    expect(screen.getByRole("button", { name: /^Data 1$/u })).toHaveAttribute("aria-current", "page");
+    const thread = within(await screen.findByRole("list", { name: "Archived chats" }));
     expect(thread.getByText("Old investigation")).toBeVisible();
-    fireEvent.click(thread.getByRole("button", { name: "Restore" }));
+    fireEvent.click(thread.getByRole("button", { name: "Restore Old investigation" }));
     expect(onUnarchive).toHaveBeenCalledExactlyOnceWith(archived);
   });
 });
 
 describe("Provider settings memory", () => {
-  it("keeps the selected provider, tab and Advanced disclosure while moving between sections", () => {
+  it("keeps the selected provider and tab while moving between sections", async () => {
     render(<SettingsView {...settingsViewProps({
-      target: { section: "providers" },
+      target: { section: "agents" },
       providers: [settingsProvider("codex", "Codex"), settingsProvider("claude", "Claude")],
     })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Configure Claude" }));
     fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
-    fireEvent.click(screen.getByRole("button", { name: "General" }));
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Configure Claude" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agents" }));
+    expect(await screen.findByRole("button", { name: "Configure Claude" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("tab", { name: /Models/u })).toHaveAttribute("aria-selected", "true");
   });
 });
@@ -109,13 +106,13 @@ describe("Codex executable settings", () => {
     const onUpdate = vi.fn(async () => undefined);
     const onChooseCodexBinary = vi.fn();
     render(<SettingsView {...settingsViewProps({
-      target: { section: "providers" },
+      target: { section: "agents" },
       providers: [settingsProvider("codex", "Codex")],
       settings: { ...defaultSettings, codexBinaryPath: "/opt/codex/bin/codex" },
       onUpdate,
       onChooseCodexBinary,
     })} />);
-    expect(screen.getByLabelText("Codex executable path")).toHaveValue("/opt/codex/bin/codex");
+    expect(await screen.findByLabelText("Codex executable path")).toHaveValue("/opt/codex/bin/codex");
     fireEvent.click(screen.getByRole("button", { name: "Browse" }));
     expect(onChooseCodexBinary).toHaveBeenCalledOnce();
 
@@ -128,12 +125,12 @@ describe("Codex executable settings", () => {
     let reject!: (error: Error) => void;
     const onUpdate = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
     render(<SettingsView {...settingsViewProps({
-      target: { section: "providers" },
+      target: { section: "agents" },
       providers: [settingsProvider("codex", "Codex")],
       settings: { ...defaultSettings, codexBinaryPath: "/opt/codex/bin/codex" },
       onUpdate,
     })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Use automatic" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use automatic" }));
     await act(async () => reject(new Error("rejected")));
     expect(within(row("provider-binary-path")).getByRole("alert")).toHaveTextContent("Couldn't save. Try again.");
   });

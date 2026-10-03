@@ -87,7 +87,7 @@ describe("diagnostic and thread navigation", () => {
   it("keeps settings links working and removes the navigation listener on unmount", async () => {
     const h = setup();
     await act(async () => { navigateDiagnosticContext({ section: "discord" }); });
-    expect(screen.getByLabelText("Settings section")).toHaveTextContent("discord");
+    expect(screen.getByLabelText("Settings section")).toHaveTextContent("devices");
     expect(screen.getByLabelText("Current view")).toHaveTextContent("settings");
     h.unmount();
     await act(async () => { navigateDiagnosticContext({ conversationId: affected.id }); });

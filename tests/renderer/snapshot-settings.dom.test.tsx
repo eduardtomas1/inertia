@@ -14,7 +14,7 @@ it("keeps the configuration result when an older focus refresh resolves later", 
     .mockResolvedValueOnce({ ...disabled, enabled: true });
   window.inertia = { ...original, snapshot };
   render(<SnapshotSettings />);
-  const toggle = screen.getByRole("switch", { name: "Enable Snapshots" });
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
   await waitFor(() => expect(toggle).toBeEnabled());
   fireEvent.focus(window);
   fireEvent.click(toggle);
@@ -30,7 +30,7 @@ it("shows the disabled authoritative state after shortcut registration fails", a
     .mockResolvedValueOnce(disabled);
   window.inertia = { ...original, snapshot };
   render(<SnapshotSettings />);
-  const toggle = screen.getByRole("switch", { name: "Enable Snapshots" });
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
   await waitFor(() => expect(toggle).toBeChecked());
   fireEvent.click(toggle);
   expect(await screen.findByRole("alert")).toHaveTextContent("Shortcut is already registered.");

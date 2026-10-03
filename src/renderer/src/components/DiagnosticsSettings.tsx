@@ -6,7 +6,7 @@ import {
   type DiagnosticPage, type DiagnosticQuery, type DiagnosticRecord,
 } from "@shared/application-diagnostics";
 import type { Conversation, Project, ProviderInfo } from "@shared/contracts";
-import { legacySettingsTarget, type DiagnosticSelection } from "../lib/settingsTarget";
+import type { DiagnosticSelection } from "../lib/settingsTarget";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
 import "./DiagnosticsSettings.css";
 
@@ -190,7 +190,7 @@ export function DiagnosticsSettings({ projects, conversations, providers, select
                 {record.context.conversationId && <div><dt>Conversation</dt><dd>{conversation?.title ?? "Unavailable or deleted conversation"}</dd></div>}
               </dl>
               <div className="diagnostics-actions">
-                {definition.action === "providers" || definition.action === "discord" ? <button type="button" className="secondary-button" onClick={() => navigateDiagnosticContext(legacySettingsTarget(definition.action as "providers" | "discord"))}>
+                {definition.action === "providers" || definition.action === "discord" ? <button type="button" className="secondary-button" onClick={() => navigateDiagnosticContext({ section: definition.action as "providers" | "discord" })}>
                   Open {definition.action === "providers" ? "provider" : "Discord"} settings<ArrowUpRight size={13} aria-hidden="true" />
                 </button> : null}
                 {record.context.conversationId && <button type="button" className="secondary-button" disabled={!conversation || page.runtime !== "ready"}

@@ -1,4 +1,5 @@
 import type {
+  AccessMode,
   AppSettings,
   ClientCommand,
   Conversation,
@@ -30,7 +31,16 @@ export type ConversationContextMismatch = {
   checkoutDiffers: boolean;
 };
 
+export function defaultAccessModeForProject(
+  project: string | Pick<Project, "preferences"> | undefined,
+  settings: Pick<AppSettings, "defaultAccessMode">,
+): AccessMode {
+  return (typeof project === "string" ? null : project?.preferences?.defaultAccessMode)
+    ?? settings.defaultAccessMode;
+}
+
 const newConversationDefaults = (
+  project: string | Project,
   settings: AppSettings,
 ): Pick<
   NewConversationPayload,
@@ -40,7 +50,7 @@ const newConversationDefaults = (
   model: settings.defaultModel,
   reasoningEffort: settings.defaultReasoningEffort,
   interactionMode: settings.defaultInteractionMode,
-  accessMode: settings.defaultAccessMode,
+  accessMode: defaultAccessModeForProject(project, settings),
 });
 
 /**
@@ -57,7 +67,7 @@ export function buildNewConversationPayload(
   const base: NewConversationPayload = {
     projectId: typeof projectId === "string" ? projectId : projectId.id,
     title: "New chat",
-    ...newConversationDefaults(settings),
+    ...newConversationDefaults(projectId, settings),
   };
 
   if (location.kind === "defaults") {

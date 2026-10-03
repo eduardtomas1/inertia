@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import type { Conversation, ClientCommand } from "../../shared/contracts";
+import type { Conversation, ClientCommand, ProviderInfo } from "../../shared/contracts";
+import { effectiveDefaultProviderId } from "../../shared/default-provider";
 import {
   providerNativeModelSelection,
   type ModelSelection,
@@ -37,6 +38,7 @@ export interface ConversationCreationDependencies {
     "trackSourceControl"
   >;
   dataDirectory: string;
+  providerInfo?(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   testHooks?: {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
@@ -60,15 +62,21 @@ export class ConversationCreationService {
     selection: ModelSelection;
   } {
     const settings = this.dependencies.store.shellSnapshot().settings;
+    const defaultProviderId = payload.providerId ?? effectiveDefaultProviderId(
+      settings.defaultProvider,
+      payload.modelSelection ? [] : this.dependencies.providerInfo?.() ?? [],
+    );
+    const inherited = payload.providerId !== undefined || defaultProviderId === settings.defaultProvider;
+    const defaultModel = inherited ? settings.defaultModel : "";
     const requestedSelection = payload.modelSelection
       ?? providerNativeModelSelection({
-        providerId: payload.providerId ?? settings.defaultProvider,
+        providerId: defaultProviderId,
         modelId: payload.model
-          || settings.defaultModel
+          || defaultModel
           || "provider-default",
-        alias: payload.model || settings.defaultModel || null,
+        alias: payload.model || defaultModel || null,
         reasoningEffort: payload.reasoningEffort
-          || settings.defaultReasoningEffort
+          || (inherited ? settings.defaultReasoningEffort : "")
           || null,
       });
     const selection = this.dependencies.backendProfileController
@@ -89,6 +97,10 @@ export class ConversationCreationService {
     payload: ConversationCreatePayload,
     requestId: string,
   ): Promise<Conversation> {
+    if (payload.accessMode === undefined) {
+      const accessMode = this.dependencies.store.project(payload.projectId).preferences?.defaultAccessMode;
+      if (accessMode) payload = { ...payload, accessMode };
+    }
     if (this.dependencies.store.project(payload.projectId).workspaceKind === "scratch") {
       if (payload.branch || payload.worktreePath) {
         throw new RuntimeRequestError("A chat without a project gets its own folder; it cannot reuse a branch or worktree.");

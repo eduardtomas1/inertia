@@ -43,7 +43,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
   color: var(--text);
-  background: var(--surface-muted);
+  background: var(--surface);
   font: inherit;
   font-size: calc(var(--ui-font-secondary) + 1px);
 }

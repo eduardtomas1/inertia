@@ -320,6 +320,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       { name: "New chat", detail: "Start a chat in the current project.", shortcut: "new-chat" },
       { name: "Project navigation", detail: "Show or hide the sidebar.", shortcut: "toggle-sidebar" },
       { name: "Terminal", detail: "Show or hide the terminal.", shortcut: "toggle-terminal" },
+      { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Escape leaves Settings." },
       {
         name: "Chats and transcript",
         detail: "Shift+F10 opens a focused chat's actions. In the transcript, Alt+↑ and Alt+↓ move between turns.",

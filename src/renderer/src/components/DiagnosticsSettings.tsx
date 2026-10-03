@@ -111,7 +111,7 @@ export function DiagnosticsSettings({ projects, conversations, providers, select
     finally { setExporting(false); }
   };
 
-  return <section className="diagnostics-center" aria-labelledby="diagnostics-heading">
+  return <section className="diagnostics-center" aria-labelledby="diagnostics-heading" data-setting-id="diagnostics-incidents">
     <header className="diagnostics-header">
       <div className="diagnostics-heading-icon"><Activity size={20} aria-hidden="true" /></div>
       <div><h3 id="diagnostics-heading">Diagnostics</h3><p>Understand what happened. Decide what happens next.</p></div>

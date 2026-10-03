@@ -90,7 +90,7 @@ export function SettingCopy({
     <span className="setting-copy">
       <span className="setting-title">
         <strong id={titleId}>{title}</strong>
-        <SettingStatus notice={notice} />
+        {notice !== undefined && <SettingStatus notice={notice} />}
       </span>
       {description && <small id={descriptionId}>{description}</small>}
     </span>
@@ -145,7 +145,7 @@ export function SettingActionRow({
         {details}
         {notice !== undefined && <SettingNoteStatus notice={notice} />}
       </span>
-      {actions && <div>{actions}</div>}
+      {actions !== undefined && <div>{actions}</div>}
     </div>
   );
 }

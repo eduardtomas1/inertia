@@ -447,7 +447,7 @@ export function ModelBackendsSettings({
   };
 
   return (
-    <section className="backend-settings" aria-label="Model backend profiles">
+    <section className="backend-settings" aria-label="Model backend profiles" data-setting-id="model-backends">
       <div className="backend-settings-toolbar">
         <span>
           <span className="welcome-kicker">Harness-aware routing</span>

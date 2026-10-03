@@ -17,6 +17,8 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { AgentPixelGrid } from "../AgentPixelGrid";
 import { Switch } from "../ui";
+import { SettingRow, SettingStatus } from "../settings/SettingsLayout";
+import { useSettingAction } from "../settings/useSettingAction";
 import { orbMotionForPhase } from "./orbMotion";
 import { WorkingIndicatorProvider } from "./WorkingIndicatorContext";
 import { WorkingOrb } from "./WorkingOrb";
@@ -97,6 +99,7 @@ export function WorkingIndicatorSettings({
   const value = pending ?? saved;
   latest.current = value;
   const colorInput = useRef<HTMLInputElement | null>(null);
+  const action = useSettingAction();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const documentVisible = useDocumentVisibility();
 
@@ -109,8 +112,8 @@ export function WorkingIndicatorSettings({
     if (sameSettings(next, latest.current)) return;
     latest.current = next;
     setPending(next);
-    void Promise.resolve(onUpdate({ workingIndicator: next })).catch(() => {
-      setPending((current) => (current === next ? null : current));
+    void action.run(() => onUpdate({ workingIndicator: next })).then((saved) => {
+      if (!saved) setPending((current) => (current === next ? null : current));
     });
   };
 
@@ -153,7 +156,7 @@ export function WorkingIndicatorSettings({
       <section className="working-indicator-settings" aria-labelledby="working-indicator-heading" data-setting-id="working-indicator">
         <div className="working-indicator-heading">
           <span>
-            <h4 id="working-indicator-heading">Agent activity</h4>
+            <span className="setting-title"><h4 id="working-indicator-heading">Agent activity</h4><SettingStatus notice={action.notice} /></span>
             <p id="working-indicator-description">What Inertia shows while an agent is working. Reduced motion always shows one still frame.</p>
           </span>
         </div>
@@ -245,30 +248,22 @@ export function WorkingIndicatorSettings({
           </div>
         </div>
         <div className="settings-rows working-indicator-switches">
-          <div className="setting-row">
-            <span className="setting-copy">
-              <strong>Glow</strong>
-              <small>{preview.color === "ink" ? "Choose a colour to add a soft halo." : "A soft halo in the indicator's colour."}</small>
-            </span>
+          <SettingRow id="working-indicator-glow" title="Glow" description={preview.color === "ink" ? "Choose a colour to add a soft halo." : "A soft halo in the indicator's colour."}>
             <Switch
               label="Glow"
               checked={value.glow}
               disabled={disabled || preview.color === "ink"}
               onChange={(glow) => commit({ glow })}
             />
-          </div>
-          <div className="setting-row">
-            <span className="setting-copy">
-              <strong>Use for tool and step activity</strong>
-              <small>Automatic can match running tools, subagents and reasoning steps. Fixed styles only change the Work tab and working indicator.</small>
-            </span>
+          </SettingRow>
+          <SettingRow id="working-indicator-activity" title="Use for tool and step activity" description="Automatic can match running tools, subagents and reasoning steps. Fixed styles only change the Work tab and working indicator.">
             <Switch
               label="Use for tool and step activity"
               checked={value.style === "automatic" && value.activity}
               disabled={disabled || value.style !== "automatic"}
               onChange={(activity) => commit({ activity })}
             />
-          </div>
+          </SettingRow>
         </div>
         <div className="response-density-setting working-indicator-row">
           <span>

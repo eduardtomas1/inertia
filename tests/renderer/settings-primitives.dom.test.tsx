@@ -29,11 +29,13 @@ afterEach(() => {
 
 describe("setting rows", () => {
   it("marks each row with its setting id and keeps an empty status slot before saving", () => {
-    const { container } = render(<SettingRow id="theme" title="Theme" description="Pick one." />);
-    const row = container.querySelector('[data-setting-id="theme"]')!;
+    const { container, rerender } = render(<SettingRow id="theme" title="Theme" description="Pick one." notice={null} />);
+    const row = container.querySelector<HTMLElement>('[data-setting-id="theme"]')!;
     expect(row).toHaveClass("setting-row");
-    expect(within(row as HTMLElement).getByRole("status")).toBeEmptyDOMElement();
-    expect(within(row as HTMLElement).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(row).getByRole("status")).toBeEmptyDOMElement();
+    expect(within(row).queryByRole("alert")).not.toBeInTheDocument();
+    rerender(<SettingRow id="theme" title="Theme" description="Pick one." />);
+    expect(within(row).queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows action notices under the description", () => {

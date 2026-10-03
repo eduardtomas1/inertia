@@ -90,8 +90,9 @@ const SettingsShell = memo(function SettingsShell({
   const [section, setSection] = useState<SettingsSection>(target?.section ?? initialSection);
   const focusRequest = useRef<FocusRequest | null>(target?.anchor ? { anchor: target.anchor } : null);
   const previousTarget = useRef(target);
+  const focusRootOnMount = useRef(!target?.anchor);
   useEffect(() => {
-    if (!focusRequest.current) rootRef.current?.focus();
+    if (focusRootOnMount.current) rootRef.current?.focus();
   }, []);
   const resolveFocus = useCallback(() => {
     const request = focusRequest.current;

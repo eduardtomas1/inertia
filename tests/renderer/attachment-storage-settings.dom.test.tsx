@@ -14,7 +14,7 @@ it("shows global disk usage and changes the budget without deleting attachments"
   const request = vi.fn().mockResolvedValue(response());
   const onUpdate = vi.fn().mockResolvedValue(undefined);
   render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={onUpdate} />);
-  expect(await screen.findByText(/100.0 MiB used · 70 of 65,536 files/u)).toBeVisible();
+  expect(await screen.findByText(/100 MiB used · 70 of 65,536 files/u)).toBeVisible();
   fireEvent.change(screen.getByRole("combobox", { name: "Global attachment disk budget" }), { target: { value: "64" } });
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ attachmentStorageGiB: 64 }));
   expect(request.mock.calls.every(([command]) => command.type === "attachment.storage.get")).toBe(true);
@@ -36,7 +36,7 @@ it("requires confirmation for both explicit deletion and automatic eviction and 
   expect(remove).toHaveFocus();
   fireEvent.click(remove);
   fireEvent.click(screen.getByRole("button", { name: "Remove stored files" }));
-  expect(await screen.findByText("Removed 64 files and freed 80.0 MiB.")).toBeVisible();
+  expect(await screen.findByText("Removed 64 files and freed 80 MiB.")).toBeVisible();
   expect(request).toHaveBeenCalledWith({ type: "attachment.storage.cleanup" });
   await waitFor(() => expect(remove).toHaveFocus());
   fireEvent.click(screen.getByRole("checkbox"));
@@ -59,7 +59,7 @@ it("returns keyboard focus to the panel after failed updates and when cleanup le
   await waitFor(() => expect(checkbox).toHaveFocus());
   fireEvent.click(screen.getByRole("button", { name: /Remove oldest files \(64/u }));
   fireEvent.click(screen.getByRole("button", { name: "Remove stored files" }));
-  expect(await screen.findByText("Removed 64 files and freed 80.0 MiB.")).toBeVisible();
+  expect(await screen.findByText("Removed 64 files and freed 80 MiB.")).toBeVisible();
   await waitFor(() => expect(screen.getByRole("button", { name: "Refresh storage" })).toHaveFocus());
 });
 

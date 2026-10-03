@@ -99,7 +99,7 @@ export function ConnectionsAndDevicesSettings({
 
   return (
     <div className="settings-stack">
-      <section className="settings-card" aria-labelledby="private-connect-heading">
+      <section className="settings-card" aria-labelledby="private-connect-heading" data-setting-id="private-connect">
         <div className="settings-card-heading">
           <div><span className={`status-dot ${state.status}`} /></div>
           <span>
@@ -180,7 +180,7 @@ export function ConnectionsAndDevicesSettings({
         </section>
       )}
 
-      <section className="settings-card" aria-labelledby="paired-devices-heading">
+      <section className="settings-card" aria-labelledby="paired-devices-heading" data-setting-id="paired-devices">
         <div className="settings-card-heading">
           <div>●</div>
           <span>

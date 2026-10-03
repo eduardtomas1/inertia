@@ -22,6 +22,7 @@ import {
   playCompletionSound,
 } from "../../utils/completionSoundPlayer";
 import { IconButton, Switch } from "../ui";
+import { SettingRow } from "../settings/SettingsLayout";
 import "./CompletionSoundSettings.css";
 
 const SOUND_LABELS: Readonly<Record<BuiltInCompletionSound, { label: string; detail: string }>> = {
@@ -197,16 +198,12 @@ export function CompletionSoundSettings({
 
   return (
     <div className="completion-sound-settings" data-setting-id="completion-sound">
-      <div className="setting-row">
-        <span className="setting-copy">
-          <strong>Sound when a task ends</strong>
-          <small>Play a short sound when an agent finishes or stops with an error. Desktop notifications are unchanged.</small>
-        </span>
+      <SettingRow id="completion-sound-enabled" title="Sound when a task ends" description="Play a short sound when an agent finishes or stops with an error. Desktop notifications are unchanged.">
         <Switch label="Sound when a task ends" checked={value.enabled} disabled={disabled} onChange={(enabled) => {
           void commit({ enabled });
           if (enabled) preview(latest.current.sound);
         }} />
-      </div>
+      </SettingRow>
       {value.enabled && (
         <div className="completion-sound-options">
           <div className="completion-sound-heading">
@@ -262,13 +259,9 @@ export function CompletionSoundSettings({
             </div>
           )}
           {notice && <p className={clsx("completion-sound-notice", notice.tone === "error" && "is-error")} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-          <div className="setting-row">
-            <span className="setting-copy">
-              <strong>Only after long tasks</strong>
-              <small>Stay quiet for quick questions and play the sound only when a task runs longer than you choose.</small>
-            </span>
+          <SettingRow id="completion-sound-long-runs" title="Only after long tasks" description="Stay quiet for quick questions and play the sound only when a task runs longer than you choose.">
             <Switch label="Only after long tasks" checked={value.longRunsOnly} disabled={disabled} onChange={(longRunsOnly) => void commit({ longRunsOnly })} />
-          </div>
+          </SettingRow>
           {value.longRunsOnly && (
             <div className="response-density-setting completion-sound-threshold">
               <span><strong>Long task</strong><small>Tasks that run at least this long get the sound.</small></span>

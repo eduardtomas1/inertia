@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SnapshotRequest, SnapshotState } from "@shared/snapshots";
 import { Switch } from "./ui";
+import { SettingRow } from "./settings/SettingsLayout";
 import "./SnapshotSettings.css";
 
 export function SnapshotSettings(): React.JSX.Element {
@@ -57,19 +58,17 @@ export function SnapshotSettings(): React.JSX.Element {
     <section className="settings-card" aria-labelledby="snapshot-capture-heading">
       <h3 id="snapshot-capture-heading">Protected foreground capture</h3>
       <p className="settings-card-note">Experimental capture of the foreground window and its accessibility context. Review the attachment before sending.</p>
-      <div className="setting-row">
-        <span className="setting-copy"><strong>Enable Snapshots</strong><small>Use a global shortcut to attach the window you are working in to your selected chat.</small></span>
+      <SettingRow id="snapshots-enabled" title="Enable Snapshots" description="Use a global shortcut to attach the window you are working in to your selected chat.">
         <Switch label="Enable Snapshots" checked={state?.enabled ?? false} disabled={pending || !state?.available}
           onChange={(enabled) => { if (state) void request({ type: "configure", enabled, shortcut: state.shortcut }); }} />
-      </div>
-      <label className="setting-row">
-        <span className="setting-copy"><strong>Capture shortcut</strong><small>Works while another app is in front.</small></span>
-        <select aria-label="Capture shortcut" value={state?.shortcut ?? "accelerator"} disabled={pending || !state?.available}
+      </SettingRow>
+      <SettingRow id="snapshot-shortcut" title="Capture shortcut" description="Works while another app is in front.">
+        <select className="setting-select" aria-label="Capture shortcut" value={state?.shortcut ?? "accelerator"} disabled={pending || !state?.available}
           onChange={(event) => { if (state) void request({ type: "configure", enabled: state.enabled, shortcut: event.target.value as SnapshotState["shortcut"] }); }}>
           {!linux && <option value="both-shift">Both Shift keys</option>}
           <option value="accelerator">{accelerator}</option>
         </select>
-      </label>
+      </SettingRow>
       {!state && !error && <p role="status">Loading Snapshots settings…</p>}
       {state?.message && <p role="status" className="settings-card-note">{state.message}</p>}
       {error && <p role="alert" className="snapshot-settings-error">{error}</p>}
@@ -83,7 +82,7 @@ export function SnapshotSettings(): React.JSX.Element {
       </ol>
       <p className="settings-card-note">Detected editable fields are masked. Screenshots and accessibility context may still contain sensitive information, including overlapping windows. Review before sending.</p>
     </section>
-    <section className="settings-card" aria-labelledby="snapshot-access-heading">
+    <section className="settings-card" aria-labelledby="snapshot-access-heading" data-setting-id="snapshot-access">
       <h3 id="snapshot-access-heading">Capture access</h3>
       {state?.permission === "required" ? <>
         <p>Allow Inertia in macOS Accessibility and Screen Recording, then return here.</p>

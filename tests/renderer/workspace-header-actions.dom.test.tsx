@@ -34,6 +34,17 @@ const gitStatus: NonNullable<HeaderProps["gitStatus"]> = {
   ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0,
 };
 
+describe("workspace header settings control", () => {
+  it("offers Close settings with the same gear inside Settings", () => {
+    const callbacks = props();
+    render(<WorkspaceHeader {...callbacks} view="settings" />);
+    expect(screen.queryByRole("button", { name: /^Settings$/u })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(callbacks.onCloseSettings).toHaveBeenCalledOnce();
+    expect(callbacks.onOpenSettings).not.toHaveBeenCalled();
+  });
+});
+
 describe("workspace header project action ownership", () => {
   it("keeps the focused project action available when initial Git discovery completes", async () => {
     const callbacks = props();

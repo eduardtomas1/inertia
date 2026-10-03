@@ -81,8 +81,7 @@
 }
 
 .setting-disclosure > summary {
-  display: inline-flex;
-  max-width: 100%;
+  display: flex;
   align-items: center;
   gap: 6px;
   color: var(--text-soft);

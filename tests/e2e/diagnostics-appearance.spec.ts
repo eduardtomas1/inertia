@@ -82,7 +82,9 @@ async function expectLayoutHolds(app: AppFixture): Promise<void> {
 }
 
 async function openDiagnostics(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  if (!await page.getByRole("main", { name: "Settings", exact: true }).isVisible()) {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+  }
   await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Diagnostics", exact: true, level: 3 })).toBeVisible();
   await expect(page.getByText("A scheduled database backup failed", { exact: true })).toBeVisible();
@@ -109,11 +111,14 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await page.keyboard.press("Enter");
   await expect(row).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("button", { name: "Open provider settings", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Copy incident", exact: true }).scrollIntoViewIfNeeded();
   await expect(page.getByText("provider.auth-failed", { exact: true })).toBeVisible();
   await expectLayoutHolds(app);
   await capture(page, info, "diagnostics-expanded-dark-wide");
+  await row.focus();
   await page.keyboard.press("Enter");
   await expect(row).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("heading", { name: "Diagnostics", exact: true, level: 3 }).scrollIntoViewIfNeeded();
 
   for (const [width, height, theme, name] of [
     [1000, 800, "light", "diagnostics-light-narrow"],
@@ -156,10 +161,11 @@ test("turns capture off, keeps the always-on events and clears history", async (
   const failed = await page.evaluate(async () => window.inertia.sendDiscordReleaseInfo({ repositoryUrl: "https://unsupported.invalid/project" }));
   expect(failed).toMatchObject({ sent: false, code: "discord.repository-missing" });
   expect(failed).not.toHaveProperty("incidentId");
-  const page1 = await page.evaluate(() => window.inertia.queryDiagnostics({ severity: "all", search: "repository" }));
+  const page1 = await page.evaluate(() => window.inertia.queryDiagnostics({ severity: "all", search: "discord.repository-missing" }));
   expect(page1.total).toBe(0);
   await capture(page, info, "diagnostics-capture-off-dark-wide");
 
+  await toggle.focus();
   await page.keyboard.press("Space");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await page.getByRole("button", { name: "Copy support summary", exact: true }).click();

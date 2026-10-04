@@ -13,6 +13,7 @@ import {
   buildNewConversationPayload,
 } from "../../src/renderer/src/lib/newConversation";
 import type { InertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
+import { taskTrace, taskTurn } from "./background-task-fixtures";
 
 const counting = vi.hoisted(() => ({ composerRenders: 0 }));
 const harness = vi.hoisted(() => ({ connection: null as unknown }));
@@ -91,6 +92,8 @@ const detail: ConversationDetail = {
   contextPackets: [],
 };
 
+const harnessDetail = vi.hoisted(() => ({ current: null as unknown }));
+
 const sendCommand: InertiaConnection["sendCommand"] = async (command) => {
   if (command.type === "conversation.detail.load") {
     return {
@@ -100,7 +103,7 @@ const sendCommand: InertiaConnection["sendCommand"] = async (command) => {
         kind: "conversation.detail",
         conversationId,
         state: "ready",
-        detail,
+        detail: harnessDetail.current ?? detail,
       },
     } as unknown as ServerEvent;
   }
@@ -125,6 +128,7 @@ function connectionFor(nextSnapshot: AppSnapshot | null): InertiaConnection {
 
 beforeEach(() => {
   counting.composerRenders = 0;
+  harnessDetail.current = null;
   harness.connection = connectionFor(snapshot);
   Object.defineProperty(window, "inertia", {
     configurable: true,
@@ -184,6 +188,40 @@ describe("detached chat window", () => {
     } finally {
       storage.mockRestore();
     }
+  });
+
+  it("shows a turn's agents as plain status that cannot close the window", async () => {
+    const turn = taskTurn({
+      id: "detached-turn",
+      conversationId,
+      userMessageId: "detached-message",
+      status: "completed",
+      completedAt: "2030-01-01T00:02:00.000Z",
+    });
+    harnessDetail.current = {
+      ...detail,
+      agentTurns: [turn],
+      messages: [{
+        id: "detached-message",
+        conversationId,
+        turnId: turn.id,
+        role: "user",
+        content: "Split the work across helpers.",
+        attachments: [],
+        createdAt: turn.requestedAt,
+      }],
+      subagents: [
+        taskTrace({ id: "done", conversationId, turnId: turn.id, runId: turn.runId, status: "completed" }),
+        taskTrace({ id: "broken", conversationId, turnId: turn.id, runId: turn.runId, status: "failed" }),
+      ],
+    };
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    const status = await screen.findByText("2 agents finished");
+    expect(status.closest("button")).toBeNull();
+    expect(status.parentElement).toHaveTextContent(/^2 agents finished · 1 failed$/u);
+    expect(screen.queryByRole("button", { name: /agents finished/u })).toBeNull();
   });
 
   it("opens with the carried draft when this window's storage rejects writes", async () => {

@@ -1,0 +1,107 @@
+.settings-search {
+  display: flex;
+  flex: 0 0 auto;
+  margin: 0 0 10px;
+}
+
+.settings-search-input {
+  width: 100%;
+}
+
+.settings-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.settings-search-results {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.settings-search-results [role="listbox"] {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-search-group {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-search-group > span {
+  padding: 2px 10px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 500;
+}
+
+.settings-search-group button {
+  display: flex;
+  width: 100%;
+  min-height: var(--ui-control-height);
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-medium);
+  color: var(--text-soft);
+  background: transparent;
+  font-size: var(--ui-font-secondary);
+  text-align: left;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+
+.settings-search-group button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-search-group button > small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.settings-search-group button:hover,
+.settings-search-group button.is-active {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.settings-search-group mark {
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+
+.settings-search-empty {
+  margin: 0;
+  padding: 2px 10px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+}
+
+@media (max-width: 900px) {
+  .settings-search {
+    margin-bottom: 6px;
+  }
+
+  .settings-search-results {
+    max-height: min(320px, 45dvh);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-search-group button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .settings-search-group button.is-active {
+    outline: 1px solid CanvasText;
+  }
+}

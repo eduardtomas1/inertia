@@ -12,6 +12,7 @@ import { useDraftConversation } from "../../src/renderer/src/hooks/useDraftConve
 import { useProjectChatNavigation } from "../../src/renderer/src/hooks/useProjectChatNavigation";
 import { conversationHasHistory } from "../../src/shared/continuation-policy";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import {
   buildDraftConversation,
@@ -515,6 +516,52 @@ describe("useDraftConversation", () => {
     expect(hook.result.current.conversation?.modelSelection).toEqual(explicitModel);
     expect(hook.result.current.conversation).toMatchObject({ accessMode: "full", interactionMode: "plan" });
     expect(hook.result.current.conversation).toMatchObject({ providerSessionId: null, branch: null, worktreePath: null });
+  });
+
+  describe("access when the project changes", () => {
+    const otherId = "33333333-3333-4333-8333-333333333333";
+    const fullAccessProject: Project = { ...project, preferences: { ...defaultProjectPreferences(), defaultAccessMode: "full" } };
+    const plainProject: Project = { ...project, id: otherId, name: "Plain", path: "/workspace/plain", normalizedPath: "/workspace/plain" };
+    const renderDraft = () => renderHook(() => useDraftConversation({
+      snapshot: { ...snapshot, projects: [fullAccessProject, plainProject] },
+      settings: defaultSettings, run: vi.fn(), sendMessage: vi.fn(),
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+
+    it("does not carry one project's default access into a project without one", () => {
+      const hook = renderDraft();
+      act(() => hook.result.current.start(projectId, true));
+      expect(hook.result.current.conversation?.accessMode).toBe("full");
+      act(() => hook.result.current.changeProject(otherId));
+      expect(hook.result.current.conversation).toMatchObject({ projectId: otherId, accessMode: "supervised" });
+    });
+
+    it("uses the new project's default access instead of the global default", () => {
+      const hook = renderDraft();
+      act(() => hook.result.current.start(otherId, true));
+      expect(hook.result.current.conversation?.accessMode).toBe("supervised");
+      act(() => hook.result.current.changeProject(projectId));
+      expect(hook.result.current.conversation).toMatchObject({ projectId, accessMode: "full" });
+    });
+
+    it("keeps explicitly chosen access across project changes", async () => {
+      const hook = renderDraft();
+      act(() => hook.result.current.start(projectId, true));
+      await act(async () => { await hook.result.current.updateConversation({ accessMode: "auto-edit" }); });
+      act(() => hook.result.current.changeProject(otherId));
+      expect(hook.result.current.conversation).toMatchObject({ projectId: otherId, accessMode: "auto-edit" });
+      act(() => hook.result.current.changeProject(projectId));
+      expect(hook.result.current.conversation).toMatchObject({ projectId, accessMode: "auto-edit" });
+    });
+
+    it("starts a fresh draft from the project default after an explicit choice", async () => {
+      const hook = renderDraft();
+      act(() => hook.result.current.start(projectId, true));
+      await act(async () => { await hook.result.current.updateConversation({ accessMode: "auto-edit" }); });
+      act(() => hook.result.current.start(projectId, true));
+      act(() => hook.result.current.changeProject(otherId));
+      expect(hook.result.current.conversation).toMatchObject({ projectId: otherId, accessMode: "supervised" });
+    });
   });
 
   it("keeps a new-project chat local until its first message is sent", async () => {

@@ -23,13 +23,13 @@ import {
   type DetachedConversationPlaceholderProps,
 } from "./DetachedConversationPlaceholder";
 import { PaneResizeHandle } from "./PaneResizeHandle";
-import type { SettingsViewProps } from "./SettingsView";
+import type { SettingsViewProps } from "./settings/settingsTypes";
 import { LoadingMark } from "./ui";
 import type { Project } from "@shared/contracts";
 import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
 import type { UsageSurfaceProps } from "./UsageSurface";
 import type { AttachmentsSurfaceProps } from "./AttachmentsSurface";
-import type { AgentsSurfaceProps } from "./AgentsSurface";
+import type { BackgroundTasksSurfaceProps } from "./BackgroundTasksSurface";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useChatMinimumHeight } from "../hooks/useChatMinimumHeight";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
@@ -37,7 +37,7 @@ import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadConversationSplitView,
-  loadAgentsSurface,
+  loadBackgroundTasksSurface,
   loadAttachmentsSurface,
   loadFilesPanel,
   loadGoalPanel,
@@ -72,9 +72,9 @@ const UsageSurface = lazySurface(
   (module) => module.UsageSurface,
 );
 const AttachmentsSurface = lazySurface(loadAttachmentsSurface, (module) => module.AttachmentsSurface);
-const AgentsSurface = lazySurface(
-  loadAgentsSurface,
-  (module) => module.AgentsSurface,
+const BackgroundTasksSurface = lazySurface(
+  loadBackgroundTasksSurface,
+  (module) => module.BackgroundTasksSurface,
 );
 const ConversationSplitView = lazySurface(
   loadConversationSplitView,
@@ -112,7 +112,7 @@ export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
   panel: Omit<WorkspacePanelProps, "children">;
   usage: UsageSurfaceProps;
-  agents: AgentsSurfaceProps;
+  agents: BackgroundTasksSurfaceProps;
   attachments: AttachmentsSurfaceProps;
   runs: WorkspaceRunsModel;
   gitNotice: string | null;
@@ -202,7 +202,7 @@ function WorkspaceToolSurface({
                 <UsageSurface {...tools.usage} />
               )}
               {tools.activeTool === "agents" && (
-                <AgentsSurface {...tools.agents} />
+                <BackgroundTasksSurface key={tools.agents.conversationId ?? ""} {...tools.agents} />
               )}
               {tools.activeTool === "changes" && (
                 tools.historicalDiff

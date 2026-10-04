@@ -1,6 +1,23 @@
 import { lstat, mkdtemp, open, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { DIAGNOSTIC_LIMITS } from "../shared/application-diagnostics.js";
+import type { RuntimeDiagnostics } from "./runtime-diagnostics.js";
+
+type DiagnosticsReportSource = () => Pick<RuntimeDiagnostics, "exportForReport"> | null;
+let reportSource: DiagnosticsReportSource | null = null;
+
+export function setDiagnosticsReportSource(source: DiagnosticsReportSource | null): void {
+  reportSource = source;
+}
+
+export async function exportDiagnosticsForReport(options: { sinceMs: number; maxBytes: number }): Promise<string> {
+  if (!Number.isFinite(options.sinceMs) || !Number.isInteger(options.maxBytes) || options.maxBytes <= 0) {
+    throw new Error("The diagnostics report bounds are invalid.");
+  }
+  const diagnostics = reportSource?.() ?? null;
+  if (!diagnostics) return "";
+  return diagnostics.exportForReport(options.sinceMs, Math.min(options.maxBytes, DIAGNOSTIC_LIMITS.exportBytes));
+}
 
 /** Only main-generated, allowlisted JSON reaches this writer. The renderer can
  * choose filters, never the destination or file contents. Browser downloads

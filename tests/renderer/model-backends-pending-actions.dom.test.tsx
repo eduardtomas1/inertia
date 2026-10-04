@@ -78,8 +78,6 @@ function settingsProps(
   };
   return {
     profiles,
-    defaults: [],
-    projects: [],
     disabled: false,
     onLoadDetail: detail,
     onCreate: vi.fn(async () => {
@@ -96,8 +94,6 @@ function settingsProps(
       throw new Error("Unexpected probe");
     }),
     onDelete: vi.fn(async () => undefined),
-    onSetDefault: vi.fn(async () => undefined),
-    onClearDefault: vi.fn(async () => undefined),
   };
 }
 
@@ -114,12 +110,12 @@ describe("backend settings pending actions", () => {
       onDelete: vi.fn(() => pending),
     };
     const { container, rerender } = render(<ModelBackendsSettings {...props} />);
-    await waitFor(() => expect(container.querySelector(".backend-identity-card")).toHaveTextContent("custom-a.example.test"));
+    await waitFor(() => expect(container.querySelector(".backend-profile-facts")).toHaveTextContent("custom-a.example.test"));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Delete permanently" }));
     rerender(<ModelBackendsSettings {...props} profiles={[profileB]} />);
     await act(async () => { finish(); await pending; });
-    await waitFor(() => expect(container.querySelector(".backend-identity-card")).toHaveTextContent("custom-b.example.test"));
+    await waitFor(() => expect(container.querySelector(".backend-profile-facts")).toHaveTextContent("custom-b.example.test"));
     const rail = screen.getByRole("complementary", { name: "Backend profiles" });
     expect(within(rail).getByTitle("Claude harness · Profile B")).toHaveAttribute("aria-current", "true");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

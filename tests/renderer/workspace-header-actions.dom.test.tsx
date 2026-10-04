@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useLayoutEffect, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
+import { OpenInControl } from "../../src/renderer/src/components/workspace-header/OpenInControl";
+import { ProjectActionsControl } from "../../src/renderer/src/components/workspace-header/ProjectActionsControl";
 import { conversation } from "./composer-fixtures";
 
 type HeaderProps = ComponentProps<typeof WorkspaceHeader>;
@@ -19,7 +21,7 @@ function props(): HeaderProps {
     sidebarCollapsed: false, gitStatus: null, branches: [],
     actions: [{ id: "check", label: "Check workspace", command: "node --version", preview: false }],
     busy: false,
-    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(),
+    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(), onCloseSettings: vi.fn(),
     onOpenFolder: vi.fn(), onRevealFolder: vi.fn(), onOpenFiles: vi.fn(),
     onRefreshBranches: vi.fn(), onSwitchBranch: vi.fn(),
     onCreateBranch: vi.fn(), onCreateConversationOnBranch: vi.fn(),
@@ -33,6 +35,66 @@ const gitStatus: NonNullable<HeaderProps["gitStatus"]> = {
   isRepository: true, root: "/studio", branch: "main", upstream: null,
   ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0,
 };
+
+function ClickDuringCommit({ trigger }: { trigger: string }): null {
+  useLayoutEffect(() => {
+    screen.getByRole("button", { name: trigger }).click();
+  }, [trigger]);
+  return null;
+}
+
+describe("workspace header action menus first click", () => {
+  it("opens the Project actions menu when the first click lands before mount effects run", async () => {
+    render(
+      <>
+        <ProjectActionsControl
+          presentation="toolbar"
+          projectId="11111111-1111-4111-8111-111111111111"
+          actions={[{ id: "check", label: "Check workspace", command: "node --version", preview: false }]}
+          runs={null}
+          onRunAction={vi.fn()}
+        />
+        <ClickDuringCommit trigger="Project action options" />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Project action options" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: "Project actions" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /Check workspace/u })).toBeInTheDocument();
+  });
+
+  it("opens the Open checkout menu when the first click lands before mount effects run", async () => {
+    render(
+      <>
+        <OpenInControl
+          presentation="toolbar"
+          checkoutName="Studio"
+          checkoutPath="/studio"
+          filesAvailable
+          onOpenFolder={vi.fn()}
+          onRevealFolder={vi.fn()}
+          onOpenFiles={vi.fn()}
+        />
+        <ClickDuringCommit trigger="Choose where to open" />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Choose where to open" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: "Open checkout" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /Folder/u })).toBeInTheDocument();
+  });
+});
+
+describe("workspace header settings control", () => {
+  it("offers Close settings with the same gear inside Settings", () => {
+    const callbacks = props();
+    render(<WorkspaceHeader {...callbacks} view="settings" />);
+    expect(screen.queryByRole("button", { name: /^Settings$/u })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(callbacks.onCloseSettings).toHaveBeenCalledOnce();
+    expect(callbacks.onOpenSettings).not.toHaveBeenCalled();
+  });
+});
 
 describe("workspace header project action ownership", () => {
   it("keeps the focused project action available when initial Git discovery completes", async () => {

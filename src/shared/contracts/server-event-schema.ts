@@ -4,6 +4,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
 import { usageResultValidators } from "./usage-results-schema";
+import { backgroundTasksResult } from "./background-tasks-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
@@ -22,7 +23,10 @@ import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator"; import { isCompletionSoundSettings } from "../completion-sound";
+import { validNotificationSettings } from "./notification-settings-schema";
+import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
+import { subagentTrace } from "./subagent-trace-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -329,8 +333,6 @@ function appSettings(value: unknown): boolean {
     usageDisplayMode: ["expanded", "compact", "hidden"],
     interfaceScale: ["compact", "default", "comfortable", "large"],
     responseDensity: ["compact", "default", "comfortable"],
-    workspaceStartupSurface: ["summary", "tools"],
-    sidebarMode: ["classic", "activity"],
     projectGrouping: PROJECT_GROUPING,
     defaultInteractionMode: INTERACTION_MODES,
   } as const;
@@ -341,9 +343,7 @@ function appSettings(value: unknown): boolean {
     "confirmDestructiveActions", "desktopNotifications",
   ];
   return strings.every((key) => stringField(value, key))
-    && (value.lightColorTheme === undefined || oneOf(value, "lightColorTheme", COLOR_THEME_IDS))
-    && (value.darkColorTheme === undefined || oneOf(value, "darkColorTheme", COLOR_THEME_IDS))
-    && [value.lightCustomColor, value.darkCustomColor].every((color) => color == null || (typeof color === "string" && /^#[0-9a-f]{6}$/iu.test(color)))
+    && validAppearanceSettings(value)
     && Object.entries(enums).every(([key, options]) => oneOf(value, key, options))
     && booleans.every((key) => booleanField(value, key))
     && integerField(value, "terminalFontSize")
@@ -361,7 +361,8 @@ function appSettings(value: unknown): boolean {
     && appKeybindings(value.keybindings)
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
-    && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound));
+    && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
+    && validNotificationSettings(value);
 }
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
@@ -415,31 +416,6 @@ function activity(value: unknown): boolean {
     && oneOf(value, "status", SERVER_EVENT_OPTIONS.activityStatuses)
     && nullableStringField(value, "turnId")
     && nullableStringField(value, "detail");
-}
-
-function subagentTrace(value: unknown): boolean {
-  if (!recordWithStrings(
-    value,
-    "id",
-    "conversationId",
-    "runId",
-    "turnId",
-    "providerId",
-    "status",
-    "createdAt",
-    "updatedAt",
-  )) return false;
-  const nullableStrings = [
-    "providerTaskId", "providerAgentId", "parentTraceId",
-    "parentProviderAgentId", "parentProviderToolUseId", "providerToolUseId",
-    "providerRole", "providerName", "providerStatus", "description",
-    "progress", "result",
-  ];
-  return nullableStrings.every((key) => nullableStringField(value, key))
-    && providerId(value, "providerId")
-    && oneOf(value, "status", SERVER_EVENT_OPTIONS.subagentStatuses)
-    && booleanField(value, "isLive")
-    && integerField(value, "sequence");
 }
 
 function approvalRequest(value: unknown): boolean {
@@ -1105,7 +1081,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return unknownEventType(type);
   }
 }
-import { issueReportSchema } from "../issue-report";
+import { issueReportResult } from "../issue-report";
 import { messageQueueResultSchema } from "../queued-messages";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
@@ -1114,7 +1090,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,
-  "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
+  "support.report": issueReportResult,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
@@ -1127,6 +1103,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
+  "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),

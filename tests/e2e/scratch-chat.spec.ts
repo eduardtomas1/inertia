@@ -81,7 +81,7 @@ test("starts without a project, runs in separate folders, and restores after res
     await expect(page.getByText("A calm weekend:", { exact: false }).first()).toBeVisible();
     expect(JSON.parse(await readFile(join(second.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: await realpath(second.worktree_path), requestedCwd: second.worktree_path });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: "Dark", exact: true }).click();
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await app.expectNoViewportOverflow();

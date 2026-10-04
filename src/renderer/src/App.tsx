@@ -2,14 +2,14 @@ import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DiagnosticSelection } from "./utils/diagnosticNavigation";
-import type { SettingsSection } from "./components/settingsSections";
+import type { SettingsSection } from "./lib/settingsTarget";
+import { useSettingsMode } from "./hooks/useSettingsMode";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
   type AgentApprovalDecision,
   type AgentApprovalRequest,
   type AgentInputRequest,
-  type AppSettings,
+  type AppSettingsUpdate,
   type Conversation,
   type Project,
   type ProviderId,
@@ -18,6 +18,7 @@ import {
 } from "@shared/contracts";
 import type { MessageSearchHit } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
+import { DEFAULT_QUOTA_WARNINGS } from "@shared/quota-warnings";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
@@ -99,7 +100,10 @@ export default function App(): React.JSX.Element {
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
   const providerQuotaNotices = useStableController(
-    useProviderQuotaNotices(connection.snapshot?.providers ?? []),
+    useProviderQuotaNotices(
+      connection.snapshot?.providers ?? [],
+      connection.snapshot?.settings.quotaWarnings ?? DEFAULT_QUOTA_WARNINGS,
+    ),
   );
   const documentPresence = useDocumentPresence();
   const documentActive = documentPresence > 1;
@@ -112,12 +116,6 @@ export default function App(): React.JSX.Element {
     ),
   );
   const [view, setView] = useState<AppView>("workspace");
-  const [settingsTarget, setSettingsTarget] = useState<{
-    section: SettingsSection;
-    projectId?: string;
-    profileId?: string;
-    selection?: DiagnosticSelection;
-  } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
@@ -254,6 +252,7 @@ export default function App(): React.JSX.Element {
     compactConversation: compactConversationById,
     runQueueCommand,
     runLimitResetCommand,
+    loadBackgroundTasks,
     updateConversationById,
     sendingConversationIds,
   } = useAppRuntimeActions({
@@ -353,6 +352,8 @@ export default function App(): React.JSX.Element {
     setView,
     setActionError,
   });
+  const settingsMode = useSettingsMode({ view, navigateToView });
+  const { openSettings } = settingsMode;
   const composerProject = connection.snapshot?.projects.find(
     ({ id }) => id === draftConversation.conversation?.projectId,
   ) ?? project;
@@ -689,6 +690,7 @@ export default function App(): React.JSX.Element {
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open || dailyWorkOpen,
     toggleTerminal: primarySceneLayout.toggleTerminal,
+    toggleSettings: settingsMode.toggleSettings,
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen,
@@ -736,7 +738,7 @@ export default function App(): React.JSX.Element {
       payload: { conversationId: request.conversationId, requestId: request.id, answers },
     });
   };
-  const updateSettings = async (updates: Partial<AppSettings>): Promise<void> => {
+  const updateSettings = async (updates: AppSettingsUpdate): Promise<void> => {
     await run("settings.update", {
       type: "settings.update",
       payload: updates,
@@ -756,25 +758,17 @@ export default function App(): React.JSX.Element {
   const connectProvider = useCallback((providerId: ProviderId) => setAuthProviderId(providerId), []);
   const closeProviderAuth = useCallback(() => setAuthProviderId(null), []);
   const openProviderSetup = useCallback((_providerId: ProviderId) => {
-    setSettingsTarget({ section: "providers" });
-    navigateToView("settings");
-  }, [navigateToView]);
+    openSettings({ section: "agents" });
+  }, [openSettings]);
   const openBackendSetup = useCallback((profileId: string) => {
-    setSettingsTarget({ section: "backends", profileId });
-    navigateToView("settings");
-  }, [navigateToView]);
+    openSettings({ section: "agents", anchor: "model-backends", profileId });
+  }, [openSettings]);
   const openProjectSettings = useCallback((projectId: string) => {
-    setSettingsTarget({ section: "projects", projectId });
-    navigateToView("settings");
-  }, [navigateToView]);
+    openSettings({ section: "projects", projectId });
+  }, [openSettings]);
   const openSettingsSection = useCallback((section: SettingsSection) => {
-    setSettingsTarget({ section });
-    navigateToView("settings");
-  }, [navigateToView]);
-
-  useEffect(() => {
-    if (view !== "settings" && settingsTarget) setSettingsTarget(null);
-  }, [settingsTarget, view]);
+    openSettings({ section });
+  }, [openSettings]);
 
   const visibleError = actionError ?? connection.error;
   useDiagnosticNavigation(
@@ -782,7 +776,7 @@ export default function App(): React.JSX.Element {
     connection.status === "online",
     selectConversation,
     () => { setView("workspace"); setSidebarOpen(false); },
-    (target) => { setSettingsTarget(target); navigateToView("settings"); },
+    openSettings,
     setActionError,
   );
   const visibleConversationDetailState = conversationDetailState?.conversationId === conversation?.id
@@ -825,7 +819,7 @@ export default function App(): React.JSX.Element {
       connectProvider,
       openProviderSetup,
       openBackendSetup,
-      openSettings: () => navigateToView("settings"),
+      openSettings: () => openSettings(),
       openUsageView: () => navigateToView("usage"),
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
@@ -848,10 +842,13 @@ export default function App(): React.JSX.Element {
       runConversationContextCommand: draftConversation.runConversationContextCommand,
       runQueueCommand,
       runLimitResetCommand,
+      loadBackgroundTasks,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view: view === "settings" ? "settings" : "workspace",
-    settingsTarget,
+    settingsTarget: settingsMode.settingsTarget,
+    settingsSection: settingsMode.lastSection,
+    onSettingsSectionChange: settingsMode.rememberSection,
     settings,
     busyAction,
     project: composerProject,
@@ -893,7 +890,9 @@ export default function App(): React.JSX.Element {
     selectedMaintenanceOperation,
     selectedMaintenanceStatus,
     settings,
-    settingsTarget,
+    settingsMode.settingsTarget,
+    settingsMode.lastSection,
+    settingsMode.rememberSection,
     view,
     primarySceneLayout,
     workspaceSceneActions,
@@ -925,13 +924,14 @@ export default function App(): React.JSX.Element {
         connectProvider,
         openProviderSetup,
         openBackendSetup,
-        openSettings: () => navigateToView("settings"),
+        openSettings: () => openSettings(),
         openUsageView: () => navigateToView("usage"),
         openProjectPath,
         sendMessageToConversation,
         compactConversation: compactConversationById,
         runQueueCommand,
         runLimitResetCommand,
+        loadBackgroundTasks,
         updateConversationById,
       },
       sendingConversationIds,
@@ -1027,6 +1027,8 @@ export default function App(): React.JSX.Element {
     openBackendSetup,
     openProjectSettings,
     openSettingsSection,
+    openSettings,
+    closeSettings: settingsMode.closeSettings,
     createConversation,
     updateSettings,
     openProjectPath,

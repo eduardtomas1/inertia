@@ -17,8 +17,8 @@ import Database from "better-sqlite3";
 import { authoritativeRunStateSchemaIsValid } from "./authoritative-run-state-schema";
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
 import {
-  type DatabaseRequiredTables,
-  REQUIRED_TABLES_BY_SCHEMA_VERSION,
+  type DatabaseSchemaRequirements,
+  DATABASE_SCHEMA_REQUIREMENTS,
 } from "./database-recovery-required-tables";
 import { schemaLessEmptyDatabase } from "./database-empty-primary";
 import {
@@ -164,7 +164,7 @@ function validateOpenDatabase(
   database: Database.Database,
   check: "quick_check" | "integrity_check",
   currentSchemaVersion: number,
-  requiredTablesBySchemaVersion: DatabaseRequiredTables,
+  schemaRequirements: DatabaseSchemaRequirements,
   providerRunOwnershipSchemaIsValid: DatabaseSchemaValidator,
   attachmentCapabilitiesAreValid: DatabaseSchemaValidator,
   usageDashboardIndexIsValid: DatabaseSchemaValidator,
@@ -193,22 +193,14 @@ function validateOpenDatabase(
   ) return "inconsistent";
   const version = versions.length;
   if (version > currentSchemaVersion) return "unsupported-future";
-  for (const [introducedAt, requiredTables] of requiredTablesBySchemaVersion) {
+  for (const [introducedAt, requiredTables] of schemaRequirements.tables) {
     if (
       version >= introducedAt
       && requiredTables.some((table) => !tables.has(table))
     ) return "inconsistent";
   }
-  const requiredColumns: Record<string, readonly string[]> = {
-    projects: ["id", "name", "path"],
-    conversations: ["id", "project_id"],
-    messages: [
-      "id", "conversation_id", "content",
-      ...(version >= 75 ? ["private_connect_device_id"] : []),
-    ],
-    app_state: ["id"],
-  };
-  for (const [table, columns] of Object.entries(requiredColumns)) {
+  for (const [introducedAt, table, columns] of schemaRequirements.columns) {
+    if (version < introducedAt) continue;
     const existing = new Set(
       (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
         .map(({ name }) => name),
@@ -441,6 +433,11 @@ function validateOpenDatabase(
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "inconsistent";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
+  for (const [introducedAt, index] of schemaRequirements.indexes) {
+    if (version >= introducedAt && !database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index)) return "inconsistent";
+  }
   if (database.prepare("PRAGMA foreign_key_check").get()) return "inconsistent";
   return "valid-current";
 }
@@ -458,7 +455,7 @@ function validateDatabase(
       database,
       check,
       CURRENT_DATABASE_SCHEMA_VERSION,
-      REQUIRED_TABLES_BY_SCHEMA_VERSION,
+      DATABASE_SCHEMA_REQUIREMENTS,
       validProviderRunOwnershipSchema,
       validAttachmentCapabilities,
       validUsageDashboardIndex,
@@ -501,7 +498,7 @@ function validateDatabaseOffThread(
         database,
         "integrity_check",
         workerData.currentSchemaVersion,
-        workerData.requiredTablesBySchemaVersion,
+        workerData.schemaRequirements,
         validProviderRunOwnershipSchema,
         validAttachmentCapabilities,
         validUsageDashboardIndex,
@@ -525,7 +522,7 @@ function validateDatabaseOffThread(
       workerData: {
         currentSchemaVersion: CURRENT_DATABASE_SCHEMA_VERSION,
         path,
-        requiredTablesBySchemaVersion: REQUIRED_TABLES_BY_SCHEMA_VERSION,
+        schemaRequirements: DATABASE_SCHEMA_REQUIREMENTS,
       },
     });
     let receivedResult: DatabaseValidation | undefined;

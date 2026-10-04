@@ -124,7 +124,6 @@ export function compareSubagentTraces(
   right: SubagentTrace,
 ): number {
   return compareCreatedAt(left, right)
-    || left.sequence - right.sequence
     || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 }
 

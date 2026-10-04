@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ const user = {
 const scratch: Project = { ...user, id: "33333333-3333-4333-8333-333333333333", name: "No project", path: "/data/scratch", workspaceKind: "scratch" };
 
 afterEach(() => {
+  cleanup();
   Reflect.deleteProperty(window, "inertia");
 });
 
@@ -31,6 +32,8 @@ function props(target: ComponentProps<typeof SettingsView>["target"]): Component
     archived: [],
     databaseBackup: { lastValidatedAt: "2026-08-03T10:15:00.000Z" },
     onUpdate: vi.fn(async () => undefined),
+    onSetDefaultModel: vi.fn(async () => undefined),
+    onRestoreDefaults: vi.fn(async () => undefined),
     onConnectProvider: vi.fn(),
     onRefreshProvider: vi.fn(),
     maintenanceOperations: new Map(),
@@ -63,23 +66,13 @@ function props(target: ComponentProps<typeof SettingsView>["target"]): Component
   };
 }
 
-function optionLabels(select: HTMLElement): string[] {
-  return within(select).getAllByRole("option").map(({ textContent }) => textContent ?? "");
-}
-
 describe("settings project lists", () => {
-  it("keeps the folder for chats without a project out of the issue report scope", async () => {
+  it("keeps the folder for chats without a project out of the project chooser", async () => {
     Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
-    render(<SettingsView {...props({ section: "support" })} />);
-    const scope = await screen.findByRole("combobox", { name: "Diagnostic scope" });
-    expect(optionLabels(scope)).toEqual(["App only", "Studio · counts only"]);
-  });
-
-  it("keeps the folder for chats without a project out of project model defaults", async () => {
-    Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
-    render(<SettingsView {...props({ section: "backends" })} />);
-    const heading = await screen.findByRole("heading", { name: "New chat defaults" });
-    const card = heading.closest("section")!;
-    expect(optionLabels(within(card).getByRole("combobox", { name: "Project" }))).toEqual(["Studio"]);
+    render(<SettingsView {...props({ section: "projects" })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose project" }));
+    const dialog = screen.getByRole("dialog", { name: "Choose project" });
+    expect(within(dialog).getByText("Studio")).toBeInTheDocument();
+    expect(within(dialog).queryByText("No project")).toBeNull();
   });
 });

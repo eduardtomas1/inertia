@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import type { Conversation } from "@shared/contracts";
+import type { SettingsTarget } from "../lib/settingsTarget";
 import {
   DIAGNOSTIC_NAVIGATION_EVENT,
   parseDiagnosticNavigation,
-  type DiagnosticNavigation,
 } from "../utils/diagnosticNavigation";
 
 export function useDiagnosticNavigation(
@@ -11,7 +11,7 @@ export function useDiagnosticNavigation(
   online: boolean,
   selectConversation: (conversation: Conversation) => void,
   showWorkspace: () => void,
-  openSettings: (target: Exclude<DiagnosticNavigation, { conversationId: string }>) => void,
+  openSettings: (target: SettingsTarget) => void,
   setActionError: (message: string) => void,
 ): void {
   useEffect(() => {

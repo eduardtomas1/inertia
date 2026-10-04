@@ -1,47 +1,264 @@
-.project-settings { position: relative; width: 100%; max-width: 920px; margin-inline: auto; padding: 8px 0 32px; }
-.project-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
-.project-settings-heading h1 { margin: 0; color: var(--text); font-size: 23px; font-weight: 550; letter-spacing: -.025em; }
-.project-settings-heading p { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
-.project-settings button:not([role="switch"], [role="radio"]) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); color: var(--text-soft); font-size: 12px; }
-.project-settings button:not([role="switch"], [role="radio"]):hover { background: var(--surface-hover); color: var(--text); }
-.project-settings button:disabled { opacity: .5; cursor: not-allowed; }
-.project-settings button:focus-visible, .project-settings input:focus-visible, .project-settings select:focus-visible, .project-settings textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.project-settings-heading > button { max-width: 260px; flex-shrink: 0; }
-.project-settings-heading > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-settings-card { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-.project-setting-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .85fr); align-items: center; gap: 28px; padding: 19px 20px; }
-.project-setting-row + .project-setting-row { border-top: 1px solid var(--border); }
-.project-setting-row h3 { margin: 0 0 5px; color: var(--text); font-size: 13px; font-weight: 550; }
-.project-setting-row p { margin: 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.65; }
-.project-setting-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: 0; }
-.project-setting-control select, .project-setting-control input, .project-action-form input, .project-action-form textarea { width: 100%; min-width: 0; min-height: 32px; padding: 6px 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12px; }
-.project-setting-control > select { max-width: 290px; }
-.project-name-form, .project-budget-form { display: flex; gap: 6px; width: 100%; max-width: 290px; }
-.project-setting-field-error { max-width: 290px; margin: 0; color: var(--danger); font-size: 11px; }
-.project-icon-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
-.project-colour-preview { display: inline-flex; align-items: center; gap: 7px; max-width: 290px; color: var(--text-soft); font-size: 12px; }
-.project-colour-preview > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-setting-control > .project-color-picker { justify-items: end; max-width: 290px; }
-.project-setting-control .project-swatches, .project-setting-control .project-color-custom { justify-content: flex-end; }
-.project-icon-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; }
-.project-model-controls { display: flex; flex-wrap: wrap; gap: 7px; width: 100%; max-width: 290px; }
-.project-settings-group-title { margin: 27px 16px 11px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
-.project-action-form { display: grid; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--border); }
-.project-action-form label { display: grid; gap: 6px; font-size: 12px; color: var(--text-soft); }
-.project-action-form p, .project-actions-empty { margin: 0; padding: 16px 20px; font-size: 11.5px; line-height: 1.65; color: var(--text-muted); border-top: 1px solid var(--border); }
-.project-action-form p { padding: 0; border: 0; }
-.project-action-form > div { display: flex; justify-content: flex-end; gap: 8px; }
-.project-actions-list { list-style: none; padding: 0; margin: 0; }
-.project-actions-list li { display: flex; align-items: center; gap: 16px; padding: 13px 20px; border-top: 1px solid var(--border); }
-.project-actions-list li > div { display: grid; flex: 1; min-width: 0; gap: 5px; font-size: 12px; }
-.project-actions-list code { font-family: var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; font-size: 11px; }
-.project-settings .is-danger, .project-settings-error { color: var(--danger); }
-.project-settings-error { padding: 12px 16px; border: 1px solid var(--danger); border-radius: 9px; font-size: 12px; }
-@media (max-width: 1000px) {
-  .project-settings-heading { flex-wrap: wrap; gap: 14px; }
-  .project-setting-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .project-setting-control { align-items: flex-start; }
-  .project-icon-controls { justify-content: flex-start; }
-  .project-setting-control > .project-color-picker { justify-items: start; }
-  .project-setting-control .project-swatches, .project-setting-control .project-color-custom { justify-content: flex-start; }
+.project-settings {
+  container: project-settings / inline-size;
+  min-width: 0;
+}
+
+.project-chooser-row {
+  margin-bottom: 8px;
+  padding-inline: 4px;
+}
+
+.project-chooser {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(320px, 60%);
+  min-height: var(--control-height);
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--surface-muted);
+  font-size: var(--ui-font-secondary);
+}
+
+.project-chooser:hover {
+  background: var(--surface-hover);
+}
+
+.project-chooser > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-chooser > svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.project-setting-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.project-icon-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.project-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 4px;
+}
+
+.project-icon-grid > button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--radius-small);
+  color: var(--text-soft);
+  background: transparent;
+}
+
+.project-icon-grid > button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.project-setting-control > .project-color-picker {
+  justify-items: end;
+}
+
+.project-setting-control .project-swatches,
+.project-setting-control .project-color-custom {
+  justify-content: flex-end;
+}
+
+.project-model-controls {
+  display: flex;
+  min-width: 0;
+  max-width: 50%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.project-model-controls .setting-select {
+  max-width: 100%;
+}
+
+.project-actions-setting + .project-settings-advanced,
+.setting-row + .project-actions-setting {
+  border-top: 1px solid var(--border);
+}
+
+.project-actions-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-actions-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.project-actions-list li > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.project-actions-list strong {
+  color: var(--text);
+  font-size: var(--ui-font-secondary);
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+
+.project-actions-list code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-micro);
+  overflow-wrap: anywhere;
+}
+
+.project-action-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--border);
+}
+
+.project-action-form label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  font-weight: 560;
+}
+
+.project-action-form .project-action-arguments {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.project-action-form textarea {
+  resize: vertical;
+}
+
+.project-action-form small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.project-action-buttons {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.project-settings-advanced {
+  padding: 4px 0;
+}
+
+.project-settings .is-danger {
+  color: var(--danger);
+}
+
+@container project-settings (max-width: 560px) {
+  .project-settings .setting-row:not(:has(> .switch-control)) {
+    flex-wrap: wrap;
+  }
+
+  .project-settings .setting-row:not(:has(> .switch-control)) > .setting-copy {
+    flex-basis: 100%;
+  }
+
+  .project-chooser,
+  .project-model-controls {
+    max-width: 100%;
+  }
+
+  .project-setting-control {
+    align-items: flex-start;
+  }
+
+  .project-icon-controls,
+  .project-model-controls,
+  .project-setting-control .project-swatches,
+  .project-setting-control .project-color-custom {
+    justify-content: flex-start;
+  }
+
+  .project-setting-control > .project-color-picker {
+    justify-items: start;
+  }
+
+  .project-action-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.project-remove-confirm {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.project-remove-confirm strong {
+  font-size: var(--ui-font-secondary);
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.project-remove-confirm small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+}
+
+.project-remove-confirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.project-remove-confirm .secondary-button.is-danger {
+  color: var(--danger);
+}
+
+@media (forced-colors: active) {
+  .project-remove-confirm {
+    border: 1px solid CanvasText;
+  }
 }

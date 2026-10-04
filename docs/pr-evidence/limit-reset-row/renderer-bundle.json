@@ -1,0 +1,42 @@
+{
+  "baseline": "75dc9ceb",
+  "method": "Node 22 npm run build:bundle on macOS against origin/main and against this branch. The usage-limit row is a lazily loaded chunk counted in coreJavaScript; its growth is the focus restore after Resume now. The row styles live in the row's deferred stylesheet, so entryCss is unchanged.",
+  "changedBudgets": {
+    "coreJavaScript": {
+      "baselineBytes": 2238608,
+      "implementationBytes": 2238846,
+      "deltaBytes": 238,
+      "previousBudget": 2238608,
+      "budget": 2238846
+    }
+  },
+  "mergedOnConsolidation": {
+    "baseline": "e2f10369",
+    "coreJavaScript": {
+      "baselineBytes": 2262074,
+      "implementationBytes": 2262312,
+      "deltaBytes": 238,
+      "budget": 2262312
+    }
+  },
+  "unchangedBudgets": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "baselineBytes": 860500,
+      "implementationBytes": 860497
+    },
+    "entryCss": {
+      "baselineBytes": 354855,
+      "implementationBytes": 354855
+    }
+  },
+  "deferredAssets": {
+    "limitResetRowJavaScript": {
+      "baselineBytes": 4134,
+      "implementationBytes": 4375
+    },
+    "limitResetRowCss": {
+      "baselineBytes": 1982,
+      "implementationBytes": 2598
+    }
+  }
+}

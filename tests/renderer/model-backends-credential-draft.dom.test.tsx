@@ -78,8 +78,6 @@ function settingsProps(
   };
   return {
     profiles,
-    defaults: [],
-    projects: [],
     disabled: false,
     onLoadDetail: detail,
     onCreate: vi.fn(async () => {
@@ -96,8 +94,6 @@ function settingsProps(
       throw new Error("Unexpected probe");
     }),
     onDelete: vi.fn(async () => undefined),
-    onSetDefault: vi.fn(async () => undefined),
-    onClearDefault: vi.fn(async () => undefined),
   };
 }
 
@@ -183,14 +179,14 @@ describe("backend credential draft identity", () => {
       const rail = screen.getByRole("complementary", { name: "Backend profiles" });
       const profileBButton = within(rail).getByTitle("Claude harness · Profile B");
       await user.click(profileBButton);
-      await waitFor(() => expect(container.querySelector(".backend-identity-card"))
+      await waitFor(() => expect(container.querySelector(".backend-profile-facts"))
         .toHaveTextContent("custom-b.example.test"));
       await user.type(credentialInput(container), "profile-b-draft");
 
       await act(async () => { finish(profileA); await pending; });
 
       expect(profileBButton).toHaveAttribute("aria-current", "true");
-      expect(container.querySelector(".backend-identity-card"))
+      expect(container.querySelector(".backend-profile-facts"))
         .toHaveTextContent("custom-b.example.test");
       expect(credentialInput(container)).toHaveValue("profile-b-draft");
       expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
@@ -230,7 +226,7 @@ describe("backend credential draft identity", () => {
     await user.click(screen.getByRole("button", { name: "New profile" }));
     await user.click(screen.getByRole("button", { name: "Create profile" }));
     await user.click(screen.getByRole("button", { name: "Cancel profile editing" }));
-    await waitFor(() => expect(container.querySelector(".backend-identity-card"))
+    await waitFor(() => expect(container.querySelector(".backend-profile-facts"))
       .toHaveTextContent("custom-a.example.test"));
     await user.type(credentialInput(container), "profile-a-draft");
     rerender(<ModelBackendsSettings {...props} profiles={[profileA, created]} />);
@@ -375,7 +371,7 @@ describe("backend credential draft identity", () => {
     await user.click(profileBButton);
     await waitFor(() => {
       expect(profileBButton).toHaveAttribute("aria-current", "true");
-      expect(container.querySelector(".backend-identity-card"))
+      expect(container.querySelector(".backend-profile-facts"))
         .toHaveTextContent("custom-b.example.test");
     });
 
@@ -391,7 +387,7 @@ describe("backend credential draft identity", () => {
     await waitFor(() => {
       expect(profileBButton).toHaveAttribute("aria-current", "true");
       expect(profileAButton).not.toHaveAttribute("aria-current");
-      expect(container.querySelector(".backend-identity-card"))
+      expect(container.querySelector(".backend-profile-facts"))
         .toHaveTextContent("custom-b.example.test");
     });
   });

@@ -138,15 +138,28 @@ describe("durable project and thread organization", () => {
     // Exact shape written by builds that predate claudeMaxBudgetUsd.
     const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
       actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
-    const appearanceDefaults = { color: null, colorEmphasis: "icon", pinned: false };
-    expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...appearanceDefaults });
+    const laterDefaults = { defaultAccessMode: null, color: null, colorEmphasis: "icon", pinned: false };
+    expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     store.close(); stores.splice(stores.indexOf(store), 1);
     const database = new Database(path);
     try { database.prepare("UPDATE projects SET preferences_json = ? WHERE id = ?").run(JSON.stringify(legacy), project.id); } finally { database.close(); }
     const reopened = new RuntimeStore(path, root); stores.push(reopened);
-    expect(reopened.project(project.id).preferences).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...appearanceDefaults });
+    expect(reopened.project(project.id).preferences).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     reopened.updateProject(project.id, { preferences: { ...reopened.project(project.id).preferences!, claudeMaxBudgetUsd: 2.5 } });
     expect(reopened.project(project.id).preferences).toMatchObject({ autoPull: true, claudeMaxBudgetUsd: 2.5 });
+  });
+
+  it("accepts only the known access modes as the project's default access, inheriting by default", () => {
+    const defaults = defaultProjectPreferences();
+    expect(defaults.defaultAccessMode).toBeNull();
+    for (const value of [null, "supervised", "auto-edit", "full"]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, defaultAccessMode: value })).toMatchObject({ success: true, data: { defaultAccessMode: value } });
+    }
+    for (const value of ["inherit", "root", "", 1, true]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, defaultAccessMode: value }).success).toBe(false);
+    }
+    const { defaultAccessMode: _defaultAccessMode, ...older } = defaults;
+    expect(parseProjectPreferences(JSON.stringify(older))).toEqual(defaults);
   });
 
   it("bounds the Claude spend limit to positive cents up to 10,000 USD", () => {
@@ -193,6 +206,16 @@ describe("durable project and thread organization", () => {
       icon: { kind: "symbol", name: "globe" }, pinned: true });
     expect(parseProjectPreferences({ ...stored, actions: "broken" })).toEqual(defaultProjectPreferences());
     expect(parseProjectPreferences([stored])).toEqual(defaultProjectPreferences());
+  });
+
+  it("resets only an unknown default access and keeps every other stored preference", () => {
+    const kept = { ...defaultProjectPreferences(), autoPull: true, claudeMaxBudgetUsd: 2.5, icon: { kind: "symbol" as const, name: "globe" as const },
+      actions: [{ id: "22222222-2222-4222-8222-222222222222", name: "Test", executable: "npm", args: ["test"] }] };
+    for (const defaultAccessMode of ["read-only", 1, { mode: "full" }]) {
+      expect(parseProjectPreferences(JSON.stringify({ ...kept, defaultAccessMode }))).toEqual({ ...kept, defaultAccessMode: null });
+    }
+    expect(parseProjectPreferences(JSON.stringify({ ...kept, defaultAccessMode: "read-only", colorEmphasis: "everything" })))
+      .toEqual({ ...kept, defaultAccessMode: null });
   });
 
   it("accepts only non-empty, well-formed appearance patches and merges them over current preferences", () => {

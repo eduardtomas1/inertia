@@ -946,9 +946,11 @@ export const Composer = memo(function Composer({
       );
     });
   };
+  const conversationProvider = providers.find(({ id }) => id === conversation.providerId);
   const limitResetRow = onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
+      providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}
       onCommand={onLimitResetCommand} />
   </Suspense>;
   return (
@@ -969,6 +971,7 @@ export const Composer = memo(function Composer({
       >
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
+        {limitResetRow}
         {goal && (
           <Suspense fallback={null}>
             <ChatGoalControl
@@ -995,7 +998,7 @@ export const Composer = memo(function Composer({
         )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
-          contextCards={<>{limitResetRow}{conversationContextHandoffEnabled && (
+          contextCards={<>{conversationContextHandoffEnabled && (
             <>
               <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
               <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />

@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   listInertiaReleases,
   sendDiscordReleaseInfo,
+  validateReleaseRepository,
 } from "../../src/main/inertia-releases";
+import { isReleaseRepositoryUrl } from "../../src/shared/release-repository";
 
 function jsonResponse(value: unknown, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(value), {
@@ -95,6 +97,39 @@ describe("Inertia release list", () => {
       repositoryUrl: "",
     })).rejects.toThrow("release repository URL is required");
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("release repository URLs", () => {
+  it.each([
+    ["https://github.com/eduardtomas1/inertia", true],
+    [" https://github.com/eduardtomas1/inertia.git/ ", true],
+    ["https://GitHub.com/eduardtomas1/inertia?tab=releases#top", true],
+    ["https://gitlab.com/group/subgroup/project", true],
+    ["https://gitlab.com/group/project.git", true],
+    ["https://github.com/eduardtomas1", false],
+    ["https://gitlab.com/group", false],
+    ["http://github.com/eduardtomas1/inertia", false],
+    ["https://user@github.com/eduardtomas1/inertia", false],
+    ["https://github.com:8443/eduardtomas1/inertia", false],
+    ["https://bitbucket.org/team/project", false],
+    ["https://github.com.evil.test/eduardtomas1/inertia", false],
+    [`https://github.com/eduardtomas1/${"r".repeat(480)}`, false],
+    ["not a url", false],
+    ["", false],
+  ])("treats %j the same in the renderer and the main process", (url, valid) => {
+    expect(isReleaseRepositoryUrl(url)).toBe(valid);
+    if (valid) expect(() => validateReleaseRepository(url)).not.toThrow();
+    else expect(() => validateReleaseRepository(url)).toThrow("A supported public release repository URL is required.");
+  });
+
+  it.each([
+    ["https://github.com/eduardtomas1/inertia.git", "https://api.github.com/repos/eduardtomas1/inertia/releases?per_page=10"],
+    ["https://gitlab.com/group/subgroup/project/", "https://gitlab.com/api/v4/projects/group%2Fsubgroup%2Fproject/releases?order_by=created_at&sort=desc&per_page=10"],
+  ])("lists releases for %s from its host API", async (repositoryUrl, releasesUrl) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => jsonResponse([]));
+    await expect(listInertiaReleases(fetch, { repositoryUrl })).resolves.toEqual([]);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(releasesUrl, expect.objectContaining({ method: "GET", redirect: "error" }));
   });
 });
 

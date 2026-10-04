@@ -13,7 +13,7 @@ The first time Inertia opens on a new computer, a short guide introduces the app
 3. **Connect an agent.** Which agents are ready on this computer, with **Set up** for any that need attention.
 4. **Start.** A summary and **Add a project**.
 
-Move between steps with **Back** and the primary button, or with the ← and → keys. **Skip** or Esc closes the guide. It doesn't come back on its own, but you can replay it from **Settings → Report an issue → Show welcome guide**.
+Move between steps with **Back** and the primary button, or with the ← and → keys. **Skip** or Esc closes the guide. It doesn't come back on its own, but you can replay it from **Settings → Help → Welcome guide → Show welcome guide**.
 
 ## Add a project
 
@@ -21,9 +21,9 @@ Choose **Add your first project** on the home screen, or the add-project button 
 
 ## Connect an agent
 
-Open **Settings → Providers** and connect a provider. Inertia uses the accounts you already have: each provider keeps its own authentication, and custom backend credentials are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
+Open **Settings → Agents** and connect a provider. Inertia uses the accounts you already have: each provider keeps its own authentication, and custom backend credentials are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
 
-For Codex, update the installed CLI from **Settings → Providers** when an update is available, then refresh the provider. Inertia reads models and their reasoning and speed options from that installation. GPT-6.1 Sol (`gpt-6.1-sol`) appears when Codex advertises it for your account; available options depend on your plan and workspace settings. See [OpenAI's model guide](https://learn.chatgpt.com/docs/models) for rollout details.
+For Codex, update the installed CLI from **Settings → Agents** when an update is available, then refresh the provider. Inertia reads models and their reasoning and speed options from that installation. GPT-6.1 Sol (`gpt-6.1-sol`) appears when Codex advertises it for your account; available options depend on your plan and workspace settings. See [OpenAI's model guide](https://learn.chatgpt.com/docs/models) for rollout details.
 
 ## Start a chat
 
@@ -34,5 +34,7 @@ Use **New chat** in the sidebar, or press ⌘N on macOS (Ctrl+N elsewhere). In t
 - **Supervised** keeps provider approvals active.
 - **Auto-edit** allows supported file edits without asking.
 - **Full Access** is an explicit choice for a workspace and task you trust.
+
+New chats start in the mode chosen in **Settings → Chats → New chats**. A project can start its new chats in another mode with **Settings → Projects → Default access**; you can still change the mode for each chat in the composer.
 
 Next: [Chats and agents](chats-and-agents.md).

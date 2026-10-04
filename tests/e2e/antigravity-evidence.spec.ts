@@ -145,14 +145,15 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
 
   const openAntigravitySettings = async (theme: "Light" | "Dark"): Promise<void> => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const general = page.getByRole("button", { name: "General", exact: true });
+    const general = page.getByRole("button", { name: "Appearance", exact: true });
     if (await general.isVisible()) await general.click();
     await page.getByRole("radio", { name: theme }).click();
-    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
     const antigravity = page.getByRole("button", { name: "Configure Antigravity" });
-    await expect(antigravity).toContainText("Antigravity checks your sign-in when a turn starts", { timeout: 20_000 });
-    await expect(page.getByRole("button", { name: /^Configure Gemini/u })).toHaveCount(0);
     await antigravity.click();
+    await expect(page.locator(".provider-settings-editor-header"))
+      .toContainText("Antigravity checks your sign-in when a turn starts", { timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /^Configure Gemini/u })).toHaveCount(0);
     await expect(page.locator(".provider-settings-shell")).not.toContainText(/\bvv\d/u);
     await expect(page.locator(".provider-settings-shell")).not.toContainText(/gemini/iu);
     const executable = page.getByRole("textbox", { name: "Antigravity executable path" });

@@ -19,7 +19,7 @@ const releases = [
   { tag_name: "v1", created_at: "2026-01-01T00:00:00Z" },
 ];
 
-function harness() {
+function harness(now?: () => number) {
   const root = mkdtempSync(join(tmpdir(), "inertia-incidents-ipc-")); directories.push(root);
   const diagnostics = new RuntimeDiagnostics(join(root, "logs"));
   const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
@@ -31,10 +31,56 @@ function harness() {
   };
   const copyText = vi.fn();
   const chooseExportPath = vi.fn(async (): Promise<string | null> => join(root, "export.json"));
-  registerApplicationDiagnosticsIpc({ ipcMain, diagnostics: () => diagnostics, assertTrusted, copyText, chooseExportPath });
+  const persistCapture = vi.fn();
+  registerApplicationDiagnosticsIpc({ ipcMain, diagnostics: () => diagnostics, assertTrusted, copyText, chooseExportPath, persistCapture, ...(now ? { now } : {}) });
   const invoke = (name: string, input: unknown) => handlers.get(name)!(event, input);
-  return { root, diagnostics, ipcMain, event, handlers, assertTrusted, copyText, chooseExportPath, invoke };
+  return { root, diagnostics, ipcMain, event, handlers, assertTrusted, copyText, chooseExportPath, persistCapture, invoke };
 }
+
+describe("diagnostics capture and history IPC", () => {
+  it("accepts only a strict boolean, persists the choice before applying it, and hides save failures", () => {
+    const h = harness();
+    for (const value of ["false", 0, null, { enabled: false }]) {
+      expect(() => h.invoke(DIAGNOSTICS_IPC.setCapture, value)).toThrow("invalid");
+    }
+    expect(h.persistCapture).not.toHaveBeenCalled();
+    expect(h.invoke(DIAGNOSTICS_IPC.setCapture, false)).toMatchObject({ enabled: false, since: expect.any(String) });
+    expect(h.persistCapture).toHaveBeenCalledExactlyOnceWith({ enabled: false, since: expect.any(String) });
+    expect(h.invoke(DIAGNOSTICS_IPC.query, { severity: "all" })).toMatchObject({ capture: false });
+    h.persistCapture.mockImplementationOnce(() => { throw new Error("EACCES /private/userData"); });
+    expect(() => h.invoke(DIAGNOSTICS_IPC.setCapture, true)).toThrow(/^Diagnostics settings could not be saved\.$/u);
+    expect(h.diagnostics.captureState().enabled).toBe(false);
+  });
+
+  it("clears history only for a trusted no-argument request within the report rate limit", () => {
+    const h = harness();
+    h.diagnostics.record("app.start");
+    expect(() => h.handlers.get(DIAGNOSTICS_IPC.clear)!(h.event, {})).toThrow("Unauthorized");
+    expect(h.handlers.get(DIAGNOSTICS_IPC.clear)!(h.event)).toEqual({ cleared: true });
+    expect(h.diagnostics.query({ severity: "all" }).events.map(({ event }) => event)).toEqual(["diagnostics.history-cleared"]);
+    for (let index = 0; index < 19; index += 1) h.handlers.get(DIAGNOSTICS_IPC.clear)!(h.event);
+    expect(() => h.handlers.get(DIAGNOSTICS_IPC.clear)!(h.event)).toThrow("rate limited");
+  });
+
+  it("limits a sender to 120 reads per minute and admits reads again once the minute has passed", () => {
+    let time = 1_000_000;
+    const h = harness(() => time);
+    for (let index = 0; index < 120; index += 1) h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 });
+    expect(() => h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 })).toThrow("rate limited");
+    time += 59_999;
+    expect(() => h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 })).toThrow("rate limited");
+    time += 1;
+    expect(h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 })).toMatchObject({ total: 0 });
+  });
+
+  it("lists lifecycle events with incidents and exports them together", async () => {
+    const h = harness();
+    h.diagnostics.record("app.start");
+    expect(h.invoke(DIAGNOSTICS_IPC.query, { severity: "all" })).toMatchObject({ total: 1, events: [{ event: "app.start" }] });
+    await h.invoke(DIAGNOSTICS_IPC.export, { severity: "all" });
+    expect(JSON.parse(readFileSync(join(h.root, "export.json"), "utf8"))).toMatchObject({ events: [{ event: "app.start" }] });
+  });
+});
 
 describe("offline diagnostics IPC", () => {
   it("rejects unauthorized senders and secret-bearing validation/filter payloads before storage or clipboard", async () => {
@@ -126,7 +172,7 @@ describe("Discord failure-to-diagnostics integration", () => {
     expect(record).toMatchObject({ code, outcome, occurrences: 1 });
     if (stage === "reject") expect(record?.metadata.httpStatus).toBe(403);
     expect(posts).toHaveBeenCalledTimes(stage === "reject" || stage === "timeout" ? 1 : 0);
-    const disk = readFileSync(join(h.root, "logs", "runtime.log"), "utf8");
+    const disk = readFileSync(join(h.root, "logs", "incidents.log"), "utf8");
     const exported = h.diagnostics.exportIncidents({});
     for (const output of [JSON.stringify(result), JSON.stringify(record), disk, exported]) {
       expect(output).not.toContain("NEVER_PERSIST"); expect(output).not.toContain("api/webhooks");
@@ -147,6 +193,6 @@ describe("Discord failure-to-diagnostics integration", () => {
     })).rejects.toThrow(/Secure webhook storage is unavailable\. \[incident:/u);
     h.diagnostics.flushIncidents();
     expect(h.diagnostics.queryIncidents({}).records[0]?.code).toBe("discord.credential-unavailable");
-    expect(readFileSync(join(h.root, "logs", "runtime.log"), "utf8")).not.toContain("PRIVATE_WEBHOOK_CONTENT");
+    expect(readFileSync(join(h.root, "logs", "incidents.log"), "utf8")).not.toContain("PRIVATE_WEBHOOK_CONTENT");
   });
 });

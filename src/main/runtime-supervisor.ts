@@ -196,6 +196,7 @@ export class RuntimeSupervisor {
       conversationAttachmentStoreAuthority:
         options.conversationAttachmentStoreAuthority,
       agentBrowserBroker: options.agentBrowserBroker,
+      issueEvidenceBroker: options.issueEvidenceBroker,
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, command) => this.post(record.child, command),
     });

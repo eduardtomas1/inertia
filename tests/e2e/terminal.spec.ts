@@ -222,11 +222,11 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
     },
   });
 
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Agents");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Background tasks");
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
-  await expect(page.getByRole("tabpanel", { name: "Agents" })).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "Background tasks" })).toBeVisible();
   const localServer = new URL(hostilePreviewUrl);
   const projectActions = page.locator(".workspace-header")
     .getByRole("group", { name: "Project actions" });

@@ -60,7 +60,6 @@ test("keeps three-line Work sidebar geometry", async ({
       );
       store.settleConversation(done.id, true);
       store.updateSettings({
-        sidebarMode: "activity",
         providerIdentityLabels: {
           codex: "OpenAI",
           claude: "Anthropic",

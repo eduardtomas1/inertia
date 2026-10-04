@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Play, Plus } from "lucide-react";
 import type { ProjectAction } from "@shared/contracts";
 
@@ -72,7 +72,7 @@ export function ProjectActionsControl({
   const anchorRef = useRef<HTMLDivElement>(null);
   const dismissOnFocusOut = useCallback(() => dismissMenu("context-change"), [dismissMenu]);
   useFocusOutDismiss(anchorRef, menu !== null && presentation === "toolbar", dismissOnFocusOut);
-  useEffect(() => {
+  useLayoutEffect(() => {
     dismissMenu("context-change");
   }, [dismissMenu, presentation, projectId]);
   const runCount = runs ? runs.localServers.length + runs.checks.length : 0;

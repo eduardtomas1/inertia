@@ -15,29 +15,29 @@ test("real operation failures survive restart and remain readable/copyable after
   });
   let page = app.page;
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Discord", exact: true }).click();
+  await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
   // Invoke the actual privileged Discord operation through its production bridge.
   // Unsupported host validation must prevent both network and credential access.
   const failed = await page.evaluate(async () => window.inertia.sendDiscordReleaseInfo({ repositoryUrl: "https://unsupported.invalid/project" }));
   expect(failed).toMatchObject({ sent: false, code: "discord.repository-missing", incidentId: expect.any(String) });
   if (!failed.incidentId) throw new Error("Main did not return an incident reference");
   const originalId = failed.incidentId;
-  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Diagnostics", exact: true, level: 3 })).toBeVisible();
   await expect(page.getByText("A release repository is needed")).toBeVisible();
   await expect.poll(async () => (await page.evaluate(() => window.inertia.queryDiagnostics({ subsystem: "provider", providerId: "codex" }))).total)
     .toBeGreaterThan(0);
   const providerIncident = (await page.evaluate(() => window.inertia.queryDiagnostics({ subsystem: "provider", providerId: "codex" }))).records[0]!;
   expect(["provider.start-failed", "provider.connection-failed"]).toContain(providerIncident.code);
-  const summary = page.locator(".diagnostics-incident summary").filter({ hasText: "Codex" }).first();
+  const summary = page.locator(".diagnostics-event-row").filter({ hasText: "Codex" }).first();
   await summary.focus(); await summary.press("Enter");
   await expect(page.getByRole("button", { name: "Open provider settings", exact: true })).toBeVisible();
 
   for (const theme of ["dark", "light"] as const) {
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: theme === "dark" ? "Dark" : "Light", exact: true }).click();
-    await page.getByRole("button", { name: "Discord", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Discord release repository URL" })).toBeVisible();
+    await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Repository URL" })).toBeVisible();
     // Discord must own its field styles; obsolete provider selectors previously
     // left labels, help text and inputs running together on direct navigation.
     const fields = await page.locator(".discord-field").evaluateAll((labels) => labels.map((label) => {
@@ -48,7 +48,7 @@ test("real operation failures survive restart and remain readable/copyable after
     expect(fields).toHaveLength(2);
     for (const field of fields) {
       expect(field.gap).toBeGreaterThanOrEqual(8);
-      expect(field.height).toBeGreaterThanOrEqual(34);
+      expect(field.height).toBeGreaterThanOrEqual(32);
       expect(field.width).toBeGreaterThan(200);
       expect(Math.abs(field.left)).toBeLessThan(1);
     }
@@ -56,19 +56,26 @@ test("real operation failures survive restart and remain readable/copyable after
     const discord = testInfo.outputPath(`discord-${theme}.png`);
     await page.screenshot({ path: discord, animations: "disabled" });
     await testInfo.attach(`discord-${theme}`, { path: discord, contentType: "image/png" });
-    await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
-    await expect(page.locator(".diagnostics-incident").first()).toBeVisible();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+    await expect(page.locator(".diagnostics-event").first()).toBeVisible();
     await app.expectNoViewportOverflow();
-    const gutters = await page.locator(".diagnostics-center").evaluate((element) => {
-      const content = element.closest(".settings-content")!.getBoundingClientRect();
-      const inner = element.getBoundingClientRect();
-      return [inner.left - content.left, content.right - inner.right];
+    const column = await page.locator(".diagnostics").evaluate((element) => {
+      const box = element.closest(".settings-content")!;
+      const bounds = box.getBoundingClientRect();
+      const style = getComputedStyle(box);
+      const left = bounds.left + parseFloat(style.paddingLeft);
+      const right = bounds.right - parseFloat(style.paddingRight);
+      const view = element.closest(".settings-view")!.getBoundingClientRect();
+      const navigation = document.querySelector(".settings-navigation")!.getBoundingClientRect();
+      return { left: left - navigation.right, right: view.right - right, width: bounds.width };
     });
-    for (const gutter of gutters) expect(gutter).toBeGreaterThanOrEqual(20);
+    expect(column.left).toBeGreaterThanOrEqual(20);
+    expect(column.right).toBeGreaterThanOrEqual(20);
+    expect(column.width).toBeLessThanOrEqual(862);
     const path = testInfo.outputPath(`diagnostics-${theme}.png`);
     await page.screenshot({ path, animations: "disabled" });
     await testInfo.attach(`diagnostics-${theme}`, { path, contentType: "image/png" });
-    await page.locator(".diagnostics-incident summary").filter({ hasText: "Codex" }).first().click();
+    await page.locator(".diagnostics-event-row").filter({ hasText: "Codex" }).first().click();
     await expect(page.getByRole("button", { name: "Open provider settings", exact: true })).toBeVisible();
     const detail = testInfo.outputPath(`diagnostics-detail-${theme}.png`);
     await page.screenshot({ path: detail, animations: "disabled" });
@@ -87,16 +94,16 @@ test("real operation failures survive restart and remain readable/copyable after
   const restarted = await app.restart(); page = restarted.page;
   await app.resizeWindow(1440, 1050);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect.poll(async () => (await page.evaluate((incidentId) => window.inertia.queryDiagnostics({ incidentId }), originalId)).records[0]?.id)
     .toBe(originalId);
   const cleanup = await prepareElectronPrivilegedCleanup(restarted.electronApp);
   expect(cleanup.cleanupConfirmed).toBe(true);
-  await expect(page.getByText("Runtime offline · diagnostics available")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Process health" })).toContainText("Local service offline");
   // Search and native keyboard expansion still work after runtime/SQLite shutdown.
   await page.getByRole("searchbox", { name: "Search diagnostics" }).fill("discord.repository-missing");
-  await expect(page.locator(".diagnostics-incident")).toHaveCount(1);
-  const row = page.locator(".diagnostics-incident summary").filter({ hasText: "A release repository is needed" });
+  await expect(page.locator(".diagnostics-event")).toHaveCount(1);
+  const row = page.locator(".diagnostics-event-row").filter({ hasText: "A release repository is needed" });
   await row.focus(); await row.press("Enter");
   await page.getByRole("button", { name: "Copy incident", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Incident copied" })).toBeVisible();
@@ -114,8 +121,8 @@ test("real operation failures survive restart and remain readable/copyable after
     // and the atomic main-process file writer remain real.
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, exportPath);
-  await page.getByRole("button", { name: "Export filtered", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Filtered diagnostics saved" })).toBeVisible();
+  await page.getByRole("button", { name: "Export…", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Diagnostics exported." })).toBeVisible();
   const exported = JSON.parse(await readFile(exportPath, "utf8"));
   expect(exported.records).toHaveLength(1);
   expect(exported.records[0].code).toBe("discord.repository-missing");

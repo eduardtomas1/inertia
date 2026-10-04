@@ -210,6 +210,15 @@ describe("working indicator settings", () => {
     expect(group.querySelectorAll(".working-orb")).toHaveLength(10);
   });
 
+  it("labels the style tiles by the group title and shows only each style's name", () => {
+    const { view } = renderSettings();
+    const group = screen.getByRole("radiogroup", { name: "Working indicator" });
+    expect(document.getElementById(group.getAttribute("aria-labelledby") ?? "")).toHaveRole("heading");
+    const tiles = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
+    expect(tiles.map((tile) => tile.textContent)).toEqual(tiles.map((tile) => tile.getAttribute("aria-label")));
+    expect(view.container.textContent).not.toMatch(/By activity|Agent activity/u);
+  });
+
   it("moves and selects with arrow keys, Home and End", () => {
     const { onUpdate } = renderSettings();
     const classic = screen.getByRole("radio", { name: "Classic" });
@@ -241,13 +250,14 @@ describe("working indicator settings", () => {
 
   it("enables activity indicators only for Automatic and preserves the saved switch", () => {
     renderSettings({ ...automatic, activity: true });
-    const activity = screen.getByRole("switch", { name: "Use for tool and step activity" });
-    expect(activity).toBeEnabled();
+    const activity = screen.getByRole("switch", { name: "Animate tool and step activity" });
+    expect(activity).not.toHaveAttribute("aria-disabled");
     expect(activity).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("radio", { name: "Shaping" }));
-    expect(activity).toBeDisabled();
-    fireEvent.click(screen.getByRole("radio", { name: "Automatic" }));
     expect(activity).toBeEnabled();
+    expect(activity).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Automatic" }));
+    expect(activity).not.toHaveAttribute("aria-disabled");
     expect(activity).toHaveAttribute("aria-checked", "true");
   });
 
@@ -262,7 +272,7 @@ describe("working indicator settings", () => {
       document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent);
     expect(groups).toEqual(["Working indicator", "Colour", "Speed"]);
     expect([...section.querySelectorAll('[role="switch"]')].map((element) => element.getAttribute("aria-label")))
-      .toEqual(["Glow", "Use for tool and step activity"]);
+      .toEqual(["Glow", "Animate tool and step activity"]);
     const inputs = section.querySelectorAll('input[type="color"]');
     expect(inputs).toHaveLength(1);
     expect(inputs[0]).toHaveAttribute("aria-hidden", "true");
@@ -275,7 +285,11 @@ describe("working indicator settings", () => {
 
   it("disables glow for theme ink and validates custom colours", () => {
     const { view, onUpdate } = renderSettings();
-    expect(screen.getByRole("switch", { name: "Glow" })).toBeDisabled();
+    const glow = screen.getByRole("switch", { name: "Glow" });
+    expect(glow).toBeEnabled();
+    expect(glow).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(glow);
+    expect(onUpdate).not.toHaveBeenCalled();
     const input = view.container.querySelector('input[type="color"]') as HTMLInputElement;
     fireEvent.input(input, { target: { value: "#12AB9F" } });
     expect(onUpdate).not.toHaveBeenCalled();
@@ -286,7 +300,7 @@ describe("working indicator settings", () => {
       workingIndicator: { ...DEFAULT_WORKING_INDICATOR, color: "custom", customColor: "#12ab9f" },
     });
     expect(screen.getByRole("radio", { name: "Custom colour, #12ab9f" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("switch", { name: "Glow" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Glow" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("opens the native picker from the single Custom swatch but not while arrowing past it", () => {

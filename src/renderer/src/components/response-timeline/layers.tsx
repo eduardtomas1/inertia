@@ -33,7 +33,7 @@ import {
   workingOrbSyncKey,
 } from "../working-indicator/orbMotion";
 import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
-import { SubagentDisclosure } from "../SubagentDisclosure";
+import { TurnAgentsLine } from "./TurnAgentsLine";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   LiveElapsed,
@@ -308,16 +308,11 @@ export function AgentExecutionLayer({
       {settledCompactions.map((entry) => (
         <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
       ))}
-      <SubagentDisclosure
-        key={`${props.conversationId}:${turn.id}`}
+      <TurnAgentsLine
         conversationId={props.conversationId}
         turnId={turn.id}
         subagents={subagents}
-        turns={props.turns}
-        onFollowUpSubagent={props.onFollowUpSubagent}
-        onStopSubagent={props.onStopSubagent}
-        onBeforeToggle={onBeforeToggle}
-        onAfterToggle={onAfterToggle}
+        onOpenSurface={props.onOpenSurface}
       />
       <span
         className="visually-hidden"

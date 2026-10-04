@@ -58,12 +58,14 @@ function rowsByTable(
   database: Database.Database,
   agentTurnColumns?: string[],
   operationColumns?: string[],
+  subagentTraceColumns?: string[],
 ): Record<string, unknown[]> {
   return Object.fromEntries(PRESERVED_TABLES.map((table) => [
     table,
     database.prepare(`SELECT ${table === "agent_turns" && agentTurnColumns
       ? agentTurnColumns.join(", ")
       : table === "agent_thread_operations" && operationColumns ? operationColumns.join(", ")
+      : table === "subagent_traces" && subagentTraceColumns ? subagentTraceColumns.join(", ")
       : "*"} FROM ${table} ORDER BY 1`).all(),
   ]));
 }
@@ -282,10 +284,11 @@ describe("native Kimi provider migration", { concurrent: false }, () => {
     database.pragma("foreign_keys = ON");
     const agentTurnColumns = tableColumns(database, "agent_turns");
     const operationColumns = tableColumns(database, "agent_thread_operations");
-    const before = rowsByTable(database, agentTurnColumns, operationColumns);
+    const subagentTraceColumns = tableColumns(database, "subagent_traces");
+    const before = rowsByTable(database, agentTurnColumns, operationColumns, subagentTraceColumns);
     const beforeTriggers = pairedDeletionTriggers(database);
     migrateRuntimeDatabase(database);
-    expect(rowsByTable(database, agentTurnColumns, operationColumns)).toEqual(before);
+    expect(rowsByTable(database, agentTurnColumns, operationColumns, subagentTraceColumns)).toEqual(before);
     expect(database.prepare("SELECT target_turn_id, target_run_id FROM agent_thread_operations").all())
       .toEqual(expect.arrayContaining([{ target_turn_id: null, target_run_id: null }]));
     expect(database.prepare(`

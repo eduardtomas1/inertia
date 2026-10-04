@@ -87,6 +87,56 @@ describe("Connections and devices settings", () => {
       .toHaveAttribute("src", "data:image/png;base64,second");
   });
 
+  it("shows plain rows with real buttons, keeps the clicked button focused while busy and collapses the details", async () => {
+    let finish!: (value: PrivateConnectStateView) => void;
+    const setPrivateConnectEnabled = vi.fn(() => new Promise<PrivateConnectStateView>((resolve) => { finish = resolve; }));
+    installBridge(state(null), { setPrivateConnectEnabled });
+    const { container } = render(<ConnectionsAndDevicesSettings projects={[]} />);
+
+    const toggle = await screen.findByRole("button", { name: "Disable" });
+    expect(toggle).toHaveClass("secondary-button");
+    expect(screen.getByRole("button", { name: "Create pairing link" })).toHaveClass("secondary-button");
+    expect(container.querySelector(".settings-card-heading > div")).toBeNull();
+    expect(container.textContent).not.toMatch(/[●↺]|\bQR\b/u);
+    for (const summary of ["Security activity", "Advanced diagnostics"]) {
+      expect(screen.getByText(summary).closest("details")).not.toHaveAttribute("open");
+    }
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(toggle).toHaveFocus();
+    fireEvent.click(toggle);
+    expect(setPrivateConnectEnabled).toHaveBeenCalledOnce();
+    await act(async () => finish({ ...state(null), enabled: false, status: "off" }));
+    expect(await screen.findByText("Private Connect disabled.")).toHaveAttribute("role", "status");
+    expect(screen.getByRole("button", { name: "Enable" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("names the device access controls by their visible labels and reports failures as alerts", async () => {
+    const device = {
+      id: "11111111-1111-4111-8111-111111111111",
+      label: "Phone",
+      preset: "monitor" as const,
+      scopes: [],
+      projectIds: [],
+      grants: [],
+      createdAt: "2030-01-01T00:00:00.000Z",
+      lastSeenAt: null,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      revokedAt: null,
+    };
+    installBridge({ ...state(null), devices: [device] }, {
+      revokePrivateConnectDevice: vi.fn(async () => { throw new Error("Revocation failed."); }),
+    });
+    render(<ConnectionsAndDevicesSettings projects={[]} />);
+    expect(await screen.findByRole("combobox", { name: "Access Phone" })).toHaveValue("monitor");
+    expect(screen.getByLabelText("Expires Phone")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save access" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Revocation failed.");
+  });
+
   it("ends while a committed pairing link still waits for its QR encode effect", async () => {
     qr.toDataURL.mockResolvedValue("data:image/png;base64,pending");
     let listener: ((next: PrivateConnectStateView) => void) | null = null;

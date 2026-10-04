@@ -46,7 +46,7 @@ import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
-import type { SettingsSection } from "./settingsSections";
+import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
@@ -118,6 +118,8 @@ interface AppLayoutActions {
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
   openSettingsSection: (section: SettingsSection) => void;
+  openSettings: (target?: SettingsTarget) => void;
+  closeSettings: () => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -593,6 +595,7 @@ export const AppLayout = memo(function AppLayout({
           activeConversationVisible={activeConversationVisible}
           splitConversationIds={splitConversationIds}
           enabled={settings.desktopNotifications}
+          onlyInBackground={settings.notifyOnlyInBackground}
           onActivate={notificationActions.activate}
         />
         {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}
@@ -710,6 +713,7 @@ export const AppLayout = memo(function AppLayout({
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onOpenSettings={() => setView("settings")}
+            onCloseSettings={actions.closeSettings}
             {...(project ? {
               onCreateConversationInProject: () => actions.createConversation(project),
             } : {})}
@@ -771,7 +775,7 @@ export const AppLayout = memo(function AppLayout({
               rightPanelAvailable={Boolean(headerTools)}
               rightPanelOpen={Boolean(headerTools) && scenePanel.panel.isOpen}
               rightPanelUnavailableLabel={workspaceToolsUnavailableReason ?? "Right panel is unavailable"}
-              liveAgentCount={headerTools?.panel.liveAgentCount ?? 0}
+              activeBackgroundTaskCount={headerTools?.panel.activeBackgroundTaskCount ?? 0}
               onToggleTerminal={scenePanel.toggleTerminal}
               onToggleRightPanel={scenePanel.toggleWorkspaceTools}
               onOpenUsage={() => scenePanel.openSurface("usage")}
@@ -910,7 +914,7 @@ export const AppLayout = memo(function AppLayout({
         createConversationIn={(project) => actions.createConversation(project)}
         openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
-        openSettings={() => setView("settings")}
+        openSettings={actions.openSettings}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}
@@ -958,7 +962,7 @@ export const AppLayout = memo(function AppLayout({
           "daily-work": () => setDailyWorkOpen(true),
           "welcome-guide": openWelcomeGuide,
         }}
-        onOpenSettings={actions.openSettingsSection}
+        onOpenSettings={actions.openSettings}
         onLeave={() => setSidebarOpen(false)}
         onLoadError={setActionError}
       />

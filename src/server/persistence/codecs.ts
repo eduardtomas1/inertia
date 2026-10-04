@@ -22,6 +22,7 @@ import {
   type ModelSelection,
   type Project,
   type ProviderId,
+  type SubagentTaskUsage,
   type SubagentTrace,
   type ThreadUsageSnapshot,
   type WorkspaceRun,
@@ -46,6 +47,7 @@ import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
 import { parseCompletionSoundJson } from "../../shared/completion-sound";
+import { DEFAULT_QUOTA_WARNINGS, isQuotaWarningThreshold } from "../../shared/quota-warnings";
 import {
   continuationIdentityForSelection,
   currentKnownHarnessIdSchema,
@@ -57,7 +59,13 @@ import {
   resolveHarnessBackendCompatibility,
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
-import { providerTimestamp, validateProviderUsage } from "../provider/usage-values";
+import { providerTimestamp, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
+import {
+  boundedSubagentCount,
+  boundedSubagentLabel,
+  MAX_SUBAGENT_DURATION_MS,
+  MAX_SUBAGENT_TOOL_USE_COUNT,
+} from "../provider/subagent-trace";
 import { parseWorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 import type {
   ActivityRow,
@@ -422,6 +430,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     darkColorTheme: state.dark_color_theme ?? state.color_theme,
     lightCustomColor: state.light_custom_color ?? null,
     darkCustomColor: state.dark_custom_color ?? null,
+    mutedCustomColors: state.muted_custom_colors === 1,
     compactSidebar: state.compact_sidebar === 1,
     showTimestamps: state.show_timestamps === 1,
     terminalFontSize: state.terminal_font_size,
@@ -435,16 +444,21 @@ export function settingsFromState(state: StateRow): AppSettings {
     usageDisplayMode: state.usage_display_mode,
     interfaceScale: state.interface_scale,
     responseDensity: state.response_density,
-    workspaceStartupSurface: state.workspace_startup_surface,
     defaultCodeWrap: state.default_code_wrap === 1,
     autoCollapseWorkLog: state.auto_collapse_work_log === 1,
     showChangedFileSummaries: state.show_changed_file_summaries === 1,
     autoScrollToFinalAnswer: state.auto_scroll_to_final_answer === 1,
-    sidebarMode: state.sidebar_mode,
     projectGrouping: state.project_grouping,
     autoOpenPlan: state.auto_open_plan === 1,
     confirmDestructiveActions: state.confirm_destructive_actions === 1,
     desktopNotifications: state.desktop_notifications === 1,
+    notifyOnlyInBackground: state.notify_only_in_background === 1,
+    quotaWarnings: {
+      enabled: state.quota_warnings_enabled !== 0,
+      firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
+        ? state.quota_warning_threshold
+        : DEFAULT_QUOTA_WARNINGS.firstThreshold,
+    },
     providerIdentityLabels: providerIdentityLabelsFromJson(
       state.provider_identity_labels_json,
     ),
@@ -791,10 +805,24 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     description: row.description,
     progress: row.progress,
     result: row.result,
+    model: boundedSubagentLabel(row.model),
+    activity: boundedSubagentLabel(row.activity),
+    usage: subagentTaskUsageFromJson(row.usage_json),
+    toolUseCount: boundedSubagentCount(row.tool_use_count, MAX_SUBAGENT_TOOL_USE_COUNT),
+    durationMs: boundedSubagentCount(row.duration_ms, MAX_SUBAGENT_DURATION_MS),
     sequence: row.sequence,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function subagentTaskUsageFromJson(value: string | null): SubagentTaskUsage | null {
+  if (value === null) return null;
+  try {
+    return validateSubagentTaskUsage(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 export function agentGoalFromRow(row: AgentGoalRow): AgentGoal {

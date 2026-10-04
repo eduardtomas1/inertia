@@ -1,6 +1,6 @@
 import type { AppShortcutAction } from "@shared/keybindings";
 
-import type { SettingsSection } from "../settingsSections";
+import type { SettingsSection } from "../../lib/settingsTarget";
 import type { WelcomeTopicId } from "./welcomeGuideModel";
 
 export const HELP_COMMANDS = [
@@ -22,6 +22,7 @@ export interface HelpEntry {
   detail: string;
   shortcut?: AppShortcutAction;
   jump?: string;
+  anchor?: string;
 }
 
 export interface HelpTopic {
@@ -46,8 +47,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Connect an agent",
-        detail: "Inertia uses the accounts you already have with Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Each provider keeps its own sign-in. Connect or refresh one in Settings → Providers.",
-        jump: "Open Settings → Providers",
+        detail: "Inertia uses the accounts you already have with Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Each provider keeps its own sign-in. Connect or refresh one in Settings → Agents.",
+        jump: "Open Settings → Agents",
       },
       {
         name: "Start a chat",
@@ -70,7 +71,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
     jumps: [
       { label: "Add a project", command: "add-project" },
-      { label: "Open Settings → Providers", settings: "providers" },
+      { label: "Open Settings → Agents", settings: "agents" },
       { label: "Show welcome guide", command: "welcome-guide" },
     ],
   },
@@ -109,8 +110,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Custom backends",
-        detail: "Add a backend profile in Settings → Model backends to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
-        jump: "Open Settings → Model backends",
+        detail: "Add a custom backend in Settings → Agents to route a chat through your own compatible endpoint. Its credential is stored in the system credential vault.",
+        jump: "Open Settings → Agents",
       },
       {
         name: "Provider sessions",
@@ -118,7 +119,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
     ],
     jumps: [
-      { label: "Open Settings → Model backends", settings: "backends" },
+      { label: "Open Settings → Agents", settings: "agents" },
     ],
   },
   {
@@ -137,7 +138,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Plan, goal and subagents",
-        detail: "The Plan and Goal surfaces show what the provider reports. Delegated agents appear in the transcript and in the Agents surface.",
+        detail: "The Plan and Goal surfaces show what the provider reports. Delegated agents appear in the transcript and in the Background tasks surface.",
+      },
+      {
+        name: "Background tasks",
+        detail: "Background tasks in the right panel lists the chat's delegated agents and the commands Inertia started, with what each is doing and the tokens it reports. A turn with agents shows one line, such as 2 agents working; choose it to open those tasks.",
       },
       {
         name: "Daily work",
@@ -146,18 +151,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Notifications and mascot",
-        detail: "Turn on desktop notifications or the desktop mascot in Settings → General. Notifications leave out prompt and response text.",
-        jump: "Open Settings → General",
+        detail: "Turn on desktop notifications or the desktop mascot in Settings → Notifications. Notifications leave out prompt and response text.",
+        jump: "Open Settings → Notifications",
       },
       {
         name: "Sound when a task ends",
-        detail: "Turn it on in Settings → General to play a short sound when an agent finishes or stops with an error. Choose a built-in sound or import your own, and Only after long tasks keeps quick questions quiet.",
-        jump: "Open Settings → General",
+        detail: "Turn it on in Settings → Notifications to play a short sound when an agent finishes or stops with an error. Choose a built-in sound or import your own, and setting Play sound to After tasks longer than a chosen time keeps quick questions quiet.",
+        jump: "Open Settings → Notifications",
       },
     ],
     jumps: [
       { label: "Open Daily work", command: "daily-work" },
-      { label: "Open Settings → General", settings: "general" },
+      { label: "Open Settings → Notifications", settings: "notifications" },
     ],
   },
   {
@@ -167,7 +172,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Surfaces",
-        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Agents, Usage, Goal or Plan. Each chat remembers its own surfaces.",
+        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
       },
       {
         name: "Terminal",
@@ -243,7 +248,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
     ],
     jumps: [
-      { label: "Open Settings → Source control", settings: "source" },
+      { label: "Open Settings → Chats", settings: "chats" },
     ],
   },
   {
@@ -253,7 +258,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Search everything",
-        detail: "Find commands, projects, chats and saved messages. Type at least two characters to search your messages and final answers across unarchived chats.",
+        detail: "Find commands, settings, projects, chats and saved messages. Type at least two characters to search your messages and final answers across unarchived chats.",
         shortcut: "search",
         jump: "Open search",
       },
@@ -263,13 +268,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Archive",
-        detail: "Archive thread hides a chat and keeps its data. Restore it from Settings → Archive & data.",
-        jump: "Open Settings → Archive & data",
+        detail: "Archive thread hides a chat and keeps its data. Restore it from Settings → Data.",
+        jump: "Open Settings → Data",
       },
     ],
     jumps: [
       { label: "Open search", command: "search" },
-      { label: "Open Settings → Archive & data", settings: "archive" },
+      { label: "Open Settings → Data", settings: "data" },
     ],
   },
   {
@@ -308,8 +313,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Snapshots",
-        detail: "Turn on Snapshots in Settings → Snapshots to attach a screenshot of the foreground window with its accessibility context, using the capture shortcut you choose there.",
-        jump: "Open Settings → Snapshots",
+        detail: "Turn on Window snapshots in Settings → Devices & integrations to attach a screenshot of the foreground window with its accessibility context. Choose its shortcut in Settings → Keyboard.",
+        jump: "Open Settings → Devices & integrations",
       },
       {
         name: "Reviewed screenshots",
@@ -317,17 +322,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Private Connect",
-        detail: "Settings → Connections & devices pairs a browser on another device over your Tailscale network while this computer stays online. Each paired device gets Monitor or Collaborate access.",
-        jump: "Open Settings → Connections & devices",
+        detail: "Settings → Devices & integrations pairs a browser on another device over your Tailscale network while this computer stays online. Each paired device gets Monitor or Collaborate access.",
+        jump: "Open Settings → Devices & integrations",
       },
       {
         name: "Discord",
-        detail: "Settings → Discord prepares release notes and a commit preview to post to a Discord webhook.",
+        detail: "Settings → Devices & integrations prepares release notes and a commit preview to post to a Discord webhook.",
       },
     ],
     jumps: [
-      { label: "Open Settings → Snapshots", settings: "snapshots" },
-      { label: "Open Settings → Connections & devices", settings: "connections" },
+      { label: "Open Settings → Devices & integrations", settings: "devices" },
     ],
   },
   {
@@ -337,27 +341,27 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Themes",
-        detail: "Choose System, Light or Dark and a color theme from the theme library in Settings → General.",
-        jump: "Open Settings → General",
+        detail: "Choose System, Light or Dark and a colour theme from the theme library in Settings → Appearance.",
+        jump: "Open Settings → Appearance",
       },
       {
-        name: "Custom colors",
-        detail: "Under Custom colors in Settings → General, pick one color for the light appearance and one for dark. Inertia adapts the shades to keep the workbench readable, and Reset returns that appearance to its previous preset.",
-        jump: "Open Settings → General",
+        name: "Custom colours",
+        detail: "Under Custom colours in Settings → Appearance, pick one colour for the light appearance and one for dark. Inertia adapts the shades to keep the workbench readable, and Reset returns that appearance to its previous preset.",
+        jump: "Open Settings → Appearance",
       },
       {
         name: "Interface scale",
         detail: "Choose Compact, Default, Comfortable or Large.",
-        jump: "Open Settings → General",
+        jump: "Open Settings → Appearance",
       },
       {
         name: "Working indicator",
         detail: "Choose how running work is shown in the Work list and the working cue.",
-        jump: "Open Settings → General",
+        jump: "Open Settings → Appearance",
       },
     ],
     jumps: [
-      { label: "Open Settings → General", settings: "general" },
+      { label: "Open Settings → Appearance", settings: "appearance" },
     ],
   },
   {
@@ -370,26 +374,27 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Search everything",
         detail: "Open the command palette.",
         shortcut: "search",
-        jump: "Open Settings → Keybindings",
+        jump: "Open Settings → Keyboard",
       },
       {
         name: "New chat",
         detail: "Start a chat in the current project.",
         shortcut: "new-chat",
-        jump: "Open Settings → Keybindings",
+        jump: "Open Settings → Keyboard",
       },
       {
         name: "Project navigation",
         detail: "Show or hide the sidebar.",
         shortcut: "toggle-sidebar",
-        jump: "Open Settings → Keybindings",
+        jump: "Open Settings → Keyboard",
       },
       {
         name: "Terminal",
         detail: "Show or hide the terminal.",
         shortcut: "toggle-terminal",
-        jump: "Open Settings → Keybindings",
+        jump: "Open Settings → Keyboard",
       },
+      { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Search settings finds a setting by name; ↑, ↓ and Enter open it. Escape clears the search, then leaves Settings." },
       {
         name: "Chats and transcript",
         detail: "Shift+F10 opens a focused chat's actions. In the transcript, Alt+↑ and Alt+↓ move between turns.",
@@ -400,7 +405,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
     ],
     jumps: [
-      { label: "Open Settings → Keybindings", settings: "keybindings" },
+      { label: "Open Settings → Keyboard", settings: "keyboard" },
     ],
   },
   {
@@ -410,30 +415,33 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "An agent stops responding",
-        detail: "Refresh it in Settings → Providers. Feature availability there shows what is ready and what needs setup.",
+        detail: "Refresh it in Settings → Agents. Details under the provider show what is ready and what needs setup.",
       },
       {
         name: "Diagnostics",
-        detail: "Settings → Diagnostics keeps a local history of incidents that you can search, filter and export.",
-        jump: "Open Settings → Diagnostics",
+        detail: "Settings → Help keeps a local history of app events and incidents that you can search, filter, export or clear. Capture can be turned off there.",
+        jump: "Open Settings → Help",
+        anchor: "diagnostics-incidents",
       },
       {
         name: "Report an issue",
-        detail: "Settings → Report an issue drafts a report. You review the exact text before anything is submitted to GitHub. Storage & backups on the same page shows local storage and backups.",
-        jump: "Open Settings → Report an issue",
+        detail: "Report an issue in Settings → Help drafts a report. You review the exact text before anything is submitted to GitHub.",
+        jump: "Open Settings → Help",
+        anchor: "report-issue",
       },
       {
         name: "Support summary",
-        detail: "Copy support summary, under Runtime diagnostics in Settings → Archive & data, copies a bounded summary to attach to a bug report.",
+        detail: "Copy support summary, under Diagnostics in Settings → Help, copies a bounded summary to attach to a bug report.",
+        jump: "Open Settings → Help",
+        anchor: "runtime-diagnostics",
       },
       {
         name: "Updates",
-        detail: "The update button in the sidebar footer and Settings → General check for, download and install updates. Canary builds run as a separate app and can prepare a rollback.",
+        detail: "The update button in the sidebar footer and Settings → Help check for, download and install updates. Canary builds run as a separate app and can prepare a rollback.",
       },
     ],
     jumps: [
-      { label: "Open Settings → Diagnostics", settings: "diagnostics" },
-      { label: "Open Settings → Report an issue", settings: "support" },
+      { label: "Open Settings → Help", settings: "help" },
     ],
   },
 ];

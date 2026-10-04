@@ -53,7 +53,7 @@ at runtime.
 
 ## Custom sprites
 
-The built-in artwork above stays the default. Settings > General > Desktop mascot >
+The built-in artwork above stays the default. Settings → Notifications → Desktop mascot →
 Custom sprites lets people import their own set, and shows these requirements before
 anything is imported:
 

@@ -26,7 +26,8 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await app.resizeWindow(1280, 840);
     expect(app.electronApp.windows()).toHaveLength(1);
     await main.getByRole("button", { name: "Settings", exact: true }).click();
-    const toggle = main.getByRole("switch", { name: "Desktop mascot", exact: true });
+    await main.getByRole("button", { name: "Notifications", exact: true }).click();
+    const toggle = main.getByRole("switch", { name: "Show mascot", exact: true });
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     const opened = app.electronApp.waitForEvent("window");
     await toggle.click();

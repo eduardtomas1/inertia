@@ -1,8 +1,7 @@
 import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
 import { isRightPanelSurface, isWorkspaceBoundSurface } from "./rightPanelSurfaces";
-import type { WorkspaceStartupSurface } from "@shared/contracts";
 
-export type { WorkspaceStartupSurface } from "@shared/contracts";
+export type WorkspaceStartupSurface = "summary" | "tools";
 
 const LEGACY_ACTIVE_TOOL_KEY = "inertia:layout:active-tool:v1";
 const LEGACY_MIGRATED_KEY = "inertia:layout:startup-surface-migrated:v1";

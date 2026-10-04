@@ -89,15 +89,15 @@ describe("Help search", () => {
 
     expect(within(dialog).queryByRole("tablist")).toBeNull();
     const results = within(dialog).getByRole("region", { name: "Search results" });
-    expect(resultNames(dialog)).toEqual(["Archive", "Organize chats", "Support summary"]);
+    expect(resultNames(dialog)).toEqual(["Archive", "Organize chats"]);
     expect(within(results).getAllByRole("group").map((group) => group.querySelector("h3")!.textContent))
-      .toEqual(["Search and history", "Following work", "Troubleshooting"]);
+      .toEqual(["Search and history", "Following work"]);
     expect(within(results).getByRole("group", { name: "Search and history" })).toBeVisible();
     expect([...results.querySelectorAll("mark")].map((mark) => mark.textContent))
-      .toEqual(["Archive", "Archive", "Archive", "archive", "Archive"]);
-    expect(within(dialog).getByRole("status")).toHaveTextContent("3 results");
+      .toEqual(["Archive", "Archive", "archive"]);
+    expect(within(dialog).getByRole("status")).toHaveTextContent("2 results");
     const group = within(results).getByRole("group", { name: "Search and history" });
-    expect(within(group).getByRole("button", { name: "Open Settings → Archive & data" })).toBeVisible();
+    expect(within(group).getByRole("button", { name: "Open Settings → Data" })).toBeVisible();
     expect(within(results).getByRole("button", { name: "Open Daily work" })).toBeVisible();
   });
 
@@ -123,11 +123,13 @@ describe("Help search", () => {
 
   it("moves between results with the arrow keys and back to the field", async () => {
     const { dialog, field, type } = await openHelp();
-    type("archiv");
+    type("folder");
     const results = within(within(dialog).getByRole("region", { name: "Search results" }));
-    const first = results.getByRole("button", { name: "Archive" });
-    const second = results.getByRole("button", { name: "Organize chats" });
-    const last = results.getByRole("button", { name: "Support summary" });
+    const result = (name: string) => results.getAllByRole("button", { name })
+      .find((button) => button.classList.contains("help-guide-result"))!;
+    const first = result("Add a project");
+    const second = result("Chats without a project");
+    const last = result("Chat commands");
 
     fireEvent.keyDown(field, { key: "ArrowDown" });
     expect(first).toHaveFocus();
@@ -180,8 +182,17 @@ describe("Help search", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Themes" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(props.onOpenSettings).toHaveBeenCalledExactlyOnceWith("general");
+    expect(props.onOpenSettings).toHaveBeenCalledExactlyOnceWith({ section: "appearance" });
     expect(props.onLeave).toHaveBeenCalledOnce();
+  });
+
+  it("opens Settings at the row an entry names", async () => {
+    const props = hostProps();
+    const { dialog, type } = await openHelp(props);
+    type("incidents");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Diagnostics" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(props.onOpenSettings).toHaveBeenCalledExactlyOnceWith({ section: "help", anchor: "diagnostics-incidents" });
   });
 
   it("opens the topic of an entry without its own action and clears the query", async () => {

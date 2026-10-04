@@ -23,7 +23,7 @@ it.each([true, false])("retains busy cleanup and propagates failure with global 
     await expect(result.current.run(command.type, command, reportError ? undefined : { reportError }))
       .rejects.toBe(error);
   });
-  expect(setActionError.mock.calls).toEqual(reportError ? [[null], [error.message]] : [[null]]);
+  expect(setActionError.mock.calls).toEqual(reportError ? [[null], [error.message]] : []);
   expect(setBusyAction).toHaveBeenCalledWith(command.type);
   const clear = setBusyAction.mock.lastCall![0] as (current: string | null) => string | null;
   expect(clear(command.type)).toBeNull();

@@ -81,7 +81,7 @@ test("keeps the right panel available while an isolated draft worktree materiali
         hasText: surface,
       })).toHaveAttribute("title", unavailableReason);
     }
-    for (const surface of ["Agents", "Usage", "Goal", "Plan"]) {
+    for (const surface of ["Background tasks", "Usage", "Goal", "Plan"]) {
       await expect(launcher.getByRole("button", {
         name: new RegExp(`^${surface}`, "u"),
       })).toBeEnabled();

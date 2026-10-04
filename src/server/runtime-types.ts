@@ -47,6 +47,7 @@ export interface RuntimeOptions {
   agentHarnessRegistry?: AgentHarnessRegistry;
   secureFiles?: RuntimeSecureFileBroker;
   agentBrowser?: RuntimeAgentBrowserBroker;
+  issueEvidence?: import("./runtime/issue-evidence-broker-client.js").RuntimeIssueEvidenceSource;
   recoveryImportFault?: {
     phase: "after-staging-publish" | "during-message-import";
     markerPath: string;

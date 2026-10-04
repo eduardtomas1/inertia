@@ -15,9 +15,9 @@ describe("Theme library", () => {
       />,
     );
 
-    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeVisible();
+    expect(screen.getByRole("radiogroup", { name: "Mode" })).toBeVisible();
     expect(screen.getByRole("radio", { name: "System" })).toBeChecked();
-    expect(screen.getByRole("group", { name: "Color theme" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Colour theme" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Inertia theme" })).toHaveAttribute("aria-pressed", "true");
     for (const option of COLOR_THEME_OPTIONS) {
       expect(screen.getByRole("button", { name: `${option.label} theme` }))
@@ -40,7 +40,7 @@ describe("Theme library", () => {
       />,
     );
 
-    for (const choice of [...screen.getAllByRole("radio"), ...screen.getAllByRole("button"), ...screen.getAllByRole("textbox"), screen.getByLabelText("Light color picker"), screen.getByLabelText("Dark color picker")]) {
+    for (const choice of [...screen.getAllByRole("radio"), ...screen.getAllByRole("button"), ...screen.getAllByRole("textbox"), screen.getByLabelText("Light colour picker"), screen.getByLabelText("Dark colour picker")]) {
       expect(choice).toBeDisabled();
     }
   });
@@ -60,44 +60,56 @@ describe("Theme library", () => {
   it("validates keyboard hex input and changes only the requested appearance", () => {
     const onUpdate = vi.fn();
     render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia", lightCustomColor: "#3a86ff" }} disabled={false} onUpdate={onUpdate} />);
-    expect(screen.getByRole("button", { name: "Use custom color for light" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Use custom colour for light" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Use Inertia for light" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Use Inertia for dark" })).toHaveAttribute("aria-pressed", "true");
-    const hex = screen.getByRole("textbox", { name: "Dark color" });
+    const hex = screen.getByRole("textbox", { name: "Dark colour" });
     fireEvent.change(hex, { target: { value: "oops" } });
     fireEvent.keyDown(hex, { key: "Enter" });
     expect(onUpdate).not.toHaveBeenCalled();
     expect(hex).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex colour");
     fireEvent.keyDown(hex, { key: "Escape" });
     expect(hex).toHaveValue("#a3a3fa");
     fireEvent.change(hex, { target: { value: "F80" } });
     fireEvent.keyDown(hex, { key: "Enter" });
     expect(onUpdate).toHaveBeenLastCalledWith({ darkCustomColor: "#ff8800" });
     onUpdate.mockClear();
-    fireEvent.input(screen.getByLabelText("Light color picker"), { target: { value: "#009688" } });
+    fireEvent.input(screen.getByLabelText("Light colour picker"), { target: { value: "#009688" } });
     expect(onUpdate).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Light color picker"), { target: { value: "#009688" } });
+    fireEvent.change(screen.getByLabelText("Light colour picker"), { target: { value: "#009688" } });
     expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: "#009688" });
-    fireEvent.click(screen.getByRole("button", { name: "Reset light custom color" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset light custom colour" }));
     expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: null });
+  });
+
+  it("labels each choice group by its visible row title and shows only theme names on the cards", () => {
+    const { container } = render(<ThemeLibrary settings={{ theme: "system", colorTheme: "inertia" }} disabled={false} onUpdate={vi.fn()} />);
+    const labelled = (element: HTMLElement): string | null | undefined =>
+      document.getElementById(element.getAttribute("aria-labelledby") ?? "")?.textContent;
+    expect(labelled(screen.getByRole("radiogroup", { name: "Mode" }))).toBe("Mode");
+    expect(labelled(screen.getByRole("group", { name: "Colour theme" }))).toBe("Colour theme");
+    expect(labelled(screen.getByRole("group", { name: "Custom colours" }))).toBe("Custom colours");
+    const cards = [...container.querySelectorAll<HTMLElement>(".color-theme-option")];
+    expect(cards.map((card) => card.textContent)).toEqual(COLOR_THEME_OPTIONS.map(({ label }) => label));
+    expect(container.querySelectorAll("h4, .color-theme-selected")).toHaveLength(0);
   });
 
   it("names each hex field by its visible label", () => {
     render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia" }} disabled={false} onUpdate={vi.fn()} />);
-    for (const label of ["Light color", "Dark color"]) {
+    for (const label of ["Light colour", "Dark colour"]) {
       const hex = screen.getByRole("textbox", { name: label });
       expect(document.querySelector(`label[for="${hex.id}"]`)?.textContent).toBe(label);
       expect(hex).not.toHaveAttribute("aria-label");
     }
-    expect(screen.queryByRole("textbox", { name: "Light hex color" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Dark hex color" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Light hex colour" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Dark hex colour" })).toBeNull();
   });
 
   it("reports an invalid hex color only after a failed commit", () => {
     const onUpdate = vi.fn();
     render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia" }} disabled={false} onUpdate={onUpdate} />);
-    const hex = screen.getByRole("textbox", { name: "Light color" });
+    const hex = screen.getByRole("textbox", { name: "Light colour" });
     for (const typed of ["#", "#3", "#3a", "#3a8", "#3a86", "#3a86f"]) {
       fireEvent.change(hex, { target: { value: typed } });
       expect(screen.queryByRole("alert")).toBeNull();
@@ -106,7 +118,7 @@ describe("Theme library", () => {
     fireEvent.keyDown(hex, { key: "Enter" });
     expect(onUpdate).not.toHaveBeenCalled();
     expect(hex).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex colour");
     fireEvent.change(hex, { target: { value: "#3a86ff" } });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(hex).toHaveAttribute("aria-invalid", "false");
@@ -114,7 +126,7 @@ describe("Theme library", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.blur(hex);
     expect(onUpdate).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex colour");
     fireEvent.keyDown(hex, { key: "Escape" });
     expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.change(hex, { target: { value: "#3a86ff" } });

@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useLayoutEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
+import { WorkspaceHeaderActions } from "../../src/renderer/src/components/workspace-header/WorkspaceHeaderActions";
 import type {
   GitStatusSnapshot,
   Project,
@@ -77,7 +78,7 @@ async function renderHeader(
     actions: [],
     busy: false,
     onOpenSidebar: vi.fn(),
-    onOpenSettings: vi.fn(),
+    onOpenSettings: vi.fn(), onCloseSettings: vi.fn(),
    
     onOpenFolder: vi.fn(),
     onRevealFolder: vi.fn(),
@@ -103,6 +104,13 @@ async function renderHeader(
   return props;
 }
 
+function ClickDuringCommit({ trigger }: { trigger: string }): null {
+  useLayoutEffect(() => {
+    screen.getByRole("button", { name: trigger }).click();
+  }, [trigger]);
+  return null;
+}
+
 describe("WorkspaceHeader Git split button", () => {
   beforeEach(() => {
     vi.stubGlobal("matchMedia", () => ({
@@ -124,6 +132,44 @@ describe("WorkspaceHeader Git split button", () => {
     expect(props.onRefreshGitStatus).toHaveBeenCalledOnce();
     fireEvent.click(await screen.findByRole("menuitem", { name: /^Pull request/u }));
     expect(props.onOpenPullRequest).toHaveBeenCalledOnce();
+  });
+
+  it("opens the Git menu when the first click lands before mount effects run", async () => {
+    const onRefreshStatus = vi.fn();
+    render(
+      <>
+        <WorkspaceHeaderActions
+          presentation="toolbar"
+          focusMenuId={null}
+          projectId={project.id}
+          projectName={project.name}
+          actions={[]}
+          runs={null}
+          checkoutPath={project.path}
+          filesAvailable
+          gitStatus={status(true, { upstream: "origin/feature/pr" })}
+          busy={false}
+          gitNotice={null}
+          onRunAction={vi.fn()}
+          onOpenFolder={vi.fn()}
+          onRevealFolder={vi.fn()}
+          onOpenFiles={vi.fn()}
+          onCommit={vi.fn()}
+          onPush={vi.fn()}
+          onPull={vi.fn()}
+          onOpenPullRequest={vi.fn()}
+          onPushAndCreatePullRequest={vi.fn()}
+          onOpenBranches={vi.fn()}
+          onRefreshGitStatus={onRefreshStatus}
+          onRequestMenuClose={vi.fn()}
+        />
+        <ClickDuringCommit trigger="More Git actions" />
+      </>,
+    );
+
+    expect(onRefreshStatus).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "More Git actions" })).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("menuitem", { name: /^Pull request/u })).toBeInTheDocument();
   });
 
   it("derives Commit from local changes and keeps the complete Git menu", async () => {

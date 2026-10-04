@@ -14,8 +14,8 @@ it("keeps the configuration result when an older focus refresh resolves later", 
     .mockResolvedValueOnce({ ...disabled, enabled: true });
   window.inertia = { ...original, snapshot };
   render(<SnapshotSettings />);
-  const toggle = screen.getByRole("switch", { name: "Enable Snapshots" });
-  await waitFor(() => expect(toggle).toBeEnabled());
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
+  await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
   fireEvent.focus(window);
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle).toBeChecked());
@@ -24,18 +24,55 @@ it("keeps the configuration result when an older focus refresh resolves later", 
   expect(toggle).toBeChecked();
 });
 
+it("configures with the loaded state when the switch is used as soon as it becomes active", async () => {
+  const snapshot = vi.fn().mockResolvedValueOnce(disabled).mockResolvedValueOnce({ ...disabled, enabled: true });
+  window.inertia = { ...original, snapshot };
+  render(<SnapshotSettings />);
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
+  const clicked = new Promise<void>((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (toggle.hasAttribute("aria-disabled")) return;
+      observer.disconnect();
+      fireEvent.click(toggle);
+      resolve();
+    });
+    observer.observe(toggle, { attributes: true });
+  });
+  await clicked;
+  await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+  expect(snapshot).toHaveBeenLastCalledWith({ type: "configure", enabled: true, shortcut: "accelerator" });
+  await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
+  expect(toggle).toBeChecked();
+});
+
+it("shows the switch off without a saved notice when the runtime declines to turn snapshots on", async () => {
+  const off: SnapshotState = { ...disabled, permission: "required" };
+  const snapshot = vi.fn()
+    .mockResolvedValueOnce(off)
+    .mockResolvedValueOnce({ ...off, message: "Allow Inertia in Accessibility and Screen Recording, then enable Snapshots again." });
+  window.inertia = { ...original, snapshot };
+  render(<SnapshotSettings />);
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
+  await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
+  fireEvent.click(toggle);
+  expect(await screen.findByText(/then enable Snapshots again/u)).toBeVisible();
+  await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+  expect(screen.queryByText("Saved")).toBeNull();
+  expect(screen.getByRole("alert")).toHaveTextContent("Window snapshots could not be turned on.");
+});
+
 it("shows the disabled authoritative state after shortcut registration fails", async () => {
   const snapshot = vi.fn().mockResolvedValueOnce({ ...disabled, enabled: true })
     .mockRejectedValueOnce(new Error("Shortcut is already registered."))
     .mockResolvedValueOnce(disabled);
   window.inertia = { ...original, snapshot };
   render(<SnapshotSettings />);
-  const toggle = screen.getByRole("switch", { name: "Enable Snapshots" });
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
   await waitFor(() => expect(toggle).toBeChecked());
   fireEvent.click(toggle);
   expect(await screen.findByRole("alert")).toHaveTextContent("Shortcut is already registered.");
   await waitFor(() => expect(toggle).not.toBeChecked());
-  expect(toggle).toBeEnabled();
+  expect(toggle).not.toHaveAttribute("aria-disabled");
   expect(snapshot).toHaveBeenLastCalledWith({ type: "state" });
 });
 

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import clsx from "clsx";
 import { CustomThemeColor } from "./CustomThemeColor";
 import "./ThemeLibrary.css";
@@ -72,24 +73,24 @@ export function ThemeLibrary({
   disabled,
   onUpdate,
 }: {
-  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor">;
+  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor" | "mutedCustomColors">;
   disabled: boolean;
   onUpdate: (settings: Partial<AppSettings>) => void;
 }): React.JSX.Element {
+  const titleId = useId();
   const selectColorTheme = (colorTheme: ColorThemeId): void => {
     void onUpdate({ colorTheme });
   };
 
   return (
-    <div className="theme-library">
-      <div>
-        <h4>Color scheme</h4>
-        <p>Follow your system or hold the workbench in one appearance.</p>
-      </div>
+    <div className="theme-library" data-setting-id="appearance-mode">
+      <span className="setting-copy">
+        <strong id={`${titleId}-appearance`}>Mode</strong>
+      </span>
       <div
         className="appearance-mode-options"
         role="radiogroup"
-        aria-label="Appearance"
+        aria-labelledby={`${titleId}-appearance`}
       >
         {APPEARANCE_OPTIONS.map((option) => {
           const active = settings.theme === option.value;
@@ -117,14 +118,15 @@ export function ThemeLibrary({
         })}
       </div>
 
-      <div className="theme-library-heading">
-        <h4>Theme library</h4>
-        <p>Choose a circle for one appearance, or a card to use its theme for both.</p>
-      </div>
+      <span className="setting-copy">
+        <strong id={`${titleId}-colour`}>Colour theme</strong>
+        <small id={`${titleId}-colour-hint`}>Pick a circle for one appearance, or the card for both.</small>
+      </span>
       <div
         className="color-theme-options"
         role="group"
-        aria-label="Color theme"
+        aria-labelledby={`${titleId}-colour`}
+        aria-describedby={`${titleId}-colour-hint`}
       >
         {COLOR_THEME_OPTIONS.map((option) => {
           const lightActive = !settings.lightCustomColor && (settings.lightColorTheme ?? settings.colorTheme) === option.id;
@@ -152,25 +154,18 @@ export function ThemeLibrary({
                   </button>;
                 })}
               </span>
-              <span className="color-theme-option-copy">
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
-              </span>
-              {active && (
-                <span className="color-theme-selected" aria-hidden="true" />
-              )}
+              <span className="color-theme-option-name">{option.label}</span>
             </div>
           );
         })}
       </div>
-      <div className="theme-library-heading">
-        <h4>Custom colors</h4>
-        <p>Pick a color for each appearance. Inertia adapts its shades to keep the workbench readable.</p>
-      </div>
-      <div className="custom-theme-options" role="group" aria-label="Custom colors">
-        <CustomThemeColor mode="light" value={settings.lightCustomColor} disabled={disabled}
+      <span className="setting-copy">
+        <strong id={`${titleId}-custom`}>Custom colours</strong>
+      </span>
+      <div className="custom-theme-options" role="group" aria-labelledby={`${titleId}-custom`}>
+        <CustomThemeColor mode="light" value={settings.lightCustomColor} muted={settings.mutedCustomColors} disabled={disabled}
           onChange={(lightCustomColor) => onUpdate({ lightCustomColor })} />
-        <CustomThemeColor mode="dark" value={settings.darkCustomColor} disabled={disabled}
+        <CustomThemeColor mode="dark" value={settings.darkCustomColor} muted={settings.mutedCustomColors} disabled={disabled}
           onChange={(darkCustomColor) => onUpdate({ darkCustomColor })} />
       </div>
     </div>

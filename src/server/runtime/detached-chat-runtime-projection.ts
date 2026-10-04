@@ -18,6 +18,7 @@ function projectedSettings(settings: AppSettings): AppSettings {
     darkColorTheme: settings.darkColorTheme,
     lightCustomColor: settings.lightCustomColor,
     darkCustomColor: settings.darkCustomColor,
+    mutedCustomColors: settings.mutedCustomColors,
     showTimestamps: settings.showTimestamps,
     showThinking: settings.showThinking,
     usageDisplayMode: settings.usageDisplayMode,

@@ -85,7 +85,6 @@ function snapshot(
     providers: [],
     settings: {
       ...defaultSettings,
-      sidebarMode: "activity",
       providerIdentityLabels: {
         codex: "OpenAI",
         claude: "Anthropic",
@@ -128,7 +127,6 @@ function renderSidebar(
   runs: WorkspaceRun[] = [],
   options: {
     projects?: Project[];
-    sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
     splitConversationId?: string | null;
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
@@ -177,13 +175,7 @@ function renderSidebar(
   const initialSnapshot = snapshot(conversations, runs, options.projects);
   const view = render(
     <ScopedSidebar
-      snapshot={{
-        ...initialSnapshot,
-        settings: {
-          ...initialSnapshot.settings,
-          sidebarMode: options.sidebarMode ?? initialSnapshot.settings.sidebarMode,
-        },
-      }}
+      snapshot={initialSnapshot}
       {...sidebarProps}
     />,
   );
@@ -689,7 +681,7 @@ describe("compact Work sidebar", () => {
       `Mode viewport work ${index}`,
       new Date(2026, 7, 11, 11, 59 - index),
     ));
-    const view = renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+    const view = renderSidebar(entries, vi.fn());
     const navigation = view.container.querySelector<HTMLElement>(".project-list");
     expect(navigation).not.toBeNull();
     expect(observe).toHaveBeenCalledWith(navigation);
@@ -718,7 +710,7 @@ describe("compact Work sidebar", () => {
       `Classic actions ${index}`,
       new Date(2026, 7, 11, 11, 59 - index),
     ));
-    renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+    renderSidebar(entries, vi.fn());
 
     fireEvent.keyDown(screen.getByRole("button", { name: /^Classic actions 0,/ }), { key: "End" });
     act(() => { vi.advanceTimersByTime(100); });
@@ -767,7 +759,7 @@ describe("compact Work sidebar", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     })));
-    const view = renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+    const view = renderSidebar([], vi.fn());
 
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
     fireEvent.click(screen.getByRole("button", {
@@ -786,7 +778,7 @@ describe("compact Work sidebar", () => {
   });
 
   it("keeps focus in the project rename field after dismissing its menu", async () => {
-    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
+    renderSidebar([], vi.fn());
 
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
     fireEvent.click(screen.getByRole("button", {
@@ -958,7 +950,7 @@ describe("compact Work sidebar", () => {
 
   it("keeps Work and its search available when a saved legacy mode is loaded", () => {
     const work = conversation("legacy", "Keep my task", new Date());
-    renderSidebar([work], vi.fn(), [], { sidebarMode: "classic" });
+    renderSidebar([work], vi.fn());
     expect(screen.queryByRole("button", { name: "Projects" })).not.toBeInTheDocument();
     expect(screen.queryByText("Work", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Work" })).toBeInTheDocument();

@@ -3,6 +3,7 @@ import type {
   SendDiscordReleaseInfoRequest,
 } from "../shared/desktop.js";
 import type { DiagnosticCode } from "../shared/application-diagnostics.js";
+import { releaseRepositoryLocation } from "../shared/release-repository.js";
 
 export class ReleaseOperationError extends Error {
   constructor(readonly code: DiagnosticCode, message: string, readonly httpStatus?: number) {
@@ -83,33 +84,18 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 
-function normalizedRepositoryUrl(value: unknown): URL {
-  const repositoryUrl = boundedString(value, 500);
-  if (!repositoryUrl) throw new Error("A release repository URL is required.");
-  let parsed: URL;
-  try {
-    parsed = new URL(repositoryUrl);
-  } catch {
-    throw new Error("The release repository URL is invalid.");
-  }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) {
-    throw new Error("The release repository URL must use HTTPS.");
-  }
-  parsed.hash = "";
-  parsed.search = "";
-  parsed.pathname = parsed.pathname.replace(/\.git$/u, "").replace(/\/+$/u, "");
-  return parsed;
-}
-
 export function validateReleaseRepository(value: unknown): void {
   try { repositoryDescriptor(value); }
   catch { throw new ReleaseOperationError("discord.repository-missing", "A supported public release repository URL is required."); }
 }
 
 function repositoryDescriptor(value: unknown): RepositoryDescriptor {
-  const repository = normalizedRepositoryUrl(value);
-  const segments = repository.pathname.split("/").filter(Boolean);
-  if (repository.hostname.toLowerCase() === "github.com" && segments.length >= 2) {
+  const repositoryUrl = boundedString(value, 500);
+  if (!repositoryUrl) throw new Error("A release repository URL is required.");
+  const location = releaseRepositoryLocation(repositoryUrl);
+  if (!location) throw new Error("Release repositories must be public GitHub or GitLab URLs.");
+  const { segments } = location;
+  if (location.host === "github.com") {
     const [owner, repo] = segments;
     const apiRepository = `${encodeURIComponent(owner!)}/${encodeURIComponent(repo!)}`;
     const webRepository = `https://github.com/${owner!}/${repo!}`;
@@ -126,24 +112,21 @@ function repositoryDescriptor(value: unknown): RepositoryDescriptor {
         }`,
     };
   }
-  if (repository.hostname.toLowerCase() === "gitlab.com" && segments.length >= 2) {
-    const project = segments.join("/");
-    const encodedProject = encodeURIComponent(project);
-    const webRepository = `https://gitlab.com/${project}`;
-    return {
-      provider: "gitlab",
-      releasesUrl: `https://gitlab.com/api/v4/projects/${encodedProject}/releases?order_by=created_at&sort=desc&per_page=10`,
-      compareUrl: (base, head) =>
-        `https://gitlab.com/api/v4/projects/${encodedProject}/repository/compare?from=${
-          encodeURIComponent(base)
-        }&to=${encodeURIComponent(head)}`,
-      compareWebUrl: (base, head) =>
-        `${webRepository}/-/compare/${encodeURIComponent(base)}...${
-          encodeURIComponent(head)
-        }`,
-    };
-  }
-  throw new Error("Release repositories must be public GitHub or GitLab URLs.");
+  const project = segments.join("/");
+  const encodedProject = encodeURIComponent(project);
+  const webRepository = `https://gitlab.com/${project}`;
+  return {
+    provider: "gitlab",
+    releasesUrl: `https://gitlab.com/api/v4/projects/${encodedProject}/releases?order_by=created_at&sort=desc&per_page=10`,
+    compareUrl: (base, head) =>
+      `https://gitlab.com/api/v4/projects/${encodedProject}/repository/compare?from=${
+        encodeURIComponent(base)
+      }&to=${encodeURIComponent(head)}`,
+    compareWebUrl: (base, head) =>
+      `${webRepository}/-/compare/${encodeURIComponent(base)}...${
+        encodeURIComponent(head)
+      }`,
+  };
 }
 
 function parseReleaseItem(value: unknown): InertiaReleaseInfo | null {

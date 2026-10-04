@@ -171,7 +171,7 @@ test("connects Kimi through a native login-only PTY then admits fresh ACP turns 
   });
   activeFixture = { app, wirePath };
   await app.page.getByRole("button", { name: "Settings", exact: true }).click();
-  await app.page.getByRole("button", { name: "Providers", exact: true }).click();
+  await app.page.getByRole("button", { name: "Agents", exact: true }).click();
   const kimi = app.page.getByRole("button", { name: "Configure Kimi Code" });
   await expect(kimi).toContainText("Sign in required", { timeout: 20_000 });
   await kimi.click();

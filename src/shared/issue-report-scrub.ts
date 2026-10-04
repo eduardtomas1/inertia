@@ -37,8 +37,7 @@ function redactSecretAssignments(text: string): string {
   return result + text.slice(last);
 }
 
-/** Deliberately lossy scrub for user-authored text, never a raw-log sanitizer. */
-export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string {
+function scrubOnce(text: string, limit: number): string {
   return redactSecretAssignments(exposeSensitiveJsonKeys(text.slice(0, limit))
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/gu, "[redacted key]")
     .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[baprs])(?:[-_]|- )[A-Za-z0-9_-]+/giu, "[redacted token]")
@@ -46,11 +45,22 @@ export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[redacted token]")
     .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]"))
     .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]+/giu, "[redacted URL]")
+    .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
     .replace(/(?:(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\)[^\n"'<>()[\]{}]*/gu, "[private path]")
     .replace(/(?:\$(?:HOME|\{HOME\}|USERPROFILE)|%USERPROFILE%)[\\/][^\s<>"']*/gu, "[private path]")
     .replace(/(?<![\w~])~?\/[^\s<>"']+/gu, "[private path]")
     .replace(/(?<!\w)(?:Users|home)[\\/][^\s<>"']+/gu, "[private path]")
-    .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "")
     .slice(0, limit).trim();
+}
+
+/** Deliberately lossy scrub for user-authored text, never a raw-log sanitizer. */
+export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string {
+  let result = scrubOnce(text, limit);
+  for (let pass = 1; pass < 3; pass += 1) {
+    const next = scrubOnce(result, limit);
+    if (next === result) break;
+    result = next;
+  }
+  return result;
 }

@@ -281,6 +281,15 @@ describe("issue reports", () => {
     expect(JSON.stringify(publisher.create.mock.calls)).not.toContain("SYNTHETIC_");
   });
 
+  it("publishes a fresh preview on the first submit when its text holds an email followed by a path", async () => {
+    const { dispatch, publisher } = setup();
+    const draft = await dispatch({ type: "support.report.prepare", payload: { ...input, description: "It fails for eduard@devbox.example/home/eduard/acme every time" } });
+    const published = await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: draft.revision } });
+    expect(published).toMatchObject({ status: "submitted", notice: "Issue created in eduardtomas1/inertia." });
+    expect(publisher.create).toHaveBeenCalledWith(expect.objectContaining({ title: draft.title, body: draft.body }));
+    expect(JSON.stringify(publisher.create.mock.calls)).not.toMatch(/eduard|devbox|acme/u);
+  });
+
   it("scrubs secrets, URLs and portable private paths from user text", () => {
     const dirty = "Problem ghp_privateToken123 /home/alice/.ssh/key C:\\Users\\alice\\secret.txt \\\\server\\share\\private ~/private\nAUTH_KEY=never-copy\npassword: hidden\nBearer never-copy\nhttps://example.com/private?q=secret\nalice@example.com";
     const clean = scrubReportText(dirty);

@@ -99,6 +99,26 @@ it("is idempotent", () => {
   }
 });
 
+it("scrubbing twice gives the same result", () => {
+  const samples = [
+    "MY_SETTING=hunter2-value", "password: a b c", "{\"Token\":\"x\"}", "/Users/John Smith/x", "a@b.co/x/y",
+    "see /tmp/a@example.com", "TOKEN=\"abc", "x=1 API_KEY=2", "Authorization: Bearer abc", "www.example.com/a?token=1",
+    "C:\\x\\y z", "KEY= ", "SECRET=\n", "foo_TOKEN: [redacted", "sk- abc", "~/a b/c", "1. Run MY_VAR=1 npm start\n2. See /Users/a/b",
+    "-----BEGIN RSA PRIVATE KEY-----\nabc", "path\\\\server\\share", "ghp_x@y.com", "\"api_key\" : 'v'", "a\u0001b", "  lead",
+    "PASS=1\nPWD=/Users/x", "session-id=abc", "eyJa.b.c", "home/x", "x.Users/y", "eduard@devbox.example/home/eduard/acme",
+  ];
+  const unstable: Array<{ input: string; once: string; twice: string }> = [];
+  for (const left of samples) {
+    for (const right of ["", " ", "\n", ...samples]) {
+      const input = `${left}${right ? ` ${right}` : ""}`;
+      const once = scrubReportText(input);
+      const twice = scrubReportText(once);
+      if (once !== twice) unstable.push({ input, once, twice });
+    }
+  }
+  expect(unstable).toEqual([]);
+});
+
 it("accepts exactly the providers the command contracts accept", () => {
   expect([...REPORT_PROVIDER_IDS].sort()).toEqual([...providerIdSchema.options].sort());
 });

@@ -29,13 +29,7 @@ import {
   loadMascotSettings,
   loadModelBackendsSettings,
 } from "./settingsSectionLoaders";
-
-export interface SettingsRowMetadata {
-  id: string;
-  title: string;
-  keywords: readonly string[];
-  group: string;
-}
+import { settingsSectionRows, type SettingsRowMetadata } from "./settingsRows";
 
 type SectionLoader<Props> = SurfaceLoader<{ default: ComponentType<Props> }>;
 
@@ -77,28 +71,12 @@ function lazySection<Props extends object>(load: () => Promise<ComponentType<Pro
   return createSurfaceLoader(async () => ({ default: memo(await load()) as ComponentType<Props> }));
 }
 
-function rows(group: string, entries: ReadonlyArray<readonly [string, string, readonly string[]]>): SettingsRowMetadata[] {
-  return entries.map(([id, title, keywords]) => ({ id, title, keywords, group }));
-}
-
 export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   defineSection({
-    id: "appearance",
-    label: "Appearance",
+    ...settingsSectionRows("appearance"),
     icon: Palette,
     load: staticSection(AppearanceSettings),
     prefetch: [],
-    rows: [
-      ...rows("Theme", [["appearance-mode", "Theme", ["appearance", "light", "dark", "system", "colour", "color", "custom colours", "palette"]]]),
-      ...rows("Scale and density", [
-        ["interface-scale", "Interface scale", ["zoom", "size", "text size"]],
-        ["response-density", "Text density", ["spacing", "type size", "response density"]],
-      ]),
-      ...rows("Working indicator", [
-        ["working-indicator", "Working indicator", ["agent activity", "animation", "orb", "glow", "speed", "colour"]],
-        ["working-indicator-activity", "Animate tool and step activity", ["automatic", "subagents"]],
-      ]),
-    ],
     select: (context) => ({
       settings: context.settings,
       disabled: context.disabled,
@@ -106,36 +84,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     }),
   }),
   defineSection({
-    id: "chats",
-    label: "Chats",
+    ...settingsSectionRows("chats"),
     icon: MessagesSquare,
     load: staticSection(ChatsSettings),
     prefetch: [],
-    rows: [
-      ...rows("New chats", [
-        ["new-chat-model", "Model", ["default model", "default provider", "backend", "new chat defaults"]],
-        ["new-chat-reasoning", "Reasoning", ["default reasoning", "effort"]],
-        ["new-chat-work-mode", "Work mode", ["build", "plan", "mode"]],
-        ["new-chat-access", "Access", ["supervised", "auto-accept edits", "full access", "permissions"]],
-        ["new-chat-location", "Where new chats run", ["worktree", "checkout", "chat location", "workspace default"]],
-      ]),
-      ...rows("Transcript", [
-        ["thinking-summaries", "Show reasoning summaries", ["thinking", "reasoning"]],
-        ["collapse-work-log", "Collapse completed work logs", ["tool activity"]],
-        ["jump-to-answers", "Scroll to the start of new answers", ["scroll", "final answer"]],
-        ["message-timestamps", "Message timestamps", ["time"]],
-        ["changed-file-summaries", "Show changed files after each turn", ["files", "summary"]],
-        ["code-wrap", "Wrap code by default", ["code blocks"]],
-        ["auto-open-plan", "Open plan automatically", ["plan panel"]],
-        ["confirm-destructive-actions", "Confirm destructive actions", ["delete", "warning"]],
-        ["usage-display", "Usage display", ["quota", "tokens", "limits", "context"]],
-      ]),
-      ...rows("Review and terminal", [
-        ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap"]],
-        ["ignore-whitespace", "Ignore whitespace", ["diff", "whitespace"]],
-        ["terminal-font-size", "Terminal font size", ["text size"]],
-      ]),
-    ],
     select: (context) => ({
       settings: context.settings,
       disabled: context.disabled,
@@ -148,29 +100,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     }),
   }),
   defineSection({
-    id: "notifications",
-    label: "Notifications",
+    ...settingsSectionRows("notifications"),
     icon: Bell,
     load: sectionAfter(NotificationsSettings, loadMascotSettings),
     prefetch: [],
-    rows: [
-      ...rows("Alerts", [
-        ["desktop-notifications", "Desktop notifications", ["alerts"]],
-        ["notify-only-in-background", "Only when Inertia is in the background", ["focus", "foreground", "quiet"]],
-      ]),
-      ...rows("Sound", [
-        ["completion-sound", "Sound when a task ends", ["sounds", "chime", "audio", "long tasks"]],
-        ["completion-sound-when", "Play sound", ["long task", "duration", "only after"]],
-      ]),
-      ...rows("Quota warnings", [
-        ["quota-warnings", "Quota warnings", ["limits", "usage", "quota"]],
-        ["quota-warning-threshold", "Warn when below", ["threshold", "percent", "remaining"]],
-      ]),
-      ...rows("Desktop mascot", [
-        ["desktop-mascot", "Desktop mascot", ["companion", "sprites"]],
-        ["mascot-motion", "Animate mascot", ["mascot", "animation", "motion", "pause"]],
-      ]),
-    ],
     select: (context) => ({
       settings: context.settings,
       disabled: context.disabled,
@@ -178,22 +111,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     }),
   }),
   defineSection({
-    id: "keyboard",
-    label: "Keyboard",
+    ...settingsSectionRows("keyboard"),
     icon: Keyboard,
     load: staticSection(KeyboardSettings),
     prefetch: [],
-    rows: [
-      ...rows("App shortcuts", [
-        ["shortcut-search", "Search everything", ["command palette", "shortcut"]],
-        ["shortcut-new-chat", "New chat", ["shortcut"]],
-        ["shortcut-toggle-sidebar", "Toggle project navigation", ["sidebar", "shortcut"]],
-        ["shortcut-toggle-terminal", "Toggle terminal", ["shortcut"]],
-        ["open-settings", "Open settings", ["preferences", "comma"]],
-        ["reset-shortcuts", "Reset shortcuts", ["keyboard defaults"]],
-      ]),
-      ...rows("Global shortcut", [["snapshot-shortcut", "Window snapshot", ["capture", "screenshot", "shortcut"]]]),
-    ],
     select: (context) => ({
       keybindings: context.settings.keybindings,
       disabled: context.disabled,
@@ -201,34 +122,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     }),
   }),
   defineSection({
-    id: "projects",
-    label: "Projects",
+    ...settingsSectionRows("projects"),
     icon: FolderOpen,
     load: lazySection(async () => (await import("./ProjectSettings")).ProjectSettings),
     prefetch: [],
-    rows: [
-      ...rows("All projects", [
-        ["project-grouping", "Group projects", ["repository", "folder", "grouping"]],
-        ["compact-sidebar", "Compact sidebar", ["sidebar", "density", "navigation"]],
-      ]),
-      ...rows("Project", [
-        ["project-name", "Name", ["rename project"]],
-        ["project-icon", "Project icon", ["image", "symbol"]],
-        ["project-colour", "Project colour", ["color", "tint"]],
-        ["project-colour-emphasis", "Colour shows on", ["color"]],
-        ["project-pin", "Pin to top", ["favourite"]],
-        ["project-model", "Model", ["default model", "override"]],
-        ["project-workspace", "Where new chats run", ["worktree", "checkout", "workspace"]],
-        ["project-default-access", "Default access", ["access", "full access", "supervised", "auto-accept edits", "permissions"]],
-        ["project-auto-pull", "Automatically pull", ["git", "branch"]],
-        ["project-browser-access", "Agent browser access", ["preview browser"]],
-        ["project-spend-limit", "Claude spend limit per turn", ["budget", "cost", "usd"]],
-        ["project-grouping-override", "Group this project", ["repository"]],
-        ["project-actions", "Actions", ["commands", "scripts"]],
-        ["project-repository-limit", "Repository display limit", ["repositories", "nested", "sidebar", "advanced"]],
-        ["project-remove", "Remove project", ["delete project"]],
-      ]),
-    ],
     select: (context) => ({
       initialProjectId: context.target?.section === "projects" ? context.target.projectId : undefined,
       projects: context.regularProjects,
@@ -244,23 +141,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     instanceKey: (context) => context.target?.section === "projects" ? context.target.projectId ?? "all" : "all",
   }),
   defineSection({
-    id: "agents",
-    label: "Agents",
+    ...settingsSectionRows("agents"),
     icon: Bot,
     contentClassName: "is-providers",
     load: sectionAfter(AgentsSettings, () => Promise.all([loadModelBackendsSettings(), loadLifecycleIntegritySettings()])),
     prefetch: [],
-    rows: [
-      ...rows("Providers", [
-        ["provider-accounts", "Providers", ["agents", "accounts", "connect", "refresh", "codex", "claude"]],
-        ["provider-display-name", "Account name", ["alias", "display name"]],
-        ["provider-binary-path", "Executable", ["binary path", "codex path", "use automatic"]],
-        ["provider-updates", "Provider updates", ["maintenance", "upgrade"]],
-      ]),
-      ...rows("Custom backends", [
-        ["model-backends", "Custom backends", ["model backends", "api key", "openai compatible", "profiles", "endpoint"]],
-      ]),
-    ],
     select: (context) => ({
       settings: context.settings,
       disabled: context.disabled,
@@ -289,26 +174,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     instanceKey: (context) => context.target?.section === "agents" ? context.target.profileId ?? "all" : "all",
   }),
   defineSection({
-    id: "devices",
-    label: "Devices & integrations",
+    ...settingsSectionRows("devices"),
     icon: MonitorSmartphone,
     load: sectionAfter(DevicesSettings, loadDevicesSections),
     prefetch: [],
-    rows: [
-      ...rows("Private Connect", [
-        ["private-connect", "Private Connect", ["phone", "remote", "tailscale", "pairing"]],
-        ["paired-devices", "Paired devices", ["phone access", "devices"]],
-      ]),
-      ...rows("Snapshots", [
-        ["snapshots-enabled", "Window snapshots", ["screenshot", "capture"]],
-        ["snapshot-access", "Capture access", ["permissions", "accessibility", "screen recording"]],
-      ]),
-      ...rows("Discord", [
-        ["discord-repository", "Repository URL", ["github", "gitlab", "release"]],
-        ["discord-webhook", "Webhook URL", ["discord webhook"]],
-        ["discord-release", "Post release to Discord", ["post release", "generate", "announce"]],
-      ]),
-    ],
     select: (context) => ({
       projects: context.regularProjects,
       disabled: context.disabled,
@@ -317,24 +186,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     }),
   }),
   defineSection({
-    id: "data",
-    label: "Data",
+    ...settingsSectionRows("data"),
     icon: Database,
     load: sectionAfter(DataSettings, loadAttachmentStorageSettings),
     prefetch: [],
-    rows: [
-      ...rows("Storage", [
-        ["resource-health", "Local resource health", ["memory", "storage", "browser cache", "clear cache", "where my data is"]],
-        ["database-backup", "Full local database backup", ["backups"]],
-        ["attachment-storage", "Attachment storage", ["disk", "files"]],
-        ["attachment-storage-limit", "Attachment storage limit", ["budget", "disk"]],
-        ["attachment-auto-remove", "Free space automatically when full", ["cleanup", "evict"]],
-        ["attachment-remove-oldest", "Remove oldest files", ["cleanup", "delete attachments"]],
-      ]),
-      ...rows("Export and import", [["recovery-export", "Portable conversation recovery export", ["import", "export"]]]),
-      ...rows("Archived chats", [["archived-threads", "Archived chats", ["restore chat", "archive", "unarchive"]]]),
-      ...rows("Defaults", [["restore-defaults", "Restore defaults", ["reset", "factory"]]]),
-    ],
     select: (context) => ({
       settings: context.settings,
       disabled: context.disabled,
@@ -348,21 +203,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     }),
   }),
   defineSection({
-    id: "help",
-    label: "Help",
+    ...settingsSectionRows("help"),
     icon: LifeBuoy,
     contentClassName: "is-diagnostics",
     load: sectionAfter(HelpSettings, loadHelpSections),
     prefetch: [],
-    rows: [
-      ...rows("Report an issue", [["report-issue", "Report an issue", ["bug", "feedback", "github issue"]]]),
-      ...rows("Diagnostics", [["diagnostics-incidents", "Diagnostics", ["errors", "incidents", "problems", "export diagnostics"]]]),
-      ...rows("Support", [
-        ["runtime-diagnostics", "Support summary and logs", ["support summary", "logs", "runtime diagnostics"]],
-        ["welcome-guide", "Welcome guide", ["tour", "onboarding"]],
-      ]),
-      ...rows("About and updates", [["app-updates", "About and updates", ["version", "check for updates", "release", "canary"]]]),
-    ],
     select: (context) => ({
       disabled: context.disabled,
       providers: context.providers,

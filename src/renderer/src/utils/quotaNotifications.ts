@@ -6,12 +6,12 @@ import type {
 import {
   activeQuotaWarningThresholds,
   DEFAULT_QUOTA_WARNINGS,
+  isQuotaWarningThreshold,
   QUOTA_WARNING_THRESHOLDS,
   type QuotaWarningSettings,
   type QuotaWarningThreshold,
 } from "@shared/quota-warnings";
 
-export const QUOTA_NOTIFICATION_THRESHOLDS = QUOTA_WARNING_THRESHOLDS;
 export const QUOTA_NOTIFICATION_STORAGE_KEY =
   "inertia:provider-quota-notifications:v1";
 
@@ -20,15 +20,13 @@ const UNKNOWN_RESET = "provider-reset-unavailable";
 const FIVE_HOURS_MINUTES = 300;
 const WEEK_MINUTES = 10_080;
 
-export type QuotaNotificationThreshold = QuotaWarningThreshold;
-
 export interface QuotaNotification {
   id: string;
   providerId: ProviderInfo["id"];
   providerLabel: string;
   limitId: string;
   windowLabel: "5-hour" | "weekly";
-  threshold: QuotaNotificationThreshold;
+  threshold: QuotaWarningThreshold;
   remainingPercent: number;
   resetsAt: string | null;
 }
@@ -36,7 +34,7 @@ export interface QuotaNotification {
 interface PersistedQuotaWindow {
   resetIdentity: string;
   remainingPercent: number;
-  announced: QuotaNotificationThreshold[];
+  announced: QuotaWarningThreshold[];
   observedAt: string;
 }
 
@@ -65,10 +63,6 @@ function validTimestamp(value: unknown): value is string {
   return typeof value === "string"
     && value.length <= 64
     && Number.isFinite(Date.parse(value));
-}
-
-function isThreshold(value: unknown): value is QuotaNotificationThreshold {
-  return QUOTA_NOTIFICATION_THRESHOLDS.some((threshold) => threshold === value);
 }
 
 export function parseQuotaNotificationState(
@@ -103,7 +97,7 @@ export function parseQuotaNotificationState(
         const normalized: PersistedQuotaWindow = {
           resetIdentity: record.resetIdentity,
           remainingPercent: record.remainingPercent,
-          announced: [...new Set(record.announced.filter(isThreshold))],
+          announced: [...new Set(record.announced.filter(isQuotaWarningThreshold))],
           observedAt: record.observedAt,
         };
         return [[key, normalized] as [string, PersistedQuotaWindow]];
@@ -142,10 +136,10 @@ function resetIdentity(limit: ProviderRateLimit): string {
 }
 
 function crossedThreshold(
-  thresholds: readonly QuotaNotificationThreshold[],
+  thresholds: readonly QuotaWarningThreshold[],
   previousRemaining: number | null,
   remaining: number,
-): QuotaNotificationThreshold | null {
+): QuotaWarningThreshold | null {
   const crossed = thresholds
     .filter((threshold) => (
       remaining <= threshold
@@ -214,7 +208,7 @@ export function evaluateQuotaNotifications(
       const alreadyAnnounced = new Set(activePrior?.announced ?? []);
 
       if (threshold !== null && !alreadyAnnounced.has(threshold)) {
-        for (const candidate of QUOTA_NOTIFICATION_THRESHOLDS) {
+        for (const candidate of QUOTA_WARNING_THRESHOLDS) {
           if (candidate >= threshold) alreadyAnnounced.add(candidate);
         }
         notices.push({

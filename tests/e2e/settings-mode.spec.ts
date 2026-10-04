@@ -133,7 +133,10 @@ test("keeps a switch row's size and control position at 760 × 600 after Saved a
   const geometry = (id: string) => page.locator(`[data-setting-id="${id}"]`).evaluate((element) => {
     const row = element.getBoundingClientRect();
     const control = element.querySelector('[role="switch"]')!.getBoundingClientRect();
-    return { height: row.height, width: row.width, controlX: control.x - row.x, controlY: control.y - row.y };
+    return {
+      height: Math.round(row.height), width: Math.round(row.width),
+      controlX: Math.round(control.x - row.x), controlY: Math.round(control.y - row.y),
+    };
   });
   const timestamps = page.locator('[data-setting-id="message-timestamps"]');
   await timestamps.scrollIntoViewIfNeeded();

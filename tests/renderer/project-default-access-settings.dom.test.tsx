@@ -8,7 +8,7 @@ import { defaultProjectPreferences } from "../../src/shared/project-preferences"
 import type { IssueReportSettingsProps } from "../../src/renderer/src/components/IssueReportSettings";
 import { provider } from "./composer-fixtures";
 
-const FULL_ACCESS_WARNING = "Choose Full access only for a workspace and task you trust.";
+const FULL_ACCESS_WARNING = "Full access lets the agent act without asking. Choose it only for a workspace and task you trust.";
 const project: Project = { id: "11111111-1111-4111-8111-111111111111", name: "Studio", path: "/workspace/studio", normalizedPath: "/workspace/studio",
   repositoryIdentity: "git:/workspace/studio/.git", repositoryRoot: "/workspace/studio", repositoryRelativePath: "",
   groupingMode: null, gitRepositoryLimit: 128, color: "#5661d8", status: "ready", createdAt: "2026-09-09T08:00:00.000Z",
@@ -35,7 +35,7 @@ describe("project default access", () => {
     expect(select).toHaveValue("");
     expect(within(select).getAllByRole("option").map((option) => option.textContent))
       .toEqual(["Default (Auto-accept edits)", "Supervised", "Auto-accept edits", "Full access"]);
-    expect(row(container, "project-default-access")).not.toHaveTextContent(FULL_ACCESS_WARNING);
+    expect(row(container, "project-default-access")).toHaveTextContent(FULL_ACCESS_WARNING);
 
     fireEvent.change(select, { target: { value: "supervised" } });
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
@@ -43,7 +43,7 @@ describe("project default access", () => {
       preferences: { ...defaultProjectPreferences(), defaultAccessMode: "supervised" } } }));
   });
 
-  it("explains Full access in one sentence only while it is the project's choice and can return to the default", async () => {
+  it("keeps the Full access caution in place while the choice changes and can return to the default", async () => {
     const full = { ...project, preferences: { ...defaultProjectPreferences(), defaultAccessMode: "full" as const } };
     const { container, request, rerender, props } = setup({ project: full });
     const select = screen.getByRole("combobox", { name: "Default access in this project" });
@@ -55,7 +55,7 @@ describe("project default access", () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: project.updatedAt, preferences: { ...full.preferences, defaultAccessMode: null } } }));
     rerender(<ProjectSettings {...props} projects={[project]} />);
-    expect(row(container, "project-default-access")).not.toHaveTextContent(FULL_ACCESS_WARNING);
+    expect(row(container, "project-default-access")).toHaveTextContent(FULL_ACCESS_WARNING);
   });
 
   it("is unavailable while the project cannot be edited", () => {

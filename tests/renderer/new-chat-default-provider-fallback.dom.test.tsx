@@ -40,6 +40,12 @@ describe("new chat default provider fallback", () => {
     expect(onSetDefaultModel).not.toHaveBeenCalled();
   });
 
+  it("states the Full access caution on the Access row whatever is chosen", () => {
+    const { container } = renderDefaults([provider, claudeReady]);
+    expect(container.querySelector('[data-setting-id="new-chat-access"]'))
+      .toHaveTextContent("Full access lets the agent act without asking. Choose it only for a workspace and task you trust.");
+  });
+
   it("says nothing extra while the stored provider is ready", () => {
     const { container } = renderDefaults([provider, claudeReady]);
     expect(container.querySelector('[data-setting-id="new-chat-model"]')).not.toHaveTextContent("is not available");

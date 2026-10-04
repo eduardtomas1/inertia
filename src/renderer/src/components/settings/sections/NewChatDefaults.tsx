@@ -9,6 +9,7 @@ import { providerNativeBackendProfile } from "@shared/model-routing";
 import { effectiveNewChatDefault } from "@shared/new-chat-default";
 import { buildComposerModelRoutes, type ComposerModelRoute } from "../../../utils/modelChooserRoutes";
 import { modelRouteIdentityKey } from "../../../utils/modelFavorites";
+import { FULL_ACCESS_CAUTION } from "../accessCaution";
 import { SettingSelect, type SettingOption } from "../SettingControls";
 import { SettingsGroup } from "../SettingsLayout";
 
@@ -154,6 +155,7 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-access"
           title="Access"
+          description={FULL_ACCESS_CAUTION}
           value={settings.defaultAccessMode}
           options={ACCESS_MODES}
           disabled={disabled}

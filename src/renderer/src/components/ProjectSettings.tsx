@@ -15,6 +15,7 @@ import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
 import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
+import { FULL_ACCESS_CAUTION } from "./settings/accessCaution";
 import { useSettingAction } from "./settings/useSettingAction";
 import { rememberProjectChoice, type SettingsSectionMemory } from "./settings/sectionMemory";
 import "./ProjectSettings.css";
@@ -147,7 +148,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ "": `Default (${workspaceOptions[settings.newThreadMode]})`, ...workspaceOptions }}
           onChange={(value) => void setPreference("project-workspace", "workspace", value as ProjectPreferences["workspace"] || null)} />
       </SettingRow>
-      <SettingRow id="project-default-access" title="Default access" description={preferences.defaultAccessMode === "full" ? "Choose Full access only for a workspace and task you trust." : undefined} notice={notice("project-default-access")}>
+      <SettingRow id="project-default-access" title="Default access" description={FULL_ACCESS_CAUTION} notice={notice("project-default-access")}>
         <ProjectSelect label="Default access in this project" value={preferences.defaultAccessMode ?? ""} disabled={unavailable} inactive={saving}
           options={{ "": `Default (${accessOptions[settings.defaultAccessMode]})`, ...accessOptions }}
           onChange={(value) => void setPreference("project-default-access", "defaultAccessMode", value as ProjectPreferences["defaultAccessMode"] || null)} />

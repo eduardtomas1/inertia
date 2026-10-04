@@ -297,11 +297,11 @@ async function captureProjectStates(viewport: Viewport): Promise<void> {
   await scrollContentTo(Math.max(0, Math.floor((await offsetWithinContent(access)).top) - 240));
   await access.selectOption({ label: "Full access" });
   const accessRow = settingsContent().locator("[data-setting-id='project-default-access']");
-  await expect(accessRow).toContainText("Choose Full access only for a workspace and task you trust.");
+  await expect(accessRow).toContainText("Full access lets the agent act without asking. Choose it only for a workspace and task you trust.");
   await expect(accessRow.getByRole("status")).toHaveText("Saved");
   await capture(evidenceName("projects", "default-access-saved", viewport)(null), { keepFocus: true });
   await access.selectOption({ index: 0 });
-  await expect(accessRow).not.toContainText("Choose Full access only");
+  await expect(accessRow).toContainText("Choose it only for a workspace and task you trust.");
   await expect(accessRow).not.toContainText("Saved", { timeout: 5_000 });
 
   const advanced = settingsContent().locator(".project-settings-advanced > summary");

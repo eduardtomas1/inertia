@@ -301,6 +301,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
         <textarea className="setting-input issue-report-body" rows={16} maxLength={REPORT_BODY_LIMIT} value={body} readOnly={!editable} disabled={locked} aria-invalid={previewInvalid || undefined} aria-describedby={previewInvalid ? "issue-report-preview-error" : undefined} onChange={(event) => setBody(event.target.value)} />
       </label>
       {previewInvalid && <small className="issue-report-error" id="issue-report-preview-error">Add a title of at least 3 characters and a body of at least 10.</small>}
+      {report.status === "uncertain" && notice && <p className="issue-report-pending" role="status"><TriangleAlert size={14} aria-hidden="true" />{notice}</p>}
       <div className="issue-report-actions">
         {editable && <button type="button" className="secondary-button issue-report-back" aria-disabled={unavailable} onClick={back}>Back</button>}
         {report.status === "uncertain" && <>
@@ -325,7 +326,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
       </div>}
     </div>}
     <div className="issue-report-messages">
-      {showPreview && notice && <p className={report.status === "failed" ? "is-error" : undefined} role={failedNow && report.status === "failed" ? "alert" : "status"}>{notice}</p>}
+      {showPreview && notice && report.status !== "uncertain" && <p className={report.status === "failed" ? "is-error" : undefined} role={failedNow && report.status === "failed" ? "alert" : "status"}>{notice}</p>}
       {loadFailed && <p className="is-error">The saved report could not be loaded. Reopen this page to try again.</p>}
       {error && <p className="is-error" role="alert">{error}</p>}
       <p role="status">{status}</p>

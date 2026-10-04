@@ -246,6 +246,19 @@ it("moves focus to Check submission when publication ends uncertain, and to View
   await waitFor(() => expect(screen.getByRole("button", { name: "View issue" })).toHaveFocus());
 });
 
+it("states an uncertain publication once, above the actions, over a read-only issue", async () => {
+  const { props } = fixture(saved("uncertain", { notice: "GitHub may still have received the issue." }));
+  render(<IssueReportSettings {...props} />);
+  const check = await screen.findByRole("button", { name: "Check submission" });
+  const notices = screen.getAllByText("GitHub may still have received the issue.");
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toHaveAttribute("role", "status");
+  expect(notices[0]!.compareDocumentPosition(check) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByLabelText("Body").compareDocumentPosition(notices[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByLabelText("Title")).toHaveAttribute("readonly");
+  expect(screen.getByLabelText("Body")).toHaveAttribute("readonly");
+});
+
 it("keeps focus on Check submission while the issue is still not found", async () => {
   const { props } = fixture(saved("uncertain"), "ready", { found: false });
   render(<IssueReportSettings {...props} />);

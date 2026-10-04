@@ -7,7 +7,7 @@ import { structurallyEqual } from "../utils/structuralEquality";
 import { SettingsPage } from "./settings/SettingsLayout";
 import { SettingsSearch } from "./settings/SettingsSearch";
 import { SettingsSectionFallback } from "./settings/SettingsSectionFallback";
-import type { SettingsSectionMemory } from "./settings/sectionMemory";
+import { chosenProjectId, type SettingsSectionMemory } from "./settings/sectionMemory";
 import type { SettingsSectionContext, SettingsViewProps } from "./settings/settingsTypes";
 import {
   prefetchSettingsSection,
@@ -166,11 +166,11 @@ const SettingsShell = memo(function SettingsShell({
   );
   const openRow = useCallback((row: SettingsRowMetadata) => {
     const projectId = isProjectSettingsRow(row)
-      ? (target?.section === "projects" ? target.projectId : undefined) ?? regularProjects[0]?.id
+      ? chosenProjectId(memory, target) ?? regularProjects[0]?.id
       : undefined;
     setQuery("");
     setLocalTarget({ base: externalTarget, target: { section: row.sectionId, anchor: row.id, ...(projectId ? { projectId } : {}) } });
-  }, [externalTarget, regularProjects, target]);
+  }, [externalTarget, memory, regularProjects, target]);
   const allConversations = useMemo(
     () => [...view.conversations, ...view.archived],
     [view.archived, view.conversations],

@@ -184,7 +184,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
             <label>Arguments (one per line)<textarea className="setting-input" rows={3} value={args} aria-describedby={`${project.id}-arguments-help`} onChange={(event) => setArgs(event.target.value)} disabled={blocked} placeholder={"run\nbuild"} /></label>
             <small id={`${project.id}-arguments-help`}>Passed literally. No shell expansion, pipes or command substitution.</small>
           </div>
-          <div><button type="button" className="secondary-button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" className="primary-button" disabled={blocked || !actionName.trim() || !executable.trim()}>Save action</button></div>
+          <div className="project-action-buttons"><button type="button" className="secondary-button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" className="primary-button" disabled={blocked || !actionName.trim() || !executable.trim()}>Save action</button></div>
         </form>}
       </div>
       <SettingDisclosure summary="Advanced" className="project-settings-advanced">

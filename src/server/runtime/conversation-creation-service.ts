@@ -68,15 +68,15 @@ export class ConversationCreationService {
     );
     const inherited = payload.providerId !== undefined || defaultProviderId === settings.defaultProvider;
     const defaultModel = inherited ? settings.defaultModel : "";
+    const requestedModel = inherited ? payload.model : undefined;
     const requestedSelection = payload.modelSelection
       ?? providerNativeModelSelection({
         providerId: defaultProviderId,
-        modelId: payload.model
+        modelId: requestedModel
           || defaultModel
           || "provider-default",
-        alias: payload.model || defaultModel || null,
-        reasoningEffort: payload.reasoningEffort
-          || (inherited ? settings.defaultReasoningEffort : "")
+        alias: requestedModel || defaultModel || null,
+        reasoningEffort: (inherited ? payload.reasoningEffort || settings.defaultReasoningEffort : "")
           || null,
       });
     const selection = this.dependencies.backendProfileController

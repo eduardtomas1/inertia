@@ -73,4 +73,57 @@ describe("effective new-chat default", () => {
       defaultReasoningEffort: "high",
     })).toMatchObject({ source: "fallback", providerId: "claude", modelId: "provider-default", reasoning: null });
   });
+
+  describe("native backend defaults for a provider that cannot run", () => {
+    const provider = (id: "codex" | "claude", state: "ready" | "missing" | "checking") => ({
+      id,
+      available: state === "ready",
+      installState: { ready: "installed", missing: "not-installed", checking: "checking" }[state],
+      authState: { ready: "authenticated", missing: "unknown", checking: "checking" }[state],
+      canRun: state === "ready",
+      models: [],
+      metadataState: { models: { freshness: "unavailable" } },
+    }) as unknown as ProviderInfo;
+    const codexDefault = (scope: "global" | "project"): ModelBackendDefault => ({
+      scope,
+      projectId: scope === "global" ? null : projectId,
+      selection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5", alias: "gpt-5", reasoningEffort: "high" }),
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+
+    it("skips the global default and uses the settings", () => {
+      expect(effectiveNewChatDefault({
+        providers: [provider("codex", "missing"), provider("claude", "ready")],
+        backendProfiles: [],
+        backendDefaults: [codexDefault("global")],
+      }, { defaultProvider: "claude", defaultModel: "sonnet", defaultReasoningEffort: "low" }))
+        .toMatchObject({ source: "settings", providerId: "claude", modelId: "sonnet", reasoning: "low" });
+    });
+
+    it("skips the global default and falls back when the settings provider cannot run either", () => {
+      expect(effectiveNewChatDefault({
+        providers: [provider("codex", "missing"), provider("claude", "ready")],
+        backendProfiles: [],
+        backendDefaults: [codexDefault("global")],
+      }, { defaultProvider: "codex", defaultModel: "gpt-5", defaultReasoningEffort: "high" }))
+        .toMatchObject({ source: "fallback", providerId: "claude", modelId: "provider-default", reasoning: null });
+    });
+
+    it("skips the project default and keeps the global default ahead of the settings", () => {
+      expect(effectiveNewChatDefault({
+        providers: [provider("codex", "missing"), provider("claude", "ready")],
+        backendProfiles: [],
+        backendDefaults: [codexDefault("project"), nativeDefault("global", "opus", "medium")],
+      }, { defaultProvider: "claude", defaultModel: "sonnet", defaultReasoningEffort: "low" }, projectId))
+        .toMatchObject({ source: "global-backend", providerId: "claude", modelId: "opus", reasoning: "medium" });
+    });
+
+    it("keeps the default while its provider is still being checked", () => {
+      expect(effectiveNewChatDefault({
+        providers: [provider("codex", "checking"), provider("claude", "ready")],
+        backendProfiles: [],
+        backendDefaults: [codexDefault("project"), nativeDefault("global", "opus", "medium")],
+      }, defaultSettings, projectId)).toMatchObject({ source: "project-backend", providerId: "codex", modelId: "gpt-5", reasoning: "high" });
+    });
+  });
 });

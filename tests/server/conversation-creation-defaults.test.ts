@@ -67,6 +67,22 @@ describe("new chat default provider fallback", () => {
     expect(conversation.modelSelection).toMatchObject({ modelId: "gpt-5.1-codex", reasoningEffort: "high" });
   });
 
+  it("ignores a requested model and reasoning that belong to the unavailable stored provider", async () => {
+    const { store, create } = fixture([missing("codex"), ready("claude")]);
+    store.updateSettings({ defaultProvider: "codex", defaultModel: "gpt-5.1-codex", defaultReasoningEffort: "high" });
+    const conversation = await create({ model: "gpt-5.1-codex", reasoningEffort: "xhigh" });
+    expect(conversation.providerId).toBe("claude");
+    expect(conversation.modelSelection).toMatchObject({ modelId: "provider-default", alias: null, reasoningEffort: null });
+  });
+
+  it("applies a requested model and reasoning to the stored provider while it is ready", async () => {
+    const { store, create } = fixture([ready("codex"), ready("claude")]);
+    store.updateSettings({ defaultProvider: "codex", defaultModel: "gpt-5.1-codex", defaultReasoningEffort: "high" });
+    const conversation = await create({ model: "gpt-5.2-codex", reasoningEffort: "xhigh" });
+    expect(conversation.providerId).toBe("codex");
+    expect(conversation.modelSelection).toMatchObject({ modelId: "gpt-5.2-codex", alias: "gpt-5.2-codex", reasoningEffort: "xhigh" });
+  });
+
   it("keeps the stored provider while its state is still being checked", async () => {
     const { create } = fixture([checking("codex"), ready("claude")]);
     expect((await create()).providerId).toBe("codex");

@@ -262,6 +262,23 @@ describe("project settings", () => {
     expect(screen.queryByRole("group", { name: "Confirm removing the project" })).not.toBeInTheDocument();
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.remove", payload: { projectId: project.id } }));
   });
+  it("sets and clears the project's model override and reports a failed save in its row", async () => {
+    const { request, container, rerender, props } = setup();
+    const model = screen.getByRole("combobox", { name: "Model for this project" });
+    const choice = within(model).getAllByRole("option").find((option) => option.getAttribute("value") && !(option as HTMLOptionElement).disabled)!;
+    fireEvent.change(model, { target: { value: choice.getAttribute("value") } });
+    await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      type: "backend.default.set", payload: expect.objectContaining({ projectId: project.id }),
+    })));
+    const selection = (request.mock.calls.at(-1)![0] as { payload: { selection: unknown } }).payload.selection;
+    rerender(<ProjectSettings {...props} backendDefaults={[{ scope: "project", projectId: project.id, selection } as never]} />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model for this project" })).not.toHaveAttribute("aria-disabled"));
+    request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));
+    fireEvent.change(screen.getByRole("combobox", { name: "Model for this project" }), { target: { value: "" } });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "backend.default.clear", payload: { projectId: project.id } }));
+    expect(await within(container.querySelector<HTMLElement>('[data-setting-id="project-model"]')!).findByRole("alert"))
+      .toHaveTextContent("The project changed in another window. Refresh and try again.");
+  });
   it("says why a project with running chats cannot be removed", () => {
     const { container } = setup({ conversations: [{ ...conversation("busy"), projectId: project.id, status: "running" }] });
     expect(container.querySelector('[data-setting-id="project-remove"]')).toHaveTextContent("Stop this project's running chats first.");

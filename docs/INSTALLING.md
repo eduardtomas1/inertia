@@ -79,7 +79,7 @@ Building the current source for macOS requires macOS 13 or later.
 ## Canary release channel
 
 Canary installs coexist with stable Inertia as a separate application and local
-profile. **Settings → General → Application updates** identifies the active
+profile. **Settings → Help → About and updates** identifies the active
 channel, reports whether the current immutable Canary package is retained as
 last-known-good, and opens or reveals a reverified rollback package after an
 update. Canary never shares stable's protocol, database, Chromium profile,

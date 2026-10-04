@@ -96,4 +96,35 @@ describe("new-chat default model command", () => {
     expect(refreshProviderInfo).toHaveBeenCalledWith("codex", true, true);
     store.close();
   });
+
+  it.each([
+    ["settings.default-model.set", { defaultProvider: "codex", defaultModel: "gpt", defaultReasoningEffort: "" }],
+    ["settings.restore-defaults", {}],
+  ])("refuses %s while maintenance owns the global default's provider", async (type, payload) => {
+    const { store } = await openStore();
+    store.updateSettings({ defaultProvider: "claude", defaultModel: "opus" });
+    store.saveModelBackendDefault(null, providerNativeModelSelection({ providerId: "claude", modelId: "haiku", alias: "haiku" }));
+    const blocked = (providerId: string): boolean => providerId === "claude";
+    const controller = await BackendProfileController.create({ store });
+    controller.attachProviderMutationGuard(blocked);
+    const refreshProviderInfo = vi.fn(async () => undefined);
+    const handler = createSettingsBackendCommandHandler({
+      store,
+      backendProfileController: controller,
+      providers: { setCommand: vi.fn() },
+      conversationAttachments: { setStoragePolicy: vi.fn() },
+      providerMaintenanceBlocked: blocked,
+      refreshProviderInfo,
+      broadcastSnapshot: vi.fn(),
+      send: vi.fn(),
+    } as unknown as SettingsBackendCommandDependencies);
+
+    const parsed = clientCommandSchema.parse({ type, requestId: crypto.randomUUID(), payload });
+    await expect(handler({} as WebSocket, parsed)).rejects.toThrow("Provider configuration cannot change while maintenance owns it.");
+
+    expect(store.snapshot().settings).toMatchObject({ defaultProvider: "claude", defaultModel: "opus" });
+    expect(store.listModelBackendDefaults().map(({ scope }) => scope)).toEqual(["global"]);
+    expect(refreshProviderInfo).not.toHaveBeenCalled();
+    store.close();
+  });
 });

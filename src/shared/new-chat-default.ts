@@ -59,7 +59,7 @@ function validBackendDefault(
   return cloneSelection(selection);
 }
 
-export function newChatDefaultProvider(
+function newChatDefaultProvider(
   settings: NewChatDefaultSettings,
   providers: readonly ProviderInfo[],
 ): { providerId: ProviderId; fallback: boolean } {

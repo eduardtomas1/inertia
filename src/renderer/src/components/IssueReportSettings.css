@@ -1,13 +1,3 @@
-.settings-content.is-issue-report {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  flex: 1;
-  box-sizing: border-box;
-  padding: 32px clamp(20px, 3vw, 40px) 48px;
-  container-type: inline-size;
-}
-
 .issue-report {
   width: 100%;
   max-width: 900px;

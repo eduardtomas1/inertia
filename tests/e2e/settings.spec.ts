@@ -11,7 +11,7 @@ import {
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
-import { expectFlatSettingsSections } from "./support/settings-assertions";
+import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -80,6 +80,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Text density" }).getByRole("radio", { name: "Comfortable" }).click();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
+  await expectBorderlessSettingsRows(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("switch", { name: "Wrap code by default" }).click();
   await expect(page.getByRole("switch", { name: "Wrap code by default" })).toHaveAttribute("aria-checked", "true");
   const providers = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });

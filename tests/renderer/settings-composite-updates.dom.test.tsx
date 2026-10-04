@@ -396,7 +396,7 @@ describe("Settings composite updates", () => {
 
     const model = screen.getByRole("combobox", { name: "Default model for new chats" });
     const reasoning = screen.getByRole("combobox", { name: "Default reasoning for new chats" });
-    expect(model).toHaveDisplayValue("Provider default");
+    expect(model).toHaveDisplayValue("Codex default");
     expect(reasoning).toHaveValue("");
     expect(reasoning).toHaveDisplayValue("Model default (Low)");
 

@@ -178,7 +178,6 @@ test("selects new-chat defaults with pointer and keyboard and preserves them aft
     await expect.poll(() => selectedLabel(control)).toMatch(option);
     await expect(control).toBeFocused();
   };
-  const model = select("Default model for new chats");
   const reasoning = select("Default reasoning for new chats");
 
   await choose("Default model for new chats", "GPT-5.2 Codex Mini");
@@ -201,8 +200,8 @@ test("selects new-chat defaults with pointer and keyboard and preserves them aft
   ({ page } = await app.restart());
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Chats", exact: true }).click();
-  await expect.poll(() => selectedLabel(model)).toBe("GPT-5.3 Codex");
-  await expect(reasoning).toHaveValue("high");
+  await expect.poll(() => selectedLabel(select("Default model for new chats"))).toBe("GPT-5.3 Codex");
+  await expect(select("Default reasoning for new chats")).toHaveValue("high");
   await expect(select("Default work mode for new chats")).toHaveValue("plan");
   await expect(select("Default access for new chats")).toHaveValue("full");
   await expect(select("Where new chats run")).toHaveValue("worktree");

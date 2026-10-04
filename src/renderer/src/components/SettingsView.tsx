@@ -141,8 +141,8 @@ const SettingsShell = memo(function SettingsShell({
   };
   return (
     <main ref={rootRef} className="settings-view" aria-label="Settings" tabIndex={-1}>
-      <aside className="settings-navigation" aria-label="Settings sections">
-        <nav>
+      <aside className="settings-navigation">
+        <nav aria-label="Settings sections">
           {SETTINGS_SECTIONS.map((item) => {
             const Icon = item.icon;
             const prefetch = (): void => prefetchSettingsSection(item);

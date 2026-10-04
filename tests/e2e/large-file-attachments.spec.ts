@@ -277,7 +277,7 @@ test("storage settings state the temporary budget the registry enforces", async 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
   const card = page.locator(".attachment-storage-setting");
-  await expect(card.getByRole("combobox", { name: "Global attachment disk budget" })).toHaveValue("16");
+  await expect(card.getByRole("combobox", { name: "Attachment storage limit" })).toHaveValue("16");
   await card.evaluate((element) => element.scrollIntoView({ block: "start" }));
   await app.expectNoViewportOverflow();
   await capture(page, info, "storage-settings-dark-wide");

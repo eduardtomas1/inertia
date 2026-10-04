@@ -165,7 +165,7 @@ let page!: Page;
 const capturedNames = new Set<string>();
 
 function settingsNavigation(label: string | RegExp): Locator {
-  return page.getByRole("complementary", { name: "Settings sections" })
+  return page.getByRole("navigation", { name: "Settings sections" })
     .getByRole("button", typeof label === "string" ? { name: label, exact: true } : { name: label });
 }
 

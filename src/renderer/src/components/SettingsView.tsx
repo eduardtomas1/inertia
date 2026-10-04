@@ -60,15 +60,26 @@ function focusIfShown(element: HTMLElement): boolean {
   return document.activeElement === element;
 }
 
-function focusSettingRow(row: HTMLElement, heading: HTMLElement | null): void {
+function focusRowControl(row: HTMLElement): boolean {
+  return [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element.tabIndex >= 0).some(focusIfShown);
+}
+
+function focusSettingRow(row: HTMLElement, heading: HTMLElement | null): MutationObserver | null {
   for (let details = row.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
     details.open = true;
   }
   row.scrollIntoView?.({ block: "center" });
-  const controls = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element.tabIndex >= 0);
-  if (controls.some(focusIfShown)) return;
+  if (focusRowControl(row)) return null;
   if (row.checkVisibility()) row.tabIndex = -1;
-  if (!focusIfShown(row)) heading?.focus();
+  if (!focusIfShown(row)) {
+    heading?.focus();
+    return null;
+  }
+  const observer = new MutationObserver(() => {
+    if (document.activeElement !== row || focusRowControl(row)) observer.disconnect();
+  });
+  observer.observe(row, { childList: true, subtree: true });
+  return observer;
 }
 
 function SettingsSectionHost({
@@ -106,18 +117,22 @@ const SettingsShell = memo(function SettingsShell({
   const focusRequest = useRef<FocusRequest | null>(target?.anchor ? { anchor: target.anchor } : null);
   const previousTarget = useRef(target);
   const focusRootOnMount = useRef(!target?.anchor);
+  const settlingRow = useRef<MutationObserver | null>(null);
   useEffect(() => {
     if (focusRootOnMount.current) rootRef.current?.focus();
+    return () => settlingRow.current?.disconnect();
   }, []);
   const resolveFocus = useCallback(() => {
     const request = focusRequest.current;
     if (!request) return;
     focusRequest.current = null;
+    settlingRow.current?.disconnect();
+    settlingRow.current = null;
     const row = request.anchor
       ? [...rootRef.current?.querySelectorAll<HTMLElement>("[data-setting-id]") ?? []]
         .find((element) => element.dataset.settingId === request.anchor)
       : undefined;
-    if (row) focusSettingRow(row, headingRef.current);
+    if (row) settlingRow.current = focusSettingRow(row, headingRef.current);
     else headingRef.current?.focus();
   }, []);
   useEffect(() => {

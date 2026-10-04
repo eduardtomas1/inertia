@@ -45,7 +45,7 @@ test("manages retained files across chats, persists disk settings and confirms c
     await expect(budget).toHaveValue("2");
     expect((await readdir(join(app.testDirectory, "data", "conversation-attachments"))).sort()).toEqual([...ids].sort());
     await page.getByRole("button", { name: /Remove oldest files \(2/u }).click();
-    await expect(page.getByRole("group", { name: "Confirm attachment deletion" })).toBeFocused();
+    await expect(page.getByRole("group", { name: "Confirm attachment deletion" }).getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(await readdir(join(app.testDirectory, "data", "conversation-attachments"))).toHaveLength(2);
     await app.expectNoViewportOverflow();

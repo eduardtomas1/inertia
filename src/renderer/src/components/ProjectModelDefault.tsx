@@ -32,7 +32,7 @@ export function ProjectModelDefault({ projectId, providers, backendProfiles, bac
   }
   const reasoningOptions = routes.find(({ key }) => key === selected.key)?.reasoningOptions ?? [];
   return <div className="project-model-controls">
-    <select className="setting-select" aria-label="Project default model" value={saved ? selected.key : ""} disabled={disabled} aria-disabled={inactive || undefined} onChange={(event) => {
+    <select className="setting-select" aria-label="Model for this project" value={saved ? selected.key : ""} disabled={disabled} aria-disabled={inactive || undefined} onChange={(event) => {
       if (inactive) return;
       if (!event.target.value) { onChange(null); return; }
       const route = routes.find(({ key }) => key === event.target.value);

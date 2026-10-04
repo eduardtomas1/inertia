@@ -22,14 +22,14 @@ describe("project settings", () => {
   it("saves against the original project revision, without a machine selector or automatic command execution", async () => {
     const { request } = setup();
     expect(screen.queryByText("All machines")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Renamed studio" } });
-    fireEvent.blur(screen.getByRole("textbox", { name: "Project name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Renamed studio" } });
+    fireEvent.blur(screen.getByRole("textbox", { name: "Name" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: project.updatedAt, name: "Renamed studio" } }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Add action" })).not.toHaveAttribute("aria-disabled"));
     request.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Add action" }));
-    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
     fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
     fireEvent.change(screen.getByLabelText("Arguments (one per line)"), { target: { value: "--version\nliteral & data" } });
     fireEvent.click(screen.getByRole("button", { name: "Save action" }));
@@ -40,7 +40,7 @@ describe("project settings", () => {
   });
   it("saves the name on Enter with row-level feedback, never while typing, and keeps an empty name as a local error", async () => {
     const { container, request } = setup();
-    const field = screen.getByRole("textbox", { name: "Project name" });
+    const field = screen.getByRole("textbox", { name: "Name" });
     const row = container.querySelector<HTMLElement>('[data-setting-id="project-name"]')!;
     expect(screen.queryByRole("button", { name: /^Save$/u })).not.toBeInTheDocument();
     fireEvent.change(field, { target: { value: "  " } });
@@ -60,7 +60,7 @@ describe("project settings", () => {
   it("shows a failed rename in the name row and keeps the typed name", async () => {
     const { container, request } = setup();
     request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));
-    const field = screen.getByRole("textbox", { name: "Project name" });
+    const field = screen.getByRole("textbox", { name: "Name" });
     fireEvent.change(field, { target: { value: "Renamed studio" } });
     fireEvent.blur(field);
     const row = container.querySelector<HTMLElement>('[data-setting-id="project-name"]')!;
@@ -69,18 +69,18 @@ describe("project settings", () => {
   });
   it("allows keyboard project search and does not carry a draft name into the next project", async () => {
     setup();
-    fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Private unsaved name" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Private unsaved name" } });
     fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
     const search = screen.getByRole("combobox", { name: "Search projects" });
     fireEvent.change(search, { target: { value: "Second" } });
     fireEvent.keyDown(search, { key: "Enter" });
-    expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue("Second project");
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Second project");
     expect(screen.queryByRole("dialog", { name: "Choose project" })).not.toBeInTheDocument();
     await act(async () => {});
   });
   it("blocks edits offline, guards active-work removal, and keeps failed saves actionable", async () => {
     const view = setup({ disabled: true });
-    expect(screen.getByRole("textbox", { name: "Project name" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
     view.rerender(<ProjectSettings {...view.props} disabled={false} conversations={[{ ...conversation("busy"), status: "running" }]} />);
     expect(screen.getByRole("button", { name: "Remove project" })).toHaveAttribute("aria-disabled", "true");
     view.request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));

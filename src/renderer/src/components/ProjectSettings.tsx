@@ -106,7 +106,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   };
   return <>
     <SettingsGroup title="General">
-      <SettingTextField id="project-name" title="Name" label="Project name" value={project.name} maxLength={80}
+      <SettingTextField id="project-name" title="Name" value={project.name} maxLength={80}
         disabled={disabled || !request} failure={saveFailure}
         validate={(name) => name ? null : "Enter a project name."}
         onSave={(name) => send(update({ name }))} />

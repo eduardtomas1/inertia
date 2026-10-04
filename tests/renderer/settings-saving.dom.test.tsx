@@ -1,7 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
+import { settingsSaveActions } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
+import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
+import { useBackendProfiles } from "../../src/renderer/src/hooks/useBackendProfiles";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { defaultSettings } from "../../src/shared/contracts";
 import { settingsViewProps } from "./settings-view-fixtures";
 
@@ -116,6 +120,39 @@ describe("Settings saving", () => {
     expect(timestamps).toBeChecked();
     expect(within(settingRow("message-timestamps")).getByRole("alert"))
       .toHaveTextContent("Couldn't save. Try again.");
+  });
+
+  it("reports a failed settings save only in its row, not as an app error", async () => {
+    const setActionError = vi.fn();
+    const { result } = renderHook(() => useAppRuntimeActions({
+      sendCommand: vi.fn().mockRejectedValue(new Error("The local service disconnected.")),
+      refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+    }));
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, ...settingsSaveActions(result.current.run) })} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Message timestamps" }));
+    await waitFor(() => expect(within(settingRow("message-timestamps")).getByRole("alert"))
+      .toHaveTextContent("Couldn't save. Try again."));
+    expect(setActionError.mock.calls).toEqual([[null]]);
+  });
+
+  it("sends every settings save without the app error report", async () => {
+    const run = vi.fn(async () => ({ type: "request.ok" as const, requestId: "settings" }));
+    const actions = settingsSaveActions(run);
+    await actions.onUpdate({ showTimestamps: false });
+    await actions.onSetDefaultModel({ defaultProvider: "codex", defaultModel: "", defaultReasoningEffort: "" });
+    await actions.onRestoreDefaults();
+    expect(run.mock.calls).toEqual([
+      ["settings.update", { type: "settings.update", payload: { showTimestamps: false } }, { reportError: false }],
+      ["settings.default-model.set", { type: "settings.default-model.set", payload: { defaultProvider: "codex", defaultModel: "", defaultReasoningEffort: "" } }, { reportError: false }],
+      ["settings.restore-defaults", { type: "settings.restore-defaults", payload: {} }, { reportError: false }],
+    ]);
+  });
+
+  it("sets the new chat backend default without the app error report", async () => {
+    const run = vi.fn(async () => ({ type: "request.ok" as const, requestId: "settings" }));
+    const { result } = renderHook(() => useBackendProfiles({ request: vi.fn(), run }));
+    await result.current.setBackendDefault(null, providerNativeModelSelection({ providerId: "codex" }));
+    expect(run).toHaveBeenCalledExactlyOnceWith("backend.default.set", expect.objectContaining({ type: "backend.default.set" }), { reportError: false });
   });
 
   it("confirms a successful radio save in its row", async () => {

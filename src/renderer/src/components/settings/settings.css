@@ -101,13 +101,15 @@
 }
 
 .settings-content {
-  width: min(810px, calc(100% - 52px));
-  max-width: 810px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 862px;
+  min-width: 0;
   min-height: 0;
   height: 100%;
   flex: 1;
   margin: 0 auto;
-  padding: 28px 0 48px;
+  padding: 28px 26px 48px;
   overflow-y: auto;
 }
 
@@ -130,10 +132,6 @@
 .settings-card {
   margin-bottom: 28px;
   padding: 0 4px;
-}
-
-.settings-card:last-child {
-  margin-bottom: 0;
 }
 
 .settings-card-heading {
@@ -300,15 +298,8 @@
   }
 
   .settings-content {
-    width: min(760px, calc(100% - 32px));
-    padding-top: 24px;
-  }
-}
-
-@media (max-width: 760px) {
-  .settings-content {
-    width: calc(100% - 32px);
-    padding: 24px 0 32px;
+    max-width: 792px;
+    padding: 24px 16px 32px;
   }
 }
 

@@ -38,7 +38,6 @@ export function AppearanceSettings({
       <SettingsGroup title="Scale and density" headingId="interface-scale-heading">
         <SettingRadioGroup
           id="interface-scale"
-          className="interface-scale-setting"
           title="Interface scale"
           description="Scales navigation, messages, controls, files and diffs. Terminal text stays independent."
           value={settings.interfaceScale}

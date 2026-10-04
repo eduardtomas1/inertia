@@ -1,6 +1,5 @@
 .settings-content.is-providers {
-  width: min(900px, calc(100% - 52px));
-  max-width: 900px;
+  max-width: 952px;
 }
 
 .settings-card.provider-settings-section {
@@ -587,10 +586,6 @@
 }
 
 @media (max-width: 760px) {
-  .settings-content.is-providers {
-    width: calc(100% - 30px);
-  }
-
   .provider-settings-shell {
     height: auto;
     min-height: 0;

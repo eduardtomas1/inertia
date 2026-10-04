@@ -13,6 +13,23 @@ On macOS the modifier is ⌘; on Windows and Linux it's Ctrl.
 
 Change them in **Settings → Keyboard → App shortcuts**. Each action uses ⌘ or Ctrl with one of B, G, H, J, K, N, U or Y, and no two actions can share a key.
 
+## Settings
+
+| Action | Keys |
+|---|---|
+| Open or close Settings | ⌘, / Ctrl+, |
+| Leave Settings | Esc (a text field keeps its text: the first Esc leaves the field, the next leaves Settings) |
+| Move through search results | ↑ ↓ in **Search settings**, Enter to open the setting |
+| Clear the search | Esc while the search has text |
+
+## Global shortcut
+
+| Action | Default |
+|---|---|
+| Window snapshot | ⌘⌥S / Ctrl+Alt+S, or both Shift keys together on macOS and Windows |
+
+Turn on Window snapshots in **Settings → Devices & integrations**, and choose its shortcut in **Settings → Keyboard → Global shortcut**. It works while another app is in front.
+
 ## Sidebar
 
 | Action | Keys |

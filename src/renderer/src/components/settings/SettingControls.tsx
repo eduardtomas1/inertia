@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 
 import { useRovingRadios } from "../../hooks/useRovingRadios";
@@ -197,6 +197,7 @@ export function SettingTextField({
   const [draft, setDraft] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestSave = useRef<string | null>(null);
   useEffect(() => {
     if (pending !== null && pending === value) setPending(null);
   }, [pending, value]);
@@ -218,8 +219,10 @@ export function SettingTextField({
     setError(null);
     setDraft(null);
     setPending(next);
+    latestSave.current = next;
     void action.run(() => onSave(next), { failure }).then((ok) => {
-      if (ok) return;
+      if (ok || latestSave.current !== next) return;
+      latestSave.current = null;
       setPending((current) => (current === next ? null : current));
       setDraft((current) => current ?? next);
     });
@@ -233,6 +236,7 @@ export function SettingTextField({
       <span className="setting-field-control">
         <input
           className="setting-input"
+          data-escape-leaves=""
           aria-label={label ?? title}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
@@ -249,6 +253,7 @@ export function SettingTextField({
           }}
           onBlur={commit}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (event.key === "Enter") {
               event.preventDefault();
               commit();

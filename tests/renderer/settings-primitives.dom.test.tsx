@@ -215,6 +215,39 @@ describe("SettingTextField", () => {
     expect(input).not.toHaveAttribute("aria-invalid");
   });
 
+  it("keeps a newer saved value when an older save fails afterwards", async () => {
+    const older = deferred();
+    const newer = deferred();
+    const onSave = vi.fn().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const view = render(<SettingTextField id="name" title="Name" value="Old" onSave={onSave} />);
+    const input = screen.getByRole("textbox", { name: "Name" });
+
+    fireEvent.change(input, { target: { value: "First" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "Second" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => newer.resolve());
+    view.rerender(<SettingTextField id="name" title="Name" value="Second" onSave={onSave} />);
+    await act(async () => older.reject(new Error("offline")));
+
+    expect(input).toHaveValue("Second");
+    fireEvent.blur(input);
+    expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores Enter and Escape while an input method is composing", () => {
+    const onSave = vi.fn(async () => undefined);
+    render(<SettingTextField id="name" title="Name" value="Old" onSave={onSave} />);
+    const input = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(input, { target: { value: "かな" } });
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(input).toHaveValue("かな");
+  });
+
   it("treats a draft equal to the saved value as clean so Escape is left to Settings", () => {
     render(<SettingTextField id="url" title="URL" value="saved" onSave={vi.fn()} />);
     const input = screen.getByRole("textbox", { name: "URL" });

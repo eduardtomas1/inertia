@@ -4,6 +4,8 @@ import type { AppView } from "../appView";
 import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 
 const ESCAPE_OWNERS = 'select:open, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .xterm';
+const TEXT_ENTRY = 'textarea, [contenteditable="true"], input:not([type]), input[type="text"], input[type="search"], '
+  + 'input[type="password"], input[type="email"], input[type="url"], input[type="number"], input[type="tel"]';
 
 export interface SettingsMode {
   settingsTarget: SettingsTarget | null;
@@ -26,13 +28,28 @@ function focusAfterSettings(opener: HTMLElement | null, view: AppView): void {
   target?.focus();
 }
 
-export function escapeLeavesSettings(event: KeyboardEvent): boolean {
-  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return false;
-  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
-  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return false;
+function holdsUnsavedInput(target: Element): boolean {
+  if (target.closest("[data-escape-leaves]")) return false;
+  return target.matches(TEXT_ENTRY) || Boolean(target.closest("form"));
+}
+
+export function settingsEscapeAction(event: KeyboardEvent): "leave" | "release" | null {
+  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return null;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (document.querySelector('[role="dialog"][aria-modal="true"]')) return null;
   const target = event.target instanceof Element ? event.target : null;
-  if (!target) return true;
-  return !target.closest(ESCAPE_OWNERS);
+  if (!target) return "leave";
+  if (target.closest(ESCAPE_OWNERS)) return null;
+  return holdsUnsavedInput(target) ? "release" : "leave";
+}
+
+export function escapeLeavesSettings(event: KeyboardEvent): boolean {
+  return settingsEscapeAction(event) === "leave";
+}
+
+function releaseSettingsFocus(): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active.closest(".settings-view")) active.blur();
 }
 
 export function useSettingsMode({
@@ -82,6 +99,7 @@ export function useSettingsMode({
   }, [navigateToView]);
 
   const closeSettings = useCallback(() => {
+    releaseSettingsFocus();
     navigateToView(returnView.current === "settings" ? "workspace" : returnView.current);
   }, [navigateToView]);
 
@@ -93,9 +111,11 @@ export function useSettingsMode({
   useEffect(() => {
     if (view !== "settings") return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!escapeLeavesSettings(event)) return;
+      const action = settingsEscapeAction(event);
+      if (!action) return;
       event.preventDefault();
-      closeSettings();
+      if (action === "release") releaseSettingsFocus();
+      else closeSettings();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

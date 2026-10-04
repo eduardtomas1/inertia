@@ -60,6 +60,7 @@ export function SettingsSearch({
       <div className="settings-search">
         <input
           className="setting-input settings-search-input"
+          data-escape-leaves=""
           value={query}
           placeholder="Search settings"
           aria-label="Search settings"

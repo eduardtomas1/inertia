@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppView } from "../../src/renderer/src/appView";
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
 import { useSettingsMode } from "../../src/renderer/src/hooks/useSettingsMode";
+import { conversation } from "./composer-fixtures";
 import { settingsViewProps } from "./settings-view-fixtures";
 
-function Harness({ initialView = "workspace" }: { initialView?: AppView }): React.JSX.Element {
+type SettingsOverrides = Parameters<typeof settingsViewProps>[0];
+
+function Harness({ initialView = "workspace", overrides }: { initialView?: AppView; overrides?: SettingsOverrides }): React.JSX.Element {
   const [view, setView] = useState<AppView>(initialView);
   const [transientOpener, setTransientOpener] = useState(true);
   const mode = useSettingsMode({ view, navigateToView: setView });
@@ -16,7 +19,7 @@ function Harness({ initialView = "workspace" }: { initialView?: AppView }): Reac
       <section id="main-workspace" tabIndex={-1} aria-label="Main workspace">
         {view === "settings" ? (
           <SettingsView
-            {...settingsViewProps()}
+            {...settingsViewProps(overrides)}
             target={mode.settingsTarget}
             initialSection={mode.lastSection}
             onSectionChange={mode.rememberSection}
@@ -157,6 +160,70 @@ describe("Settings as a mode", () => {
     fireEvent.change(repository, { target: { value: " " } });
     pressEscape(repository);
     expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
+  });
+
+  it("keeps an unsent issue report: Escape in its text releases the field and only the next Escape leaves", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: new Proxy({ getPlatform: () => "darwin" } as Record<string, unknown>, {
+        get: (target, key: string) => key in target ? target[key] : key === "then" ? undefined
+          : key.startsWith("on") ? vi.fn(() => () => undefined) : vi.fn(async () => null),
+      }),
+    });
+    const onReportCommand = vi.fn(async () => ({
+      type: "request.result" as const,
+      requestId: "request",
+      result: { kind: "support.report" as const, report: null },
+    }));
+    render(<Harness overrides={{ onReportCommand: onReportCommand as never }} />);
+    openFrom("Open settings");
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    const description = await screen.findByRole("textbox", { name: "What happened" });
+    await waitFor(() => expect(description).toBeEnabled());
+    fireEvent.change(description, { target: { value: "Typed for five minutes before pressing Escape" } });
+    description.focus();
+
+    const first = pressEscape(description);
+    expect(first.defaultPrevented).toBe(true);
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("settings");
+    expect(description).toHaveValue("Typed for five minutes before pressing Escape");
+    expect(description).not.toHaveFocus();
+
+    pressEscape();
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
+  });
+
+  it("clears the archived chats filter with Escape before leaving", async () => {
+    const archived = { ...conversation("33333333-3333-4333-8333-333333333333"), title: "Old investigation", archivedAt: "2026-09-01T00:00:00.000Z" };
+    render(<Harness overrides={{ archived: [archived] }} />);
+    openFrom("Open settings");
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
+    const filter = await screen.findByRole("searchbox", { name: "Filter archived chats" });
+    filter.focus();
+    fireEvent.change(filter, { target: { value: "zebra" } });
+    expect(screen.getByText("No archived chats match this filter.")).toBeInTheDocument();
+
+    const first = pressEscape(filter);
+    expect(first.defaultPrevented).toBe(true);
+    expect(filter).toHaveValue("");
+    expect(filter).toHaveFocus();
+    expect(screen.getByText("Old investigation")).toBeInTheDocument();
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("settings");
+  });
+
+  it("saves a valid draft in the focused field when Settings is closed without leaving the field", async () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(<Harness overrides={{ onUpdate }} />);
+    openFrom("Open settings");
+    fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
+    const repository = await screen.findByLabelText("Repository URL");
+    repository.focus();
+    fireEvent.change(repository, { target: { value: "https://gitlab.com/acme/widgets" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle settings" }));
+
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
+    expect(onUpdate).toHaveBeenCalledWith({ discordReleaseRepositoryUrl: "https://gitlab.com/acme/widgets" });
   });
 
   it("remembers the last section when Settings opens again and moves focus to the section title", async () => {

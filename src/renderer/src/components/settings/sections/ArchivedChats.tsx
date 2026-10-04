@@ -70,6 +70,12 @@ export function ArchivedChats({
               setQuery(event.currentTarget.value);
               setLimit(ARCHIVED_CHATS_PAGE_SIZE);
             }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !query || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              setQuery("");
+              setLimit(ARCHIVED_CHATS_PAGE_SIZE);
+            }}
           />
         )}
         {archived.length === 0

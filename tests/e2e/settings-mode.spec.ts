@@ -98,3 +98,19 @@ test("finds a setting with Settings search, lands on its row and keeps the searc
   await app.resizeWindow(1440, 920);
   expect(rendererErrors).toEqual([]);
 });
+
+test("keeps an action row's height when its notice appears", async () => {
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true }).click();
+  const recoveryRow = page.locator('[data-setting-id="recovery-export"]');
+  const rowHeight = (): Promise<number> => recoveryRow.evaluate((element) => element.getBoundingClientRect().height);
+  const idleHeight = await rowHeight();
+  await app.electronApp.evaluate(({ dialog }) => {
+    Reflect.set(dialog, "showSaveDialog", async () => ({ canceled: true }));
+  });
+  await recoveryRow.getByRole("button", { name: "Export recovery file" }).click();
+  await expect(recoveryRow.getByText("Recovery export cancelled.", { exact: true })).toBeVisible();
+  expect(await rowHeight()).toBe(idleHeight);
+  await page.getByRole("button", { name: "Close settings", exact: true }).click();
+  expect(rendererErrors).toEqual([]);
+});

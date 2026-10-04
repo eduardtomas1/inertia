@@ -24,6 +24,7 @@ import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchem
 import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator"; import { isCompletionSoundSettings } from "../completion-sound";
 import { validNotificationSettings } from "./notification-settings-schema";
+import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
@@ -342,9 +343,7 @@ function appSettings(value: unknown): boolean {
     "confirmDestructiveActions", "desktopNotifications",
   ];
   return strings.every((key) => stringField(value, key))
-    && (value.lightColorTheme === undefined || oneOf(value, "lightColorTheme", COLOR_THEME_IDS))
-    && (value.darkColorTheme === undefined || oneOf(value, "darkColorTheme", COLOR_THEME_IDS))
-    && [value.lightCustomColor, value.darkCustomColor].every((color) => color == null || (typeof color === "string" && /^#[0-9a-f]{6}$/iu.test(color)))
+    && validAppearanceSettings(value)
     && Object.entries(enums).every(([key, options]) => oneOf(value, key, options))
     && booleans.every((key) => booleanField(value, key))
     && integerField(value, "terminalFontSize")

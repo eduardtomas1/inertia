@@ -1,0 +1,27 @@
+{
+  "baseline": "8c651b73 (consolidate/settings-diagnostics-background-tasks)",
+  "platform": "macOS arm64, Node 22.23.2, same package-lock.json",
+  "note": "mainWorkbenchFirstLoadJavaScript and coreJavaScript had no headroom; each cap grows by exactly its measured delta. Palette generation stays lazily loaded.",
+  "measurements": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "beforeBytes": 867469,
+      "afterBytes": 867611,
+      "deltaBytes": 142
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "beforeBytes": 660967,
+      "afterBytes": 661109,
+      "deltaBytes": 142
+    },
+    "settingsJavaScript": {
+      "beforeBytes": 79238,
+      "afterBytes": 79584,
+      "deltaBytes": 346
+    },
+    "coreJavaScript": {
+      "beforeBytes": 2262312,
+      "afterBytes": 2263231,
+      "deltaBytes": 919
+    }
+  }
+}

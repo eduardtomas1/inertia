@@ -2,7 +2,7 @@ import { defaultSettings, type AppSettings, type AppSettingsUpdate } from "./con
 import { parseCompletionSoundSettings } from "./completion-sound";
 
 export const RESTORE_DEFAULTS_RESETS = [
-  { label: "appearance", keys: ["theme", "colorTheme", "interfaceScale", "responseDensity", "workingIndicator"] },
+  { label: "appearance", keys: ["theme", "colorTheme", "mutedCustomColors", "interfaceScale", "responseDensity", "workingIndicator"] },
   {
     label: "chat and notification preferences",
     keys: [

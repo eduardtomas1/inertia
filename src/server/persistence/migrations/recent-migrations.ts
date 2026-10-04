@@ -6,6 +6,7 @@ import { completionSoundMigration } from "./completion-sound";
 import { conversationContextDeliveriesMigration } from "./conversation-context-deliveries";
 import { conversationContextWholeChatMigration } from "./conversation-context-whole-chat";
 import { customAppearanceColorsMigration } from "./custom-appearance-colors";
+import { mutedCustomColorsMigration } from "./muted-custom-colors";
 import { nativeAntigravityProviderMigration } from "./native-antigravity-provider";
 import { notificationPreferencesMigration } from "./notification-preferences";
 import { queuedMessagesMigration } from "./queued-messages";
@@ -31,4 +32,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   notificationPreferencesMigration,
   issueReportPreviewMigration,
   subagentTaskTelemetryMigration,
+  mutedCustomColorsMigration,
 ];

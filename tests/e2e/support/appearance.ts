@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 import WebSocket from "ws";
 
-import type { ServerEvent } from "../../../src/shared/contracts";
+import type { AppSettingsUpdate, ServerEvent } from "../../../src/shared/contracts";
 import type { AppFixture } from "./app-fixture";
 
 /**
@@ -36,6 +36,14 @@ export async function setAppearanceInPlace(
 ): Promise<void> {
   const html = app.page.locator("html");
   if (await html.getAttribute("data-theme") === theme) return;
+  await updateSettingsInPlace(app, { theme });
+  await expect(html).toHaveAttribute("data-theme", theme);
+}
+
+export async function updateSettingsInPlace(
+  app: AppFixture,
+  payload: AppSettingsUpdate,
+): Promise<void> {
   const { websocketUrl } = await app.runtimeSnapshot();
   if (!websocketUrl) throw new Error("Fixture runtime is unavailable.");
   const requestId = randomUUID();
@@ -50,13 +58,13 @@ export async function setAppearanceInPlace(
       if (error) reject(error);
       else resolve();
     };
-    const timer = setTimeout(() => finish(new Error("The theme update timed out.")), 10_000);
+    const timer = setTimeout(() => finish(new Error("The settings update timed out.")), 10_000);
     socket.on("error", (error) => finish(error));
     socket.on("message", (data) => {
       const frame = JSON.parse(data.toString()) as ServerEvent;
       const event = frame.type === "runtime.event" ? frame.event : frame;
       if (event.type === "server.welcome") {
-        socket.send(JSON.stringify({ type: "settings.update", requestId, payload: { theme } }));
+        socket.send(JSON.stringify({ type: "settings.update", requestId, payload }));
       } else if (
         (event.type === "request.ok" || event.type === "request.result")
         && event.requestId === requestId
@@ -67,5 +75,4 @@ export async function setAppearanceInPlace(
       }
     });
   });
-  await expect(html).toHaveAttribute("data-theme", theme);
 }

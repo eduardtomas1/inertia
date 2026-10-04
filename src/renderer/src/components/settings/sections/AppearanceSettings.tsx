@@ -1,7 +1,7 @@
 import type { AppSettings } from "@shared/contracts";
 import { ThemeLibrary } from "../../ThemeLibrary";
 import { WorkingIndicatorSettings } from "../../working-indicator/WorkingIndicatorSettings";
-import { SettingRadioGroup, type SettingOption } from "../SettingControls";
+import { SettingRadioGroup, SettingSwitch, type SettingOption } from "../SettingControls";
 import { SettingsGroup } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
 
@@ -34,6 +34,15 @@ export function AppearanceSettings({
     <>
       <SettingsGroup title="Theme" headingId="appearance-heading" notice={themeAction.notice}>
         <ThemeLibrary settings={settings} disabled={disabled} onUpdate={updateTheme} />
+        <SettingSwitch
+          id="muted-custom-colours"
+          title="Muted colours"
+          description="Softens custom colours for a quieter workbench."
+          checked={Boolean(settings.mutedCustomColors)}
+          disabled={disabled}
+          inactive={!settings.lightCustomColor && !settings.darkCustomColor}
+          onChange={(mutedCustomColors) => onUpdate({ mutedCustomColors })}
+        />
       </SettingsGroup>
       <SettingsGroup title="Scale and density" headingId="interface-scale-heading">
         <SettingRadioGroup

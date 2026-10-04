@@ -3,9 +3,10 @@ import clsx from "clsx";
 import { buildCustomPaletteTokens } from "@shared/theme/color-theme-spec";
 import { normalizeProjectHexColor } from "@shared/project-colors";
 
-export function CustomThemeColor({ mode, value, disabled, onChange }: {
+export function CustomThemeColor({ mode, value, muted = false, disabled, onChange }: {
   mode: "light" | "dark";
   value?: string | null;
+  muted?: boolean;
   disabled: boolean;
   onChange: (color: string | null) => void;
 }): React.JSX.Element {
@@ -32,7 +33,7 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
   const validDraft = draft === null ? color : normalizeProjectHexColor(draft);
   const invalid = rejected && draft !== null;
   const swatchStyle = useMemo(() => {
-    const tokens = Object.fromEntries(buildCustomPaletteTokens(color, mode));
+    const tokens = Object.fromEntries(buildCustomPaletteTokens(color, mode, muted));
     return {
       "--theme-preview-canvas": tokens["app-bg"],
       "--theme-preview-sidebar": tokens["sidebar-bg"],
@@ -41,7 +42,7 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
       "--theme-preview-accent-soft": tokens["accent-soft"],
       "--theme-preview-message-action": tokens["message-action"],
     } as CSSProperties;
-  }, [color, mode]);
+  }, [color, mode, muted]);
   const commit = (): void => {
     if (draft === null || disabled) return;
     if (!validDraft) { setRejected(true); return; }

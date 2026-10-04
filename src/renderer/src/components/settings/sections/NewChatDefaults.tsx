@@ -110,7 +110,9 @@ export function NewChatDefaults({
     if (isNativeRoute(route) && route.providerId) await nativeDefault(route.providerId, route.modelId, "");
     else await onSetBackendDefault(null, route.selection);
   };
+  const fallback = effective.source === "fallback";
   const chooseReasoning = async (reasoning: string): Promise<void> => {
+    if (fallback) return;
     if (effective.source === "global-backend") {
       await onSetBackendDefault(null, { ...effective.selection, reasoningEffort: reasoning || null });
       return;
@@ -123,7 +125,7 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-model"
           title="Model"
-          description={effective.source === "fallback" && storedProvider && fallbackProvider
+          description={fallback && storedProvider && fallbackProvider
             ? `${storedProvider.label} is not available, so new chats use ${fallbackProvider.label}.`
             : undefined}
           value={effectiveKey}
@@ -134,10 +136,11 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-reasoning"
           title="Reasoning"
+          description={fallback ? "Choose a model to change its reasoning." : undefined}
           value={levels.length > 0 ? effective.reasoning ?? "" : ""}
           options={levels.length > 0 ? reasoningOptions : reasoningOptions.slice(0, 1)}
           disabled={disabled}
-          inactive={levels.length === 0}
+          inactive={levels.length === 0 || fallback}
           onChange={chooseReasoning}
         />
         <SettingSelect

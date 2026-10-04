@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SETTINGS_SECTIONS } from "../../src/renderer/src/components/settingsSections";
+import { SETTINGS_ROWS } from "../../src/renderer/src/components/settingsRows";
 import {
   HELP_COMMANDS,
   HELP_TOPICS,
@@ -99,6 +100,33 @@ describe("help topics", () => {
       "broken: markup or address in Visit https://example.com",
       "broken: unknown settings mention Themes.",
     ]));
+  });
+
+  it("names Settings controls by the labels their rows show, in the section the entry opens", () => {
+    const controls: ReadonlyArray<readonly [entry: string, rowId: string]> = [
+      ["Notifications and mascot", "desktop-notifications"],
+      ["Sound when a task ends", "completion-sound-enabled"],
+      ["Sound when a task ends", "completion-sound-when"],
+      ["Snapshots", "snapshots-enabled"],
+      ["Interface scale", "interface-scale"],
+      ["Working indicator", "working-indicator"],
+      ["Report an issue", "report-issue"],
+      ["Support summary", "runtime-diagnostics"],
+    ];
+    const problems: string[] = [];
+    for (const [entryName, rowId] of controls) {
+      const topic = HELP_TOPICS.find(({ entries }) => entries.some(({ name }) => name === entryName))!;
+      const entry = topic.entries.find(({ name }) => name === entryName)!;
+      const row = SETTINGS_ROWS.find(({ id }) => id === rowId);
+      if (!row) { problems.push(`${entryName}: no row ${rowId}`); continue; }
+      if (!`${entry.name} ${entry.detail}`.toLocaleLowerCase().includes(row.title.toLocaleLowerCase())) {
+        problems.push(`${entryName}: does not name ${row.title}`);
+      }
+      const jump = topic.jumps.find(({ label }) => label === entry.jump);
+      const section = jump && "settings" in jump ? jump.settings : undefined;
+      if (section !== undefined && section !== row.sectionId) problems.push(`${entryName}: opens ${section}, row is in ${row.sectionId}`);
+    }
+    expect(problems).toEqual([]);
   });
 
   it("covers the features the first-run tour introduces and groups the rest", () => {

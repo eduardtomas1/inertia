@@ -384,7 +384,7 @@ test("keeps runtime support and application update checks explicit in settings",
     "Imported 0 projects, 0 conversations, and 0 messages under new identities with supervised access.",
     { exact: true },
   )).toBeVisible();
-  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
   await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();

@@ -39,6 +39,10 @@ export const NEW_CHAT_LOCATIONS: readonly SettingOption<AppSettings["newThreadMo
   { value: "worktree", label: "New worktree" },
 ];
 
+function routeLabel(route: Pick<ComposerModelRoute, "modelId" | "displayName" | "providerLabel">): string {
+  return route.modelId === "provider-default" ? `${route.providerLabel} default` : route.displayName;
+}
+
 function isNativeRoute(route: Pick<ComposerModelRoute, "providerId" | "backendProfileId">): boolean {
   return route.providerId !== null && route.backendProfileId === providerNativeBackendProfile(route.providerId).id;
 }
@@ -81,7 +85,7 @@ export function NewChatDefaults({
     ...(effectiveRoute ? [] : [{ value: effectiveKey, label: `${effective.selection.alias ?? effective.selection.modelId} (unavailable)`, disabled: true }]),
     ...routes.map((route) => ({
       value: route.key,
-      label: route.selectable ? route.displayName : `${route.displayName} (unavailable)`,
+      label: `${routeLabel(route)}${route.selectable ? "" : " (unavailable)"}`,
       disabled: !route.selectable,
       group: `${route.backendProfileName} · ${route.harnessLabel}`,
     })),

@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test";
 import Database from "better-sqlite3";
 
 import { createAppFixture } from "./support/app-fixture";
+import { setAppearanceInPlace } from "./support/appearance";
 
 function sineWav(seconds: number, frequency = 880, rate = 22_050): Buffer {
   const samples = Math.round(seconds * rate);
@@ -54,11 +55,11 @@ test("configures, imports and plays the sound for finished tasks", async ({ brow
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Notifications", exact: true }).click();
-    const card = page.locator(".settings-content");
+    const card = page.locator('section[aria-labelledby="completion-sound-heading"]');
     const toggle = card.getByRole("switch", { name: "Sound when a task ends" });
     await toggle.scrollIntoViewIfNeeded();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await expect(card.getByRole("switch", { name: "Desktop notifications" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("switch", { name: "Desktop notifications" })).toHaveAttribute("aria-checked", "true");
     await expect(card.getByRole("heading", { name: "Sound", level: 3 })).toBeVisible();
     const capture = async (name: string): Promise<void> => {
       await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
@@ -91,10 +92,10 @@ test("configures, imports and plays the sound for finished tasks", async ({ brow
     };
 
     for (const theme of ["Dark", "Light"] as const) {
-      await page.getByRole("radio", { name: theme, exact: true }).click();
+      await setAppearanceInPlace(app, theme === "Dark" ? "dark" : "light");
       await capture(`completion-sound-off-${theme.toLowerCase()}`);
     }
-    await page.getByRole("radio", { name: "Dark", exact: true }).click();
+    await setAppearanceInPlace(app, "dark");
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -125,7 +126,7 @@ test("configures, imports and plays the sound for finished tasks", async ({ brow
     await expect.poll(() => [stored().longRunsOnly, stored().longRunSeconds]).toEqual([true, 300]);
 
     for (const theme of ["Dark", "Light"] as const) {
-      await page.getByRole("radio", { name: theme, exact: true }).click();
+      await setAppearanceInPlace(app, theme === "Dark" ? "dark" : "light");
       await capture(`completion-sound-on-${theme.toLowerCase()}`);
     }
 

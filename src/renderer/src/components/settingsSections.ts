@@ -158,7 +158,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
         ["desktop-notifications", "Desktop notifications", ["alerts"]],
         ["notify-only-in-background", "Only when Inertia is in the background", ["focus", "foreground", "quiet"]],
       ]),
-      ...rows("Sound", [["completion-sound", "Sound when a task ends", ["sounds", "chime", "audio", "long tasks"]]]),
+      ...rows("Sound", [
+        ["completion-sound", "Sound when a task ends", ["sounds", "chime", "audio", "long tasks"]],
+        ["completion-sound-when", "Play sound", ["long task", "duration", "only after"]],
+      ]),
       ...rows("Quota warnings", [
         ["quota-warnings", "Quota warnings", ["limits", "usage", "quota"]],
         ["quota-warning-threshold", "Warn when below", ["threshold", "percent", "remaining"]],

@@ -22,6 +22,7 @@ import {
   playCompletionSound,
 } from "../../utils/completionSoundPlayer";
 import { IconButton, Switch } from "../ui";
+import { SettingSelect, type SettingOption } from "../settings/SettingControls";
 import { SettingRow } from "../settings/SettingsLayout";
 import "./CompletionSoundSettings.css";
 
@@ -39,6 +40,13 @@ export const LONG_RUN_THRESHOLDS = [30, 60, 120, 300, 600, 900] as const;
 export function longRunLabel(seconds: number): string {
   return seconds < 60 ? `${seconds} s` : `${seconds / 60} min`;
 }
+
+const EVERY_TASK = "every";
+
+const PLAY_AFTER_OPTIONS: readonly SettingOption<string>[] = [
+  { value: EVERY_TASK, label: "After every task" },
+  ...LONG_RUN_THRESHOLDS.map((seconds) => ({ value: String(seconds), label: `After tasks longer than ${longRunLabel(seconds)}` })),
+];
 
 function sameSettings(a: SoundSettings, b: SoundSettings): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -110,13 +118,14 @@ export function CompletionSoundSettings({
     (target === null ? importRef.current : removeButtons.current.get(target))?.focus();
   }, [value.library]);
 
-  const commit = (patch: Partial<SoundSettings>): Promise<boolean> => {
+  const commit = (patch: Partial<SoundSettings>, report = true): Promise<boolean> => {
     const next = { ...latest.current, ...patch };
     if (sameSettings(next, latest.current)) return Promise.resolve(true);
     latest.current = next;
     setPending(next);
-    return Promise.resolve(onUpdate({ completionSound: next })).then(() => true, () => {
+    return Promise.resolve(onUpdate({ completionSound: next })).then(() => true, (cause: unknown) => {
       setPending((current) => (current === next ? null : current));
+      if (!report) throw cause;
       setNotice({ tone: "error", text: "The sound setting could not be saved. Try again." });
       return false;
     });
@@ -131,11 +140,6 @@ export function CompletionSoundSettings({
     void commit({ sound });
     preview(sound);
   });
-  const thresholds = useRovingRadios(
-    LONG_RUN_THRESHOLDS.map(String),
-    String(value.longRunSeconds),
-    (seconds) => void commit({ longRunSeconds: Number(seconds) }),
-  );
 
   const importSound = async (): Promise<void> => {
     const bridge = window.inertia;
@@ -204,6 +208,18 @@ export function CompletionSoundSettings({
           if (enabled) preview(latest.current.sound);
         }} />
       </SettingRow>
+      <SettingSelect
+        id="completion-sound-when"
+        title="Play sound"
+        value={value.longRunsOnly ? String(value.longRunSeconds) : EVERY_TASK}
+        options={PLAY_AFTER_OPTIONS}
+        disabled={disabled}
+        inactive={!value.enabled}
+        onChange={(choice) => commit(
+          choice === EVERY_TASK ? { longRunsOnly: false } : { longRunsOnly: true, longRunSeconds: Number(choice) },
+          false,
+        ).then(() => undefined)}
+      />
       {value.enabled && (
         <div className="completion-sound-options">
           <div className="completion-sound-heading">
@@ -259,20 +275,6 @@ export function CompletionSoundSettings({
             </div>
           )}
           {notice && <p className={clsx("completion-sound-notice", notice.tone === "error" && "is-error")} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-          <SettingRow id="completion-sound-long-runs" title="Only after long tasks" description="Stay quiet for quick questions and play the sound only when a task runs longer than you choose.">
-            <Switch label="Only after long tasks" checked={value.longRunsOnly} disabled={disabled} onChange={(longRunsOnly) => void commit({ longRunsOnly })} />
-          </SettingRow>
-          {value.longRunsOnly && (
-            <div className="response-density-setting completion-sound-threshold">
-              <span><strong>Long task</strong><small>Tasks that run at least this long get the sound.</small></span>
-              <div role="radiogroup" aria-label="Long task duration" {...thresholds.groupProps}>
-                {LONG_RUN_THRESHOLDS.map((seconds) => {
-                  const radio = thresholds.radioProps(String(seconds));
-                  return <button type="button" key={seconds} {...radio} disabled={disabled} className={clsx(radio["aria-checked"] && "is-active")}>{longRunLabel(seconds)}</button>;
-                })}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

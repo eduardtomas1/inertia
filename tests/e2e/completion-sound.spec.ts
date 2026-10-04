@@ -119,10 +119,10 @@ test("configures, imports and plays the sound for finished tasks", async ({ brow
     await card.getByRole("button", { name: "Preview Soft ding" }).click();
     await expect.poll(starts).toBeGreaterThan(selected);
 
-    await card.getByRole("switch", { name: "Only after long tasks" }).click();
-    const durations = card.getByRole("radiogroup", { name: "Long task duration" });
-    await durations.getByRole("radio", { name: "5 min", exact: true }).click();
-    await expect(durations.getByRole("radio", { name: "5 min", exact: true })).toHaveAttribute("aria-checked", "true");
+    const playAfter = card.getByRole("combobox", { name: "Play sound" });
+    await expect(playAfter).toHaveValue("every");
+    await playAfter.selectOption({ label: "After tasks longer than 5 min" });
+    await expect(playAfter).toHaveValue("300");
     await expect.poll(() => [stored().longRunsOnly, stored().longRunSeconds]).toEqual([true, 300]);
 
     for (const theme of ["Dark", "Light"] as const) {

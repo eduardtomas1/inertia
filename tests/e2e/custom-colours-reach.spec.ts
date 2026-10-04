@@ -57,6 +57,7 @@ async function openWorkbench(name: string): Promise<AppFixture> {
   await app.page.keyboard.type("PS1='$ ' PROMPT='$ '; clear");
   await app.page.keyboard.press("Enter");
   await expectAnonymousTerminal(app.page);
+  await app.page.getByRole("textbox", { name: "Message" }).fill("Review the colour changes");
   return app;
 }
 

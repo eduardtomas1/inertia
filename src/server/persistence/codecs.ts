@@ -46,6 +46,7 @@ import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
 import { parseCompletionSoundJson } from "../../shared/completion-sound";
+import { DEFAULT_QUOTA_WARNINGS, isQuotaWarningThreshold } from "../../shared/quota-warnings";
 import {
   continuationIdentityForSelection,
   currentKnownHarnessIdSchema,
@@ -435,16 +436,21 @@ export function settingsFromState(state: StateRow): AppSettings {
     usageDisplayMode: state.usage_display_mode,
     interfaceScale: state.interface_scale,
     responseDensity: state.response_density,
-    workspaceStartupSurface: state.workspace_startup_surface,
     defaultCodeWrap: state.default_code_wrap === 1,
     autoCollapseWorkLog: state.auto_collapse_work_log === 1,
     showChangedFileSummaries: state.show_changed_file_summaries === 1,
     autoScrollToFinalAnswer: state.auto_scroll_to_final_answer === 1,
-    sidebarMode: state.sidebar_mode,
     projectGrouping: state.project_grouping,
     autoOpenPlan: state.auto_open_plan === 1,
     confirmDestructiveActions: state.confirm_destructive_actions === 1,
     desktopNotifications: state.desktop_notifications === 1,
+    notifyOnlyInBackground: state.notify_only_in_background === 1,
+    quotaWarnings: {
+      enabled: state.quota_warnings_enabled !== 0,
+      firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
+        ? state.quota_warning_threshold
+        : DEFAULT_QUOTA_WARNINGS.firstThreshold,
+    },
     providerIdentityLabels: providerIdentityLabelsFromJson(
       state.provider_identity_labels_json,
     ),

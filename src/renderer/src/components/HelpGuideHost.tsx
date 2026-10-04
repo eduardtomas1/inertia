@@ -6,7 +6,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { closeHelpGuide, settleHelpGuideRequest } from "../utils/helpGuide";
 import { DialogPresence, useDialogPresence } from "./DialogPresence";
 import { loadWelcomeGuide } from "./lazySurfaceLoaders";
-import type { SettingsSection } from "./settingsSections";
+import type { SettingsSection } from "../lib/settingsTarget";
 import type { HelpCommand } from "./welcome-guide/helpTopics";
 
 export function HelpGuideHost({

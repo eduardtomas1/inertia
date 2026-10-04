@@ -509,7 +509,7 @@ test.beforeAll(async () => {
     Reflect.set(shell, "openExternal", async (url: string) => { opened.push(url); });
   });
   await app.page.getByRole("button", { name: "Settings", exact: true }).click();
-  await app.page.getByRole("button", { name: "Providers", exact: true }).click();
+  await app.page.getByRole("button", { name: "Agents", exact: true }).click();
 });
 
 test.afterAll(async () => {

@@ -22,14 +22,14 @@ describe("project settings", () => {
   it("saves against the original project revision, without a machine selector or automatic command execution", async () => {
     const { request } = setup();
     expect(screen.queryByText("All machines")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Renamed studio" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Renamed studio" } });
+    fireEvent.blur(screen.getByRole("textbox", { name: "Name" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: project.updatedAt, name: "Renamed studio" } }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add action" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add action" })).not.toHaveAttribute("aria-disabled"));
     request.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Add action" }));
-    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
     fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
     fireEvent.change(screen.getByLabelText("Arguments (one per line)"), { target: { value: "--version\nliteral & data" } });
     fireEvent.click(screen.getByRole("button", { name: "Save action" }));
@@ -38,52 +38,90 @@ describe("project settings", () => {
       preferences: { actions: [{ name: "Check", executable: "node", args: ["--version", "literal & data"] }] } } });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save action" })).not.toBeInTheDocument());
   });
-  it("allows keyboard project search and discards the previous project's unsaved name", async () => {
+  it("saves the name on Enter with row-level feedback, never while typing, and keeps an empty name as a local error", async () => {
+    const { container, request } = setup();
+    const field = screen.getByRole("textbox", { name: "Name" });
+    const row = container.querySelector<HTMLElement>('[data-setting-id="project-name"]')!;
+    expect(screen.queryByRole("button", { name: /^Save$/u })).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "  " } });
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.blur(field);
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription("Enter a project name.");
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: " Studio two " } });
+    expect(field).not.toHaveAttribute("aria-invalid");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
+      projectId: project.id, expectedUpdatedAt: project.updatedAt, name: "Studio two" } }));
+    expect(await within(row).findByText("Saved")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("shows a failed rename in the name row and keeps the typed name", async () => {
+    const { container, request } = setup();
+    request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));
+    const field = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(field, { target: { value: "Renamed studio" } });
+    fireEvent.blur(field);
+    const row = container.querySelector<HTMLElement>('[data-setting-id="project-name"]')!;
+    expect(await within(row).findByRole("alert")).toHaveTextContent("changed in another window");
+    expect(field).toHaveValue("Renamed studio");
+  });
+  it("allows keyboard project search and does not carry a draft name into the next project", async () => {
     setup();
-    fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Private unsaved name" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Private unsaved name" } });
     fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
     const search = screen.getByRole("combobox", { name: "Search projects" });
     fireEvent.change(search, { target: { value: "Second" } });
     fireEvent.keyDown(search, { key: "Enter" });
-    expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue("Second project");
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Second project");
     expect(screen.queryByRole("dialog", { name: "Choose project" })).not.toBeInTheDocument();
     await act(async () => {});
   });
   it("blocks edits offline, guards active-work removal, and keeps failed saves actionable", async () => {
     const view = setup({ disabled: true });
-    expect(screen.getByRole("textbox", { name: "Project name" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
     view.rerender(<ProjectSettings {...view.props} disabled={false} conversations={[{ ...conversation("busy"), status: "running" }]} />);
-    expect(screen.getByRole("button", { name: "Remove project" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove project" })).toHaveAttribute("aria-disabled", "true");
     view.request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));
     fireEvent.change(screen.getByRole("combobox", { name: "Agent browser access" }), { target: { value: "false" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("changed in another window");
     expect(screen.getByRole("combobox", { name: "Agent browser access" })).toBeEnabled();
   });
-  it("saves an optional Claude spend limit, rejects amounts the schema rejects, and clears back to no limit", async () => {
+  it("saves an optional Claude spend limit on blur, rejects amounts the schema rejects, and clears back to no limit", async () => {
     const view = setup();
     const field = screen.getByRole("textbox", { name: "Claude spend limit per turn (USD)" });
+    const row = view.container.querySelector<HTMLElement>('[data-setting-id="project-spend-limit"]')!;
     expect(field).toHaveValue("");
     expect(field).toHaveAttribute("placeholder", "No limit");
+    expect(field).toHaveAttribute("inputmode", "decimal");
     expect(screen.getByText(/subagents count toward it/u)).toBeInTheDocument();
     for (const value of ["0", "-1", "10000.01", "1.234", "abc"]) {
       fireEvent.change(field, { target: { value } });
+      expect(field).not.toHaveAttribute("aria-invalid");
+      expect(screen.queryByText(/0\.01 to 10,000/u)).not.toBeInTheDocument();
+      fireEvent.blur(field);
       expect(field).toHaveAttribute("aria-invalid", "true");
       expect(field).toHaveAccessibleDescription(/0\.01 to 10,000/u);
       expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();
     }
+    expect(view.request).not.toHaveBeenCalled();
     fireEvent.change(field, { target: { value: "2.50" } });
-    expect(field).toHaveAttribute("aria-invalid", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
+    expect(field).not.toHaveAttribute("aria-invalid");
+    fireEvent.blur(field);
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: 2.5 } } }));
-    await waitFor(() => expect(field).toBeEnabled());
+    expect(await within(row).findByText("Saved")).toBeInTheDocument();
     view.request.mockClear();
     const saved = { ...project, updatedAt: "2026-09-09T08:01:00.000Z", preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: 2.5 } };
     view.rerender(<ProjectSettings {...view.props} projects={[saved, view.props.projects[1]!]} />);
-    expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();
+    expect(field).toHaveValue("2.5");
+    fireEvent.change(field, { target: { value: "2.50" } });
+    fireEvent.blur(field);
+    expect(view.request).not.toHaveBeenCalled();
     fireEvent.change(field, { target: { value: "" } });
-    expect(field).toHaveAttribute("aria-invalid", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
+    expect(field).not.toHaveAttribute("aria-invalid");
+    fireEvent.keyDown(field, { key: "Enter" });
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: saved.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: null } } }));
   });
@@ -99,15 +137,15 @@ describe("project settings", () => {
       return { type: "request.ok", requestId: "saved" };
     });
     const view = setup({ request });
-    const workspace = screen.getByRole("combobox", { name: "Project default workspace" });
+    const workspace = screen.getByRole("combobox", { name: "Where new chats run in this project" });
     await act(async () => {
       fireEvent.click(screen.getByRole("radio", { name: "Pink" }));
       fireEvent.change(workspace, { target: { value: "worktree" } });
     });
     expect(request).toHaveBeenCalledTimes(1);
-    expect(workspace).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Choose icon" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Add action" })).toBeDisabled();
+    expect(workspace).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Choose icon" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Add action" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {
@@ -115,13 +153,13 @@ describe("project settings", () => {
       view.rerender(<ProjectSettings {...view.props} projects={[tinted]} />);
       pending.resolve({ type: "request.ok", requestId: "appearance-saved" });
     });
-    expect(workspace).toBeEnabled();
+    expect(workspace).not.toHaveAttribute("aria-disabled");
     fireEvent.change(workspace, { target: { value: "worktree" } });
     await waitFor(() => expect(request).toHaveBeenLastCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: tinted.updatedAt,
       preferences: { ...tinted.preferences!, workspace: "worktree" },
     } }));
-    await waitFor(() => expect(workspace).toBeEnabled());
+    await waitFor(() => expect(workspace).not.toHaveAttribute("aria-disabled"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("guards appearance changes during a full save and unlocks them after a failure", async () => {
@@ -130,7 +168,7 @@ describe("project settings", () => {
       .mockResolvedValue({ type: "request.ok", requestId: "saved" })
       .mockReturnValueOnce(pending.promise);
     setup({ request });
-    const workspace = screen.getByRole("combobox", { name: "Project default workspace" });
+    const workspace = screen.getByRole("combobox", { name: "Where new chats run in this project" });
     const colour = screen.getByRole("radio", { name: "Pink" });
     const emphasis = screen.getByRole("radio", { name: "Icon and name" });
     const pinned = screen.getByRole("switch", { name: "Pin to top of project lists" });
@@ -141,16 +179,66 @@ describe("project settings", () => {
       fireEvent.click(pinned);
     });
     expect(request).toHaveBeenCalledTimes(1);
-    for (const control of [colour, emphasis, pinned]) expect(control).toBeDisabled();
+    for (const control of [workspace, colour, emphasis, pinned]) expect(control).toHaveAttribute("aria-disabled", "true");
     await act(async () => pending.reject(new Error("The runtime is offline.")));
     expect(screen.getByRole("alert")).toHaveTextContent("The runtime is offline.");
-    for (const control of [workspace, colour, emphasis, pinned]) expect(control).toBeEnabled();
+    for (const control of [workspace, colour, emphasis, pinned]) expect(control).not.toHaveAttribute("aria-disabled");
     fireEvent.click(colour);
     await waitFor(() => expect(request).toHaveBeenLastCalledWith({ type: "project.update", payload: {
       projectId: project.id, appearance: { color: { kind: "palette", name: "pink" } },
     } }));
-    await waitFor(() => expect(colour).toBeEnabled());
+    await waitFor(() => expect(colour).not.toHaveAttribute("aria-disabled"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("keeps the clicked swatch focused and ignores further clicks while its save is pending", async () => {
+    const pending = deferred<ServerEvent>();
+    const request = vi.fn<IssueReportSettingsProps["request"]>()
+      .mockResolvedValue({ type: "request.ok", requestId: "saved" })
+      .mockReturnValueOnce(pending.promise);
+    setup({ request });
+    const pink = screen.getByRole("radio", { name: "Pink" });
+    const teal = screen.getByRole("radio", { name: "Teal" });
+    pink.focus();
+    fireEvent.click(pink);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(pink).toHaveFocus();
+    expect(pink).toHaveAttribute("aria-disabled", "true");
+    expect(pink).not.toBeDisabled();
+    fireEvent.click(teal);
+    fireEvent.keyDown(pink, { key: "End" });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(pink).toHaveFocus();
+    await act(async () => pending.resolve({ type: "request.ok", requestId: "appearance-saved" }));
+    expect(pink).not.toHaveAttribute("aria-disabled");
+  });
+  it("keeps the pin switch, icon buttons and Remove project focused while a save is pending", async () => {
+    const pending = deferred<ServerEvent>();
+    const request = vi.fn<IssueReportSettingsProps["request"]>()
+      .mockResolvedValue({ type: "request.ok", requestId: "saved" })
+      .mockReturnValueOnce(pending.promise);
+    const confirm = vi.fn(() => true);
+    Object.defineProperty(window, "confirm", { configurable: true, value: confirm });
+    setup({ request });
+    const pinned = screen.getByRole("switch", { name: "Pin to top of project lists" });
+    pinned.focus();
+    fireEvent.click(pinned);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(pinned).toHaveFocus();
+    expect(pinned).toHaveAttribute("aria-disabled", "true");
+    for (const name of ["Choose icon", "Choose file", "Add action", "Remove project"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).not.toBeDisabled();
+      button.focus();
+      fireEvent.click(button);
+      expect(button).toHaveFocus();
+    }
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Project icons" })).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ type: "request.ok", requestId: "pin-saved" }));
+    expect(screen.getByRole("button", { name: "Remove project" })).not.toHaveAttribute("aria-disabled");
+    Reflect.deleteProperty(window, "confirm");
   });
   it("sets colour, emphasis and pinning as server-merged appearance patches", async () => {
     const view = setup();
@@ -159,13 +247,13 @@ describe("project settings", () => {
     expect(within(colours).getByRole("radio", { name: "Pink" })).toHaveFocus();
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       appearance: { color: { kind: "palette", name: "pink" } } } }));
-    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Pink" })).toBeEnabled());
+    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Pink" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("radio", { name: "Icon and name" }));
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Pin to top of project lists" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Pin to top of project lists" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("switch", { name: "Pin to top of project lists" }));
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { pinned: true } } }));
     expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { colorEmphasis: "icon-and-name" } } });
-    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Teal" })).toBeEnabled());
+    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Teal" })).not.toHaveAttribute("aria-disabled"));
     view.request.mockRejectedValueOnce(new Error("The runtime is offline."));
     fireEvent.click(within(colours).getByRole("radio", { name: "Teal" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The runtime is offline.");

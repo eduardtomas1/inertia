@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useThreadPreview } from "../../src/renderer/src/components/sidebar/useThreadPreview";
+import { escapeLeavesSettings } from "../../src/renderer/src/hooks/useSettingsMode";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import { conversation } from "./composer-fixtures";
 
@@ -60,5 +61,20 @@ describe("delayed thread preview", () => {
     fireEvent.blur(window);
     act(() => { vi.advanceTimersByTime(2000); });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+  it("consumes the Escape that closes a visible preview so it does not also leave Settings", () => {
+    vi.useFakeTimers();
+    render(<Preview />);
+    const seen: boolean[] = [];
+    const observe = (event: KeyboardEvent): void => { seen.push(escapeLeavesSettings(event)); };
+    window.addEventListener("keydown", observe);
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "First" }));
+    act(() => { vi.advanceTimersByTime(2000); });
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("button", { name: "First" }), { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("button", { name: "First" }), { key: "Escape" });
+    window.removeEventListener("keydown", observe);
+    expect(seen).toEqual([false, true]);
   });
 });

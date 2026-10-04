@@ -1,6 +1,5 @@
 import { useState } from "react";
-import clsx from "clsx";
-import { Copy, FolderOpen, ShieldCheck } from "lucide-react";
+import { Copy, FolderOpen } from "lucide-react";
 
 import {
   appUpdatePreparationDiagnostic,
@@ -11,6 +10,8 @@ import type {
   RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
+import { SettingActionRow, SettingDisclosure } from "./settings/SettingsLayout";
+import type { SettingNotice } from "./settings/useSettingAction";
 
 const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   images: "Images",
@@ -56,74 +57,63 @@ export function LifecycleIntegritySettings(
 ): React.JSX.Element | null {
   const [revealingLogs, setRevealingLogs] = useState(false);
   const [copyingSupportReport, setCopyingSupportReport] = useState(false);
-  const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
-  const [supportReportStatus, setSupportReportStatus] = useState<string | null>(
-    null,
-  );
+  const [supportNotice, setSupportNotice] = useState<SettingNotice | null>(null);
 
   if (props.surface === "provider-capability") {
     const contract = props.provider.capabilityContract;
     if (!contract) return null;
     return (
-      <div className="provider-settings-field">
-        <span>Capability contract</span>
-        <div
-          className={clsx(
-            "provider-settings-capability-contract",
-            contract.installationVerified ? "is-verified" : "is-unverified",
-          )}
-          aria-label={`${props.provider.label} capability contract`}
-        >
-          <ShieldCheck size={15} aria-hidden="true" />
-          <span>
-            <strong>
+      <SettingDisclosure className="provider-settings-details" summary="Details">
+        <dl className="provider-settings-facts" aria-label={`${props.provider.label} capability contract`}>
+          <div>
+            <dt>Installation</dt>
+            <dd>
               {contract.installationVerified
                 ? `Verified for ${contract.installedVersion ?? "this installation"}`
                 : "Waiting for exact installation verification"}
-            </strong>
-            <code title={contract.manifestDigest}>
-              {contract.harnessId}
-              {" · "}
-              {contract.manifestDigest.slice(0, 12)}
-            </code>
-          </span>
-          <small>
-            {contract.installationVerified
-              ? `${contract.currentlyAvailableCount} of ${contract.declaredCapabilityCount} declared capabilities are available now.`
-              : "Optional provider features remain unavailable until version and protocol evidence match this manifest."}
-          </small>
-          {contract.capabilities && (
-            <details className="provider-settings-capability-details">
-              <summary>Feature availability</summary>
-              <ul aria-label={`${props.provider.label} feature availability`}>
-                {contract.capabilities.filter(({ id }) => CAPABILITY_LABELS[id]).map(({ id, state }) => (
-                  <li key={id}>
-                    <span>{CAPABILITY_LABELS[id]}</span>
-                    <span className={state === "available" ? "is-ready" : undefined}>
-                      {CAPABILITY_STATES[state]}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p>Availability can also depend on the model and settings of each chat.</p>
-            </details>
-          )}
-        </div>
-      </div>
+            </dd>
+          </div>
+          <div>
+            <dt>Capabilities</dt>
+            <dd>
+              {contract.installationVerified
+                ? `${contract.currentlyAvailableCount} of ${contract.declaredCapabilityCount} declared capabilities are available now.`
+                : "Optional provider features stay unavailable until version and protocol evidence match."}
+            </dd>
+          </div>
+          <div>
+            <dt>Contract</dt>
+            <dd title={contract.manifestDigest}>{contract.harnessId}</dd>
+          </div>
+        </dl>
+        {contract.capabilities && (
+          <>
+            <ul className="provider-settings-features" aria-label={`${props.provider.label} feature availability`}>
+              {contract.capabilities.filter(({ id }) => CAPABILITY_LABELS[id]).map(({ id, state }) => (
+                <li key={id}>
+                  <span>{CAPABILITY_LABELS[id]}</span>
+                  <span>{CAPABILITY_STATES[state]}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="provider-settings-features-note">Availability can also depend on the model and settings of each chat.</p>
+          </>
+        )}
+      </SettingDisclosure>
     );
   }
 
   const revealRuntimeLogs = async (): Promise<void> => {
     if (revealingLogs) return;
     setRevealingLogs(true);
-    setLogRevealStatus(null);
+    setSupportNotice(null);
     try {
       const error = await props.onRevealRuntimeLogs();
-      setLogRevealStatus(error
-        ? "The runtime log folder could not be opened."
-        : "Runtime log folder opened.");
+      setSupportNotice(error
+        ? { tone: "error", text: "The runtime log folder could not be opened." }
+        : { tone: "info", text: "Runtime log folder opened." });
     } catch {
-      setLogRevealStatus("The runtime log folder could not be opened.");
+      setSupportNotice({ tone: "error", text: "The runtime log folder could not be opened." });
     } finally {
       setRevealingLogs(false);
     }
@@ -131,45 +121,44 @@ export function LifecycleIntegritySettings(
   const copyRuntimeSupportReport = async (): Promise<void> => {
     if (copyingSupportReport) return;
     setCopyingSupportReport(true);
-    setSupportReportStatus(null);
+    setSupportNotice(null);
     try {
       const result = await props.onCopyRuntimeDiagnosticReport();
-      setSupportReportStatus(result.copied
-        ? `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.`
-        : "The support summary could not be copied.");
+      setSupportNotice(result.copied
+        ? { tone: "info", text: `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.` }
+        : { tone: "error", text: "The support summary could not be copied." });
     } catch {
-      setSupportReportStatus("The support summary could not be copied.");
+      setSupportNotice({ tone: "error", text: "The support summary could not be copied." });
     } finally {
       setCopyingSupportReport(false);
     }
   };
   const diagnostics = props.diagnostics;
   return (
-    <>
-      <div className="codex-binary-path runtime-log-setting">
-        <span>
-          <strong>Runtime diagnostics</strong>
-          <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>
-          {diagnostics && (
-            <small className="runtime-lifecycle-summary">
-              <strong>{lifecycleActionLabel(lifecycleActionableStateWithUpdate(
-                diagnostics.actionableState,
-                appUpdatePreparationDiagnostic(props.appUpdateStatus),
-              ))}</strong>
-              {` · ${diagnostics.ownedResources.turns} active ${diagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`}
-              {` · ${diagnostics.ownedResources.interactions} open ${diagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`}
-              {` · generation ${diagnostics.runtimeGenerationHash}`}
-            </small>
-          )}
-        </span>
-        <div>
-          <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
-          <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
-        </div>
-      </div>
-      {logRevealStatus && <p className="settings-card-note" role="status">{logRevealStatus}</p>}
-      {supportReportStatus && <p className="settings-card-note" role="status">{supportReportStatus}</p>}
-    </>
+    <SettingActionRow
+      id="runtime-diagnostics"
+      className="runtime-log-setting"
+      title="Runtime diagnostics"
+      description="Local lifecycle and failure metadata, without prompts, source, tokens or credentials."
+      details={diagnostics && (
+        <small className="runtime-lifecycle-summary">
+          <strong>{lifecycleActionLabel(lifecycleActionableStateWithUpdate(
+            diagnostics.actionableState,
+            appUpdatePreparationDiagnostic(props.appUpdateStatus),
+          ))}</strong>
+          {` · ${diagnostics.ownedResources.turns} active ${diagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`}
+          {` · ${diagnostics.ownedResources.interactions} open ${diagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`}
+          {` · generation ${diagnostics.runtimeGenerationHash}`}
+        </small>
+      )}
+      notice={supportNotice}
+      actions={(
+        <>
+          <button type="button" className="secondary-button" aria-disabled={copyingSupportReport || undefined} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} aria-hidden="true" />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
+          <button type="button" className="secondary-button" aria-disabled={revealingLogs || undefined} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} aria-hidden="true" />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
+        </>
+      )}
+    />
   );
 }
 

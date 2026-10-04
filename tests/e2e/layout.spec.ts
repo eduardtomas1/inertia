@@ -431,17 +431,18 @@ test("searches Help, moves through the results and opens an entry's setting", as
   await captureHelp(help, testInfo, "help-search-topics-light-wide");
   await setAppearanceInPlace(app, "dark");
 
-  await page.keyboard.type("custom colors");
+  await page.keyboard.type("custom colours");
   await expect(status).toHaveText("1 result");
   await page.keyboard.press("ArrowDown");
-  const result = results.getByRole("button", { name: "Custom colors" });
+  const result = results.getByRole("button", { name: "Custom colours" });
   await expect(result).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(field).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(help).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Custom colors" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Custom colours" })).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);

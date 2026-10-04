@@ -1,6 +1,6 @@
 # Guided issue reporting
 
-Open **Settings → Report an issue**. Describe the observed and expected behavior and reproduction steps, choose the agent/model/reasoning, and optionally select a project for counts. **Create private report chat** saves a scrubbed local draft and shows exactly which safe evidence was collected.
+Open **Settings → Help → Report an issue**. Describe the observed and expected behavior and reproduction steps, choose the agent/model/reasoning, and optionally select a project for counts. **Create private report chat** saves a scrubbed local draft and shows exactly which safe evidence was collected.
 
 Automatic validation currently supports **Claude Agent SDK** with existing native or configured backend authentication. **Validate with selected model** runs one isolated assessment of the user's observations against the collected metadata. It cannot reproduce arbitrary application behavior. The result separates evidence from unconfirmed observations and suggests reproduction questions to address in the issue preview. Other provider routes retain the same manual preview, editing and submission flow. Provider setup is linked when authentication is missing. Configured backends use their own readiness and vault authentication; a separate native Claude login is not required.
 

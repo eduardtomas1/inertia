@@ -21,7 +21,7 @@ test.afterAll(async () => {
 test("wires the packaged Private Connect state through the desktop settings boundary", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", {
-    name: "Connections & devices",
+    name: "Devices & integrations",
     exact: true,
   }).click();
 
@@ -46,6 +46,6 @@ test("wires the packaged Private Connect state through the desktop settings boun
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   // Devices are reached only from Settings; no header or sidebar shortcut.
-  await expect(page.getByRole("button", { name: /^Connections & devices/u })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Devices & integrations/u })).toHaveCount(0);
   expect(app.rendererErrors).toEqual([]);
 });

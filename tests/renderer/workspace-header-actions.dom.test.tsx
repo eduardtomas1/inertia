@@ -19,7 +19,7 @@ function props(): HeaderProps {
     sidebarCollapsed: false, gitStatus: null, branches: [],
     actions: [{ id: "check", label: "Check workspace", command: "node --version", preview: false }],
     busy: false,
-    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(),
+    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(), onCloseSettings: vi.fn(),
     onOpenFolder: vi.fn(), onRevealFolder: vi.fn(), onOpenFiles: vi.fn(),
     onRefreshBranches: vi.fn(), onSwitchBranch: vi.fn(),
     onCreateBranch: vi.fn(), onCreateConversationOnBranch: vi.fn(),
@@ -33,6 +33,17 @@ const gitStatus: NonNullable<HeaderProps["gitStatus"]> = {
   isRepository: true, root: "/studio", branch: "main", upstream: null,
   ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0,
 };
+
+describe("workspace header settings control", () => {
+  it("offers Close settings with the same gear inside Settings", () => {
+    const callbacks = props();
+    render(<WorkspaceHeader {...callbacks} view="settings" />);
+    expect(screen.queryByRole("button", { name: /^Settings$/u })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(callbacks.onCloseSettings).toHaveBeenCalledOnce();
+    expect(callbacks.onOpenSettings).not.toHaveBeenCalled();
+  });
+});
 
 describe("workspace header project action ownership", () => {
   it("keeps the focused project action available when initial Git discovery completes", async () => {

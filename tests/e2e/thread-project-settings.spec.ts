@@ -3,15 +3,16 @@ import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
-import { defaultProjectPreferences } from "../../src/shared/project-preferences";
+import { defaultProjectPreferences, type ProjectPreferences } from "../../src/shared/project-preferences";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app: AppFixture;
 let projectId: string;
 let threadId: string;
 let otherThreadId: string;
+let otherProjectName: string;
 
-async function createThreadFixture(withSavedAction = false): Promise<AppFixture> {
+async function createThreadFixture(withSavedAction = false, defaultAccessMode: ProjectPreferences["defaultAccessMode"] = null): Promise<AppFixture> {
   // Delayed hover previews and the native clipboard need exclusive display ownership.
   return createAppFixture({ name: "thread-project-settings", initialState: "conversation", seedSecondProject: true, windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory, secondWorkspaceDirectory }) => {
@@ -24,8 +25,9 @@ async function createThreadFixture(withSavedAction = false): Promise<AppFixture>
         const thread = state.conversations.find((chat) => chat.projectId === project.id)!;
         threadId = thread.id;
         otherThreadId = state.conversations.find((chat) => chat.projectId !== project.id)!.id;
+        otherProjectName = state.projects.find(({ id }) => id !== project.id)!.name;
         store.updateProject(project.id, { name: "Workspace studio", preferences: {
-          ...defaultProjectPreferences(), icon: { kind: "symbol", name: "code" },
+          ...defaultProjectPreferences(), defaultAccessMode, icon: { kind: "symbol", name: "code" },
           actions: withSavedAction ? [{ id: randomUUID(), name: "Check workspace", executable: process.execPath, args: ["--version"] }] : [],
         } });
         store.updateConversation(thread.id, { title: "Review authentication flow" });
@@ -82,7 +84,7 @@ test("right-click, inline actions, delayed preview, and nested keyboard menus", 
   await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(threadId);
   await row.press("Shift+F10");
   await menu.getByRole("menuitem", { name: "Project settings", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "Project name", exact: true })).toHaveValue("Workspace studio");
+  await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Workspace studio");
   expect(app.rendererErrors).toEqual([]);
 });
 
@@ -90,7 +92,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   const page = app.page;
   await page.getByRole("complementary", { name: "Project navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  if (!await page.getByRole("textbox", { name: "Project name" }).isVisible()) {
+  if (!await page.getByRole("textbox", { name: "Name", exact: true }).isVisible()) {
     await page.getByRole("button", { name: "Choose project", exact: true }).click();
     await page.getByRole("option", { name: "Workspace studio", exact: true }).click();
   }
@@ -104,7 +106,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   await capture(info, "project-image-icon-light");
   await page.getByRole("combobox", { name: "Agent browser access", exact: true }).selectOption("false");
   await page.getByRole("button", { name: "Add action", exact: true }).click();
-  await page.getByLabel("Name", { exact: true }).fill("Check workspace");
+  await page.getByRole("form", { name: "New action" }).getByLabel("Name", { exact: true }).fill("Check workspace");
   await page.getByLabel("Executable", { exact: true }).fill("node");
   await page.getByLabel("Arguments (one per line)", { exact: true }).fill("--version");
   await page.getByRole("button", { name: "Save action", exact: true }).scrollIntoViewIfNeeded();
@@ -120,10 +122,10 @@ test("edits project defaults without running actions, shows all settings, and pe
   await page.getByRole("button", { name: "Choose project", exact: true }).click();
   await capture(info, "project-chooser-light");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("button", { name: "Use Ocean for light", exact: true }).click();
   await page.getByRole("button", { name: "Use Iris for dark", exact: true }).click();
-  await page.getByRole("group", { name: "Color theme", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("group", { name: "Colour theme", exact: true }).scrollIntoViewIfNeeded();
   await capture(info, "independent-themes-light");
   await page.getByRole("radio", { name: "Dark", exact: true }).click();
   await capture(info, "independent-themes-dark");
@@ -134,7 +136,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   await page.getByRole("button", { name: "Remove project", exact: true }).scrollIntoViewIfNeeded();
   await capture(info, "project-checkout-dark");
   await app.resizeWindow(900, 700);
-  await page.getByRole("textbox", { name: "Project name" }).scrollIntoViewIfNeeded();
+  await page.getByRole("textbox", { name: "Name", exact: true }).scrollIntoViewIfNeeded();
   await capture(info, "project-defaults-narrow-dark");
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
@@ -203,5 +205,23 @@ test("runs a saved action only on explicit selection through the real terminal",
   }).toEqual([{ projectId, conversationId: threadId, status: "succeeded" }]);
   await expect(page.locator(".xterm-screen").first()).toBeVisible();
   await capture(info, "project-action-terminal-dark");
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("starts a new chat in a project with that project's default access", async () => {
+  await app.close();
+  app = await createThreadFixture(false, "full");
+  const page = app.page;
+  const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+  const newChatIn = async (project: string): Promise<void> => {
+    await sidebar.getByRole("button", { name: "Filter work by project" }).click();
+    await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: `Project actions for ${project}` }).first().click();
+    await sidebar.getByRole("menu", { name: `Project actions for ${project}` }).getByRole("menuitem", { name: `New chat in ${project}` }).click();
+    await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
+  };
+  await newChatIn("Workspace studio");
+  await expect(page.getByRole("button", { name: "Choose project access. Current access: Full access." })).toBeVisible();
+  await newChatIn(otherProjectName);
+  await expect(page.getByRole("button", { name: "Choose project access. Current access: Supervised." })).toBeVisible();
   expect(app.rendererErrors).toEqual([]);
 });

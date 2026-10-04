@@ -58,7 +58,7 @@ test.afterAll(async () => {
 
 test("hands Claude's PTY OAuth URL to the desktop browser exactly once", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
   const claude = page.getByRole("button", { name: "Configure Claude" });
   await expect(claude).toContainText("Sign in required", { timeout: 20_000 });
   await claude.click();

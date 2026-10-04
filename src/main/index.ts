@@ -35,6 +35,7 @@ import {
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { openDesktopLink } from "./external-link-open.js";
+import { inertiaWindowInForeground } from "./desktop-notification-gate.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
@@ -620,6 +621,7 @@ function registerIpcHandlers(): void {
     const request = parseDesktopNotificationRequest(args[0]);
     if (!request) throw new Error("Invalid desktop notification request");
     if (detachedChatMain?.isFocusedForNotification(request.conversationId)) return false;
+    if (request.onlyInBackground && inertiaWindowInForeground(BrowserWindow.getAllWindows())) return false;
     if (!Notification.isSupported()) return false;
     const copy = {
       completed: ["Inertia finished", "A coding task completed."],

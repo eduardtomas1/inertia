@@ -206,6 +206,7 @@ describe("detached chat leaf controls", () => {
         }}
         onOpenSidebar={noOp}
         onOpenSettings={noOp}
+        onCloseSettings={noOp}
         onOpenFolder={noOp}
         onRevealFolder={noOp}
         onOpenFiles={noOp}
@@ -290,10 +291,7 @@ describe("detached chat leaf controls", () => {
       providers: [],
       activeProjectId: project.id,
       activeConversationId: conversation.id,
-      settings: {
-        ...defaultSettings,
-        sidebarMode: "classic",
-      },
+      settings: defaultSettings,
     };
     render(
       <Sidebar

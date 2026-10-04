@@ -201,7 +201,7 @@ test("starts a new chat in the project chosen from the New chat palette", async 
 
     for (const theme of ["Dark", "Light"] as const) {
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await page.getByRole("button", { name: "General", exact: true }).click();
+      await page.getByRole("button", { name: "Appearance", exact: true }).click();
       await page.getByRole("radio", { name: theme, exact: true }).click();
       await page.getByRole("button", { name: "Workspace", exact: true }).click();
       await expect(newChat).toHaveAttribute("aria-haspopup", "dialog");

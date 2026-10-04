@@ -74,13 +74,13 @@ describe("help topics", () => {
     const broken = {
       id: "broken",
       title: "Broken",
-      summary: "Open Settings → Appearance.",
+      summary: "Open Settings → Themes.",
       demo: "missing",
       entries: [{ name: "Entry", detail: "Visit https://example.com", shortcut: "open-help", jump: "Open Settings → Missing" }],
       jumps: [
         { label: "Run", command: "missing-command" },
         { label: "Open Settings → Themes", settings: "themes" },
-        { label: "Open Settings → Anything", settings: "general" },
+        { label: "Open Settings → Anything", settings: "appearance" },
       ],
     } as unknown as HelpTopic;
 
@@ -91,9 +91,9 @@ describe("help topics", () => {
       "broken: entry Entry names missing jump Open Settings → Missing",
       "broken: unknown command missing-command",
       "broken: unknown settings section themes",
-      "broken: jump label Open Settings → Anything does not name General",
+      "broken: jump label Open Settings → Anything does not name Appearance",
       "broken: markup or address in Visit https://example.com",
-      "broken: unknown settings mention Appearance.",
+      "broken: unknown settings mention Themes.",
     ]));
   });
 

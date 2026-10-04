@@ -91,10 +91,10 @@ test("renders partial health failures without hiding healthy metrics", async ({
   });
   try {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Archive & data", exact: true }).click();
+    await page.getByRole("button", { name: "Data", exact: true }).click();
     await expect(page.getByText("Partial health data", { exact: true }))
       .toBeVisible();
-    await expect(page.getByRole("region", { name: "Local data", exact: true })
+    await expect(page.getByRole("region", { name: "Storage", exact: true })
       .getByRole("status").filter({ hasText: "Partial health data" })).toContainText(
       "Browser cache storage could not be measured.",
     );

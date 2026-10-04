@@ -10,7 +10,7 @@ served from the application package.
 1. Install and sign in to [Tailscale](https://tailscale.com/download) on the
    desktop and the device you will use. The Inertia desktop must remain online
    and unlocked while the other device connects.
-2. In Inertia, open **Settings → Connections & devices**.
+2. In Inertia, open **Settings → Devices & integrations → Private Connect**.
 3. Enable Private Connect. Inertia requires a connected Tailscale backend,
    MagicDNS, and a trusted Tailscale Serve mapping to the loopback gateway.
 4. Choose **Create pairing link**, then open the link or scan its QR code on

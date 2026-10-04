@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
@@ -112,6 +113,8 @@ function settingsProps(
     conversations: [],
     archived: [],
     onUpdate,
+    onSetDefaultModel: vi.fn(async () => undefined),
+    onRestoreDefaults: vi.fn(async () => undefined),
     onConnectProvider: vi.fn(),
     onRefreshProvider: vi.fn(),
     maintenanceOperations: new Map(),
@@ -144,6 +147,11 @@ function settingsProps(
     onSetBackendDefault: vi.fn(async () => undefined),
     onClearBackendDefault: vi.fn(async () => undefined),
   };
+}
+
+async function openAgents(): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: "Agents" }));
+  await screen.findByRole("tab", { name: "Configuration" });
 }
 
 describe("Settings composite updates", () => {
@@ -214,8 +222,7 @@ describe("Settings composite updates", () => {
       {...properties}
       lifecycleDiagnostics={lifecycleDiagnostics}
     />);
-    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
-    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
 
     expect(await screen.findByText("Waiting for provider cleanup")).toBeVisible();
     expect(screen.getByText(/1 active turn · 1 open interaction/u))
@@ -281,18 +288,12 @@ describe("Settings composite updates", () => {
       },
     });
     render(<SettingsView {...settingsProps(vi.fn(async () => undefined))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
 
-    expect(await screen.findByText("Partial health data")).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Browser cache storage could not be measured.",
-    );
-    expect(screen.getByText("30 MB")).toBeVisible();
-    expect(screen.getByText("4.0 KB")).toBeVisible();
-    expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.getByText(/UI 20 MB across 1 process/u)).toBeVisible();
-    expect(screen.getByText("Partial health data").parentElement)
-      .toBe(screen.getByRole("status"));
+    const warning = await screen.findByText("Partial health data: Browser cache storage could not be measured.");
+    expect(warning).toHaveAttribute("role", "status");
+    expect(screen.getByText("Memory 30 MiB · Database 4.0 KiB · Browser cache unavailable · Temporary attachments 512 B")).toBeVisible();
+    expect(screen.getByText(/^Main 10 MiB · Interface 20 MiB · Local service unavailable · Measured/u)).toBeVisible();
   });
 
   it.each([
@@ -316,7 +317,7 @@ describe("Settings composite updates", () => {
         openCanaryRollback,
       },
     });
-    render(<SettingsView {...settingsProps(vi.fn(async () => undefined))} appUpdateStatus={{
+    render(<SettingsView {...settingsProps(vi.fn(async () => undefined))} target={{ section: "help" }} appUpdateStatus={{
       revision: 1,
       channel: "canary",
       state: "current",
@@ -333,8 +334,8 @@ describe("Settings composite updates", () => {
       message: "Inertia Canary is up to date.",
     }} />);
 
-    expect(screen.getByText(`Inertia Canary · v${INERTIA_VERSION}`)).toBeInTheDocument();
-    expect(await screen.findByText("Canary channel · isolated profile")).toBeInTheDocument();
+    expect(await screen.findByText(`Inertia Canary · v${INERTIA_VERSION}`)).toBeInTheDocument();
+    expect(await screen.findByText("Canary rollback")).toBeInTheDocument();
     expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
       .toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: action }));
@@ -350,6 +351,7 @@ describe("Settings composite updates", () => {
     const props = settingsProps(vi.fn(async () => undefined));
     render(<SettingsView
       {...props}
+      target={{ section: "help" }}
       appUpdateStatus={{
       revision: 1,
       channel: "stable",
@@ -371,55 +373,54 @@ describe("Settings composite updates", () => {
       })}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download" }));
     expect(await screen.findByText("The update download could not be started."))
-      .toHaveAttribute("role", "status");
+      .toHaveAttribute("role", "alert");
   });
 
-  it("shows persisted default sentinels and saves the concrete provider default", () => {
+  it("shows the provider default once in Chats and saves the concrete provider default", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "darwin" },
     });
-    const onUpdate = vi.fn(async () => undefined);
+    const onSetDefaultModel = vi.fn(async () => undefined);
     const props = {
-      ...settingsProps(onUpdate),
+      ...settingsProps(vi.fn(async () => undefined)),
       providers: [codexWithModels()],
+      onSetDefaultModel,
     };
-    const view = render(<SettingsView {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const view = render(<SettingsView {...props} target={{ section: "chats" }} />);
 
-    const model = screen.getByLabelText("Model");
-    const reasoning = screen.getByLabelText("Reasoning");
-    expect(model).toHaveValue("");
-    expect(model).toHaveDisplayValue(
-      "Provider default — GPT-5.6-Sol",
-    );
+    const model = screen.getByRole("combobox", { name: "Model" });
+    const reasoning = screen.getByRole("combobox", { name: "Reasoning" });
+    expect(model).toHaveDisplayValue("Codex default");
     expect(reasoning).toHaveValue("");
-    expect(reasoning).toHaveDisplayValue("Model default — Low");
+    expect(reasoning).toHaveDisplayValue("Model default (Low)");
 
-    fireEvent.change(model, { target: { value: "gpt-5.6-sol" } });
-    expect(onUpdate).toHaveBeenLastCalledWith({
+    const sol = [...(model as HTMLSelectElement).options].find((option) => option.textContent === "GPT-5.6-Sol")!;
+    fireEvent.change(model, { target: { value: sol.value } });
+    await waitFor(() => expect(onSetDefaultModel).toHaveBeenLastCalledWith({
+      defaultProvider: "codex",
       defaultModel: "gpt-5.6-sol",
-      defaultReasoningEffort: "low",
-    });
+      defaultReasoningEffort: "",
+    }));
 
     view.rerender(<SettingsView
       {...props}
+      target={{ section: "chats" }}
       settings={{
         ...defaultSettings,
         defaultModel: "gpt-5.6-sol",
         defaultReasoningEffort: "xhigh",
       }}
     />);
-    expect(model).toHaveValue("gpt-5.6-sol");
-    expect(model).toHaveDisplayValue("GPT-5.6-Sol — Default");
+    expect(model).toHaveValue(sol.value);
+    expect(model).toHaveDisplayValue("GPT-5.6-Sol");
     expect(reasoning).toHaveValue("xhigh");
     expect(reasoning).toHaveDisplayValue("Xhigh");
   });
 
-  it("opens providers in a selected master-detail editor with model metadata", () => {
+  it("opens providers in a selected master-detail editor with model metadata", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "darwin" },
@@ -429,7 +430,7 @@ describe("Settings composite updates", () => {
       providers={[codexWithModels(), provider("claude", "Claude")]}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    await openAgents();
     expect(screen.getByRole("button", { name: "Configure Codex" }))
       .toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
@@ -439,7 +440,7 @@ describe("Settings composite updates", () => {
     fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
     expect(screen.getByRole("tab", { name: "Configuration" }))
       .toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("Name in Inertia"))
+    expect(screen.getByLabelText("Account name"))
       .toHaveAttribute("placeholder", "Claude account");
   });
 
@@ -466,19 +467,21 @@ describe("Settings composite updates", () => {
       }]}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    await openAgents();
     const contract = await screen.findByLabelText("Codex capability contract");
-    expect(contract).toHaveClass("is-verified");
+    const details = contract.closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    expect(within(details).getByText("Details")).toBeInTheDocument();
     expect(contract).toHaveTextContent("Verified for 1.0.0");
-    expect(contract).toHaveTextContent("codex-app-server · aaaaaaaaaaaa");
     expect(contract).toHaveTextContent(
       "23 of 28 declared capabilities are available now.",
     );
-    expect(contract.querySelector("code")).toHaveAttribute(
+    expect(within(contract).getByText("codex-app-server")).toHaveAttribute(
       "title",
       manifestDigest,
     );
     expect(contract).not.toHaveTextContent(manifestDigest);
+    expect(screen.queryByText("Capability contract")).not.toBeInTheDocument();
   });
 
   it("expands model-aware capability reasons without exposing private configuration", async () => {
@@ -503,9 +506,10 @@ describe("Settings composite updates", () => {
         },
       }]}
     />);
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const summary = await screen.findByText("Feature availability");
-    const details = summary.closest("details")!;
+    await openAgents();
+    const contract = await screen.findByLabelText("Codex capability contract");
+    const details = contract.closest("details")!;
+    const summary = within(details).getByText("Details");
     expect(details).not.toHaveAttribute("open");
     fireEvent.click(summary);
     expect(details).toHaveAttribute("open");
@@ -519,7 +523,7 @@ describe("Settings composite updates", () => {
     expect(details).toHaveTextContent("Availability can also depend on the model");
   });
 
-  it("moves provider detail tabs with the composite keyboard pattern", () => {
+  it("moves provider detail tabs with the composite keyboard pattern", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "darwin" },
@@ -529,7 +533,7 @@ describe("Settings composite updates", () => {
       providers={[codexWithModels()]}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    await openAgents();
     const configuration = screen.getByRole("tab", {
       name: "Configuration",
     });
@@ -583,11 +587,11 @@ describe("Settings composite updates", () => {
       providers={[codexWithModels(), provider("claude", "Claude")]}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
     await waitFor(() => expect(getBackendCredentialState).toHaveBeenCalledWith({
       profileId: "discord-release-webhook",
     }));
-    const repository = screen.getByLabelText("Discord release repository URL");
+    const repository = screen.getByLabelText("Repository URL");
     expect(repository).toHaveValue("");
 
     fireEvent.change(repository, {
@@ -595,12 +599,14 @@ describe("Settings composite updates", () => {
         value: "https://github.com/eduardtomas1/inertia",
       },
     });
+    expect(onUpdate).not.toHaveBeenCalled();
+    fireEvent.blur(repository);
 
     expect(onUpdate).toHaveBeenLastCalledWith({
       discordReleaseRepositoryUrl: "https://github.com/eduardtomas1/inertia",
     });
 
-    const webhook = screen.getByLabelText("Discord webhook URL");
+    const webhook = screen.getByLabelText("Webhook URL");
     expect(webhook).toHaveValue("");
 
     fireEvent.change(webhook, {
@@ -620,7 +626,7 @@ describe("Settings composite updates", () => {
     expect(webhook).toHaveAttribute("placeholder", "••••••••");
     expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Post release to Discord…" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("sends the latest release info to Discord", async () => {
@@ -650,10 +656,12 @@ describe("Settings composite updates", () => {
       }}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Discord" }));
+    fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+      expect(screen.getByRole("button", { name: "Post release to Discord…" })).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(screen.getByRole("button", { name: "Post release to Discord…" }));
+    expect(sendDiscordReleaseInfo).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Post to Discord" }));
 
     await waitFor(() =>
       expect(sendDiscordReleaseInfo).toHaveBeenCalledWith({
@@ -663,7 +671,7 @@ describe("Settings composite updates", () => {
       .toHaveAttribute("role", "status");
   });
 
-  it("preserves a dirty alias through an equivalent snapshot refresh", () => {
+  it("preserves a dirty alias through an equivalent snapshot refresh", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "darwin" },
@@ -671,8 +679,8 @@ describe("Settings composite updates", () => {
     const onUpdate = vi.fn(async () => undefined);
     const props = settingsProps(onUpdate);
     const view = render(<SettingsView {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const alias = screen.getAllByLabelText("Name in Inertia")[0]!;
+    await openAgents();
+    const alias = screen.getAllByLabelText("Account name")[0]!;
     alias.focus();
     expect(alias).toHaveFocus();
     fireEvent.change(alias, { target: { value: "Unsaved Codex name" } });
@@ -692,7 +700,7 @@ describe("Settings composite updates", () => {
     expect(onUpdate).not.toHaveBeenCalled();
   });
 
-  it("merges rapid alias and shortcut edits before a snapshot round trip", () => {
+  it("merges rapid alias and shortcut edits before a snapshot round trip", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "darwin" },
@@ -700,12 +708,12 @@ describe("Settings composite updates", () => {
     const onUpdate = vi.fn(async () => undefined);
     render(<SettingsView {...settingsProps(onUpdate)} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const codexAlias = screen.getByLabelText("Name in Inertia");
+    await openAgents();
+    const codexAlias = screen.getByLabelText("Account name");
     fireEvent.change(codexAlias, { target: { value: "Team Codex" } });
     fireEvent.blur(codexAlias);
     fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
-    const claudeAlias = screen.getByLabelText("Name in Inertia");
+    const claudeAlias = screen.getByLabelText("Account name");
     fireEvent.change(claudeAlias, { target: { value: "Team Claude" } });
     fireEvent.blur(claudeAlias);
 
@@ -717,7 +725,7 @@ describe("Settings composite updates", () => {
     });
 
     onUpdate.mockClear();
-    fireEvent.click(screen.getByRole("button", { name: "Keybindings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
     fireEvent.change(screen.getByLabelText("Search everything key"), {
       target: { value: "g" },
     });
@@ -743,8 +751,8 @@ describe("Settings composite updates", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValue(undefined);
     render(<SettingsView {...settingsProps(onUpdate)} />);
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const alias = screen.getAllByLabelText("Name in Inertia")[0]!;
+    await openAgents();
+    const alias = screen.getAllByLabelText("Account name")[0]!;
 
     fireEvent.change(alias, { target: { value: "Team Codex" } });
     fireEvent.blur(alias);
@@ -770,8 +778,8 @@ describe("Settings composite updates", () => {
       rejectSave = reject;
     }));
     render(<SettingsView {...settingsProps(onUpdate)} />);
-    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const alias = screen.getByLabelText("Name in Inertia");
+    await openAgents();
+    const alias = screen.getByLabelText("Account name");
 
     fireEvent.change(alias, { target: { value: "Saving Codex" } });
     fireEvent.blur(alias);
@@ -784,13 +792,13 @@ describe("Settings composite updates", () => {
 
     expect(alias).toHaveValue("New Codex draft");
     fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
-    fireEvent.change(screen.getByLabelText("Name in Inertia"), {
+    fireEvent.change(screen.getByLabelText("Account name"), {
       target: { value: "New Claude draft" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Configure Codex" }));
-    expect(screen.getByLabelText("Name in Inertia")).toHaveValue("New Codex draft");
+    expect(screen.getByLabelText("Account name")).toHaveValue("New Codex draft");
     fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
-    expect(screen.getByLabelText("Name in Inertia")).toHaveValue("New Claude draft");
+    expect(screen.getByLabelText("Account name")).toHaveValue("New Claude draft");
     expect(onUpdate).toHaveBeenCalledOnce();
   });
 });

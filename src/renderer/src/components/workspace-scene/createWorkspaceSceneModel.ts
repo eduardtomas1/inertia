@@ -46,6 +46,7 @@ import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation, ReplacementChatRequest } from "../../lib/newConversation";
 import { replacementChatRequest } from "../../utils/modelRouteTransition";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import type { SettingsViewProps } from "../settings/settingsTypes";
 import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
@@ -64,6 +65,7 @@ import {
 } from "../../utils/goalExecution";
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
+import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -140,6 +142,21 @@ export function chatResumeAvailability(
   return continuationRefusal
     ? { kind: "unavailable", resume: null, reason: continuationRefusal }
     : providerTerminalResumeAvailability(conversation, provider);
+}
+
+type SettingsSaveRunner = (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
+
+export function settingsSaveActions(run: SettingsSaveRunner): Pick<SettingsViewProps, "onSaveCommand" | "onUpdate" | "onSetDefaultModel" | "onRestoreDefaults"> {
+  const onSaveCommand = (command: CommandWithoutId): Promise<ServerEvent> => run(command.type, command, { reportError: false });
+  const save = async (command: CommandWithoutId): Promise<void> => {
+    await onSaveCommand(command);
+  };
+  return {
+    onSaveCommand,
+    onUpdate: (payload) => save({ type: "settings.update", payload }),
+    onSetDefaultModel: (payload) => save({ type: "settings.default-model.set", payload }),
+    onRestoreDefaults: () => save({ type: "settings.restore-defaults", payload: {} }),
+  };
 }
 
 export function replacementChatStarter(
@@ -264,7 +281,7 @@ export interface WorkspaceSceneActions {
   followUpSubagent: (trace: SubagentTrace) => void;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
@@ -272,12 +289,9 @@ export interface WorkspaceSceneActions {
 
 export interface WorkspaceSceneModelInput {
   view: "workspace" | "settings";
-  settingsTarget: {
-    section: import("../settingsSections").SettingsSection;
-    projectId?: string;
-    profileId?: string;
-    selection?: import("../../utils/diagnosticNavigation").DiagnosticSelection;
-  } | null;
+  settingsTarget: SettingsTarget | null;
+  settingsSection?: SettingsSection;
+  onSettingsSectionChange?: (section: SettingsSection) => void;
   settings: AppSettings;
   busyAction: string | null;
   project: Project | null;
@@ -318,6 +332,8 @@ export function runtimeConversationReference(
 export function createWorkspaceSceneModel({
   view,
   settingsTarget,
+  settingsSection,
+  onSettingsSectionChange,
   settings,
   busyAction,
   project,
@@ -583,6 +599,8 @@ export function createWorkspaceSceneModel({
     view,
     settings: {
       target: settingsTarget,
+      initialSection: settingsSection,
+      onSectionChange: onSettingsSectionChange,
       settings,
       disabled: connection.status !== "online",
       providers: connection.snapshot?.providers ?? [],
@@ -601,7 +619,7 @@ export function createWorkspaceSceneModel({
       lifecycleDiagnostics: connection.status === "online"
         ? connection.snapshot?.lifecycleDiagnostics
         : undefined,
-      onUpdate: actions.updateSettings,
+      ...settingsSaveActions(actions.run),
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
         actions.refreshProvider(providerId);

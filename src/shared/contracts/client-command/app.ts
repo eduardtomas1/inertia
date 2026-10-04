@@ -4,6 +4,8 @@ import { conversationHistoryRequestSchema } from "../../conversation-history";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
+import { QUOTA_WARNING_THRESHOLDS } from "../../quota-warnings";
+import { isReleaseRepositoryUrl, RELEASE_REPOSITORY_URL_MAX_LENGTH } from "../../release-repository";
 import {
   WORKING_INDICATOR_COLORS,
   WORKING_INDICATOR_SPEEDS,
@@ -380,7 +382,10 @@ export const configurationCommandSchemas = [
           terminalFontSize: z.number().int().min(11).max(22).optional(),
           defaultProvider: providerIdSchema.optional(),
           defaultModel: z.string().trim().max(160).optional(),
-          discordReleaseRepositoryUrl: z.string().trim().max(500).optional(),
+          discordReleaseRepositoryUrl: z.string().trim().max(RELEASE_REPOSITORY_URL_MAX_LENGTH).refine(
+            (value) => value === "" || isReleaseRepositoryUrl(value),
+            "Release repositories must be HTTPS GitHub or GitLab URLs.",
+          ).optional(),
           defaultAccessMode: accessModeSchema.optional(),
           newThreadMode: z.enum(["local", "worktree"]).optional(),
           wrapDiffs: z.boolean().optional(),
@@ -389,16 +394,19 @@ export const configurationCommandSchemas = [
           usageDisplayMode: z.enum(["expanded", "compact", "hidden"]).optional(),
           interfaceScale: z.enum(["compact", "default", "comfortable", "large"]).optional(),
           responseDensity: z.enum(["compact", "default", "comfortable"]).optional(),
-          workspaceStartupSurface: z.enum(["summary", "tools"]).optional(),
           defaultCodeWrap: z.boolean().optional(),
           autoCollapseWorkLog: z.boolean().optional(),
           showChangedFileSummaries: z.boolean().optional(),
           autoScrollToFinalAnswer: z.boolean().optional(),
-          sidebarMode: z.enum(["classic", "activity"]).optional(),
           projectGrouping: z.enum(["repository", "repository-path", "separate"]).optional(),
           autoOpenPlan: z.boolean().optional(),
           confirmDestructiveActions: z.boolean().optional(),
           desktopNotifications: z.boolean().optional(),
+          notifyOnlyInBackground: z.boolean().optional(),
+          quotaWarnings: z.object({
+            enabled: z.boolean().optional(),
+            firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),
+          }).strict().optional(),
           providerIdentityLabels: z.partialRecord(
             providerIdSchema,
             z.string().trim().min(1).max(48).refine(
@@ -502,6 +510,26 @@ export const configurationCommandSchemas = [
       ...requestBase,
       type: z.literal("backend.default.clear"),
       payload: z.object({ projectId: z.string().uuid().nullable() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("settings.default-model.set"),
+      payload: z
+        .object({
+          defaultProvider: providerIdSchema,
+          defaultModel: z.string().trim().max(160),
+          defaultReasoningEffort: z.string().trim().max(40),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("settings.restore-defaults"),
+      payload: z.object({}).strict(),
     })
     .strict(),
 ] as const;

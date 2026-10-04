@@ -24,6 +24,7 @@ import {
   type AppSnapshot,
   type Project,
 } from "../../src/shared/contracts";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 
 const codexSelection = providerNativeModelSelection({
   providerId: "codex",
@@ -120,6 +121,37 @@ describe("multi-spawn preset", () => {
     });
     expect(duo.sides.map(({ selection }) => selection.modelId))
       .toEqual(["provider-default", "provider-default"]);
+  });
+
+  it("starts both perspectives with the project's default access unless a preset saved one", () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const settings = { ...defaultSettings, defaultAccessMode: "auto-edit" as const };
+    const project = {
+      id: projectId,
+      preferences: { ...defaultProjectPreferences(), defaultAccessMode: "full" as const },
+    } as Project;
+    const snapshot = {
+      projects: [project],
+      conversations: [],
+      providers: [],
+      backendProfiles: [],
+      backendDefaults: [],
+      runs: [],
+      settings,
+      activeProjectId: projectId,
+      activeConversationId: null,
+    } satisfies AppSnapshot;
+    const initial = (input: Partial<Parameters<typeof initialMultiSpawnDraft>[0]>) => initialMultiSpawnDraft({
+      snapshot,
+      settings,
+      activeProjectId: projectId,
+      routesForSelection: () => [],
+      preset: null,
+      ...input,
+    });
+    expect(initial({}).sides.map(({ accessMode }) => accessMode)).toEqual(["full", "full"]);
+    expect(initial({ snapshot: { ...snapshot, projects: [] } }).sides.map(({ accessMode }) => accessMode))
+      .toEqual(["auto-edit", "auto-edit"]);
   });
 
   it("persists only a bounded launch identity for restart reconciliation", () => {

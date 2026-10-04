@@ -4,11 +4,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Project } from "@shared/contracts";
 import { MESSAGE_SEARCH_QUERY_MAX, messageSearchPattern, type MessageSearchHit } from "@shared/message-search";
 import { useMessageSearch, type MessageSearchCommand } from "../hooks/useMessageSearch";
+import type { SettingsTarget } from "../lib/settingsTarget";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { openHelpGuide } from "../utils/helpGuide";
 import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
+import { isProjectSettingsRow, SETTINGS_SECTION_ROWS } from "./settingsRows";
+import { searchSettings } from "./settings/settingsMatcher";
 
 export type CommandPaletteView = "search" | "new-chat";
 
@@ -28,14 +31,15 @@ type CommandPaletteProps = {
   onNewThreadIn: (project: Project) => void;
   onNewThreadWithoutProject?: () => void;
   onAddProject: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (target?: SettingsTarget) => void;
 };
 
 type PaletteItem = {
   id: string;
-  group: "Actions" | "Projects" | "Threads" | "Messages";
+  group: typeof groupOrder[number];
   label: string;
   detail?: string;
+  keywords?: string;
   icon: React.JSX.Element;
   shortcut?: string;
   match?: MessageSearchHit;
@@ -43,25 +47,36 @@ type PaletteItem = {
   view?: CommandPaletteView;
 };
 
-function score(label: string, detail: string | undefined, query: string): number {
-  const target = `${label} ${detail ?? ""}`.toLocaleLowerCase();
+const groupOrder = ["Actions", "Settings", "Projects", "Threads", "Messages"] as const;
+const ROWS_COVERED_BY_ACTIONS = new Set(["open-settings"]);
+
+function score(label: string, detail: string | undefined, query: string, keywords = ""): number {
+  const target = `${label} ${detail ?? ""} ${keywords}`.toLocaleLowerCase();
   if (!query) return 1;
   if (label.toLocaleLowerCase().startsWith(query)) return 4;
   if (target.split(/\s+/u).some((word) => word.startsWith(query))) return 3;
   return target.includes(query) ? 2 : 0;
 }
 
-const groupOrder = ["Actions", "Projects", "Threads", "Messages"] as const;
+function byGroup(left: PaletteItem, right: PaletteItem): number {
+  return groupOrder.indexOf(left.group) - groupOrder.indexOf(right.group);
+}
 
-function filterItems(items: PaletteItem[], query: string, limit = true): PaletteItem[] {
+function filterItems(items: PaletteItem[], query: string, limit = true, wordMatches?: ReadonlySet<string>): PaletteItem[] {
   const needle = query.trim().toLocaleLowerCase();
   return items
-    .map((item) => ({ item, rank: score(item.label, item.detail, needle) }))
+    .map((item) => ({ item, rank: score(item.label, item.detail, needle, item.keywords) || (wordMatches?.has(item.id) ? 1 : 0) }))
     .filter(({ rank }) => rank > 0)
     .sort((left, right) => right.rank - left.rank)
     .slice(0, limit ? needle ? 18 : 14 : undefined)
     .map(({ item }) => item)
-    .sort((left, right) => groupOrder.indexOf(left.group) - groupOrder.indexOf(right.group));
+    .sort(byGroup);
+}
+
+function searchItems(items: PaletteItem[], settings: PaletteItem[], query: string): PaletteItem[] {
+  if (!query.trim()) return filterItems(items, query);
+  const wordMatches = new Set(searchSettings(query, SETTINGS_SECTION_ROWS).flatMap(({ results }) => results.map(({ row }) => `settings:${row.id}`)));
+  return [...filterItems(items, query), ...filterItems(settings, query, true, wordMatches)].sort(byGroup);
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -117,6 +132,18 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
   }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onSelectConversation, onSelectProject, projects]);
+  const settingsItems = useMemo<PaletteItem[]>(() => {
+    const regular = projects.filter((project) => project.workspaceKind !== "scratch");
+    const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;
+    return SETTINGS_SECTION_ROWS.flatMap(({ label, rows }) => rows.flatMap((row) => {
+      if (ROWS_COVERED_BY_ACTIONS.has(row.id)) return [];
+      const project = isProjectSettingsRow(row);
+      if (project && !projectId) return [];
+      const target: SettingsTarget = { section: row.sectionId, anchor: row.id, ...(project ? { projectId } : {}) };
+      return [{ id: `settings:${row.id}`, group: "Settings" as const, label: row.title, detail: label,
+        keywords: row.keywords.join(" "), icon: <Settings size={15} />, run: () => onOpenSettings(target) }];
+    }));
+  }, [currentProjectId, onOpenSettings, projects]);
   const messageItems = useMemo<PaletteItem[]>(() => {
     if (!onSelectMessage) return [];
     return (search.result?.hits ?? []).flatMap((hit) => {
@@ -141,8 +168,8 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     });
     return choices;
   }, [currentProjectId, onNewThreadIn, onNewThreadWithoutProject, projects]);
-  const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : filterItems(allItems, value);
-  const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...filterItems(allItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query]);
+  const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : searchItems(allItems, settingsItems, value);
+  const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...searchItems(allItems, settingsItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query, settingsItems]);
   const activeIndex = Math.max(0, items.findIndex(({ id }) => id === activeId));
   const activeItemId = items[activeIndex]?.id;
   useEffect(() => {

@@ -14,13 +14,12 @@ it("shows global disk usage and changes the budget without deleting attachments"
   const request = vi.fn().mockResolvedValue(response());
   const onUpdate = vi.fn().mockResolvedValue(undefined);
   render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={onUpdate} />);
-  expect(await screen.findByText(/100.0 MiB used · 70 of 65,536 files/u)).toBeVisible();
-  fireEvent.change(screen.getByRole("combobox", { name: "Global attachment disk budget" }), { target: { value: "64" } });
+  expect(await screen.findByText(/100 MiB used · 70 of 65,536 files/u)).toBeVisible();
+  fireEvent.change(screen.getByRole("combobox", { name: "Attachment storage limit" }), { target: { value: "64" } });
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ attachmentStorageGiB: 64 }));
   expect(request.mock.calls.every(([command]) => command.type === "attachment.storage.get")).toBe(true);
-  expect(screen.getByText(/This disk budget does not reserve RAM/u)).toBeVisible();
-  expect(screen.getByText(/separate temporary disk budget of 16 GiB and 1,024 files/u)).toBeVisible();
-  expect(screen.getByText(/^Per message: 100 files, 50 MiB each\./u)).toBeVisible();
+  expect(screen.getByText("100 MiB used · 70 of 65,536 files · 500 GiB free")).toBeVisible();
+  expect(screen.queryByText(/temporary disk budget/u)).toBeNull();
 });
 
 it("requires confirmation for both explicit deletion and automatic eviction and allows cancellation", async () => {
@@ -36,14 +35,27 @@ it("requires confirmation for both explicit deletion and automatic eviction and 
   expect(remove).toHaveFocus();
   fireEvent.click(remove);
   fireEvent.click(screen.getByRole("button", { name: "Remove stored files" }));
-  expect(await screen.findByText("Removed 64 files and freed 80.0 MiB.")).toBeVisible();
+  expect(await screen.findByText("Removed 64 files and freed 80 MiB.")).toBeVisible();
   expect(request).toHaveBeenCalledWith({ type: "attachment.storage.cleanup" });
   await waitFor(() => expect(remove).toHaveFocus());
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("switch", { name: "Free space automatically when full" }));
   expect(onUpdate).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Allow automatic removal" }));
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ autoRemoveOldAttachments: true }));
-  await waitFor(() => expect(screen.getByRole("checkbox")).toHaveFocus());
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Free space automatically when full" })).toHaveFocus());
+});
+
+it("cancels a deletion confirmation with Escape without leaving Settings and puts Cancel first", async () => {
+  const request = vi.fn().mockResolvedValue(response());
+  render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={vi.fn()} />);
+  const remove = await screen.findByRole("button", { name: /Remove oldest files \(64/u });
+  fireEvent.click(remove);
+  const confirmation = screen.getByRole("group", { name: "Confirm attachment deletion" });
+  expect([...confirmation.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Cancel", "Remove stored files"]);
+  expect(fireEvent.keyDown(confirmation, { key: "Escape" })).toBe(false);
+  expect(screen.queryByRole("group", { name: "Confirm attachment deletion" })).toBeNull();
+  expect(remove).toHaveFocus();
+  expect(request.mock.calls.every(([command]) => command.type === "attachment.storage.get")).toBe(true);
 });
 
 it("returns keyboard focus to the panel after failed updates and when cleanup leaves nothing removable", async () => {
@@ -51,7 +63,7 @@ it("returns keyboard focus to the panel after failed updates and when cleanup le
     ? response({ records: 64, bytes: 80 * 1024 ** 2 }, 0) : response());
   const onUpdate = vi.fn().mockRejectedValue(new Error("fixture update failed"));
   render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={onUpdate} />);
-  const checkbox = screen.getByRole("checkbox");
+  const checkbox = screen.getByRole("switch", { name: "Free space automatically when full" });
   await screen.findByRole("button", { name: /Remove oldest files \(64/u });
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByRole("button", { name: "Allow automatic removal" }));
@@ -59,7 +71,7 @@ it("returns keyboard focus to the panel after failed updates and when cleanup le
   await waitFor(() => expect(checkbox).toHaveFocus());
   fireEvent.click(screen.getByRole("button", { name: /Remove oldest files \(64/u }));
   fireEvent.click(screen.getByRole("button", { name: "Remove stored files" }));
-  expect(await screen.findByText("Removed 64 files and freed 80.0 MiB.")).toBeVisible();
+  expect(await screen.findByText("Removed 64 files and freed 80 MiB.")).toBeVisible();
   await waitFor(() => expect(screen.getByRole("button", { name: "Refresh storage" })).toHaveFocus());
 });
 

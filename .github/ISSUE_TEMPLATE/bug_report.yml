@@ -9,7 +9,7 @@ body:
 
         Do not include credentials, tokens, private prompts, proprietary source code, repository names, account identifiers, full local paths, or unredacted raw logs, screenshots, recordings, or diagnostic archives. Use a throwaway repository and replace identifying values with neutral placeholders.
 
-        When the app opens, its built-in **Copy diagnostic report** output is designed for public bug intake: it excludes prompts, source content, token values, credentials, and provider capabilities. You must still review it and redact any remaining identifier before posting it below.
+        When the app opens, its built-in **Copy support summary** output is designed for public bug intake: it excludes prompts, source content, token values, credentials, and provider capabilities. You must still review it and redact any remaining identifier before posting it below.
 
         Security vulnerabilities must be reported through the private process in the [security policy](https://github.com/eduardtomas1/inertia/security/policy), not here.
 
@@ -90,7 +90,7 @@ body:
     id: diagnostic_report
     attributes:
       label: Reviewed privacy-safe diagnostic report
-      description: In Inertia, open Settings → Runtime diagnostics → Copy diagnostic report. Paste that built-in report here after reviewing and redacting any remaining identifier. It excludes prompts, source content, token values, credentials, and provider capabilities. If the app did not open far enough to copy it, state that instead. Do not substitute raw logs, terminal output, database files, or an unredacted diagnostic archive.
+      description: In Inertia, open Settings → Help → Support → Copy support summary. Paste that built-in report here after reviewing and redacting any remaining identifier. It excludes prompts, source content, token values, credentials, and provider capabilities. If the app did not open far enough to copy it, state that instead. Do not substitute raw logs, terminal output, database files, or an unredacted diagnostic archive.
       render: text
     validations:
       required: true

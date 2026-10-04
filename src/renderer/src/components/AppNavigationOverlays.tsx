@@ -10,6 +10,7 @@ import { LoadingMark } from "./ui";
 import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
 import type { MessageSearchCommand } from "../hooks/useMessageSearch";
+import type { SettingsTarget } from "../lib/settingsTarget";
 
 function PaletteLoadingShell(): React.JSX.Element {
   return (
@@ -37,7 +38,7 @@ interface AppNavigationOverlaysProps {
   createConversationIn: (project: Project) => void;
   openNoProjectChat: () => void;
   importProject: () => Promise<void>;
-  openSettings: () => void;
+  openSettings: (target?: SettingsTarget) => void;
 }
 
 export function AppNavigationOverlays({

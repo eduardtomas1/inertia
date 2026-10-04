@@ -14,6 +14,7 @@ import type {
   ProviderMetadataProvenance,
   ProviderRateLimit,
 } from "../../src/shared/contracts";
+import type { QuotaWarningSettings } from "../../src/shared/quota-warnings";
 
 function limit(
   id: string,
@@ -208,6 +209,34 @@ describe("provider quota notifications", () => {
       serializeQuotaNotificationState(result.state),
     )).toEqual(result.state);
     expect(parseQuotaNotificationState("{not-json")).toEqual(emptyState);
+  });
+
+  it("starts at the chosen first threshold and keeps the lower fixed levels", () => {
+    const from15 = { enabled: true, firstThreshold: 15 } as const;
+    const at = (remaining: number, state: PersistedQuotaNotificationState, warnings: QuotaWarningSettings = from15) =>
+      evaluateQuotaNotifications([provider("codex", [limit("primary", remaining, 300)])], state, "2026-07-28T10:00:00.000Z", warnings);
+    const quiet = at(24, emptyState);
+    expect(quiet.notices).toEqual([]);
+    const fifteen = at(14, quiet.state);
+    expect(fifteen.notices.map(({ threshold }) => threshold)).toEqual([15]);
+    expect(at(4, fifteen.state).notices.map(({ threshold }) => threshold)).toEqual([5]);
+    expect(at(20, emptyState, { enabled: true, firstThreshold: 5 }).notices).toEqual([]);
+    expect(at(4, emptyState, { enabled: true, firstThreshold: 5 }).notices.map(({ threshold }) => threshold)).toEqual([5]);
+    expect(at(14, emptyState, { enabled: true, firstThreshold: 25 }).notices.map(({ threshold }) => threshold)).toEqual([15]);
+  });
+
+  it("shows no notices while warnings are off and does not replay crossings after they turn back on", () => {
+    const off = { enabled: false, firstThreshold: 25 } as const;
+    const on = { enabled: true, firstThreshold: 25 } as const;
+    const at = (remaining: number, state: PersistedQuotaNotificationState, warnings: QuotaWarningSettings) =>
+      evaluateQuotaNotifications([provider("codex", [limit("primary", remaining, 300)])], state, "2026-07-28T10:00:00.000Z", warnings);
+    const first = at(24, emptyState, off);
+    expect(first.notices).toEqual([]);
+    const second = at(4, first.state, off);
+    expect(second.notices).toEqual([]);
+    expect(at(4, second.state, on).notices).toEqual([]);
+    const replenished = at(100, second.state, on);
+    expect(at(24, replenished.state, on).notices.map(({ threshold }) => threshold)).toEqual([25]);
   });
 
   it("renders a small provider-scoped polite notification with a dismiss action", () => {

@@ -17,7 +17,7 @@ function props(project: Partial<NonNullable<HeaderProps["project"]>>): HeaderPro
     },
     conversation: conversation("33333333-3333-4333-8333-333333333333"), view: "workspace",
     sidebarCollapsed: false, gitStatus: null, branches: [], actions: [], busy: false,
-    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(),
+    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(), onCloseSettings: vi.fn(),
     onOpenFolder: vi.fn(), onRevealFolder: vi.fn(), onOpenFiles: vi.fn(),
     onRefreshBranches: vi.fn(), onSwitchBranch: vi.fn(),
     onCreateBranch: vi.fn(), onCreateConversationOnBranch: vi.fn(),

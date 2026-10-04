@@ -1,6 +1,6 @@
 import { writeClipboardText } from "../utils/clipboard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bug, Check, Copy, ExternalLink, ShieldCheck, Square } from "lucide-react";
+import { Check, Copy, ExternalLink, Square } from "lucide-react";
 import type { ModelBackendProfileView, ModelSelection, Project, ProviderInfo, ServerEvent } from "@shared/contracts";
 import { ISSUE_REPOSITORY_URL, reportAllowsAgent, scrubReportText, type IssueReport } from "@shared/issue-report";
 import { modelSelectionSchema, providerNativeModelSelection } from "@shared/model-routing";
@@ -93,23 +93,19 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
     setReport({ ...report, status: "validating", notice: "Validating your observations against the safe local evidence…" });
     await command({ type: "support.report.validate", payload: { id: report.id, revision: report.revision } });
   };
-  return <section className="settings-card issue-report" aria-labelledby="issue-report-heading">
-    <div className="settings-card-heading"><div><Bug size={18} /></div><span><h3 id="issue-report-heading">Report an issue</h3><p>Turn a problem into a useful GitHub issue for eduardtomas1/inertia.</p></span></div>
-    <ol className="issue-report-steps" aria-label="Report progress">
-      <li aria-current={!report ? "step" : undefined}>1 · Describe</li><li aria-current={report && !["preview", "submitted", "submitting", "uncertain", "retired"].includes(report.status) ? "step" : undefined}>2 · Validate</li><li aria-current={report?.status === "preview" ? "step" : undefined}>3 · Review & submit</li>
-    </ol>
-    <div className="issue-report-safety"><ShieldCheck size={18} aria-hidden="true" /><p>Only Inertia version, platform, lifecycle codes and counts are collected. A selected project adds chat and pending-interaction counts. No logs, files, paths or conversation content are read. Review your description for private information before sending it to your chosen provider or GitHub.</p></div>
+  return <section className="settings-card issue-report" aria-labelledby="issue-report-heading" data-setting-id="report-issue">
+    <div className="settings-card-heading"><span><h3 id="issue-report-heading">Report an issue</h3><p>Only the Inertia version, platform, lifecycle codes and counts are collected, plus chat counts for a selected project. No logs, files, paths or conversation content are read. Review your description for private information before sending it.</p></span></div>
     {!report && <div className="issue-report-form">
-      <label>What happened?<textarea aria-label="What happened?" rows={5} maxLength={8000} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What were you doing? What did you expect, what happened instead, and how can we reproduce it?" disabled={locked} /></label>
+      <label>What happened?<textarea className="setting-input" aria-label="What happened?" rows={5} maxLength={8000} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What were you doing? What did you expect, what happened instead, and how can we reproduce it?" disabled={locked} /></label>
       <div className="issue-report-options">
-        <label>Agent and model<select aria-label="Report agent and model" value={selectedIndex < 0 ? "" : selectedIndex} disabled={locked} onChange={(event) => { const route = routes[Number(event.target.value)]; if (route) setSelection(route.selection); }}>
+        <label>Agent and model<select className="setting-select" aria-label="Agent and model" value={selectedIndex < 0 ? "" : selectedIndex} disabled={locked} onChange={(event) => { const route = routes[Number(event.target.value)]; if (route) setSelection(route.selection); }}>
           {selectedIndex < 0 && <option value="">Choose a model</option>}
           {routes.map((route, index) => <option key={`${route.selection.backendProfileId}:${route.selection.modelId}`} value={index}>{route.providerLabel} · {route.displayName}</option>)}
         </select></label>
-        <label>Reasoning<select aria-label="Report reasoning" disabled={locked || !selectedRoute?.reasoningOptions.length} value={selection.reasoningEffort ?? ""} onChange={(event) => setSelection({ ...selection, reasoningEffort: event.target.value || null })}>
+        <label>Reasoning<select className="setting-select" aria-label="Reasoning" disabled={locked || !selectedRoute?.reasoningOptions.length} value={selection.reasoningEffort ?? ""} onChange={(event) => setSelection({ ...selection, reasoningEffort: event.target.value || null })}>
           <option value="">Provider default</option>{selectedRoute?.reasoningOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
         </select></label>
-        <label>Diagnostic scope<select aria-label="Diagnostic scope" value={projectId} disabled={locked} onChange={(event) => setProjectId(event.target.value)}><option value="">App only</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · counts only</option>)}</select></label>
+        <label>Diagnostic scope<select className="setting-select" aria-label="Diagnostic scope" value={projectId} disabled={locked} onChange={(event) => setProjectId(event.target.value)}><option value="">App only</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · counts only</option>)}</select></label>
       </div>
       <p className="settings-card-note">Automatic validation currently supports Claude Agent SDK with tools disabled. Other providers can continue with a manual preview. Your existing model authentication is used.</p>
       <div className="issue-report-actions issue-report-create-actions">
@@ -134,8 +130,8 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
       </div>}
       <section className="issue-report-preview" aria-labelledby="issue-preview-heading"><div className="issue-report-preview-heading"><h4 id="issue-preview-heading">Public issue preview</h4><span>eduardtomas1/inertia</span></div>
         {editing && !submitted && !retired ? <>
-          <label>Issue title<input aria-label="Issue title" maxLength={200} value={title} disabled={locked} onChange={(event) => setTitle(event.target.value)} /></label>
-          <label>Issue body<textarea aria-label="Issue body" rows={15} maxLength={24000} value={body} disabled={locked} onChange={(event) => setBody(event.target.value)} /></label>
+          <label>Issue title<input className="setting-input" aria-label="Issue title" maxLength={200} value={title} disabled={locked} onChange={(event) => setTitle(event.target.value)} /></label>
+          <label>Issue body<textarea className="setting-input" aria-label="Issue body" rows={15} maxLength={24000} value={body} disabled={locked} onChange={(event) => setBody(event.target.value)} /></label>
           <button type="button" className="secondary-button" disabled={locked || title.trim().length < 3 || body.trim().length < 10} onClick={() => { void perform(async () => { await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title, body } }); setEditing(false); }); }}>Save and review preview</button>
         </> : <><h4>{report.title}</h4><pre>{report.body}</pre></>}
       </section>

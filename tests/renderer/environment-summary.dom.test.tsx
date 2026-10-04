@@ -647,6 +647,7 @@ describe("Environment content in its workspace surfaces", () => {
         busy={false}
         onOpenSidebar={vi.fn()}
         onOpenSettings={vi.fn()}
+        onCloseSettings={vi.fn()}
         onOpenFolder={vi.fn()}
         onRevealFolder={vi.fn()}
         onOpenFiles={vi.fn()}

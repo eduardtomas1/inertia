@@ -236,6 +236,7 @@ describe("Help", () => {
     const panel = within(dialog).getByRole("tabpanel", { name: "Keyboard" });
     expect([...panel.querySelectorAll(".help-guide-entries kbd")].map((key) => key.textContent))
       .toEqual(["⌘Y", "⌘N", "⌘B", "⌘J"]);
+    expect(within(panel).getByText(/⌘, on macOS or Ctrl\+, elsewhere opens and closes Settings\. Search settings finds a setting by name; ↑, ↓ and Enter open it\. Escape clears the search, then leaves Settings\./u)).toBeInTheDocument();
     const demo = panel.querySelector(".welcome-demo");
     expect(demo).toHaveAttribute("aria-hidden", "true");
     expect([...demo!.querySelectorAll(".d-key kbd")].map((key) => key.textContent))
@@ -243,6 +244,7 @@ describe("Help", () => {
 
     fireEvent.click(within(dialog).getByRole("tab", { name: "Search and history" }));
     expect(within(dialog).getByRole("tabpanel").querySelector(".welcome-demo")).toBeNull();
+    expect(within(dialog).getByRole("tabpanel")).toHaveTextContent("Find commands, settings, projects, chats and saved messages.");
   });
 
   it("runs every jump through an existing action, closes and hands focus back first", async () => {

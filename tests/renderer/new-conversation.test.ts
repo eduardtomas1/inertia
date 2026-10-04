@@ -84,6 +84,17 @@ describe("new conversation isolation", () => {
       { ...defaultSettings, newThreadMode: "local" }).useWorktree).toBe(false);
   });
 
+  it("starts a new chat with the project's default access before the global default", () => {
+    const settings = { ...defaultSettings, defaultAccessMode: "auto-edit" as const };
+    const configured = { ...project, preferences: { ...defaultProjectPreferences(), defaultAccessMode: "full" as const } };
+    expect(buildNewConversationPayload(configured, settings).accessMode).toBe("full");
+    expect(buildNewConversationPayload(configured, settings, { kind: "isolated-worktree" }).accessMode).toBe("full");
+    expect(buildNewConversationPayload(configured, settings, { kind: "branch", branch: "main" }).accessMode).toBe("full");
+    expect(buildNewConversationPayload({ ...project, preferences: defaultProjectPreferences() }, settings).accessMode).toBe("auto-edit");
+    expect(buildNewConversationPayload(project, settings).accessMode).toBe("auto-edit");
+    expect(buildNewConversationPayload(project.id, settings).accessMode).toBe("auto-edit");
+  });
+
   it("builds an ordinary new chat only from global defaults", () => {
     const payload = buildNewConversationPayload(project.id, {
       ...defaultSettings,

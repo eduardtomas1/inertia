@@ -296,9 +296,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await page.getByRole("button", { name: "Close daily work" }).click();
   await expect(dailyWorkDialog).toBeHidden();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Connections & devices", exact: true }).click();
+  await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
   await expect(page.getByRole("button", {
-    name: "Connections & devices",
+    name: "Devices & integrations",
     exact: true,
   })).toHaveAttribute("aria-current", "page");
   await usageDestination.focus();
@@ -311,7 +311,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(usageSections).toHaveCSS("display", "flex");
   await expect(usageSections.getByRole("button", { name: "History", exact: true })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("button", { name: "General", exact: true }))
+  await expect(page.getByRole("button", { name: "Devices & integrations", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await usageDestination.click();
   await expect(page.getByRole("main", { name: "Usage" })).toBeVisible();

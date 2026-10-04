@@ -104,7 +104,6 @@ test("projects exact live run states in the real Electron shell", async ({
     }
     store.updateSettings({
       theme: "dark",
-      sidebarMode: "activity",
       showTimestamps: true,
       providerIdentityLabels: {
         codex: "Codex App Server",

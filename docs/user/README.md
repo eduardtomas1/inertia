@@ -24,7 +24,7 @@ No. History and preferences stay on your computer, and each provider keeps its o
 
 ### Which agents can I use?
 
-Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Providers**. See [Getting started](getting-started.md#connect-an-agent).
+Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Agents**. See [Getting started](getting-started.md#connect-an-agent).
 
 ### Can I work on two things at once?
 
@@ -40,7 +40,7 @@ Yes. Choose **Help**, the question-mark button in the sidebar footer, or search 
 
 ### How do I see the welcome guide again?
 
-Open **Settings → Report an issue** and choose **Show welcome guide**.
+Open **Settings → Help** and choose **Show welcome guide**.
 
 ## Reference
 
@@ -54,4 +54,4 @@ Open **Settings → Report an issue** and choose **Show welcome guide**.
 
 ### Can I choose my own theme colors?
 
-In **Settings → General → Appearance → Custom colors**, choose separate light and dark colors with the color picker or hex field. Press Enter or leave the hex field to apply it; Escape cancels an edit. Inertia adapts the color into readable surfaces and accents. **System** switches between your saved colors with your operating system. **Reset** returns that appearance to its previous preset; choosing a theme card replaces both custom colors.
+In **Settings → Appearance → Theme → Custom colours**, choose separate light and dark colors with the color picker or hex field. Press Enter or leave the hex field to apply it; Escape cancels an edit. Inertia adapts the color into readable surfaces and accents. **System** switches between your saved colors with your operating system. **Reset** returns that appearance to its previous preset; choosing a theme card replaces both custom colors.

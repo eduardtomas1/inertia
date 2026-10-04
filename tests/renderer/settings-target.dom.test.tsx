@@ -67,9 +67,16 @@ describe("Settings external section targets", () => {
         }),
         updatePrivateConnectDevice,
         getAppHealth,
+        getBackendCredentialState: vi.fn(async () => ({
+          profileId: "discord-release-webhook",
+          hasSecret: false,
+          maskedValue: null,
+          credentialGeneration: null,
+          storage: { available: true, provider: "keychain" as const, message: null },
+        })),
       },
     });
-    const providersTarget = { section: "providers" as const };
+    const providersTarget = { section: "agents" as const };
     const onUpdate = vi.fn(async () => undefined);
     const props: ComponentProps<typeof SettingsView> = {
       target: providersTarget,
@@ -85,6 +92,8 @@ describe("Settings external section targets", () => {
         lastValidatedAt: "2026-08-03T10:15:00.000Z",
       },
       onUpdate,
+      onSetDefaultModel: vi.fn(async () => undefined),
+      onRestoreDefaults: vi.fn(async () => undefined),
       onConnectProvider: vi.fn(),
       onRefreshProvider: vi.fn(),
       maintenanceOperations: new Map(),
@@ -119,33 +128,33 @@ describe("Settings external section targets", () => {
     };
     const view = render(<SettingsView {...props} />);
     expect(screen.getByRole("main", { name: "Settings" })).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Providers" }))
+    expect(screen.getByRole("button", { name: "Agents" }))
       .toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { level: 2, name: "Providers" }))
-      .toHaveClass("visually-hidden");
+    expect(screen.getByRole("heading", { level: 2, name: "Agents" }))
+      .toHaveClass("settings-page-title");
 
-    fireEvent.click(screen.getByRole("button", { name: "General" }));
-    expect(screen.getByRole("button", { name: "General" }))
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { level: 2, name: "General" }))
-      .toHaveClass("visually-hidden");
+    expect(screen.getByRole("heading", { level: 2, name: "Chats" }))
+      .toHaveClass("settings-page-title");
     const answerScrollSwitch = screen.getByRole("switch", {
-      name: "Jump to completed answers",
+      name: "Scroll to the start of new answers",
     });
     expect(answerScrollSwitch).toBeChecked();
     fireEvent.click(answerScrollSwitch);
     expect(onUpdate).toHaveBeenCalledWith({ autoScrollToFinalAnswer: false });
     view.rerender(<SettingsView {...props} disabled />);
-    expect(screen.getByRole("button", { name: "General" }))
+    expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
 
-    const connectionsTarget = { section: "connections" as const };
+    const connectionsTarget = { section: "devices" as const };
     view.rerender(<SettingsView {...props} target={connectionsTarget} />);
     expect(screen.getByRole("heading", {
       level: 2,
-      name: "Connections & devices",
-    })).toHaveClass("visually-hidden");
-    const phoneAccess = await screen.findByLabelText("Phone access");
+      name: "Devices & integrations",
+    })).toHaveClass("settings-page-title");
+    const phoneAccess = await screen.findByLabelText("Access Phone");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
     });
@@ -170,36 +179,30 @@ describe("Settings external section targets", () => {
       }),
     ));
 
-    fireEvent.click(screen.getByRole("button", { name: "General" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     view.rerender(<SettingsView {...props} target={connectionsTarget} disabled />);
-    expect(screen.getByRole("button", { name: "General" }))
+    expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
 
     view.rerender(<SettingsView
       {...props}
-      target={{ section: "connections" }}
+      target={{ section: "devices" }}
     />);
-    expect(await screen.findByLabelText("Phone access")).toBeVisible();
+    expect(await screen.findByLabelText("Access Phone")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Report an issue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
     expect(getAppHealth).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "View storage & backups" }));
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
     await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("5.0 MB")).toBeVisible();
-    expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
-    expect(screen.getByText(/targeting 5 copies and 512 MB/u)).toBeVisible();
-    expect(screen.getByText(/The newest validated copy is kept even above that target/u)).toBeVisible();
-    expect(screen.getByText(/Chats stay stored until you delete them/u)).toBeVisible();
+    expect(await screen.findByText(/Memory 1\.0 KiB · Database 5\.0 MiB · Browser cache unavailable/u)).toBeVisible();
     expect(screen.getByText("Full local database backup")).toBeVisible();
-    expect(screen.getByText(
-      /Validated SQLite copies include presets/u,
-    )).toBeVisible();
-    expect(screen.getByText(/Last validated backup:/u)).toBeVisible();
+    expect(screen.getByText("Chats, settings and attachment records, without secrets or attachment files.")).toBeVisible();
+    expect(document.querySelector('[data-setting-id="database-backup"] .data-facts'))
+      .toHaveTextContent(/^Last validated .+ · Every 1 hour · 5 copies, 512 MiB in total$/u);
     expect(screen.getByText("Portable conversation recovery export"))
       .toBeVisible();
-    expect(screen.getByText(
-      /without presets, attachments, sessions, execution context, Git artifacts, credentials, secret references, or vault data/u,
-    )).toBeVisible();
+    expect(screen.getByText("Project paths and messages only. Imports create new supervised identities."))
+      .toBeVisible();
+    expect(screen.queryByText(/Provider credentials stay outside Inertia/u)).toBeNull();
   });
 });

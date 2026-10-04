@@ -23,7 +23,7 @@ import {
   type DetachedConversationPlaceholderProps,
 } from "./DetachedConversationPlaceholder";
 import { PaneResizeHandle } from "./PaneResizeHandle";
-import type { SettingsViewProps } from "./SettingsView";
+import type { SettingsViewProps } from "./settings/settingsTypes";
 import { LoadingMark } from "./ui";
 import type { Project } from "@shared/contracts";
 import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";

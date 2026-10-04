@@ -36,6 +36,7 @@ export function useThreadPreview(conversations: readonly Conversation[], project
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
   }, []);
+  const open = useRef(false);
   const close = useCallback(() => { clearTimer(); setTarget(null); }, [clearTimer]);
   const leave = useCallback(() => {
     clearTimer(); timer.current = setTimeout(() => setTarget(null), 150);
@@ -51,21 +52,29 @@ export function useThreadPreview(conversations: readonly Conversation[], project
     if (disabled) close();
   }, [close, disabled]);
   useEffect(() => {
-    const key = (event: KeyboardEvent): void => { if (event.key === "Escape") close(); };
+    const key = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      if (open.current && !event.defaultPrevented) event.preventDefault();
+      close();
+    };
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
-    window.addEventListener("keydown", key);
+    window.addEventListener("keydown", key, true);
     return () => {
       clearTimer();
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
-      window.removeEventListener("keydown", key);
+      window.removeEventListener("keydown", key, true);
     };
   }, [clearTimer, close]);
   const conversation = target && !disabled && target.anchor.isConnected
     ? conversations.find(({ id }) => id === target.id) : undefined;
+  const visible = Boolean(conversation);
+  useLayoutEffect(() => {
+    open.current = visible;
+  }, [visible]);
   return {
     enter, leave, close,
     describedId: conversation ? `thread-preview-${conversation.id}` : undefined,

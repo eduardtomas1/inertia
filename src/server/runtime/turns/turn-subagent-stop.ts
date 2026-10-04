@@ -48,7 +48,6 @@ export async function stopActiveSubagent(
       { runId: active.turn.runId, turnId: active.turn.id },
     );
   } catch {
-    // The provider event stream may still have proved the exact stop.
   }
   let currentTrace: SubagentTrace;
   try {

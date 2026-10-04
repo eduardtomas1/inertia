@@ -2,7 +2,6 @@ import { REPORT_TEXT_LIMIT } from "./issue-report";
 
 const SENSITIVE_REPORT_KEY = /^(?:api[_ -]?(?:key|token)|(?:access|refresh)[_ -]?token|client[_ -]?secret|password|authorization|cookies?|credentials?|secret[_ -]?(?:access[_ -]?)?key|secrets?|tokens?)$/iu;
 
-/** Decode only short JSON field names, never arbitrary prose or field values. */
 function exposeSensitiveJsonKeys(text: string): string {
   return text.replace(/"(?:\\.|[^"\\\r\n]){1,128}"(?=\s*:)/gu, (literal) => {
     try {
@@ -63,7 +62,6 @@ function scrubOnce(text: string, limit: number): string {
     .slice(0, limit).trim();
 }
 
-/** Deliberately lossy scrub for user-authored text, never a raw-log sanitizer. */
 export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string {
   let result = scrubOnce(text, limit);
   for (let pass = 1; pass < 3; pass += 1) {

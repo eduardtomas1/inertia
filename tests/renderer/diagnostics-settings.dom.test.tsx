@@ -84,6 +84,8 @@ function setup(records: DiagnosticRecord[], events: DiagnosticEventEntry[] = [],
 
 const rows = (): HTMLElement[] => within(screen.getByRole("list", { name: "Recent events" })).getAllByRole("button", { expanded: false });
 
+const pageStatus = (): HTMLElement | null => document.querySelector<HTMLElement>(".diagnostics-status[role='status']");
+
 describe("Diagnostics settings", () => {
   it("lists lifecycle events and incidents together, newest first, as plain expandable rows", async () => {
     setup([record(2)], [event(1), event(3, { event: "runtime.failure", severity: "error", subsystem: "runtime",
@@ -92,7 +94,7 @@ describe("Diagnostics settings", () => {
     expect(screen.getByRole("heading", { name: "Diagnostics", level: 3 })).toBeVisible();
     expect(screen.getByText("Events and failures recorded on this device.")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Recent events", level: 3 })).toBeVisible();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(pageStatus()).toBeNull();
     expect(rows()[0]!.querySelector("time")).toHaveTextContent("Sep 9, 8:00:03 AM");
     expect(rows().map((row) => row.querySelector("strong")?.textContent)).toEqual([
       "The local runtime reported a failure", "Discord delivery could not be confirmed", "Inertia started",
@@ -134,7 +136,7 @@ describe("Diagnostics settings", () => {
     expect(screen.getByRole("button", { name: "Open affected conversation" })).toBeDisabled();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy incident" })));
     expect(h.copyDiagnostics).toHaveBeenCalledExactlyOnceWith({ incidentId: incident.id, severity: "all" });
-    expect(screen.getByRole("status")).toHaveTextContent("Incident copied.");
+    expect(pageStatus()).toHaveTextContent("Incident copied.");
     const navigation = vi.fn();
     window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigation);
     fireEvent.click(screen.getByRole("button", { name: "Open Discord settings" }));
@@ -196,10 +198,13 @@ describe("Diagnostics settings", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(toggle).toHaveFocus();
     expect(screen.getByText(/Off since/u)).toHaveTextContent("App start, quit and crashes are still kept.");
+    const row = document.querySelector<HTMLElement>('[data-setting-id="diagnostics-capture"]')!;
+    expect(within(row).getByText("Saved")).toBeInTheDocument();
     h.setDiagnosticsCapture.mockRejectedValueOnce(new Error("Diagnostics settings could not be saved."));
     await act(async () => fireEvent.click(toggle));
+    await settle();
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("alert")).toHaveTextContent("Capture could not be changed. Try again.");
+    expect(within(row).getByRole("alert")).toHaveTextContent("Capture could not be changed. Try again.");
   });
 
   it("runs the header actions and reports each result once", async () => {
@@ -207,16 +212,16 @@ describe("Diagnostics settings", () => {
     await settle();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy support summary" })));
     expect(h.onCopyRuntimeDiagnosticReport).toHaveBeenCalledOnce();
-    expect(screen.getByRole("status")).toHaveTextContent("Support summary copied · 3 events.");
+    expect(pageStatus()).toHaveTextContent("Support summary copied · 3 events.");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reveal log folder" })));
     expect(h.onRevealRuntimeLogs).toHaveBeenCalledOnce();
-    expect(screen.getByRole("status")).toHaveTextContent("Log folder opened.");
+    expect(pageStatus()).toHaveTextContent("Log folder opened.");
     h.exportDiagnostics.mockResolvedValueOnce({ status: "cancelled" });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Export…" })));
     expect(h.exportDiagnostics).toHaveBeenLastCalledWith({ severity: "all", offset: 0 });
-    expect(screen.getByRole("status")).toHaveTextContent("Export cancelled.");
+    expect(pageStatus()).toHaveTextContent("Export cancelled.");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Export…" })));
-    expect(screen.getByRole("status")).toHaveTextContent("Diagnostics exported.");
+    expect(pageStatus()).toHaveTextContent("Diagnostics exported.");
     let release = (): void => undefined;
     h.onCopyRuntimeDiagnosticReport.mockImplementationOnce(() => new Promise((resolve) => {
       release = () => resolve({ copied: true, eventCount: 1 });
@@ -231,7 +236,7 @@ describe("Diagnostics settings", () => {
     await act(async () => release());
     expect(h.onCopyRuntimeDiagnosticReport).toHaveBeenCalledTimes(2);
     expect(copy).toHaveTextContent("Copy support summary");
-    expect(screen.getByRole("status")).toHaveTextContent("Support summary copied · 1 event.");
+    expect(pageStatus()).toHaveTextContent("Support summary copied · 1 event.");
   });
 
   it("keeps the dialog open and says so when Clear history fails", async () => {
@@ -266,7 +271,7 @@ describe("Diagnostics settings", () => {
     expect(h.clearDiagnostics).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(trigger).toHaveFocus();
-    expect(screen.getByRole("status")).toHaveTextContent("Diagnostics history cleared.");
+    expect(pageStatus()).toHaveTextContent("Diagnostics history cleared.");
   });
 
   it("shows sampled process health as a usage line and a state line", async () => {

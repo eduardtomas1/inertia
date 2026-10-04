@@ -10,8 +10,8 @@ import {
 import type { Conversation, Project, ProviderInfo, RuntimeLifecycleDiagnosticSnapshot } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
 import type { DiagnosticSelection } from "../lib/settingsTarget";
-import { SettingRow, SettingsGroup } from "./settings/SettingsLayout";
-import { Switch } from "./ui";
+import { SettingSwitch } from "./settings/SettingControls";
+import { SettingsGroup } from "./settings/SettingsLayout";
 import { DiagnosticsClearDialog } from "./DiagnosticsClearDialog";
 import { DiagnosticsEventRow, SOURCE_NAMES, formatDiagnosticTime, type DiagnosticsListEntry } from "./DiagnosticsEventRow";
 import { DiagnosticsHealth } from "./DiagnosticsHealth";
@@ -127,10 +127,7 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
     setCapturePending(true);
     try {
       setCapture(await window.inertia.setDiagnosticsCapture(enabled));
-      setFailure(null);
       setRefresh((value) => value + 1);
-    } catch {
-      fail("Capture could not be changed. Try again.");
     } finally {
       savingCapture.current = false;
       setCapturePending(false);
@@ -191,13 +188,12 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
 
   return <div className="diagnostics">
     <SettingsGroup title="Diagnostics" headingId="diagnostics-heading" description="Events and failures recorded on this device." className="diagnostics-overview">
-      <SettingRow id="diagnostics-capture" className="diagnostics-capture" title="Capture diagnostics" description={!capture
+      <SettingSwitch id="diagnostics-capture" title="Capture diagnostics" description={!capture
         ? readFailed ? "The capture setting could not be read." : "Reading…"
         : capture.enabled ? "Events are kept for 7 days."
-          : `Off since ${capture.since ? formatDiagnosticTime(capture.since) : "an earlier session"}. App start, quit and crashes are still kept.`}>
-        <Switch label="Capture diagnostics" checked={capture?.enabled === true} disabled={!capture} inactive={capturePending}
-          onChange={(enabled) => void toggleCapture(enabled)} />
-      </SettingRow>
+          : `Off since ${capture.since ? formatDiagnosticTime(capture.since) : "an earlier session"}. App start, quit and crashes are still kept.`}
+        checked={capture?.enabled === true} disabled={!capture} inactive={capturePending}
+        failure="Capture could not be changed. Try again." onChange={toggleCapture} />
       <div className="diagnostics-actions" data-setting-id="runtime-diagnostics">
         <button type="button" className="secondary-button" disabled={!page || page.total === 0} aria-disabled={busy === "export"} onClick={() => void exportEvents()}>
           <Download size={14} aria-hidden="true" />{busy === "export" ? "Exporting…" : "Export…"}

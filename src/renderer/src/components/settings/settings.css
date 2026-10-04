@@ -224,3 +224,17 @@
 .settings-content .secondary-button[aria-disabled="true"]:hover {
   background: var(--surface-strong);
 }
+
+.settings-card-heading {
+  margin-bottom: 4px;
+}
+
+.settings-card > .settings-card-heading + * {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.setting-row {
+  min-height: 52px;
+  padding: 10px 0;
+}

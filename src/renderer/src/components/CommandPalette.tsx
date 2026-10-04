@@ -47,6 +47,7 @@ type PaletteItem = {
 };
 
 const groupOrder = ["Actions", "Settings", "Projects", "Threads", "Messages"] as const;
+const ROWS_COVERED_BY_ACTIONS = new Set(["open-settings"]);
 
 function score(label: string, detail: string | undefined, query: string, keywords = ""): number {
   const target = `${label} ${detail ?? ""} ${keywords}`.toLocaleLowerCase();
@@ -133,6 +134,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     const regular = projects.filter((project) => project.workspaceKind !== "scratch");
     const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;
     return SETTINGS_SECTION_ROWS.flatMap(({ label, rows }) => rows.flatMap((row) => {
+      if (ROWS_COVERED_BY_ACTIONS.has(row.id)) return [];
       const project = isProjectSettingsRow(row);
       if (project && !projectId) return [];
       const target: SettingsTarget = { section: row.sectionId, anchor: row.id, ...(project ? { projectId } : {}) };

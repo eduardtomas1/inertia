@@ -107,6 +107,19 @@ describe("Diagnostics settings", () => {
     expect(details).toHaveAttribute("tabindex", "0");
   });
 
+  it("points a row at its details only while they exist", async () => {
+    setup([record(2)], [event(1)]);
+    await settle();
+    for (const row of rows()) expect(row).not.toHaveAttribute("aria-controls");
+    const row = rows()[0]!;
+    fireEvent.click(row);
+    const controlled = document.getElementById(row.getAttribute("aria-controls") ?? "");
+    expect(controlled).toHaveClass("diagnostics-event-detail");
+    expect(row.closest("li")).toContainElement(controlled);
+    fireEvent.click(row);
+    expect(row).not.toHaveAttribute("aria-controls");
+  });
+
   it("expands an incident to its explanation, facts and actions, copies it, and never opens offline work", async () => {
     const incident = record(1);
     const h = setup([incident]);

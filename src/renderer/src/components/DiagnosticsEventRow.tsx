@@ -63,7 +63,7 @@ export function DiagnosticsEventRow(props: RowProps): React.JSX.Element {
   ].filter(Boolean).join(" · ");
   const detailId = `diagnostics-detail-${item.id}`;
   return <li className={`diagnostics-event severity-${severity}${recovered ? " is-recovered" : ""}`}>
-    <button type="button" className="diagnostics-event-row" aria-expanded={expanded} aria-controls={detailId} onClick={props.onToggle}>
+    <button type="button" className="diagnostics-event-row" aria-expanded={expanded} aria-controls={expanded ? detailId : undefined} onClick={props.onToggle}>
       <span className="diagnostics-event-icon"><LevelIcon severity={severity} recovered={recovered} /></span>
       <span className="diagnostics-event-copy"><strong>{title}</strong><span>{meta}</span></span>
       <time dateTime={item.at}>{formatDiagnosticTime(item.at)}</time>

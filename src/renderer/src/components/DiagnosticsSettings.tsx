@@ -219,59 +219,57 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
       <DiagnosticsHealth runtime={page?.runtime ?? null} lifecycleDiagnostics={props.lifecycleDiagnostics} appUpdateStatus={props.appUpdateStatus} />
     </SettingsGroup>
 
-    <SettingsGroup title="Recent events" headingId="diagnostics-events-heading" className="diagnostics-events">
-      <div className="diagnostics-events-body" data-setting-id="diagnostics-incidents">
-        <div className="diagnostics-filters" role="search" aria-label="Filter diagnostics">
-          <label className="diagnostics-search"><span className="visually-hidden">Search diagnostics</span><Search size={14} aria-hidden="true" />
-            <input className="setting-input" type="search" maxLength={160} disabled={Boolean(activeSelection)} placeholder="Search events" value={filters.search ?? ""}
-              onChange={(event) => update({ search: event.target.value || undefined })} />
-          </label>
-          <label><span className="visually-hidden">Level</span>
-            <select className="setting-select" disabled={Boolean(activeSelection)} value={filters.severity ?? "all"} onChange={(event) => update({ severity: event.target.value as DiagnosticQuery["severity"] })}>
-              <option value="all">All levels</option><option value="attention">Warnings and errors</option>
-              <option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Info</option>
-            </select>
-          </label>
-          <label><span className="visually-hidden">Source</span>
-            <select className="setting-select" disabled={Boolean(activeSelection)} value={filters.subsystem ?? ""} onChange={(event) => update({ subsystem: (event.target.value || undefined) as DiagnosticQuery["subsystem"] })}>
-              <option value="">All sources</option>{SOURCES.map((source) => <option key={source} value={source}>{SOURCE_NAMES[source]}</option>)}
-            </select>
-          </label>
-          <label><span className="visually-hidden">Time</span>
-            <select className="setting-select" disabled={Boolean(activeSelection)} value={timeRange} onChange={(event) => {
-              const value = event.target.value;
-              setTimeRange(value);
-              update({ after: value === "all" ? undefined : new Date(Date.now() - Number(value)).toISOString() });
-            }}>
-              <option value="all">Any time</option><option value="3600000">Last hour</option>
-              <option value="86400000">Last 24 hours</option><option value="604800000">Last 7 days</option>
-            </select>
-          </label>
-        </div>
-        {activeSelection && <p className="diagnostics-linked">Showing the linked event · <button type="button" className="diagnostics-link"
-          onClick={() => { setSelectionDismissed(true); setOffset(0); }}>Show all</button></p>}
-        {readFailed && <p className="diagnostics-status is-error diagnostics-read-failed">
-          <span key={refresh} role={readFailed === "announced" ? "alert" : undefined}>Diagnostics could not be read.</span>
-          <button type="button" className="diagnostics-link" onClick={() => { retrying.current = true; setRefresh((value) => value + 1); }}>Retry</button>
-        </p>}
-        {!page ? null : entries.length === 0 ? <p className="diagnostics-empty">{emptyMessage}</p>
-          : <ul className="diagnostics-list" aria-label="Recent events" aria-busy={loading}>
-            {entries.map((item) => <DiagnosticsEventRow key={item.id} item={item} expanded={expanded === item.id}
-              onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
-              runtimeReady={page?.runtime === "ready"}
-              currentIncident={page?.runtime === "ready" && page.currentIncidentIds.includes(item.id)}
-              copying={copying === item.id} onCopy={(record) => void copyIncident(record)}
-              providerLabel={(providerId) => providerById.get(providerId as ProviderInfo["id"])?.label ?? providerId}
-              projectLabel={(projectId) => projectById.get(projectId)?.name ?? "Unavailable project"}
-              conversationTitle={(conversationId) => conversationById.get(conversationId)?.title} />)}
-          </ul>}
-        {page && (offset > 0 || page.nextOffset !== null) && <div className="diagnostics-pages">
-          <button type="button" className="secondary-button" aria-disabled={!offset || loading}
-            onClick={() => { if (offset && !loading) setOffset(Math.max(0, offset - DIAGNOSTIC_LIMITS.pageSize)); }}>Previous</button>
-          <button type="button" className="secondary-button" aria-disabled={page.nextOffset === null || loading}
-            onClick={() => { if (page.nextOffset !== null && !loading) setOffset(page.nextOffset); }}>Next</button>
-        </div>}
+    <SettingsGroup title="Recent events" headingId="diagnostics-events-heading" settingId="diagnostics-incidents" className="diagnostics-events">
+      <div className="diagnostics-filters" role="search" aria-label="Filter diagnostics">
+        <label className="diagnostics-search"><span className="visually-hidden">Search diagnostics</span><Search size={14} aria-hidden="true" />
+          <input className="setting-input" type="search" maxLength={160} disabled={Boolean(activeSelection)} placeholder="Search events" value={filters.search ?? ""}
+            onChange={(event) => update({ search: event.target.value || undefined })} />
+        </label>
+        <label><span className="visually-hidden">Level</span>
+          <select className="setting-select" disabled={Boolean(activeSelection)} value={filters.severity ?? "all"} onChange={(event) => update({ severity: event.target.value as DiagnosticQuery["severity"] })}>
+            <option value="all">All levels</option><option value="attention">Warnings and errors</option>
+            <option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Info</option>
+          </select>
+        </label>
+        <label><span className="visually-hidden">Source</span>
+          <select className="setting-select" disabled={Boolean(activeSelection)} value={filters.subsystem ?? ""} onChange={(event) => update({ subsystem: (event.target.value || undefined) as DiagnosticQuery["subsystem"] })}>
+            <option value="">All sources</option>{SOURCES.map((source) => <option key={source} value={source}>{SOURCE_NAMES[source]}</option>)}
+          </select>
+        </label>
+        <label><span className="visually-hidden">Time</span>
+          <select className="setting-select" disabled={Boolean(activeSelection)} value={timeRange} onChange={(event) => {
+            const value = event.target.value;
+            setTimeRange(value);
+            update({ after: value === "all" ? undefined : new Date(Date.now() - Number(value)).toISOString() });
+          }}>
+            <option value="all">Any time</option><option value="3600000">Last hour</option>
+            <option value="86400000">Last 24 hours</option><option value="604800000">Last 7 days</option>
+          </select>
+        </label>
       </div>
+      {activeSelection && <p className="diagnostics-linked">Showing the linked event · <button type="button" className="diagnostics-link"
+        onClick={() => { setSelectionDismissed(true); setOffset(0); }}>Show all</button></p>}
+      {readFailed && <p className="diagnostics-status is-error diagnostics-read-failed">
+        <span key={refresh} role={readFailed === "announced" ? "alert" : undefined}>Diagnostics could not be read.</span>
+        <button type="button" className="diagnostics-link" onClick={() => { retrying.current = true; setRefresh((value) => value + 1); }}>Retry</button>
+      </p>}
+      {!page ? null : entries.length === 0 ? <p className="diagnostics-empty">{emptyMessage}</p>
+        : <ul className="diagnostics-list" aria-label="Recent events" aria-busy={loading}>
+          {entries.map((item) => <DiagnosticsEventRow key={item.id} item={item} expanded={expanded === item.id}
+            onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
+            runtimeReady={page?.runtime === "ready"}
+            currentIncident={page?.runtime === "ready" && page.currentIncidentIds.includes(item.id)}
+            copying={copying === item.id} onCopy={(record) => void copyIncident(record)}
+            providerLabel={(providerId) => providerById.get(providerId as ProviderInfo["id"])?.label ?? providerId}
+            projectLabel={(projectId) => projectById.get(projectId)?.name ?? "Unavailable project"}
+            conversationTitle={(conversationId) => conversationById.get(conversationId)?.title} />)}
+        </ul>}
+      {page && (offset > 0 || page.nextOffset !== null) && <div className="diagnostics-pages">
+        <button type="button" className="secondary-button" aria-disabled={!offset || loading}
+          onClick={() => { if (offset && !loading) setOffset(Math.max(0, offset - DIAGNOSTIC_LIMITS.pageSize)); }}>Previous</button>
+        <button type="button" className="secondary-button" aria-disabled={page.nextOffset === null || loading}
+          onClick={() => { if (page.nextOffset !== null && !loading) setOffset(page.nextOffset); }}>Next</button>
+      </div>}
     </SettingsGroup>
     {confirmingClear && <DiagnosticsClearDialog onClear={clearHistory} onClose={() => setConfirmingClear(false)} />}
   </div>;

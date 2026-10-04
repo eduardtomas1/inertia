@@ -99,11 +99,11 @@ export function ConnectionsAndDevicesSettings({
       <SettingsGroup
         title="Inertia Private Connect"
         headingId="private-connect-heading"
+        settingId="private-connect"
         description={ready ? "Open Inertia on another device through your own Tailscale tailnet." : undefined}
         className="private-connect-settings"
       >
         <SettingActionRow
-          id="private-connect"
           className="runtime-log-setting"
           title="Status"
           description={ready ? statusLabel(ready) : undefined}

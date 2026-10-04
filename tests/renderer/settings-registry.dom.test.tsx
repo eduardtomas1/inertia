@@ -16,7 +16,7 @@ const themeLibraryRenders = vi.hoisted(() => ({ count: 0 }));
 vi.mock("../../src/renderer/src/components/ThemeLibrary", () => ({
   ThemeLibrary: () => {
     themeLibraryRenders.count += 1;
-    return <div data-setting-id="appearance-mode">Theme library</div>;
+    return <div data-setting-id="appearance-mode"><strong>Mode</strong></div>;
   },
 }));
 
@@ -159,6 +159,7 @@ describe("Settings row metadata coverage", () => {
       { section: "projects" as const, projectId: undefined },
     ];
     const rendered = new Map<string, Set<string>>();
+    const mislabelled: string[] = [];
     for (const target of views) {
       render(<SettingsView {...settingsViewProps({
         target,
@@ -172,6 +173,11 @@ describe("Settings row metadata coverage", () => {
         .filter(({ group }) => target.section !== "projects" || (target.projectId ? group !== "All projects" : group === "All projects"))
         .map(({ id }) => id);
       await waitFor(() => expect(settingRowIds()).toEqual(expect.arrayContaining(expected)));
+      for (const row of SETTINGS_SECTIONS.find(({ id }) => id === target.section)!.rows.filter(({ id }) => expected.includes(id))) {
+        const element = document.querySelector(`[data-setting-id="${row.id}"]`)!;
+        const labels = [element.textContent ?? "", ...[element, ...element.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label") ?? "")];
+        if (!labels.some((label) => label.includes(row.title))) mislabelled.push(`${row.id}: ${row.title}`);
+      }
       const ids = rendered.get(target.section) ?? new Set<string>();
       for (const id of settingRowIds()) ids.add(id);
       rendered.set(target.section, ids);
@@ -180,6 +186,7 @@ describe("Settings row metadata coverage", () => {
     for (const section of SETTINGS_SECTIONS) {
       expect([...rendered.get(section.id)!].sort()).toEqual(section.rows.map(({ id }) => id).sort());
     }
+    expect(mislabelled).toEqual([]);
   });
 });
 

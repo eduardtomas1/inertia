@@ -121,8 +121,8 @@ export function NewChatDefaults({
     if (effective.providerId) await nativeDefault(effective.providerId, effective.modelId, reasoning);
   };
   return (
-    <SettingsGroup title="New chats" headingId="new-chats-heading">
-      <div className="settings-rows" data-setting-id="new-chat-defaults">
+    <SettingsGroup title="New chats" headingId="new-chats-heading" settingId="new-chat-defaults">
+      <div className="settings-rows">
         <SettingSelect
           id="new-chat-model"
           title="Model"

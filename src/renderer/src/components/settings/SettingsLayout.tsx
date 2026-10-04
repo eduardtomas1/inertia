@@ -27,6 +27,7 @@ export function SettingsPage({
 export function SettingsGroup({
   title,
   headingId: requestedHeadingId,
+  settingId,
   description,
   icon: Icon,
   notice,
@@ -35,6 +36,7 @@ export function SettingsGroup({
 }: {
   title: string;
   headingId?: string;
+  settingId?: string;
   description?: ReactNode;
   icon?: LucideIcon;
   notice?: SettingNotice | null;
@@ -44,7 +46,7 @@ export function SettingsGroup({
   const generatedHeadingId = useId();
   const headingId = requestedHeadingId ?? generatedHeadingId;
   return (
-    <section className={clsx("settings-card", className)} aria-labelledby={headingId}>
+    <section className={clsx("settings-card", className)} aria-labelledby={headingId} data-setting-id={settingId}>
       <div className="settings-card-heading">
         {Icon && <div><Icon size={18} aria-hidden="true" /></div>}
         <span>

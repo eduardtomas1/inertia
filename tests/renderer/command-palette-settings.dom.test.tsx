@@ -80,8 +80,8 @@ describe("Command palette settings entries", () => {
     fireEvent.change(search, { target: { value: "keyboard shortcuts" } });
     expect(settingsOptions().map((option) => option.textContent)).toContain("Search everythingKeyboard");
     fireEvent.change(search, { target: { value: "sounds" } });
-    fireEvent.click(settingsOptions().find((option) => option.textContent === "Completion soundNotifications")!);
-    expect(onOpenSettings).toHaveBeenCalledExactlyOnceWith({ section: "notifications", anchor: "completion-sound" });
+    fireEvent.click(settingsOptions().find((option) => option.textContent === "Sound when a task endsNotifications")!);
+    expect(onOpenSettings).toHaveBeenCalledExactlyOnceWith({ section: "notifications", anchor: "completion-sound-enabled" });
   });
 
   it("never shows settings for an empty query and cuts a broad query to the palette's limit", () => {

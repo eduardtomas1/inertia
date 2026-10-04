@@ -203,7 +203,7 @@ export function CompletionSoundSettings({
   };
 
   return (
-    <div className="completion-sound-settings" data-setting-id="completion-sound">
+    <div className="completion-sound-settings">
       <SettingSwitch id="completion-sound-enabled" title="Sound when a task ends" description="Plays when an agent finishes or stops with an error."
         checked={value.enabled} disabled={disabled} onChange={(enabled) => {
           const saving = commit({ enabled }, false);

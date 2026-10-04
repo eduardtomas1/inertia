@@ -37,9 +37,8 @@ export function AppUpdateSettings({
     void action.run(operation, { key: "update", success: null, failure });
   };
   return (
-    <SettingsGroup title="About and updates" headingId="application-update-heading">
+    <SettingsGroup title="About and updates" headingId="application-update-heading" settingId="app-updates">
       <SettingActionRow
-        id="app-updates"
         className="runtime-log-setting application-update-setting"
         title={`${isCanary ? "Inertia Canary" : "Inertia"} · v${INERTIA_VERSION}`}
         details={(

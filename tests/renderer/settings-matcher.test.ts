@@ -98,7 +98,7 @@ describe("settings search matcher", () => {
     ["dark mode", "appearance-mode"],
     ["zoom", "interface-scale"],
     ["font", "interface-scale"],
-    ["sounds", "completion-sound"],
+    ["sounds", "completion-sound-enabled"],
     ["mute", "desktop-notifications"],
     ["hotkey", "shortcut-search"],
     ["keyboard shortcuts", "shortcut-search"],

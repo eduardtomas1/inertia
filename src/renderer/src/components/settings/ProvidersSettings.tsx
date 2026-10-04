@@ -414,7 +414,7 @@ export function ProvidersSettings({
                     </span>
                   </div>
 
-                  <div className="provider-settings-maintenance" data-setting-id="provider-updates">
+                  <div className="provider-settings-maintenance" data-setting-id="provider-updates" role="group" aria-label="Provider updates">
                     <ProviderMaintenanceNotice
                       providerLabel={selectedProvider.label}
                       status={maintenanceStatuses.get(selectedProvider.id) ?? null}

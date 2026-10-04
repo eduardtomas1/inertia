@@ -42,7 +42,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   }),
   section("chats", "Chats", {
     "New chats": [
-      ["new-chat-defaults", "New chat defaults", ["default provider", "default model", "defaults", "general"]],
+      ["new-chat-defaults", "New chats", ["new chat defaults", "default provider", "default model", "defaults", "general"]],
       ["new-chat-model", "Model", ["default model", "default provider", "backend", "provider", "new chat defaults"]],
       ["new-chat-reasoning", "Reasoning", ["default reasoning", "effort", "thinking"]],
       ["new-chat-work-mode", "Work mode", ["build", "plan", "mode"]],
@@ -74,8 +74,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["quota-warning-threshold", "Warn when below", ["threshold", "percent", "remaining", "quota", "limit"]],
     ],
     Sound: [
-      ["completion-sound", "Completion sound", ["sounds", "chime", "audio", "custom sounds", "your sounds", "import sound", "general"]],
-      ["completion-sound-enabled", "Sound when a task ends", ["sounds", "audio", "mute", "chime"]],
+      ["completion-sound-enabled", "Sound when a task ends", ["completion sound", "sounds", "audio", "mute", "chime", "custom sounds", "your sounds", "import sound", "general"]],
       ["completion-sound-when", "Play sound", ["long task", "duration", "only after", "long tasks", "threshold", "quiet", "sounds"]],
     ],
     "Desktop mascot": [
@@ -90,7 +89,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["shortcut-toggle-sidebar", "Toggle project navigation", ["sidebar", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["shortcut-toggle-terminal", "Toggle terminal", ["terminal", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["open-settings", "Open settings", ["preferences", "comma", "shortcut", "hotkey", "keybindings"]],
-      ["reset-shortcuts", "Default shortcuts", ["reset shortcuts", "keyboard defaults", "keyboard shortcuts", "hotkey", "keybindings"]],
+      ["reset-shortcuts", "Reset shortcuts", ["default shortcuts", "keyboard defaults", "keyboard shortcuts", "hotkey", "keybindings"]],
     ],
     "Global shortcut": [
       ["snapshot-shortcut", "Window snapshot", ["capture", "screenshot", "snapshot", "shortcut", "hotkey", "keybindings"]],

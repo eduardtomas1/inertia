@@ -153,8 +153,8 @@ export function WorkingIndicatorSettings({
 
   return (
     <WorkingIndicatorProvider settings={preview}>
-      <SettingsGroup title="Working indicator" headingId="working-indicator-heading" notice={action.notice} className="working-indicator-settings">
-        <div className="working-indicator-style" data-setting-id="working-indicator">
+      <SettingsGroup title="Working indicator" headingId="working-indicator-heading" settingId="working-indicator" notice={action.notice} className="working-indicator-settings">
+        <div className="working-indicator-style">
           <div
             className="working-indicator-picker"
             role="radiogroup"

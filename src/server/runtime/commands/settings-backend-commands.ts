@@ -281,25 +281,12 @@ export function createSettingsBackendCommandHandler(
         );
         return "mutation";
       }
-      case "settings.default-model.set": {
-        const current = dependencies.backendProfileController.defaults().find(
-          (candidate) => candidate.projectId === null,
-        );
-        if (current) {
-          assertHarnessMaintenanceIdle(current.selection.harnessId);
-        }
+      case "settings.default-model.set":
         dependencies.backendProfileController.replaceGlobalDefaultWithSettings(
           command.payload,
         );
         return "mutation";
-      }
       case "settings.restore-defaults": {
-        const current = dependencies.backendProfileController.defaults().find(
-          (candidate) => candidate.projectId === null,
-        );
-        if (current) {
-          assertHarnessMaintenanceIdle(current.selection.harnessId);
-        }
         assertMaintenanceIdle("codex");
         const restored = restoredDefaultSettings(dependencies.store.shellSnapshot().settings);
         dependencies.backendProfileController.replaceGlobalDefaultWithSettings(restored);

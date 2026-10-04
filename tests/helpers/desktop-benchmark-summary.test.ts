@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  summarizePrefetchedSurfaceSamples,
   summarizeStreamingBenchmarkEvidence,
   summarizeVisibleStreamingCadence,
 } from "./desktop-benchmark-summary";
 
 const CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
+const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
 
 function samples(visibleGaps: readonly number[]) {
   return visibleGaps.map((p95VisibleGapMs, index) => ({
@@ -74,5 +76,54 @@ describe("desktop benchmark streaming summary", () => {
     expect(summary.p95VisibleGapMs).toBe(501);
     expect(summary.p95VisibleGapMs).toBeGreaterThan(CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
     expect(summary.distributions.p95VisibleGapMs.maximum).toBe(517.9);
+  });
+});
+
+describe("desktop benchmark prefetched-surface first opens", () => {
+  function surfaceSamples(settings: readonly number[]) {
+    return settings.map((settingsFirstOpenMs, index) => ({
+      commandPaletteFirstOpenMs: [10.6, 13.3, 10.8, 12.1, 9.4][index]!,
+      settingsFirstOpenMs,
+    }));
+  }
+
+  it("gates the median of the measured relaunches and keeps the warm-up and every sample", () => {
+    const warmUp = { commandPaletteFirstOpenMs: 21.4, settingsFirstOpenMs: 162.5 };
+    const samples = surfaceSamples([50.8, 119, 47.3, 98.1, 64.4]);
+
+    const summary = summarizePrefetchedSurfaceSamples(warmUp, samples);
+
+    expect(summary.settingsFirstOpenMs).toBe(64.4);
+    expect(summary.settingsFirstOpenMs).toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
+    expect(summary.commandPaletteFirstOpenMs).toBe(10.8);
+    expect(summary.prefetchedSurfaces.warmUp).toEqual(warmUp);
+    expect(summary.prefetchedSurfaces.samples).toEqual(samples);
+    expect(summary.prefetchedSurfaces.settingsFirstOpenMs).toEqual({
+      sampleCount: 5,
+      minimum: 47.3,
+      median: 64.4,
+      p95: 119,
+      maximum: 119,
+    });
+    expect(summary.prefetchedSurfaces.commandPaletteFirstOpenMs.sampleCount).toBe(5);
+  });
+
+  it("still fails the gate when most measured relaunches are slow", () => {
+    const summary = summarizePrefetchedSurfaceSamples(
+      { commandPaletteFirstOpenMs: 12, settingsFirstOpenMs: 60 },
+      surfaceSamples([131.8, 146.5, 211.7, 191.2, 117.5]),
+    );
+
+    expect(summary.settingsFirstOpenMs).toBe(146.5);
+    expect(summary.settingsFirstOpenMs).toBeGreaterThan(CI_PREFETCHED_SURFACE_TARGET_MS);
+  });
+
+  it("requires an odd number of measured relaunches", () => {
+    const warmUp = { commandPaletteFirstOpenMs: 12, settingsFirstOpenMs: 60 };
+    expect(() => summarizePrefetchedSurfaceSamples(warmUp, [])).toThrow(
+      "Prefetched-surface first opens need an odd number of measured relaunches.",
+    );
+    expect(() => summarizePrefetchedSurfaceSamples(warmUp, surfaceSamples([50, 60])))
+      .toThrow("Prefetched-surface first opens need an odd number of measured relaunches.");
   });
 });

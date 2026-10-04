@@ -89,8 +89,8 @@ test("writes a plain report, previews the exact public issue and keeps it review
     const form = await page.locator(".issue-report").evaluate((element) => {
       const field = element.querySelector("textarea")!.getBoundingClientRect();
       const primary = element.querySelector(".issue-report-actions .primary-button")!.getBoundingClientRect();
-      const storage = [...document.querySelectorAll("button")].find((button) => button.textContent === "View storage & backups")!.getBoundingClientRect();
-      return { aligned: Math.abs(field.right - primary.right) < 1, below: storage.top > element.getBoundingClientRect().bottom };
+      const diagnostics = document.getElementById("diagnostics-heading")!.getBoundingClientRect();
+      return { aligned: Math.abs(field.right - primary.right) < 1, below: diagnostics.top > element.getBoundingClientRect().bottom };
     });
     expect(form).toEqual({ aligned: true, below: true });
     await expect(page.locator(".issue-report-github")).toHaveCount(0);

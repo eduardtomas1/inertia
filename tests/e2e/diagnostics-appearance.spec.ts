@@ -61,7 +61,9 @@ async function capture(page: Page, info: TestInfo, name: string, keepFocus = fal
 async function expectLayoutHolds(app: AppFixture): Promise<void> {
   await app.expectNoViewportOverflow();
   const gutters = await app.page.locator(".settings-content").evaluate((element) => {
-    const content = element.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const content = { top: box.top, left: box.left + parseFloat(style.paddingLeft), right: box.right - parseFloat(style.paddingRight) };
     const view = element.closest(".settings-view")!.getBoundingClientRect();
     const navigation = document.querySelector(".settings-navigation")!.getBoundingClientRect();
     const besideNavigation = navigation.bottom > content.top + 1;
@@ -137,7 +139,7 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(page.getByRole("group", { name: "Process health" })).toContainText("Memory");
   const fields = await page.locator(".diagnostics-filters").evaluate((filters) => {
     const probe = document.createElement("span");
-    probe.style.background = "var(--surface)";
+    probe.style.background = "var(--surface-muted)";
     filters.append(probe);
     const surface = getComputedStyle(probe).backgroundColor;
     probe.remove();
@@ -194,7 +196,7 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(trigger).toBeFocused();
 
   await page.getByRole("button", { name: "Data", exact: true }).click();
-  await page.getByRole("heading", { name: "Local data", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("heading", { name: "Storage", exact: true }).scrollIntoViewIfNeeded();
   await expect(page.getByText("Local storage", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy support summary", exact: true })).toHaveCount(0);
   await app.expectNoViewportOverflow();
@@ -203,14 +205,14 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await capture(page, info, "archive-data-dark-wide");
   await app.resizeWindow(1000, 800);
   await setAppearanceInPlace(app, "light");
-  await page.getByRole("heading", { name: "Local data", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("heading", { name: "Storage", exact: true }).scrollIntoViewIfNeeded();
   await app.expectNoViewportOverflow();
   await capture(page, info, "archive-data-light-narrow");
   await setAppearanceInPlace(app, "dark");
   await app.resizeWindow(1440, 920);
 
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  await page.getByRole("heading", { name: "Workspace", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByRole("heading", { name: "Transcript", exact: true }).scrollIntoViewIfNeeded();
   await expect(page.getByRole("switch", { name: "Message timestamps" })).toBeVisible();
   await capture(page, info, "settings-switches-dark-wide");
   await setAppearanceInPlace(app, "light");
@@ -229,7 +231,7 @@ test("turns capture off, keeps the always-on events and clears history", async (
   await page.keyboard.press("Space");
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await expect(toggle).toBeFocused();
-  await expect(page.getByText(/Off since .*App start, quit and failures are still kept\./u)).toBeVisible();
+  await expect(page.getByText(/Off since .*App start, quit and crashes are still kept\./u)).toBeVisible();
   const preferences = JSON.parse(await readFile(join(app.testDirectory, "electron-profile", "diagnostics-preferences.json"), "utf8"));
   expect(preferences).toMatchObject({ enabled: false });
   await expect(page.getByRole("list", { name: "Recent events" }).getByText("Diagnostics capture turned off", { exact: true })).toBeVisible();

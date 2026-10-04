@@ -79,8 +79,6 @@ test("real operation failures survive restart and remain readable/copyable after
   }
   await app.resizeWindow(900, 760);
   await app.expectNoViewportOverflow();
-  await expect(page.locator(".diagnostics-filters select").first()).toBeHidden();
-  await page.locator(".diagnostics-filter-disclosure > summary").click();
   for (const control of await page.locator(".diagnostics-filters select").all()) {
     const box = await control.boundingBox();
     expect(box?.width).toBeGreaterThan(90);

@@ -84,6 +84,43 @@ describe("effective default provider", () => {
     expect(effectiveDefaultProviderId("claude", [])).toBe("claude");
   });
 
+  it("falls back to a signed-in provider ahead of an earlier one whose sign-in is unverified", () => {
+    const unverified = { authState: "unknown", canRun: true } as const;
+    expect(effectiveDefaultProviderId("codex", [
+      state("codex", notInstalled),
+      state("claude", notInstalled),
+      state("cursor", notInstalled),
+      state("kimi", unverified),
+      state("opencode"),
+    ])).toBe("opencode");
+    expect(effectiveDefaultProviderId("codex", [
+      state("codex", notInstalled),
+      state("kimi", unverified),
+      state("antigravity", unverified),
+      state("cursor", { authState: "configured" }),
+      state("opencode"),
+    ])).toBe("cursor");
+  });
+
+  it("falls back to the first unverified runnable provider when none is signed in", () => {
+    const unverified = { authState: "unknown", canRun: true } as const;
+    expect(effectiveDefaultProviderId("claude", [
+      state("codex", notInstalled),
+      state("claude", signedOut),
+      state("cursor", notInstalled),
+      state("kimi", unverified),
+      state("opencode", notInstalled),
+      state("antigravity", unverified),
+    ])).toBe("kimi");
+  });
+
+  it("keeps a stored provider whose sign-in is unverified while it can run", () => {
+    expect(effectiveDefaultProviderId("antigravity", [
+      state("codex"),
+      state("antigravity", { authState: "unknown", canRun: true }),
+    ])).toBe("antigravity");
+  });
+
   it("falls back when the stored provider is absent from a known provider list", () => {
     expect(effectiveDefaultProviderId("antigravity", [state("codex", notInstalled), state("claude")])).toBe("claude");
   });

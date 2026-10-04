@@ -285,7 +285,8 @@ export class SnapshotRepository {
       subagents: newest<SubagentTraceRow>(`SELECT id, conversation_id, run_id, turn_id, provider_id, provider_task_id,
           provider_agent_id, parent_trace_id, parent_provider_agent_id, parent_provider_tool_use_id,
           provider_tool_use_id, provider_role, provider_name, provider_status, status, is_live,
-          NULL AS description, NULL AS progress, NULL AS result, sequence, created_at, updated_at
+          NULL AS description, NULL AS progress, NULL AS result, NULL AS model, NULL AS activity,
+          NULL AS usage_json, NULL AS tool_use_count, NULL AS duration_ms, sequence, created_at, updated_at
         FROM subagent_traces WHERE conversation_id = ?
         ORDER BY created_at DESC, sequence DESC, id DESC LIMIT ?`, conversationId, limits.subagents).map(subagentTraceFromRow),
       plans: newest<AgentPlanRow>(`SELECT conversation_id, run_id, turn_id, explanation, steps_json

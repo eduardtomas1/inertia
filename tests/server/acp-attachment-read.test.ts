@@ -80,8 +80,10 @@ describe.each([
   { providerId: "kimi" as const, binary: "kimi", agentName: "Kimi Code CLI", harness: createKimiAcpHarness },
 ])("$providerId reads of this chat's own attachments", ({ providerId, binary, agentName, harness }) => {
   const roots: string[] = [];
+  const managers: ProviderManager[] = [];
   afterEach(async () => {
-    for (const root of roots.splice(0)) await removePortableFixture(root);
+    await Promise.all(managers.splice(0).map(async (manager) => await manager.disposeAll()));
+    await Promise.all(roots.splice(0).map(async (root) => await removePortableFixture(root)));
   });
 
   it.each([
@@ -108,6 +110,7 @@ describe.each([
       { commands: { [providerId]: command } },
       new AgentHarnessRegistry([harness()]),
     );
+    managers.push(manager);
     const approvals: string[] = [];
     await expect(manager.run(nativeProviderRunInput({
       providerId,
@@ -139,6 +142,7 @@ describe.each([
       { commands: { [providerId]: command } },
       new AgentHarnessRegistry([harness()]),
     );
+    managers.push(manager);
     const approvals: string[] = [];
     await expect(manager.run(nativeProviderRunInput({
       providerId,

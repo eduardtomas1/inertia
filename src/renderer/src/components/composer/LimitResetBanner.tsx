@@ -8,6 +8,7 @@ import { useDocumentActivity } from "../../hooks/useDocumentPresence";
 import "./LimitResetBanner.css";
 
 const PENDING_POLL_MS = 30_000;
+const RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000];
 const MAX_TIMER_MS = 2_147_483_647;
 const MISSED_MESSAGE = "Inertia was closed or asleep at the reset, so nothing was sent.";
 const loads = new WeakMap<LimitResetCommandRunner, Map<string, Promise<LimitResetResult>>>();
@@ -39,16 +40,18 @@ function refreshDelay(result: LimitResetResult, now: number): number | null {
   return remaining > 0 ? Math.min(remaining + 1_000, MAX_TIMER_MS) : PENDING_POLL_MS;
 }
 
-export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, onCommand }: {
+export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, providerState, onCommand }: {
   conversationId: string;
   latestTurnId: string | null;
   snoozedUntil: string | null;
   disabled: boolean;
+  providerState: string;
   onCommand: LimitResetCommandRunner;
 }): React.JSX.Element | null {
   const [result, setResult] = useState<LimitResetResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [misses, setMisses] = useState(0);
   const active = useDocumentActivity();
   const reasonId = useId();
   const generation = useRef(0);
@@ -60,19 +63,29 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     setResult(null);
     setBusy(false);
     setError(null);
+    setMisses(0);
   }, [conversationId, latestTurnId, onCommand]);
   const refresh = useCallback((): void => {
     const owner = generation.current;
     const requested = revision.current;
     void load(onCommand, conversationId).then((next) => {
       if (generation.current !== owner || revision.current !== requested) return;
-      loaded.current = true;
+      const empty = next.usageLimited && !next.offer && !next.plan;
+      loaded.current = !empty;
       setResult(next);
-    }, () => undefined);
+      setMisses((current) => empty ? current + 1 : 0);
+    }, () => {
+      if (generation.current === owner) setMisses((current) => current + 1);
+    });
   }, [conversationId, onCommand]);
   useEffect(() => {
     if (active && !disabled && !loaded.current) refresh();
-  }, [active, disabled, refresh, latestTurnId]);
+  }, [active, disabled, refresh, latestTurnId, providerState]);
+  useEffect(() => {
+    if (!active || disabled || misses === 0 || misses > RETRY_DELAYS_MS.length) return;
+    const timer = window.setTimeout(refresh, RETRY_DELAYS_MS[misses - 1]);
+    return () => window.clearTimeout(timer);
+  }, [active, disabled, misses, refresh]);
   useEffect(() => {
     if (!active || disabled || result?.conversationId !== conversationId) return;
     const delay = refreshDelay(result, Date.now());

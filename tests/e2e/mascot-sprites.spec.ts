@@ -5,6 +5,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MASCOT_SPRITE_STATES, type MascotSpriteState } from "../../src/shared/mascot-sprites";
 import { createAppFixture } from "./support/app-fixture";
+import { setAppearanceInPlace } from "./support/appearance";
 
 const ACCENTS: Record<MascotSpriteState, string> = {
   idle: "#8cb7af", thinking: "#a4b1bd", working: "#f5ce69", idea: "#fff1ae", pickup: "#e39b8f",
@@ -53,13 +54,12 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-sprites", "default");
     const openSettings = async (): Promise<void> => {
       await app.page.getByRole("button", { name: "Settings", exact: true }).click();
-      await app.page.getByRole("button", { name: "General", exact: true }).click();
+      await app.page.getByRole("button", { name: "Notifications", exact: true }).click();
     };
     await openSettings();
     const section = app.page.getByRole("region", { name: "Custom sprites" });
     const theme = async (appearance: "light" | "dark"): Promise<void> => {
-      await app.page.getByRole("radio", { name: appearance === "light" ? "Light" : "Dark", exact: true }).click();
-      await expect(app.page.locator("html")).toHaveAttribute("data-theme", appearance);
+      await setAppearanceInPlace(app, appearance);
     };
     const capture = async (name: string, label: string): Promise<void> => {
       await section.scrollIntoViewIfNeeded();
@@ -68,6 +68,7 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
       await info.attach(label, { path, contentType: "image/png" });
     };
     await expect(section).toContainText("Each state needs a PNG: 96 × 96 pixels, a single frame, up to 512 KB.");
+    await section.getByText("How custom sprites work", { exact: true }).click();
     await expect(section.getByRole("list", { name: "Required files" }).getByRole("listitem").filter({ hasText: "idea.png" })).toContainText("Complete");
     for (const appearance of ["light", "dark"] as const) {
       await theme(appearance);

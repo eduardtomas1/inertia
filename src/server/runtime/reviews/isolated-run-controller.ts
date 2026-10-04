@@ -43,7 +43,7 @@ const MAX_ISOLATED_RUN_TIMEOUT_MS = 10 * 60_000;
 const MAX_ISOLATED_RUN_OUTPUT_LIMIT = 4 * 1024 * 1024;
 const MAX_ISOLATED_EXECUTION_PROMPT = 4 * 1024 * 1024;
 
-export type IsolatedRunKind = "selection-ask" | "diff-summary" | "issue-report";
+export type IsolatedRunKind = "selection-ask" | "diff-summary";
 export type IsolatedRunToolPolicy = "none" | "read-only";
 export type IsolatedRunInteractionPolicy = "fail-closed";
 export type IsolatedRunStopReason =
@@ -380,7 +380,7 @@ export class IsolatedRunController<Owner extends object> {
     let finalDetail = stopMessage("setup-failed");
     let completion: IsolatedRunCompletion<Value> | null = null;
     try {
-      if (request.kind !== "issue-report") this.store.createWorkspaceRun({
+      this.store.createWorkspaceRun({
         id: active.workspaceRunId,
         kind: "agent",
         projectId: request.projectId,
@@ -446,7 +446,6 @@ export class IsolatedRunController<Owner extends object> {
         reasoningEffort: modelSelection.reasoningEffort || undefined,
         interactionMode: "plan",
         access: "supervised",
-        ...(request.kind === "issue-report" ? { toolRestriction: "none" as const } : {}),
         ...(request.selection.supportedFastMode
           ? { supportedFastMode: request.selection.supportedFastMode }
           : {}),
@@ -744,7 +743,7 @@ export class IsolatedRunController<Owner extends object> {
       if (!active.workspaceSettled) {
         active.workspaceSettled = true;
         try {
-          if (active.kind !== "issue-report") this.store.updateWorkspaceRun(active.workspaceRunId, {
+          this.store.updateWorkspaceRun(active.workspaceRunId, {
             status: workspaceStatus(reason),
             detail: detail.slice(0, 1_000),
           });

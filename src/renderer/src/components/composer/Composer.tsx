@@ -946,9 +946,11 @@ export const Composer = memo(function Composer({
       );
     });
   };
+  const conversationProvider = providers.find(({ id }) => id === conversation.providerId);
   const limitResetRow = onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
+      providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}
       onCommand={onLimitResetCommand} />
   </Suspense>;
   return (

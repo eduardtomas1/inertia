@@ -47,6 +47,7 @@ import {
   type MultiSpawnSideDraft,
 } from "../utils/multiSpawn";
 import { accessOptions } from "./composer/config";
+import { defaultAccessModeForProject } from "../lib/newConversation";
 import {
   formatDuoRecoveryCommand,
   recoveryCommandShell,
@@ -310,6 +311,7 @@ export function MultiSpawnDialog({
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const initializedForOpenRef = useRef(false);
   const restoreFocusRef = useRef(true);
+  const chosenAccessRef = useRef<[boolean, boolean]>([false, false]);
   const [draft, setDraft] = useState<MultiSpawnDraft | null>(null);
   const regularProjects = useMemo(() => (snapshot?.projects ?? [])
     .filter(({ workspaceKind }) => workspaceKind !== "scratch"), [snapshot?.projects]);
@@ -352,12 +354,14 @@ export function MultiSpawnDialog({
       || !snapshot || regularProjects.length === 0
     ) return;
     initializedForOpenRef.current = true;
+    const preset = readMultiSpawnPreset(window.localStorage);
+    chosenAccessRef.current = [Boolean(preset), Boolean(preset)];
     setDraft(initialMultiSpawnDraft({
       snapshot,
       settings,
       activeProjectId: regularProjects.find(({ id }) => id === snapshot.activeProjectId)?.id ?? regularProjects[0]!.id,
       routesForSelection,
-      preset: readMultiSpawnPreset(window.localStorage),
+      preset,
     }));
   }, [open, regularProjects, routesForSelection, settings, snapshot]);
 
@@ -509,11 +513,22 @@ export function MultiSpawnDialog({
     index: 0 | 1,
     next: MultiSpawnSideDraft,
   ): void => {
+    const previous = draft.sides[index];
+    if (next.accessMode !== previous.accessMode) chosenAccessRef.current[index] = true;
+    const side = next.projectId !== previous.projectId && !chosenAccessRef.current[index]
+      ? {
+          ...next,
+          accessMode: defaultAccessModeForProject(
+            snapshot.projects.find(({ id }) => id === next.projectId),
+            settings,
+          ),
+        }
+      : next;
     setDraft((current) => current ? {
       ...current,
       sides: index === 0
-        ? [next, current.sides[1]]
-        : [current.sides[0], next],
+        ? [side, current.sides[1]]
+        : [current.sides[0], side],
     } : current);
   };
 

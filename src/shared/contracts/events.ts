@@ -1,4 +1,5 @@
 import type { LimitResetResult } from "../limit-reset";
+import type { BackgroundTasksResult } from "../background-tasks";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { MessageQueueResult } from "../queued-messages";
 import type {
@@ -180,7 +181,7 @@ export type ServerEvent =
       requestId: string;
       result:
         | { kind: "attachment.storage"; storage: import("../attachment-storage").AttachmentStorageStatus; removed?: { records: number; bytes: number } }
-        | { kind: "support.report"; report: import("../issue-report").IssueReport | null }
+        | { kind: "support.report"; report: import("../issue-report").IssueReport | null; github?: import("../issue-report").IssueGitHubState }
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
         | { kind: "git.workspace.status"; status: WorkspaceGitSnapshot }
@@ -206,6 +207,7 @@ export type ServerEvent =
         | MessageSendAcceptance
         | MessageQueueResult
         | LimitResetResult
+        | BackgroundTasksResult
         | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult

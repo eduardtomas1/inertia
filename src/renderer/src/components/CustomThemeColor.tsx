@@ -52,17 +52,17 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
   return (
     <div className={clsx("custom-theme-color", value && "is-active")}>
       <button type="button" className="custom-theme-preview" disabled={disabled}
-        aria-label={`Use custom color for ${mode}`} aria-pressed={Boolean(value)}
+        aria-label={`Use custom colour for ${mode}`} aria-pressed={Boolean(value)}
         onClick={() => onChange(color)}>
         <span className={`color-theme-swatch is-${mode}`} style={swatchStyle} aria-hidden="true" />
       </button>
       <div className="custom-theme-controls">
         <div className="custom-theme-label">
-          <label htmlFor={`${id}-hex`}><span className={`appearance-mode-icon is-${mode}`} aria-hidden="true" />{label} color</label>
+          <label htmlFor={`${id}-hex`}><span className={`appearance-mode-icon is-${mode}`} aria-hidden="true" />{label} colour</label>
           {value && <span className="custom-theme-status">Selected</span>}
         </div>
         <div className="custom-theme-inputs">
-          <input ref={colorInput} type="color" aria-label={`${label} color picker`} defaultValue={color} disabled={disabled} />
+          <input ref={colorInput} type="color" aria-label={`${label} colour picker`} defaultValue={color} disabled={disabled} />
           <input id={`${id}-hex`} type="text" value={draft ?? color}
             maxLength={7} spellCheck={false} autoComplete="off" disabled={disabled}
             aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined}
@@ -72,9 +72,9 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
               if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDraft(null); }
             }} />
           <button type="button" className="custom-theme-reset" disabled={disabled || !value}
-            aria-label={`Reset ${mode} custom color`} onClick={() => { setDraft(null); onChange(null); }}>Reset</button>
+            aria-label={`Reset ${mode} custom colour`} onClick={() => { setDraft(null); onChange(null); }}>Reset</button>
         </div>
-        {invalid && <p id={`${id}-error`} role="alert">Enter a hex color, like #3a86ff.</p>}
+        {invalid && <p id={`${id}-error`} role="alert">Enter a hex colour, like #3a86ff.</p>}
       </div>
     </div>
   );

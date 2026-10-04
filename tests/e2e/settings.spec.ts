@@ -11,7 +11,7 @@ import {
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
-import { expectFlatSettingsSections } from "./support/settings-assertions";
+import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -58,7 +58,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await sidebarSettings.focus();
   await sidebarSettings.press("Enter");
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
-  await expect(page.getByRole("button", { name: "General", exact: true }))
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await expectFlatSettingsSections(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("radio", { name: "Dark" }).click();
@@ -78,15 +78,16 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(nativeAppearance.background).toMatch(/^#050507(?:ff)?$/iu);
   await page.getByRole("radiogroup", { name: "Interface scale" }).getByRole("radio", { name: "Comfortable" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
-  await page.getByRole("radiogroup", { name: "Response density" }).getByRole("radio", { name: "Comfortable" }).click();
+  await page.getByRole("radiogroup", { name: "Text density" }).getByRole("radio", { name: "Comfortable" }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
+  await expectBorderlessSettingsRows(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("switch", { name: "Wrap code by default" }).click();
   await expect(page.getByRole("switch", { name: "Wrap code by default" })).toHaveAttribute("aria-checked", "true");
-  const providers = page.getByRole("button", { name: "Providers", exact: true });
+  const providers = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
   await providers.click();
   await expect(providers).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { level: 3, name: "Providers" })).toBeVisible();
-  await page.getByRole("button", { name: "Keybindings", exact: true }).click();
-  await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "Custom backends" })).toBeVisible();
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
@@ -101,18 +102,25 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
+function globalBackendDefaults(): number {
+  const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true });
+  const { count } = database.prepare("SELECT COUNT(*) AS count FROM model_backend_defaults WHERE scope = 'global'").get() as { count: number };
+  database.close();
+  return count;
+}
+
 test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
   const openBackends = async (): Promise<void> => {
-    const backends = page.getByRole("button", { name: "Model backends", exact: true });
+    const backends = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
     await backends.click();
     await expect(backends).toHaveAttribute("aria-current", "page");
-    await expect(page.getByLabel("Model backend profiles")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Custom backends" })).toBeVisible();
   };
   const setAppearance = async (
     theme: "Light" | "Dark" | "System",
     scale: "Compact" | "Default" | "Large",
   ): Promise<void> => {
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: theme, exact: true }).click();
     await page.getByRole("radiogroup", { name: "Interface scale" })
       .getByRole("radio", { name: scale, exact: true })
@@ -176,12 +184,12 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await expect(profileRail.getByText("Kimi", { exact: true })).toBeVisible();
   await expect(profileRail.locator(".backend-profile-rail-item").filter({
     hasText: /^OpenAI/u,
-  }).locator(".backend-profile-dot")).toHaveClass(/is-ready/u);
+  }).locator(".backend-profile-state")).toHaveText("Ready");
   await expect(profileRail.getByRole("button", {
-    name: "Kimi api.kimi.com",
-  }).locator(".backend-profile-dot")).not.toHaveClass(/is-ready/u);
+    name: /^Kimi api\.kimi\.com/u,
+  }).locator(".backend-profile-state")).not.toHaveText("Ready");
   await profileRail.getByText("Kimi", { exact: true }).click();
-  await expect(page.getByText("Backend credential", { exact: true })).toBeVisible();
+  await expect(page.locator(".backend-credential-row").getByText("Credential", { exact: true })).toBeVisible();
   await expect(page.getByPlaceholder("Add credential")).toBeVisible();
 
   const appearances = [
@@ -262,9 +270,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   });
   await page.getByRole("button", { name: "Create profile" }).click();
   await expect(page.getByText("Visual gateway with an intentionally long profile name for truncation", { exact: true }).first()).toBeVisible();
-  const enable = page.getByRole("switch", {
-    name: "Enable Visual gateway with an intentionally long profile name for truncation",
-  });
+  const enable = page.getByRole("switch", { name: "Use this backend", exact: true });
   await expect(enable).toHaveAttribute("aria-checked", "false");
 
   const probe = page.getByRole("button", { name: "Test connection" });
@@ -273,43 +279,36 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-loading.png"),
   });
-  await expect(page.locator(".backend-status-strip").getByText("limited", {
+  await expect(page.locator(".backend-connection-row").getByText("Limited", {
     exact: true,
   })).toBeVisible();
   await expect(probe).toBeVisible();
   await enable.click();
   await expect(enable).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText("Partial", { exact: true }).first()).toBeVisible();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   const globalDefault = page.getByRole("combobox", {
-    name: "Global default",
+    name: "Model",
     exact: true,
   });
   await globalDefault.selectOption({
-    label: "Claude harness · Visual gateway with an intentionally long profile name for truncation · Visual primary model with a deliberately long readable name",
+    label: "Visual primary model with a deliberately long readable name",
   });
-  await expect.poll(() => {
-    const database = new Database(join(testDirectory, "data", "inertia.sqlite"), {
-      readonly: true,
-    });
-    const count = (database.prepare(`
-      SELECT COUNT(*) AS count
-      FROM model_backend_defaults
-      WHERE scope = 'global'
-    `).get() as { count: number }).count;
-    database.close();
-    return count;
-  }).toBe(1);
+  await expect(page.locator('[data-setting-id="new-chat-model"]').getByRole("status")).toHaveText("Saved");
+  await expect.poll(globalBackendDefaults).toBe(1);
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-success-enabled.png"),
   });
 
+  await openBackends();
+  await profileRail.getByText("Visual gateway with an intentionally long profile name for truncation", { exact: true }).click();
   await page.getByRole("button", { name: "Edit configuration" }).click();
   await page.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:1/backend-probe");
   await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(enable).toHaveAttribute("aria-checked", "false");
-  await expect(globalDefault).toHaveValue("");
+  await expect.poll(globalBackendDefaults).toBe(0);
   await probe.click();
-  await expect(page.locator(".backend-status-strip").getByText("failed", {
+  await expect(page.locator(".backend-connection-row").getByText("Failed", {
     exact: true,
   })).toBeVisible();
   await page.screenshot({
@@ -338,12 +337,11 @@ test("changes the theme only from Settings", async () => {
 
 test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Report an issue", exact: true }).click();
-  await page.getByRole("button", { name: "View storage & backups", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Archive & data", exact: true })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
-  await expect(page.getByText(/targeting 5 copies and 512 MB in total/u)).toBeVisible();
-  await expect(page.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
+  await expect(page.getByText(/· Every 1 hour · 5 copies, 512 MiB in total$/u)).toBeVisible();
+  await expect(page.getByText(/^Memory .+ · Database .+ · Browser cache .+ · Temporary attachments .+$/u)).toBeVisible();
   const exportPath = join(testDirectory, "settings-recovery-export.json");
   await electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showSaveDialog", async () => ({
@@ -387,24 +385,24 @@ test("keeps runtime support and application update checks explicit in settings",
     "Imported 0 projects, 0 conversations, and 0 messages under new identities with supervised access.",
     { exact: true },
   )).toBeVisible();
-  await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 3, name: "Diagnostics", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
-  await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();
+  await expect(page.getByText("Support summary copied", { exact: false })).toBeVisible();
   const supportSummary = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
   expect(supportSummary).toContain("Inertia support summary");
   expect(supportSummary).toContain("Privacy: prompts, source, project paths");
   expect(supportSummary).not.toContain(workspaceDirectory);
   expect(supportSummary).not.toContain("sample.ts");
   await page.getByRole("button", { name: "Reveal log folder" }).click();
-  await expect(page.getByText("Runtime log folder opened.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Log folder opened.", { exact: true })).toBeVisible();
 
   const logDirectory = join(testDirectory, "electron-profile", "logs", "runtime");
   await expect.poll(async () => (await stat(logDirectory)).isDirectory()).toBe(true);
   if (process.platform !== "win32") {
     expect((await stat(logDirectory)).mode & 0o777).toBe(0o700);
   }
-  await page.getByRole("button", { name: "General", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Application updates" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "About and updates" })).toBeVisible();
   await page.getByRole("button", { name: "Check now" }).click();
   await expect(page.getByRole("main", { name: "Settings", exact: true })
     .getByText("Inertia is up to date.", { exact: true })).toBeVisible();
@@ -589,7 +587,8 @@ test("persists composer usage modes without losing the followed transcript", asy
   }).toBe("hidden");
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const usageModes = page.getByRole("radiogroup", { name: "Usage and context display" });
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
+  const usageModes = page.getByRole("radiogroup", { name: "Usage display" });
   await expect(usageModes.getByRole("radio", { name: "Hidden" })).toHaveAttribute("aria-checked", "true");
   await usageModes.getByRole("radio", { name: "Expanded" }).click();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
@@ -664,6 +663,7 @@ test("applies every interface scale live and remains usable at common Linux disp
   await ensureTerminalTools();
   const terminalFontSize = await page.locator("aside.terminal-panel").first().getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
     ["Compact", "compact", "13px", "30px"],

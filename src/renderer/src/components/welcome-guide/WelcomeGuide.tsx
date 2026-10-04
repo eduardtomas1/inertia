@@ -170,7 +170,7 @@ export function WelcomeGuide({
             </ul>
           )}
           <p className="welcome-guide-note">
-            {readyCount} of {readiness.length} ready · change this any time in Settings → Providers
+            {readyCount} of {readiness.length} ready · change this any time in Settings → Agents
           </p>
         </>
       )}

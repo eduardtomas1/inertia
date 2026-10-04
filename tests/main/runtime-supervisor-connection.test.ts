@@ -54,11 +54,11 @@ describe("runtime supervisor connection", () => {
   it.each([
     [
       "prior-runtime-cleanup-unconfirmed",
-      "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
+      "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Runtime diagnostics in Settings → Help.",
     ],
     [
       "provider-installation-quarantined",
-      "Runtime startup is blocked because provider installation recovery requires manual attention. Review Lifecycle Integrity in Settings.",
+      "Runtime startup is blocked because provider installation recovery requires manual attention. Review Runtime diagnostics in Settings → Help.",
     ],
   ] as const)(
     "classifies %s as a finite non-retryable blocker",
@@ -74,6 +74,15 @@ describe("runtime supervisor connection", () => {
       });
     },
   );
+
+  it("points a stopped local service at the Runtime diagnostics row in Help", () => {
+    expect(unavailableRuntimeConnection({ phase: "stopped", startupBlockerCode: null }, "linux")).toEqual({
+      unavailable: true,
+      code: "runtime-stopped",
+      retryable: false,
+      message: "The local service stopped. Review Runtime diagnostics in Settings → Help before restarting Inertia.",
+    });
+  });
 
   it("gives stranded Windows profiles a supported recovery step without retrying or deleting state", () => {
     const state = {

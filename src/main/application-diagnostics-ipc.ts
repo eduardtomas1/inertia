@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
-import { diagnosticQuerySchema, rendererDiagnosticSchema } from "../shared/application-diagnostics.js";
-import type { RuntimeDiagnostics } from "./runtime-diagnostics.js";
+import { diagnosticCaptureSchema, diagnosticQuerySchema, rendererDiagnosticSchema } from "../shared/application-diagnostics.js";
+import type { DiagnosticCaptureState, RuntimeDiagnostics } from "./runtime-diagnostics.js";
 import { exportDiagnosticReport } from "./diagnostic-export.js";
 
 interface DiagnosticsIpcOptions {
@@ -11,6 +11,7 @@ interface DiagnosticsIpcOptions {
   assertTrusted: (event: IpcMainInvokeEvent, received: number, expected?: number) => void;
   copyText: (text: string) => void | Promise<void>;
   chooseExportPath: () => Promise<string | null>;
+  persistCapture: (state: DiagnosticCaptureState) => void;
   now?: () => number;
 }
 
@@ -18,8 +19,8 @@ export function registerApplicationDiagnosticsIpc(options: DiagnosticsIpcOptions
   const now = options.now ?? Date.now;
   const budgets = new WeakMap<object, { at: number; reads: number; reports: number }>();
   let exporting = false;
-  const admit = (event: IpcMainInvokeEvent, argumentCount: number, report = false): void => {
-    options.assertTrusted(event, argumentCount, 1);
+  const admit = (event: IpcMainInvokeEvent, argumentCount: number, report = false, expected = 1): void => {
+    options.assertTrusted(event, argumentCount, expected);
     const time = now();
     let budget = budgets.get(event.sender);
     if (!budget || time - budget.at >= 60_000) {
@@ -36,19 +37,19 @@ export function registerApplicationDiagnosticsIpc(options: DiagnosticsIpcOptions
   };
   options.ipcMain.handle(DIAGNOSTICS_IPC.query, (event, ...args) => {
     admit(event, args.length);
-    return options.diagnostics().queryIncidents(query(args[0]));
+    return options.diagnostics().query(query(args[0]));
   });
   options.ipcMain.handle(DIAGNOSTICS_IPC.copy, async (event, ...args) => {
     admit(event, args.length);
     const filter = query(args[0]);
     const diagnostics = options.diagnostics();
-    const text = diagnostics.exportIncidents(filter);
+    const text = diagnostics.exportDiagnostics(filter);
     await options.copyText(text);
-    return { copied: true, count: diagnostics.queryIncidents(filter).total };
+    return { copied: true, count: diagnostics.query(filter).total };
   });
   options.ipcMain.handle(DIAGNOSTICS_IPC.export, async (event, ...args) => {
     admit(event, args.length);
-    const report = options.diagnostics().exportIncidents(query(args[0]));
+    const report = options.diagnostics().exportDiagnostics(query(args[0]));
     if (exporting) throw new Error("A diagnostics export is already open.");
     exporting = true;
     try { return await exportDiagnosticReport(report, options.chooseExportPath); }
@@ -66,5 +67,18 @@ export function registerApplicationDiagnosticsIpc(options: DiagnosticsIpcOptions
       outcome: "not-started", context: input.context ?? {}, metadata: {},
     });
     return record ? { incidentId: record.id } : null;
+  });
+  options.ipcMain.handle(DIAGNOSTICS_IPC.setCapture, (event, ...args) => {
+    admit(event, args.length, true);
+    const parsed = diagnosticCaptureSchema.safeParse(args[0]);
+    if (!parsed.success) throw new Error("The diagnostics capture choice is invalid.");
+    try { return options.diagnostics().setCapture(parsed.data, options.persistCapture); }
+    catch { throw new Error("Diagnostics settings could not be saved."); }
+  });
+  options.ipcMain.handle(DIAGNOSTICS_IPC.clear, (event, ...args) => {
+    admit(event, args.length, true, 0);
+    try { options.diagnostics().clearHistory(); }
+    catch { throw new Error("Diagnostics history could not be cleared."); }
+    return { cleared: true };
   });
 }

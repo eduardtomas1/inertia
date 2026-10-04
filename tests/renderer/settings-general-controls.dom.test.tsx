@@ -1,59 +1,16 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
-import { defaultSettings, type AppSettings } from "../../src/shared/contracts";
-
-function settingsProps(
-  settings: AppSettings,
-  onUpdate: ComponentProps<typeof SettingsView>["onUpdate"],
-): ComponentProps<typeof SettingsView> {
-  return {
-    settings,
-    disabled: false,
-    providers: [],
-    backendProfiles: [],
-    backendDefaults: [],
-    projects: [],
-    conversations: [],
-    archived: [],
-    onUpdate,
-    onConnectProvider: vi.fn(),
-    onRefreshProvider: vi.fn(),
-    maintenanceOperations: new Map(),
-    maintenanceStatuses: new Map(),
-    onRefreshProviderMaintenance: vi.fn(async () => undefined),
-    onUpdateProvider: vi.fn(async () => undefined),
-    onCancelProviderUpdate: vi.fn(async () => undefined),
-    onOpenProviderUpdateInstructions: vi.fn(),
-    onChooseCodexBinary: vi.fn(),
-    onRevealRuntimeLogs: vi.fn(async () => ""),
-    onCopyRuntimeDiagnosticReport: vi.fn(async () => ({ copied: true, eventCount: 0 })),
-    appUpdateStatus: null,
-    checkingAppUpdate: false,
-    onCheckAppUpdate: vi.fn(async () => undefined),
-    onDownloadAppUpdate: vi.fn(async () => undefined),
-    onCancelAppUpdateDownload: vi.fn(async () => undefined),
-    onInstallAppUpdate: vi.fn(async () => undefined),
-    onOpenAppRelease: vi.fn(async () => undefined),
-    onUnarchive: vi.fn(),
-    onLoadBackendProfile: vi.fn(),
-    onCreateBackendProfile: vi.fn(),
-    onUpdateBackendProfile: vi.fn(),
-    onSetBackendCredential: vi.fn(),
-    onClearBackendCredential: vi.fn(),
-    onProbeBackendProfile: vi.fn(),
-    onDeleteBackendProfile: vi.fn(async () => undefined),
-    onSetBackendDefault: vi.fn(async () => undefined),
-    onClearBackendDefault: vi.fn(async () => undefined),
-  };
-}
+import type { SettingsSection } from "../../src/renderer/src/lib/settingsTarget";
+import { defaultSettings } from "../../src/shared/contracts";
+import { RESTORE_DEFAULTS_SCOPE } from "../../src/shared/restore-defaults";
+import { settingsViewProps } from "./settings-view-fixtures";
 
 beforeEach(() => {
   Object.defineProperty(window, "inertia", {
     configurable: true,
-    value: { getPlatform: () => "darwin" },
+    value: { getPlatform: () => "darwin", getAppHealth: vi.fn(async () => null) },
   });
 });
 
@@ -62,16 +19,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("General settings controls", () => {
+describe("Settings radio controls", () => {
   it.each([
-    ["Interface scale", "Default", "Comfortable", "Compact", { interfaceScale: "comfortable" }],
-    ["Logical project grouping", "Keep separate", "Repository", "Repo + folder", { projectGrouping: "repository" }],
-    ["Usage and context display", "Compact", "Hidden", "Expanded", { usageDisplayMode: "hidden" }],
-    ["Response density", "Default", "Comfortable", "Compact", { responseDensity: "comfortable" }],
-  ] as const)("moves the %s choice with arrow keys and a single tab stop", (group, checked, next, previous, update) => {
+    ["appearance", "Interface scale", "Default", "Comfortable", "Compact", { interfaceScale: "comfortable" }],
+    ["projects", "Group projects", "Keep separate", "By repository", "By repository and folder", { projectGrouping: "repository" }],
+    ["chats", "Usage display", "Compact", "Hidden", "Expanded", { usageDisplayMode: "hidden" }],
+    ["appearance", "Text density", "Default", "Comfortable", "Compact", { responseDensity: "comfortable" }],
+  ] as const)("moves the %s › %s choice with arrow keys and a single tab stop", async (section: SettingsSection, group, checked, next, previous, update) => {
     const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsProps(defaultSettings, onUpdate)} />);
-    const radios = within(screen.getByRole("radiogroup", { name: group }));
+    render(<SettingsView {...settingsViewProps({ target: { section }, onUpdate })} />);
+    const radios = within(await screen.findByRole("radiogroup", { name: group }));
     const current = radios.getByRole("radio", { name: checked });
 
     expect(current).toHaveAttribute("aria-checked", "true");
@@ -86,56 +43,63 @@ describe("General settings controls", () => {
     fireEvent.keyDown(current, { key: "ArrowLeft" });
     expect(radios.getByRole("radio", { name: previous })).toHaveFocus();
   });
+});
 
-  it("asks before restoring every setting to its default", () => {
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
-    const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsProps(defaultSettings, onUpdate)} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
-    expect(confirm).toHaveBeenCalledOnce();
-    expect(onUpdate).not.toHaveBeenCalled();
-
-    confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
-    expect(onUpdate).toHaveBeenCalledWith(defaultSettings);
-  });
-
-  it("resets the completion sound choice but keeps imported sounds when restoring defaults", () => {
+describe("Restore defaults confirmation", () => {
+  it("asks inline with Cancel focused, cancels with Escape and restores only after confirmation", async () => {
     const confirm = vi.fn(() => true);
     vi.stubGlobal("confirm", confirm);
-    const onUpdate = vi.fn(async () => undefined);
-    const library = [
-      { file: "0123456789abcdef.wav", name: "Ding" },
-      { file: "fedcba9876543210.mp3", name: "Rain" },
-    ] as AppSettings["completionSound"]["library"];
-    render(<SettingsView {...settingsProps({
-      ...defaultSettings,
-      completionSound: { enabled: true, sound: library[0]!.file, library, longRunsOnly: true, longRunSeconds: 300 },
-    }, onUpdate)} />);
+    const onRestoreDefaults = vi.fn(async () => undefined);
+    render(<SettingsView {...settingsViewProps({ target: { section: "data" }, onRestoreDefaults })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    const trigger = await screen.findByRole("button", { name: "Restore defaults…" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const group = screen.getByRole("group", { name: "Confirm restore defaults" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(within(group).getByText("Restore defaults?")).toBeInTheDocument();
+    expect(within(group).getByText("This cannot be undone.")).toBeInTheDocument();
+    expect(within(group).queryByText(RESTORE_DEFAULTS_SCOPE)).toBeNull();
+    expect(screen.getAllByText(RESTORE_DEFAULTS_SCOPE)).toHaveLength(1);
+    expect(within(group).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { within(group).getByRole("button", { name: "Cancel" }).dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("group", { name: "Confirm restore defaults" })).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(onRestoreDefaults).not.toHaveBeenCalled();
 
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Imported completion sounds are kept."));
-    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({
-      ...defaultSettings,
-      completionSound: { ...defaultSettings.completionSound, library },
-    });
+    fireEvent.click(trigger);
+    fireEvent.click(within(screen.getByRole("group", { name: "Confirm restore defaults" })).getByRole("button", { name: "Cancel" }));
+    expect(trigger).toHaveFocus();
+    expect(onRestoreDefaults).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    const restore = within(screen.getByRole("group", { name: "Confirm restore defaults" })).getByRole("button", { name: "Restore defaults" });
+    expect(restore).toHaveClass("is-danger");
+    restore.focus();
+    fireEvent.click(restore);
+    expect(onRestoreDefaults).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("group", { name: "Confirm restore defaults" })).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await screen.findByText("Defaults restored.")).toBeInTheDocument();
   });
 
-  it("restores defaults without asking when destructive confirmations are off", () => {
+  it("restores defaults without asking when destructive confirmations are off", async () => {
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    const onUpdate = vi.fn(async () => undefined);
-    render(<SettingsView {...settingsProps(
-      { ...defaultSettings, confirmDestructiveActions: false },
-      onUpdate,
-    )} />);
+    const onRestoreDefaults = vi.fn(async () => undefined);
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "data" },
+      settings: { ...defaultSettings, confirmDestructiveActions: false },
+      onRestoreDefaults,
+    })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore defaults" }));
 
     expect(confirm).not.toHaveBeenCalled();
-    expect(onUpdate).toHaveBeenCalledWith(defaultSettings);
+    expect(screen.queryByRole("group", { name: "Confirm restore defaults" })).toBeNull();
+    expect(onRestoreDefaults).toHaveBeenCalledOnce();
   });
 });

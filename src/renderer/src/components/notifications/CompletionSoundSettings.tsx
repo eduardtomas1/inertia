@@ -21,7 +21,10 @@ import {
   forgetCustomCompletionSound,
   playCompletionSound,
 } from "../../utils/completionSoundPlayer";
-import { IconButton, Switch } from "../ui";
+import { IconButton } from "../ui";
+import { SettingSelect, SettingSwitch, type SettingOption } from "../settings/SettingControls";
+import { SettingStatus } from "../settings/SettingsLayout";
+import { useSettingAction } from "../settings/useSettingAction";
 import "./CompletionSoundSettings.css";
 
 const SOUND_LABELS: Readonly<Record<BuiltInCompletionSound, { label: string; detail: string }>> = {
@@ -38,6 +41,13 @@ export const LONG_RUN_THRESHOLDS = [30, 60, 120, 300, 600, 900] as const;
 export function longRunLabel(seconds: number): string {
   return seconds < 60 ? `${seconds} s` : `${seconds / 60} min`;
 }
+
+const EVERY_TASK = "every";
+
+const PLAY_AFTER_OPTIONS: readonly SettingOption<string>[] = [
+  { value: EVERY_TASK, label: "After every task" },
+  ...LONG_RUN_THRESHOLDS.map((seconds) => ({ value: String(seconds), label: `After tasks longer than ${longRunLabel(seconds)}` })),
+];
 
 function sameSettings(a: SoundSettings, b: SoundSettings): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -93,6 +103,7 @@ export function CompletionSoundSettings({
   const importRef = useRef<HTMLButtonElement>(null);
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
   const removalFocus = useRef<string | null | undefined>(undefined);
+  const soundAction = useSettingAction();
   const value = pending ?? saved;
   latest.current = value;
   const canImport = Boolean(window.inertia?.importCompletionSound);
@@ -109,13 +120,14 @@ export function CompletionSoundSettings({
     (target === null ? importRef.current : removeButtons.current.get(target))?.focus();
   }, [value.library]);
 
-  const commit = (patch: Partial<SoundSettings>): Promise<boolean> => {
+  const commit = (patch: Partial<SoundSettings>, report = true): Promise<boolean> => {
     const next = { ...latest.current, ...patch };
     if (sameSettings(next, latest.current)) return Promise.resolve(true);
     latest.current = next;
     setPending(next);
-    return Promise.resolve(onUpdate({ completionSound: next })).then(() => true, () => {
+    return Promise.resolve(onUpdate({ completionSound: next })).then(() => true, (cause: unknown) => {
       setPending((current) => (current === next ? null : current));
+      if (!report) throw cause;
       setNotice({ tone: "error", text: "The sound setting could not be saved. Try again." });
       return false;
     });
@@ -127,14 +139,9 @@ export function CompletionSoundSettings({
 
   const choices: CompletionSoundChoice[] = [...BUILT_IN_COMPLETION_SOUNDS, ...value.library.map(({ file }) => file)];
   const sounds = useRovingRadios(choices, value.sound, (sound) => {
-    void commit({ sound });
+    void soundAction.run(() => commit({ sound }, false));
     preview(sound);
   });
-  const thresholds = useRovingRadios(
-    LONG_RUN_THRESHOLDS.map(String),
-    String(value.longRunSeconds),
-    (seconds) => void commit({ longRunSeconds: Number(seconds) }),
-  );
 
   const importSound = async (): Promise<void> => {
     const bridge = window.inertia;
@@ -196,23 +203,31 @@ export function CompletionSoundSettings({
   };
 
   return (
-    <div className="completion-sound-settings">
-      <div className="setting-row">
-        <span className="setting-copy">
-          <strong>Sound when a task ends</strong>
-          <small>Play a short sound when an agent finishes or stops with an error. Desktop notifications are unchanged.</small>
-        </span>
-        <Switch label="Sound when a task ends" checked={value.enabled} disabled={disabled} onChange={(enabled) => {
-          void commit({ enabled });
+    <div className="completion-sound-settings" data-setting-id="completion-sound">
+      <SettingSwitch id="completion-sound-enabled" title="Sound when a task ends" description="Plays when an agent finishes or stops with an error."
+        checked={value.enabled} disabled={disabled} onChange={(enabled) => {
+          const saving = commit({ enabled }, false);
           if (enabled) preview(latest.current.sound);
+          return saving.then(() => undefined);
         }} />
-      </div>
+      <SettingSelect
+        id="completion-sound-when"
+        title="Play sound"
+        value={value.longRunsOnly ? String(value.longRunSeconds) : EVERY_TASK}
+        options={PLAY_AFTER_OPTIONS}
+        disabled={disabled}
+        inactive={!value.enabled}
+        onChange={(choice) => commit(
+          choice === EVERY_TASK ? { longRunsOnly: false } : { longRunsOnly: true, longRunSeconds: Number(choice) },
+          false,
+        ).then(() => undefined)}
+      />
       {value.enabled && (
         <div className="completion-sound-options">
           <div className="completion-sound-heading">
-            <span id="completion-sound-label">Sound</span>
-            <button type="button" className="completion-sound-button" disabled={disabled} onClick={() => preview(value.sound)}>
-              <Play size={12} aria-hidden="true" />Preview
+            <span className="setting-title"><span id="completion-sound-label">Sound</span><SettingStatus notice={soundAction.notice} /></span>
+            <button type="button" className="secondary-button" disabled={disabled} onClick={() => preview(value.sound)}>
+              <Play size={14} aria-hidden="true" />Preview
             </button>
           </div>
           <div className="completion-sound-choices" role="radiogroup" aria-labelledby="completion-sound-label" {...sounds.groupProps}>
@@ -232,9 +247,9 @@ export function CompletionSoundSettings({
             <div className="completion-sound-library">
               <div className="completion-sound-heading">
                 <span id="completion-sound-library-label">Your sounds</span>
-                <button ref={importRef} type="button" className="completion-sound-button" disabled={disabled || full}
+                <button ref={importRef} type="button" className="secondary-button" disabled={disabled || full}
                   aria-disabled={importing || removing > 0 || undefined} onClick={() => void importSound()}>
-                  <Upload size={12} aria-hidden="true" />{importing ? "Importing…" : "Import sound…"}
+                  <Upload size={14} aria-hidden="true" />{importing ? "Importing…" : "Import sound…"}
                 </button>
               </div>
               {value.library.length > 0 && (
@@ -262,24 +277,6 @@ export function CompletionSoundSettings({
             </div>
           )}
           {notice && <p className={clsx("completion-sound-notice", notice.tone === "error" && "is-error")} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-          <div className="setting-row">
-            <span className="setting-copy">
-              <strong>Only after long tasks</strong>
-              <small>Stay quiet for quick questions and play the sound only when a task runs longer than you choose.</small>
-            </span>
-            <Switch label="Only after long tasks" checked={value.longRunsOnly} disabled={disabled} onChange={(longRunsOnly) => void commit({ longRunsOnly })} />
-          </div>
-          {value.longRunsOnly && (
-            <div className="response-density-setting completion-sound-threshold">
-              <span><strong>Long task</strong><small>Tasks that run at least this long get the sound.</small></span>
-              <div role="radiogroup" aria-label="Long task duration" {...thresholds.groupProps}>
-                {LONG_RUN_THRESHOLDS.map((seconds) => {
-                  const radio = thresholds.radioProps(String(seconds));
-                  return <button type="button" key={seconds} {...radio} disabled={disabled} className={clsx(radio["aria-checked"] && "is-active")}>{longRunLabel(seconds)}</button>;
-                })}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -118,6 +118,11 @@ export class TurnSettlementCoordinator {
       notePersistenceError(error);
     }
     try {
+      active.subagentTelemetry?.close();
+    } catch (error) {
+      notePersistenceError(error);
+    }
+    try {
       const subagentStatus = status === "cancelled" ? "cancelled" : "lost";
       for (const trace of this.options.store.settleLiveSubagents(
         active.turn.id,

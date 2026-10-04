@@ -125,7 +125,7 @@ export class PrivateConnectHost {
         this.initializationError = null;
         await service.setPrivacyLocked(this.privacyMonitor.isLocked());
         if (migration.cleaned) {
-          service.setNotice("Private Connect is ready. Previous browser pairings were removed; pair devices again through Connections & devices.");
+          service.setNotice("Private Connect is ready. Previous browser pairings were removed; pair devices again in Settings → Devices & integrations.");
         }
         await service.startIfEnabled().catch((error: unknown) => {
           this.initializationError = error instanceof Error ? error.message : "Private Connect could not be restored safely.";

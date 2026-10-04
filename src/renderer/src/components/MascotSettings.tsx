@@ -26,20 +26,22 @@ export function MascotSettings() {
   }, []);
   const bridge = window.inertiaMascot;
   if (!bridge) return null;
+  const held = busy !== null || undefined;
   const run = (
     kind: NonNullable<typeof busy>,
     operation: () => Promise<void>,
     failure: string,
     report = setError,
   ): void => {
+    if (held) return;
     setBusy(kind);
     setError("");
     setSpriteError("");
     setNotice("");
     void operation().catch(() => report(failure)).finally(() => setBusy(null));
   };
-  const configure = (enabled: boolean): void => {
-    if (snapshot) run("configure", async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, enabled })), "Could not update the mascot. Try again.");
+  const configure = (change: Partial<MascotSnapshot["preferences"]>): void => {
+    if (snapshot) run("configure", async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, ...change })), "Could not update the mascot. Try again.");
   };
   const importSprites = (): void => run("import", async () => {
     const result = await bridge.importSprites();
@@ -65,15 +67,20 @@ export function MascotSettings() {
   const shown = pending ?? snapshot?.sprites;
   const counts = shown && `${MASCOT_SPRITE_STATES.length} states, ${shown.animated} animated`;
   const discardPreview = (): void => {
+    if (held) return;
     setPending(null);
     setSpriteError("");
     setNotice("");
   };
   return (
     <div className="mascot-settings">
-      <div className="setting-row">
-        <span className="setting-copy"><strong>Desktop mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
-        <Switch label="Desktop mascot" checked={enabled} disabled={busy !== null || !snapshot} onChange={configure} />
+      <div className="setting-row" data-setting-id="desktop-mascot">
+        <span className="setting-copy"><strong>Show mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
+        <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure({ enabled: value })} />
+      </div>
+      <div className="setting-row" data-setting-id="mascot-motion">
+        <span className="setting-copy"><strong>Animate mascot</strong></span>
+        <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} inactive={held || !snapshot || !enabled} onChange={(motion) => configure({ motion })} />
       </div>
       {enabled && snapshot && <div className="mascot-settings-controls">
         <span role="status">{MASCOT_LABELS[snapshot.status.phase]}</span>
@@ -92,11 +99,11 @@ export function MascotSettings() {
             <small>{pending ? `Preview: ${counts}. Apply to use them.` : shown ? `Using your sprites: ${counts}.` : "Import your own artwork for each state. The built-in mascot stays until you apply a set."}</small>
           </span>
           <div>
-            <button className="secondary-button" type="button" disabled={busy !== null} onClick={exportTemplate}>{busy === "export" ? "Exporting…" : "Export template"}</button>
-            <button className="secondary-button" type="button" disabled={busy !== null} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
+            <button className="secondary-button" type="button" aria-disabled={held} onClick={exportTemplate}>{busy === "export" ? "Exporting…" : "Export template"}</button>
+            <button className="secondary-button" type="button" aria-disabled={held} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
           </div>
         </div>
-        <details className="mascot-sprite-guide" key={snapshot.sprites ? "custom" : "default"} open={!snapshot.sprites || undefined}>
+        <details className="mascot-sprite-guide">
           <summary>How custom sprites work</summary>
           <ol aria-label="Steps">
             {MASCOT_SPRITE_STEPS.map((step) => <li key={step}>{step}</li>)}
@@ -104,8 +111,15 @@ export function MascotSettings() {
           <ul aria-label="Format">
             {MASCOT_SPRITE_RULES.map((rule) => <li key={rule}>{rule}</li>)}
           </ul>
+          {!shown && <ul className="mascot-sprite-files" aria-label="Required files">
+            {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
+              <code>{`${state}.png`}</code>
+              <strong>{MASCOT_SPRITE_LABELS[state]}</strong>
+              <small>{MASCOT_SPRITE_NOTES[state]}</small>
+            </li>)}
+          </ul>}
         </details>
-        {shown ? <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
+        {shown && <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
           {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
             <picture>
               <source media="(prefers-reduced-motion: no-preference)" srcSet={shown.files[state].animation} />
@@ -115,22 +129,16 @@ export function MascotSettings() {
             <code>{`${state}.png`}</code>
             {shown.files[state].animation !== shown.files[state].poster && <small>Animated</small>}
           </li>)}
-        </ul> : <ul className="mascot-sprite-files" aria-label="Required files">
-          {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
-            <code>{`${state}.png`}</code>
-            <strong>{MASCOT_SPRITE_LABELS[state]}</strong>
-            <small>{MASCOT_SPRITE_NOTES[state]}</small>
-          </li>)}
         </ul>}
         {spriteError && <p role="alert" className="mascot-sprites-error">{spriteError}</p>}
         {(pending || snapshot.sprites) && <div className="mascot-sprites-actions">
           {pending ? <>
-            <button className="primary-button" type="button" disabled={busy !== null} onClick={() => applySprites(pending)}>{busy === "apply" ? "Applying…" : "Apply sprites"}</button>
-            <button className="secondary-button" type="button" disabled={busy !== null} onClick={discardPreview}>Discard preview</button>
-          </> : <button className="secondary-button" type="button" disabled={busy !== null} onClick={resetSprites}>{busy === "reset" ? "Resetting…" : "Reset to default"}</button>}
+            <button className="primary-button" type="button" aria-disabled={held} onClick={() => applySprites(pending)}>{busy === "apply" ? "Applying…" : "Apply sprites"}</button>
+            <button className="secondary-button" type="button" aria-disabled={held} onClick={discardPreview}>Discard preview</button>
+          </> : <button className="secondary-button" type="button" aria-disabled={held} onClick={resetSprites}>{busy === "reset" ? "Resetting…" : "Reset to default"}</button>}
         </div>}
         {notice && <p role="status" className="settings-card-note">{notice}</p>}
-        {shown && !enabled && <p className="settings-card-note">Turn on Desktop mascot above to see these sprites on your desktop.</p>}
+        {shown && !enabled && <p className="settings-card-note">Turn on Show mascot above to see these sprites on your desktop.</p>}
       </section>}
       {error && <p role="alert" className="settings-card-note">{error}</p>}
     </div>

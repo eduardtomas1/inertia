@@ -41,6 +41,10 @@ type LifecycleScenario =
   | "inactive-descendant"
   | "unrelated-liveness"
   | "descendant-cancel"
+  | "subagent-traces"
+  | "subagent-overflow"
+  | "subagent-long-child"
+  | "subagent-concurrent-children"
   | "slow"
   | "endless"
   | "server-exit"
@@ -122,6 +126,74 @@ const server = http.createServer((req, res) => {
             ? { type: "session.status", properties: { sessionID, status: { type: "idle" } } }
             : { type: "session.idle", properties: { sessionID } });
         }, 75);
+        return;
+      }
+      if (scenario === "subagent-long-child" || scenario === "subagent-concurrent-children") {
+        json(res, undefined, 204);
+        await eventsReady;
+        const children = scenario === "subagent-long-child" ? 1 : 9;
+        const steps = scenario === "subagent-long-child" ? 2_100 : 230;
+        const childID = (index) => "opencode-step-child-" + index;
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "root-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        for (let index = 0; index < children; index += 1) {
+          sendEvent({ type: "session.created", properties: { sessionID: childID(index), info: { ...session, id: childID(index), parentID: sessionID, title: "Step child " + index } } });
+        }
+        let step = 0;
+        const tick = () => {
+          for (let burst = 0; burst < 50 && step < steps; burst += 1, step += 1) {
+            for (let index = 0; index < children; index += 1) {
+              sendEvent({ type: "message.updated", properties: { sessionID: childID(index), info: { id: childID(index) + "-message-" + step, sessionID: childID(index), role: "assistant", providerID: "fake", modelID: "model-a", tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+            }
+          }
+          if (step < steps) return setTimeout(tick, 5);
+          for (let index = 0; index < children; index += 1) {
+            sendEvent({ type: "message.part.updated", properties: { sessionID: childID(index), part: { id: childID(index) + "-text", sessionID: childID(index), messageID: childID(index) + "-message-" + (steps - 1), type: "text", text: "Child " + index + " finished." } } });
+            sendEvent({ type: "session.idle", properties: { sessionID: childID(index) } });
+          }
+          setTimeout(() => {
+            sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "root-text", sessionID, messageID: "root-assistant", type: "text", text: "Parent finished after long delegated work" } } });
+            sendEvent({ type: "session.idle", properties: { sessionID } });
+          }, 20);
+        };
+        setTimeout(tick, 10);
+        return;
+      }
+      if (scenario === "subagent-traces" || scenario === "subagent-overflow") {
+        json(res, undefined, 204);
+        await eventsReady;
+        const childID = "opencode-child-session";
+        const grandchildID = "opencode-grandchild-session";
+        const failingID = "opencode-failing-session";
+        const at = (delay, event) => setTimeout(() => sendEvent(event), delay);
+        const assistant = (id, sessionID, tokens) => ({ type: "message.updated", properties: { sessionID, info: { id, parentID: id + "-prompt", sessionID, role: "assistant", providerID: "fake", modelID: "model-a", ...(tokens ? { tokens } : {}) } } });
+        const part = (sessionID, part) => ({ type: "message.part.updated", properties: { sessionID, part: { sessionID, ...part } } });
+        at(10, { type: "message.updated", properties: { sessionID, info: { id: "root-assistant", parentID: parsed.messageID, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+        if (scenario === "subagent-overflow") {
+          for (let index = 0; index < 256; index += 1) {
+            const id = "opencode-overflow-" + index;
+            at(20, { type: "session.created", properties: { sessionID: id, info: { ...session, id, parentID: sessionID, title: "Overflow " + index } } });
+          }
+          return;
+        }
+        at(20, { type: "session.created", properties: { sessionID: childID, info: { ...session, id: childID, parentID: sessionID, title: "Inspect parser (@explore subagent)" } } });
+        at(30, part(sessionID, { id: "root-task", messageID: "root-assistant", type: "tool", callID: "root-task-call", tool: "task", state: { status: "running", input: { description: "Inspect parser", prompt: "Read the parser and report", subagent_type: "explore" }, title: "Inspect parser", metadata: { sessionId: childID } } }));
+        at(40, assistant("child-assistant", childID, { input: 100, output: 20, reasoning: 5, cache: { read: 30, write: 10 } }));
+        at(50, part(childID, { id: "child-read", messageID: "child-assistant", type: "tool", callID: "child-read-call", tool: "read", state: { status: "running", input: { filePath: "src/parser.ts" }, title: "Read src/parser.ts" } }));
+        at(60, part(childID, { id: "child-read", messageID: "child-assistant", type: "tool", callID: "child-read-call", tool: "read", state: { status: "completed", input: { filePath: "src/parser.ts" }, output: "ok", title: "Read src/parser.ts" } }));
+        at(70, { type: "session.created", properties: { info: { ...session, id: grandchildID, parentID: childID, title: "Check grammar (@general subagent)" } } });
+        at(80, part(childID, { id: "child-task", messageID: "child-assistant", type: "tool", callID: "child-task-call", tool: "task", state: { status: "running", input: { description: "Check grammar", prompt: "Validate the grammar file" }, title: "Check grammar", metadata: { sessionId: grandchildID } } }));
+        at(90, assistant("grandchild-assistant", grandchildID, { total: 50, input: 30, output: 15, reasoning: 0, cache: { read: 5, write: 0 } }));
+        at(100, part(grandchildID, { id: "grandchild-grep", messageID: "grandchild-assistant", type: "tool", callID: "grandchild-grep-call", tool: "grep", state: { status: "running", input: { pattern: "rule" }, title: "Search grammar rules" } }));
+        at(110, part(grandchildID, { id: "grandchild-text", messageID: "grandchild-assistant", type: "text", text: "Grammar is valid." }));
+        at(120, { type: "session.idle", properties: { sessionID: grandchildID } });
+        at(130, { type: "session.created", properties: { sessionID: failingID, info: { ...session, id: failingID, parentID: sessionID, title: "Run benchmarks (@general subagent)" } } });
+        at(140, assistant("failing-assistant", failingID));
+        at(150, { type: "message.updated", properties: { sessionID: failingID, info: { id: "malformed-assistant", sessionID: failingID, role: "assistant", tokens: "many", providerID: 7 } } });
+        at(160, { type: "session.error", properties: { sessionID: failingID, error: { name: "APIError", data: { message: "Delegated model request failed." } } } });
+        at(170, part(childID, { id: "child-text", messageID: "child-assistant", type: "text", text: "Parser reviewed; grammar is valid." }));
+        at(180, { type: "session.status", properties: { sessionID: childID, status: { type: "idle" } } });
+        at(200, part(sessionID, { id: "root-text", messageID: "root-assistant", type: "text", text: "Parent resumed after delegated work" }));
+        at(210, { type: "session.idle", properties: { sessionID } });
         return;
       }
       if (["descendant-liveness", "inactive-descendant", "unrelated-liveness", "descendant-cancel"].includes(scenario)) {

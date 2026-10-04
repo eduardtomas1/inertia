@@ -196,7 +196,8 @@ describe("provider capability manifests", () => {
     const openCode = manifest("opencode-sdk");
     expect(capability(openCode, "images").support).toBe("negotiated");
     expect(capability(openCode, "provider-owned-server").support).toBe("native");
-    expect(capability(openCode, "subagent-create").support).toBe("unavailable");
+    expect(capability(openCode, "subagent-create").support).toBe("native");
+    expect(capability(openCode, "subagent-stop").support).toBe("unavailable");
     expect(capability(openCode, "custom-backend").support).toBe("unavailable");
     expect(capability(openCode, "endpoint-selection").support)
       .toBe("unavailable");

@@ -66,8 +66,29 @@ test("opens the command palette and manages a thread", async () => {
   await expect(settingsOption).toHaveAttribute("aria-selected", "true");
   if (process.platform === "win32") await settingsOption.click();
   else await search.press("Enter");
-  await expect(page.getByRole("button", { name: "General", exact: true }))
+  await expect(page.getByRole("button", { name: "Appearance", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("opens a setting from the palette on its row", async () => {
+  await resizeWindow(1440, 920);
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+  const search = page.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
+  await expect(search).toBeFocused();
+  await search.pressSequentially("theme");
+  const theme = page.getByRole("group", { name: "Settings" }).getByRole("option", { name: /^Mode/u });
+  await expect(theme).toHaveAttribute("aria-selected", "true");
+  if (process.platform === "win32") await theme.click();
+  else await search.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Search Inertia" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }))
+    .toHaveAttribute("aria-current", "page");
+  await expect.poll(() => page.evaluate(() => Boolean(
+    document.querySelector('[data-setting-id="appearance-mode"]')?.contains(document.activeElement),
+  ))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("main", { name: "Settings" })).toBeHidden();
   expect(rendererErrors).toEqual([]);
 });

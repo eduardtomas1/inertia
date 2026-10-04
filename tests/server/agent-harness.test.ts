@@ -12,7 +12,8 @@ import {
   type ProviderRunResult,
 } from "../../src/server/providers";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
-import { providerRunTerminal } from "../../src/server/provider/contracts";
+import { providerRunTerminal, type ProviderEvent } from "../../src/server/provider/contracts";
+import { createProviderEmitter, providerCallbacksFromHarness } from "../../src/server/provider/emitter";
 import {
   PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS,
   createProcessLifecycleHarnessForTests,
@@ -137,6 +138,60 @@ describe("agent harness architecture", () => {
         },
       },
     ]);
+  });
+
+  it("forwards delegated task telemetry from the harness to the provider event", () => {
+    const events: ProviderEvent[] = [];
+    const providerEmitter = createProviderEmitter("codex", "conversation-1", {
+      onEvent: (event) => events.push(event),
+    }, "run-1", "turn-1");
+    const emitter = createAgentHarnessEmitter(
+      "codex",
+      "conversation-1",
+      providerCallbacksFromHarness(providerEmitter),
+      "run-1",
+      "turn-1",
+    );
+    const telemetry = {
+      model: "gpt-5.4-mini",
+      activity: "Reading files",
+      usage: {
+        totalTokens: 10,
+        inputTokens: 8,
+        cachedInputTokens: null,
+        cacheWriteInputTokens: null,
+        outputTokens: 2,
+        reasoningOutputTokens: null,
+        contextTokens: null,
+        maxContextTokens: null,
+      },
+      toolUseCount: 1,
+      durationMs: 25,
+    };
+    const subagent = {
+      sequence: 1,
+      providerTaskId: null,
+      providerAgentId: "agent-1",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      status: "running" as const,
+      isLive: true,
+      description: null,
+      progress: null,
+      result: null,
+    };
+
+    emitter.subagent({ ...subagent, ...telemetry });
+    emitter.subagent({ ...subagent, sequence: 2 });
+
+    expect(events).toEqual([
+      { ...subagent, ...telemetry, providerId: "codex", conversationId: "conversation-1", runId: "run-1", turnId: "turn-1", type: "subagent" },
+      { ...subagent, sequence: 2, providerId: "codex", conversationId: "conversation-1", runId: "run-1", turnId: "turn-1", type: "subagent" },
+    ]);
+    expect(Object.keys(events[1]!)).not.toContain("usage");
   });
 
   it("keeps exact identity on an otherwise unidentified harness notice", () => {

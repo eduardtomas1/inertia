@@ -9,6 +9,7 @@ export interface GlobalShortcutActions {
     update: boolean | ((collapsed: boolean) => boolean),
   ) => void;
   setSidebarOpen: (open: boolean) => void;
+  toggleSettings: () => void;
 }
 
 interface ShortcutTarget {
@@ -52,8 +53,10 @@ export function installGlobalShortcuts(
     const terminalTarget = typeof Element !== "undefined"
       && event.target instanceof Element && event.target.closest(".xterm");
     if (event.ctrlKey && terminalTarget) return;
-    const shortcut = (Object.keys(actions.current.keybindings) as AppShortcutAction[])
-      .find((action) => actions.current.keybindings[action] === key);
+    const shortcut: AppShortcutAction | "toggle-settings" | undefined = key === "," || event.code === "Comma"
+      ? "toggle-settings"
+      : (Object.keys(actions.current.keybindings) as AppShortcutAction[])
+        .find((action) => actions.current.keybindings[action] === key);
     const ownerDocument = typeof Node !== "undefined" && event.target instanceof Node
       ? event.target.ownerDocument
       : typeof document !== "undefined" ? document : null;
@@ -81,6 +84,11 @@ export function installGlobalShortcuts(
       event.stopPropagation();
       ownedKeyUps.add(key);
       actions.current.toggleTerminal();
+    } else if (shortcut === "toggle-settings") {
+      event.preventDefault();
+      event.stopPropagation();
+      ownedKeyUps.add(key);
+      actions.current.toggleSettings();
     } else if (shortcut === "toggle-sidebar") {
       event.preventDefault();
       event.stopPropagation();

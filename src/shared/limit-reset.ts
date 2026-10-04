@@ -13,6 +13,7 @@ export const limitResetResultSchema = z.strictObject({
     unavailableReason: z.string().min(1).max(300).nullable(),
   }).nullable(),
   plan: limitResetPlanSchema.nullable(),
+  usageLimited: z.boolean(),
 });
 export type LimitResetPlan = z.infer<typeof limitResetPlanSchema>;
 export type LimitResetResult = z.infer<typeof limitResetResultSchema>;

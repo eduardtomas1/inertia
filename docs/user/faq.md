@@ -6,7 +6,7 @@ No. History and preferences stay on your computer. Agents run through the provid
 
 ## Which agents does Inertia support?
 
-Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Providers**.
+Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Agents**.
 
 ## Do I need a new subscription?
 
@@ -26,11 +26,11 @@ Yes. Use [split view](working-side-by-side.md), give chats their own windows, or
 
 ## How do I change a keyboard shortcut?
 
-Open **Settings → Keybindings**. See [Keyboard shortcuts](keyboard-shortcuts.md).
+Open **Settings → Keyboard**. See [Keyboard shortcuts](keyboard-shortcuts.md).
 
 ## How do I see the welcome guide again?
 
-Open **Settings → Report an issue** and choose **Show welcome guide**.
+Open **Settings → Help** and choose **Show welcome guide**.
 
 ## Where do I report a problem?
 

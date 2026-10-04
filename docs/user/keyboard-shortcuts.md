@@ -11,7 +11,7 @@ On macOS the modifier is ⌘; on Windows and Linux it's Ctrl.
 | Toggle project navigation | ⌘B / Ctrl+B |
 | Toggle terminal | ⌘J / Ctrl+J |
 
-Change them in **Settings → Keybindings**. Each action uses ⌘ or Ctrl with one of B, G, H, J, K, N, U or Y, and no two actions can share a key.
+Change them in **Settings → Keyboard → App shortcuts**. Each action uses ⌘ or Ctrl with one of B, G, H, J, K, N, U or Y, and no two actions can share a key.
 
 ## Sidebar
 

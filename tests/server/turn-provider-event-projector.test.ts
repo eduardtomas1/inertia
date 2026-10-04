@@ -6,6 +6,7 @@ import type {
   ProviderActivityEvent,
   ProviderSubagentEvent,
 } from "../../src/server/provider/contracts";
+import { defaultTurnScheduler } from "../../src/server/runtime/turns/turn-controller-support";
 import {
   TurnProviderEventProjector,
 } from "../../src/server/runtime/turns/turn-provider-event-projector";
@@ -69,6 +70,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       streams: {} as never,
       activities: {} as never,
       interactions: {} as never,
+      scheduler: defaultTurnScheduler(),
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
@@ -136,6 +138,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       streams: {} as never,
       activities: {} as never,
       interactions: {} as never,
+      scheduler: defaultTurnScheduler(),
       now: () => "2030-01-01T00:00:02.000Z",
       transition: () => false,
       observeSubagent,
@@ -202,6 +205,7 @@ describe("TurnProviderEventProjector reasoning order", () => {
         })),
       } as never,
       interactions: {} as never,
+      scheduler: defaultTurnScheduler(),
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,

@@ -147,7 +147,7 @@ describe("useInertiaConnection", () => {
       code: "prior-runtime-cleanup-unconfirmed",
       retryable: false,
       message:
-        "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
+        "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Runtime diagnostics in Settings → Help.",
     });
     Object.defineProperty(window, "inertia", {
       configurable: true,

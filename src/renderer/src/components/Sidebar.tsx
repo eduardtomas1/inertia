@@ -34,6 +34,7 @@ import {
 import clsx from "clsx";
 import type { Conversation, ConversationShell, Project, ProjectGroupingMode } from "@shared/contracts";
 import { canOrganizeThread } from "../../../shared/thread-organization";
+import { PROJECT_REPOSITORY_DISPLAY_LIMITS, projectRepositoryDisplayLimit } from "../../../shared/project-repository-limit";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { agentRequestProviderName } from "../utils/agentInput";
@@ -574,12 +575,12 @@ function SidebarView({
         </button>
       ))}
       <span className="project-menu-heading"><FolderOpen size={12} />Repository display limit</span>
-      {([16, 32] as const).map((limit) => (
+      {PROJECT_REPOSITORY_DISPLAY_LIMITS.map((limit) => (
         <button
           type="button"
           role="menuitemradio"
           tabIndex={-1}
-          aria-checked={Math.min(project.gitRepositoryLimit, 32) === limit}
+          aria-checked={projectRepositoryDisplayLimit(project.gitRepositoryLimit) === limit}
           onClick={() => {
             dismissMenu("selection");
             onSetProjectGitRepositoryLimit(project, limit);
@@ -587,7 +588,7 @@ function SidebarView({
           key={limit}
         >
           <span className="menu-check">
-            {Math.min(project.gitRepositoryLimit, 32) === limit ? "✓" : ""}
+            {projectRepositoryDisplayLimit(project.gitRepositoryLimit) === limit ? "✓" : ""}
           </span>
           Show up to {limit} repositories
         </button>

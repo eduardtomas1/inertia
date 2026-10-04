@@ -91,17 +91,14 @@ test("renders partial health failures without hiding healthy metrics", async ({
   });
   try {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Archive & data", exact: true }).click();
-    await expect(page.getByText("Partial health data", { exact: true }))
-      .toBeVisible();
-    await expect(page.getByRole("region", { name: "Local data", exact: true })
-      .getByRole("status").filter({ hasText: "Partial health data" })).toContainText(
-      "Browser cache storage could not be measured.",
-    );
-    await expect(page.getByText("Browser cache", { exact: true })
-      .locator("..").locator("b")).toHaveText("Unavailable");
-    await expect(page.getByText("Database", { exact: true })
-      .locator("..").locator("b")).not.toHaveText("Unavailable");
+    await page.getByRole("button", { name: "Data", exact: true }).click();
+    const storage = page.getByRole("region", { name: "Storage", exact: true });
+    const warning = storage.getByRole("status").filter({ hasText: "Partial health data:" });
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("Browser cache storage could not be measured.");
+    const facts = storage.locator(".data-facts").first();
+    await expect(facts).toContainText("Browser cache unavailable");
+    await expect(facts).toContainText(/Database \d/u);
 
     const screenshot = testInfo.outputPath("partial-health-warning.png");
     await page.screenshot({ animations: "disabled", path: screenshot });

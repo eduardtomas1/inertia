@@ -166,7 +166,9 @@ export function ProviderMaintenanceNotice({
     setRequestError(null);
   }, [operation?.id, status?.checkedAt]);
 
-  if (!status || !visible) return null;
+  if (!status || !visible) {
+    return showStatus ? <p className="provider-maintenance-empty">No updates available.</p> : null;
+  }
 
   const dismiss = (): void => {
     if (displayOperation && !activeOperation) {

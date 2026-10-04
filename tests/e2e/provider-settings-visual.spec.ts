@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
@@ -79,11 +79,24 @@ test.afterAll(async () => {
   await app.close();
 });
 
+const NEW_CHAT_SELECTS = [
+  "Model",
+  "Reasoning",
+  "Work mode",
+  "Access",
+  "Where new chats run",
+] as const;
+
+async function selectedLabel(control: Locator): Promise<string> {
+  return control.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.textContent ?? "");
+}
+
 test("keeps provider settings coherent across details, themes, and widths", async ({ browserName: _browserName }, testInfo) => {
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("radio", { name: "Light" }).click();
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
 
   const shell = page.locator(".provider-settings-shell");
   const rail = page.locator(".provider-settings-rail");
@@ -92,6 +105,7 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await expect(page.getByRole("button", { name: "Configure Codex" }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("tab", { name: /Models 2/u })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Advanced", exact: true })).toHaveCount(0);
   const wideGeometry = await Promise.all([rail.boundingBox(), editor.boundingBox()]);
   expect(wideGeometry[0]?.y).toBe(wideGeometry[1]?.y);
   expect(wideGeometry[0]?.x ?? 0).toBeLessThan(wideGeometry[1]?.x ?? 0);
@@ -102,14 +116,14 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await expect(page.getByText("GPT-5.3 Codex", { exact: true })).toBeVisible();
   await expect(page.getByText("GPT-5.2 Codex Mini", { exact: true })).toBeVisible();
   await capture(testInfo, "provider-settings-models-light-wide");
-
   await page.getByRole("tab", { name: "Configuration" }).click();
-  await page.getByRole("button", { name: "Advanced", exact: true }).click();
-  await expect(page.getByText("New chat defaults", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
   await app.resizeWindow(1440, 1180);
-  for (const name of ["Provider", "Model", "Reasoning", "Mode", "Access", "Chat location"]) {
+  for (const name of NEW_CHAT_SELECTS) {
     const control = page.getByRole("combobox", { name, exact: true });
     await expect(control).toBeEnabled();
+    if (await control.getAttribute("aria-disabled") === "true") continue;
     await control.click();
     await expect(control).toHaveCSS("appearance", "base-select");
     await expect.poll(() => control.evaluate((element) => element.matches(":open"))).toBe(true);
@@ -118,22 +132,21 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
     const bounds = await option.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds!.width).toBeGreaterThan(0);
-    if (name === "Model") await capture(testInfo, "provider-default-model-picker-light");
+    if (name === "Model") await capture(testInfo, "new-chat-default-model-picker-light");
     await page.keyboard.press("Escape");
     await expect(control).toBeFocused();
   }
-  await capture(testInfo, "provider-settings-advanced-light-wide");
+  await capture(testInfo, "new-chat-defaults-light-wide");
 
-  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("radio", { name: "Dark" }).click();
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Advanced", exact: true }))
-    .toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
   await app.resizeWindow(760, 1100);
   const narrowGeometry = await Promise.all([rail.boundingBox(), editor.boundingBox()]);
   expect(narrowGeometry[0]?.y ?? 0).toBeLessThan(narrowGeometry[1]?.y ?? 0);
   await app.expectNoViewportOverflow();
   await capture(testInfo, "provider-settings-configuration-dark-narrow");
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
   const access = page.getByRole("combobox", { name: "Access", exact: true });
   await access.click();
   const fullAccess = access.getByRole("option", { name: "Full access", exact: true });
@@ -145,38 +158,38 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   expect(bounds!.y).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
-  await capture(testInfo, "provider-default-access-picker-dark-narrow");
+  await capture(testInfo, "new-chat-default-access-picker-dark-narrow");
   await page.keyboard.press("Escape");
 
   await app.resizeWindow(1440, 920);
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("selects Advanced defaults with pointer and keyboard and preserves them after restart", async () => {
+test("selects new-chat defaults with pointer and keyboard and preserves them after restart", async () => {
   if (!await page.getByRole("main", { name: "Settings", exact: true }).isVisible()) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
   }
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
-  const advanced = page.getByRole("button", { name: "Advanced", exact: true });
-  if (await advanced.getAttribute("aria-expanded") !== "true") await advanced.click();
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
   const select = (name: string) => page.getByRole("combobox", { name, exact: true });
-  const choose = async (name: string, option: string | RegExp, value: string): Promise<void> => {
+  const choose = async (name: string, option: string | RegExp): Promise<void> => {
     const control = select(name);
     await control.click();
-    await control.getByRole("option", { name: option, exact: true }).click();
-    await expect(control).toHaveValue(value);
+    await control.getByRole("option", { name: option, exact: true }).first().click();
+    await expect.poll(() => selectedLabel(control)).toMatch(option);
     await expect(control).toBeFocused();
   };
+  const reasoning = select("Reasoning");
 
-  await choose("Model", "GPT-5.2 Codex Mini", "gpt-5.2-codex-mini");
-  await expect(select("Reasoning")).toHaveValue("medium");
-  await expect(select("Reasoning").getByRole("option", { name: "High", exact: true })).toHaveCount(0);
-  await choose("Model", "GPT-5.3 Codex — Default", "gpt-5.3-codex");
-  await choose("Reasoning", "High", "high");
-  await choose("Mode", "Plan", "plan");
-  await choose("Access", "Full access", "full");
+  await choose("Model", "GPT-5.2 Codex Mini");
+  await expect(reasoning).toHaveValue("");
+  await expect(reasoning.getByRole("option", { name: "High", exact: true })).toHaveCount(0);
+  await choose("Model", "GPT-5.3 Codex");
+  await choose("Reasoning", "High");
+  await expect(reasoning).toHaveValue("high");
+  await choose("Work mode", "Plan");
+  await choose("Access", "Full access");
 
-  const location = select("Chat location");
+  const location = select("Where new chats run");
   await location.focus();
   await page.keyboard.press("Space");
   await page.keyboard.press("ArrowDown");
@@ -184,20 +197,13 @@ test("selects Advanced defaults with pointer and keyboard and preserves them aft
   await expect(location).toHaveValue("worktree");
   await expect(location).toBeFocused();
 
-  await choose("Provider", /^Claude —/u, "claude");
-  await expect(select("Model")).toHaveValue("");
-  await expect(select("Reasoning")).toHaveValue("");
-  await choose("Provider", /^Codex —/u, "codex");
-  await choose("Model", "GPT-5.3 Codex — Default", "gpt-5.3-codex");
-  await choose("Reasoning", "High", "high");
-
   ({ page } = await app.restart());
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
-  await page.getByRole("button", { name: "Advanced", exact: true }).click();
-  for (const [name, value] of [
-    ["Provider", "codex"], ["Model", "gpt-5.3-codex"], ["Reasoning", "high"],
-    ["Mode", "plan"], ["Access", "full"], ["Chat location", "worktree"],
-  ]) await expect(select(name!)).toHaveValue(value!);
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await expect.poll(() => selectedLabel(select("Model"))).toBe("GPT-5.3 Codex");
+  await expect(select("Reasoning")).toHaveValue("high");
+  await expect(select("Work mode")).toHaveValue("plan");
+  await expect(select("Access")).toHaveValue("full");
+  await expect(select("Where new chats run")).toHaveValue("worktree");
   expect(app.rendererErrors).toEqual([]);
 });

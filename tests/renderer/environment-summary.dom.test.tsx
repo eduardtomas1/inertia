@@ -13,7 +13,7 @@ vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
   prefetchWorkspaceTool: vi.fn(),
 }));
 
-import { AgentsSurface } from "../../src/renderer/src/components/AgentsSurface";
+import { BackgroundTasksSurface } from "../../src/renderer/src/components/BackgroundTasksSurface";
 import { AttachmentsSurface } from "../../src/renderer/src/components/AttachmentsSurface";
 import {
   CheckoutBranchControlProvider,
@@ -221,13 +221,14 @@ function runsModel(
   };
 }
 
-function agentsSurface(overrides: Partial<EnvironmentSummarySnapshot> = {}): React.JSX.Element {
-  const next = { ...summary, ...overrides };
+function backgroundTasksSurface(): React.JSX.Element {
   return (
-    <AgentsSurface
-      runtimeStatus={next.runtime.status}
+    <BackgroundTasksSurface
+      runtimeStatus={summary.runtime.status}
       subagents={[]}
       turns={[]}
+      runs={[]}
+      conversationId={null}
     />
   );
 }
@@ -337,39 +338,16 @@ describe("Environment content in its workspace surfaces", () => {
     expect(nativePreviewSuspended()).toBe(false);
   });
 
-  it("separates delegated work from the dedicated attachment browser", () => {
-    render(<>{agentsSurface()}{attachmentsSurface()}</>);
-    const agents = screen.getByRole("region", { name: "Agents" });
-    expect(within(agents).getByRole("heading", { name: "Delegated work" })).toBeVisible();
-    expect(within(agents).getByText("No provider-reported subagents in this conversation.")).toBeVisible();
-    expect(within(agents).queryByRole("list", { name: "Chat attachments" })).toBeNull();
+  it("separates background tasks from the dedicated attachment browser", () => {
+    render(<>{backgroundTasksSurface()}{attachmentsSurface()}</>);
+    const tasks = screen.getByRole("region", { name: "Background tasks" });
+    expect(within(tasks).getByText("No background tasks.")).toBeVisible();
+    expect(within(tasks).queryByRole("list", { name: "Chat attachments" })).toBeNull();
     const attachments = screen.getByRole("region", { name: "Attachments" });
     expect(within(attachments).getByText("reference.png")).toBeVisible();
     expect(within(attachments).getByText("requirements.pdf")).toBeVisible();
     expect(within(attachments).getByText("forecast.xlsx")).toBeVisible();
     expect(attachments.querySelector(".lucide-file-spreadsheet")).not.toBeNull();
-  });
-
-  it("promotes runtime status in Agents only when attention is required", () => {
-    const view = render(agentsSurface());
-    expect(screen.queryByText(/workspace runtime/iu)).not.toBeInTheDocument();
-
-    view.rerender(agentsSurface({ runtime: { status: "connecting" } }));
-    expect(screen.getByRole("status")).toHaveTextContent("Connecting to workspace");
-
-    view.rerender(agentsSurface({ runtime: { status: "offline" } }));
-    expect(screen.getByRole("status")).toHaveTextContent("Workspace runtime unavailable");
-  });
-
-  it("keeps section labelling unique across split Agents surfaces", () => {
-    const view = render(<>{agentsSurface()}{agentsSurface()}</>);
-    const labels = [...view.container.querySelectorAll<HTMLElement>(
-      ".agents-surface [aria-labelledby]",
-    )].map((element) => element.getAttribute("aria-labelledby"));
-    expect(labels.length).toBeGreaterThan(1);
-    expect(labels).not.toContain(null);
-    expect(new Set(labels).size).toBe(labels.length);
-    for (const label of labels) expect(document.getElementById(label!)).not.toBeNull();
   });
 
   it("shows every provider limit with its window, reset and this chat's context in Usage", () => {
@@ -647,6 +625,7 @@ describe("Environment content in its workspace surfaces", () => {
         busy={false}
         onOpenSidebar={vi.fn()}
         onOpenSettings={vi.fn()}
+        onCloseSettings={vi.fn()}
         onOpenFolder={vi.fn()}
         onRevealFolder={vi.fn()}
         onOpenFiles={vi.fn()}
@@ -680,7 +659,7 @@ describe("Environment content in its workspace surfaces", () => {
         terminalUnavailableLabel={reason}
         rightPanelAvailable
         rightPanelOpen={false}
-        liveAgentCount={0}
+        activeBackgroundTaskCount={0}
         onToggleTerminal={vi.fn()}
         onToggleRightPanel={onToggleRightPanel}
         onOpenUsage={vi.fn()}

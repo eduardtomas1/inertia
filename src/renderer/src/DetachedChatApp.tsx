@@ -24,7 +24,6 @@ import type {
   ModelBackendProfileView,
   ProjectAction,
   ProviderId,
-  SubagentTrace,
   TurnRequestContext,
   UsageDisplayMode,
 } from "@shared/contracts";
@@ -57,8 +56,6 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useStableController } from "./hooks/useStableController";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceMentions } from "./hooks/workspace-tools/useWorkspaceMentions";
-import { canStopSubagentTrace } from "./utils/subagentDisclosure";
-import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { onComposerDraftPersisted, persistComposerDraft } from "./utils/composerDraftPersistence";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import {
@@ -411,25 +408,6 @@ export default function DetachedChatApp({
       payload: { conversationId },
     });
   }, [conversationId, runtimeActions]);
-  const stopSubagent = useCallback(async (
-    trace: SubagentTrace,
-  ): Promise<void> => {
-    await runtimeActions.run(`agent.subagent.stop:${trace.id}`, {
-      type: "agent.subagent.stop",
-      payload: {
-        conversationId: trace.conversationId,
-        traceId: trace.id,
-      },
-    });
-  }, [runtimeActions]);
-  const turns = projection.turns;
-  const stopVisibleSubagent = useCallback(async (
-    trace: SubagentTrace,
-  ): Promise<void> => {
-    if (canStopSubagentTrace(trace, turns)) {
-      await stopSubagent(trace);
-    }
-  }, [stopSubagent, turns]);
   const revertCheckpoint = useCallback((checkpoint: CheckpointSummary): void => {
     const confirmed = !settings.confirmDestructiveActions
       || window.confirm(
@@ -445,9 +423,6 @@ export default function DetachedChatApp({
       },
     }).catch(() => undefined);
   }, [conversationId, runtimeActions, settings.confirmDestructiveActions]);
-  const followUpSubagent = useCallback((trace: SubagentTrace): void => {
-    if (conversation) requestSubagentFollowUp(conversationId, trace, turns);
-  }, [conversation, conversationId, turns]);
   const openProjectFile = useCallback((path: string): void => {
     if (!project) return;
     void window.inertia.openProjectPath({
@@ -676,8 +651,6 @@ export default function DetachedChatApp({
             onResumeConversation={dockInMain}
             onUsageDisplayModeChange={changeUsageDisplayMode}
             onStop={stopAgent}
-            onFollowUpSubagent={followUpSubagent}
-            onStopSubagent={stopVisibleSubagent}
             onRevertCheckpoint={revertCheckpoint}
             onOpenTurnDiff={dockInMain}
             onCompareTurnArtifacts={dockInMain}

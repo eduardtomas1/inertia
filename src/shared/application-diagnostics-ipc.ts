@@ -4,5 +4,7 @@ export const DIAGNOSTICS_IPC = {
   copy: "inertia:diagnostics-copy",
   export: "inertia:diagnostics-export",
   reportValidation: "inertia:diagnostics-validation",
+  setCapture: "inertia:diagnostics-set-capture",
+  clear: "inertia:diagnostics-clear",
   changed: "inertia:diagnostics-changed",
 } as const;

@@ -1,0 +1,230 @@
+.private-connect-note {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.private-connect-settings .setting-action-row small {
+  overflow-wrap: anywhere;
+}
+
+.private-connect-pairing {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.private-connect-qr {
+  display: block;
+  width: min(176px, 100%);
+  height: auto;
+  border-radius: var(--radius-medium);
+  background: white;
+}
+
+.private-connect-link,
+.private-connect-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.private-connect-link .setting-input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 240px;
+  font-family: var(--font-mono);
+}
+
+.private-connect-actions {
+  justify-content: flex-end;
+}
+
+.private-connect-facts {
+  margin: 0 0 12px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+}
+
+.private-connect-code {
+  color: var(--text);
+  font-family: var(--font-mono);
+  letter-spacing: 0.18em;
+}
+
+.private-connect-device {
+  display: grid;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.private-connect-device-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.private-connect-device-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.private-connect-device-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.private-connect-device-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.private-connect-device-fields .setting-select {
+  max-width: none;
+}
+
+.private-connect-projects {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.private-connect-projects legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.private-connect-projects label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+}
+
+.private-connect-projects label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.private-connect-projects input {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.private-connect-disclosure {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.private-connect-disclosure .setting-disclosure-content {
+  padding: 0 0 8px 19px;
+}
+
+.private-connect-disclosure .setting-disclosure-content > .private-connect-note:first-child {
+  margin-top: 4px;
+}
+
+.private-connect-audit-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.private-connect-audit-list li {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.private-connect-audit-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.private-connect-audit-list span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  font-size: var(--ui-font-secondary);
+}
+
+.private-connect-audit-list strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.private-connect-audit-list small,
+.private-connect-audit-list time {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.private-connect-audit-list time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.private-connect-diagnostics dl {
+  display: grid;
+  margin: 4px 0 0;
+  font-size: var(--ui-font-secondary);
+}
+
+.private-connect-diagnostics dl > div {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.4fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.private-connect-diagnostics dl > div + div {
+  border-top: 1px solid var(--border);
+}
+
+.private-connect-diagnostics dt {
+  color: var(--text-muted);
+}
+
+.private-connect-diagnostics dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .private-connect-projects,
+  .private-connect-device-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .private-connect-device-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

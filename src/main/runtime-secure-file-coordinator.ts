@@ -17,6 +17,8 @@ import { RuntimeAgentBrowserCoordinator } from "./runtime-agent-browser-coordina
 import type { DocumentPreparationRunner } from "../node/document-preparation";
 import type { RuntimeDocumentPreparationEvent } from "../node/runtime-document-preparation-protocol";
 import { RuntimeDocumentPreparationCoordinator } from "./runtime-document-preparation-coordinator";
+import type { RuntimeIssueEvidenceRequest } from "../node/runtime-issue-evidence-protocol";
+import { RuntimeIssueEvidenceCoordinator, type RuntimeIssueEvidenceBroker } from "./runtime-issue-evidence-coordinator";
 
 type SecureFileRequestEvent = Extract<
   RuntimeWorkerEvent,
@@ -36,10 +38,11 @@ type AgentBrowserEvent = Extract<
 >;
 
 type RuntimeSecureFileBrokerEvent = SecureFileRequestEvent | ConversationAttachmentStoreEvent
-  | AgentBrowserEvent | RuntimeDocumentPreparationEvent;
+  | AgentBrowserEvent | RuntimeDocumentPreparationEvent | RuntimeIssueEvidenceRequest;
 
 export function isRuntimeSecureFileBrokerEvent(event: RuntimeWorkerEvent): event is RuntimeSecureFileBrokerEvent {
   return event.type === "runtime.secure-file-request"
+    || event.type === "runtime.issue-evidence-request"
     || event.type === "runtime.agent-browser-request"
     || event.type === "runtime.agent-browser-cancel"
     || event.type === "runtime.conversation-attachment-store-request"
@@ -61,6 +64,7 @@ interface RuntimeSecureFileCoordinatorOptions {
   readonly conversationAttachmentSourceRoot?: string;
   readonly agentBrowserBroker?: RuntimeAgentBrowserBroker;
   readonly documentPreparationRunner?: DocumentPreparationRunner;
+  readonly issueEvidenceBroker?: RuntimeIssueEvidenceBroker;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
   readonly post: (
     record: RuntimeProcessRecord,
@@ -77,11 +81,17 @@ export class RuntimeSecureFileCoordinator {
     RuntimeConversationAttachmentStoreCoordinator;
   private readonly agentBrowser: RuntimeAgentBrowserCoordinator;
   private readonly documents: RuntimeDocumentPreparationCoordinator;
+  private readonly issueEvidence: RuntimeIssueEvidenceCoordinator;
 
   constructor(options: RuntimeSecureFileCoordinatorOptions) {
     this.broker = options.broker;
     this.accepts = options.accepts;
     this.post = options.post;
+    this.issueEvidence = new RuntimeIssueEvidenceCoordinator({
+      broker: options.issueEvidenceBroker,
+      accepts: options.accepts,
+      post: options.post,
+    });
     this.documents = new RuntimeDocumentPreparationCoordinator({
       runner: options.documentPreparationRunner, retryUnconfirmedShutdown: options.retryUnconfirmedShutdown,
       accepts: options.accepts, post: options.post,
@@ -106,6 +116,10 @@ export class RuntimeSecureFileCoordinator {
     record: RuntimeProcessRecord,
     event: RuntimeSecureFileBrokerEvent,
   ): void {
+    if (event.type === "runtime.issue-evidence-request") {
+      this.issueEvidence.handle(record, event);
+      return;
+    }
     if (event.type === "runtime.document-preparation-request" || event.type === "runtime.document-preparation-cancel") {
       this.documents.handle(record, event);
       return;
@@ -167,6 +181,7 @@ export class RuntimeSecureFileCoordinator {
   }
 
   clear(record: RuntimeProcessRecord | null): void {
+    this.issueEvidence.clear(record);
     this.agentBrowser.clear(record);
     this.conversationAttachmentStore.clear(record);
     this.documents.clear(record);

@@ -11,6 +11,7 @@ import { claudeSuccessResult, fixtureClaudeQuery } from "../helpers/claude-agent
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
+const managers: ProviderManager[] = [];
 const OWN = "11111111-1111-4111-8111-111111111111";
 const SIBLING = "22222222-2222-4222-8222-222222222222";
 
@@ -63,6 +64,7 @@ async function runRequests(
     { commands: { claude: process.execPath } },
     new AgentHarnessRegistry([harness]),
   );
+  managers.push(manager);
   const approvals: Array<{ title: string; access: string[] }> = [];
   await expect(manager.run(nativeProviderRunInput({
     providerId: "claude",
@@ -83,7 +85,8 @@ async function runRequests(
 describe("Claude reads of this chat's own attachments", () => {
   const roots: string[] = [];
   afterEach(async () => {
-    for (const root of roots.splice(0)) await removePortableFixture(root);
+    await Promise.all(managers.splice(0).map(async (manager) => await manager.disposeAll()));
+    await Promise.all(roots.splice(0).map(async (root) => await removePortableFixture(root)));
   });
 
   it.each([

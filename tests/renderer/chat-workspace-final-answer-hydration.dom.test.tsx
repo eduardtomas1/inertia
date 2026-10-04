@@ -253,7 +253,6 @@ function workspaceProps(
     onOpenResume: () => undefined,
     onUsageDisplayModeChange: () => undefined,
     onStop: async () => undefined,
-    onStopSubagent: async () => undefined,
     onRevertCheckpoint: () => undefined,
     onOpenTurnDiff: () => undefined,
     onCompareTurnArtifacts: () => undefined,

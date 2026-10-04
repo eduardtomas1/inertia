@@ -844,6 +844,11 @@ describe("agent loading and trace DOM", () => {
       description: "Review the prior turn.",
       progress: "Waiting for terminal persistence.",
       result: null,
+      model: null,
+      activity: null,
+      usage: null,
+      toolUseCount: null,
+      durationMs: null,
       sequence: 1,
       createdAt: "2026-08-12T12:00:03.000Z",
       updatedAt: "2026-08-12T12:00:07.000Z",
@@ -872,8 +877,7 @@ describe("agent loading and trace DOM", () => {
       terminalProjections={{
         [owner]: { owner, status: "completed", terminalReason: null },
       }}
-      onFollowUpSubagent={vi.fn()}
-      onStopSubagent={vi.fn(async () => undefined)}
+      onOpenSurface={vi.fn()}
     />);
 
     expect(container.querySelector(

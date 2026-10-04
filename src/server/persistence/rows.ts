@@ -241,6 +241,11 @@ export interface SubagentTraceRow {
   description: string | null;
   progress: string | null;
   result: string | null;
+  model: string | null;
+  activity: string | null;
+  usage_json: string | null;
+  tool_use_count: number | null;
+  duration_ms: number | null;
   sequence: number;
   created_at: string;
   updated_at: string;
@@ -324,16 +329,13 @@ export interface StateRow {
   wrap_diffs: 0 | 1;
   ignore_whitespace: 0 | 1;
   show_thinking: 0 | 1;
-  show_usage: 0 | 1;
   usage_display_mode: AppSettings["usageDisplayMode"];
   interface_scale: AppSettings["interfaceScale"];
   response_density: AppSettings["responseDensity"];
-  workspace_startup_surface: AppSettings["workspaceStartupSurface"];
   default_code_wrap: 0 | 1;
   auto_collapse_work_log: 0 | 1;
   show_changed_file_summaries: 0 | 1;
   auto_scroll_to_final_answer: 0 | 1;
-  sidebar_mode: AppSettings["sidebarMode"];
   project_grouping: AppSettings["projectGrouping"];
   auto_open_plan: 0 | 1;
   confirm_destructive_actions: 0 | 1;
@@ -346,6 +348,9 @@ export interface StateRow {
   discord_release_repository_url: string;
   working_indicator_json?: string | null;
   completion_sound_json?: string | null;
+  quota_warnings_enabled?: number;
+  quota_warning_threshold?: number;
+  notify_only_in_background?: number;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

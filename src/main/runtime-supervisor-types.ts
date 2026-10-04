@@ -187,6 +187,7 @@ export interface RuntimeSupervisorOptions {
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
   agentBrowserBroker?: RuntimeAgentBrowserBroker;
+  issueEvidenceBroker?: import("./runtime-issue-evidence-coordinator.js").RuntimeIssueEvidenceBroker;
   conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   documentPreparationRunner?: DocumentPreparationRunner;
   conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;

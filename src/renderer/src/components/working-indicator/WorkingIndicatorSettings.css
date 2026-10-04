@@ -1,42 +1,14 @@
-.working-indicator-settings {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-  padding-top: 14px;
+.working-indicator-style {
+  padding: 10px 0 14px;
+}
+
+.working-indicator-style + .working-indicator-row {
   border-top: 1px solid var(--border);
-}
-
-.working-indicator-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.working-indicator-heading h4 {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--ui-font-secondary);
-  font-weight: 650;
-}
-
-.working-indicator-heading p {
-  margin: 3px 0 0;
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.45;
-}
-
-.working-indicator-label {
-  margin-top: 2px;
-  color: var(--text);
-  font-size: var(--ui-font-secondary);
-  font-weight: 620;
 }
 
 .working-indicator-picker {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 6px;
 }
 
@@ -46,23 +18,27 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 10px 4px 7px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  padding: 10px 4px 8px;
+  border-radius: var(--radius-medium);
   color: var(--text-soft);
   background: transparent;
-  transition:
-    background var(--motion-base) var(--motion-ease),
-    border-color var(--motion-base) var(--motion-ease);
+  box-shadow: inset 0 0 0 1px transparent;
 }
 
 .working-indicator-option:hover:not(:disabled) {
+  color: var(--text);
   background: var(--surface-hover);
 }
 
 .working-indicator-option.is-active {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: var(--accent-soft);
+  color: var(--text);
+  background: var(--selected-surface);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.working-indicator-option:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
 }
 
 .working-indicator-option:focus-visible,
@@ -93,21 +69,9 @@
   max-width: 100%;
   overflow: hidden;
   font-size: var(--ui-font-micro);
-  font-weight: 600;
+  font-weight: 560;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.working-indicator-option-badge {
-  min-height: 1.2em;
-  margin-top: -4px;
-  color: var(--accent-strong);
-  font-size: calc(var(--ui-font-micro) * 0.9);
-  letter-spacing: 0.02em;
-}
-
-.working-indicator-row {
-  border-bottom: 0;
 }
 
 .working-indicator-colors {
@@ -116,13 +80,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-}
-
-.working-indicator-row > .working-indicator-colors {
-  padding: 0;
-  border: 0;
-  background: transparent;
+  margin-left: auto;
 }
 
 .working-indicator-swatches {
@@ -130,7 +88,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 5px;
+  padding: 4px;
 }
 
 .working-indicator-row .working-indicator-swatch {
@@ -142,6 +100,11 @@
   border-radius: 50%;
   background: var(--indicator-swatch);
   box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.working-indicator-swatch:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
 }
 
 .working-indicator-swatch[aria-checked="true"]::after {
@@ -171,10 +134,11 @@
 
 .working-indicator-color-input {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   padding: 0;
-  margin: -1px;
   overflow: hidden;
   border: 0;
   clip-path: inset(50%);
@@ -182,35 +146,31 @@
   pointer-events: none;
 }
 
-.working-indicator-switches .setting-row {
-  min-height: 0;
+.working-indicator-advanced {
   padding: 10px 0;
-}
-
-.working-indicator-switches {
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
 }
 
-@media (max-width: 900px) {
-  .working-indicator-picker {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .working-indicator-heading {
-    flex-direction: column;
-  }
+.working-indicator-advanced > summary {
+  min-height: var(--control-height-small);
 }
 
-@media (prefers-reduced-motion: reduce) {
+.working-indicator-advanced .setting-row {
+  padding-left: 20px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
   .working-indicator-option {
-    transition: none;
+    transition:
+      background var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease),
+      color var(--motion-fast) var(--motion-ease);
   }
 }
 
 @media (forced-colors: active) {
   .working-indicator-option.is-active {
-    border-color: Highlight;
+    outline: 2px solid Highlight;
   }
 
   .working-indicator-swatch {

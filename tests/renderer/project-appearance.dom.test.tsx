@@ -34,7 +34,7 @@ function chat(id: string, projectId: string, title: string): ConversationShell {
 }
 
 function snapshot(projects: Project[], conversations: ConversationShell[]): AppSnapshot {
-  return { projects, conversations, runs: [], providers: [], settings: { ...defaultSettings, sidebarMode: "activity" },
+  return { projects, conversations, runs: [], providers: [], settings: defaultSettings,
     activeProjectId: projects[0]!.id, activeConversationId: null };
 }
 

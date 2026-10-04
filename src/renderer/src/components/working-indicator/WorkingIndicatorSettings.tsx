@@ -17,14 +17,16 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { AgentPixelGrid } from "../AgentPixelGrid";
 import { Switch } from "../ui";
+import { SettingDisclosure, SettingRow, SettingsGroup } from "../settings/SettingsLayout";
+import { useSettingAction } from "../settings/useSettingAction";
 import { orbMotionForPhase } from "./orbMotion";
 import { WorkingIndicatorProvider } from "./WorkingIndicatorContext";
 import { WorkingOrb } from "./WorkingOrb";
 import "./WorkingIndicatorSettings.css";
 
-const STYLE_LABELS: Readonly<Record<WorkingIndicatorStyle, { label: string; detail: string; badge?: string }>> = {
-  classic: { label: "Classic", detail: "The 3×3 grid and spinning rings", badge: "Default" },
-  automatic: { label: "Automatic", detail: "Picks a design for each kind of work", badge: "By activity" },
+const STYLE_LABELS: Readonly<Record<WorkingIndicatorStyle, { label: string; detail: string }>> = {
+  classic: { label: "Classic", detail: "The 3×3 grid and spinning rings" },
+  automatic: { label: "Automatic", detail: "Picks a design for each kind of work" },
   working: { label: "Working", detail: "Particles on tilted orbits" },
   searching: { label: "Searching", detail: "A scan meridian sweeps a dotted globe" },
   solving: { label: "Solving", detail: "Bands scramble, then click back solved" },
@@ -97,6 +99,7 @@ export function WorkingIndicatorSettings({
   const value = pending ?? saved;
   latest.current = value;
   const colorInput = useRef<HTMLInputElement | null>(null);
+  const action = useSettingAction();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const documentVisible = useDocumentVisibility();
 
@@ -109,8 +112,8 @@ export function WorkingIndicatorSettings({
     if (sameSettings(next, latest.current)) return;
     latest.current = next;
     setPending(next);
-    void Promise.resolve(onUpdate({ workingIndicator: next })).catch(() => {
-      setPending((current) => (current === next ? null : current));
+    void action.run(() => onUpdate({ workingIndicator: next })).then((saved) => {
+      if (!saved) setPending((current) => (current === next ? null : current));
     });
   };
 
@@ -150,46 +153,39 @@ export function WorkingIndicatorSettings({
 
   return (
     <WorkingIndicatorProvider settings={preview}>
-      <section className="working-indicator-settings" aria-labelledby="working-indicator-heading">
-        <div className="working-indicator-heading">
-          <span>
-            <h4 id="working-indicator-heading">Agent activity</h4>
-            <p id="working-indicator-description">What Inertia shows while an agent is working. Reduced motion always shows one still frame.</p>
-          </span>
-        </div>
-        <strong className="working-indicator-label" id="working-indicator-style-label">Working indicator</strong>
-        <div
-          className="working-indicator-picker"
-          role="radiogroup"
-          aria-labelledby="working-indicator-style-label"
-          aria-describedby="working-indicator-description"
-          {...styles.groupProps}
-        >
-          {WORKING_INDICATOR_STYLES.map((style) => {
-            const copy = STYLE_LABELS[style];
-            return (
-              <button
-                type="button"
-                key={style}
-                className={clsx("working-indicator-option", value.style === style && "is-active")}
-                data-indicator-style={style}
-                aria-label={copy.label}
-                title={copy.detail}
-                disabled={disabled}
-                {...styles.radioProps(style)}
-              >
-                <span className="working-indicator-stage" aria-hidden="true">
-                  {style === "classic"
-                    ? <span className="working-indicator-classic"><AgentPixelGrid animated={animatePreview} /></span>
-                    : style === "automatic"
-                      ? <AutomaticPreview animate={animatePreview} />
-                      : <WorkingOrb size={PICKER_ORB_SIZE} design={style} />}
-                </span>
-                <span className="working-indicator-option-label" aria-hidden="true">{copy.label}</span>
-                <span className="working-indicator-option-badge" aria-hidden="true">{copy.badge ?? ""}</span>
-              </button>
-            );
-          })}
+      <SettingsGroup title="Working indicator" headingId="working-indicator-heading" notice={action.notice} className="working-indicator-settings">
+        <div className="working-indicator-style" data-setting-id="working-indicator">
+          <div
+            className="working-indicator-picker"
+            role="radiogroup"
+            aria-labelledby="working-indicator-heading"
+            {...styles.groupProps}
+          >
+            {WORKING_INDICATOR_STYLES.map((style) => {
+              const copy = STYLE_LABELS[style];
+              return (
+                <button
+                  type="button"
+                  key={style}
+                  className={clsx("working-indicator-option", value.style === style && "is-active")}
+                  data-indicator-style={style}
+                  aria-label={copy.label}
+                  title={copy.detail}
+                  disabled={disabled}
+                  {...styles.radioProps(style)}
+                >
+                  <span className="working-indicator-stage" aria-hidden="true">
+                    {style === "classic"
+                      ? <span className="working-indicator-classic"><AgentPixelGrid animated={animatePreview} /></span>
+                      : style === "automatic"
+                        ? <AutomaticPreview animate={animatePreview} />
+                        : <WorkingOrb size={PICKER_ORB_SIZE} design={style} />}
+                  </span>
+                  <span className="working-indicator-option-label" aria-hidden="true">{copy.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="response-density-setting working-indicator-row">
           <span>
@@ -245,35 +241,19 @@ export function WorkingIndicatorSettings({
           </div>
         </div>
         <div className="settings-rows working-indicator-switches">
-          <div className="setting-row">
-            <span className="setting-copy">
-              <strong>Glow</strong>
-              <small>{preview.color === "ink" ? "Choose a colour to add a soft halo." : "A soft halo in the indicator's colour."}</small>
-            </span>
+          <SettingRow id="working-indicator-glow" title="Glow" description={preview.color === "ink" ? "Choose a colour to add a soft halo." : "A soft halo in the indicator's colour."}>
             <Switch
               label="Glow"
               checked={value.glow}
-              disabled={disabled || preview.color === "ink"}
+              disabled={disabled}
+              inactive={preview.color === "ink"}
               onChange={(glow) => commit({ glow })}
             />
-          </div>
-          <div className="setting-row">
-            <span className="setting-copy">
-              <strong>Use for tool and step activity</strong>
-              <small>Automatic can match running tools, subagents and reasoning steps. Fixed styles only change the Work tab and working indicator.</small>
-            </span>
-            <Switch
-              label="Use for tool and step activity"
-              checked={value.style === "automatic" && value.activity}
-              disabled={disabled || value.style !== "automatic"}
-              onChange={(activity) => commit({ activity })}
-            />
-          </div>
+          </SettingRow>
         </div>
         <div className="response-density-setting working-indicator-row">
           <span>
             <strong id="working-indicator-speed-label">Speed</strong>
-            <small>Waiting and stopping states always move at half this pace.</small>
           </span>
           <div role="radiogroup" aria-labelledby="working-indicator-speed-label" {...speeds.groupProps}>
             {WORKING_INDICATOR_SPEEDS.map((speed) => (
@@ -289,7 +269,18 @@ export function WorkingIndicatorSettings({
             ))}
           </div>
         </div>
-      </section>
+        <SettingDisclosure className="working-indicator-advanced" summary="Advanced">
+          <SettingRow id="working-indicator-activity" title="Animate tool and step activity" description="With Automatic, running tools, subagents and reasoning steps get their own animation.">
+            <Switch
+              label="Animate tool and step activity"
+              checked={value.style === "automatic" && value.activity}
+              disabled={disabled}
+              inactive={value.style !== "automatic"}
+              onChange={(activity) => commit({ activity })}
+            />
+          </SettingRow>
+        </SettingDisclosure>
+      </SettingsGroup>
     </WorkingIndicatorProvider>
   );
 }

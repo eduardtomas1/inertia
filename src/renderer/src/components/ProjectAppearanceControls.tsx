@@ -20,11 +20,12 @@ interface RadioOption<T extends string> { id: T; label: string; content: ReactNo
 const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown"]);
 const PREVIOUS_KEYS = new Set(["ArrowLeft", "ArrowUp"]);
 
-export function RovingRadioGroup<T extends string>({ label, options, value, disabled = false, className, onChange }: {
+export function RovingRadioGroup<T extends string>({ label, options, value, disabled = false, inactive = false, className, onChange }: {
   label: string;
   options: readonly RadioOption<T>[];
   value: T;
   disabled?: boolean;
+  inactive?: boolean;
   className?: string;
   onChange: (value: T) => void;
 }): React.JSX.Element {
@@ -39,15 +40,16 @@ export function RovingRadioGroup<T extends string>({ label, options, value, disa
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (inactive) return;
     buttons.current.get(target.id)?.focus();
     if (target.id !== value) onChange(target.id);
   };
-  return <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={className} onKeyDown={onKeyDown}>
+  return <div role="radiogroup" aria-label={label} aria-disabled={disabled || inactive || undefined} className={className} onKeyDown={onKeyDown}>
     {options.map((option) => <button key={option.id} type="button" role="radio" aria-checked={option.id === value}
-      aria-label={option.label} title={option.label} data-radio-id={option.id} disabled={disabled}
+      aria-label={option.label} title={option.label} data-radio-id={option.id} disabled={disabled} aria-disabled={inactive || undefined}
       tabIndex={option.id === focusable ? 0 : -1} style={option.style} className={option.className}
       ref={(node) => { if (node) buttons.current.set(option.id, node); else buttons.current.delete(option.id); }}
-      onClick={() => { if (option.id !== value) onChange(option.id); }}>{option.content}</button>)}
+      onClick={() => { if (!inactive && option.id !== value) onChange(option.id); }}>{option.content}</button>)}
   </div>;
 }
 
@@ -63,9 +65,10 @@ function swatchStyle(color: ProjectColor): CSSProperties | undefined {
   return projectTintStyle({ preferences: { ...defaultProjectPreferences(), color } });
 }
 
-export function ProjectColorPicker({ value, disabled = false, onChange }: {
+export function ProjectColorPicker({ value, disabled = false, inactive = false, onChange }: {
   value: ProjectColor | null;
   disabled?: boolean;
+  inactive?: boolean;
   onChange: (color: ProjectColor | null) => void;
 }): React.JSX.Element {
   useProjectColorRevision();
@@ -90,7 +93,7 @@ export function ProjectColorPicker({ value, disabled = false, onChange }: {
     if (!input) return;
     const commit = (): void => {
       const next = normalizeProjectHexColor(input.value);
-      if (next) onChangeRef.current({ kind: "custom", value: next });
+      if (next && input.getAttribute("aria-disabled") !== "true") onChangeRef.current({ kind: "custom", value: next });
     };
     input.addEventListener("change", commit);
     return () => input.removeEventListener("change", commit);
@@ -106,6 +109,7 @@ export function ProjectColorPicker({ value, disabled = false, onChange }: {
   ];
   const selected: ColorChoice = !value ? "default" : value.kind === "palette" ? value.name : "custom";
   const applyDraft = (): void => {
+    if (inactive) return;
     const next = normalizeProjectHexColor(draft);
     setInvalid(!next);
     if (!next) return;
@@ -113,7 +117,7 @@ export function ProjectColorPicker({ value, disabled = false, onChange }: {
     if (next !== customValue) onChange({ kind: "custom", value: next });
   };
   return <div className="project-color-picker">
-    <RovingRadioGroup label="Project colour" options={options} value={selected} disabled={disabled} className="project-swatches"
+    <RovingRadioGroup label="Project colour" options={options} value={selected} disabled={disabled} inactive={inactive} className="project-swatches"
       onChange={(choice) => {
         if (choice === "default") onChange(null);
         else if (choice === "custom") { if (rememberedCustom) onChange({ kind: "custom", value: rememberedCustom }); }
@@ -122,11 +126,11 @@ export function ProjectColorPicker({ value, disabled = false, onChange }: {
     <div className="project-color-custom">
       <label className="project-color-well" title="Pick a custom colour">
         <Pipette size={13} aria-hidden="true" />
-        <input ref={colorInput} type="color" aria-label="Pick a custom colour" disabled={disabled}
+        <input ref={colorInput} type="color" aria-label="Pick a custom colour" disabled={disabled} aria-disabled={inactive || undefined}
           defaultValue={customValue ?? "#6f76d9"} />
       </label>
       <input className="project-color-hex" aria-label="Custom colour hex value" placeholder="#RRGGBB" spellCheck={false}
-        autoComplete="off" maxLength={7} disabled={disabled} value={draft} aria-invalid={invalid || undefined}
+        autoComplete="off" maxLength={7} disabled={disabled} readOnly={inactive} aria-disabled={inactive || undefined} value={draft} aria-invalid={invalid || undefined}
         aria-describedby={invalid ? hexId : undefined}
         onChange={(event) => { setDraft(event.target.value); setDirty(true); setInvalid(false); }}
         onBlur={() => { if (dirty && draft.trim()) applyDraft(); }}
@@ -136,12 +140,13 @@ export function ProjectColorPicker({ value, disabled = false, onChange }: {
   </div>;
 }
 
-export function ProjectEmphasisPicker({ value, disabled = false, onChange }: {
+export function ProjectEmphasisPicker({ value, disabled = false, inactive = false, onChange }: {
   value: ProjectColorEmphasis;
   disabled?: boolean;
+  inactive?: boolean;
   onChange: (value: ProjectColorEmphasis) => void;
 }): React.JSX.Element {
-  return <RovingRadioGroup label="Colour shows on" value={value} disabled={disabled} className="project-emphasis-picker" onChange={onChange}
+  return <RovingRadioGroup label="Colour shows on" value={value} disabled={disabled} inactive={inactive} className="project-emphasis-picker" onChange={onChange}
     options={PROJECT_COLOR_EMPHASES.map((emphasis) => ({ id: emphasis, label: PROJECT_COLOR_EMPHASIS_LABELS[emphasis],
       content: PROJECT_COLOR_EMPHASIS_LABELS[emphasis], className: "project-emphasis-option" }))} />;
 }

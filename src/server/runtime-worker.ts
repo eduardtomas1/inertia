@@ -22,6 +22,7 @@ import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-clie
 import {
   RuntimeAgentBrowserBrokerClient,
 } from "./runtime/agent-browser-broker-client.js";
+import { RuntimeIssueEvidenceBrokerClient } from "./runtime/issue-evidence-broker-client.js";
 import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 import {
   activateRuntimeOwnedProcessRegistry,
@@ -94,6 +95,7 @@ const documents = new RuntimeDocumentPreparationClient(post);
 const prepareDocuments = createBrokeredDocumentPreparer(documents.runner);
 const secureFiles = new RuntimeSecureFileBrokerClient(post);
 const agentBrowser = new RuntimeAgentBrowserBrokerClient(post);
+const issueEvidence = new RuntimeIssueEvidenceBrokerClient(post);
 
 async function finishShutdown(
   activeRuntime: RunningRuntime | null,
@@ -111,6 +113,7 @@ async function finishShutdown(
       documents.close();
       secureFiles.close();
       agentBrowser.close();
+      issueEvidence.close();
     },
     ...(process.platform === "win32"
       ? { ownedProcessAdmissionFence: fenceWindowsRuntimeOwnedProcessAdmissions }
@@ -188,6 +191,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.agent-browser-result") {
     agentBrowser.handle(command);
+    return;
+  }
+  if (command.type === "runtime.issue-evidence-result") {
+    issueEvidence.handle(command);
     return;
   }
   if (command.type === "runtime.record-system-suspend") {
@@ -682,6 +689,7 @@ parentPort.on("message", (messageEvent) => {
     prepareDocumentAttachments: prepareDocuments,
     secureFiles,
     agentBrowser,
+    issueEvidence,
   }), async (startedRuntime) => {
     starting = false;
     if (stopping) {

@@ -342,7 +342,7 @@ async function captureAgentStates(viewport: Viewport): Promise<void> {
 }
 
 async function captureDiscordStates(viewport: Viewport): Promise<void> {
-  const repository = page.getByRole("textbox", { name: "Discord release repository URL" });
+  const repository = page.getByRole("textbox", { name: "Repository URL" });
   await repository.click();
   await page.keyboard.type("not-a-url", { delay: 150 });
   await expect(repository).toHaveValue("not-a-url");
@@ -352,7 +352,7 @@ async function captureDiscordStates(viewport: Viewport): Promise<void> {
   await repository.fill("https://github.com/eduardtomas1/inertia");
   await repository.blur();
   await expect(repository).not.toHaveAttribute("aria-invalid");
-  const webhook = page.getByRole("textbox", { name: "Discord webhook URL" });
+  const webhook = page.getByRole("textbox", { name: "Webhook URL" });
   await webhook.fill("https://discord.com/api/webhooks/evidence/fixture");
   const post = page.getByRole("button", { name: "Post release to Discord…" });
   await post.click();

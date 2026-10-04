@@ -130,8 +130,8 @@ describe("Connections and devices settings", () => {
       revokePrivateConnectDevice: vi.fn(async () => { throw new Error("Revocation failed."); }),
     });
     render(<ConnectionsAndDevicesSettings projects={[]} />);
-    expect(await screen.findByRole("combobox", { name: "Access for Phone" })).toHaveValue("monitor");
-    expect(screen.getByLabelText("Expires for Phone")).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Access Phone" })).toHaveValue("monitor");
+    expect(screen.getByLabelText("Expires Phone")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save access" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Revocation failed.");

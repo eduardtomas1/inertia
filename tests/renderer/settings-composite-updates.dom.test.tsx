@@ -587,7 +587,7 @@ describe("Settings composite updates", () => {
     await waitFor(() => expect(getBackendCredentialState).toHaveBeenCalledWith({
       profileId: "discord-release-webhook",
     }));
-    const repository = screen.getByLabelText("Discord release repository URL");
+    const repository = screen.getByLabelText("Repository URL");
     expect(repository).toHaveValue("");
 
     fireEvent.change(repository, {
@@ -602,7 +602,7 @@ describe("Settings composite updates", () => {
       discordReleaseRepositoryUrl: "https://github.com/eduardtomas1/inertia",
     });
 
-    const webhook = screen.getByLabelText("Discord webhook URL");
+    const webhook = screen.getByLabelText("Webhook URL");
     expect(webhook).toHaveValue("");
 
     fireEvent.change(webhook, {

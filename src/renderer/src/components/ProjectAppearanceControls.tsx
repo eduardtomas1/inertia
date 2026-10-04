@@ -34,16 +34,13 @@ export function RovingRadioGroup<T extends string>({ label, options, value, disa
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const index = options.findIndex((option) => option.id === (event.target as HTMLElement).dataset.radioId);
     if (index < 0 || disabled) return;
-    if (inactive) {
-      if (NEXT_KEYS.has(event.key) || PREVIOUS_KEYS.has(event.key) || event.key === "Home" || event.key === "End") event.preventDefault();
-      return;
-    }
     const target = NEXT_KEYS.has(event.key) ? options[(index + 1) % options.length]
       : PREVIOUS_KEYS.has(event.key) ? options[(index - 1 + options.length) % options.length]
         : event.key === "Home" ? options[0] : event.key === "End" ? options.at(-1) : undefined;
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();
+    if (inactive) return;
     buttons.current.get(target.id)?.focus();
     if (target.id !== value) onChange(target.id);
   };
@@ -90,14 +87,13 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
     if (colorInput.current) colorInput.current.value = customValue;
   }, [customValue]);
   const onChangeRef = useRef(onChange);
-  const inactiveRef = useRef(inactive);
-  useEffect(() => { onChangeRef.current = onChange; inactiveRef.current = inactive; }, [inactive, onChange]);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   useEffect(() => {
     const input = colorInput.current;
     if (!input) return;
     const commit = (): void => {
       const next = normalizeProjectHexColor(input.value);
-      if (next && !inactiveRef.current) onChangeRef.current({ kind: "custom", value: next });
+      if (next && input.getAttribute("aria-disabled") !== "true") onChangeRef.current({ kind: "custom", value: next });
     };
     input.addEventListener("change", commit);
     return () => input.removeEventListener("change", commit);

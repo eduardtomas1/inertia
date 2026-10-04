@@ -26,6 +26,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [failedNow, setFailedNow] = useState(false);
@@ -65,6 +66,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const apply = useCallback((next: IssueReport | null, initial = false) => {
     if (!mounted.current) return;
     setLoaded(true);
+    setLoadFailed(false);
     setReport(next);
     if (!next) return;
     const key = `${next.id}:${next.revision}`;
@@ -87,9 +89,14 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
 
   useEffect(() => {
     mounted.current = true;
-    void command({ type: "support.report.get" })
-      .then(() => command({ type: "support.report.github" }))
-      .catch(() => { if (mounted.current) setLoaded(true); });
+    void command({ type: "support.report.get" }).then(
+      () => command({ type: "support.report.github" }).catch(() => undefined),
+      () => {
+        if (!mounted.current) return;
+        setLoaded(true);
+        setLoadFailed(true);
+      },
+    );
     return () => { mounted.current = false; };
   }, [command]);
 
@@ -108,7 +115,10 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
     setStatus("");
     setFailedNow(false);
     try { await operation(); }
-    catch { if (mounted.current) setError("The request did not finish. Nothing was published; try again."); }
+    catch {
+      if (mounted.current) setError("The request could not be finished. Check the report before trying again.");
+      await command({ type: "support.report.get" }).catch(() => undefined);
+    }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   };
 
@@ -311,6 +321,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
     </div>}
     <div className="issue-report-messages">
       {showPreview && notice && <p className={report.status === "failed" ? "is-error" : undefined} role={failedNow && report.status === "failed" ? "alert" : "status"}>{notice}</p>}
+      {loadFailed && <p className="is-error">The saved report could not be loaded. Reopen this page to try again.</p>}
       {error && <p className="is-error" role="alert">{error}</p>}
       <p role="status">{status}</p>
     </div>

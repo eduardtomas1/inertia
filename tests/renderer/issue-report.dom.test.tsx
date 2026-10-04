@@ -123,6 +123,40 @@ it("announces a publication failure with its own message and keeps the issue ret
   expect(screen.getByLabelText("Body")).toHaveValue(saved("failed").body);
 });
 
+it("rereads the saved report after an unfinished Create on GitHub and never claims nothing was published", async () => {
+  const { props, request, setReport } = fixture(saved("preview"));
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (command) => {
+    if (command.type === "support.report.submit") {
+      setReport(saved("uncertain", { revision: 6, notice: "GitHub may still have received the issue." }));
+      throw new Error("socket closed after the runtime started publishing");
+    }
+    return await original(command);
+  });
+  render(<IssueReportSettings {...props} />);
+  await screen.findByLabelText("Body");
+  await waitFor(() => expect(commands(request, "support.report.github")).toHaveLength(1));
+  fireEvent.click(screen.getByRole("button", { name: "Create on GitHub" }));
+  expect(await screen.findByRole("button", { name: "Check submission" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Create on GitHub" })).toBeNull();
+  expect(screen.getByText("GitHub may still have received the issue.")).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("The request could not be finished.");
+  expect(document.body).not.toHaveTextContent(/Nothing was published/u);
+  expect(commands(request, "support.report.get")).toHaveLength(2);
+});
+
+it("says so when the saved report cannot be loaded", async () => {
+  const { props, request } = fixture(saved("preview"));
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (command) => {
+    if (command.type === "support.report.get") throw new Error("runtime unavailable");
+    return await original(command);
+  });
+  render(<IssueReportSettings {...props} />);
+  expect(await screen.findByText("The saved report could not be loaded. Reopen this page to try again.")).toBeVisible();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("shows a saved failure on reopening without an alert", async () => {
   const { props } = fixture(saved("failed", { notice: ISSUE_GITHUB_MESSAGES.offline }));
   render(<IssueReportSettings {...props} />);

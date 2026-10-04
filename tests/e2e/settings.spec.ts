@@ -182,9 +182,9 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await expect(profileRail.getByText("Cursor", { exact: true })).toBeVisible();
   await expect(profileRail.getByText("OpenCode", { exact: true })).toBeVisible();
   await expect(profileRail.getByText("Kimi", { exact: true })).toBeVisible();
-  await expect(profileRail.locator(".backend-profile-rail-item").filter({
-    hasText: /^OpenAI/u,
-  }).locator(".backend-profile-state")).toHaveText("Ready");
+  const nativeOpenAi = profileRail.locator(".backend-profile-rail-item").filter({ hasText: /^OpenAI/u });
+  await expect(nativeOpenAi).toContainText("Harness managed");
+  await expect(nativeOpenAi.locator(".backend-profile-state")).toHaveCount(0);
   await expect(profileRail.getByRole("button", {
     name: /^Kimi api\.kimi\.com/u,
   }).locator(".backend-profile-state")).not.toHaveText("Ready");
@@ -341,7 +341,7 @@ test("keeps runtime support and application update checks explicit in settings",
   await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
   await expect(page.getByText(/· Every 1 hour · 5 copies, 512 MiB in total$/u)).toBeVisible();
-  await expect(page.getByText(/^Memory .+ · Database .+ · Browser cache .+ · Temporary attachments .+$/u)).toBeVisible();
+  await expect(page.getByText(/^Database .+ · Browser cache .+ · Temporary attachments .+ · Measured .+$/u)).toBeVisible();
   const exportPath = join(testDirectory, "settings-recovery-export.json");
   await electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showSaveDialog", async () => ({

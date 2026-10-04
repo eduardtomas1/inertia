@@ -196,6 +196,7 @@ async function waitForSettledSection(): Promise<void> {
     const height = element.scrollHeight;
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(element.scrollHeight === height
       && document.getAnimations().every((animation) => animation.playState !== "running"
+        || animation.timeline !== document.timeline
         || animation.effect?.getTiming().iterations === Infinity))));
   }))).toBe(true);
 }

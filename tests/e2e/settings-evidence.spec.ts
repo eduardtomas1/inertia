@@ -192,7 +192,12 @@ async function capture(name: string, options: { keepFocus?: boolean; target?: Pa
 async function waitForSettledSection(): Promise<void> {
   await expect(settingsContent().locator("[aria-busy='true']")).toHaveCount(0);
   await expect(settingsContent()).not.toContainText(/Loading .*…/u);
-  await page.waitForTimeout(300);
+  await expect.poll(() => settingsContent().evaluate((element) => new Promise<boolean>((resolve) => {
+    const height = element.scrollHeight;
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(element.scrollHeight === height
+      && document.getAnimations().every((animation) => animation.playState !== "running"
+        || animation.effect?.getTiming().iterations === Infinity))));
+  }))).toBe(true);
 }
 
 async function openSection(label: string): Promise<void> {

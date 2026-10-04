@@ -15,7 +15,7 @@ function exposeSensitiveJsonKeys(text: string): string {
 
 const SECRET_NAME_PART = /^(?:[A-Z0-9]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|COOKIE|PAT|AUTH|SESSION)S?|PASS|PWD|SID|AUTHORIZATION|BEARER)$/u;
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/u;
-const ASSIGNMENT_NAME = /(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*)\\?["']?[ \t]*([:=])[ \t]*/gu;
+const ASSIGNMENT_NAME = /(?<![A-Za-z0-9])(?=[A-Za-z][A-Za-z0-9_-]{0,127}\\?["']?[ \t]*[:=])([A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*)\\?["']?[ \t]*([:=])[ \t]*/gu;
 const ASSIGNMENT_VALUE = /(?!\[redacted)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[^\n]+)/uy;
 
 function redactedAssignment(name: string, separator: string): boolean {
@@ -52,9 +52,9 @@ function scrubOnce(text: string, limit: number): string {
     .replace(/\b(?:npm|hf)_[A-Za-z0-9]{30,}/gu, "[redacted token]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[redacted token]")
     .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]"))
-    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]+/giu, "[redacted URL]")
-    .replace(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*:[^\s<>"']+/gu, "[redacted URL]")
-    .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
+    .replace(/(?:(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]+/giu, "[redacted URL]")
+    .replace(/(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)*:[^\s<>"']+/gu, "[redacted URL]")
+    .replace(/(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
     .replace(/(?:(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\)[^\n"'<>()[\]{}]*/gu, "[private path]")
     .replace(HOME_VARIABLE_PATH, "[private path]")
     .replace(ABSOLUTE_PATH, "[private path]")

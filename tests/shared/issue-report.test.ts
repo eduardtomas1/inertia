@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { providerIdSchema } from "../../src/shared/contracts/client-command/common";
-import { REPORT_PROVIDER_IDS } from "../../src/shared/issue-report";
+import { REPORT_BODY_LIMIT, REPORT_PROVIDER_IDS } from "../../src/shared/issue-report";
 import { scrubReportText } from "../../src/shared/issue-report-scrub";
 
 it.each([
@@ -149,3 +149,22 @@ it("scrubbing twice gives the same result", () => {
 it("accepts exactly the providers the command contracts accept", () => {
   expect([...REPORT_PROVIDER_IDS].sort()).toEqual([...providerIdSchema.options].sort());
 });
+
+it.each(["a.", "a-", "a_", "a.b-c+d_", "a@b.", "x-y=", "ab.cd-ef:"])("scrubs a full body of repeated %j in linear time and stays stable", (unit) => {
+  const text = unit.repeat(Math.ceil(REPORT_BODY_LIMIT / unit.length)).slice(0, REPORT_BODY_LIMIT);
+  const started = performance.now();
+  const scrubbed = scrubReportText(text, REPORT_BODY_LIMIT);
+  expect(performance.now() - started).toBeLessThan(100);
+  expect(scrubReportText(scrubbed, REPORT_BODY_LIMIT)).toBe(scrubbed);
+});
+
+it.each([
+  ["1-SECRET=abc", "1-SECRET=[redacted secret]"],
+  ["9a-TOKEN=abc", "9a-TOKEN=[redacted secret]"],
+  ["x git@github.com:org/repo.git y", "x [redacted URL] y"],
+  ["mail me@example.com now", "mail [redacted email] now"],
+  ["see https://a.b/c", "see [redacted URL]"],
+])("keeps redacting %j", (input, expected) => {
+  expect(scrubReportText(input)).toBe(expected);
+});
+

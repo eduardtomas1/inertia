@@ -137,11 +137,12 @@
   font-weight: 560;
 }
 
-.mascot-sprite-files {
+.mascot-sprite-guide .mascot-sprite-files {
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
+  gap: 0;
   margin: 0;
-  padding: 0;
+  padding: 6px 0 6px 38px;
   list-style: none;
 }
 

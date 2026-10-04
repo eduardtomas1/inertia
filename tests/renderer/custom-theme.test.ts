@@ -33,12 +33,43 @@ describe("custom appearance palettes", () => {
     }
   });
 
-  it("keeps the preset palettes and the vivid custom palettes byte-identical", () => {
+  it("keeps the preset palettes byte-identical and pins the vivid custom palettes", () => {
     const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
     expect(digest(PALETTE_FAMILIES.flatMap((family) => modes.map((mode) => [family, mode, buildPaletteTokens(family, mode)]))))
       .toBe("5e888df5b571fb4c5d686f8bffedd73c2307619344e5b81fb99fc83ac391dbef");
     expect(digest([...colors, "#0d9488", "#f97316"].flatMap((color) => modes.map((mode) => [color, mode, buildCustomPaletteTokens(color, mode)]))))
-      .toBe("bbe22750226c38ff901452c74412898ee0d927758d931286d65338468bed93b5");
+      .toBe("586bd35d799541be0f4de82b2ee78a76ad3960837f4ffd4520ba1ab865339a6b");
+  });
+
+  it.each(modes)("uses the picked colour as the %s accent and moves it only as far as contrast requires", (mode) => {
+    const seeds = Array.from({ length: 24 }, (_, index) => oklchToHex({ l: 0.62, c: 0.25, h: index * 15 }));
+    for (const color of [...seeds, ...colors, "#0d9488", "#f97316", "#2bc7b8", "#a3e635", "#1e3a8a"]) {
+      const palette = Object.fromEntries(buildCustomPaletteTokens(color, mode));
+      const guards = ["app-bg", "sidebar-bg", "surface", "surface-strong", "terminal-bg"].map((role) => palette[role]!);
+      const passes = (hex: string, target: number) => guards.every((background) => contrastRatio(hex, background) >= target);
+      if (passes(color, 3)) {
+        expect(palette.accent, `${color} accent`).toBe(color);
+      } else {
+        expect(passes(palette.accent!, 3), `${color} accent guard`).toBe(true);
+        expect(Math.min(...guards.map((background) => contrastRatio(palette.accent!, background))), `${color} accent clamp`).toBeLessThan(3.15);
+        expect(Math.sign(hexToOklch(palette.accent!).l - hexToOklch(color).l)).toBe(mode === "light" ? -1 : 1);
+      }
+      if (passes(color, 4.5)) expect(palette["accent-strong"], `${color} accent-strong`).toBe(color);
+      for (const fill of ["accent", "accent-hover"]) {
+        expect(contrastRatio(palette["accent-text"]!, palette[fill]!), `${color} accent-text on ${fill}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it.each(modes)("would leave every preset %s accent as it is", (mode) => {
+    for (const family of PALETTE_FAMILIES) {
+      const preset = Object.fromEntries(buildPaletteTokens(family, mode));
+      const seeded = Object.fromEntries(buildCustomPaletteTokens(preset.accent!, mode));
+      expect(seeded.accent, `${family} ${mode}`).toBe(preset.accent);
+      for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "terminal-bg"]) {
+        expect(contrastRatio(preset.accent!, preset[role]!), `${family} ${mode} on ${role}`).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 
   it.each(modes)("mutes a custom %s palette without changing its roles or elevations", (mode) => {
@@ -47,11 +78,14 @@ describe("custom appearance palettes", () => {
       const muted = Object.fromEntries(buildCustomPaletteTokens(color, mode, true));
       expect(Object.keys(muted)).toEqual(Object.keys(vivid));
       expect(buildCustomPaletteTokens(color, mode, true)).toEqual(buildCustomPaletteTokens(color, mode, true));
-      for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "accent", "accent-soft", "terminal-bg"]) {
+      for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "accent-soft", "terminal-bg"]) {
         expect(Math.abs(hexToOklch(muted[role]!).l - hexToOklch(vivid[role]!).l), `${color} ${role} lightness`).toBeLessThan(0.006);
       }
-      for (const role of ["app-bg", "surface", "accent", "accent-soft", "accent-strong", "message-action", "terminal-selection", "aurora-1"]) {
+      for (const role of ["app-bg", "surface", "accent-soft", "message-action", "terminal-selection", "aurora-1"]) {
         expect(hexToOklch(muted[role]!).c, `${color} ${role} chroma`).toBeLessThanOrEqual(hexToOklch(vivid[role]!).c * 0.55 + 0.002);
+      }
+      for (const role of ["accent", "accent-hover", "accent-strong"]) {
+        expect(hexToOklch(muted[role]!).c, `${color} ${role} chroma`).toBeLessThanOrEqual(hexToOklch(color).c * 0.5 + 0.002);
       }
       expect(Math.abs(hexToOklch(muted.accent!).h - hexToOklch(vivid.accent!).h) % 360).toBeLessThan(8);
     }

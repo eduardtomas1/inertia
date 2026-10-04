@@ -154,7 +154,7 @@ describe("Settings external section targets", () => {
       level: 2,
       name: "Devices & integrations",
     })).toHaveClass("settings-page-title");
-    const phoneAccess = await screen.findByLabelText("Access for Phone");
+    const phoneAccess = await screen.findByLabelText("Access Phone");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
     });
@@ -188,7 +188,7 @@ describe("Settings external section targets", () => {
       {...props}
       target={{ section: "devices" }}
     />);
-    expect(await screen.findByLabelText("Access for Phone")).toBeVisible();
+    expect(await screen.findByLabelText("Access Phone")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Help" }));
     expect(getAppHealth).not.toHaveBeenCalled();

@@ -190,7 +190,6 @@ export function DiscordSettings({
         className="discord-field"
         title="Repository URL"
         description="Public GitHub or GitLab repository used to find releases."
-        label="Discord release repository URL"
         disabled={disabled}
         maxLength={RELEASE_REPOSITORY_URL_MAX_LENGTH}
         placeholder="https://github.com/org/repo"
@@ -209,7 +208,7 @@ export function DiscordSettings({
         <span className="discord-webhook-control">
           <input
             className="setting-input"
-            aria-label="Discord webhook URL"
+            aria-label="Webhook URL"
             autoComplete="off"
             disabled={disabled || webhookBusy
               || webhookState?.storage.available === false}

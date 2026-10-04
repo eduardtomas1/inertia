@@ -26,7 +26,7 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
   await expect(settings).toBeVisible();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Devices & integrations", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Devices & integrations" })).toBeFocused();
-  const repository = page.getByRole("textbox", { name: "Discord release repository URL" });
+  const repository = page.getByRole("textbox", { name: "Repository URL" });
   await repository.pressSequentially("not a url");
   await expect(repository).toHaveValue("not a url");
   await repository.press("Escape");

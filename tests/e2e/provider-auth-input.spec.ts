@@ -667,8 +667,9 @@ test("OpenCode credential setup accepts menu keys, typing and a pasted code", as
 
 test("Antigravity sign-in accepts a retry and a menu paste in its own prompt", async () => {
   test.setTimeout(120_000);
-  const row = app.page.getByRole("button", { name: "Configure Antigravity", exact: true });
-  await expect(row).toContainText("Antigravity checks your sign-in", { timeout: 30_000 });
+  const header = app.page.locator(".provider-settings-editor-header");
+  await app.page.getByRole("button", { name: "Configure Antigravity", exact: true }).click();
+  await expect(header).toContainText("Antigravity checks your sign-in", { timeout: 30_000 });
 
   const dialog = await openConnect("Antigravity", "Connect");
   await expect(dialog).toContainText("Authorization code:");
@@ -691,6 +692,6 @@ test("Antigravity sign-in accepts a retry and a menu paste in its own prompt", a
   await expect.poll(() => executableProcessExists(pid)).toBe(false);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(row).toContainText("Antigravity checks your sign-in");
+  await expect(header).toContainText("Antigravity checks your sign-in");
   expect(app.rendererErrors).toEqual([]);
 });

@@ -74,7 +74,7 @@ describe("diagnostics export for an issue report", () => {
     for (const value of [old.id, recent.id, projectId, conversationId]) expect(text).not.toContain(value);
   });
 
-  it("keeps the newest incidents within maxBytes and returns nothing when even one does not fit", async () => {
+  it("keeps the newest incidents within maxBytes and says diagnostics were omitted when even one does not fit", async () => {
     const diagnostics = await journal();
     const incidents = Array.from({ length: 12 }, (_, index) => incident(index));
     for (const value of incidents) diagnostics.recordIncident(value);
@@ -86,7 +86,7 @@ describe("diagnostics export for an issue report", () => {
     expect(records.length).toBeGreaterThan(0);
     expect(records.length).toBeLessThan(12);
     expect(records[0]!.at).toBe(incidents[0]!.at);
-    await expect(exportDiagnosticsForReport({ sinceMs: now - 60 * 60_000, maxBytes: 200 })).resolves.toBe("");
+    await expect(exportDiagnosticsForReport({ sinceMs: now - 60 * 60_000, maxBytes: 200 })).resolves.toBe("Diagnostics omitted: exceeded the size cap.");
   });
 
   it("rejects an invalid cutoff or size bound", async () => {

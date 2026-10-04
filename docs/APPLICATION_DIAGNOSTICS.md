@@ -26,8 +26,11 @@ Detached chats retain their existing failure details/copy action.
 
 Capture is on by default. The choice is stored by the main process in
 `userData/diagnostics-preferences.json` (no-follow open, 512-byte cap, strict
-two-key parse, atomic private write) and read before the journal is created, so
-it applies from the first event of a launch. A temporary file left by a write
+two-key parse, atomic private write followed by a directory sync) and read
+before the journal is created, so it applies from the first event of a launch.
+A missing file means capture is on. A file that exists but cannot be read or
+parsed (corrupt, tampered, oversized, a link, or not readable) turns capture off
+for that launch and writes a `diagnostics.preferences-unreadable` marker. A temporary file left by a write
 interrupted by a crash is removed when the journal opens. Turning capture off flushes pending
 incidents, writes a `diagnostics.capture-stopped` marker, then stops all other
 recording: incidents and gated lifecycle events are dropped before they reach
@@ -36,8 +39,8 @@ memory or disk and are not counted as dropped writes. Turning it on writes
 
 These events are recorded even while capture is off, so a crash report is never
 empty: `app.start`, `app.stop`, `runtime.failure`, `runtime.restart-requested`,
-`renderer.crash` and the `diagnostics.capture-started`, `capture-stopped` and
-`history-cleared` markers.
+`renderer.crash` and the `diagnostics.capture-started`, `capture-stopped`,
+`history-cleared` and `preferences-unreadable` markers.
 
 `createIncidentReporter` returns `null` when the sink reports that nothing was
 stored, so main-process callers (Discord release info, credential vault,

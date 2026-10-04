@@ -21,6 +21,8 @@ type ExportItem =
   | { kind: "event"; at: string; id: string; entry: DiagnosticEventEntry };
 type ProjectedItem = { kind: "incident" | "event"; value: Record<string, unknown>; bytes: number };
 
+const OMITTED_REPORT = "Diagnostics omitted: exceeded the size cap.";
+
 interface IncidentIndexOptions {
   now: () => number;
   retentionMs: number;
@@ -140,7 +142,9 @@ export class ApplicationIncidentIndex {
 
   exportWithin(value: DiagnosticQuery, maxBytes: number, events: readonly DiagnosticEventEntry[] = []): string {
     const projected = this.project(this.matching(value, events));
-    return projected.length === 0 ? "" : this.newestWithin(projected, maxBytes);
+    if (projected.length === 0) return "";
+    const report = this.newestWithin(projected, maxBytes);
+    return report || (Buffer.byteLength(OMITTED_REPORT) <= maxBytes ? OMITTED_REPORT : "");
   }
 
   private newestWithin(projected: readonly ProjectedItem[], maxBytes: number): string {

@@ -37,20 +37,39 @@ function redactSecretAssignments(text: string): string {
   return result + text.slice(last);
 }
 
-/** Deliberately lossy scrub for user-authored text, never a raw-log sanitizer. */
-export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string {
+const PATH_WORD = String.raw`(?:(?!\[(?:redacted|private) )[^\s<>"'])+`;
+const PATH_REST = String.raw`${PATH_WORD}(?: (?=[^\s<>"'()[\]{}/]+/)${PATH_WORD})*`;
+const HOME_VARIABLE_PATH = new RegExp(String.raw`(?:\$(?:HOME|\{HOME\}|USERPROFILE)|%USERPROFILE%)[\\/](?:${PATH_REST})?`, "gu");
+const ABSOLUTE_PATH = new RegExp(String.raw`(?<![\w~])~?/${PATH_REST}`, "gu");
+const HOME_RELATIVE_PATH = new RegExp(String.raw`(?<!\w)(?:Users|home)[\\/]${PATH_REST}`, "gu");
+
+function scrubOnce(text: string, limit: number): string {
   return redactSecretAssignments(exposeSensitiveJsonKeys(text.slice(0, limit))
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/gu, "[redacted key]")
     .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[baprs])(?:[-_]|- )[A-Za-z0-9_-]+/giu, "[redacted token]")
     .replace(/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted token]")
+    .replace(/\bAIza[0-9A-Za-z_-]{30,}/gu, "[redacted token]")
+    .replace(/\b(?:npm|hf)_[A-Za-z0-9]{30,}/gu, "[redacted token]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[redacted token]")
     .replace(/\b(?:Bearer|Basic)\s+[^\s]+/giu, "[redacted authorization]"))
     .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]+/giu, "[redacted URL]")
-    .replace(/(?:(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\)[^\n"'<>()[\]{}]*/gu, "[private path]")
-    .replace(/(?:\$(?:HOME|\{HOME\}|USERPROFILE)|%USERPROFILE%)[\\/][^\s<>"']*/gu, "[private path]")
-    .replace(/(?<![\w~])~?\/[^\s<>"']+/gu, "[private path]")
-    .replace(/(?<!\w)(?:Users|home)[\\/][^\s<>"']+/gu, "[private path]")
+    .replace(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*:[^\s<>"']+/gu, "[redacted URL]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "[redacted email]")
+    .replace(/(?:(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\)[^\n"'<>()[\]{}]*/gu, "[private path]")
+    .replace(HOME_VARIABLE_PATH, "[private path]")
+    .replace(ABSOLUTE_PATH, "[private path]")
+    .replace(HOME_RELATIVE_PATH, "[private path]")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "")
     .slice(0, limit).trim();
+}
+
+/** Deliberately lossy scrub for user-authored text, never a raw-log sanitizer. */
+export function scrubReportText(text: string, limit = REPORT_TEXT_LIMIT): string {
+  let result = scrubOnce(text, limit);
+  for (let pass = 1; pass < 3; pass += 1) {
+    const next = scrubOnce(result, limit);
+    if (next === result) break;
+    result = next;
+  }
+  return result;
 }

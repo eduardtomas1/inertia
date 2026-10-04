@@ -82,6 +82,33 @@ it.each([
   expect(scrubReportText(text)).toBe(expected);
 });
 
+it.each([
+  ["error at /Users/John Smith/secret-app/src/a.ts", "error at [private path]"],
+  ["open /Users/eduard/Client Work/Acme Merger/plan.md", "open [private path]"],
+  ["failed at /Users/John Smith/a.ts. Then it stopped", "failed at [private path] Then it stopped"],
+  ["\"/Users/John Smith/a.ts\" was opened", "\"[private path]\" was opened"],
+  ["~/My Projects/app/x.ts failed twice", "[private path] failed twice"],
+  ["$HOME/My Projects/app failed", "[private path] failed"],
+  ["at Users/John Smith/x.ts and src/main.ts", "at [private path] and src/main.ts"],
+  ["see /tmp/a@example.com", "see [private path][redacted email]"],
+])("removes a whole path with spaces and keeps the prose after it: %s", (text, expected) => {
+  expect(scrubReportText(text)).toBe(expected);
+});
+
+it.each([
+  ["git clone git@github.com:acme-private/secret-roadmap.git", "git clone [redacted URL]"],
+  ["scp build eduard@devbox.corp.example:/srv/acme/secret now", "scp build [redacted URL] now"],
+  ["key AIzaSyA1234567890abcdefghijklmnopqrstu", "key [redacted token]"],
+  ["key npm_abcdefghijklmnopqrstuvwxyz0123456789", "key [redacted token]"],
+  ["key hf_abcdefghijklmnopqrstuvwxyz01234", "key [redacted token]"],
+])("removes an SSH remote or a known token format: %s", (text, expected) => {
+  expect(scrubReportText(text)).toBe(expected);
+});
+
+it("keeps an email before a colon and words that only resemble token prefixes", () => {
+  expect(scrubReportText("Ask bob@example.com: he saw it. Run npm-run-all, npm_config_cache and hf_hub.")).toBe("Ask [redacted email]: he saw it. Run npm-run-all, npm_config_cache and hf_hub.");
+});
+
 it("is idempotent", () => {
   const samples = [
     "Authorization=Bearer abcdef", "Authorization: Token abcdef", "{\"token\": \"abc\"}", "{\\\"password\\\":\\\"hunter\\\"}",
@@ -97,6 +124,26 @@ it("is idempotent", () => {
     const once = scrubReportText(sample, 24_000);
     expect(scrubReportText(once, 24_000), sample).toBe(once);
   }
+});
+
+it("scrubbing twice gives the same result", () => {
+  const samples = [
+    "MY_SETTING=hunter2-value", "password: a b c", "{\"Token\":\"x\"}", "/Users/John Smith/x", "a@b.co/x/y",
+    "see /tmp/a@example.com", "TOKEN=\"abc", "x=1 API_KEY=2", "Authorization: Bearer abc", "www.example.com/a?token=1",
+    "C:\\x\\y z", "KEY= ", "SECRET=\n", "foo_TOKEN: [redacted", "sk- abc", "~/a b/c", "1. Run MY_VAR=1 npm start\n2. See /Users/a/b",
+    "-----BEGIN RSA PRIVATE KEY-----\nabc", "path\\\\server\\share", "ghp_x@y.com", "\"api_key\" : 'v'", "a\u0001b", "  lead",
+    "PASS=1\nPWD=/Users/x", "session-id=abc", "eyJa.b.c", "home/x", "x.Users/y", "eduard@devbox.example/home/eduard/acme",
+  ];
+  const unstable: Array<{ input: string; once: string; twice: string }> = [];
+  for (const left of samples) {
+    for (const right of ["", " ", "\n", ...samples]) {
+      const input = `${left}${right ? ` ${right}` : ""}`;
+      const once = scrubReportText(input);
+      const twice = scrubReportText(once);
+      if (once !== twice) unstable.push({ input, once, twice });
+    }
+  }
+  expect(unstable).toEqual([]);
 });
 
 it("accepts exactly the providers the command contracts accept", () => {

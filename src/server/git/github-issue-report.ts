@@ -22,8 +22,8 @@ export function verifiedIssueUrl(text: string): string | null {
   return /^https:\/\/github\.com\/eduardtomas1\/inertia\/issues\/[1-9][0-9]*$/u.test(value) ? value : null;
 }
 
-export function classifyGitHubCliFailure(stderr: string): IssuePublicationFailure | null {
-  const text = stderr.slice(0, 16_384);
+export function classifyGitHubCliFailure(output: string): IssuePublicationFailure | null {
+  const text = output.slice(0, 16_384);
   if (/error connecting to|check your internet connection|no such host|could not resolve host|dial tcp|network is unreachable|connection refused|connection reset|tls handshake timeout|i\/o timeout|timeout trying to log in/iu.test(text)) return "offline";
   if (/not logged in|gh auth login|http 401|bad credentials|token in .+ is invalid|requires authentication/iu.test(text)) return "signed-out";
   if (/rate limit|http 429|too many requests|abuse detection/iu.test(text)) return "rate-limited";

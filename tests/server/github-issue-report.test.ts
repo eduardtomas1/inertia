@@ -1,3 +1,6 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyGitHubCliFailure, githubIssuePublisher, IssuePublicationError } from "../../src/server/git/github-issue-report";
 import { RestrictedCliError } from "../../src/server/restricted-cli-runner";
@@ -106,4 +109,33 @@ it("checks GitHub CLI readiness read-only and reports a missing CLI", async () =
   const missing = { ...dependencies, executableCandidates: async () => [] };
   await expect(githubIssuePublisher("/app", new AbortController().signal, missing).status()).resolves.toBe("missing");
   expect(mocks.run).toHaveBeenCalledTimes(2);
+});
+
+function stubGh(stdout: string, exitCode: number): ChildProcessWithoutNullStreams {
+  const streams = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
+  const child = Object.assign(new EventEmitter(), { pid: 4242, ...streams }) as unknown as ChildProcessWithoutNullStreams;
+  setImmediate(() => {
+    streams.stdout.end(stdout);
+    streams.stderr.end();
+    setImmediate(() => child.emit("close", exitCode));
+  });
+  return child;
+}
+
+it("classifies a GitHub CLI failure printed only to stdout before and after publication starts", async () => {
+  const actual = await vi.importActual<typeof import("../../src/server/restricted-cli-runner")>("../../src/server/restricted-cli-runner");
+  const outputs = [
+    { stdout: "github.com\n  X Failed to log in to github.com account octocat (keyring)\n  - The token in keyring is invalid.\n", exitCode: 1 },
+    { stdout: "", exitCode: 0 },
+    { stdout: "GraphQL: API rate limit exceeded for user ID 1.\n", exitCode: 1 },
+  ];
+  mocks.run.mockImplementation(async (executable: string, args: string[], options: Parameters<typeof actual.runRestrictedCli>[2]) => {
+    const output = outputs.shift()!;
+    return await actual.runRestrictedCli(executable, args, options, { spawn: () => stubGh(output.stdout, output.exitCode) });
+  });
+  const publisher = githubIssuePublisher("/app", new AbortController().signal, dependencies);
+  await expect(publisher.status()).resolves.toBe("signed-out");
+  const beforePublish = vi.fn();
+  await expect(publisher.create({ id, title: "A bug", body: "Useful report", beforePublish })).rejects.toMatchObject({ reason: "rate-limited" });
+  expect(beforePublish).toHaveBeenCalledOnce();
 });

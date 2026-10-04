@@ -250,6 +250,14 @@ describe("diagnostics exports", () => {
     ]);
   });
 
+  it("says diagnostics were omitted when even the newest record exceeds the report cap", () => {
+    const { diagnostics } = fixture();
+    expect(diagnostics.exportForReport(clock - 3_600_000, 100)).toBe("");
+    diagnostics.recordIncident(incident());
+    diagnostics.flushIncidents();
+    expect(diagnostics.exportForReport(clock - 3_600_000, 100)).toBe("Diagnostics omitted: exceeded the size cap.");
+  });
+
   it("truncates a full user export newest first at a record boundary and says so in the file", () => {
     const { diagnostics } = fixture({ maxFileBytes: 4 * 1_024 * 1_024 });
     for (let index = 0; index < 4_000; index += 1) {

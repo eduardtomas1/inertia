@@ -123,7 +123,6 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-model"
           title="Model"
-          label="Default model for new chats"
           description={effective.source === "fallback" && storedProvider && fallbackProvider
             ? `${storedProvider.label} is not available, so new chats use ${fallbackProvider.label}.`
             : undefined}
@@ -135,7 +134,6 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-reasoning"
           title="Reasoning"
-          label="Default reasoning for new chats"
           value={levels.length > 0 ? effective.reasoning ?? "" : ""}
           options={levels.length > 0 ? reasoningOptions : reasoningOptions.slice(0, 1)}
           disabled={disabled}
@@ -145,7 +143,6 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-work-mode"
           title="Work mode"
-          label="Default work mode for new chats"
           value={settings.defaultInteractionMode}
           options={WORK_MODES}
           disabled={disabled}
@@ -154,7 +151,6 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-access"
           title="Access"
-          label="Default access for new chats"
           value={settings.defaultAccessMode}
           options={ACCESS_MODES}
           disabled={disabled}

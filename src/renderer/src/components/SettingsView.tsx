@@ -97,6 +97,7 @@ const SettingsShell = memo(function SettingsShell({
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   const [section, setSection] = useState<SettingsSection>(target?.section ?? initialSection);
   const [memory] = useState<SettingsSectionMemory>(() => new Map());
   const focusRequest = useRef<FocusRequest | null>(target?.anchor ? { anchor: target.anchor } : null);
@@ -126,6 +127,11 @@ const SettingsShell = memo(function SettingsShell({
   useEffect(() => {
     onSectionChange?.(section);
   }, [onSectionChange, section]);
+  const navigationShown = query.trim() === "";
+  useLayoutEffect(() => {
+    if (!navigationShown) return;
+    navRef.current?.querySelector<HTMLElement>("[aria-current='page']")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [navigationShown, section]);
   const navigate = useCallback((next: SettingsSection) => {
     if (next === section) return;
     setSection(next);
@@ -164,7 +170,7 @@ const SettingsShell = memo(function SettingsShell({
     <main ref={rootRef} className="settings-view" aria-label="Settings" tabIndex={-1}>
       <aside className="settings-navigation">
         <SettingsSearch query={query} sections={searchSections} onQueryChange={setQuery} onChoose={openRow} />
-        {query.trim() === "" && <nav aria-label="Settings sections">
+        {navigationShown && <nav ref={navRef} aria-label="Settings sections">
           {SETTINGS_SECTIONS.map((item) => {
             const Icon = item.icon;
             const prefetch = (): void => prefetchSettingsSection(item);

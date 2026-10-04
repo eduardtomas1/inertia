@@ -29,7 +29,6 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
         </div>
         <SettingRadioGroup
           id="usage-display"
-          className="usage-display-setting"
           title="Usage display"
           description="Provider usage and context in the composer."
           value={settings.usageDisplayMode}

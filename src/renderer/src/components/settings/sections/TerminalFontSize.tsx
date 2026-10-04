@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { AppSettings } from "@shared/contracts";
-import { SettingStatus } from "../SettingsLayout";
+import { SettingRow } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
 
 export function TerminalFontSize({
@@ -38,26 +38,24 @@ export function TerminalFontSize({
   }, []);
   const shown = draft ?? pending ?? value;
   return (
-    <div className="range-setting" data-setting-id="terminal-font-size">
-      <span className="setting-title">
-        <label htmlFor="terminal-font-size">Terminal font size</label>
-        <SettingStatus notice={action.notice} />
+    <SettingRow id="terminal-font-size" title="Terminal font size" notice={action.notice}>
+      <span className="setting-range">
+        <input
+          ref={input}
+          id="terminal-font-size"
+          type="range"
+          min="11"
+          max="22"
+          step="1"
+          value={shown}
+          aria-label="Terminal font size"
+          disabled={disabled}
+          onChange={(event) => {
+            if (event.nativeEvent.type !== "change") setDraft(Number(event.currentTarget.value));
+          }}
+        />
+        <output htmlFor="terminal-font-size">{shown}px</output>
       </span>
-      <output htmlFor="terminal-font-size">{shown}px</output>
-      <input
-        ref={input}
-        id="terminal-font-size"
-        type="range"
-        min="11"
-        max="22"
-        step="1"
-        value={shown}
-        disabled={disabled}
-        onChange={(event) => {
-          if (event.nativeEvent.type !== "change") setDraft(Number(event.currentTarget.value));
-        }}
-      />
-      <div className="range-labels"><span>Compact</span><span>Comfortable</span></div>
-    </div>
+    </SettingRow>
   );
 }

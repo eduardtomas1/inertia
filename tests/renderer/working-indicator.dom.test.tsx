@@ -210,6 +210,15 @@ describe("working indicator settings", () => {
     expect(group.querySelectorAll(".working-orb")).toHaveLength(10);
   });
 
+  it("labels the style tiles by the group title and shows only each style's name", () => {
+    const { view } = renderSettings();
+    const group = screen.getByRole("radiogroup", { name: "Working indicator" });
+    expect(document.getElementById(group.getAttribute("aria-labelledby") ?? "")).toHaveRole("heading");
+    const tiles = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
+    expect(tiles.map((tile) => tile.textContent)).toEqual(tiles.map((tile) => tile.getAttribute("aria-label")));
+    expect(view.container.textContent).not.toMatch(/By activity|Agent activity/u);
+  });
+
   it("moves and selects with arrow keys, Home and End", () => {
     const { onUpdate } = renderSettings();
     const classic = screen.getByRole("radio", { name: "Classic" });

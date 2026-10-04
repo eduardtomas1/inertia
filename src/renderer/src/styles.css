@@ -9478,56 +9478,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   font-size: 9px;
 }
 
-/* Settings */
-.settings-view {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-  background: var(--surface-strong);
-}
-
-.settings-navigation {
-  display: flex;
-  width: 205px;
-  min-width: 205px;
-  min-height: 0;
-  flex-direction: column;
-  padding: 18px 10px;
-  border-right: 1px solid var(--panel-border);
-  background: var(--surface);
-}
-
-.settings-navigation nav { display: grid; gap: 3px; }
-.settings-navigation nav button { display: flex; min-height: 37px; align-items: center; gap: 9px; padding: 0 10px; border-radius: var(--radius-medium); color: var(--text-muted); background: transparent; font-size: 9.5px; text-align: left; }
-.settings-navigation nav button:hover,
-.settings-navigation nav button.is-active { color: var(--text); }
-.settings-navigation nav button:hover { background: var(--surface-hover); }
-.settings-navigation nav button.is-active {
-  background: var(--selected-surface);
-  font-weight: 630;
-}
-.settings-navigation nav button > small { min-width: 17px; margin-left: auto; padding: 2px 4px; border-radius: 999px; color: var(--text-muted); background: var(--surface-muted); font-size: 7px; text-align: center; }
-
-.settings-content {
-  width: min(810px, calc(100% - 52px));
-  max-width: 810px;
-  min-height: 0;
-  height: 100%;
-  flex: 1;
-  margin: 0 auto;
-  padding: 28px 0 48px;
-  overflow-y: auto;
-}
-
-.settings-section-loading {
-  display: grid;
-  min-height: 180px;
-  place-items: center;
-  color: var(--text-muted);
-}
-
 .settings-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -9535,39 +9485,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .settings-toolbar .secondary-button { flex: 0 0 auto; }
-
-.settings-card {
-  margin-bottom: 28px;
-  padding: 0 4px;
-}
-
-.settings-card-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.settings-card-heading > div {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--text-muted);
-}
-
-.settings-card-heading h3 {
-  margin: 1px 0 3px;
-  font-size: 12px;
-  font-weight: 670;
-}
-
-.settings-card-heading p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 9.5px;
-}
 
 .setting-action-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
 .setting-action-row > span { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -9579,14 +9496,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .application-update-setting > div { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .application-update-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
 .settings-card-note { margin: 10px 2px 0; color: var(--text-muted); font-size: 8.5px; }
-
-.settings-navigation nav::-webkit-scrollbar {
-  display: none;
-}
-
-.settings-navigation nav {
-  scrollbar-width: none;
-}
 
 .composer-route-confirmation .primary-button {
   min-height: 38px;
@@ -9738,10 +9647,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 
-.settings-rows {
-  overflow: visible;
-}
-
 .settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -9773,78 +9678,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .settings-form-grid input:focus,
 .settings-form-grid select:focus { border-color: var(--accent); }
-
-.shortcut-list {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-
-.shortcut-list > div,
-.shortcut-list > label {
-  display: flex;
-  min-height: 51px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 13px;
-  color: var(--text-soft);
-  background: var(--surface-strong);
-  font-size: 9.5px;
-}
-
-.shortcut-list > div + div,
-.shortcut-list > label + label { border-top: 1px solid var(--border); }
-.shortcut-list kbd { min-width: 45px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface-muted); font-family: inherit; font-size: 8px; text-align: center; }
-.shortcut-binding { display: flex; align-items: center; gap: 5px; }
-.shortcut-binding select { min-width: 48px; height: 28px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--surface-muted); font: inherit; text-align: center; }
-.settings-keybinding-reset { align-self: flex-start; }
-.settings-empty-state { display: flex; min-height: 150px; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--border-strong); border-radius: 12px; color: var(--text-muted); }
-.settings-empty-state strong { color: var(--text-soft); font-size: 10px; }
-.settings-empty-state span { font-size: 8.5px; }
-
-.setting-row {
-  display: flex;
-  min-height: 72px;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  background: transparent;
-}
-
-.setting-row + .setting-row {
-  border-top: 1px solid var(--border);
-}
-
-.setting-row-icon {
-  display: grid;
-  width: 31px;
-  height: 31px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: var(--radius-medium);
-  color: var(--text-soft);
-  background: var(--surface-muted);
-}
-
-.setting-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.setting-copy strong {
-  font-size: 10.5px;
-  font-weight: 620;
-}
-
-.setting-copy small {
-  color: var(--text-muted);
-  font-size: 9px;
-  line-height: 1.4;
-}
 
 .switch-control {
   position: relative;
@@ -9882,49 +9715,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .switch-control[data-checked="true"] .switch-thumb {
   transform: translateX(16px);
-}
-
-.range-setting {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-strong);
-}
-
-.range-setting label,
-.range-setting output {
-  font-size: 10px;
-  font-weight: 610;
-}
-
-.range-setting output {
-  color: var(--accent);
-}
-
-.range-setting input {
-  grid-column: 1 / -1;
-  width: 100%;
-  height: 4px;
-  margin: 5px 0 0;
-  accent-color: var(--accent);
-}
-
-.range-labels {
-  display: flex;
-  grid-column: 1 / -1;
-  justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 8px;
-}
-
-.settings-footnote {
-  margin: 24px 0 0;
-  color: var(--text-muted);
-  font-size: 9px;
-  text-align: center;
 }
 
 /* App notices and errors */
@@ -10192,14 +9982,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   }
 }
 
-@media (max-width: 900px) {
-  .settings-view { flex-direction: column; }
-  .settings-navigation { width: 100%; min-width: 0; min-height: 49px; flex: 0 0 auto; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--panel-border); }
-  .settings-navigation nav { display: flex; gap: 2px; overflow-x: auto; }
-  .settings-navigation nav button { min-height: 35px; flex: 0 0 auto; }
-  .settings-content { width: min(760px, calc(100% - 32px)); padding-top: 32px; }
-}
-
 @media (max-width: 760px) {
   body { min-width: 440px; }
 
@@ -10289,11 +10071,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
   .composer textarea {
     min-height: 48px;
-  }
-
-  .settings-content {
-    width: calc(100% - 30px);
-    padding: 38px 0;
   }
 
   .composer-route-confirmation {
@@ -12901,56 +12678,6 @@ button.sent-attachment-open:focus-visible {
   margin-left: 10px;
 }
 
-.response-density-setting {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.response-density-setting > span {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.response-density-setting strong {
-  font-size: 10px;
-}
-
-.response-density-setting small {
-  color: var(--text-muted);
-  font-size: 8px;
-  line-height: 1.45;
-}
-
-.response-density-setting > div {
-  display: flex;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-medium);
-  background: var(--surface-muted);
-}
-
-.response-density-setting button {
-  min-height: 28px;
-  padding: 0 8px;
-  border-radius: var(--radius-small);
-  color: var(--text-muted);
-  background: transparent;
-  font-size: 8px;
-  font-weight: 600;
-}
-
-.response-density-setting button.is-active {
-  color: var(--text);
-  background: var(--surface-strong);
-  box-shadow: var(--shadow-soft);
-}
-
 @container conversation-workspace (max-width: 1040px) {
   .message-scroll {
     padding-right: clamp(20px, 4cqi, 40px);
@@ -13093,15 +12820,6 @@ button.sent-attachment-open:focus-visible {
   .response-code-block > header button span,
   .turn-action span {
     display: none;
-  }
-
-  .response-density-setting {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .response-density-setting > div {
-    align-self: flex-start;
   }
 }
 
@@ -13347,48 +13065,14 @@ button.sent-attachment-open:focus-visible {
   height: var(--ui-control-height);
 }
 
-.settings-card-heading h3,
-.setting-copy strong,
 .settings-form-grid input,
-.settings-form-grid select,
-.shortcut-list > div,
-.shortcut-list > label {
+.settings-form-grid select {
   font-size: var(--ui-font-secondary);
 }
 
-.settings-card-heading p,
 .settings-card-note,
-.setting-copy small,
-.settings-form-grid label,
-.shortcut-list kbd {
+.settings-form-grid label {
   font-size: var(--ui-font-micro);
-}
-
-.settings-navigation nav button,
-.appearance-mode-option,
-.color-theme-option,
-.response-density-setting button {
-  min-height: var(--ui-control-height);
-  font-size: var(--ui-font-secondary);
-}
-
-.response-density-setting strong {
-  font-size: var(--ui-font-secondary);
-}
-
-.response-density-setting small {
-  font-size: var(--ui-font-micro);
-}
-
-.interface-scale-setting {
-  margin-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-@media (max-width: 900px) {
-  .interface-scale-setting > div {
-    flex-wrap: wrap;
-  }
 }
 
 /* Reusable model chooser result row. The chooser surface owns its container. */

@@ -74,7 +74,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
     Sound: [
       ["completion-sound", "Completion sound", ["sounds", "chime", "audio", "custom sounds", "your sounds", "import sound", "general"]],
       ["completion-sound-enabled", "Sound when a task ends", ["sounds", "audio", "mute", "chime"]],
-      ["completion-sound-long-runs", "Only after long tasks", ["sounds", "long tasks", "threshold", "quiet"]],
+      ["completion-sound-when", "Play sound", ["long task", "duration", "only after", "long tasks", "threshold", "quiet", "sounds"]],
     ],
     "Quota warnings": [
       ["quota-warnings", "Quota warnings", ["limit", "limits", "usage", "quota", "rate limit"]],
@@ -92,7 +92,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["shortcut-toggle-sidebar", "Toggle project navigation", ["sidebar", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["shortcut-toggle-terminal", "Toggle terminal", ["terminal", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["open-settings", "Open settings", ["preferences", "comma", "shortcut", "hotkey", "keybindings"]],
-      ["reset-shortcuts", "Reset shortcuts", ["keyboard defaults", "keyboard shortcuts", "hotkey", "keybindings"]],
+      ["reset-shortcuts", "Default shortcuts", ["reset shortcuts", "keyboard defaults", "keyboard shortcuts", "hotkey", "keybindings"]],
     ],
     "Global shortcut": [
       ["snapshot-shortcut", "Window snapshot", ["capture", "screenshot", "snapshot", "shortcut", "hotkey", "keybindings"]],

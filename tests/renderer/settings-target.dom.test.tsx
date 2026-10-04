@@ -131,13 +131,13 @@ describe("Settings external section targets", () => {
     expect(screen.getByRole("button", { name: "Agents" }))
       .toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 2, name: "Agents" }))
-      .toHaveClass("visually-hidden");
+      .toHaveClass("settings-page-title");
 
     fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     expect(screen.getByRole("button", { name: "Chats" }))
       .toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 2, name: "Chats" }))
-      .toHaveClass("visually-hidden");
+      .toHaveClass("settings-page-title");
     const answerScrollSwitch = screen.getByRole("switch", {
       name: "Scroll to the start of new answers",
     });
@@ -153,7 +153,7 @@ describe("Settings external section targets", () => {
     expect(screen.getByRole("heading", {
       level: 2,
       name: "Devices & integrations",
-    })).toHaveClass("visually-hidden");
+    })).toHaveClass("settings-page-title");
     const phoneAccess = await screen.findByLabelText("Access Phone");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },

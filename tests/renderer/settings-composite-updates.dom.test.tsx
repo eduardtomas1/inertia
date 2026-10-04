@@ -391,8 +391,8 @@ describe("Settings composite updates", () => {
     };
     const view = render(<SettingsView {...props} target={{ section: "chats" }} />);
 
-    const model = screen.getByRole("combobox", { name: "Default model for new chats" });
-    const reasoning = screen.getByRole("combobox", { name: "Default reasoning for new chats" });
+    const model = screen.getByRole("combobox", { name: "Model" });
+    const reasoning = screen.getByRole("combobox", { name: "Reasoning" });
     expect(model).toHaveDisplayValue("Codex default");
     expect(reasoning).toHaveValue("");
     expect(reasoning).toHaveDisplayValue("Model default (Low)");

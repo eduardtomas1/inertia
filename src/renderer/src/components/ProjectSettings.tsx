@@ -46,10 +46,11 @@ function normalizeBudget(draft: string): string {
   return budgetPattern.test(text) ? String(Number(text)) : text;
 }
 
-function ProjectSelect({ label, value, disabled, options, onChange }: {
-  label: string; value: string; disabled: boolean; options: Record<string, string>; onChange: (value: string) => void;
+function ProjectSelect({ label, value, disabled, inactive, options, onChange }: {
+  label: string; value: string; disabled: boolean; inactive: boolean; options: Record<string, string>; onChange: (value: string) => void;
 }): React.JSX.Element {
-  return <select className="setting-select" aria-label={label} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+  return <select className="setting-select" aria-label={label} value={value} disabled={disabled} aria-disabled={inactive || undefined}
+    onChange={(event) => { if (!inactive) onChange(event.target.value); }}>
     {Object.entries(options).map(([key, text]) => <option key={key} value={key}>{text}</option>)}
   </select>;
 }
@@ -66,7 +67,10 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const fileInput = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
-  const blocked = disabled || saving || !request;
+  const unavailable = disabled || !request;
+  const blocked = unavailable || saving;
+  const busy = saving || undefined;
+  const guarded = (action: () => void) => (): void => { if (!blocked) action(); };
   const busyProject = conversations.some((conversation) => conversation.projectId === project.id
     && (conversation.status === "running" || conversation.status === "needs-input"));
   const send = async (command: CommandWithoutId | (() => Promise<CommandWithoutId>)): Promise<void> => {
@@ -104,47 +108,47 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       <SettingRow id="project-icon" title="Project icon" description="A symbol, or a small image stored only on this device." notice={notice("project-icon")}>
         <div className="project-setting-control">
           <div className="project-icon-controls"><ProjectIcon project={project} size={20} />
-            <button type="button" className="secondary-button" disabled={blocked} aria-expanded={iconsOpen} onClick={() => setIconsOpen(!iconsOpen)}>Choose icon</button>
-            <button type="button" className="secondary-button" disabled={blocked} onClick={() => fileInput.current?.click()}>Choose file</button>
-            {preferences.icon && <button type="button" className="secondary-button" disabled={blocked} onClick={() => void setPreference("project-icon", "icon", null)}>Reset</button>}
+            <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} aria-expanded={iconsOpen} onClick={guarded(() => setIconsOpen(!iconsOpen))}>Choose icon</button>
+            <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => fileInput.current?.click())}>Choose file</button>
+            {preferences.icon && <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => void setPreference("project-icon", "icon", null))}>Reset</button>}
             <input ref={fileInput} type="file" hidden disabled={blocked} accept="image/png,image/jpeg,image/webp" onChange={(event) => {
               const file = event.currentTarget.files?.[0]; event.currentTarget.value = "";
               if (file) void change("project-icon", async () => update({ preferences: { ...preferences, icon: { kind: "image", data: await readProjectIcon(file) } } }));
             }} />
           </div>
-          {iconsOpen && <div className="project-icon-grid" role="group" aria-label="Project icons">{PROJECT_ICON_NAMES.map((icon) => <button type="button" key={icon} aria-label={`${icon} icon`} disabled={blocked}
-            onClick={() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); setIconsOpen(false); }}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={18} /></button>)}</div>}
+          {iconsOpen && <div className="project-icon-grid" role="group" aria-label="Project icons">{PROJECT_ICON_NAMES.map((icon) => <button type="button" key={icon} aria-label={`${icon} icon`} disabled={unavailable} aria-disabled={busy}
+            onClick={guarded(() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); setIconsOpen(false); })}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={18} /></button>)}</div>}
         </div>
       </SettingRow>
       <SettingRow id="project-colour" title="Project colour" description="Its chats inherit the colour." notice={notice("project-colour")}>
         <div className="project-setting-control">
-          <ProjectColorPicker value={preferences.color} disabled={blocked} onChange={(color) => setAppearance("project-colour", { color })} />
+          <ProjectColorPicker value={preferences.color} disabled={unavailable} inactive={saving} onChange={(color) => setAppearance("project-colour", { color })} />
         </div>
       </SettingRow>
       <SettingRow id="project-colour-emphasis" title="Colour shows on" notice={notice("project-colour-emphasis")}>
-        <ProjectEmphasisPicker value={preferences.colorEmphasis} disabled={blocked} onChange={(colorEmphasis) => setAppearance("project-colour-emphasis", { colorEmphasis })} />
+        <ProjectEmphasisPicker value={preferences.colorEmphasis} disabled={unavailable} inactive={saving} onChange={(colorEmphasis) => setAppearance("project-colour-emphasis", { colorEmphasis })} />
       </SettingRow>
       <SettingRow id="project-pin" title="Pin to top" description="First in the project filter and project choosers." notice={notice("project-pin")}>
-        <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={blocked} onChange={(pinned) => setAppearance("project-pin", { pinned })} />
+        <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={unavailable} inactive={saving} onChange={(pinned) => setAppearance("project-pin", { pinned })} />
       </SettingRow>
     </SettingsGroup>
     <SettingsGroup title="New chats">
       <SettingRow id="project-model" title="Model" description="Existing chats keep their model." notice={notice("project-model")}>
         <ProjectModelDefault projectId={project.id} providers={providers} backendDefaults={backendDefaults}
-          backendProfiles={backendProfiles} settings={settings} disabled={blocked} onChange={setModel} />
+          backendProfiles={backendProfiles} settings={settings} disabled={unavailable} inactive={saving} onChange={setModel} />
       </SettingRow>
       <SettingRow id="project-workspace" title="Where new chats run" description="Existing checkouts are never moved." notice={notice("project-workspace")}>
-        <ProjectSelect label="Where new chats run in this project" value={preferences.workspace ?? ""} disabled={blocked}
+        <ProjectSelect label="Where new chats run in this project" value={preferences.workspace ?? ""} disabled={unavailable} inactive={saving}
           options={{ "": `Default (${workspaceOptions[settings.newThreadMode]})`, ...workspaceOptions }}
           onChange={(value) => void setPreference("project-workspace", "workspace", value as ProjectPreferences["workspace"] || null)} />
       </SettingRow>
       <SettingRow id="project-default-access" title="Default access" description={preferences.defaultAccessMode === "full" ? "Choose Full access only for a workspace and task you trust." : undefined} notice={notice("project-default-access")}>
-        <ProjectSelect label="Default access in this project" value={preferences.defaultAccessMode ?? ""} disabled={blocked}
+        <ProjectSelect label="Default access in this project" value={preferences.defaultAccessMode ?? ""} disabled={unavailable} inactive={saving}
           options={{ "": `Default (${accessOptions[settings.defaultAccessMode]})`, ...accessOptions }}
           onChange={(value) => void setPreference("project-default-access", "defaultAccessMode", value as ProjectPreferences["defaultAccessMode"] || null)} />
       </SettingRow>
       <SettingRow id="project-browser-access" title="Agent browser access" description="Turning this off blocks new preview browser tool calls, not external CLI tools." notice={notice("project-browser-access")}>
-        <ProjectSelect label="Agent browser access" value={preferences.browserAccess === null ? "inherit" : String(preferences.browserAccess)} disabled={blocked}
+        <ProjectSelect label="Agent browser access" value={preferences.browserAccess === null ? "inherit" : String(preferences.browserAccess)} disabled={unavailable} inactive={saving}
           options={{ inherit: "Default (On)", true: "On", false: "Off" }}
           onChange={(value) => void setPreference("project-browser-access", "browserAccess", value === "inherit" ? null : value === "true")} />
       </SettingRow>
@@ -158,46 +162,47 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
     </SettingsGroup>
     <SettingsGroup title="Checkout">
       <SettingRow id="project-grouping-override" title="Group this project" notice={notice("project-grouping-override")}>
-        <ProjectSelect label="Group this project" value={project.groupingMode ?? ""} disabled={blocked}
+        <ProjectSelect label="Group this project" value={project.groupingMode ?? ""} disabled={unavailable} inactive={saving}
           options={{ "": `Default (${groupingOptions[settings.projectGrouping]})`, ...groupingOptions }}
           onChange={(value) => void change("project-grouping-override", update({ groupingMode: value as Project["groupingMode"] || null }))} />
       </SettingRow>
       <SettingRow id="project-auto-pull" title="Automatically pull" description="Only while the default branch checkout is idle, clean and has no local commits." notice={notice("project-auto-pull")}>
-        <Switch label="Automatically pull" checked={preferences.autoPull} disabled={blocked || !project.repositoryRoot} onChange={(value) => void setPreference("project-auto-pull", "autoPull", value)} />
+        <Switch label="Automatically pull" checked={preferences.autoPull} disabled={unavailable || !project.repositoryRoot} inactive={saving} onChange={(value) => void setPreference("project-auto-pull", "autoPull", value)} />
       </SettingRow>
       <div className="project-actions-setting">
         <SettingRow id="project-actions" title="Actions" description="Named commands you run from the workspace. Saving never runs them." notice={notice("project-actions")}>
-          <button type="button" className="secondary-button" disabled={blocked || preferences.actions.length >= 20} aria-expanded={actionOpen} onClick={() => setActionOpen(!actionOpen)}><Plus size={14} aria-hidden="true" />Add action</button>
+          <button type="button" className="secondary-button" disabled={unavailable || preferences.actions.length >= 20} aria-disabled={busy} aria-expanded={actionOpen} onClick={guarded(() => setActionOpen(!actionOpen))}><Plus size={14} aria-hidden="true" />Add action</button>
         </SettingRow>
         {preferences.actions.length > 0 && <ul className="project-actions-list" aria-label="Project actions">{preferences.actions.map((projectAction) => <li key={projectAction.id}>
           <span><strong>{projectAction.name}</strong><code>{[projectAction.executable, ...projectAction.args].join(" ")}</code></span>
-          <button type="button" className="icon-button" aria-label={`Remove ${projectAction.name}`} title={`Remove ${projectAction.name}`} disabled={blocked}
-            onClick={() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id))}><Trash2 size={14} aria-hidden="true" /></button>
+          <button type="button" className="icon-button" aria-label={`Remove ${projectAction.name}`} title={`Remove ${projectAction.name}`} disabled={unavailable} aria-disabled={busy}
+            onClick={guarded(() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id)))}><Trash2 size={14} aria-hidden="true" /></button>
         </li>)}</ul>}
         {actionOpen && <form className="project-action-form" aria-label="New action" onSubmit={(event) => {
           event.preventDefault();
+          if (blocked || !actionName.trim() || !executable.trim()) return;
           void change("project-actions", update({ preferences: { ...preferences, actions: [...preferences.actions, { id: crypto.randomUUID(), name: actionName.trim(), executable: executable.trim(), args: args ? args.split("\n") : [] }] } })).then((saved) => { if (saved) { setActionOpen(false); setActionName(""); setExecutable(""); setArgs(""); } });
         }}>
-          <label>Name<input className="setting-input" required maxLength={80} value={actionName} onChange={(event) => setActionName(event.target.value)} disabled={blocked} /></label>
-          <label>Executable<input className="setting-input" required maxLength={4096} value={executable} onChange={(event) => setExecutable(event.target.value)} disabled={blocked} placeholder="npm" /></label>
+          <label>Name<input className="setting-input" required maxLength={80} value={actionName} onChange={(event) => setActionName(event.target.value)} disabled={unavailable} readOnly={saving} /></label>
+          <label>Executable<input className="setting-input" required maxLength={4096} value={executable} onChange={(event) => setExecutable(event.target.value)} disabled={unavailable} readOnly={saving} placeholder="npm" /></label>
           <div className="project-action-arguments">
-            <label>Arguments (one per line)<textarea className="setting-input" rows={3} value={args} aria-describedby={`${project.id}-arguments-help`} onChange={(event) => setArgs(event.target.value)} disabled={blocked} placeholder={"run\nbuild"} /></label>
+            <label>Arguments (one per line)<textarea className="setting-input" rows={3} value={args} aria-describedby={`${project.id}-arguments-help`} onChange={(event) => setArgs(event.target.value)} disabled={unavailable} readOnly={saving} placeholder={"run\nbuild"} /></label>
             <small id={`${project.id}-arguments-help`}>Passed literally. No shell expansion, pipes or command substitution.</small>
           </div>
-          <div className="project-action-buttons"><button type="button" className="secondary-button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" className="primary-button" disabled={blocked || !actionName.trim() || !executable.trim()}>Save action</button></div>
+          <div className="project-action-buttons"><button type="button" className="secondary-button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" className="primary-button" disabled={unavailable || !actionName.trim() || !executable.trim()} aria-disabled={busy}>Save action</button></div>
         </form>}
       </div>
       <SettingDisclosure summary="Advanced" className="project-settings-advanced">
         <SettingRow id="project-repository-limit" title="Repository display limit" notice={notice("project-repository-limit")}>
-          <ProjectSelect label="Repository display limit" value={String(projectRepositoryDisplayLimit(project.gitRepositoryLimit))} disabled={blocked}
+          <ProjectSelect label="Repository display limit" value={String(projectRepositoryDisplayLimit(project.gitRepositoryLimit))} disabled={unavailable} inactive={saving}
             options={repositoryLimitOptions} onChange={(value) => void change("project-repository-limit", update({ gitRepositoryLimit: Number(value) }))} />
         </SettingRow>
       </SettingDisclosure>
     </SettingsGroup>
     <SettingsGroup title="Danger zone">
       <SettingRow id="project-remove" title="Remove project" description="Removes the project and its chats from Inertia. Files on disk are not touched." notice={notice("project-remove")}>
-        <button type="button" className="secondary-button is-danger" disabled={blocked || busyProject} onClick={() => {
-          if (!request || !window.confirm(`Remove “${project.name}” and its chats from Inertia? This cannot be undone. Files on disk will not be deleted.`)) return;
+        <button type="button" className="secondary-button is-danger" disabled={unavailable} aria-disabled={busy || busyProject || undefined} onClick={() => {
+          if (blocked || busyProject || !request || !window.confirm(`Remove “${project.name}” and its chats from Inertia? This cannot be undone. Files on disk will not be deleted.`)) return;
           void change("project-remove", { type: "project.remove", payload: { projectId: project.id } }).then((removed) => { if (removed) onRemoved(); });
         }}><Trash2 size={14} aria-hidden="true" />Remove project</button>
       </SettingRow>

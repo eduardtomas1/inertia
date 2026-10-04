@@ -35,11 +35,15 @@ export function SnapshotSettings(): React.JSX.Element {
     <SettingSwitch
       id="snapshots-enabled"
       title="Window snapshots"
-      description="Attach the foreground window and its accessibility context to the selected chat with a global shortcut. Experimental."
+      description="Attach the foreground window and its accessibility context to the selected chat with a global shortcut. Screenshots may still contain sensitive information, including overlapping windows. Experimental."
       checked={state?.enabled ?? false}
       inactive={pending || !state?.available}
       failure={failureMessage}
-      onChange={(enabled) => state ? configure({ type: "configure", enabled, shortcut: state.shortcut }) : undefined}
+      onChange={async (enabled) => {
+        if (!state) return;
+        const result = await configure({ type: "configure", enabled, shortcut: state.shortcut });
+        if (result.enabled !== enabled) throw new Error(`Window snapshots could not be turned ${enabled ? "on" : "off"}.`);
+      }}
     />
     <SettingActionRow
       id="snapshot-access"
@@ -65,7 +69,7 @@ export function SnapshotSettings(): React.JSX.Element {
         <li>Switch to the window you want to share, then press <kbd>{state?.shortcut === "both-shift" ? "both Shift keys together" : accelerator}</kbd>.</li>
         <li>Review the image and accessibility details before sending.</li>
       </ol>
-      <p className="snapshot-settings-note">Detected editable fields are masked. Screenshots may still contain sensitive information, including overlapping windows.</p>
+      <p className="snapshot-settings-note">Detected editable fields are masked.</p>
     </SettingDisclosure>
   </SettingsGroup>;
 }

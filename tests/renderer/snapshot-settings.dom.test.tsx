@@ -45,6 +45,22 @@ it("configures with the loaded state when the switch is used as soon as it becom
   expect(toggle).toBeChecked();
 });
 
+it("shows the switch off without a saved notice when the runtime declines to turn snapshots on", async () => {
+  const off: SnapshotState = { ...disabled, permission: "required" };
+  const snapshot = vi.fn()
+    .mockResolvedValueOnce(off)
+    .mockResolvedValueOnce({ ...off, message: "Allow Inertia in Accessibility and Screen Recording, then enable Snapshots again." });
+  window.inertia = { ...original, snapshot };
+  render(<SnapshotSettings />);
+  const toggle = screen.getByRole("switch", { name: "Window snapshots" });
+  await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
+  fireEvent.click(toggle);
+  expect(await screen.findByText(/then enable Snapshots again/u)).toBeVisible();
+  await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+  expect(screen.queryByText("Saved")).toBeNull();
+  expect(screen.getByRole("alert")).toHaveTextContent("Window snapshots could not be turned on.");
+});
+
 it("shows the disabled authoritative state after shortcut registration fails", async () => {
   const snapshot = vi.fn().mockResolvedValueOnce({ ...disabled, enabled: true })
     .mockRejectedValueOnce(new Error("Shortcut is already registered."))

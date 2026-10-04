@@ -42,7 +42,7 @@ it.each(["Linux x86_64", "MacIntel", "Win32"])("offers only supported snapshot s
   render(<SnapshotSettings />);
   await waitFor(() => expect(screen.getByRole("switch", { name: "Window snapshots" })).toBeChecked());
   expect(screen.getByText(/foreground window and its accessibility context.*Experimental/u)).toBeVisible();
-  expect(screen.getByText(/Detected editable fields are masked.*may still contain sensitive information/u)).toBeInTheDocument();
+  expect(screen.getByText(/Screenshots may still contain sensitive information, including overlapping windows\./u)).toBeVisible();
   expect(screen.queryByRole("combobox", { name: "Window snapshot" })).toBeNull();
   cleanup();
   render(<KeyboardSettings keybindings={DEFAULT_APP_KEYBINDINGS} disabled={false} onUpdate={vi.fn(async () => undefined)} />);

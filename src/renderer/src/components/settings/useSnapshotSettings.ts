@@ -9,7 +9,7 @@ export interface SnapshotSettingsState {
   linux: boolean;
   accelerator: string;
   request: (input: SnapshotRequest) => Promise<void>;
-  configure: (input: SnapshotRequest) => Promise<void>;
+  configure: (input: SnapshotRequest) => Promise<SnapshotState>;
 }
 
 export function useSnapshotSettings(): SnapshotSettingsState {
@@ -37,13 +37,14 @@ export function useSnapshotSettings(): SnapshotSettingsState {
     return () => { active = false; revision.current += 1; window.removeEventListener("focus", refresh); };
   }, []);
 
-  const configure = async (input: SnapshotRequest): Promise<void> => {
+  const configure = async (input: SnapshotRequest): Promise<SnapshotState> => {
     const requested = ++revision.current;
     configuring.current = true;
     setPending(true); setError(null);
     try {
       const value = await window.inertia.snapshot(input);
       if (revision.current === requested) setState(value);
+      return value;
     } catch (cause) {
       const value = await window.inertia.snapshot({ type: "state" }).catch(() => null);
       if (value && revision.current === requested) setState(value);
@@ -55,7 +56,7 @@ export function useSnapshotSettings(): SnapshotSettingsState {
   };
 
   const request = async (input: SnapshotRequest): Promise<void> => {
-    await configure(input).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Snapshots unavailable."));
+    await configure(input).then(() => undefined, (cause: unknown) => setError(cause instanceof Error ? cause.message : "Snapshots unavailable."));
   };
 
   return { available: Boolean(window.inertia?.snapshot), state, error, pending, linux, accelerator, request, configure };

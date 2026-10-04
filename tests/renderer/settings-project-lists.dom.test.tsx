@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ const user = {
 const scratch: Project = { ...user, id: "33333333-3333-4333-8333-333333333333", name: "No project", path: "/data/scratch", workspaceKind: "scratch" };
 
 afterEach(() => {
+  cleanup();
   Reflect.deleteProperty(window, "inertia");
 });
 

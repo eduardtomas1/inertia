@@ -73,9 +73,9 @@ describe("Command palette settings entries", () => {
   it("finds settings by their keywords and opens the chosen one with a click", () => {
     const { onOpenSettings, search } = renderPalette();
     fireEvent.change(search, { target: { value: "where my data is" } });
-    expect(settingsOptions().map((option) => option.textContent)).toEqual(["Local resource healthData"]);
+    expect(settingsOptions().map((option) => option.textContent)).toEqual(["Local storageData"]);
     fireEvent.change(search, { target: { value: "where is my data" } });
-    expect(settingsOptions().map((option) => option.textContent)).toEqual(["Local resource healthData"]);
+    expect(settingsOptions().map((option) => option.textContent)).toEqual(["Local storageData"]);
 
     fireEvent.change(search, { target: { value: "keyboard shortcuts" } });
     expect(settingsOptions().map((option) => option.textContent)).toContain("Search everythingKeyboard");

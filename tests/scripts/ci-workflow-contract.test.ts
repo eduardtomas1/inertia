@@ -208,6 +208,35 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
     .toContain("matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'");
 });
 
+it("measures desktop workloads on the prepared bundle before any Electron end-to-end phase", () => {
+  const steps = workflow.jobs.electron.steps as Array<{ name: string; if?: string; run?: string; "continue-on-error"?: boolean }>;
+  const index = (name: string) => steps.findIndex((step) => step.name === name);
+  const measure = index("Measure desktop workloads under Xvfb");
+  const step = steps[measure]!;
+  expect(measure).toBeGreaterThan(index("Build the application bundle"));
+  expect(measure).toBe(index("Prepare Electron end-to-end binary") + 1);
+  expect(measure).toBeLessThan(steps.findIndex(({ run }) => run?.includes("playwright test --project=")));
+  expect(step.run).toBe("xvfb-run --auto-servernum npm run benchmark:desktop:built");
+  expect(step.if).toContain("needs.classify.outputs.benchmarks == 'true'");
+  expect(step.if).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/u);
+  expect(step["continue-on-error"]).not.toBe(true);
+  expect(index("Keep desktop performance evidence")).toBeGreaterThan(
+    steps.findLastIndex(({ run }) => run?.includes("playwright test --project=")),
+  );
+});
+
+it("measures release desktop workloads on the release bundle before packaging", () => {
+  const steps = parse(source(".github/workflows/release-platforms.yml")).jobs.build.steps as Array<{ name: string; if?: string; run?: string; "continue-on-error"?: boolean }>;
+  const bundle = steps.findIndex((step) => step.name === "Build the release application bundle once");
+  const measurements = steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => step.run?.includes("benchmark:desktop:built"));
+  expect(measurements.map(({ index }) => index)).toEqual([bundle + 1, bundle + 2]);
+  expect(measurements.map(({ step }) => step.if)).toEqual(["runner.os != 'Linux'", "runner.os == 'Linux'"]);
+  const firstPackage = steps.findIndex((step) => /^Build (?:macOS|Windows|Linux) release package$/u.test(step.name));
+  expect(firstPackage).toBe(bundle + 3);
+  for (const { step } of measurements) expect(step["continue-on-error"]).not.toBe(true);
+});
+
 it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {
   const plan = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["benchmarks/data-throughput.test.ts"] });
   expect(plan.performanceSmoke).toBe(true);

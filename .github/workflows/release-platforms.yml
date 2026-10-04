@@ -237,6 +237,14 @@ jobs:
         id: application_bundle
         run: npm run build:packaged
 
+      - name: Measure release-candidate desktop workloads
+        if: runner.os != 'Linux'
+        run: npm run benchmark:desktop:built
+
+      - name: Measure release-candidate desktop workloads under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+
       - name: Build macOS release package
         if: runner.os == 'macOS'
         env:
@@ -460,14 +468,6 @@ jobs:
               throw "The Windows release signature is not valid: $($signature.Status)"
             }
           }
-
-      - name: Measure release-candidate desktop workloads
-        if: runner.os != 'Linux'
-        run: npm run benchmark:desktop:built
-
-      - name: Measure release-candidate desktop workloads under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       # These phases share the native desktop and must never overlap. Keep
       # release certification aligned with PR/main CI: foreground first, then

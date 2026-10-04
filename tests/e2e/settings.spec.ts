@@ -113,7 +113,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
     const backends = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
     await backends.click();
     await expect(backends).toHaveAttribute("aria-current", "page");
-    await expect(page.getByLabel("Model backend profiles")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Custom backends" })).toBeVisible();
   };
   const setAppearance = async (
     theme: "Light" | "Dark" | "System",

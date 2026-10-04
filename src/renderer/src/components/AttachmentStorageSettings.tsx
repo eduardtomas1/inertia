@@ -66,10 +66,10 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       id="attachment-storage"
       className="runtime-log-setting"
       title="Attachment storage"
-      description="Original images and documents kept on this device for all chats. This disk budget does not reserve RAM."
+      description="Original images and documents kept on this device."
       details={<>
-        <small role="status">{storage?.state === "ready"
-          ? `${formatBytes(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${formatBytes(storage.availableDiskBytes)} free on disk`}`
+        <small role="status" className="data-facts">{storage?.state === "ready"
+          ? `${formatBytes(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${formatBytes(storage.availableDiskBytes)} free`}`
           : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : !storage && !readFailed ? "Checking attachment usage…" : "Attachment usage unavailable. Refresh to check again."}</small>
         {readFailed && !action.notice && <small role="status">Storage usage could not be read. Refresh to try again.</small>}
       </>}
@@ -78,7 +78,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
     <SettingSelect
       id="attachment-storage-limit"
       title="Attachment storage limit"
-      description="Applies immediately. Lowering it keeps existing files. New attachments need at least 512 MiB free on disk."
+      description="Lowering it keeps existing files."
       value={String(settings.attachmentStorageGiB)}
       options={LIMIT_OPTIONS}
       disabled={blocked}
@@ -87,9 +87,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
     <SettingRow
       id="attachment-auto-remove"
       title="Free space automatically when full"
-      description={settings.autoRemoveOldAttachments
-        ? "Old attachments in finished chats can be removed when new ones need space. Files used by running chats are protected."
-        : "Existing attachments are kept when storage fills. Files used by running chats are protected."}
+      description="Removes old attachments from finished chats when new ones need space. Running chats are protected."
     >
       <span ref={autoRemoveRef}>
         <Switch
@@ -106,23 +104,36 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
     </SettingRow>
     <SettingActionRow
       id="attachment-remove-oldest"
+      className="runtime-log-setting"
       title="Remove oldest files"
       description="Deleting a chat also releases its unshared files."
       notice={action.notice}
       actions={<button type="button" className="secondary-button" disabled={blocked || storage?.state !== "ready" || !storage.removableRecords} onClick={(event) => { triggerRef.current = event.currentTarget; setConfirm("cleanup"); }}>Remove oldest files{storage?.removableRecords ? ` (${storage.removableRecords} · ${formatBytes(storage.removableBytes)})` : ""}</button>}
     />
-    {confirm && <div className="attachment-storage-confirm" ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm attachment deletion">
+    {confirm && <div
+      className="attachment-storage-confirm"
+      ref={confirmationRef}
+      tabIndex={-1}
+      role="group"
+      aria-label="Confirm attachment deletion"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || busy) return;
+        event.preventDefault();
+        setConfirm(null);
+        triggerRef.current?.focus();
+      }}
+    >
       <strong>{confirm === "cleanup" ? `Permanently remove up to ${ATTACHMENT_CLEANUP_BATCH_RECORDS} oldest files?` : "Allow automatic removal of old files?"}</strong>
       <small>This removes original images and documents from finished chats across the app, including archived chats. Messages remain, but those attachments will no longer open. Running chats are protected.</small>
-      <button type="button" className="secondary-button" disabled={blocked} onClick={() => {
-        restoreFocusRef.current = true;
-        void (confirm === "cleanup"
-          ? perform(cleanup, (message) => message ?? null)
-          : perform(() => onUpdate({ autoRemoveOldAttachments: true })));
-      }}>{confirm === "cleanup" ? "Remove stored files" : "Allow automatic removal"}</button>
-      <button type="button" className="secondary-button" disabled={busy} onClick={() => { setConfirm(null); triggerRef.current?.focus(); }}>Cancel</button>
+      <div>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => { setConfirm(null); triggerRef.current?.focus(); }}>Cancel</button>
+        <button type="button" className="secondary-button is-danger" disabled={blocked} onClick={() => {
+          restoreFocusRef.current = true;
+          void (confirm === "cleanup"
+            ? perform(cleanup, (message) => message ?? null)
+            : perform(() => onUpdate({ autoRemoveOldAttachments: true })));
+        }}>{confirm === "cleanup" ? "Remove stored files" : "Allow automatic removal"}</button>
+      </div>
     </div>}
-    <small className="settings-card-note">Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Removing a draft attachment frees it; abandoned temporary files are cleaned up after restart.</small>
-    <small className="settings-card-note">Per message: 100 files, 50 MiB each. Images up to 50 MiB, 40 megapixels and 8,192 pixels per side are resized to 10 MiB each, 80 MiB combined; animated images share the 40-megapixel decode budget across at most 256 frames. Your provider may impose lower limits.</small>
   </div>;
 }

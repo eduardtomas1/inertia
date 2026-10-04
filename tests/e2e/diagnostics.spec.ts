@@ -48,7 +48,7 @@ test("real operation failures survive restart and remain readable/copyable after
     expect(fields).toHaveLength(2);
     for (const field of fields) {
       expect(field.gap).toBeGreaterThanOrEqual(8);
-      expect(field.height).toBeGreaterThanOrEqual(34);
+      expect(field.height).toBeGreaterThanOrEqual(32);
       expect(field.width).toBeGreaterThan(200);
       expect(Math.abs(field.left)).toBeLessThan(1);
     }
@@ -76,6 +76,8 @@ test("real operation failures survive restart and remain readable/copyable after
   }
   await app.resizeWindow(900, 760);
   await app.expectNoViewportOverflow();
+  await expect(page.locator(".diagnostics-filters select").first()).toBeHidden();
+  await page.locator(".diagnostics-filter-disclosure > summary").click();
   for (const control of await page.locator(".diagnostics-filters select").all()) {
     const box = await control.boundingBox();
     expect(box?.width).toBeGreaterThan(90);

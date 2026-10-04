@@ -39,7 +39,7 @@ export function AppUpdateSettings({
     <SettingsGroup title="About and updates" headingId="application-update-heading">
       <SettingActionRow
         id="app-updates"
-        className="application-update-setting"
+        className="runtime-log-setting application-update-setting"
         title={`${isCanary ? "Inertia Canary" : "Inertia"} · v${INERTIA_VERSION}`}
         details={(
           <small role="status" aria-live="polite" aria-atomic="true">
@@ -50,10 +50,10 @@ export function AppUpdateSettings({
         actions={(
           <>
             {appUpdateStatus?.state === "available" && (
-              <button type="button" className="secondary-button" onClick={() => runUpdateAction(onOpenAppRelease, "The release page could not be opened.")}><Download size={14} />View release</button>
+              <button type="button" className="secondary-button" onClick={() => runUpdateAction(onOpenAppRelease, "The release page could not be opened.")}><Download size={14} aria-hidden="true" />View release</button>
             )}
             {appUpdateStatus?.delivery === "in-app" && ["available", "cancelled", "failed"].includes(appUpdateStatus.state) && (
-              <button type="button" className="secondary-button" onClick={() => runUpdateAction(onDownloadAppUpdate, "The update download could not be started.")}><Download size={14} />{appUpdateStatus.state === "available" ? "Download" : "Retry download"}</button>
+              <button type="button" className="secondary-button" onClick={() => runUpdateAction(onDownloadAppUpdate, "The update download could not be started.")}><Download size={14} aria-hidden="true" />{appUpdateStatus.state === "available" ? "Download" : "Retry download"}</button>
             )}
             {appUpdateStatus?.state === "downloading" && (
               <button type="button" className="secondary-button" onClick={() => runUpdateAction(onCancelAppUpdateDownload, "The update download could not be cancelled.")}>Cancel download</button>
@@ -74,7 +74,7 @@ export function AppUpdateSettings({
                 });
               }}
             >
-              <RefreshCw size={14} />{checking ? "Checking…" : "Check now"}
+              <RefreshCw size={14} aria-hidden="true" />{checking ? "Checking…" : "Check now"}
             </button>
           </>
         )}

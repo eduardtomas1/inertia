@@ -61,14 +61,14 @@ export function ArchivedChats({
           />
         )}
         {archived.length === 0
-          ? <p className="settings-card-note">No archived chats.</p>
+          ? <p className="archived-chats-empty">No archived chats.</p>
           : matches.length === 0
-            ? <p className="settings-card-note">No archived chats match this filter.</p>
+            ? <p className="archived-chats-empty">No archived chats match this filter.</p>
             : (
               <ul ref={list} className="archive-list" aria-label="Archived chats">
                 {shown.map((chat) => (
                   <li className="archive-row" key={chat.id}>
-                    <span>
+                    <span className="setting-copy">
                       <strong title={chat.title}>{chat.title}</strong>
                       <small>{providerLabels.get(chat.providerId) ?? chat.providerId}</small>
                     </span>

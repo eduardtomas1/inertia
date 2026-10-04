@@ -15,7 +15,7 @@ describe("settings health presentation", () => {
   });
 
   it("renders an unavailable metric honestly", () => {
-    expect(formatHealthBytes(null)).toBe("Unavailable");
+    expect(formatHealthBytes(null)).toBe("unavailable");
     expect(formatHealthBytes(1_024)).toBe("1.0 KiB");
   });
 });

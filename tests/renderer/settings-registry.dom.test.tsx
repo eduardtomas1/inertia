@@ -291,6 +291,17 @@ describe("Settings anchors", () => {
     expect(navigation).toHaveFocus();
   });
 
+  it("lands on a plain line in Provider updates when the provider has no update status", async () => {
+    installFullBridge();
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "agents", anchor: "provider-updates" },
+      providers: [settingsProvider("codex", "Codex")],
+    })} />);
+    const row = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-setting-id="provider-updates"]');
+    await waitFor(() => expect(row()).toHaveFocus());
+    expect(row()).toHaveTextContent("No updates available.");
+  });
+
   it("focuses the section title when the anchored row is hidden", async () => {
     const style = document.createElement("style");
     style.textContent = "[data-setting-id=\"terminal-font-size\"] { display: none; }";

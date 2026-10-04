@@ -21,9 +21,10 @@ import {
   forgetCustomCompletionSound,
   playCompletionSound,
 } from "../../utils/completionSoundPlayer";
-import { IconButton, Switch } from "../ui";
-import { SettingSelect, type SettingOption } from "../settings/SettingControls";
-import { SettingRow } from "../settings/SettingsLayout";
+import { IconButton } from "../ui";
+import { SettingSelect, SettingSwitch, type SettingOption } from "../settings/SettingControls";
+import { SettingStatus } from "../settings/SettingsLayout";
+import { useSettingAction } from "../settings/useSettingAction";
 import "./CompletionSoundSettings.css";
 
 const SOUND_LABELS: Readonly<Record<BuiltInCompletionSound, { label: string; detail: string }>> = {
@@ -102,6 +103,7 @@ export function CompletionSoundSettings({
   const importRef = useRef<HTMLButtonElement>(null);
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
   const removalFocus = useRef<string | null | undefined>(undefined);
+  const soundAction = useSettingAction();
   const value = pending ?? saved;
   latest.current = value;
   const canImport = Boolean(window.inertia?.importCompletionSound);
@@ -137,7 +139,7 @@ export function CompletionSoundSettings({
 
   const choices: CompletionSoundChoice[] = [...BUILT_IN_COMPLETION_SOUNDS, ...value.library.map(({ file }) => file)];
   const sounds = useRovingRadios(choices, value.sound, (sound) => {
-    void commit({ sound });
+    void soundAction.run(() => commit({ sound }, false));
     preview(sound);
   });
 
@@ -202,12 +204,12 @@ export function CompletionSoundSettings({
 
   return (
     <div className="completion-sound-settings" data-setting-id="completion-sound">
-      <SettingRow id="completion-sound-enabled" title="Sound when a task ends" description="Plays when an agent finishes or stops with an error.">
-        <Switch label="Sound when a task ends" checked={value.enabled} disabled={disabled} onChange={(enabled) => {
-          void commit({ enabled });
+      <SettingSwitch id="completion-sound-enabled" title="Sound when a task ends" description="Plays when an agent finishes or stops with an error."
+        checked={value.enabled} disabled={disabled} onChange={(enabled) => {
+          const saving = commit({ enabled }, false);
           if (enabled) preview(latest.current.sound);
+          return saving.then(() => undefined);
         }} />
-      </SettingRow>
       <SettingSelect
         id="completion-sound-when"
         title="Play sound"
@@ -223,7 +225,7 @@ export function CompletionSoundSettings({
       {value.enabled && (
         <div className="completion-sound-options">
           <div className="completion-sound-heading">
-            <span id="completion-sound-label">Sound</span>
+            <span className="setting-title"><span id="completion-sound-label">Sound</span><SettingStatus notice={soundAction.notice} /></span>
             <button type="button" className="secondary-button" disabled={disabled} onClick={() => preview(value.sound)}>
               <Play size={14} aria-hidden="true" />Preview
             </button>

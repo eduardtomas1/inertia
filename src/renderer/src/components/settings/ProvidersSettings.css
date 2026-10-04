@@ -235,8 +235,12 @@
   gap: 6px;
 }
 
-.provider-settings-maintenance:empty {
-  display: none;
+.provider-settings-maintenance .provider-maintenance-empty {
+  margin: 0;
+  padding: 12px 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
 }
 
 .provider-settings-maintenance .provider-maintenance-notice {

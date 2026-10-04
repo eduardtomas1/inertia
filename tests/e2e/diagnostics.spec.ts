@@ -1,4 +1,4 @@
-// @inertia-e2e-resource isolated
+// @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";

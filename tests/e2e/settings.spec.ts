@@ -336,8 +336,8 @@ test("changes the theme only from Settings", async () => {
 
 test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
-  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u })).toHaveAttribute("aria-current", "page");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
   await expect(page.getByText(/· Every 1 hour · 5 copies, 512 MiB in total$/u)).toBeVisible();
   await expect(page.getByText(/^Memory .+ · Database .+ · Browser cache .+ · Temporary attachments .+$/u)).toBeVisible();

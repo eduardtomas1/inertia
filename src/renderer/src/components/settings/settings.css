@@ -92,14 +92,6 @@
   flex: 0 0 auto;
 }
 
-.settings-navigation nav button > small {
-  margin-left: auto;
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-}
-
 .settings-content {
   box-sizing: border-box;
   width: 100%;

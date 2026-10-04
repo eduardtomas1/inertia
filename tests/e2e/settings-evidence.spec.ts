@@ -110,7 +110,7 @@ const ARCHIVED_PAGE_FILLER = 8;
 
 const SECTIONS: ReadonlyArray<{
   id: string;
-  label: string | RegExp;
+  label: string;
   overview: string;
   select?: string;
   cards?: readonly Card[];
@@ -144,7 +144,7 @@ const SECTIONS: ReadonlyArray<{
   },
   {
     id: "data",
-    label: /^Data(?: \d+)?$/u,
+    label: "Data",
     overview: "storage",
     cards: [["storage", null], ["recovery", "recovery-heading"], ["archived", "archive-heading"], ["defaults", "restore-defaults-heading"]],
   },
@@ -164,16 +164,16 @@ let app!: AppFixture;
 let page!: Page;
 const capturedNames = new Set<string>();
 
-function settingsNavigation(label: string | RegExp): Locator {
+function settingsNavigation(label: string): Locator {
   return page.getByRole("navigation", { name: "Settings sections" })
-    .getByRole("button", typeof label === "string" ? { name: label, exact: true } : { name: label });
+    .getByRole("button", { name: label, exact: true });
 }
 
 function settingsContent(): Locator {
   return page.locator(".settings-content");
 }
 
-function sectionLabel(id: string): string | RegExp {
+function sectionLabel(id: string): string {
   return SECTIONS.find((section) => section.id === id)!.label;
 }
 
@@ -194,7 +194,7 @@ async function waitForSettledSection(): Promise<void> {
   await page.waitForTimeout(300);
 }
 
-async function openSection(label: string | RegExp): Promise<void> {
+async function openSection(label: string): Promise<void> {
   await settingsNavigation(label).click();
   await expect(settingsNavigation(label)).toHaveAttribute("aria-current", "page");
   await settingsContent().evaluate((element) => { element.scrollTop = 0; });

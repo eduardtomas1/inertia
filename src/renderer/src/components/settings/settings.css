@@ -253,6 +253,21 @@
   .response-density-setting > [role="radiogroup"] > button.is-active {
     outline: 1px solid CanvasText;
   }
+
+  .settings-content .switch-thumb {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .settings-content .switch-control[data-checked="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .settings-content .switch-control[data-checked="true"] .switch-thumb {
+    background: HighlightText;
+  }
 }
 
 @media (max-width: 900px) {
@@ -325,7 +340,11 @@
 }
 
 .setting-note-status:empty {
-  margin-top: -5px;
+  min-height: calc(var(--ui-font-micro) * 1.4);
+}
+
+.setting-note-status:empty:has(+ .setting-note-status.is-error) {
+  display: none;
 }
 
 .setting-select,

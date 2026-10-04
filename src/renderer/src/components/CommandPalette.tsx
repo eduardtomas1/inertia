@@ -124,7 +124,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         : []),
       ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <MessageSquarePlus size={15} />, run: onNewThreadWithoutProject }] : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
-      { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
+      { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, chats, agents and data", icon: <Settings size={15} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={15} />, run: openHelpGuide },
     ];
     const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={15} />, run: () => onSelectProject(project) }));

@@ -49,7 +49,7 @@ describe("Settings saving", () => {
     const onUpdate = vi.fn(() => save.promise);
     render(<SettingsView {...settingsViewProps({ onUpdate })} />);
     fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
-    const repository = await screen.findByLabelText("Discord release repository URL");
+    const repository = await screen.findByLabelText("Repository URL");
 
     let typed = "";
     for (const character of "not a url") {

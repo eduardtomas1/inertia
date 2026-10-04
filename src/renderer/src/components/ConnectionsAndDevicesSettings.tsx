@@ -409,7 +409,7 @@ function PairedDeviceEditor({
           Access
           <select
             className="setting-select"
-            aria-label={`Access for ${device.label}`}
+            aria-label={`Access ${device.label}`}
             value={preset}
             onChange={(event) => setPreset(event.currentTarget.value as PrivateConnectPreset)}
           >
@@ -422,7 +422,7 @@ function PairedDeviceEditor({
           <input
             className="setting-input"
             type="datetime-local"
-            aria-label={`Expires for ${device.label}`}
+            aria-label={`Expires ${device.label}`}
             value={expiresAt}
             onChange={(event) => setExpiresAt(event.currentTarget.value)}
           />

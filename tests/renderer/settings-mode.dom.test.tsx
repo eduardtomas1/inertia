@@ -126,7 +126,7 @@ describe("Settings as a mode", () => {
     render(<Harness />);
     openFrom("Open settings");
     fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
-    const repository = await screen.findByLabelText("Discord release repository URL");
+    const repository = await screen.findByLabelText("Repository URL");
     repository.focus();
     fireEvent.change(repository, { target: { value: "not a url" } });
     fireEvent.blur(repository);
@@ -147,7 +147,7 @@ describe("Settings as a mode", () => {
     render(<Harness />);
     openFrom("Open settings");
     fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
-    const repository = await screen.findByLabelText("Discord release repository URL");
+    const repository = await screen.findByLabelText("Repository URL");
     repository.focus();
     fireEvent.change(repository, { target: { value: " " } });
     pressEscape(repository);

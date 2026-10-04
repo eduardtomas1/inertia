@@ -37,7 +37,7 @@ test("real operation failures survive restart and remain readable/copyable after
     await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: theme === "dark" ? "Dark" : "Light", exact: true }).click();
     await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Discord release repository URL" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Repository URL" })).toBeVisible();
     // Discord must own its field styles; obsolete provider selectors previously
     // left labels, help text and inputs running together on direct navigation.
     const fields = await page.locator(".discord-field").evaluateAll((labels) => labels.map((label) => {

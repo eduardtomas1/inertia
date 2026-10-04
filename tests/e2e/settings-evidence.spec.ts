@@ -545,8 +545,14 @@ test("keeps Settings inside a 760x600 window", async () => {
   await settingsNavigation("Appearance").click();
   await expect(settingsNavigation("Appearance")).toHaveAttribute("aria-current", "page");
   await app.resizeWindow(760, 600);
-  await app.expectNoViewportOverflow();
-  await expect(page.locator(".settings-content button button")).toHaveCount(0);
+  const titleEdges = new Map<string, number>();
+  for (const { label } of SECTIONS) {
+    await openSection(label);
+    await app.expectNoViewportOverflow();
+    await expect(page.locator(".settings-content button button")).toHaveCount(0);
+    titleEdges.set(label, await page.locator(".settings-page-title").evaluate((element) => element.getBoundingClientRect().left));
+  }
+  expect(new Set(titleEdges.values()), JSON.stringify(Object.fromEntries(titleEdges))).toHaveProperty("size", 1);
   expect(app.rendererErrors).toEqual([]);
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();

@@ -112,10 +112,11 @@ it("checks GitHub CLI readiness read-only and reports a missing CLI", async () =
 });
 
 function stubGh(stdout: string, exitCode: number): ChildProcessWithoutNullStreams {
-  const child = Object.assign(new EventEmitter(), { pid: 4242, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() }) as unknown as ChildProcessWithoutNullStreams;
+  const streams = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
+  const child = Object.assign(new EventEmitter(), { pid: 4242, ...streams }) as unknown as ChildProcessWithoutNullStreams;
   setImmediate(() => {
-    child.stdout.end(stdout);
-    child.stderr.end();
+    streams.stdout.end(stdout);
+    streams.stderr.end();
     setImmediate(() => child.emit("close", exitCode));
   });
   return child;

@@ -43,6 +43,22 @@ function setup(records: DiagnosticRecord[], overrides: Partial<DiagnosticPage> =
 }
 
 describe("Diagnostics settings", () => {
+  it("uses one group label without a hero and keeps the five filters in a Filters disclosure beside the search", async () => {
+    const { container } = setup([record(1)]); await settle();
+    expect(screen.getByRole("heading", { level: 3, name: "Diagnostics" })).toBeVisible();
+    expect(container.textContent).not.toContain("Understand what happened");
+    expect(container.querySelector(".diagnostics-heading-icon, .diagnostics-local-strip")).toBeNull();
+    const filters = screen.getByText("Filters").closest("details")!;
+    expect(filters).toHaveClass("setting-disclosure");
+    expect(filters.querySelector("summary")).toHaveAttribute("aria-controls");
+    for (const label of ["Severity", "Subsystem", "Provider", "Project", "Time"]) {
+      expect(filters).toContainElement(screen.getByLabelText(label));
+      expect(screen.getByLabelText(label)).toHaveClass("setting-select");
+    }
+    expect(filters).not.toContainElement(screen.getByRole("searchbox"));
+    expect(screen.getByText("Outcome unknown")).toHaveClass("diagnostics-outcome");
+  });
+
   it("distinguishes a current provider readiness failure from historical terminal work", async () => {
     const incident = { ...record(1, "provider.connection-failed"), outcome: "failed" as const, context: { providerId: "claude" as const } };
     setup([incident], { runtime: "ready", currentIncidentIds: [incident.id] }); await settle();
@@ -73,9 +89,9 @@ describe("Diagnostics settings", () => {
 
   it("applies search, severity, subsystem, provider, project and time filters and paginates a bounded list", async () => {
     const h = setup(Array.from({ length: 30 }, (_, n) => record(n + 1))); await settle();
-    expect(document.querySelectorAll("details")).toHaveLength(25);
+    expect(document.querySelectorAll(".diagnostics-incident")).toHaveLength(25);
     fireEvent.click(screen.getByRole("button", { name: "Next" })); await settle();
-    expect(document.querySelectorAll("details")).toHaveLength(5);
+    expect(document.querySelectorAll(".diagnostics-incident")).toHaveLength(5);
     fireEvent.click(screen.getByRole("button", { name: "Previous" })); await settle();
     const expectedCutoff = new Date(Date.now() - 3_600_000).toISOString();
     for (const [label, value] of [["Severity", "warning"], ["Subsystem", "discord"], ["Provider", "claude"], ["Project", project.id], ["Time", "3600000"]]) {

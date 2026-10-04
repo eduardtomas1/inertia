@@ -238,3 +238,15 @@
   min-height: 52px;
   padding: 10px 0;
 }
+
+.setting-action-row {
+  flex-wrap: wrap;
+}
+
+.setting-action-row > span {
+  flex: 1 1 240px;
+}
+
+.setting-action-row > div {
+  margin-left: auto;
+}

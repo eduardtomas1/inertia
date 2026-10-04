@@ -154,7 +154,7 @@ describe("Settings external section targets", () => {
       level: 2,
       name: "Devices & integrations",
     })).toHaveClass("visually-hidden");
-    const phoneAccess = await screen.findByLabelText("Phone access");
+    const phoneAccess = await screen.findByLabelText("Access for Phone");
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
     });
@@ -188,27 +188,21 @@ describe("Settings external section targets", () => {
       {...props}
       target={{ section: "devices" }}
     />);
-    expect(await screen.findByLabelText("Phone access")).toBeVisible();
+    expect(await screen.findByLabelText("Access for Phone")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Help" }));
     expect(getAppHealth).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Data" }));
     await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("5.0 MiB")).toBeVisible();
-    expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
-    expect(screen.getByText(/targeting 5 copies and 512 MiB/u)).toBeVisible();
-    expect(screen.getByText(/The newest validated copy is kept even above that target/u)).toBeVisible();
-    expect(screen.getByText(/Chats stay stored until you delete them/u)).toBeVisible();
+    expect(await screen.findByText(/Memory 1\.0 KiB · Database 5\.0 MiB · Browser cache unavailable/u)).toBeVisible();
     expect(screen.getByText("Full local database backup")).toBeVisible();
-    expect(screen.getByText(
-      /Validated SQLite copies include presets/u,
-    )).toBeVisible();
-    expect(screen.getByText(/Last validated backup:/u)).toBeVisible();
+    expect(screen.getByText("Chats, settings and attachment records, without secrets or attachment files.")).toBeVisible();
+    expect(document.querySelector('[data-setting-id="database-backup"] .data-facts'))
+      .toHaveTextContent(/^Last validated .+ · Every 1 hour · 5 copies, 512 MiB in total$/u);
     expect(screen.getByText("Portable conversation recovery export"))
       .toBeVisible();
-    expect(screen.getByText(
-      /without presets, attachments, sessions, execution context, Git artifacts, credentials, secret references, or vault data/u,
-    )).toBeVisible();
+    expect(screen.getByText("Project paths and messages only. Imports create new supervised identities."))
+      .toBeVisible();
+    expect(screen.queryByText(/Provider credentials stay outside Inertia/u)).toBeNull();
   });
 });

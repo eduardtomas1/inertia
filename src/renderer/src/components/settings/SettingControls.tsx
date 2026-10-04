@@ -232,7 +232,7 @@ export function SettingTextField({
       <SettingCopy title={title} description={description} notice={action.notice} />
       <span className="setting-field-control">
         <input
-          className={layout === "row" ? "setting-input" : undefined}
+          className="setting-input"
           aria-label={label ?? title}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}

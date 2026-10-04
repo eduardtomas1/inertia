@@ -11,7 +11,7 @@ import { diagnosticDefinition, type RendererDiagnostic } from "@shared/applicati
 import { isReleaseRepositoryUrl, RELEASE_REPOSITORY_URL_MAX_LENGTH } from "@shared/release-repository";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
 import { SettingTextField } from "./settings/SettingControls";
-import { SettingActionRow, SettingNoteStatus, SettingsGroup } from "./settings/SettingsLayout";
+import { SettingActionRow, SettingCopy, SettingNoteStatus, SettingsGroup } from "./settings/SettingsLayout";
 import { useSettingAction } from "./settings/useSettingAction";
 import "./DiscordSettings.css";
 
@@ -98,8 +98,12 @@ export function DiscordSettings({
     return error instanceof DiscordReleaseError ? error.message : fallback;
   };
 
+  const saveUnavailable = disabled || discord.busy || !webhookDraft.trim();
+  const removeUnavailable = disabled || discord.busy || !webhookState?.hasSecret;
+  const postUnavailable = disabled || discord.busy || (!webhookState?.hasSecret && !webhookDraft.trim());
+
   const saveWebhook = (): void => {
-    if (!webhookDraft.trim()) return;
+    if (saveUnavailable) return;
     setStorageError(null);
     void discord.run(storeWebhook, {
       key: "save",
@@ -110,6 +114,7 @@ export function DiscordSettings({
   };
 
   const clearWebhook = (): void => {
+    if (removeUnavailable) return;
     setStorageError(null);
     void discord.run(async () => {
       const state = await window.inertia.clearBackendCredential({
@@ -126,6 +131,7 @@ export function DiscordSettings({
   };
 
   const requestPost = (): void => {
+    if (postUnavailable) return;
     if (!repositoryUrl.trim()) {
       void reportValidation("discord.repository-missing");
       discord.report({ tone: "error", text: "Add a release repository URL before posting." });
@@ -137,6 +143,7 @@ export function DiscordSettings({
 
   const postReleaseInfo = (): void => {
     const normalizedRepositoryUrl = repositoryUrl.trim();
+    restorePostFocus.current = true;
     setConfirming(false);
     setIncidentId(null);
     let deliveryRequested = false;
@@ -192,49 +199,48 @@ export function DiscordSettings({
         validate={(value) => value === "" || isReleaseRepositoryUrl(value) ? null : DISCORD_REPOSITORY_URL_ERROR}
         onSave={(discordReleaseRepositoryUrl) => onUpdate({ discordReleaseRepositoryUrl })}
       />
-      <label className="discord-field" data-setting-id="discord-webhook">
-        <span>
-          <strong>Webhook URL</strong>
-          <small>
-            {webhookState?.hasSecret
-              ? "Stored in the operating system credential vault. Paste a value only to replace it."
-              : "Incoming Discord webhook stored only in the operating system credential vault."}
-          </small>
-        </span>
-        <input
-          aria-label="Discord webhook URL"
-          autoComplete="off"
-          disabled={disabled || webhookBusy
-            || webhookState?.storage.available === false}
-          maxLength={500}
-          placeholder={webhookState?.hasSecret
-            ? BACKEND_CREDENTIAL_MASK
-            : "https://discord.com/api/webhooks/..."}
-          type="password"
-          value={webhookDraft}
-          onChange={(event) => setWebhookDraft(event.target.value)}
+      <div className="setting-field discord-field" data-setting-id="discord-webhook">
+        <SettingCopy
+          title="Webhook URL"
+          description={webhookState?.hasSecret
+            ? "Stored in the operating system credential vault. Paste a new value to replace it."
+            : "Incoming Discord webhook, stored only in the operating system credential vault."}
         />
-      </label>
-      <div className="settings-inline-actions">
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={disabled || discord.busy || !webhookDraft.trim()}
-          onClick={saveWebhook}
-        >
-          {discord.pending === "save" ? "Saving…" : "Save webhook"}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={disabled || discord.busy || !webhookState?.hasSecret}
-          onClick={clearWebhook}
-        >
-          Remove webhook
-        </button>
+        <span className="discord-webhook-control">
+          <input
+            className="setting-input"
+            aria-label="Discord webhook URL"
+            autoComplete="off"
+            disabled={disabled || webhookBusy
+              || webhookState?.storage.available === false}
+            maxLength={500}
+            placeholder={webhookState?.hasSecret
+              ? BACKEND_CREDENTIAL_MASK
+              : "https://discord.com/api/webhooks/…"}
+            type="password"
+            value={webhookDraft}
+            onChange={(event) => setWebhookDraft(event.target.value)}
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            aria-disabled={saveUnavailable || undefined}
+            onClick={saveWebhook}
+          >
+            {discord.pending === "save" ? "Saving…" : "Save webhook"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            aria-disabled={removeUnavailable || undefined}
+            onClick={clearWebhook}
+          >
+            Remove webhook
+          </button>
+        </span>
       </div>
       {webhookState?.storage.available === false && (
-        <p className="settings-card-note" role="status">
+        <p className="discord-note" role="status">
           {webhookState.storage.message}
         </p>
       )}
@@ -249,8 +255,7 @@ export function DiscordSettings({
             type="button"
             className="secondary-button"
             aria-expanded={confirming}
-            disabled={disabled || discord.busy
-              || (!webhookState?.hasSecret && !webhookDraft.trim())}
+            aria-disabled={postUnavailable || undefined}
             onClick={requestPost}
           >
             <Send size={14} aria-hidden="true" />
@@ -259,7 +264,17 @@ export function DiscordSettings({
         )}
       />
       {confirming && (
-        <div className="discord-post-confirm" role="group" aria-label="Confirm Discord post">
+        <div
+          className="discord-post-confirm"
+          role="group"
+          aria-label="Confirm Discord post"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            restorePostFocus.current = true;
+            setConfirming(false);
+          }}
+        >
           <strong>Post the latest release to Discord?</strong>
           <small>Everyone in the webhook&apos;s channel will see it. Discord posts cannot be withdrawn from Inertia.</small>
           <div>

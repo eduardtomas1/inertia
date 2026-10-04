@@ -96,7 +96,7 @@ test("renders the Canary channel, status, isolation, and rollback surface", asyn
   const updates = canary.page.getByRole("region", { name: "About and updates" });
   await expect(updates.getByText(`Inertia Canary · v${INERTIA_VERSION}`, { exact: true }))
     .toBeVisible();
-  await expect(updates.getByText("Canary channel · isolated profile", { exact: true }))
+  await expect(updates.getByText("Canary rollback", { exact: true }))
     .toBeVisible();
   await expect(updates.getByText("No last-known-good Canary package is retained yet.", {
     exact: true,

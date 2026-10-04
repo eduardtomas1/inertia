@@ -290,14 +290,10 @@ describe("Settings composite updates", () => {
     render(<SettingsView {...settingsProps(vi.fn(async () => undefined))} />);
     fireEvent.click(screen.getByRole("button", { name: "Data" }));
 
-    expect(await screen.findByText("Partial health data")).toBeVisible();
-    const warning = screen.getByText("Partial health data").parentElement;
+    const warning = await screen.findByText("Partial health data: Browser cache storage could not be measured.");
     expect(warning).toHaveAttribute("role", "status");
-    expect(warning).toHaveTextContent("Browser cache storage could not be measured.");
-    expect(screen.getByText("30 MiB")).toBeVisible();
-    expect(screen.getByText("4.0 KiB")).toBeVisible();
-    expect(screen.getByText("Unavailable")).toBeVisible();
-    expect(screen.getByText(/UI 20 MiB across 1 process/u)).toBeVisible();
+    expect(screen.getByText("Memory 30 MiB · Database 4.0 KiB · Browser cache unavailable · Temporary attachments 512 B")).toBeVisible();
+    expect(screen.getByText(/^Main 10 MiB · Interface 20 MiB · Local service unavailable · Measured/u)).toBeVisible();
   });
 
   it.each([
@@ -339,7 +335,7 @@ describe("Settings composite updates", () => {
     }} />);
 
     expect(await screen.findByText(`Inertia Canary · v${INERTIA_VERSION}`)).toBeInTheDocument();
-    expect(await screen.findByText("Canary channel · isolated profile")).toBeInTheDocument();
+    expect(await screen.findByText("Canary rollback")).toBeInTheDocument();
     expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
       .toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: action }));
@@ -630,7 +626,7 @@ describe("Settings composite updates", () => {
     expect(webhook).toHaveAttribute("placeholder", "••••••••");
     expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Post release to Discord…" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Post release to Discord…" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("sends the latest release info to Discord", async () => {
@@ -662,7 +658,7 @@ describe("Settings composite updates", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Post release to Discord…" })).toBeEnabled());
+      expect(screen.getByRole("button", { name: "Post release to Discord…" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("button", { name: "Post release to Discord…" }));
     expect(sendDiscordReleaseInfo).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Post to Discord" }));

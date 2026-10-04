@@ -65,6 +65,3 @@
 .mascot-sprite-files code { color: var(--text); }
 .mascot-sprites-error { margin: 0; padding: 8px 10px; border-radius: var(--radius-medium); color: var(--danger); background: var(--danger-soft); font-size: 9px; line-height: 1.5; }
 
-.attachment-storage-setting label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.attachment-storage-setting select { max-width: 100%; }
-.attachment-storage-setting [role="group"] { display: grid; gap: 8px; }

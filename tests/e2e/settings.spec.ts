@@ -339,8 +339,8 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
   await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
-  await expect(page.getByText(/targeting 5 copies and 512 MiB in total/u)).toBeVisible();
-  await expect(page.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
+  await expect(page.getByText(/· Every 1 hour · 5 copies, 512 MiB in total$/u)).toBeVisible();
+  await expect(page.getByText(/^Memory .+ · Database .+ · Browser cache .+ · Temporary attachments .+$/u)).toBeVisible();
   const exportPath = join(testDirectory, "settings-recovery-export.json");
   await electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showSaveDialog", async () => ({
@@ -385,7 +385,7 @@ test("keeps runtime support and application update checks explicit in settings",
     { exact: true },
   )).toBeVisible();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
-  await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Local lifecycle and failure metadata, without prompts, source, tokens or credentials.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
   await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();
   const supportSummary = await electronApp.evaluate(({ clipboard }) => clipboard.readText());

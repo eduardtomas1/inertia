@@ -42,8 +42,9 @@ export default function CanaryRollbackSetting(): React.JSX.Element {
     <>
       <SettingActionRow
         id="canary-rollback"
-        className="application-update-setting canary-rollback-setting"
-        title="Canary channel · isolated profile"
+        className="runtime-log-setting application-update-setting"
+        title="Canary rollback"
+        description="Canary uses its own app identity, data, profile, update feed and package cache. Stable Inertia data is never imported or modified."
         details={(
           <small role="status" aria-live="polite" aria-atomic="true">
             {action.busy
@@ -52,12 +53,11 @@ export default function CanaryRollbackSetting(): React.JSX.Element {
           </small>
         )}
         actions={status?.state === "ready" && status.version !== INERTIA_VERSION ? (
-          <button type="button" className="secondary-button" disabled={action.busy} onClick={() => run(window.inertia.openCanaryRollback)}><RotateCcw size={14} />{window.inertia.getPlatform() === "linux" ? "Show rollback file" : "Open rollback"} v{status.version}</button>
+          <button type="button" className="secondary-button" disabled={action.busy} onClick={() => run(window.inertia.openCanaryRollback)}><RotateCcw size={14} aria-hidden="true" />{window.inertia.getPlatform() === "linux" ? "Show rollback file" : "Open rollback"} v{status.version}</button>
         ) : status?.state !== "ready" ? (
-          <button type="button" className="secondary-button" disabled={action.busy} onClick={() => run(window.inertia.prepareCanaryRollback)}><ShieldCheck size={14} />Prepare rollback</button>
+          <button type="button" className="secondary-button" disabled={action.busy} onClick={() => run(window.inertia.prepareCanaryRollback)}><ShieldCheck size={14} aria-hidden="true" />Prepare rollback</button>
         ) : null}
       />
-      <p className="settings-card-note">Canary uses a separate app identity, protocol, data directory, Chromium profile, update feed, and package cache. Stable Inertia data is never imported or modified.</p>
     </>
   );
 }

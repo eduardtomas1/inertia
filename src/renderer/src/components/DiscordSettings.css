@@ -1,18 +1,43 @@
-.discord-settings { min-width: 0; }
-.discord-field { display: grid; gap: 10px; min-width: 0; margin-top: 20px; }
-.discord-field > span { display: grid; gap: 5px; }
-.discord-field strong { font-size: 12px; font-weight: 600; }
-.discord-field small, .discord-settings .settings-card-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.discord-field input { width: 100%; min-width: 0; box-sizing: border-box; height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); color: var(--text); font: inherit; font-size: 12px; }
-.discord-settings .settings-inline-actions { flex-wrap: wrap; margin-top: 12px; }
-.discord-settings .runtime-log-setting { flex-wrap: wrap; align-items: center; margin-top: 24px; padding-top: 24px; }
-.discord-settings .runtime-log-setting > span { flex: 1 1 260px; }
-.discord-settings .runtime-log-setting > div { margin-left: auto; }
-.discord-settings .runtime-log-setting strong { font-size: 13px; }
-.discord-settings .runtime-log-setting small { font-size: 12px; }
-.discord-settings :is(.primary-button, .secondary-button) { margin-top: 0; min-height: 36px; height: auto; padding: 9px 12px; font-size: 11px; }
-.discord-settings .discord-diagnostic-link { margin-top: 12px; }
-.discord-settings :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.discord-settings {
+  min-width: 0;
+}
+
+.discord-field {
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.discord-field small {
+  overflow-wrap: anywhere;
+}
+
+.discord-webhook-control {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.discord-webhook-control .setting-input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.discord-note {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.discord-settings .discord-diagnostic-link {
+  margin-top: 8px;
+}
 
 .discord-post-confirm {
   display: grid;
@@ -23,18 +48,22 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
+.discord-post-confirm strong {
+  font-size: var(--ui-font-secondary);
+  font-weight: 620;
+}
+
 .discord-post-confirm small {
   color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
 }
 
 .discord-post-confirm > div {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.discord-post-confirm .primary-button {
-  margin: 0;
+  margin-top: 4px;
 }
 
 @media (forced-colors: active) {

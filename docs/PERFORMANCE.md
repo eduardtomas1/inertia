@@ -154,6 +154,13 @@ application produced alongside the AppImage, not AppImage mount time.
 - Long-session soak: five authoritative 120-frame scroll passes (600 real
   viewport frames) interleaved with tool cycles, with post-soak JS heap,
   renderer working set, and mounted-row samples.
+- Prefetched-surface first opens: Settings and the command palette are loaded
+  during idle time, so their first open must stay under 100 ms (250 ms on the
+  hosted Intel macOS runner). The fresh-profile launch opens both once as an
+  ungated warm-up. Five later relaunches of the same profile and database each
+  wait 1.5 seconds of idle and open both again; the gate applies to the median
+  of those five. The report keeps the warm-up, every sample and the
+  minimum/median/p95/maximum of each surface.
 - Split workload: Inertia's supported two-chat split view. Inertia intentionally
   owns one primary `BrowserWindow`; the benchmark does not invent a multi-window
   architecture.

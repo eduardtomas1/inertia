@@ -6,6 +6,11 @@ export interface DistributionSummary {
   maximum: number | null;
 }
 
+export interface PrefetchedSurfaceSample {
+  commandPaletteFirstOpenMs: number;
+  settingsFirstOpenMs: number;
+}
+
 interface StreamingBenchmarkEvidenceSample {
   p95VisibleGapMs: number;
   longTaskTotalMs: number;
@@ -77,5 +82,26 @@ export function summarizeStreamingBenchmarkEvidence(
     },
     p95VisibleGapMs: visibleGap.median ?? Number.POSITIVE_INFINITY,
     longTaskTotalMs: longTaskTotal.maximum ?? Number.POSITIVE_INFINITY,
+  };
+}
+
+export function summarizePrefetchedSurfaceSamples(
+  warmUp: PrefetchedSurfaceSample,
+  samples: readonly PrefetchedSurfaceSample[],
+) {
+  if (samples.length % 2 === 0) {
+    throw new Error("Prefetched-surface first opens need an odd number of measured relaunches.");
+  }
+  const commandPalette = distribution(samples.map(({ commandPaletteFirstOpenMs }) => commandPaletteFirstOpenMs));
+  const settings = distribution(samples.map(({ settingsFirstOpenMs }) => settingsFirstOpenMs));
+  return {
+    commandPaletteFirstOpenMs: commandPalette.median ?? Number.POSITIVE_INFINITY,
+    settingsFirstOpenMs: settings.median ?? Number.POSITIVE_INFINITY,
+    prefetchedSurfaces: {
+      warmUp,
+      samples,
+      commandPaletteFirstOpenMs: commandPalette,
+      settingsFirstOpenMs: settings,
+    },
   };
 }

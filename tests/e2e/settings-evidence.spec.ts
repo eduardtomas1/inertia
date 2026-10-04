@@ -177,15 +177,16 @@ function sectionLabel(id: string): string | RegExp {
   return SECTIONS.find((section) => section.id === id)!.label;
 }
 
-async function capture(name: string, options: { keepFocus?: boolean } = {}): Promise<void> {
+async function capture(name: string, options: { keepFocus?: boolean; target?: Page } = {}): Promise<void> {
   if (!evidenceDirectory) throw new Error("INERTIA_SETTINGS_EVIDENCE_DIR is not set.");
   if (capturedNames.has(name)) throw new Error(`Evidence image ${name} was captured twice.`);
   capturedNames.add(name);
-  await page.mouse.move(0, 0);
+  const target = options.target ?? page;
+  await target.mouse.move(0, 0);
   if (!options.keepFocus) {
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await target.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   }
-  await page.screenshot({ path: join(evidenceDirectory, `${name}.png`), animations: "disabled" });
+  await target.screenshot({ path: join(evidenceDirectory, `${name}.png`), animations: "disabled" });
 }
 
 async function waitForSettledSection(): Promise<void> {
@@ -292,6 +293,24 @@ async function captureProjectStates(viewport: Viewport): Promise<void> {
   await waitForSettledSection();
   await capturePages(evidenceName("projects", "project", viewport));
 
+  const access = page.getByRole("combobox", { name: "Default access in this project" });
+  await scrollContentTo(Math.max(0, Math.floor((await offsetWithinContent(access)).top) - 240));
+  await access.selectOption({ label: "Full access" });
+  const accessRow = settingsContent().locator("[data-setting-id='project-default-access']");
+  await expect(accessRow).toContainText("Choose Full access only for a workspace and task you trust.");
+  await expect(accessRow.getByRole("status")).toHaveText("Saved");
+  await capture(evidenceName("projects", "default-access-saved", viewport)(null), { keepFocus: true });
+  await access.selectOption({ index: 0 });
+  await expect(accessRow).not.toContainText("Choose Full access only");
+  await expect(accessRow).not.toContainText("Saved", { timeout: 5_000 });
+
+  const advanced = settingsContent().locator(".project-settings-advanced > summary");
+  await advanced.click();
+  await expect(page.getByRole("combobox", { name: "Repository display limit" })).toBeVisible();
+  await scrollContentTo(Math.max(0, Math.floor((await offsetWithinContent(advanced)).top) - 320));
+  await capture(evidenceName("projects", "advanced", viewport)(null));
+  await advanced.click();
+
   const addAction = page.getByRole("button", { name: "Add action" });
   await addAction.click();
   const actionForm = page.locator(".project-action-form");
@@ -372,6 +391,69 @@ async function captureDiscordStates(viewport: Viewport): Promise<void> {
   await scrollContentTo(0);
 }
 
+async function captureSavedState(viewport: Viewport): Promise<void> {
+  const timestamps = page.getByRole("switch", { name: "Message timestamps" });
+  await scrollContentTo(Math.max(0, Math.floor((await offsetWithinContent(timestamps)).top) - 240));
+  await timestamps.click();
+  const row = settingsContent().locator("[data-setting-id='message-timestamps']");
+  await expect(row.getByRole("status")).toHaveText("Saved");
+  await capture(evidenceName("chats", "saved", viewport)(null), { keepFocus: true });
+  await timestamps.click();
+  await expect(timestamps).toBeChecked();
+  await scrollContentTo(0);
+}
+
+async function captureSearchStates(viewport: Viewport): Promise<void> {
+  await openSection(sectionLabel("appearance"));
+  const search = page.getByRole("combobox", { name: "Search settings" });
+  await search.click();
+  await page.keyboard.type("sound");
+  const results = page.getByRole("listbox", { name: "Matching settings" });
+  await expect(results.getByRole("option").first()).toBeVisible();
+  await page.waitForTimeout(200);
+  await capture(evidenceName("search", "results", viewport)(null), { keepFocus: true });
+  await page.keyboard.press("ArrowDown");
+  await expect(results.getByRole("option", { selected: true })).toHaveCount(1);
+  await capture(evidenceName("search", "result-focused", viewport)(null), { keepFocus: true });
+  await page.keyboard.press("Enter");
+  await expect(results).toHaveCount(0);
+  await expect(page.locator(".settings-content :focus")).toHaveCount(1);
+  await page.waitForTimeout(300);
+  await capture(evidenceName("search", "opened", viewport)(null), { keepFocus: true });
+  await search.click();
+  await search.fill("zzzz");
+  await expect(page.getByText("No settings match")).toBeVisible();
+  await capture(evidenceName("search", "no-results", viewport)(null), { keepFocus: true });
+  await page.keyboard.press("Escape");
+  await expect(search).toHaveValue("");
+}
+
+async function captureNarrowSearch(viewport: Viewport): Promise<void> {
+  const search = page.getByRole("combobox", { name: "Search settings" });
+  await search.click();
+  await page.keyboard.type("theme");
+  await expect(page.getByRole("listbox", { name: "Matching settings" }).getByRole("option").first()).toBeVisible();
+  await page.waitForTimeout(200);
+  await capture(evidenceName("search", "results", viewport)(null), { keepFocus: true });
+  await page.keyboard.press("Escape");
+  await expect(search).toHaveValue("");
+}
+
+async function captureDiscordError(viewport: Viewport): Promise<void> {
+  await setAppearanceInPlace(app, viewport.theme);
+  await app.resizeWindow(viewport.width, viewport.height);
+  await openSection(sectionLabel("devices"));
+  await expect(page.getByRole("textbox", { name: "Repository URL" })).toHaveValue("");
+  const webhook = page.getByRole("textbox", { name: "Webhook URL" });
+  await webhook.fill("https://discord.com/api/webhooks/evidence/fixture");
+  const post = page.getByRole("button", { name: "Post release to Discord…" });
+  await post.scrollIntoViewIfNeeded();
+  await post.click();
+  await expect(settingsContent().getByText("Add a release repository URL before posting.")).toBeVisible();
+  await capture(evidenceName("devices", "discord-error", viewport)(null));
+  await webhook.fill("");
+}
+
 async function captureArchivedStates(viewport: Viewport): Promise<void> {
   const filter = page.getByRole("searchbox", { name: "Filter archived chats" });
   await filter.scrollIntoViewIfNeeded();
@@ -411,7 +493,11 @@ async function captureCardSection(id: string, viewport: Viewport): Promise<void>
 }
 
 async function captureEveryState(viewport: Viewport): Promise<void> {
-  for (const id of ["appearance", "chats", "notifications"]) await captureCardSection(id, viewport);
+  await captureSearchStates(viewport);
+  for (const id of ["appearance", "chats", "notifications"]) {
+    await captureCardSection(id, viewport);
+    if (id === "chats") await captureSavedState(viewport);
+  }
   await captureDefaultState("keyboard", viewport);
   await captureProjectStates(viewport);
   await captureAgentStates(viewport);
@@ -440,6 +526,7 @@ async function captureSections(viewport: Viewport): Promise<void> {
       }
     }
   }
+  if (viewport.size === "narrow") await captureNarrowSearch(viewport);
 }
 
 async function captureViewport(viewport: Viewport): Promise<void> {
@@ -470,6 +557,15 @@ async function captureEntryAndExit(viewport: Viewport): Promise<void> {
   await search.fill("theme");
   await page.waitForTimeout(300);
   await capture(evidenceName("entry", "palette-theme", viewport)(null), { keepFocus: true });
+  await page.keyboard.press("Enter");
+  await expect(settings).toBeVisible();
+  await expect(settingsNavigation(sectionLabel("appearance"))).toHaveAttribute("aria-current", "page");
+  await waitForSettledSection();
+  await capture(evidenceName("entry", "palette-theme-opened", viewport)(null), { keepFocus: true });
+  await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(settings).toHaveCount(0);
+
+  await openPalette();
   await search.fill("settings");
   await page.waitForTimeout(300);
   await page.keyboard.press("Enter");
@@ -495,6 +591,16 @@ async function captureEntryAndExit(viewport: Viewport): Promise<void> {
   await expect(settings).toBeVisible();
   await waitForSettledSection();
   await capture(evidenceName("exit", "reopened", viewport)(null), { keepFocus: true });
+
+  const toggleSettings = process.platform === "darwin" ? "Meta+Comma" : "Control+Comma";
+  await page.keyboard.press(toggleSettings);
+  await expect(settings).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await capture(evidenceName("exit", "shortcut", viewport)(null), { keepFocus: true });
+  await page.keyboard.press(toggleSettings);
+  await expect(settings).toBeVisible();
+  await waitForSettledSection();
+  await capture(evidenceName("entry", "shortcut", viewport)(null), { keepFocus: true });
 }
 
 test.beforeAll(async () => {
@@ -567,5 +673,45 @@ test("captures every Settings section for PR evidence", async () => {
   for (const viewport of VIEWPORTS) {
     await test.step(`${viewport.theme} ${viewport.size}`, () => captureViewport(viewport));
   }
+  await test.step("Discord error", () => captureDiscordError(VIEWPORTS[0]));
   expect(app.rendererErrors).toEqual([]);
+});
+
+test("captures the new-chat fallback for an unavailable default provider", async () => {
+  test.skip(!evidenceDirectory, "Set INERTIA_SETTINGS_EVIDENCE_DIR to capture Settings evidence.");
+  const viewport = VIEWPORTS[0];
+  const fallback = await createAppFixture({
+    name: "settings-evidence-fallback",
+    initialState: "conversation",
+    codexAppServerSource,
+    claudeAuthSource,
+    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+      const store = new RuntimeStore(
+        join(testDirectory, "data", "inertia.sqlite"),
+        workspaceDirectory,
+        { recoverInterruptedRuns: false },
+      );
+      try {
+        store.updateSettings({ defaultProvider: "claude" });
+      } finally {
+        store.close();
+      }
+    },
+  });
+  try {
+    await fallback.page.clock.setFixedTime(new Date("2026-10-03T10:30:00Z"));
+    await setAppearanceInPlace(fallback, viewport.theme);
+    await fallback.resizeWindow(viewport.width, viewport.height);
+    await fallback.page.getByRole("button", { name: "Settings", exact: true }).click();
+    const chats = fallback.page.getByRole("navigation", { name: "Settings sections" })
+      .getByRole("button", { name: "Chats", exact: true });
+    await chats.click();
+    await expect(chats).toHaveAttribute("aria-current", "page");
+    await expect(fallback.page.locator("[data-setting-id='new-chat-model']"))
+      .toContainText("Claude is not available, so new chats use Codex.", { timeout: 30_000 });
+    await capture(evidenceName("chats", "new-chats-fallback", viewport)(null), { target: fallback.page });
+    expect(fallback.rendererErrors).toEqual([]);
+  } finally {
+    await fallback.close();
+  }
 });

@@ -12,7 +12,7 @@ import { ProjectColorPicker, ProjectEmphasisPicker } from "./ProjectAppearanceCo
 import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
-import { SettingDisclosure, SettingRow, SettingsGroup } from "./settings/SettingsLayout";
+import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { useSettingAction } from "./settings/useSettingAction";
 import "./ProjectSettings.css";
@@ -59,8 +59,8 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const preferences = project.preferences ?? defaultProjectPreferences();
   const action = useSettingAction();
   const [noticeRow, setNoticeRow] = useState<string | null>(null);
-  const [iconsOpen, setIconsOpen] = useState(false);
-  const [actionOpen, setActionOpen] = useState(false);
+  const icons = useDisclosure();
+  const actionForm = useDisclosure();
   const [actionName, setActionName] = useState("");
   const [executable, setExecutable] = useState("");
   const [args, setArgs] = useState("");
@@ -70,6 +70,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const unavailable = disabled || !request;
   const blocked = unavailable || saving;
   const busy = saving || undefined;
+  const actionsFull = preferences.actions.length >= 20 || undefined;
   const guarded = (action: () => void) => (): void => { if (!blocked) action(); };
   const busyProject = conversations.some((conversation) => conversation.projectId === project.id
     && (conversation.status === "running" || conversation.status === "needs-input"));
@@ -108,7 +109,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       <SettingRow id="project-icon" title="Project icon" description="A symbol, or a small image stored only on this device." notice={notice("project-icon")}>
         <div className="project-setting-control">
           <div className="project-icon-controls"><ProjectIcon project={project} size={20} />
-            <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} aria-expanded={iconsOpen} onClick={guarded(() => setIconsOpen(!iconsOpen))}>Choose icon</button>
+            <button ref={icons.ref} type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} aria-expanded={icons.open} onClick={guarded(icons.toggle)}>Choose icon</button>
             <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => fileInput.current?.click())}>Choose file</button>
             {preferences.icon && <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => void setPreference("project-icon", "icon", null))}>Reset</button>}
             <input ref={fileInput} type="file" hidden disabled={blocked} accept="image/png,image/jpeg,image/webp" onChange={(event) => {
@@ -116,8 +117,8 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
               if (file) void change("project-icon", async () => update({ preferences: { ...preferences, icon: { kind: "image", data: await readProjectIcon(file) } } }));
             }} />
           </div>
-          {iconsOpen && <div className="project-icon-grid" role="group" aria-label="Project icons">{PROJECT_ICON_NAMES.map((icon) => <button type="button" key={icon} aria-label={`${icon} icon`} disabled={unavailable} aria-disabled={busy}
-            onClick={guarded(() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); setIconsOpen(false); })}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={18} /></button>)}</div>}
+          {icons.open && <div className="project-icon-grid" role="group" aria-label="Project icons">{PROJECT_ICON_NAMES.map((icon) => <button type="button" key={icon} aria-label={`${icon} icon`} disabled={unavailable} aria-disabled={busy}
+            onClick={guarded(() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); icons.close(); })}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={18} /></button>)}</div>}
         </div>
       </SettingRow>
       <SettingRow id="project-colour" title="Project colour" description="Its chats inherit the colour." notice={notice("project-colour")}>
@@ -171,17 +172,17 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </SettingRow>
       <div className="project-actions-setting">
         <SettingRow id="project-actions" title="Actions" description="Named commands you run from the workspace. Saving never runs them." notice={notice("project-actions")}>
-          <button type="button" className="secondary-button" disabled={unavailable || preferences.actions.length >= 20} aria-disabled={busy} aria-expanded={actionOpen} onClick={guarded(() => setActionOpen(!actionOpen))}><Plus size={14} aria-hidden="true" />Add action</button>
+          <button ref={actionForm.ref} type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy || actionsFull} aria-expanded={actionForm.open} onClick={guarded(actionsFull ? actionForm.close : actionForm.toggle)}><Plus size={14} aria-hidden="true" />Add action</button>
         </SettingRow>
         {preferences.actions.length > 0 && <ul className="project-actions-list" aria-label="Project actions">{preferences.actions.map((projectAction) => <li key={projectAction.id}>
           <span><strong>{projectAction.name}</strong><code>{[projectAction.executable, ...projectAction.args].join(" ")}</code></span>
           <button type="button" className="icon-button" aria-label={`Remove ${projectAction.name}`} title={`Remove ${projectAction.name}`} disabled={unavailable} aria-disabled={busy}
             onClick={guarded(() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id)))}><Trash2 size={14} aria-hidden="true" /></button>
         </li>)}</ul>}
-        {actionOpen && <form className="project-action-form" aria-label="New action" onSubmit={(event) => {
+        {actionForm.open && <form className="project-action-form" aria-label="New action" onSubmit={(event) => {
           event.preventDefault();
           if (blocked || !actionName.trim() || !executable.trim()) return;
-          void change("project-actions", update({ preferences: { ...preferences, actions: [...preferences.actions, { id: crypto.randomUUID(), name: actionName.trim(), executable: executable.trim(), args: args ? args.split("\n") : [] }] } })).then((saved) => { if (saved) { setActionOpen(false); setActionName(""); setExecutable(""); setArgs(""); } });
+          void change("project-actions", update({ preferences: { ...preferences, actions: [...preferences.actions, { id: crypto.randomUUID(), name: actionName.trim(), executable: executable.trim(), args: args ? args.split("\n") : [] }] } })).then((saved) => { if (saved) { actionForm.close(); setActionName(""); setExecutable(""); setArgs(""); } });
         }}>
           <label>Name<input className="setting-input" required maxLength={80} value={actionName} onChange={(event) => setActionName(event.target.value)} disabled={unavailable} readOnly={saving} /></label>
           <label>Executable<input className="setting-input" required maxLength={4096} value={executable} onChange={(event) => setExecutable(event.target.value)} disabled={unavailable} readOnly={saving} placeholder="npm" /></label>
@@ -189,7 +190,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
             <label>Arguments (one per line)<textarea className="setting-input" rows={3} value={args} aria-describedby={`${project.id}-arguments-help`} onChange={(event) => setArgs(event.target.value)} disabled={unavailable} readOnly={saving} placeholder={"run\nbuild"} /></label>
             <small id={`${project.id}-arguments-help`}>Passed literally. No shell expansion, pipes or command substitution.</small>
           </div>
-          <div className="project-action-buttons"><button type="button" className="secondary-button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" className="primary-button" disabled={unavailable || !actionName.trim() || !executable.trim()} aria-disabled={busy}>Save action</button></div>
+          <div className="project-action-buttons"><button type="button" className="secondary-button" onClick={actionForm.close}>Cancel</button><button type="submit" className="primary-button" disabled={unavailable || !actionName.trim() || !executable.trim()} aria-disabled={busy}>Save action</button></div>
         </form>}
       </div>
       <SettingDisclosure summary="Advanced" className="project-settings-advanced">

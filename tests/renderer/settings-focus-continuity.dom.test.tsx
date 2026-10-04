@@ -2,16 +2,20 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachmentStorageSettings } from "../../src/renderer/src/components/AttachmentStorageSettings";
 import CanaryRollbackSetting from "../../src/renderer/src/components/CanaryRollbackSetting";
+import type { IssueReportSettingsProps } from "../../src/renderer/src/components/IssueReportSettings";
 import { MascotSettings } from "../../src/renderer/src/components/MascotSettings";
+import { ProjectSettings } from "../../src/renderer/src/components/ProjectSettings";
 import { SnapshotSettings } from "../../src/renderer/src/components/SnapshotSettings";
 import { AppUpdateSettings } from "../../src/renderer/src/components/settings/AppUpdateSettings";
 import { RestoreDefaults } from "../../src/renderer/src/components/settings/RestoreDefaults";
+import { ArchivedChats } from "../../src/renderer/src/components/settings/sections/ArchivedChats";
 import { KeyboardSettings } from "../../src/renderer/src/components/settings/sections/KeyboardSettings";
-import { defaultSettings, type ServerEvent } from "../../src/shared/contracts";
+import { defaultSettings, type Conversation, type Project, type ServerEvent } from "../../src/shared/contracts";
 import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
 import { emptyMascotStatus, type MascotSettingsBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import type { SnapshotState } from "../../src/shared/snapshots";
-import { deferred } from "./composer-fixtures";
+import { conversation, deferred, provider } from "./composer-fixtures";
 
 const original = window.inertia;
 afterEach(() => {
@@ -179,5 +183,98 @@ describe("busy settings controls keep focus", () => {
     expect(bridge.configure).toHaveBeenCalledOnce();
     await act(async () => { configuring.resolve(); await configuring.promise; });
     await waitFor(() => expect(show).not.toHaveAttribute("aria-disabled"));
+  });
+});
+
+const project: Project = { id: "11111111-1111-4111-8111-111111111111", name: "Studio", path: "/workspace/studio", normalizedPath: "/workspace/studio",
+  repositoryIdentity: "git:/workspace/studio/.git", repositoryRoot: "/workspace/studio", repositoryRelativePath: "",
+  groupingMode: null, gitRepositoryLimit: 16, color: "#5661d8", status: "ready", createdAt: "2026-09-09T08:00:00.000Z",
+  updatedAt: "2026-09-09T08:00:00.000Z", preferences: defaultProjectPreferences() };
+
+function renderProject(subject: Project = project) {
+  const request = vi.fn<IssueReportSettingsProps["request"]>().mockResolvedValue({ type: "request.ok", requestId: "test" });
+  const view = render(<ProjectSettings projects={[subject]} conversations={[]} providers={[provider]} backendDefaults={[]} backendProfiles={[]}
+    settings={defaultSettings} disabled={false} request={request} onUpdateSettings={vi.fn()} initialProjectId={subject.id} />);
+  return { request, view };
+}
+
+function archivedChat(id: string, title: string, archivedAt: string): Conversation {
+  return { ...conversation(id), title, archivedAt };
+}
+
+describe("focus survives controls that close themselves", () => {
+  it("returns focus to Choose icon after an icon is picked", async () => {
+    const { request } = renderProject();
+    const trigger = screen.getByRole("button", { name: "Choose icon" });
+    press(trigger);
+    press(screen.getAllByRole("button", { name: / icon$/u })[1]!);
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    expect(screen.queryByRole("group", { name: "Project icons" })).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("returns focus to Add action when the action form is cancelled or saved", async () => {
+    const { request } = renderProject();
+    const add = screen.getByRole("button", { name: "Add action" });
+    press(add);
+    press(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("form", { name: "New action" })).toBeNull();
+    expect(add).toHaveFocus();
+    press(add);
+    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
+    fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
+    press(screen.getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save action" })).toBeNull());
+    expect(add).toHaveFocus();
+  });
+
+  it("keeps Add action focusable once the last allowed action is saved", async () => {
+    const actions = Array.from({ length: 19 }, (_, index) => ({ id: `action-${index}`, name: `Action ${index}`, executable: "node", args: [] }));
+    const full = { ...project, preferences: { ...defaultProjectPreferences(), actions } };
+    const { request, view } = renderProject(full);
+    const add = screen.getByRole("button", { name: "Add action" });
+    press(add);
+    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Last" } });
+    fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
+    press(screen.getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    const saved = { ...full, updatedAt: "2026-09-09T09:00:00.000Z", preferences: { ...full.preferences, actions: [...actions, { id: "last", name: "Last", executable: "node", args: [] }] } };
+    view.rerender(<ProjectSettings projects={[saved]} conversations={[]} providers={[provider]} backendDefaults={[]} backendProfiles={[]}
+      settings={defaultSettings} disabled={false} request={request} onUpdateSettings={vi.fn()} initialProjectId={saved.id} />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save action" })).toBeNull());
+    expect(add).toHaveFocus();
+    expect(add).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(add);
+    expect(screen.queryByRole("form", { name: "New action" })).toBeNull();
+  });
+
+  it("moves focus to the next Restore, then to the filter, when a restored chat leaves the list", () => {
+    const chats = [
+      archivedChat("a", "Oldest", "2026-10-01T00:00:00.000Z"),
+      archivedChat("b", "Middle", "2026-10-02T00:00:00.000Z"),
+      archivedChat("c", "Newest", "2026-10-03T00:00:00.000Z"),
+    ];
+    const onUnarchive = vi.fn();
+    const view = render(<ArchivedChats archived={chats} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    press(screen.getByRole("button", { name: "Restore Middle" }));
+    expect(onUnarchive).toHaveBeenCalledWith(chats[1]);
+    view.rerender(<ArchivedChats archived={[chats[0]!, chats[2]!]} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    expect(screen.getByRole("button", { name: "Restore Oldest" })).toHaveFocus();
+    press(screen.getByRole("button", { name: "Restore Oldest" }));
+    view.rerender(<ArchivedChats archived={[chats[2]!]} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    expect(screen.getByRole("button", { name: "Restore Newest" })).toHaveFocus();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter archived chats" }), { target: { value: "new" } });
+    press(screen.getByRole("button", { name: "Restore Newest" }));
+    view.rerender(<ArchivedChats archived={[archivedChat("d", "Other", "2026-10-04T00:00:00.000Z")]} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    expect(screen.getByRole("searchbox", { name: "Filter archived chats" })).toHaveFocus();
+  });
+
+  it("moves focus to the empty message when the last archived chat is restored", () => {
+    const chat = archivedChat("a", "Only", "2026-10-01T00:00:00.000Z");
+    const view = render(<ArchivedChats archived={[chat]} providers={[provider]} disabled={false} onUnarchive={vi.fn()} />);
+    press(screen.getByRole("button", { name: "Restore Only" }));
+    view.rerender(<ArchivedChats archived={[]} providers={[provider]} disabled={false} onUnarchive={vi.fn()} />);
+    expect(screen.getByText("No archived chats.")).toHaveFocus();
   });
 });

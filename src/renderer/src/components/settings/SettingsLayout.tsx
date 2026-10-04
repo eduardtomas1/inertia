@@ -1,4 +1,4 @@
-import { useId, type ReactNode, type Ref } from "react";
+import { useId, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import clsx from "clsx";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 
@@ -191,4 +191,23 @@ export function SettingDisclosure({
       <div id={contentId} className="setting-disclosure-content">{children}</div>
     </details>
   );
+}
+
+export function useDisclosure(): {
+  open: boolean;
+  ref: RefObject<HTMLButtonElement | null>;
+  toggle: () => void;
+  close: () => void;
+} {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  return {
+    open,
+    ref,
+    toggle: () => setOpen(!open),
+    close: () => {
+      setOpen(false);
+      ref.current?.focus();
+    },
+  };
 }

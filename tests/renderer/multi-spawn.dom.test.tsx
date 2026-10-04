@@ -30,9 +30,11 @@ import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommand
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import {
   MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+  writeMultiSpawnPreset,
   type MultiSpawnDraft,
 } from "../../src/renderer/src/utils/multiSpawn";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
@@ -423,6 +425,80 @@ describe("multi-spawn", () => {
     expect(screen.getByText(
       /Both agents will share this project checkout/u,
     )).toBeVisible();
+  });
+
+  describe("access when a chat's project changes", () => {
+    const accessSnapshot = (activeProjectId: string): AppSnapshot => ({
+      ...snapshot,
+      activeProjectId,
+      projects: [
+        project(firstProjectId, "Inertia", {
+          preferences: { ...defaultProjectPreferences(), defaultAccessMode: "full" },
+        }),
+        project(secondProjectId, "Companion"),
+      ],
+    });
+    const renderDialog = (activeProjectId: string) => render(
+      <MultiSpawnDialog
+        open
+        snapshot={accessSnapshot(activeProjectId)}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    it("does not carry one project's default access into a project without one", () => {
+      renderDialog(firstProjectId);
+      expect(screen.getByLabelText("Chat 2 access")).toHaveValue("full");
+      fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+        target: { value: secondProjectId },
+      });
+      expect(screen.getByLabelText("Chat 2 access")).toHaveValue("supervised");
+      expect(screen.getByLabelText("Chat 1 access")).toHaveValue("full");
+    });
+
+    it("uses the new project's default access instead of the global default", () => {
+      renderDialog(secondProjectId);
+      expect(screen.getByLabelText("Chat 1 access")).toHaveValue("supervised");
+      fireEvent.change(screen.getByLabelText("Chat 1 project"), {
+        target: { value: firstProjectId },
+      });
+      expect(screen.getByLabelText("Chat 1 access")).toHaveValue("full");
+    });
+
+    it("keeps explicitly chosen access across project changes", () => {
+      renderDialog(firstProjectId);
+      fireEvent.change(screen.getByLabelText("Chat 2 access"), {
+        target: { value: "auto-edit" },
+      });
+      fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+        target: { value: secondProjectId },
+      });
+      expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
+      fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+        target: { value: firstProjectId },
+      });
+      expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
+    });
+
+    it("keeps remembered access across project changes", () => {
+      const draft = multiSpawnDraft();
+      writeMultiSpawnPreset(window.localStorage, {
+        ...draft,
+        sides: [draft.sides[0], { ...draft.sides[1], accessMode: "auto-edit" }],
+      });
+      renderDialog(firstProjectId);
+      expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
+      fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+        target: { value: secondProjectId },
+      });
+      expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
+    });
   });
 
   it("selects each model independently through the existing route chooser", async () => {

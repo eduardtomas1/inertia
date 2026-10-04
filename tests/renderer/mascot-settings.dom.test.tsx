@@ -48,6 +48,7 @@ describe("mascot custom sprite settings", () => {
     expect(format).toHaveTextContent("To animate a state, add a .webp or .gif with the same name, like working.webp.");
     expect(format).toHaveTextContent("When animation is paused or reduced motion is on, the still PNG is shown.");
     const required = within(section).getByRole("list", { name: "Required files" });
+    expect(guide).toContainElement(required);
     expect(within(required).getAllByRole("listitem").map((item) => [
       item.querySelector("code")!.textContent,
       item.querySelector("strong")!.textContent,
@@ -70,7 +71,7 @@ describe("mascot custom sprite settings", () => {
     const rejected = await within(section).findByRole("alert");
     expect(rejected).toHaveTextContent("idea.png must be 96 × 96 pixels, not 128 × 128.");
     expect(rejected).toHaveClass("mascot-sprites-error");
-    expect(rejected.previousElementSibling).toBe(within(section).getByRole("list", { name: "Required files" }));
+    expect(rejected.previousElementSibling).toBe(guide);
 
     bridge.importSprites.mockResolvedValueOnce({ status: "ready", sprites: sprites("0123456789abcdef", 2) });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));

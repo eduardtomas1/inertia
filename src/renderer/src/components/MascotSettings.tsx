@@ -111,8 +111,15 @@ export function MascotSettings() {
           <ul aria-label="Format">
             {MASCOT_SPRITE_RULES.map((rule) => <li key={rule}>{rule}</li>)}
           </ul>
+          {!shown && <ul className="mascot-sprite-files" aria-label="Required files">
+            {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
+              <code>{`${state}.png`}</code>
+              <strong>{MASCOT_SPRITE_LABELS[state]}</strong>
+              <small>{MASCOT_SPRITE_NOTES[state]}</small>
+            </li>)}
+          </ul>}
         </details>
-        {shown ? <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
+        {shown && <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
           {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
             <picture>
               <source media="(prefers-reduced-motion: no-preference)" srcSet={shown.files[state].animation} />
@@ -121,12 +128,6 @@ export function MascotSettings() {
             <span>{MASCOT_SPRITE_LABELS[state]}</span>
             <code>{`${state}.png`}</code>
             {shown.files[state].animation !== shown.files[state].poster && <small>Animated</small>}
-          </li>)}
-        </ul> : <ul className="mascot-sprite-files" aria-label="Required files">
-          {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
-            <code>{`${state}.png`}</code>
-            <strong>{MASCOT_SPRITE_LABELS[state]}</strong>
-            <small>{MASCOT_SPRITE_NOTES[state]}</small>
           </li>)}
         </ul>}
         {spriteError && <p role="alert" className="mascot-sprites-error">{spriteError}</p>}

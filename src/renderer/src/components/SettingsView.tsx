@@ -54,18 +54,21 @@ function useStableSettingsProps(props: SettingsViewProps): SettingsViewProps {
   return stable.current as unknown as SettingsViewProps;
 }
 
-function focusSettingRow(row: HTMLElement): void {
+function focusIfShown(element: HTMLElement): boolean {
+  if (!element.checkVisibility()) return false;
+  element.focus();
+  return document.activeElement === element;
+}
+
+function focusSettingRow(row: HTMLElement, heading: HTMLElement | null): void {
   for (let details = row.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
     details.open = true;
   }
   row.scrollIntoView?.({ block: "center" });
-  const control = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].find((element) => element.tabIndex >= 0);
-  if (control) {
-    control.focus();
-    return;
-  }
-  row.tabIndex = -1;
-  row.focus();
+  const controls = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element.tabIndex >= 0);
+  if (controls.some(focusIfShown)) return;
+  if (row.checkVisibility()) row.tabIndex = -1;
+  if (!focusIfShown(row)) heading?.focus();
 }
 
 function SettingsSectionHost({
@@ -114,7 +117,7 @@ const SettingsShell = memo(function SettingsShell({
       ? [...rootRef.current?.querySelectorAll<HTMLElement>("[data-setting-id]") ?? []]
         .find((element) => element.dataset.settingId === request.anchor)
       : undefined;
-    if (row) focusSettingRow(row);
+    if (row) focusSettingRow(row, headingRef.current);
     else headingRef.current?.focus();
   }, []);
   useEffect(() => {

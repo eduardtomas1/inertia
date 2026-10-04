@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 
 import { useRovingRadios } from "../../hooks/useRovingRadios";
@@ -173,6 +173,7 @@ export function SettingTextField({
   validate,
   failure,
   onSave,
+  onTextChange,
 }: {
   id: string;
   title: string;
@@ -191,6 +192,7 @@ export function SettingTextField({
   validate?: (value: string) => string | null;
   failure?: Failure;
   onSave: Persist<string>;
+  onTextChange?: (text: string, invalid: boolean) => void;
 }): React.JSX.Element {
   const action = useSettingAction();
   const errorId = useId();
@@ -203,6 +205,13 @@ export function SettingTextField({
   }, [pending, value]);
   const saved = pending ?? value;
   const shown = draft ?? saved;
+  const reportText = useRef(onTextChange);
+  useLayoutEffect(() => {
+    reportText.current = onTextChange;
+  });
+  useLayoutEffect(() => {
+    reportText.current?.(shown, error !== null);
+  }, [error, shown]);
   const commit = (): void => {
     if (draft === null) return;
     const next = normalize(draft);

@@ -191,11 +191,11 @@
 }
 
 @container project-settings (max-width: 560px) {
-  .project-settings .setting-row {
+  .project-settings .setting-row:not(:has(> .switch-control)) {
     flex-wrap: wrap;
   }
 
-  .project-settings .setting-copy {
+  .project-settings .setting-row:not(:has(> .switch-control)) > .setting-copy {
     flex-basis: 100%;
   }
 

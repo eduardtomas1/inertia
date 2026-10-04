@@ -213,8 +213,8 @@
 
 .provider-settings-binary-control {
   display: flex;
-  width: min(420px, 60%);
-  min-width: 0;
+  min-width: 220px;
+  flex: 0 1 360px;
   align-items: center;
   gap: 6px;
 }
@@ -429,6 +429,7 @@
   .provider-settings-editor-body .setting-field-control,
   .provider-settings-binary-control {
     width: 100%;
+    flex-basis: 100%;
   }
 }
 

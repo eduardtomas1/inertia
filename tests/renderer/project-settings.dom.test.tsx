@@ -26,7 +26,7 @@ describe("project settings", () => {
     fireEvent.blur(screen.getByRole("textbox", { name: "Project name" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: project.updatedAt, name: "Renamed studio" } }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add action" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add action" })).not.toHaveAttribute("aria-disabled"));
     request.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Add action" }));
     fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
@@ -82,7 +82,7 @@ describe("project settings", () => {
     const view = setup({ disabled: true });
     expect(screen.getByRole("textbox", { name: "Project name" })).toBeDisabled();
     view.rerender(<ProjectSettings {...view.props} disabled={false} conversations={[{ ...conversation("busy"), status: "running" }]} />);
-    expect(screen.getByRole("button", { name: "Remove project" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove project" })).toHaveAttribute("aria-disabled", "true");
     view.request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));
     fireEvent.change(screen.getByRole("combobox", { name: "Agent browser access" }), { target: { value: "false" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("changed in another window");
@@ -143,9 +143,9 @@ describe("project settings", () => {
       fireEvent.change(workspace, { target: { value: "worktree" } });
     });
     expect(request).toHaveBeenCalledTimes(1);
-    expect(workspace).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Choose icon" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Add action" })).toBeDisabled();
+    expect(workspace).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Choose icon" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Add action" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {
@@ -153,13 +153,13 @@ describe("project settings", () => {
       view.rerender(<ProjectSettings {...view.props} projects={[tinted]} />);
       pending.resolve({ type: "request.ok", requestId: "appearance-saved" });
     });
-    expect(workspace).toBeEnabled();
+    expect(workspace).not.toHaveAttribute("aria-disabled");
     fireEvent.change(workspace, { target: { value: "worktree" } });
     await waitFor(() => expect(request).toHaveBeenLastCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: tinted.updatedAt,
       preferences: { ...tinted.preferences!, workspace: "worktree" },
     } }));
-    await waitFor(() => expect(workspace).toBeEnabled());
+    await waitFor(() => expect(workspace).not.toHaveAttribute("aria-disabled"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("guards appearance changes during a full save and unlocks them after a failure", async () => {
@@ -179,16 +179,66 @@ describe("project settings", () => {
       fireEvent.click(pinned);
     });
     expect(request).toHaveBeenCalledTimes(1);
-    for (const control of [colour, emphasis, pinned]) expect(control).toBeDisabled();
+    for (const control of [workspace, colour, emphasis, pinned]) expect(control).toHaveAttribute("aria-disabled", "true");
     await act(async () => pending.reject(new Error("The runtime is offline.")));
     expect(screen.getByRole("alert")).toHaveTextContent("The runtime is offline.");
-    for (const control of [workspace, colour, emphasis, pinned]) expect(control).toBeEnabled();
+    for (const control of [workspace, colour, emphasis, pinned]) expect(control).not.toHaveAttribute("aria-disabled");
     fireEvent.click(colour);
     await waitFor(() => expect(request).toHaveBeenLastCalledWith({ type: "project.update", payload: {
       projectId: project.id, appearance: { color: { kind: "palette", name: "pink" } },
     } }));
-    await waitFor(() => expect(colour).toBeEnabled());
+    await waitFor(() => expect(colour).not.toHaveAttribute("aria-disabled"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("keeps the clicked swatch focused and ignores further clicks while its save is pending", async () => {
+    const pending = deferred<ServerEvent>();
+    const request = vi.fn<IssueReportSettingsProps["request"]>()
+      .mockResolvedValue({ type: "request.ok", requestId: "saved" })
+      .mockReturnValueOnce(pending.promise);
+    setup({ request });
+    const pink = screen.getByRole("radio", { name: "Pink" });
+    const teal = screen.getByRole("radio", { name: "Teal" });
+    pink.focus();
+    fireEvent.click(pink);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(pink).toHaveFocus();
+    expect(pink).toHaveAttribute("aria-disabled", "true");
+    expect(pink).not.toBeDisabled();
+    fireEvent.click(teal);
+    fireEvent.keyDown(pink, { key: "End" });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(pink).toHaveFocus();
+    await act(async () => pending.resolve({ type: "request.ok", requestId: "appearance-saved" }));
+    expect(pink).not.toHaveAttribute("aria-disabled");
+  });
+  it("keeps the pin switch, icon buttons and Remove project focused while a save is pending", async () => {
+    const pending = deferred<ServerEvent>();
+    const request = vi.fn<IssueReportSettingsProps["request"]>()
+      .mockResolvedValue({ type: "request.ok", requestId: "saved" })
+      .mockReturnValueOnce(pending.promise);
+    const confirm = vi.fn(() => true);
+    Object.defineProperty(window, "confirm", { configurable: true, value: confirm });
+    setup({ request });
+    const pinned = screen.getByRole("switch", { name: "Pin to top of project lists" });
+    pinned.focus();
+    fireEvent.click(pinned);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(pinned).toHaveFocus();
+    expect(pinned).toHaveAttribute("aria-disabled", "true");
+    for (const name of ["Choose icon", "Choose file", "Add action", "Remove project"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).not.toBeDisabled();
+      button.focus();
+      fireEvent.click(button);
+      expect(button).toHaveFocus();
+    }
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Project icons" })).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ type: "request.ok", requestId: "pin-saved" }));
+    expect(screen.getByRole("button", { name: "Remove project" })).not.toHaveAttribute("aria-disabled");
+    Reflect.deleteProperty(window, "confirm");
   });
   it("sets colour, emphasis and pinning as server-merged appearance patches", async () => {
     const view = setup();
@@ -197,13 +247,13 @@ describe("project settings", () => {
     expect(within(colours).getByRole("radio", { name: "Pink" })).toHaveFocus();
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       appearance: { color: { kind: "palette", name: "pink" } } } }));
-    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Pink" })).toBeEnabled());
+    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Pink" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("radio", { name: "Icon and name" }));
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Pin to top of project lists" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Pin to top of project lists" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("switch", { name: "Pin to top of project lists" }));
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { pinned: true } } }));
     expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { colorEmphasis: "icon-and-name" } } });
-    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Teal" })).toBeEnabled());
+    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Teal" })).not.toHaveAttribute("aria-disabled"));
     view.request.mockRejectedValueOnce(new Error("The runtime is offline."));
     fireEvent.click(within(colours).getByRole("radio", { name: "Teal" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The runtime is offline.");

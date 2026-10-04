@@ -181,8 +181,8 @@
 
 .backend-credential-control {
   display: flex;
-  width: min(360px, 60%);
-  min-width: 0;
+  min-width: 200px;
+  flex: 0 1 320px;
   align-items: center;
   gap: 6px;
 }
@@ -512,7 +512,7 @@
   }
 
   .backend-credential-control {
-    width: 100%;
+    flex-basis: 100%;
   }
 
   .backend-choice-grid,

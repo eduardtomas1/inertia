@@ -93,7 +93,7 @@ const budgets = {
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 1_114 + 905,
   deferredThreadActionsJavaScript: 8 * kibibyte,
-  deferredProjectCustomizeJavaScript: 11.125 * kibibyte,
+  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 218,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,

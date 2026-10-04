@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachmentStorageSettings } from "../../src/renderer/src/components/AttachmentStorageSettings";
 import CanaryRollbackSetting from "../../src/renderer/src/components/CanaryRollbackSetting";
@@ -221,7 +221,7 @@ describe("focus survives controls that close themselves", () => {
     expect(screen.queryByRole("form", { name: "New action" })).toBeNull();
     expect(add).toHaveFocus();
     press(add);
-    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
     fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
     press(screen.getByRole("button", { name: "Save action" }));
     await waitFor(() => expect(request).toHaveBeenCalled());
@@ -235,7 +235,7 @@ describe("focus survives controls that close themselves", () => {
     const { request, view } = renderProject(full);
     const add = screen.getByRole("button", { name: "Add action" });
     press(add);
-    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Last" } });
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Last" } });
     fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
     press(screen.getByRole("button", { name: "Save action" }));
     await waitFor(() => expect(request).toHaveBeenCalled());

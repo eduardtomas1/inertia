@@ -84,7 +84,7 @@ test("right-click, inline actions, delayed preview, and nested keyboard menus", 
   await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(threadId);
   await row.press("Shift+F10");
   await menu.getByRole("menuitem", { name: "Project settings", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "Project name", exact: true })).toHaveValue("Workspace studio");
+  await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Workspace studio");
   expect(app.rendererErrors).toEqual([]);
 });
 
@@ -92,7 +92,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   const page = app.page;
   await page.getByRole("complementary", { name: "Project navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  if (!await page.getByRole("textbox", { name: "Project name" }).isVisible()) {
+  if (!await page.getByRole("textbox", { name: "Name", exact: true }).isVisible()) {
     await page.getByRole("button", { name: "Choose project", exact: true }).click();
     await page.getByRole("option", { name: "Workspace studio", exact: true }).click();
   }
@@ -106,7 +106,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   await capture(info, "project-image-icon-light");
   await page.getByRole("combobox", { name: "Agent browser access", exact: true }).selectOption("false");
   await page.getByRole("button", { name: "Add action", exact: true }).click();
-  await page.getByLabel("Name", { exact: true }).fill("Check workspace");
+  await page.getByRole("form", { name: "New action" }).getByLabel("Name", { exact: true }).fill("Check workspace");
   await page.getByLabel("Executable", { exact: true }).fill("node");
   await page.getByLabel("Arguments (one per line)", { exact: true }).fill("--version");
   await page.getByRole("button", { name: "Save action", exact: true }).scrollIntoViewIfNeeded();
@@ -136,7 +136,7 @@ test("edits project defaults without running actions, shows all settings, and pe
   await page.getByRole("button", { name: "Remove project", exact: true }).scrollIntoViewIfNeeded();
   await capture(info, "project-checkout-dark");
   await app.resizeWindow(900, 700);
-  await page.getByRole("textbox", { name: "Project name" }).scrollIntoViewIfNeeded();
+  await page.getByRole("textbox", { name: "Name", exact: true }).scrollIntoViewIfNeeded();
   await capture(info, "project-defaults-narrow-dark");
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();

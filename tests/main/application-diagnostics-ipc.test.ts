@@ -19,7 +19,7 @@ const releases = [
   { tag_name: "v1", created_at: "2026-01-01T00:00:00Z" },
 ];
 
-function harness() {
+function harness(now?: () => number) {
   const root = mkdtempSync(join(tmpdir(), "inertia-incidents-ipc-")); directories.push(root);
   const diagnostics = new RuntimeDiagnostics(join(root, "logs"));
   const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
@@ -32,7 +32,7 @@ function harness() {
   const copyText = vi.fn();
   const chooseExportPath = vi.fn(async (): Promise<string | null> => join(root, "export.json"));
   const persistCapture = vi.fn();
-  registerApplicationDiagnosticsIpc({ ipcMain, diagnostics: () => diagnostics, assertTrusted, copyText, chooseExportPath, persistCapture });
+  registerApplicationDiagnosticsIpc({ ipcMain, diagnostics: () => diagnostics, assertTrusted, copyText, chooseExportPath, persistCapture, ...(now ? { now } : {}) });
   const invoke = (name: string, input: unknown) => handlers.get(name)!(event, input);
   return { root, diagnostics, ipcMain, event, handlers, assertTrusted, copyText, chooseExportPath, persistCapture, invoke };
 }
@@ -60,6 +60,17 @@ describe("diagnostics capture and history IPC", () => {
     expect(h.diagnostics.query({ severity: "all" }).events.map(({ event }) => event)).toEqual(["diagnostics.history-cleared"]);
     for (let index = 0; index < 19; index += 1) h.handlers.get(DIAGNOSTICS_IPC.clear)!(h.event);
     expect(() => h.handlers.get(DIAGNOSTICS_IPC.clear)!(h.event)).toThrow("rate limited");
+  });
+
+  it("limits a sender to 120 reads per minute and admits reads again once the minute has passed", () => {
+    let time = 1_000_000;
+    const h = harness(() => time);
+    for (let index = 0; index < 120; index += 1) h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 });
+    expect(() => h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 })).toThrow("rate limited");
+    time += 59_999;
+    expect(() => h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 })).toThrow("rate limited");
+    time += 1;
+    expect(h.invoke(DIAGNOSTICS_IPC.query, { limit: 1 })).toMatchObject({ total: 0 });
   });
 
   it("lists lifecycle events with incidents and exports them together", async () => {

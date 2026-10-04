@@ -246,13 +246,13 @@ test("walks a report through failed, submitting, uncertain, retired and submitte
     await capture(page, info, "issue-report-submitting-dark-wide");
     const check = page.getByRole("button", { name: "Check submission" });
     await expect(check).toBeFocused({ timeout: 30_000 });
-    await expect(page.locator(".issue-report-messages")).toContainText("GitHub could not be reached. GitHub may still have received the issue.");
+    await expect(page.locator(".issue-report-pending")).toContainText("GitHub could not be reached. GitHub may still have received the issue.");
     await expect(create).toHaveCount(0);
     await expectLayoutHolds(app);
     await capture(page, info, "issue-report-uncertain-dark-wide");
 
     await check.click();
-    await expect(page.locator(".issue-report-messages")).toContainText("No matching issue is visible yet.");
+    await expect(page.locator(".issue-report-pending")).toContainText("No matching issue is visible yet.");
     await expect(check).toBeFocused();
     await page.getByRole("button", { name: "Retire this report" }).click();
     await expect(page.getByRole("group", { name: "Retire uncertain publication?" })).toBeFocused();

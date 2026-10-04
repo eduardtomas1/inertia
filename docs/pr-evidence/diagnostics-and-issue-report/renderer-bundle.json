@@ -1,19 +1,20 @@
 {
   "baseline": "1053edf2",
-  "method": "Node 22 production electron-vite builds of origin/main and this branch on macOS arm64. The Diagnostics chunk absorbs the support summary, log folder and lifecycle state from LifecycleIntegritySettings and process health from SettingsView, and adds the capture switch, clear confirmation, retry and the merged event list. Its ceiling is main's ceiling plus the measured growth. The shared settings gutter and switch thumb colors add 59 bytes to the entry CSS, inside its existing ceiling.",
+  "method": "Node 22 production electron-vite builds of origin/main and this branch on macOS arm64. The Diagnostics chunk absorbs the support summary, log folder and lifecycle state from LifecycleIntegritySettings and process health from SettingsView, and adds the capture switch, clear confirmation, retry and the merged event list. Its ceiling is main's ceiling plus the measured growth. The shared settings gutter and switch thumb colors add 59 bytes to the entry CSS, inside its existing ceiling. The Report an issue, Diagnostics and LifecycleIntegritySettings sizes are measured at e2f10369 after the merge into the reworked Settings.",
   "changedBudgets": {
     "deferredDiagnosticsJavaScript": {
       "baselineBytes": 12325,
-      "implementationBytes": 18806,
-      "deltaBytes": 6481,
+      "implementationBytes": 19041,
+      "deltaBytes": 6716,
       "previousBudget": 13312,
-      "budget": 19793
+      "budget": 20028
     }
   },
   "unchangedBudgets": {
+    "deferredIssueReportJavaScript": { "implementationBytes": 11681, "budget": 13312 },
     "deferredDiagnosticCatalogJavaScript": { "baselineBytes": 9888, "implementationBytes": 9980, "budget": 12288 },
     "settingsJavaScript": { "baselineBytes": 68657, "implementationBytes": 68209, "budget": 69397 },
-    "deferredLifecycleIntegritySettingsJavaScript": { "baselineBytes": 5285, "implementationBytes": 2202, "budget": 6222 },
+    "deferredLifecycleIntegritySettingsJavaScript": { "baselineBytes": 5285, "implementationBytes": 2639, "budget": 6222 },
     "deferredDiscordSettingsJavaScript": { "baselineBytes": 5390, "implementationBytes": 5689, "budget": 6144 },
     "mainWorkbenchFirstLoadJavaScript": { "baselineBytes": 860500, "implementationBytes": 860471 },
     "entryCss": { "baselineBytes": 354855, "implementationBytes": 354914, "budget": 355064 }

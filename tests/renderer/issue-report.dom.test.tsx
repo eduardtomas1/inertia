@@ -123,6 +123,40 @@ it("announces a publication failure with its own message and keeps the issue ret
   expect(screen.getByLabelText("Body")).toHaveValue(saved("failed").body);
 });
 
+it("rereads the saved report after an unfinished Create on GitHub and never claims nothing was published", async () => {
+  const { props, request, setReport } = fixture(saved("preview"));
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (command) => {
+    if (command.type === "support.report.submit") {
+      setReport(saved("uncertain", { revision: 6, notice: "GitHub may still have received the issue." }));
+      throw new Error("socket closed after the runtime started publishing");
+    }
+    return await original(command);
+  });
+  render(<IssueReportSettings {...props} />);
+  await screen.findByLabelText("Body");
+  await waitFor(() => expect(commands(request, "support.report.github")).toHaveLength(1));
+  fireEvent.click(screen.getByRole("button", { name: "Create on GitHub" }));
+  expect(await screen.findByRole("button", { name: "Check submission" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Create on GitHub" })).toBeNull();
+  expect(screen.getByText("GitHub may still have received the issue.")).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("The request could not be finished.");
+  expect(document.body).not.toHaveTextContent(/Nothing was published/u);
+  expect(commands(request, "support.report.get")).toHaveLength(2);
+});
+
+it("says so when the saved report cannot be loaded", async () => {
+  const { props, request } = fixture(saved("preview"));
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (command) => {
+    if (command.type === "support.report.get") throw new Error("runtime unavailable");
+    return await original(command);
+  });
+  render(<IssueReportSettings {...props} />);
+  expect(await screen.findByText("The saved report could not be loaded. Reopen this page to try again.")).toBeVisible();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("shows a saved failure on reopening without an alert", async () => {
   const { props } = fixture(saved("failed", { notice: ISSUE_GITHUB_MESSAGES.offline }));
   render(<IssueReportSettings {...props} />);
@@ -212,6 +246,19 @@ it("moves focus to Check submission when publication ends uncertain, and to View
   await waitFor(() => expect(screen.getByRole("button", { name: "View issue" })).toHaveFocus());
 });
 
+it("states an uncertain publication once, above the actions, over a read-only issue", async () => {
+  const { props } = fixture(saved("uncertain", { notice: "GitHub may still have received the issue." }));
+  render(<IssueReportSettings {...props} />);
+  const check = await screen.findByRole("button", { name: "Check submission" });
+  const notices = screen.getAllByText("GitHub may still have received the issue.");
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toHaveAttribute("role", "status");
+  expect(notices[0]!.compareDocumentPosition(check) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByLabelText("Body").compareDocumentPosition(notices[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByLabelText("Title")).toHaveAttribute("readonly");
+  expect(screen.getByLabelText("Body")).toHaveAttribute("readonly");
+});
+
 it("keeps focus on Check submission while the issue is still not found", async () => {
   const { props } = fixture(saved("uncertain"), "ready", { found: false });
   render(<IssueReportSettings {...props} />);
@@ -285,7 +332,8 @@ it("asks before replacing an edited preview when the form changed", async () => 
   const choice = await screen.findByRole("group", { name: "Replace your edited preview?" });
   await waitFor(() => expect(choice).toHaveFocus());
   expect(commands(request, "support.report.prepare")).toHaveLength(0);
-  fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+  expect(choice).toHaveTextContent("Keeping the edited preview drops your form changes.");
+  fireEvent.click(screen.getByRole("button", { name: "Keep edited preview" }));
   expect(await screen.findByLabelText("Body")).toHaveValue("My careful hand-written body text.");
   expect(commands(request, "support.report.prepare")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -294,4 +342,40 @@ it("asks before replacing an edited preview when the form changed", async () => 
   fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
   await waitFor(() => expect(commands(request, "support.report.prepare")).toHaveLength(1));
   expect(await screen.findByLabelText("Body")).toHaveValue(`## What happened\n\n${saved("preview").description}`);
+});
+
+it("rebuilds a failed preview that was never edited by hand without asking", async () => {
+  const { props, request } = fixture(saved("failed", { revision: 2, notice: ISSUE_GITHUB_MESSAGES["signed-out"] }));
+  render(<IssueReportSettings {...props} />);
+  await screen.findByLabelText("Body");
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await waitFor(() => expect(screen.getByLabelText("What happened")).toHaveFocus());
+  fireEvent.change(screen.getByLabelText("Steps to reproduce (optional)"), { target: { value: "Cancel twice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  await waitFor(() => expect(commands(request, "support.report.prepare")).toHaveLength(1));
+  expect(screen.queryByRole("group", { name: "Replace your edited preview?" })).toBeNull();
+  expect(commands(request, "support.report.prepare")[0]).toMatchObject({ payload: { steps: "Cancel twice" } });
+  expect(commands(request, "support.report.edit")).toHaveLength(0);
+});
+
+it("still asks before replacing a preview edited by hand when publishing it failed", async () => {
+  const { props, request, current, setReport } = fixture(saved("preview", { revision: 0 }));
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (command) => {
+    if (command.type === "support.report.submit") {
+      setReport({ ...current()!, status: "failed", revision: current()!.revision + 2, notice: ISSUE_GITHUB_MESSAGES.offline });
+      return { type: "request.result", requestId: crypto.randomUUID(), result: { kind: "support.report", report: current() } };
+    }
+    return await original(command);
+  });
+  render(<IssueReportSettings {...props} />);
+  fireEvent.change(await screen.findByLabelText("Body"), { target: { value: "My careful hand-written body text." } });
+  fireEvent.click(screen.getByRole("button", { name: "Create on GitHub" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(ISSUE_GITHUB_MESSAGES.offline);
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await waitFor(() => expect(screen.getByLabelText("What happened")).toHaveFocus());
+  fireEvent.change(screen.getByLabelText("Steps to reproduce (optional)"), { target: { value: "Cancel twice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  expect(await screen.findByRole("group", { name: "Replace your edited preview?" })).toBeVisible();
+  expect(commands(request, "support.report.prepare")).toHaveLength(0);
 });

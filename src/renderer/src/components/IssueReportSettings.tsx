@@ -26,6 +26,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [failedNow, setFailedNow] = useState(false);
@@ -33,6 +34,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const [formInvalid, setFormInvalid] = useState(false);
   const [previewInvalid, setPreviewInvalid] = useState(false);
   const [replacing, setReplacing] = useState(false);
+  const [handEdited, setHandEdited] = useState(false);
   const [retiring, setRetiring] = useState(false);
   const [focusTarget, setFocusTarget] = useState<FocusTarget>(null);
   const seeded = useRef("");
@@ -65,6 +67,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const apply = useCallback((next: IssueReport | null, initial = false) => {
     if (!mounted.current) return;
     setLoaded(true);
+    setLoadFailed(false);
     setReport(next);
     if (!next) return;
     const key = `${next.id}:${next.revision}`;
@@ -74,7 +77,9 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
     setTitle(next.title);
     setBody(next.body);
     seedForm(next);
-    if (initial) setView("preview");
+    if (!initial) return;
+    setView("preview");
+    setHandEdited(next.status === "preview" && next.revision > 0);
   }, [seedForm]);
 
   const command = useCallback(async (value: CommandWithoutId): Promise<IssueReport | null> => {
@@ -87,9 +92,14 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
 
   useEffect(() => {
     mounted.current = true;
-    void command({ type: "support.report.get" })
-      .then(() => command({ type: "support.report.github" }))
-      .catch(() => { if (mounted.current) setLoaded(true); });
+    void command({ type: "support.report.get" }).then(
+      () => command({ type: "support.report.github" }).catch(() => undefined),
+      () => {
+        if (!mounted.current) return;
+        setLoaded(true);
+        setLoadFailed(true);
+      },
+    );
     return () => { mounted.current = false; };
   }, [command]);
 
@@ -108,7 +118,10 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
     setStatus("");
     setFailedNow(false);
     try { await operation(); }
-    catch { if (mounted.current) setError("The request did not finish. Nothing was published; try again."); }
+    catch {
+      if (mounted.current) setError("The request could not be finished. Check the report before trying again.");
+      await command({ type: "support.report.get" }).catch(() => undefined);
+    }
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   };
 
@@ -116,15 +129,17 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const unchangedForm = Boolean(report && editable && description.trim() === report.description && steps.trim() === report.steps
     && (providerId || null) === report.providerId && attachDiagnostics === report.attachDiagnostics);
   const edited = Boolean(report && (title !== report.title || body !== report.body));
-  const previewEdited = Boolean(report && editable && (edited || report.revision > 0));
+  const previewEdited = Boolean(report && editable && (edited || handEdited));
 
   const saveEdits = async (): Promise<IssueReport | null> => {
     if (!report || !edited) return report;
     const saved = await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title, body } });
+    if (saved && mounted.current) setHandEdited(true);
     return saved && saved.title === title.trim() && saved.body === body.trim() ? saved : null;
   };
   const regenerate = async (): Promise<void> => {
     await command({ type: "support.report.prepare", payload: { description, steps, providerId: providerId || null, attachDiagnostics } });
+    if (mounted.current) setHandEdited(false);
     setView("preview");
     setFocusTarget("title");
   };
@@ -271,9 +286,9 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
       </div>}
       {replacing && <div className="issue-report-confirm" role="group" aria-labelledby="issue-report-replace-heading" tabIndex={-1} ref={replaceRef}>
         <h4 id="issue-report-replace-heading">Replace your edited preview?</h4>
-        <p>Previewing again rebuilds the issue from the form and discards your edits to it.</p>
+        <p>Previewing again rebuilds the issue from the form and discards your edits to it. Keeping the edited preview drops your form changes.</p>
         <div className="issue-report-actions">
-          <button type="button" className="secondary-button" onClick={keepPreview}>Keep</button>
+          <button type="button" className="secondary-button" onClick={keepPreview}>Keep edited preview</button>
           <button type="button" className="primary-button" aria-disabled={unavailable} onClick={() => { setReplacing(false); void perform(regenerate); }}>Replace</button>
         </div>
       </div>}
@@ -286,6 +301,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
         <textarea className="setting-input issue-report-body" rows={16} maxLength={REPORT_BODY_LIMIT} value={body} readOnly={!editable} disabled={locked} aria-invalid={previewInvalid || undefined} aria-describedby={previewInvalid ? "issue-report-preview-error" : undefined} onChange={(event) => setBody(event.target.value)} />
       </label>
       {previewInvalid && <small className="issue-report-error" id="issue-report-preview-error">Add a title of at least 3 characters and a body of at least 10.</small>}
+      {report.status === "uncertain" && notice && <p className="issue-report-pending" role="status"><TriangleAlert size={14} aria-hidden="true" />{notice}</p>}
       <div className="issue-report-actions">
         {editable && <button type="button" className="secondary-button issue-report-back" aria-disabled={unavailable} onClick={back}>Back</button>}
         {report.status === "uncertain" && <>
@@ -310,7 +326,8 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
       </div>}
     </div>}
     <div className="issue-report-messages">
-      {showPreview && notice && <p className={report.status === "failed" ? "is-error" : undefined} role={failedNow && report.status === "failed" ? "alert" : "status"}>{notice}</p>}
+      {showPreview && notice && report.status !== "uncertain" && <p className={report.status === "failed" ? "is-error" : undefined} role={failedNow && report.status === "failed" ? "alert" : "status"}>{notice}</p>}
+      {loadFailed && <p className="is-error">The saved report could not be loaded. Reopen this page to try again.</p>}
       {error && <p className="is-error" role="alert">{error}</p>}
       <p role="status">{status}</p>
     </div>

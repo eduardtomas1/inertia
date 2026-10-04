@@ -40,7 +40,7 @@
   line-height: 1.6;
 }
 
-.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled) {
+.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled, [readonly]) {
   border-color: var(--interactive-border-hover);
 }
 
@@ -55,7 +55,9 @@
 }
 
 .issue-report-field :is(input, textarea)[readonly] {
+  border-color: var(--border);
   color: var(--text-soft);
+  background: transparent;
 }
 
 .issue-report-provider {
@@ -164,6 +166,23 @@
   color: var(--text-soft);
   font-size: var(--ui-font-micro);
   line-height: 1.5;
+}
+
+.issue-report-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.issue-report-pending svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--warning);
 }
 
 .issue-report-error {

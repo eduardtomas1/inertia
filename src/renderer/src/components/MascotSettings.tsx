@@ -1,22 +1,26 @@
 import { Switch } from "./ui";
 import { useEffect, useState } from "react";
-import { SettingRow } from "./settings/SettingsLayout";
-import { useSettingAction, type SettingAction } from "./settings/useSettingAction";
+import type { SettingAction, SettingNotice } from "./settings/useSettingAction";
 import { MASCOT_LABELS, type MascotSettingsBridge, type MascotSnapshot } from "../../../shared/mascot";
 import { MASCOT_SPRITE_LABELS, MASCOT_SPRITE_STATES, type MascotSprites } from "../../../shared/mascot-sprites";
 import { MASCOT_SPRITE_NOTES, MASCOT_SPRITE_RULES, MASCOT_SPRITE_STEPS } from "../../../shared/mascot-sprite-guide";
 
 declare global { interface Window { inertiaMascot?: MascotSettingsBridge } }
 
-export function MascotSettings() {
+function RowStatus({ notice }: { notice: SettingNotice | null }): React.JSX.Element {
+  return <>
+    <span className="setting-status" role="status" aria-live="polite" aria-atomic="true">{notice && notice.tone !== "error" ? notice.text : ""}</span>
+    {notice?.tone === "error" && <span className="setting-status is-error" role="alert">{notice.text}</span>}
+  </>;
+}
+
+export function MascotSettings({ showAction, motionAction }: { showAction: SettingAction; motionAction: SettingAction }) {
   const [snapshot, setSnapshot] = useState<MascotSnapshot | null>(null);
   const [pending, setPending] = useState<MascotSprites | null>(null);
   const [busy, setBusy] = useState<"import" | "export" | "apply" | "reset" | null>(null);
   const [error, setError] = useState("");
   const [spriteError, setSpriteError] = useState("");
   const [notice, setNotice] = useState("");
-  const showAction = useSettingAction();
-  const motionAction = useSettingAction();
   useEffect(() => {
     const bridge = window.inertiaMascot;
     if (!bridge) return;
@@ -82,12 +86,19 @@ export function MascotSettings() {
   };
   return (
     <div className="mascot-settings">
-      <SettingRow id="desktop-mascot" title="Show mascot" description="A tiny companion above your windows, showing live chat status." notice={showAction.notice}>
+      <div className="setting-row" data-setting-id="desktop-mascot">
+        <span className="setting-copy">
+          <span className="setting-title"><strong>Show mascot</strong><RowStatus notice={showAction.notice} /></span>
+          <small>A tiny companion above your windows, showing live chat status.</small>
+        </span>
         <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure(showAction, { enabled: value })} />
-      </SettingRow>
-      <SettingRow id="mascot-motion" title="Animate mascot" notice={motionAction.notice}>
+      </div>
+      <div className="setting-row" data-setting-id="mascot-motion">
+        <span className="setting-copy">
+          <span className="setting-title"><strong>Animate mascot</strong><RowStatus notice={motionAction.notice} /></span>
+        </span>
         <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} inactive={held || !snapshot || !enabled} onChange={(motion) => configure(motionAction, { motion })} />
-      </SettingRow>
+      </div>
       {enabled && snapshot && <div className="mascot-settings-controls">
         <span role="status">{MASCOT_LABELS[snapshot.status.phase]}</span>
         <button className="secondary-button" type="button" onClick={() => {

@@ -5,6 +5,7 @@ import { loadMascotSettings } from "../../settingsSectionLoaders";
 import { BackgroundNotificationSetting, QuotaWarningSettings } from "../NotificationPreferenceRows";
 import { SettingSwitch } from "../SettingControls";
 import { SettingsGroup } from "../SettingsLayout";
+import { useSettingAction } from "../useSettingAction";
 
 export function NotificationsSettings({
   settings,
@@ -16,6 +17,8 @@ export function NotificationsSettings({
   onUpdate: (settings: AppSettingsUpdate) => Promise<void>;
 }): React.JSX.Element {
   const MascotSettings = useLoadedSurface(loadMascotSettings, true);
+  const showMascotAction = useSettingAction();
+  const mascotMotionAction = useSettingAction();
   return (
     <>
       <SettingsGroup title="Alerts" headingId="notifications-heading">
@@ -29,7 +32,7 @@ export function NotificationsSettings({
         <CompletionSoundSettings settings={settings.completionSound} disabled={disabled} onUpdate={onUpdate} />
       </SettingsGroup>
       <SettingsGroup title="Desktop mascot" headingId="desktop-mascot-heading">
-        {MascotSettings && <MascotSettings />}
+        {MascotSettings && <MascotSettings showAction={showMascotAction} motionAction={mascotMotionAction} />}
       </SettingsGroup>
     </>
   );

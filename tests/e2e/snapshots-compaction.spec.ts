@@ -102,7 +102,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await expect(page.locator(".composer").getByRole("button", { name: "Snapshots", exact: true })).toHaveCount(0);
     await app.resizeWindow(1100, 760);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const navigation = page.getByRole("complementary", { name: "Settings sections" });
+    const navigation = page.getByRole("navigation", { name: "Settings sections" });
     const devices = navigation.getByRole("button", { name: "Devices & integrations", exact: true });
     await devices.focus(); await devices.press("Enter");
     const setup = page.getByRole("main", { name: "Settings", exact: true });
@@ -116,7 +116,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await expect(setup.getByRole("combobox", { name: "Window snapshot" })).toBeEnabled();
     await page.reload();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();
     await expect(page.getByRole("combobox", { name: "Window snapshot" })).toHaveValue("accelerator");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) { bodyFailure = { error }; throw error; }

@@ -92,7 +92,7 @@ test("runs stable and Canary concurrently with distinct desktop boundaries", asy
 test("renders the Canary channel, status, isolation, and rollback surface", async ({ browserName: _browserName }, testInfo) => {
   await canary.resizeWindow(1280, 860);
   await canary.page.getByRole("button", { name: "Settings", exact: true }).click();
-  await canary.page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await canary.page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   const updates = canary.page.getByRole("region", { name: "About and updates" });
   await expect(updates.getByText(`Inertia Canary · v${INERTIA_VERSION}`, { exact: true }))
     .toBeVisible();

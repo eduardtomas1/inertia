@@ -58,7 +58,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await sidebarSettings.focus();
   await sidebarSettings.press("Enter");
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
-  await expect(page.getByRole("button", { name: "Appearance", exact: true }))
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await expectFlatSettingsSections(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("radio", { name: "Dark" }).click();
@@ -79,10 +79,10 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await page.getByRole("radiogroup", { name: "Interface scale" }).getByRole("radio", { name: "Comfortable" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Text density" }).getByRole("radio", { name: "Comfortable" }).click();
-  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   await page.getByRole("switch", { name: "Wrap code by default" }).click();
   await expect(page.getByRole("switch", { name: "Wrap code by default" })).toHaveAttribute("aria-checked", "true");
-  const providers = page.getByRole("button", { name: "Agents", exact: true });
+  const providers = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
   await providers.click();
   await expect(providers).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { level: 3, name: "Providers" })).toBeVisible();
@@ -110,7 +110,7 @@ function globalBackendDefaults(): number {
 
 test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
   const openBackends = async (): Promise<void> => {
-    const backends = page.getByRole("button", { name: "Agents", exact: true });
+    const backends = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
     await backends.click();
     await expect(backends).toHaveAttribute("aria-current", "page");
     await expect(page.getByLabel("Model backend profiles")).toBeVisible();
@@ -119,7 +119,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
     theme: "Light" | "Dark" | "System",
     scale: "Compact" | "Default" | "Large",
   ): Promise<void> => {
-    await page.getByRole("button", { name: "Appearance", exact: true }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: theme, exact: true }).click();
     await page.getByRole("radiogroup", { name: "Interface scale" })
       .getByRole("radio", { name: scale, exact: true })
@@ -285,7 +285,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await enable.click();
   await expect(enable).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText("Partial", { exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   const globalDefault = page.getByRole("combobox", {
     name: "Default model for new chats",
     exact: true,
@@ -336,8 +336,8 @@ test("changes the theme only from Settings", async () => {
 
 test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
-  await expect(page.getByRole("button", { name: /^Data(?: \d+)?$/u })).toHaveAttribute("aria-current", "page");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
   await expect(page.getByText(/targeting 5 copies and 512 MiB in total/u)).toBeVisible();
   await expect(page.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
@@ -384,7 +384,7 @@ test("keeps runtime support and application update checks explicit in settings",
     "Imported 0 projects, 0 conversations, and 0 messages under new identities with supervised access.",
     { exact: true },
   )).toBeVisible();
-  await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
   await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();
@@ -586,7 +586,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   }).toBe("hidden");
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   const usageModes = page.getByRole("radiogroup", { name: "Usage display" });
   await expect(usageModes.getByRole("radio", { name: "Hidden" })).toHaveAttribute("aria-checked", "true");
   await usageModes.getByRole("radio", { name: "Expanded" }).click();
@@ -662,7 +662,7 @@ test("applies every interface scale live and remains usable at common Linux disp
   await ensureTerminalTools();
   const terminalFontSize = await page.locator("aside.terminal-panel").first().getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Appearance", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
     ["Compact", "compact", "13px", "30px"],

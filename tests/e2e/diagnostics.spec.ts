@@ -22,7 +22,7 @@ test("real operation failures survive restart and remain readable/copyable after
   expect(failed).toMatchObject({ sent: false, code: "discord.repository-missing", incidentId: expect.any(String) });
   if (!failed.incidentId) throw new Error("Main did not return an incident reference");
   const originalId = failed.incidentId;
-  await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Diagnostics", exact: true, level: 3 })).toBeVisible();
   await expect(page.getByText("A release repository is needed")).toBeVisible();
   await expect.poll(async () => (await page.evaluate(() => window.inertia.queryDiagnostics({ subsystem: "provider", providerId: "codex" }))).total)
@@ -56,7 +56,7 @@ test("real operation failures survive restart and remain readable/copyable after
     const discord = testInfo.outputPath(`discord-${theme}.png`);
     await page.screenshot({ path: discord, animations: "disabled" });
     await testInfo.attach(`discord-${theme}`, { path: discord, contentType: "image/png" });
-    await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
     await expect(page.locator(".diagnostics-incident").first()).toBeVisible();
     await app.expectNoViewportOverflow();
     const gutters = await page.locator(".diagnostics-center").evaluate((element) => {
@@ -87,7 +87,7 @@ test("real operation failures survive restart and remain readable/copyable after
   const restarted = await app.restart(); page = restarted.page;
   await app.resizeWindow(1440, 1050);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect.poll(async () => (await page.evaluate((incidentId) => window.inertia.queryDiagnostics({ incidentId }), originalId)).records[0]?.id)
     .toBe(originalId);
   const cleanup = await prepareElectronPrivilegedCleanup(restarted.electronApp);

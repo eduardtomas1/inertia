@@ -4,6 +4,7 @@ import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefa
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectAppearancePatch, type ProjectPreferences } from "../../../shared/project-preferences";
 import { modelSelectionSchema } from "../../../shared/model-routing";
+import { PROJECT_REPOSITORY_DISPLAY_LIMITS, projectRepositoryDisplayLimit } from "../../../shared/project-repository-limit";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { ProjectSearchDialog } from "./ProjectSearchDialog";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
@@ -11,7 +12,7 @@ import { ProjectColorPicker, ProjectEmphasisPicker } from "./ProjectAppearanceCo
 import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
-import { SettingStatus } from "./settings/SettingsLayout";
+import { SettingDisclosure, SettingStatus } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch } from "./settings/SettingControls";
 import type { SettingNotice } from "./settings/useSettingAction";
 import "./ProjectSettings.css";
@@ -29,11 +30,13 @@ interface Props {
   onUpdateSettings: (settings: Partial<AppSettings>) => Promise<void>;
 }
 
-function Row({ id, title, description, notice, children }: { id: string; title: string; description: string; notice?: SettingNotice | null; children: ReactNode }): React.JSX.Element {
-  return <div className="project-setting-row" data-setting-id={id}><div><span className="setting-title"><h3>{title}</h3><SettingStatus notice={notice} /></span><p>{description}</p></div><div className="project-setting-control">{children}</div></div>;
+function Row({ id, title, description, notice, children }: { id: string; title: string; description?: string; notice?: SettingNotice | null; children: ReactNode }): React.JSX.Element {
+  return <div className="project-setting-row" data-setting-id={id}><div><span className="setting-title"><h3>{title}</h3><SettingStatus notice={notice} /></span>{description && <p>{description}</p>}</div><div className="project-setting-control">{children}</div></div>;
 }
 
 const workspaceOptions = { local: "Current checkout", worktree: "New worktree" };
+const accessOptions: Record<AppSettings["defaultAccessMode"], string> = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" };
+const repositoryLimitOptions = Object.fromEntries(PROJECT_REPOSITORY_DISPLAY_LIMITS.map((limit) => [String(limit), `Show up to ${limit} repositories`]));
 const groupingOptions: Record<AppSettings["projectGrouping"], string> = { repository: "By repository", "repository-path": "By repository and folder", separate: "Keep separate" };
 
 function ProjectSelect({ label, value, disabled, options, onChange }: {
@@ -78,7 +81,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       return false;
     } finally { savingRef.current = false; setSaving(false); }
   };
-  const save = (patch: { name?: string; groupingMode?: Project["groupingMode"]; preferences?: ProjectPreferences }): Promise<boolean> => mutate({ type: "project.update", payload: { projectId: project.id, expectedUpdatedAt: project.updatedAt, ...patch } });
+  const save = (patch: { name?: string; groupingMode?: Project["groupingMode"]; gitRepositoryLimit?: number; preferences?: ProjectPreferences }): Promise<boolean> => mutate({ type: "project.update", payload: { projectId: project.id, expectedUpdatedAt: project.updatedAt, ...patch } });
   const setModel = (selection: ModelSelection | null): void => {
     void mutate(selection
       ? { type: "backend.default.set", payload: { projectId: project.id, selection: modelSelectionSchema.parse(selection) } }
@@ -132,6 +135,11 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ "": `Default (${workspaceOptions[settings.newThreadMode]})`, ...workspaceOptions }}
           onChange={(value) => setPreference("workspace", value as ProjectPreferences["workspace"] || null)} />
       </Row>
+      <Row id="project-default-access" title="Default access" description={preferences.defaultAccessMode === "full" ? "Choose Full access only for a workspace and task you trust." : undefined}>
+        <ProjectSelect label="Default access in this project" value={preferences.defaultAccessMode ?? ""} disabled={blocked}
+          options={{ "": `Default (${accessOptions[settings.defaultAccessMode]})`, ...accessOptions }}
+          onChange={(value) => setPreference("defaultAccessMode", value as ProjectPreferences["defaultAccessMode"] || null)} />
+      </Row>
       <Row id="project-auto-pull" title="Automatically pull" description="Keep the default branch current only when its checkout is idle, clean and has no local commits. Off by default.">
         <Switch label="Automatically pull" checked={preferences.autoPull} disabled={blocked || !project.repositoryRoot} onChange={(value) => setPreference("autoPull", value)} />
       </Row>
@@ -172,6 +180,12 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </form>}
       {preferences.actions.length === 0 ? <p className="project-actions-empty">No custom actions configured. Detected package scripts remain available in the workspace.</p>
         : <ul className="project-actions-list">{preferences.actions.map((action) => <li key={action.id}><div><strong>{action.name}</strong><code>{[action.executable, ...action.args].join(" ")}</code></div><button type="button" aria-label={`Remove ${action.name}`} disabled={blocked} onClick={() => setPreference("actions", preferences.actions.filter(({ id }) => id !== action.id))}><Trash2 size={14} /></button></li>)}</ul>}
+      <SettingDisclosure summary="Advanced" className="project-settings-advanced">
+        <Row id="project-repository-limit" title="Repository display limit">
+          <ProjectSelect label="Repository display limit" value={String(projectRepositoryDisplayLimit(project.gitRepositoryLimit))} disabled={blocked}
+            options={repositoryLimitOptions} onChange={(value) => void save({ gitRepositoryLimit: Number(value) })} />
+        </Row>
+      </SettingDisclosure>
     </section>
     <h2 className="project-settings-group-title">Danger zone</h2>
     <section className="project-settings-card"><Row id="project-remove" title="Remove project" description="Remove this project and its chats from Inertia. Files on disk are not touched.">

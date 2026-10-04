@@ -24,7 +24,7 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
   await sidebarSettings.focus();
   await sidebarSettings.press("Enter");
   await expect(settings).toBeVisible();
-  await page.getByRole("button", { name: "Devices & integrations", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Devices & integrations", exact: true }).click();
   await expect(page.getByRole("heading", { level: 2, name: "Devices & integrations" })).toBeFocused();
   const repository = page.getByRole("textbox", { name: "Discord release repository URL" });
   await repository.pressSequentially("not a url");
@@ -33,7 +33,7 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
   await expect(repository).toHaveValue("");
   await expect(settings).toBeVisible();
 
-  await page.getByRole("button", { name: "Keyboard", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(settings).toBeHidden();
@@ -42,7 +42,7 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
 
   await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
   await expect(settings).toBeVisible();
-  await expect(page.getByRole("button", { name: "Keyboard", exact: true }))
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await page.getByRole("button", { name: "Close settings", exact: true }).click();
   await expect(settings).toBeHidden();

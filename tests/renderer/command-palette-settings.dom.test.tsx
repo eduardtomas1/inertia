@@ -74,6 +74,8 @@ describe("Command palette settings entries", () => {
     const { onOpenSettings, search } = renderPalette();
     fireEvent.change(search, { target: { value: "where my data is" } });
     expect(settingsOptions().map((option) => option.textContent)).toEqual(["Local resource healthData"]);
+    fireEvent.change(search, { target: { value: "where is my data" } });
+    expect(settingsOptions().map((option) => option.textContent)).toEqual(["Local resource healthData"]);
 
     fireEvent.change(search, { target: { value: "keyboard shortcuts" } });
     expect(settingsOptions().map((option) => option.textContent)).toContain("Search everythingKeyboard");

@@ -6,7 +6,8 @@ import { settingsSaveActions } from "../../src/renderer/src/components/workspace
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import { useBackendProfiles } from "../../src/renderer/src/hooks/useBackendProfiles";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { defaultSettings } from "../../src/shared/contracts";
+import { defaultSettings, type Project } from "../../src/shared/contracts";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { settingsViewProps } from "./settings-view-fixtures";
 
 function deferredSave(): { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } {
@@ -18,6 +19,13 @@ function deferredSave(): { promise: Promise<void>; resolve: () => void; reject: 
   });
   return { promise, resolve, reject };
 }
+
+const studio: Project = {
+  id: "11111111-1111-4111-8111-111111111111", name: "Studio", path: "/workspace/studio", normalizedPath: "/workspace/studio",
+  repositoryIdentity: null, repositoryRoot: "/workspace/studio", repositoryRelativePath: "", groupingMode: null,
+  gitRepositoryLimit: 16, color: "#5661d8", status: "ready", createdAt: "2026-09-09T08:00:00.000Z",
+  updatedAt: "2026-09-09T08:00:00.000Z", preferences: defaultProjectPreferences(),
+};
 
 function settingRow(id: string): HTMLElement {
   const row = document.querySelector<HTMLElement>(`[data-setting-id="${id}"]`);
@@ -132,6 +140,24 @@ describe("Settings saving", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Message timestamps" }));
     await waitFor(() => expect(within(settingRow("message-timestamps")).getByRole("alert"))
       .toHaveTextContent("Couldn't save. Try again."));
+    expect(setActionError.mock.calls).toEqual([[null]]);
+  });
+
+  it("reports a failed project save only in its row, not as an app error", async () => {
+    const setActionError = vi.fn();
+    const { result } = renderHook(() => useAppRuntimeActions({
+      sendCommand: vi.fn().mockRejectedValue(new Error("The local service disconnected.")),
+      refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+    }));
+    const run = result.current.run;
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "projects", projectId: studio.id },
+      projects: [studio],
+      onReportCommand: (command) => run(command.type, command),
+      ...settingsSaveActions(run),
+    })} />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Pin to top of project lists" }));
+    await waitFor(() => expect(within(settingRow("project-pin")).getByRole("alert")).toBeInTheDocument());
     expect(setActionError.mock.calls).toEqual([[null]]);
   });
 

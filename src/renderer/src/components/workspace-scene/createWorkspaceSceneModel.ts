@@ -144,13 +144,15 @@ export function chatResumeAvailability(
     : providerTerminalResumeAvailability(conversation, provider);
 }
 
-type SettingsSaveRunner = (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<unknown>;
+type SettingsSaveRunner = (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
 
-export function settingsSaveActions(run: SettingsSaveRunner): Pick<SettingsViewProps, "onUpdate" | "onSetDefaultModel" | "onRestoreDefaults"> {
+export function settingsSaveActions(run: SettingsSaveRunner): Pick<SettingsViewProps, "onSaveCommand" | "onUpdate" | "onSetDefaultModel" | "onRestoreDefaults"> {
+  const onSaveCommand = (command: CommandWithoutId): Promise<ServerEvent> => run(command.type, command, { reportError: false });
   const save = async (command: CommandWithoutId): Promise<void> => {
-    await run(command.type, command, { reportError: false });
+    await onSaveCommand(command);
   };
   return {
+    onSaveCommand,
     onUpdate: (payload) => save({ type: "settings.update", payload }),
     onSetDefaultModel: (payload) => save({ type: "settings.default-model.set", payload }),
     onRestoreDefaults: () => save({ type: "settings.restore-defaults", payload: {} }),

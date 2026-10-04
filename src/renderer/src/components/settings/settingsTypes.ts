@@ -21,6 +21,7 @@ import type { SettingsSectionMemory } from "./sectionMemory";
 
 export interface SettingsViewProps {
   onReportCommand?: IssueReportSettingsProps["request"];
+  onSaveCommand?: IssueReportSettingsProps["request"];
   target?: SettingsTarget | null;
   initialSection?: SettingsSection;
   onSectionChange?: (section: SettingsSection) => void;

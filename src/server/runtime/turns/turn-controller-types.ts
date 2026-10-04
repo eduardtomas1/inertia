@@ -37,6 +37,7 @@ import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExec
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
+import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 
@@ -324,6 +325,7 @@ export interface ActiveTurn {
   providerCommandRuns: Map<string, string>;
   approvalIds: Set<string>;
   inputIds: Set<string>;
+  subagentTelemetry?: TurnSubagentTelemetry;
   onSettled?: QueueTurnRequest["onSettled"];
 }
 

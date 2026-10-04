@@ -711,7 +711,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         refreshProviderInfo,
         send,
       }),
-      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target) }),
+      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
       createConversationCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
         providers,

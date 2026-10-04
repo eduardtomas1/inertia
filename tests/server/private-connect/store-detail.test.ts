@@ -48,7 +48,9 @@ describe("Private Connect bounded store projection", () => {
         parentProviderAgentId: null, parentProviderToolUseId: null, providerToolUseId: `tool-${index}`,
         providerRole: "reviewer", providerName: `Reviewer ${index}`, providerStatus: "completed", status: "completed",
         isLive: false, description: "Private description", progress: "Private progress", result: "Private result",
-        sequence: index, updatedAt: at });
+        model: "private-model", usage: { totalTokens: 120, inputTokens: 100, cachedInputTokens: null,
+          cacheWriteInputTokens: null, outputTokens: 20, reasoningOutputTokens: null, contextTokens: null,
+          maxContextTokens: null }, toolUseCount: 4, durationMs: 900, sequence: index, updatedAt: at });
       store.upsertAgentPlan({ conversationId: conversation.id, runId: turn.runId, turnId: turn.id,
         explanation: `Plan ${index}`, steps: [] });
     }
@@ -69,7 +71,9 @@ describe("Private Connect bounded store projection", () => {
     expect(detail.activities).toEqual(full.activities
       .slice(-PRIVATE_CONNECT_RUNTIME_LIMITS.activities).map((activity) => ({ ...activity, detail: null })));
     expect(detail.subagents).toEqual(full.subagents.slice(-PRIVATE_CONNECT_RUNTIME_LIMITS.subagents)
-      .map((subagent) => ({ ...subagent, description: null, progress: null, result: null })));
+      .map((subagent) => ({ ...subagent, description: null, progress: null, result: null,
+        model: null, activity: null, usage: null, toolUseCount: null, durationMs: null })));
+    expect(full.subagents.at(-1)).toMatchObject({ model: "private-model", toolUseCount: 4, durationMs: 900 });
     expect(detail.plans).toEqual([full.plans.at(-1)]);
     expect([detail.reasonings, detail.checkpoints, detail.usage, detail.reviewNotes, detail.contextPackets])
       .toEqual([[], [], [], [], []]);

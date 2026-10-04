@@ -8,17 +8,26 @@ import type {
   AgentReasoning,
   AgentTurn,
   CheckpointSummary,
+  SubagentTaskUsage,
   SubagentTrace,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
-import { validateProviderUsage } from "../provider/usage-values";
 import {
+  mergeSubagentTaskUsage,
+  validateProviderUsage,
+  validateSubagentTaskUsage,
+} from "../provider/usage-values";
+import {
+  boundedSubagentCount,
   boundedSubagentIdentifier,
+  boundedSubagentLabel,
   isTerminalSubagentStatus,
   MAX_SUBAGENT_DESCRIPTION_CHARS,
+  MAX_SUBAGENT_DURATION_MS,
   MAX_SUBAGENT_PROGRESS_CHARS,
   MAX_SUBAGENT_RESULT_CHARS,
+  MAX_SUBAGENT_TOOL_USE_COUNT,
   MAX_SUBAGENT_TRACES_PER_TURN,
 } from "../provider/subagent-trace";
 import {
@@ -73,6 +82,15 @@ function safeSubagentLabel(
   })?.replace(/\s+/gu, " ").trim() || null;
 }
 
+function safeSubagentTelemetryLabel(
+  value: unknown,
+  workspaceRoot: string,
+): string | null {
+  return boundedSubagentLabel(sanitizeProviderActivityDetail(value, {
+    workspaceRoot,
+  })?.replace(/\s+/gu, " "));
+}
+
 function safeSubagentProviderStatus(
   value: unknown,
   workspaceRoot: string,
@@ -83,6 +101,10 @@ function safeSubagentProviderStatus(
     workspaceRoot,
     maxChars: 200,
   })?.replace(/\s+/gu, " ").trim() || "[redacted]";
+}
+
+function subagentTaskUsageJson(usage: SubagentTaskUsage | null): string | null {
+  return usage ? JSON.stringify(usage) : null;
 }
 
 export class ExecutionLedgerRepository {
@@ -163,6 +185,7 @@ export class ExecutionLedgerRepository {
       SET status = 'cancelled',
           is_live = 0,
           progress = 'Stopped by the user.',
+          activity = NULL,
           updated_at = MAX(updated_at, @updatedAt)
       WHERE id = @id AND is_live = 1
     `).run({ id: traceId, updatedAt: now });
@@ -291,7 +314,20 @@ export class ExecutionLedgerRepository {
         workspaceRoot,
         maxChars: MAX_SUBAGENT_RESULT_CHARS,
       }),
+      model: safeSubagentTelemetryLabel(input.model, workspaceRoot),
+      activity: input.isLive
+        ? safeSubagentTelemetryLabel(input.activity, workspaceRoot)
+        : null,
+      toolUseCount: boundedSubagentCount(
+        input.toolUseCount,
+        MAX_SUBAGENT_TOOL_USE_COUNT,
+      ),
+      durationMs: boundedSubagentCount(
+        input.durationMs,
+        MAX_SUBAGENT_DURATION_MS,
+      ),
     };
+    const usage = validateSubagentTaskUsage(input.usage);
 
     if (existing) {
       this.context.database.prepare(`
@@ -319,12 +355,25 @@ export class ExecutionLedgerRepository {
             description = COALESCE(@description, description),
             progress = COALESCE(@progress, progress),
             result = COALESCE(@result, result),
+            model = COALESCE(@model, model),
+            activity = CASE
+              WHEN @isLive = 1 AND @status = status THEN COALESCE(@activity, activity)
+              WHEN @isLive = 1 THEN @activity
+              ELSE NULL
+            END,
+            usage_json = @usageJson,
+            tool_use_count = COALESCE(@toolUseCount, tool_use_count),
+            duration_ms = COALESCE(@durationMs, duration_ms),
             sequence = @sequence,
             updated_at = @updatedAt
         WHERE id = @id
       `).run({
         id: existing.id,
         ...normalized,
+        usageJson: subagentTaskUsageJson(mergeSubagentTaskUsage(
+          subagentTraceFromRow(existing).usage,
+          usage,
+        )),
         status: input.status,
         isLive: input.isLive ? 1 : 0,
         sequence: input.sequence,
@@ -350,6 +399,7 @@ export class ExecutionLedgerRepository {
       turnId: input.turnId,
       providerId: input.providerId,
       ...normalized,
+      usage,
       status: input.status,
       isLive: input.isLive,
       sequence: input.sequence,
@@ -363,7 +413,8 @@ export class ExecutionLedgerRepository {
         parent_provider_agent_id, parent_provider_tool_use_id,
         provider_tool_use_id, provider_role,
         provider_name, provider_status, status, is_live,
-        description, progress, result, sequence,
+        description, progress, result, model, activity,
+        usage_json, tool_use_count, duration_ms, sequence,
         created_at, updated_at
       ) VALUES (
         @id, @conversationId, @runId, @turnId, @providerId,
@@ -371,12 +422,23 @@ export class ExecutionLedgerRepository {
         @parentProviderAgentId, @parentProviderToolUseId,
         @providerToolUseId, @providerRole,
         @providerName, @providerStatus, @status, @isLive,
-        @description, @progress, @result, @sequence,
+        @description, @progress, @result, @model, @activity,
+        @usageJson, @toolUseCount, @durationMs, @sequence,
         @createdAt, @updatedAt
       )
     `).run({
-      ...trace,
+      ...normalized,
+      id: trace.id,
+      conversationId: trace.conversationId,
+      runId: trace.runId,
+      turnId: trace.turnId,
+      providerId: trace.providerId,
+      status: trace.status,
       isLive: trace.isLive ? 1 : 0,
+      usageJson: subagentTaskUsageJson(usage),
+      sequence: trace.sequence,
+      createdAt: trace.createdAt,
+      updatedAt: trace.updatedAt,
     });
     this.linkSubagentChildren(trace.id);
     return { trace, changed: true };
@@ -397,7 +459,8 @@ export class ExecutionLedgerRepository {
     if (rows.length === 0) return [];
     const update = this.context.database.prepare(`
       UPDATE subagent_traces
-      SET status = ?, is_live = 0, sequence = sequence + 1, updated_at = ?
+      SET status = ?, is_live = 0, activity = NULL,
+          sequence = sequence + 1, updated_at = ?
       WHERE id = ?
         AND is_live = 1
     `);

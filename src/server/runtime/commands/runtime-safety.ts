@@ -2,6 +2,7 @@ import type { ClientCommand } from "../../../shared/contracts";
 
 export const RUNTIME_SAFETY_READ_COMMAND_TYPES = Object.freeze([
   "conversation.detail.load",
+  "conversation.background-tasks.get",
   "conversation.detail.subscription",
   "conversation.context.source.load",
   "conversation.context.agent.source.load",

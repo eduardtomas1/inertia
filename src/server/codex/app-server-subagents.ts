@@ -1,3 +1,5 @@
+import type { SubagentTaskUsage } from "../../shared/contracts";
+import { validateSubagentTaskUsage } from "../provider/usage-values";
 import {
   boundedText,
   CappedTextBuffer,
@@ -5,8 +7,10 @@ import {
   stringValue,
   type JsonObject,
 } from "./protocol";
+import { codexItemActivityLabel } from "./app-server-item-labels";
 import { codexTurnInterruptionFailure } from "./app-server-status";
 import type { CodexAppServerOptions } from "./types";
+import { parseCodexTokenUsage } from "./usage";
 
 export type CodexSubagentUpdate = Parameters<
   NonNullable<CodexAppServerOptions["onSubagent"]>
@@ -56,6 +60,10 @@ interface ProvisionalChildEvent {
   params: JsonObject;
 }
 
+type CodexChildTelemetry =
+  | { activity: string }
+  | { usage: SubagentTaskUsage };
+
 export interface CodexChildTurn {
   threadId: string;
   turnId: string;
@@ -95,6 +103,21 @@ export function strictCodexProviderIdentifier(
       && identifier.length <= maxChars
     ? identifier
     : null;
+}
+
+function codexSubagentTaskUsage(value: unknown): SubagentTaskUsage | null {
+  const usage = parseCodexTokenUsage(value);
+  if (!usage) return null;
+  return validateSubagentTaskUsage({
+    totalTokens: usage.totalProcessedTokens,
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheWriteInputTokens: usage.cacheWriteInputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningOutputTokens: usage.reasoningOutputTokens,
+    contextTokens: usage.usedTokens,
+    maxContextTokens: usage.maxTokens,
+  });
 }
 
 function agentPathName(value: unknown): string | null {
@@ -186,6 +209,7 @@ export class CodexSubagentLifecycle {
     ProvisionalChildEvent[]
   >();
   private readonly provisionalActiveTurns = new Map<string, string>();
+  private readonly provisionalUsage = new Map<string, SubagentTaskUsage>();
   private provisionalOverflowed = false;
 
   constructor(private readonly host: CodexSubagentLifecycleHost) {}
@@ -200,6 +224,7 @@ export class CodexSubagentLifecycle {
     this.subagentByToolUseId.clear();
     this.provisionalEvents.clear();
     this.provisionalActiveTurns.clear();
+    this.provisionalUsage.clear();
     this.provisionalOverflowed = false;
   }
 
@@ -309,12 +334,15 @@ export class CodexSubagentLifecycle {
 
   private replayProvisionalLifecycle(threadId: string): void {
     const buffered = this.provisionalEvents.get(threadId);
+    const usage = this.provisionalUsage.get(threadId);
     this.provisionalEvents.delete(threadId);
     this.provisionalActiveTurns.delete(threadId);
+    this.provisionalUsage.delete(threadId);
     if (!buffered) return;
     for (const event of buffered) {
       this.handleChildNotification(event.method, event.params, threadId);
     }
+    if (usage) this.emitChildTelemetry(threadId, { usage });
   }
 
   private rememberProvisionalLifecycle(
@@ -322,6 +350,12 @@ export class CodexSubagentLifecycle {
     params: JsonObject,
     threadId: string,
   ): boolean {
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexSubagentTaskUsage(params.tokenUsage);
+      if (!usage || !this.provisionalEvents.has(threadId)) return false;
+      this.provisionalUsage.set(threadId, usage);
+      return true;
+    }
     const event = this.normalizedProvisionalEvent(method, params, threadId);
     if (!event) return false;
     let events = this.provisionalEvents.get(threadId);
@@ -488,6 +522,9 @@ export class CodexSubagentLifecycle {
     }
     const toolUseId = strictCodexProviderIdentifier(item.id) ?? null;
     const prompt = boundedText(item.prompt, 4_000) ?? null;
+    const model = tool === "spawnAgent"
+      ? boundedText(item.model, 200)
+      : undefined;
     const agentsStates = objectValue(item.agentsStates) ?? {};
     for (const providerAgentId of receiverThreadIds) {
       const rootThreadId = this.host.rootThreadId();
@@ -536,6 +573,7 @@ export class CodexSubagentLifecycle {
         result: terminal
           ? boundedText(agentState?.message, 16_000) ?? null
           : null,
+        ...(model ? { model } : {}),
       }, exactStatus ? "state" : "activity", isLive);
       this.replayProvisionalLifecycle(providerAgentId);
     }
@@ -702,6 +740,7 @@ export class CodexSubagentLifecycle {
       progress?: string | null;
       result?: string | null;
       isLive?: boolean;
+      telemetry?: CodexChildTelemetry;
     } = {},
   ): void {
     this.host.emitSubagent({
@@ -720,7 +759,22 @@ export class CodexSubagentLifecycle {
       description: null,
       progress: options.progress ?? null,
       result: options.result ?? null,
+      ...options.telemetry,
     }, authority, options.isLive ?? LIVE_SUBAGENT_STATUSES.has(status));
+  }
+
+  private emitChildTelemetry(
+    threadId: string,
+    telemetry: CodexChildTelemetry,
+  ): void {
+    const projection = this.host.projection(threadId);
+    if (!projection || ("activity" in telemetry && !projection.isLive)) return;
+    this.emitChildLifecycle(
+      threadId,
+      projection.status,
+      projection.authority,
+      { isLive: projection.isLive, telemetry },
+    );
   }
 
   private handleChildNotification(
@@ -786,7 +840,11 @@ export class CodexSubagentLifecycle {
       });
       return true;
     }
-    if (method === "thread/tokenUsage/updated") return true;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = codexSubagentTaskUsage(params.tokenUsage);
+      if (usage) this.emitChildTelemetry(threadId, { usage });
+      return true;
+    }
     if (method === "item/agentMessage/delta") {
       const delta = stringValue(params.delta);
       if (delta) {
@@ -807,6 +865,10 @@ export class CodexSubagentLifecycle {
         method === "item/started" ? "started" : "completed",
         threadId,
       )) return true;
+      if (method === "item/started") {
+        const activity = boundedText(codexItemActivityLabel(item), 200);
+        if (activity) this.emitChildTelemetry(threadId, { activity });
+      }
       if (
         method === "item/completed"
         && stringValue(item.type) === "agentMessage"

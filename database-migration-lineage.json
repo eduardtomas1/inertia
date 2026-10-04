@@ -702,6 +702,11 @@
       "version": 89,
       "name": "PersistIssueReportPreview",
       "digest": "372602cd20304f1812ded307c7b5ef5062ffd34ad1af0b7f4cf5d4660a7b241b"
+    },
+    {
+      "version": 90,
+      "name": "PersistSubagentTaskTelemetry",
+      "digest": "381d58213931bf6518e30e06b4f6763d44619361793e0b1d050f1a4d12076efa"
     }
   ]
 }

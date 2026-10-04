@@ -1,4 +1,9 @@
 import { commandExecutionLabel } from "./app-server-config";
+import {
+  codexDynamicToolLabel,
+  codexMcpToolLabel,
+  codexWebSearchActivity,
+} from "./app-server-item-labels";
 import { strictCodexProviderIdentifier } from "./app-server-subagents";
 import { codexHookActivityPhase, codexItemActivityPhase } from "./app-server-status";
 import { boundedText, objectValue, stringValue, type JsonObject } from "./protocol";
@@ -151,11 +156,7 @@ export function handleCodexItem(
         : undefined,
     );
   } else if (itemType === "mcpToolCall") {
-    const server = boundedText(item.server, 120);
-    const tool = boundedText(item.tool, 160);
-    const label = server && tool
-      ? `MCP · ${server}/${tool}`
-      : tool ? `MCP · ${tool}` : "MCP tool";
+    const label = codexMcpToolLabel(item);
     if (method === "item/started") {
       rememberItemActivity(state, activityId, { kind: "tool", label });
     }
@@ -168,8 +169,7 @@ export function handleCodexItem(
     emitItemActivity(host, "tool", phase, label, activityId, detail);
     deleteCompletedActivity(state, method, activityId);
   } else if (itemType === "dynamicToolCall") {
-    const tool = boundedText(item.tool, 160);
-    const label = tool ? `Tool · ${tool}` : "Dynamic tool";
+    const label = codexDynamicToolLabel(item);
     if (method === "item/started") {
       rememberItemActivity(state, activityId, { kind: "tool", label });
     }
@@ -184,7 +184,7 @@ export function handleCodexItem(
     );
     deleteCompletedActivity(state, method, activityId);
   } else if (itemType === "webSearch") {
-    const search = webSearchLabel(item);
+    const search = codexWebSearchActivity(item);
     emitItemActivity(
       host,
       "tool",
@@ -273,28 +273,4 @@ function fileChangeDetail(item: JsonObject): string | undefined {
     return `${kind ? `${kind}: ` : ""}${path}`;
   });
   return changes.length > 0 ? `Files:\n${changes.join("\n")}` : undefined;
-}
-
-function webSearchLabel(item: JsonObject): { label: string; detail?: string } {
-  const action = objectValue(item.action);
-  const actionType = stringValue(action?.type);
-  if (actionType === "openPage") {
-    const url = boundedText(action?.url, 4_000);
-    return { label: "Open web page", ...(url ? { detail: `URL:\n${url}` } : {}) };
-  }
-  if (actionType === "findInPage") {
-    const url = boundedText(action?.url, 4_000);
-    const pattern = boundedText(action?.pattern, 1_000);
-    const detail = [
-      url ? `URL:\n${url}` : null,
-      pattern ? `Pattern:\n${pattern}` : null,
-    ].filter((part): part is string => Boolean(part)).join("\n\n");
-    return { label: "Find on web page", ...(detail ? { detail } : {}) };
-  }
-  const query = boundedText(action?.query, 4_000)
-    ?? boundedText(item.query, 4_000);
-  return {
-    label: "Search the web",
-    ...(query ? { detail: `Query:\n${query}` } : {}),
-  };
 }

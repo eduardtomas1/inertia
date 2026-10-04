@@ -87,6 +87,8 @@ import { QueuedMessageRepository } from "./persistence/queued-message-repository
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
+import { backgroundTasks } from "./persistence/background-task-repository";
+import type { BackgroundTaskCursor, BackgroundTasksResult } from "../shared/background-tasks";
 import type {
   AgentTurnRow,
   ConversationRow,
@@ -976,6 +978,11 @@ export class RuntimeStore {
       traceId,
       updatedAt,
     );
+  }
+
+  backgroundTasks(conversationId: string, before: BackgroundTaskCursor | null): BackgroundTasksResult {
+    this.conversation(conversationId);
+    return backgroundTasks(this.database, conversationId, before);
   }
 
   upsertSubagentTrace(

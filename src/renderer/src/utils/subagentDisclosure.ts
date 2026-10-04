@@ -1,6 +1,7 @@
 import { agentRunStateForTurn } from "@shared/run-state";
 import type { AgentTurn, SubagentTrace } from "@shared/contracts";
 import { supportsActiveParentFollowUp } from "./composerPrimaryAction";
+import { formatCompact } from "../lib/compactFormat";
 
 export interface SubagentDisclosureRow {
   trace: SubagentTrace;
@@ -65,6 +66,7 @@ const PROVIDER_LABELS: Partial<Record<SubagentTrace["providerId"], string>> = {
   cursor: "Cursor",
   kimi: "Kimi Code",
   opencode: "OpenCode",
+  antigravity: "Antigravity",
 };
 
 export function subagentProviderLabel(trace: SubagentTrace): string {
@@ -77,6 +79,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "cursor-acp": "ACP",
   "kimi-acp": "ACP",
   "opencode-sdk": "SDK",
+  "antigravity-cli": "CLI",
 };
 
 export function subagentHarnessLabel(
@@ -105,13 +108,6 @@ export function subagentTraceLabel(trace: SubagentTrace): string {
   const name = trace.providerName ?? trace.providerRole;
   if (name) return humanizeSubagentIdentifier(name);
   return `${subagentProviderLabel(trace)} delegated task`;
-}
-
-export function subagentRoleLabel(trace: SubagentTrace): string | null {
-  const role = trace.providerRole;
-  return role && role !== trace.providerName
-    ? humanizeSubagentIdentifier(role)
-    : null;
 }
 
 export function subagentMissionSummary(trace: SubagentTrace): string | null {
@@ -193,6 +189,11 @@ export function subagentTraceSummary(trace: SubagentTrace): string | null {
   const detail = subagentTraceDetail(trace);
   if (!detail || detail.length <= MAX_SUBAGENT_SUMMARY_CHARS) return detail;
   return `${detail.slice(0, MAX_SUBAGENT_SUMMARY_CHARS - 1).trimEnd()}…`;
+}
+
+export function subagentTokensLabel(trace: SubagentTrace): string | null {
+  const total = trace.usage?.totalTokens;
+  return total == null ? null : `${formatCompact(total)} tokens`;
 }
 
 export function subagentRelationshipLabel(
@@ -304,15 +305,4 @@ export function subagentStatsLabel(stats: SubagentDisclosureStats): string {
   const settled = stats.completed + stats.stopped;
   if (settled > 0) labels.push(`${settled} settled`);
   return labels.join(" · ");
-}
-
-export function subagentDisclosureSummary(
-  traces: readonly SubagentTrace[],
-): string {
-  const stats = subagentDisclosureStats(traces);
-  const noun = traces.length === 1 ? "delegated task" : "delegated tasks";
-  const state = subagentStatsLabel(stats);
-  return state
-    ? `${traces.length} ${noun} · ${state}`
-    : `${traces.length} ${noun}`;
 }

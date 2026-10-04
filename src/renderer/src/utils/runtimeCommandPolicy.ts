@@ -122,6 +122,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.create": gitMutation,
   "conversation.context.create": shortMutation,
   "conversation.context.agent.respond": shortMutation,
+  "conversation.background-tasks.get": shortRetrySafe,
   "conversation.context.agent.source.load": shortRetrySafe,
   "conversation.context.load": shortRetrySafe,
   "conversation.context.remove": shortMutation,

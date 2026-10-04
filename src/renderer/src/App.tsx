@@ -252,6 +252,7 @@ export default function App(): React.JSX.Element {
     compactConversation: compactConversationById,
     runQueueCommand,
     runLimitResetCommand,
+    loadBackgroundTasks,
     updateConversationById,
     sendingConversationIds,
   } = useAppRuntimeActions({
@@ -841,6 +842,7 @@ export default function App(): React.JSX.Element {
       runConversationContextCommand: draftConversation.runConversationContextCommand,
       runQueueCommand,
       runLimitResetCommand,
+      loadBackgroundTasks,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view: view === "settings" ? "settings" : "workspace",
@@ -929,6 +931,7 @@ export default function App(): React.JSX.Element {
         compactConversation: compactConversationById,
         runQueueCommand,
         runLimitResetCommand,
+        loadBackgroundTasks,
         updateConversationById,
       },
       sendingConversationIds,

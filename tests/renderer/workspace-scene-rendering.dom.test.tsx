@@ -3,11 +3,11 @@ import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import type { WorkspacePanelTab } from "../../src/renderer/src/components/workspacePanelTypes";
 import { useStableActions } from "../../src/renderer/src/hooks/useStableController";
 import type {
   AgentTurn,
   ChatMessage,
-  SubagentTrace,
 } from "../../src/shared/contracts";
 
 const renderCounts = vi.hoisted(() => ({
@@ -110,30 +110,6 @@ const messages: ChatMessage[] = [
     createdAt: completedAt,
   },
 ];
-const subagent: SubagentTrace = {
-  id: "stable-subagent",
-  conversationId,
-  runId: "stable-run",
-  turnId: "stable-turn",
-  providerId: "codex",
-  providerTaskId: null,
-  providerAgentId: null,
-  parentTraceId: null,
-  parentProviderAgentId: null,
-  parentProviderToolUseId: null,
-  providerToolUseId: null,
-  providerRole: null,
-  providerName: null,
-  providerStatus: null,
-  status: "completed",
-  isLive: false,
-  description: "Stable delegation",
-  progress: null,
-  result: "Done",
-  sequence: 1,
-  createdAt: requestedAt,
-  updatedAt: completedAt,
-};
 const empty: never[] = [];
 const respondToApproval = async (): Promise<void> => undefined;
 const respondToInput = async (): Promise<void> => undefined;
@@ -142,20 +118,19 @@ const noop = (): void => undefined;
 function Harness({
   backgroundRevision,
   showThinking = false,
-  onFollowUp,
+  onOpen,
 }: {
   backgroundRevision: number;
   showThinking?: boolean;
-  onFollowUp: (revision: number) => void;
+  onOpen: (revision: number) => void;
 }): React.JSX.Element {
   const actions = useStableActions({
-    followUp: (_trace: SubagentTrace) => onFollowUp(backgroundRevision),
-    stopSubagent: async (_trace: SubagentTrace) => undefined,
+    openSurface: (_surface: WorkspacePanelTab) => onOpen(backgroundRevision),
   });
   return (
     <>
-      <button type="button" onClick={() => actions.followUp(subagent)}>
-        Follow up
+      <button type="button" onClick={() => actions.openSurface("agents")}>
+        Open Background tasks
       </button>
       <ResponseTimeline
         turns={turns}
@@ -184,8 +159,7 @@ function Harness({
         onCompareTurnArtifacts={noop}
         onOpenTurnFile={noop}
         onStop={noop}
-        onFollowUpSubagent={actions.followUp}
-        onStopSubagent={actions.stopSubagent}
+        onOpenSurface={actions.openSurface}
       />
     </>
   );
@@ -199,27 +173,27 @@ afterEach(() => {
 
 describe("workspace scene timeline rendering", () => {
   it("keeps settled rows mounted across unrelated background revisions", () => {
-    const followedRevisions: number[] = [];
-    const onFollowUp = (revision: number): void => {
-      followedRevisions.push(revision);
+    const openedRevisions: number[] = [];
+    const onOpen = (revision: number): void => {
+      openedRevisions.push(revision);
     };
     const view = render(
-      <Harness backgroundRevision={1} onFollowUp={onFollowUp} />,
+      <Harness backgroundRevision={1} onOpen={onOpen} />,
     );
     expect(renderCounts).toEqual({ row: 1, profiler: 1 });
 
     view.rerender(
-      <Harness backgroundRevision={2} onFollowUp={onFollowUp} />,
+      <Harness backgroundRevision={2} onOpen={onOpen} />,
     );
     expect(renderCounts).toEqual({ row: 1, profiler: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "Follow up" }));
-    expect(followedRevisions).toEqual([2]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Background tasks" }));
+    expect(openedRevisions).toEqual([2]);
 
     view.rerender(
       <Harness
         backgroundRevision={2}
         showThinking
-        onFollowUp={onFollowUp}
+        onOpen={onOpen}
       />,
     );
     expect(renderCounts).toEqual({ row: 2, profiler: 2 });

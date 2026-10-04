@@ -1,4 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import {
+  RIGHT_PANEL_SURFACE_META,
+  RIGHT_PANEL_SURFACES,
+} from "../../../src/renderer/src/utils/rightPanelSurfaces";
 
 export function rightPanelToggle(page: Page): Locator {
   return page.locator("[data-panel-layout-controls] [data-right-panel-toggle]");
@@ -56,7 +60,9 @@ export async function selectWorkspaceTool(
   panel: Locator,
   name: string,
 ): Promise<void> {
-  const tabId = name === "Browser" ? "preview" : name.toLowerCase();
+  const tabId = RIGHT_PANEL_SURFACES.find((surface) =>
+    RIGHT_PANEL_SURFACE_META[surface].label === name);
+  if (!tabId) throw new Error(`Unknown workspace tool: ${name}`);
   const tab = panel.locator(`[data-workspace-tab="${tabId}"]`);
   const launcher = panel.getByRole("group", { name: "Open a surface" });
   const add = panel.getByRole("button", { name: "Add panel surface" });

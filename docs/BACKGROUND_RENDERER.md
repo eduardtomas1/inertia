@@ -115,10 +115,11 @@ original completed-history fixture's React/RAF counters did not detect this
 work. This is a small residual cost after #254, not an attribution of the
 original greater-than-one-core field report.
 
-The clock now subscribes only for an open disclosure in a visible, focused
-document. Removing the last subscriber clears the shared interval. Reopening
-or refocusing refreshes from wall time immediately and resumes one shared
-clock. The change does not alter a trace's `isLive`, status, timestamps,
+The clock now subscribes only while a live elapsed label is mounted (in
+the Background tasks or Goal panel; the chat timeline shows a per-turn count
+with no clock) and the document is visible. Removing the last subscriber
+clears the shared interval. Reopening the panel or showing the window again
+refreshes from wall time immediately and resumes one shared clock. The change does not alter a trace's `isLive`, status, timestamps,
 ownership, stop controls, or follow-up controls. Foreground CSS motion and
 reduced-motion rules are unchanged.
 
@@ -292,7 +293,7 @@ actual criteria to the measurements and regression coverage above.
 | Matched before/after traces | Each comparison above holds the generated profile, selected history, native window state, five-second duration, instrumentation, and graphics environment constant within its pair. Baseline and patched raw traces are retained. |
 | Separate attribution | Animation inventory/time, RAF callbacks, layout/paint/raster events, React commits, and GC are recorded independently. The first fix attributes continuous paint to the Ultra CSS animation; the follow-up attributes one-second layout/paint to elapsed-label DOM writes. GC-variable samples are explicitly separated. |
 | Focus/occlusion-aware scheduling | `useDocumentActivity` combines focus and visibility; root background-motion CSS also covers portals and detached chats. X11 native tests leave the main window mapped and visible while another Electron window owns focus. DOM tests separately exercise hidden documents. |
-| Pause unobservable work; preserve motion | Root CSS pauses infinite animations with their progress retained. Sidebar FLIP cancels and resets its baseline. Elapsed timers unsubscribe while inactive, with delegated clocks also gated by disclosure state. Native tests require frozen background animation/labels and advancing foreground/refocused motion, including reduced-motion checks. |
+| Pause unobservable work; preserve motion | Root CSS pauses infinite animations with their progress retained. Sidebar FLIP cancels and resets its baseline. Elapsed timers unsubscribe while inactive, and delegated clocks run only while their panel's labels are mounted. Native tests require frozen background animation/labels and advancing foreground/refocused motion, including reduced-motion checks. |
 | Validate virtualization and bound projections/idle work | `response-timeline/viewport.tsx` uses viewport virtualization with overscan 4, weak-key weight/estimate caches, and at most 12 layout estimates per item; layout-anchor restoration is bounded to 30 frames/600 ms. `useConversationProjection.ts` replaces detail on conversation changes, clears live overlays, and removes hydrated duplicates. `runtimeSnapshotProjection.ts` caps shell runs at 200. Tests cover 600 timeline rows/3,000 events, stable settled rows under updates, heavy short histories, and native mounting of seven rows in the mature workload. Idle samples require zero React, RAF, and interval callbacks. |
 | Reconcile stale running state without hiding live work | `recovery-repository.ts` excludes durable provider-owned turns/runs before transactional interruption of unowned current turns and their running activities. `runtime-safety.test.ts` verifies exact receipt-bound retirement, failed recovery, crash/replay, and retained ownership. `turn-controller-cleanup-proof.test.ts` requires matching run/turn identity and settled cleanup before clearing authority; missing/mismatched proof retains active controls. `database.test.ts` verifies scoped recovery and rollback. No age heuristic or renderer status rewriting was introduced. |
 | Deterministic large-history regression | DOM presence/clock/sidebar tests and the native 41-history profile cover background scheduling, cleanup, catch-up, and the complete activity dataset. The baseline fails the new zero-interval assertion. Persisted fixture tests independently verify counts, payloads, ownership, and integrity. |

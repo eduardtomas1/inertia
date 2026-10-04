@@ -1302,7 +1302,7 @@ describe("production provider lifecycle conformance", () => {
         runId: input.runId,
         turnId: input.turnId,
       };
-      if (route.providerId === "claude") {
+      if (route.providerId === "claude" || route.providerId === "opencode") {
         controlled.emit({
           ...base,
           type: "goal-updated",
@@ -1350,6 +1350,53 @@ describe("production provider lifecycle conformance", () => {
       expect(controlled.manager.isRunning(input.conversationId)).toBe(false);
     },
   );
+
+  it("accepts an attested OpenCode delegated-agent event", async () => {
+    const route = PRODUCTION_HARNESSES.find(
+      ({ harnessId }) => harnessId === "opencode-sdk",
+    )!;
+    const controlled = controlledManager(route, route.providerId, true);
+    const input = inputFor(route);
+    const subagents: string[] = [];
+    await controlled.manager.detect(route.providerId);
+    const running = controlled.manager.run(input, {
+      onSubagent: ({ providerAgentId }) => {
+        if (providerAgentId) subagents.push(providerAgentId);
+      },
+    });
+    controlled.emit({
+      providerId: input.providerId,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      turnId: input.turnId,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: null,
+      providerAgentId: "child-session",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: "Inspect the parser",
+      status: "spawned",
+      isLive: true,
+      description: null,
+      progress: null,
+      result: null,
+    });
+    controlled.resolve({
+      ...providerRunTerminal(input, "completed"),
+      text: "",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+      cleanupConfirmed: true,
+    });
+
+    await expect(running).resolves.toMatchObject({ status: "completed" });
+    expect(subagents).toEqual(["child-session"]);
+    expect(controlled.cancellations).toEqual([]);
+  });
 
   it.each(PRODUCTION_HARNESSES.slice(0, 1))(
     "$harnessId quarantines a mismatched harness-run owner",

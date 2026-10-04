@@ -139,6 +139,7 @@ describe("Claude delegated-agent projection", () => {
           input: {
             subagent_type: "researcher",
             description: "Research in the background",
+            model: "opus",
           },
         }],
       },
@@ -163,6 +164,11 @@ describe("Claude delegated-agent projection", () => {
 
     expect(tracker.hasLiveTasks()).toBe(true);
     expect(tracker.retainedStateCounts().pendingTasksByToolUse).toBe(1);
+    expect(updates.at(-1)).toMatchObject({
+      providerAgentId: "agent-async",
+      status: "running",
+      model: "opus",
+    });
 
     tracker.observe(sdkMessage({
       type: "system",
@@ -182,6 +188,7 @@ describe("Claude delegated-agent projection", () => {
       providerToolUseId: "tool-async",
       status: "spawned",
       isLive: true,
+      model: "opus",
     });
 
     tracker.observe(sdkMessage({
@@ -308,7 +315,10 @@ describe("Claude delegated-agent projection", () => {
       expect.objectContaining({
         providerTaskId: "workflow-task",
         status: "running",
-        progress: "Reviewing providers · 10 tokens · 1 tool use · 5 ms",
+        progress: "Reviewing providers",
+        usage: expect.objectContaining({ totalTokens: 10 }),
+        toolUseCount: 1,
+        durationMs: 5,
       }),
       expect.objectContaining({
         providerTaskId: "workflow-task",
@@ -395,13 +405,240 @@ describe("Claude delegated-agent projection", () => {
         providerTaskId: "task-retrying-agent",
         status: "running",
         progress: "Bash · 30 seconds elapsed",
+        activity: "Bash",
       }),
       expect.objectContaining({
         providerTaskId: "task-retrying-agent",
         status: "running",
         progress: "Retrying Bash · attempt 2/3 · in 1000 ms · after overloaded",
+        activity: "Bash",
       }),
     ]);
+  });
+
+  it("reports structured task telemetry while running and final numbers at the end", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: "tool-telemetry",
+          name: "Agent",
+          input: {
+            subagent_type: "researcher",
+            description: "Measure delegated work",
+            model: "  haiku  ",
+          },
+        }],
+      },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-telemetry",
+      tool_use_id: "tool-telemetry",
+      description: "Measure delegated work",
+      subagent_type: "researcher",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-telemetry",
+      tool_use_id: "tool-telemetry",
+      description: "Measure delegated work",
+      usage: { total_tokens: 1_200, tool_uses: 2, duration_ms: 3_000 },
+      last_tool_name: "Read",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-telemetry",
+      tool_use_id: "tool-telemetry",
+      description: "Measure delegated work",
+      usage: { total_tokens: 2_400, tool_uses: 3, duration_ms: 4_500 },
+      last_tool_name: "Read",
+    }));
+    tracker.observe(sdkMessage({
+      type: "tool_progress",
+      task_id: "task-telemetry",
+      tool_use_id: "child-grep",
+      tool_name: "Grep",
+      parent_tool_use_id: "tool-telemetry",
+      elapsed_time_seconds: 4,
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-telemetry",
+      tool_use_id: "tool-telemetry",
+      status: "completed",
+      output_file: "/tmp/task-telemetry",
+      summary: "Measured",
+      usage: { total_tokens: 3_100, tool_uses: 4, duration_ms: 6_000 },
+    }));
+
+    const totalOnly = (totalTokens: number) => ({
+      totalTokens,
+      inputTokens: null,
+      cachedInputTokens: null,
+      cacheWriteInputTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      contextTokens: null,
+      maxContextTokens: null,
+    });
+    expect(updates).toEqual([
+      expect.objectContaining({
+        sequence: 1,
+        status: "spawned",
+        model: "haiku",
+      }),
+      expect.objectContaining({
+        sequence: 2,
+        status: "running",
+        model: "haiku",
+        progress: "Read",
+        activity: "Read",
+        usage: totalOnly(1_200),
+        toolUseCount: 2,
+        durationMs: 3_000,
+      }),
+      expect.objectContaining({
+        sequence: 3,
+        status: "running",
+        progress: "Read",
+        activity: "Read",
+        usage: totalOnly(2_400),
+        toolUseCount: 3,
+        durationMs: 4_500,
+      }),
+      expect.objectContaining({
+        sequence: 4,
+        status: "running",
+        progress: "Grep · 4 seconds elapsed",
+        activity: "Grep",
+      }),
+      expect.objectContaining({
+        sequence: 5,
+        status: "completed",
+        isLive: false,
+        model: "haiku",
+        result: "Measured",
+        usage: totalOnly(3_100),
+        toolUseCount: 4,
+        durationMs: 6_000,
+      }),
+    ]);
+    expect(updates[0]).not.toHaveProperty("usage");
+    expect(updates[0]).not.toHaveProperty("activity");
+    expect(updates[3]).not.toHaveProperty("usage");
+    expect(updates[3]).not.toHaveProperty("toolUseCount");
+    expect(updates[4]).not.toHaveProperty("activity");
+  });
+
+  it("ignores malformed, negative, fractional, and oversized task numbers", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: "tool-malformed",
+          name: "Task",
+          input: {
+            subagent_type: "reviewer",
+            prompt: "Review malformed numbers",
+            model: 42,
+          },
+        }],
+      },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-malformed",
+      tool_use_id: "tool-malformed",
+      subagent_type: "reviewer",
+    }));
+    const malformedUsages: unknown[] = [
+      { total_tokens: -1, tool_uses: -1, duration_ms: -1 },
+      { total_tokens: 1.5, tool_uses: 0.5, duration_ms: 2.5 },
+      { total_tokens: "10", tool_uses: "1", duration_ms: "5" },
+      {
+        total_tokens: Number.POSITIVE_INFINITY,
+        tool_uses: Number.NaN,
+        duration_ms: Number.MAX_VALUE,
+      },
+      {
+        total_tokens: 1_000_000_000_001,
+        tool_uses: 1_000_001,
+        duration_ms: 31 * 24 * 60 * 60 * 1_000 + 1,
+      },
+      "not an object",
+      [1, 2, 3],
+      null,
+    ];
+    for (const usage of malformedUsages) {
+      tracker.observe(sdkMessage({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-malformed",
+        tool_use_id: "tool-malformed",
+        usage,
+        last_tool_name: 7,
+      }));
+    }
+    tracker.observe(sdkMessage({
+      type: "tool_progress",
+      task_id: "task-malformed",
+      tool_use_id: "child-tool",
+      tool_name: "   ",
+      parent_tool_use_id: "tool-malformed",
+      elapsed_time_seconds: 1,
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-malformed",
+      tool_use_id: "tool-malformed",
+      usage: { total_tokens: 0, tool_uses: 0, duration_ms: 0 },
+      last_tool_name: "x".repeat(250),
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-malformed",
+      status: "completed",
+      usage: { total_tokens: -5, tool_uses: 1.25, duration_ms: "late" },
+    }));
+
+    const telemetryKeys = ["model", "activity", "usage", "toolUseCount", "durationMs"];
+    const running = updates.slice(1, 1 + malformedUsages.length + 1);
+    expect(running).toHaveLength(malformedUsages.length + 1);
+    for (const update of [updates[0]!, ...running, updates.at(-1)!]) {
+      for (const key of telemetryKeys) {
+        expect(update).not.toHaveProperty(key);
+      }
+    }
+    expect(updates.at(-2)).toMatchObject({
+      progress: "x".repeat(250),
+      activity: "x".repeat(200),
+      usage: expect.objectContaining({ totalTokens: 0 }),
+      toolUseCount: 0,
+      durationMs: 0,
+    });
+    expect(updates.map((update) => update.sequence)).toEqual(
+      updates.map((_, index) => index + 1),
+    );
   });
 
   it("preserves waiting, failed, and stopped provider states exactly", () => {
@@ -637,7 +874,7 @@ describe("Claude delegated-agent projection", () => {
           type: "tool_use",
           id: `pending-tool-${index}`,
           name: "Agent",
-          input: { subagent_type: "reviewer" },
+          input: { subagent_type: "reviewer", model: "m".repeat(10_000) },
         }],
       },
     });
@@ -681,6 +918,36 @@ describe("Claude delegated-agent projection", () => {
     )).toThrow("bounded ignored-task trace state");
     expect(ignoredTasks.retainedStateCounts().ignoredTaskIds)
       .toBe(MAX_CLAUDE_IGNORED_TASK_IDS);
+  });
+
+  it.each([
+    ["the Agent tool input", { subagent_type: "fork", prompt: "Continue.", model: "haiku" }, "fork"],
+    ["the task start", { prompt: "Continue.", model: "haiku" }, "fork"],
+  ])("does not report a requested model for a fork named by %s", (_label, input, startedType) => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => updates.push(event));
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "tool-fork", name: "Agent", input }] },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-fork",
+      tool_use_id: "tool-fork",
+      subagent_type: startedType,
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-fork",
+      tool_use_id: "tool-fork",
+      usage: { total_tokens: 30, tool_uses: 1, duration_ms: 5 },
+    }));
+    expect(updates.length).toBeGreaterThan(0);
+    expect(updates[0]).toMatchObject({ providerRole: "fork" });
+    for (const update of updates) expect(update).not.toHaveProperty("model");
   });
 });
 

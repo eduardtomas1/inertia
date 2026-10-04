@@ -9,6 +9,7 @@ import { customAppearanceColorsMigration } from "./custom-appearance-colors";
 import { nativeAntigravityProviderMigration } from "./native-antigravity-provider";
 import { notificationPreferencesMigration } from "./notification-preferences";
 import { queuedMessagesMigration } from "./queued-messages";
+import { subagentTaskTelemetryMigration } from "./subagent-task-telemetry";
 import { turnSessionRecoveryMigration } from "./turn-session-recovery";
 import { workingIndicatorMigration } from "./working-indicator";
 import { scratchProjectMigration } from "./scratch-project";
@@ -29,4 +30,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   limitResetMigration,
   notificationPreferencesMigration,
   issueReportPreviewMigration,
+  subagentTaskTelemetryMigration,
 ];

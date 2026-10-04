@@ -137,7 +137,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Plan, goal and subagents",
-        detail: "The Plan and Goal surfaces show what the provider reports. Delegated agents appear in the transcript and in the Agents surface.",
+        detail: "The Plan and Goal surfaces show what the provider reports. Delegated agents appear in the transcript and in the Background tasks surface.",
+      },
+      {
+        name: "Background tasks",
+        detail: "Background tasks in the right panel lists the chat's delegated agents and the commands Inertia started, with what each is doing and the tokens it reports. A turn with agents shows one line, such as 2 agents working; choose it to open those tasks.",
       },
       {
         name: "Daily work",
@@ -167,7 +171,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Surfaces",
-        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Agents, Usage, Goal or Plan. Each chat remembers its own surfaces.",
+        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
       },
       {
         name: "Terminal",
@@ -410,7 +414,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "An agent stops responding",
-        detail: "Refresh it in Settings → Agents. Feature availability there shows what is ready and what needs setup.",
+        detail: "Refresh it in Settings → Agents. Details under the provider show what is ready and what needs setup.",
       },
       {
         name: "Diagnostics",

@@ -22,6 +22,7 @@ import { getRepositoryStatus } from "../../src/server/git";
 import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
 import {
   GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
+  GIT_SCAN_GLOBAL_PROCESS_BUDGET,
   GIT_SCAN_MAX_CONCURRENT_KEYS,
   GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
   GIT_SCAN_PROCESS_BUDGET_PER_KEY,
@@ -35,8 +36,9 @@ import { activatePreparedRuntimeOwnedProcessRegistry } from
 const linuxIt = process.platform === "linux" ? it : it.skip;
 const roots: string[] = [];
 const STATUS_INSPECTION_CEILING = 6;
-const CONTROL_HELPERS_PER_ACTIVE_INSPECTION = 1;
-const LINUX_FORKS_PER_INSPECTION = 5;
+const ADMISSION_HELPERS_PER_ACTIVE_INSPECTION = 1;
+const RELEASE_HELPERS_PER_ACTIVE_INSPECTION = 1;
+const LINUX_FORKS_PER_INSPECTION = 6;
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -84,6 +86,11 @@ interface LinuxProcessMetrics {
     targetState: string | null;
     ageMs: number | null;
   }>;
+  peakAdmissionHelpers: number;
+  peakReleaseHelpers: number;
+  peakInspectionsWithControlHelpers: number;
+  releaseHandoffSamples: number;
+  controlHelperViolations: unknown[];
   peakDescendants: number;
   peakGuardedTreeDescendants: number;
   peakDescendantRssKb: number;
@@ -140,6 +147,23 @@ async function observeDescendants(repositoryRoots: readonly string[]): Promise<{
       return metricsPromise;
     },
   };
+}
+
+function expectControlHelpersWithinBudget(
+  metrics: LinuxProcessMetrics,
+  activeInspections: number,
+): void {
+  const detail = JSON.stringify(metrics.peakControlHelperDetail);
+  expect(metrics.controlHelperViolations, detail).toEqual([]);
+  expect(metrics.peakInspectionsWithControlHelpers, detail).toBeLessThanOrEqual(
+    activeInspections,
+  );
+  expect(metrics.peakAdmissionHelpers, detail).toBeLessThanOrEqual(
+    activeInspections * ADMISSION_HELPERS_PER_ACTIVE_INSPECTION,
+  );
+  expect(metrics.peakReleaseHelpers, detail).toBeLessThanOrEqual(
+    activeInspections * RELEASE_HELPERS_PER_ACTIVE_INSPECTION,
+  );
 }
 
 async function scanRequest(
@@ -251,17 +275,11 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
       );
-      expect(
-        metrics.peakControlHelpers,
-        JSON.stringify(metrics.peakControlHelperDetail),
-      ).toBeLessThanOrEqual(
-        GIT_SCAN_PROCESS_BUDGET_PER_KEY
-          * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
-      );
+      expectControlHelpersWithinBudget(metrics, GIT_SCAN_PROCESS_BUDGET_PER_KEY);
       expect(metrics.peakDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY
           + GIT_SCAN_PROCESS_BUDGET_PER_KEY
-            * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
+            * ADMISSION_HELPERS_PER_ACTIVE_INSPECTION,
       );
       expect(metrics.uniqueDescendants).toBeLessThanOrEqual(forkBudget);
       // This two-scan burst can complete between /proc samples when the
@@ -341,19 +359,12 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
       );
-      expect(
-        metrics.peakControlHelpers,
-        JSON.stringify(metrics.peakControlHelperDetail),
-      ).toBeLessThanOrEqual(
-        GIT_SCAN_MAX_CONCURRENT_KEYS
-          * GIT_SCAN_PROCESS_BUDGET_PER_KEY
-          * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
-      );
+      expectControlHelpersWithinBudget(metrics, GIT_SCAN_GLOBAL_PROCESS_BUDGET);
       expect(metrics.peakDescendants).toBeLessThanOrEqual(
         GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET
           + GIT_SCAN_MAX_CONCURRENT_KEYS
             * GIT_SCAN_PROCESS_BUDGET_PER_KEY
-            * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
+            * ADMISSION_HELPERS_PER_ACTIVE_INSPECTION,
       );
       expect(metrics.uniqueDescendants).toBeLessThanOrEqual(forkBudget);
       expect(metrics.forkRatePerSecond).toBeGreaterThan(0);

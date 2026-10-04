@@ -34,6 +34,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const [formInvalid, setFormInvalid] = useState(false);
   const [previewInvalid, setPreviewInvalid] = useState(false);
   const [replacing, setReplacing] = useState(false);
+  const [handEdited, setHandEdited] = useState(false);
   const [retiring, setRetiring] = useState(false);
   const [focusTarget, setFocusTarget] = useState<FocusTarget>(null);
   const seeded = useRef("");
@@ -76,7 +77,9 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
     setTitle(next.title);
     setBody(next.body);
     seedForm(next);
-    if (initial) setView("preview");
+    if (!initial) return;
+    setView("preview");
+    setHandEdited(next.status === "preview" && next.revision > 0);
   }, [seedForm]);
 
   const command = useCallback(async (value: CommandWithoutId): Promise<IssueReport | null> => {
@@ -126,15 +129,17 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
   const unchangedForm = Boolean(report && editable && description.trim() === report.description && steps.trim() === report.steps
     && (providerId || null) === report.providerId && attachDiagnostics === report.attachDiagnostics);
   const edited = Boolean(report && (title !== report.title || body !== report.body));
-  const previewEdited = Boolean(report && editable && (edited || report.revision > 0));
+  const previewEdited = Boolean(report && editable && (edited || handEdited));
 
   const saveEdits = async (): Promise<IssueReport | null> => {
     if (!report || !edited) return report;
     const saved = await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title, body } });
+    if (saved && mounted.current) setHandEdited(true);
     return saved && saved.title === title.trim() && saved.body === body.trim() ? saved : null;
   };
   const regenerate = async (): Promise<void> => {
     await command({ type: "support.report.prepare", payload: { description, steps, providerId: providerId || null, attachDiagnostics } });
+    if (mounted.current) setHandEdited(false);
     setView("preview");
     setFocusTarget("title");
   };
@@ -281,9 +286,9 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
       </div>}
       {replacing && <div className="issue-report-confirm" role="group" aria-labelledby="issue-report-replace-heading" tabIndex={-1} ref={replaceRef}>
         <h4 id="issue-report-replace-heading">Replace your edited preview?</h4>
-        <p>Previewing again rebuilds the issue from the form and discards your edits to it.</p>
+        <p>Previewing again rebuilds the issue from the form and discards your edits to it. Keeping the edited preview drops your form changes.</p>
         <div className="issue-report-actions">
-          <button type="button" className="secondary-button" onClick={keepPreview}>Keep</button>
+          <button type="button" className="secondary-button" onClick={keepPreview}>Keep edited preview</button>
           <button type="button" className="primary-button" aria-disabled={unavailable} onClick={() => { setReplacing(false); void perform(regenerate); }}>Replace</button>
         </div>
       </div>}

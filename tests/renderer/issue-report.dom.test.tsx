@@ -319,7 +319,8 @@ it("asks before replacing an edited preview when the form changed", async () => 
   const choice = await screen.findByRole("group", { name: "Replace your edited preview?" });
   await waitFor(() => expect(choice).toHaveFocus());
   expect(commands(request, "support.report.prepare")).toHaveLength(0);
-  fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+  expect(choice).toHaveTextContent("Keeping the edited preview drops your form changes.");
+  fireEvent.click(screen.getByRole("button", { name: "Keep edited preview" }));
   expect(await screen.findByLabelText("Body")).toHaveValue("My careful hand-written body text.");
   expect(commands(request, "support.report.prepare")).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -328,4 +329,40 @@ it("asks before replacing an edited preview when the form changed", async () => 
   fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
   await waitFor(() => expect(commands(request, "support.report.prepare")).toHaveLength(1));
   expect(await screen.findByLabelText("Body")).toHaveValue(`## What happened\n\n${saved("preview").description}`);
+});
+
+it("rebuilds a failed preview that was never edited by hand without asking", async () => {
+  const { props, request } = fixture(saved("failed", { revision: 2, notice: ISSUE_GITHUB_MESSAGES["signed-out"] }));
+  render(<IssueReportSettings {...props} />);
+  await screen.findByLabelText("Body");
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await waitFor(() => expect(screen.getByLabelText("What happened")).toHaveFocus());
+  fireEvent.change(screen.getByLabelText("Steps to reproduce (optional)"), { target: { value: "Cancel twice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  await waitFor(() => expect(commands(request, "support.report.prepare")).toHaveLength(1));
+  expect(screen.queryByRole("group", { name: "Replace your edited preview?" })).toBeNull();
+  expect(commands(request, "support.report.prepare")[0]).toMatchObject({ payload: { steps: "Cancel twice" } });
+  expect(commands(request, "support.report.edit")).toHaveLength(0);
+});
+
+it("still asks before replacing a preview edited by hand when publishing it failed", async () => {
+  const { props, request, current, setReport } = fixture(saved("preview", { revision: 0 }));
+  const original = request.getMockImplementation()!;
+  request.mockImplementation(async (command) => {
+    if (command.type === "support.report.submit") {
+      setReport({ ...current()!, status: "failed", revision: current()!.revision + 2, notice: ISSUE_GITHUB_MESSAGES.offline });
+      return { type: "request.result", requestId: crypto.randomUUID(), result: { kind: "support.report", report: current() } };
+    }
+    return await original(command);
+  });
+  render(<IssueReportSettings {...props} />);
+  fireEvent.change(await screen.findByLabelText("Body"), { target: { value: "My careful hand-written body text." } });
+  fireEvent.click(screen.getByRole("button", { name: "Create on GitHub" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(ISSUE_GITHUB_MESSAGES.offline);
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await waitFor(() => expect(screen.getByLabelText("What happened")).toHaveFocus());
+  fireEvent.change(screen.getByLabelText("Steps to reproduce (optional)"), { target: { value: "Cancel twice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
+  expect(await screen.findByRole("group", { name: "Replace your edited preview?" })).toBeVisible();
+  expect(commands(request, "support.report.prepare")).toHaveLength(0);
 });

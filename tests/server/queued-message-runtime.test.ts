@@ -133,10 +133,12 @@ describe("durable runtime message queue", () => {
         id: randomUUID(), name: `queued-${index}.png`, path: "opaque", mimeType: "image/png" as const, size: 8,
       }));
       await f.command("message.queue.enqueue", id, images); await f.drain();
+      const resolve = vi.spyOn(f.attachments, "resolve");
       await f.command("message.queue.send", id); await f.drain();
       const queued = f.store.queuedMessages.get(f.conversationId, id);
       expect(queued?.state).toBe("blocked");
       expect(queued?.error).toContain("accepts at most 32 images per message. Remove some images and send again.");
+      expect(resolve).not.toHaveBeenCalled();
       expect(queued?.attachments.map(({ id: attachmentId }) => attachmentId)).toEqual(images.map(({ id: attachmentId }) => attachmentId));
       expect(f.provider.runCount).toBe(0);
       expect(await f.attachments.preview(images[0]!.id)).not.toBeNull();

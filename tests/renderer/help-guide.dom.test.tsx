@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("Help", () => {
-  it("opens from the sidebar as a labelled modal with focus on the first topic", async () => {
+  it("opens from the sidebar as a labelled modal on the first topic with focus in search", async () => {
     const { opener } = renderWithSidebarButton();
     expect(opener).toHaveAttribute("aria-haspopup", "dialog");
     expect(opener).toHaveAttribute("aria-expanded", "false");
@@ -76,8 +76,8 @@ describe("Help", () => {
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByRole("heading", { level: 2, name: "Help" })).toBeVisible();
     expect(opener).toHaveAttribute("aria-expanded", "true");
+    expect(within(dialog).getByRole("searchbox", { name: "Search help" })).toHaveFocus();
     const first = within(dialog).getByRole("tab", { name: "Getting started" });
-    expect(first).toHaveFocus();
     expect(first).toHaveAttribute("aria-selected", "true");
     expect(within(dialog).getAllByRole("tab").map((tab) => tab.textContent))
       .toEqual(HELP_TOPICS.map(({ title }) => title));
@@ -122,6 +122,7 @@ describe("Help", () => {
   it("closes with Escape from any control and returns focus to the opener every time", async () => {
     const { opener } = renderWithSidebarButton();
     const controls: Array<(dialog: HTMLElement) => HTMLElement> = [
+      (dialog) => within(dialog).getByRole("searchbox", { name: "Search help" }),
       (dialog) => within(dialog).getByRole("tab", { name: "Getting started" }),
       (dialog) => within(dialog).getByRole("tabpanel"),
       (dialog) => within(dialog).getByRole("button", { name: /Show welcome guide/u }),
@@ -155,8 +156,9 @@ describe("Help", () => {
     const reopened = await openFrom(opener);
     const first = within(reopened).getByRole("tab", { name: "Getting started" });
     expect(first).toHaveAttribute("aria-selected", "true");
-    expect(first).toHaveFocus();
-    fireEvent.keyDown(first, { key: "Escape" });
+    const field = within(reopened).getByRole("searchbox", { name: "Search help" });
+    expect(field).toHaveFocus();
+    fireEvent.keyDown(field, { key: "Escape" });
     expect(opener).toHaveFocus();
     await waitFor(() => expect(document.querySelector(".help-guide")).toBeNull());
   });

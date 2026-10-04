@@ -31,6 +31,9 @@ function helpTopicProblems(topics: readonly HelpTopic[]): string[] {
       if (entry.shortcut !== undefined && !shortcuts.has(entry.shortcut)) {
         problems.push(`${topic.id}: unknown shortcut ${entry.shortcut}`);
       }
+      if (entry.jump !== undefined && !topic.jumps.some(({ label }) => label === entry.jump)) {
+        problems.push(`${topic.id}: entry ${entry.name} names missing jump ${entry.jump}`);
+      }
     }
     for (const jump of topic.jumps) {
       if ("command" in jump) {
@@ -73,7 +76,7 @@ describe("help topics", () => {
       title: "Broken",
       summary: "Open Settings → Themes.",
       demo: "missing",
-      entries: [{ name: "Entry", detail: "Visit https://example.com", shortcut: "open-help" }],
+      entries: [{ name: "Entry", detail: "Visit https://example.com", shortcut: "open-help", jump: "Open Settings → Missing" }],
       jumps: [
         { label: "Run", command: "missing-command" },
         { label: "Open Settings → Themes", settings: "themes" },
@@ -85,6 +88,7 @@ describe("help topics", () => {
       "broken: duplicate topic",
       "broken: unknown demo missing",
       "broken: unknown shortcut open-help",
+      "broken: entry Entry names missing jump Open Settings → Missing",
       "broken: unknown command missing-command",
       "broken: unknown settings section themes",
       "broken: jump label Open Settings → Anything does not name Appearance",

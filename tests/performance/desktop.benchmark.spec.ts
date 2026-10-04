@@ -55,8 +55,10 @@ import {
 } from "../helpers/desktop-benchmark-app-shutdown";
 import {
   distribution,
+  summarizePrefetchedSurfaceSamples,
   summarizeStreamingBenchmarkEvidence,
   summarizeVisibleStreamingCadence,
+  type PrefetchedSurfaceSample,
 } from "../helpers/desktop-benchmark-summary";
 import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
 import { measureDesktopDiscovery } from "../helpers/desktop-discovery-benchmark";
@@ -99,6 +101,7 @@ const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 const CI_PREFETCHED_SURFACE_TARGET_MS = process.platform === "darwin" && process.arch === "x64"
   ? 250
   : 100;
+const PREFETCHED_SURFACE_RELAUNCH_COUNT = 5;
 const AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX = 2;
 const AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES = 8;
 // Prove progressive rendering before the scenario deliberately leaves the live
@@ -1784,10 +1787,7 @@ async function coldIntentDialogMeasurement(page: Page): Promise<number> {
   return elapsed;
 }
 
-async function prefetchedOverlayMeasurements(page: Page): Promise<{
-  commandPaletteFirstOpenMs: number;
-  settingsFirstOpenMs: number;
-}> {
+async function prefetchedOverlayMeasurements(page: Page): Promise<PrefetchedSurfaceSample> {
   const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
     triggerSelector: '.sidebar-footer button[aria-label="Settings"]',
     targetSelector: ".settings-view",
@@ -1934,7 +1934,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     cold.cleanup.resource.runtimePid = idleStart.runtimePid;
     await elapseObservationWindow(cold.page, 1_500);
     const idleEnd = await processSample(cold.electronApp);
-    const prefetchedOverlays = await prefetchedOverlayMeasurements(cold.page);
+    const prefetchedSurfaceWarmUp = await prefetchedOverlayMeasurements(cold.page);
     const memoryBaseline = await rendererMemorySample(
       cold.electronApp,
       cold.page,
@@ -2100,6 +2100,26 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       warm,
       warmSample.runtimePid,
     );
+    const prefetchedSurfaceSamples: PrefetchedSurfaceSample[] = [];
+    for (let relaunchNumber = 1; relaunchNumber <= PREFETCHED_SURFACE_RELAUNCH_COUNT; relaunchNumber += 1) {
+      const relaunch = await launchApp(
+        cleanupContext,
+        dataDirectory,
+        workspace,
+        profile,
+        fixtureEnvironment,
+      );
+      launchedApps.push(relaunch.electronApp);
+      const relaunchSample = await processSample(relaunch.electronApp);
+      relaunch.cleanup.resource.runtimePid = relaunchSample.runtimePid;
+      await elapseObservationWindow(relaunch.page, 1_500);
+      prefetchedSurfaceSamples.push(await prefetchedOverlayMeasurements(relaunch.page));
+      await closeMeasuredBenchmarkApp(relaunch, relaunchSample.runtimePid);
+    }
+    const prefetchedSurfaces = summarizePrefetchedSurfaceSamples(
+      prefetchedSurfaceWarmUp,
+      prefetchedSurfaceSamples,
+    );
     const discoveryRoot = join(fixtureRoot, "controlled-discovery");
     await mkdir(discoveryRoot, { recursive: true });
     const controlledDiscovery = await measureDesktopDiscovery({
@@ -2124,7 +2144,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           ? "x11"
           : "none";
       const report = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       collectedAt: new Date().toISOString(),
       runtime: {
         node: process.version,
@@ -2180,7 +2200,8 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           },
         firstOpenLatency: {
           coldIntentDialogMs,
-          ...prefetchedOverlays,
+          ...prefetchedSurfaces,
+          prefetchedSurfaceDefinition: `the fresh-profile launch opens Settings and the command palette once as an ungated warm-up; each gated value is the median of ${PREFETCHED_SURFACE_RELAUNCH_COUNT} relaunches of the same profile and database, each opened after 1.5 seconds of idle`,
         },
         fileTree: { interactiveMs: fileTreeMs },
         terminal: { startupMs: terminalStartupMs },
@@ -2324,6 +2345,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       );
     expect(report.scenarios.firstOpenLatency.coldIntentDialogMs)
       .toBeLessThan(5_000);
+    expect(report.scenarios.firstOpenLatency.prefetchedSurfaces.commandPaletteFirstOpenMs.sampleCount)
+      .toBe(PREFETCHED_SURFACE_RELAUNCH_COUNT);
+    expect(report.scenarios.firstOpenLatency.prefetchedSurfaces.settingsFirstOpenMs.sampleCount)
+      .toBe(PREFETCHED_SURFACE_RELAUNCH_COUNT);
     expect(report.scenarios.firstOpenLatency.commandPaletteFirstOpenMs)
       .toBeLessThan(CI_PREFETCHED_SURFACE_TARGET_MS);
     expect(report.scenarios.firstOpenLatency.settingsFirstOpenMs)

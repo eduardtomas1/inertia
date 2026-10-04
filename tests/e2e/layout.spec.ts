@@ -1,9 +1,9 @@
 // @inertia-e2e-resource isolated
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, openTerminalDock, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
-import { setAppearance } from "./support/appearance";
+import { setAppearance, setAppearanceInPlace } from "./support/appearance";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -340,3 +340,110 @@ for (const size of [
     expect(rendererErrors).toEqual([]);
   });
 }
+
+async function settleHelp(help: Locator): Promise<void> {
+  await expect.poll(() => help.evaluate((element) => (
+    element.getAnimations({ subtree: true }).every((animation) => animation.playState === "finished"
+      || animation.effect?.getTiming().iterations === Infinity)
+  ))).toBe(true);
+}
+
+async function captureHelp(help: Locator, testInfo: TestInfo, name: string): Promise<void> {
+  await settleHelp(help);
+  await page.mouse.move(0, 0);
+  const path = testInfo.outputPath(`${name}.png`);
+  await page.screenshot({ path, animations: "disabled" });
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
+async function expectHelpFits(help: Locator): Promise<void> {
+  const geometry = await help.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const results = element.querySelector(".help-guide-results");
+    return {
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      resultsOverflow: results ? results.scrollWidth - results.clientWidth : 0,
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.width);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.height);
+  expect(geometry.resultsOverflow).toBeLessThanOrEqual(0);
+  await expectNoViewportOverflow();
+}
+
+test("searches Help, moves through the results and opens an entry's setting", async ({ browserName: _browserName }, testInfo) => {
+  await resizeWindow(1440, 920);
+  await setAppearanceInPlace(app, "dark");
+  await page.clock.setFixedTime(new Date("2026-10-03T10:00:00.000Z"));
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  const help = page.getByRole("dialog", { name: "Help" });
+  const field = help.getByRole("searchbox", { name: "Search help" });
+  const results = help.getByRole("region", { name: "Search results" });
+  const status = help.getByRole("status");
+  await expect(field).toBeFocused();
+  await expect(help.getByRole("tab", { name: "Getting started" })).toHaveAttribute("aria-selected", "true");
+  await captureHelp(help, testInfo, "help-search-topics-dark-wide");
+
+  await page.keyboard.type("snooz");
+  await expect(help.getByRole("tablist")).toHaveCount(0);
+  await expect(status).toHaveText("2 results");
+  await expect(results.getByRole("group", { name: "Following work" })).toBeVisible();
+  await expect(results.getByRole("group", { name: "Usage and limits" })).toBeVisible();
+  await expect(results.locator("mark").first()).toBeVisible();
+  await expect(help.getByText(/Topic \d+ of/u)).toHaveCount(0);
+  await expect(help.getByRole("button", { name: "Done" })).toBeVisible();
+  await expectHelpFits(help);
+  await captureHelp(help, testInfo, "help-search-results-dark-wide");
+
+  await setAppearanceInPlace(app, "light");
+  await captureHelp(help, testInfo, "help-search-results-light-wide");
+
+  for (const size of [
+    { width: 1000, height: 800, label: "narrow" },
+    { width: 760, height: 600, label: "760x600" },
+  ]) {
+    await resizeWindow(size.width, size.height);
+    for (const theme of ["light", "dark"] as const) {
+      await setAppearanceInPlace(app, theme);
+      await expectHelpFits(help);
+      await captureHelp(help, testInfo, `help-search-results-${theme}-${size.label}`);
+    }
+  }
+
+  await resizeWindow(1440, 920);
+  await field.fill("zebra");
+  await expect(status).toHaveText("No matches");
+  await expect(help.getByText("No matches.")).toBeVisible();
+  await captureHelp(help, testInfo, "help-search-no-matches-dark-wide");
+
+  await page.keyboard.press("Escape");
+  await expect(field).toHaveValue("");
+  await expect(field).toBeFocused();
+  await expect(help.getByRole("tab", { name: "Getting started" })).toHaveAttribute("aria-selected", "true");
+  await setAppearanceInPlace(app, "light");
+  await captureHelp(help, testInfo, "help-search-topics-light-wide");
+  await setAppearanceInPlace(app, "dark");
+
+  await page.keyboard.type("custom colours");
+  await expect(status).toHaveText("1 result");
+  await page.keyboard.press("ArrowDown");
+  const result = results.getByRole("button", { name: "Custom colours" });
+  await expect(result).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(field).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(help).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 2, name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Custom colours" })).toBeVisible();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  expect(rendererErrors).toEqual([]);
+});

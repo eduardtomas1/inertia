@@ -1,5 +1,7 @@
 import { Switch } from "./ui";
 import { useEffect, useState } from "react";
+import { SettingRow } from "./settings/SettingsLayout";
+import { useSettingAction, type SettingAction } from "./settings/useSettingAction";
 import { MASCOT_LABELS, type MascotSettingsBridge, type MascotSnapshot } from "../../../shared/mascot";
 import { MASCOT_SPRITE_LABELS, MASCOT_SPRITE_STATES, type MascotSprites } from "../../../shared/mascot-sprites";
 import { MASCOT_SPRITE_NOTES, MASCOT_SPRITE_RULES, MASCOT_SPRITE_STEPS } from "../../../shared/mascot-sprite-guide";
@@ -9,10 +11,12 @@ declare global { interface Window { inertiaMascot?: MascotSettingsBridge } }
 export function MascotSettings() {
   const [snapshot, setSnapshot] = useState<MascotSnapshot | null>(null);
   const [pending, setPending] = useState<MascotSprites | null>(null);
-  const [busy, setBusy] = useState<"import" | "export" | "apply" | "reset" | "configure" | null>(null);
+  const [busy, setBusy] = useState<"import" | "export" | "apply" | "reset" | null>(null);
   const [error, setError] = useState("");
   const [spriteError, setSpriteError] = useState("");
   const [notice, setNotice] = useState("");
+  const showAction = useSettingAction();
+  const motionAction = useSettingAction();
   useEffect(() => {
     const bridge = window.inertiaMascot;
     if (!bridge) return;
@@ -26,7 +30,7 @@ export function MascotSettings() {
   }, []);
   const bridge = window.inertiaMascot;
   if (!bridge) return null;
-  const held = busy !== null || undefined;
+  const held = busy !== null || showAction.busy || motionAction.busy || undefined;
   const run = (
     kind: NonNullable<typeof busy>,
     operation: () => Promise<void>,
@@ -40,8 +44,12 @@ export function MascotSettings() {
     setNotice("");
     void operation().catch(() => report(failure)).finally(() => setBusy(null));
   };
-  const configure = (change: Partial<MascotSnapshot["preferences"]>): void => {
-    if (snapshot) run("configure", async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, ...change })), "Could not update the mascot. Try again.");
+  const configure = (action: SettingAction, change: Partial<MascotSnapshot["preferences"]>): void => {
+    if (!snapshot || held) return;
+    void action.run(async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, ...change })), {
+      exclusive: true,
+      failure: "Could not update the mascot. Try again.",
+    });
   };
   const importSprites = (): void => run("import", async () => {
     const result = await bridge.importSprites();
@@ -74,14 +82,12 @@ export function MascotSettings() {
   };
   return (
     <div className="mascot-settings">
-      <div className="setting-row" data-setting-id="desktop-mascot">
-        <span className="setting-copy"><strong>Show mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
-        <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure({ enabled: value })} />
-      </div>
-      <div className="setting-row" data-setting-id="mascot-motion">
-        <span className="setting-copy"><strong>Animate mascot</strong></span>
-        <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} inactive={held || !snapshot || !enabled} onChange={(motion) => configure({ motion })} />
-      </div>
+      <SettingRow id="desktop-mascot" title="Show mascot" description="A tiny companion above your windows, showing live chat status." notice={showAction.notice}>
+        <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure(showAction, { enabled: value })} />
+      </SettingRow>
+      <SettingRow id="mascot-motion" title="Animate mascot" notice={motionAction.notice}>
+        <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} inactive={held || !snapshot || !enabled} onChange={(motion) => configure(motionAction, { motion })} />
+      </SettingRow>
       {enabled && snapshot && <div className="mascot-settings-controls">
         <span role="status">{MASCOT_LABELS[snapshot.status.phase]}</span>
         <button className="secondary-button" type="button" onClick={() => {

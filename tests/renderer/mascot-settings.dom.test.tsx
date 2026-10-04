@@ -189,6 +189,17 @@ describe("mascot animation setting", () => {
     bridge.configure.mockRejectedValueOnce(new Error("offline"));
     render(<MascotSettings />);
     fireEvent.click(await screen.findByRole("switch", { name: "Animate mascot" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not update the mascot. Try again.");
+    const motion = document.querySelector<HTMLElement>('[data-setting-id="mascot-motion"]')!;
+    expect(await within(motion).findByRole("alert")).toHaveTextContent("Could not update the mascot. Try again.");
+  });
+
+  it("confirms each switch save in its own row", async () => {
+    install();
+    render(<MascotSettings />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Show mascot" }));
+    const show = document.querySelector<HTMLElement>('[data-setting-id="desktop-mascot"]')!;
+    const motion = document.querySelector<HTMLElement>('[data-setting-id="mascot-motion"]')!;
+    expect(await within(show).findByText("Saved")).toBeInTheDocument();
+    expect(within(motion).queryByText("Saved")).toBeNull();
   });
 });

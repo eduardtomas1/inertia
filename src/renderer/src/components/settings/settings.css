@@ -563,3 +563,15 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+.setting-action-row {
+  flex-wrap: wrap;
+}
+
+.setting-action-row > span {
+  flex: 1 1 240px;
+}
+
+.setting-action-row > div {
+  margin-left: auto;
+}

@@ -430,6 +430,10 @@ async function captureSections(viewport: Viewport): Promise<void> {
       await captureCards(section.id, section.cards, viewport, false);
     } else {
       await capture(evidenceName(section.id, section.overview, viewport)(null));
+      if (section.id === "help") {
+        await scrollContentTo(await cardTop("diagnostics-heading"));
+        await capture(evidenceName("help", "diagnostics", viewport)(null));
+      }
     }
   }
 }

@@ -263,7 +263,7 @@ describe("Discord release post", () => {
       settings: { ...defaultSettings, discordReleaseRepositoryUrl: "https://github.com/org/repo" },
     })} />);
     const post = await screen.findByRole("button", { name: "Post release to Discord…" });
-    await waitFor(() => expect(post).toBeEnabled());
+    await waitFor(() => expect(post).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(post);
     const confirm = screen.getByRole("group", { name: "Confirm Discord post" });
     expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
@@ -277,6 +277,25 @@ describe("Discord release post", () => {
     fireEvent.click(post);
     fireEvent.click(screen.getByRole("button", { name: "Post to Discord" }));
     await waitFor(() => expect(window.inertia.sendDiscordReleaseInfo).toHaveBeenCalledExactlyOnceWith({ repositoryUrl: "https://github.com/org/repo" }));
+  });
+
+  it("cancels the confirmation with Escape without leaving Settings and returns focus after posting", async () => {
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "devices" },
+      settings: { ...defaultSettings, discordReleaseRepositoryUrl: "https://github.com/org/repo" },
+    })} />);
+    const post = await screen.findByRole("button", { name: "Post release to Discord…" });
+    await waitFor(() => expect(post).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(post);
+    const cancel = within(screen.getByRole("group", { name: "Confirm Discord post" })).getByRole("button", { name: "Cancel" });
+    expect(fireEvent.keyDown(cancel, { key: "Escape" })).toBe(false);
+    expect(screen.queryByRole("group", { name: "Confirm Discord post" })).toBeNull();
+    expect(post).toHaveFocus();
+
+    fireEvent.click(post);
+    fireEvent.click(screen.getByRole("button", { name: "Post to Discord" }));
+    await waitFor(() => expect(window.inertia.sendDiscordReleaseInfo).toHaveBeenCalledOnce());
+    expect(post).toHaveFocus();
   });
 });
 

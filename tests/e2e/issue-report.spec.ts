@@ -29,7 +29,7 @@ test("preserves the private report chat and requires a reviewed preview before p
       await testInfo.attach(`issue-report-${theme.toLowerCase()}`, { path, contentType: "image/png" });
     }
     // Settings menus must stay in Chromium's top layer on Linux too.
-    for (const name of ["Report agent and model", "Report reasoning", "Diagnostic scope"]) {
+    for (const name of ["Agent and model", "Reasoning", "Diagnostic scope"]) {
       const control = page.getByRole("combobox", { name, exact: true });
       await expect(control).toHaveCSS("appearance", "base-select");
       if (await control.isDisabled()) continue;

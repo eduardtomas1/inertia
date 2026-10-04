@@ -1,6 +1,45 @@
-.snapshot-settings { display: grid; gap: 12px; }
-.snapshot-instructions { margin: 0; padding-left: 22px; list-style: decimal; line-height: 1.7; }
-.snapshot-instructions li + li { margin-top: 8px; }
-.snapshot-permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.snapshot-settings-error { padding: 9px 12px; border-radius: var(--radius-medium); color: var(--danger); background: var(--danger-soft); }
-.snapshot-settings code { overflow-wrap: anywhere; }
+.snapshot-settings code {
+  overflow-wrap: anywhere;
+}
+
+.snapshot-settings-status {
+  margin-top: 8px;
+}
+
+.snapshot-settings-guide {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.snapshot-settings-guide .setting-disclosure-content {
+  padding: 4px 0 8px 19px;
+}
+
+.snapshot-instructions {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.5;
+  list-style: decimal;
+}
+
+.snapshot-instructions li + li {
+  margin-top: 4px;
+}
+
+.snapshot-instructions kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-muted);
+  font-family: inherit;
+  font-size: var(--ui-font-micro);
+}
+
+.snapshot-settings-note {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+}

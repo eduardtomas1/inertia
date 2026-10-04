@@ -1,6 +1,6 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowUpRight, Check, ChevronDown, Copy, Download, RefreshCw, Search, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Copy, Download, RefreshCw, Search, TriangleAlert } from "lucide-react";
 import {
   DIAGNOSTIC_CATALOG, DIAGNOSTIC_LIMITS, diagnosticDefinition,
   type DiagnosticPage, type DiagnosticQuery, type DiagnosticRecord,
@@ -8,6 +8,7 @@ import {
 import type { Conversation, Project, ProviderInfo } from "@shared/contracts";
 import type { DiagnosticSelection } from "../lib/settingsTarget";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
+import { SettingDisclosure } from "./settings/SettingsLayout";
 import "./DiagnosticsSettings.css";
 
 interface Props {
@@ -112,18 +113,15 @@ export function DiagnosticsSettings({ projects, conversations, providers, select
   };
 
   return <section className="diagnostics-center" aria-labelledby="diagnostics-heading" data-setting-id="diagnostics-incidents">
-    <header className="diagnostics-header">
-      <div className="diagnostics-heading-icon"><Activity size={20} aria-hidden="true" /></div>
-      <div><h3 id="diagnostics-heading">Diagnostics</h3><p>Understand what happened. Decide what happens next.</p></div>
+    <header className="settings-card-heading diagnostics-header">
+      <span>
+        <h3 id="diagnostics-heading">Diagnostics</h3>
+        <p>Stored on this device, never uploaded · <span className="diagnostics-runtime-state">{page ? page.runtime === "ready" ? "Runtime connected" : "Runtime offline · diagnostics available" : "Reading local diagnostics…"}</span></p>
+      </span>
       <button type="button" className="secondary-button" disabled={!page || !page.total || loading || exporting} onClick={() => void exportFiltered()}>
         <Download size={14} aria-hidden="true" />Export filtered
       </button>
     </header>
-
-    <div className="diagnostics-local-strip">
-      <ShieldCheck size={16} aria-hidden="true" /><span>Stored on this device. No telemetry or automatic uploads.</span>
-      <span className="diagnostics-runtime-state">{page ? page.runtime === "ready" ? "Runtime connected" : "Runtime offline · diagnostics available" : "Reading local diagnostics…"}</span>
-    </div>
     {page?.persistence === "unavailable" && <p className="diagnostics-notice is-warning" role="status">
       Persistence unavailable. New incidents are kept in bounded memory and may be lost when you quit. Copy or export important incidents now.
     </p>}
@@ -131,31 +129,35 @@ export function DiagnosticsSettings({ projects, conversations, providers, select
       {page.dropped} journal updates could not be retained. This is a bounded history, not a complete audit trail.
     </p>}
 
-    <div className="diagnostics-filters" role="search" aria-label="Filter diagnostics">
-      <label className="diagnostics-search"><span className="visually-hidden">Search diagnostics</span><Search size={15} aria-hidden="true" />
-        <input type="search" maxLength={160} disabled={Boolean(activeSelection)} placeholder="Search explanation, code or correlation…" value={filters.search ?? ""}
+    <div className="diagnostics-filter-bar" role="search" aria-label="Filter diagnostics">
+      <label className="diagnostics-search"><span className="visually-hidden">Search diagnostics</span><Search size={14} aria-hidden="true" />
+        <input className="setting-input" type="search" maxLength={160} disabled={Boolean(activeSelection)} placeholder="Search explanation, code or correlation…" value={filters.search ?? ""}
           onChange={(event) => update({ search: event.target.value })} />
       </label>
-      <label><span>Severity</span><select value={query.severity ?? "attention"} disabled={Boolean(activeSelection)} onChange={(event) => update({ severity: event.target.value as DiagnosticQuery["severity"] })}>
-        <option value="attention">Warnings &amp; errors</option><option value="all">All severities</option>
-        <option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Information</option>
-      </select></label>
-      <label><span>Subsystem</span><select disabled={Boolean(activeSelection)} value={filters.subsystem ?? ""} onChange={(event) => update({ subsystem: event.target.value as DiagnosticQuery["subsystem"] || undefined })}>
-        <option value="">All subsystems</option>{subsystems.map((subsystem) => <option key={subsystem} value={subsystem}>{subsystemNames[subsystem]}</option>)}
-      </select></label>
-      <label><span>Provider</span><select disabled={Boolean(activeSelection)} value={filters.providerId ?? ""} onChange={(event) => update({ providerId: event.target.value as DiagnosticQuery["providerId"] || undefined })}>
-        <option value="">All providers</option>{providerIds.map((id) => <option key={id} value={id}>{providerById.get(id)?.label ?? id}</option>)}
-      </select></label>
-      <label><span>Project</span><select disabled={Boolean(activeSelection)} value={filters.projectId ?? ""} onChange={(event) => update({ projectId: event.target.value || undefined })}>
-        <option value="">All projects</option>{projectIds.map((id) => <option key={id} value={id}>{projectLabel(id)}</option>)}
-      </select></label>
-      <label><span>Time</span><select disabled={Boolean(activeSelection)} value={timeRange} onChange={(event) => {
-        const value = event.target.value; setTimeRange(value);
-        update({ after: value === "all" ? undefined : new Date(Date.now() - Number(value)).toISOString() });
-      }}><option value="all">All retained history</option><option value="3600000">Last hour</option><option value="86400000">Last 24 hours</option><option value="604800000">Last 7 days</option></select></label>
+      <SettingDisclosure summary="Filters" className="diagnostics-filter-disclosure">
+        <div className="diagnostics-filters">
+          <label><span>Severity</span><select className="setting-select" value={query.severity ?? "attention"} disabled={Boolean(activeSelection)} onChange={(event) => update({ severity: event.target.value as DiagnosticQuery["severity"] })}>
+            <option value="attention">Warnings &amp; errors</option><option value="all">All severities</option>
+            <option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Information</option>
+          </select></label>
+          <label><span>Subsystem</span><select className="setting-select" disabled={Boolean(activeSelection)} value={filters.subsystem ?? ""} onChange={(event) => update({ subsystem: event.target.value as DiagnosticQuery["subsystem"] || undefined })}>
+            <option value="">All subsystems</option>{subsystems.map((subsystem) => <option key={subsystem} value={subsystem}>{subsystemNames[subsystem]}</option>)}
+          </select></label>
+          <label><span>Provider</span><select className="setting-select" disabled={Boolean(activeSelection)} value={filters.providerId ?? ""} onChange={(event) => update({ providerId: event.target.value as DiagnosticQuery["providerId"] || undefined })}>
+            <option value="">All providers</option>{providerIds.map((id) => <option key={id} value={id}>{providerById.get(id)?.label ?? id}</option>)}
+          </select></label>
+          <label><span>Project</span><select className="setting-select" disabled={Boolean(activeSelection)} value={filters.projectId ?? ""} onChange={(event) => update({ projectId: event.target.value || undefined })}>
+            <option value="">All projects</option>{projectIds.map((id) => <option key={id} value={id}>{projectLabel(id)}</option>)}
+          </select></label>
+          <label><span>Time</span><select className="setting-select" disabled={Boolean(activeSelection)} value={timeRange} onChange={(event) => {
+            const value = event.target.value; setTimeRange(value);
+            update({ after: value === "all" ? undefined : new Date(Date.now() - Number(value)).toISOString() });
+          }}><option value="all">All retained history</option><option value="3600000">Last hour</option><option value="86400000">Last 24 hours</option><option value="604800000">Last 7 days</option></select></label>
+        </div>
+      </SettingDisclosure>
     </div>
     {activeSelection && <div className="diagnostics-context-filter"><span>Showing the referenced operation</span>
-      <button className="text-button" type="button" onClick={() => { setSelectionDismissed(true); setOffset(0); }}>Show all incidents</button>
+      <button className="secondary-button" type="button" onClick={() => { setSelectionDismissed(true); setOffset(0); }}>Show all incidents</button>
     </div>}
     <div className="diagnostics-list-heading"><span aria-live="polite">{page ? `${page.total} matching ${page.total === 1 ? "incident" : "incidents"}` : "Local incident history"}</span>
       <span>Newest first</span><button type="button" className="icon-button" aria-label="Refresh diagnostics" disabled={loading} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={14} /></button>
@@ -164,8 +166,8 @@ export function DiagnosticsSettings({ projects, conversations, providers, select
     {notice && <p role="status" className="diagnostics-notice">{notice}</p>}
     <div className="diagnostics-list" aria-label="Diagnostic incidents" aria-busy={loading}>
       {!page && loading ? <p className="diagnostics-empty">Reading bounded local history…</p>
-        : page?.records.length === 0 ? <div className="diagnostics-empty"><Check size={22} aria-hidden="true" />
-          <h4>No incidents match these filters</h4><p>{activeSelection ? "This operation may be outside the retained history or predate structured diagnostics." : "Try another filter or time range. An empty history does not certify every operation as healthy."}</p>
+        : page?.records.length === 0 ? <div className="diagnostics-empty">
+          <strong>No incidents match these filters</strong><p>{activeSelection ? "This operation may be outside the retained history or predate structured diagnostics." : "Try another filter or time range. An empty history does not certify every operation as healthy."}</p>
         </div> : page?.records.map((record) => {
           const definition = diagnosticDefinition(record.code);
           const conversation = record.context.conversationId ? conversationById.get(record.context.conversationId) : undefined;

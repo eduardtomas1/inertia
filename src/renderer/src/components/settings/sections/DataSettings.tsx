@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArchiveRestore, Download, ShieldCheck } from "lucide-react";
+import { ArchiveRestore, Download } from "lucide-react";
 
 import type {
   AppSettings,
@@ -17,6 +17,7 @@ import { SettingsSectionFallback } from "../SettingsSectionFallback";
 import { SettingActionRow, SettingsGroup } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
 import { ArchivedChats } from "./ArchivedChats";
+import "./DataSettings.css";
 
 export const APP_HEALTH_SAMPLE_INTERVAL_MS = 10_000;
 
@@ -86,7 +87,10 @@ export function DataSettings({
     });
   };
 
+  const recoveryUnavailable = disabled || recovery.busy;
+
   const exportRecoveryData = (): void => {
+    if (recoveryUnavailable) return;
     void recovery.run(() => window.inertia.exportRecoveryData(), {
       key: "export",
       exclusive: true,
@@ -98,6 +102,7 @@ export function DataSettings({
   };
 
   const importRecoveryData = (): void => {
+    if (recoveryUnavailable) return;
     void recovery.run(() => window.inertia.importRecoveryData(), {
       key: "import",
       exclusive: true,
@@ -113,7 +118,6 @@ export function DataSettings({
   return (
     <>
       <SettingsGroup title="Storage" headingId="data-heading">
-        <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
         <StorageStatusSettings
           health={appHealth}
           healthUnavailable={healthUnavailable}
@@ -131,12 +135,12 @@ export function DataSettings({
           id="recovery-export"
           className="runtime-log-setting"
           title="Portable conversation recovery export"
-          description="Exports project paths and messages without presets, attachments, sessions, execution context, Git artifacts, credentials, secret references, or vault data. Imports create new supervised identities."
+          description="Project paths and messages only. Imports create new supervised identities."
           notice={recovery.notice}
           actions={(
             <>
-              <button type="button" className="secondary-button" disabled={disabled || recovery.busy} onClick={exportRecoveryData}><Download size={14} />{recovery.pending === "export" ? "Exporting…" : "Export recovery file"}</button>
-              <button type="button" className="secondary-button" disabled={disabled || recovery.busy} onClick={importRecoveryData}><ArchiveRestore size={14} />{recovery.pending === "import" ? "Importing…" : "Import recovery file"}</button>
+              <button type="button" className="secondary-button" aria-disabled={recoveryUnavailable || undefined} onClick={exportRecoveryData}><Download size={14} aria-hidden="true" />{recovery.pending === "export" ? "Exporting…" : "Export recovery file"}</button>
+              <button type="button" className="secondary-button" aria-disabled={recoveryUnavailable || undefined} onClick={importRecoveryData}><ArchiveRestore size={14} aria-hidden="true" />{recovery.pending === "import" ? "Importing…" : "Import recovery file"}</button>
             </>
           )}
         />

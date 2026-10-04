@@ -11,7 +11,8 @@ import type {
   RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
-import { SettingDisclosure } from "./settings/SettingsLayout";
+import { SettingActionRow, SettingDisclosure } from "./settings/SettingsLayout";
+import type { SettingNotice } from "./settings/useSettingAction";
 
 const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
   images: "Images",
@@ -57,10 +58,7 @@ export function LifecycleIntegritySettings(
 ): React.JSX.Element | null {
   const [revealingLogs, setRevealingLogs] = useState(false);
   const [copyingSupportReport, setCopyingSupportReport] = useState(false);
-  const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
-  const [supportReportStatus, setSupportReportStatus] = useState<string | null>(
-    null,
-  );
+  const [supportNotice, setSupportNotice] = useState<SettingNotice | null>(null);
 
   if (props.surface === "provider-capability") {
     const contract = props.provider.capabilityContract;
@@ -116,14 +114,14 @@ export function LifecycleIntegritySettings(
   const revealRuntimeLogs = async (): Promise<void> => {
     if (revealingLogs) return;
     setRevealingLogs(true);
-    setLogRevealStatus(null);
+    setSupportNotice(null);
     try {
       const error = await props.onRevealRuntimeLogs();
-      setLogRevealStatus(error
-        ? "The runtime log folder could not be opened."
-        : "Runtime log folder opened.");
+      setSupportNotice(error
+        ? { tone: "error", text: "The runtime log folder could not be opened." }
+        : { tone: "info", text: "Runtime log folder opened." });
     } catch {
-      setLogRevealStatus("The runtime log folder could not be opened.");
+      setSupportNotice({ tone: "error", text: "The runtime log folder could not be opened." });
     } finally {
       setRevealingLogs(false);
     }
@@ -131,45 +129,44 @@ export function LifecycleIntegritySettings(
   const copyRuntimeSupportReport = async (): Promise<void> => {
     if (copyingSupportReport) return;
     setCopyingSupportReport(true);
-    setSupportReportStatus(null);
+    setSupportNotice(null);
     try {
       const result = await props.onCopyRuntimeDiagnosticReport();
-      setSupportReportStatus(result.copied
-        ? `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.`
-        : "The support summary could not be copied.");
+      setSupportNotice(result.copied
+        ? { tone: "info", text: `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.` }
+        : { tone: "error", text: "The support summary could not be copied." });
     } catch {
-      setSupportReportStatus("The support summary could not be copied.");
+      setSupportNotice({ tone: "error", text: "The support summary could not be copied." });
     } finally {
       setCopyingSupportReport(false);
     }
   };
   const diagnostics = props.diagnostics;
   return (
-    <>
-      <div className="setting-action-row runtime-log-setting" data-setting-id="runtime-diagnostics">
-        <span>
-          <strong>Runtime diagnostics</strong>
-          <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>
-          {diagnostics && (
-            <small className="runtime-lifecycle-summary">
-              <strong>{lifecycleActionLabel(lifecycleActionableStateWithUpdate(
-                diagnostics.actionableState,
-                appUpdatePreparationDiagnostic(props.appUpdateStatus),
-              ))}</strong>
-              {` · ${diagnostics.ownedResources.turns} active ${diagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`}
-              {` · ${diagnostics.ownedResources.interactions} open ${diagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`}
-              {` · generation ${diagnostics.runtimeGenerationHash}`}
-            </small>
-          )}
-        </span>
-        <div>
-          <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
-          <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
-        </div>
-      </div>
-      {logRevealStatus && <p className="settings-card-note" role="status">{logRevealStatus}</p>}
-      {supportReportStatus && <p className="settings-card-note" role="status">{supportReportStatus}</p>}
-    </>
+    <SettingActionRow
+      id="runtime-diagnostics"
+      className="runtime-log-setting"
+      title="Runtime diagnostics"
+      description="Local lifecycle and failure metadata, without prompts, source, tokens or credentials."
+      details={diagnostics && (
+        <small className="runtime-lifecycle-summary">
+          <strong>{lifecycleActionLabel(lifecycleActionableStateWithUpdate(
+            diagnostics.actionableState,
+            appUpdatePreparationDiagnostic(props.appUpdateStatus),
+          ))}</strong>
+          {` · ${diagnostics.ownedResources.turns} active ${diagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`}
+          {` · ${diagnostics.ownedResources.interactions} open ${diagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`}
+          {` · generation ${diagnostics.runtimeGenerationHash}`}
+        </small>
+      )}
+      notice={supportNotice}
+      actions={(
+        <>
+          <button type="button" className="secondary-button" aria-disabled={copyingSupportReport || undefined} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} aria-hidden="true" />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
+          <button type="button" className="secondary-button" aria-disabled={revealingLogs || undefined} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} aria-hidden="true" />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
+        </>
+      )}
+    />
   );
 }
 

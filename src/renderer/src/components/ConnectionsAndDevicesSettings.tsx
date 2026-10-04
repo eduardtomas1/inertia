@@ -1,6 +1,7 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { Copy, ExternalLink, Link, Power } from "lucide-react";
 import type { Project } from "@shared/contracts";
 import type {
   PrivateConnectDeviceView,
@@ -9,6 +10,15 @@ import type {
 import type { PrivateConnectPreset } from "@shared/private-connect/scopes";
 import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
 import { writeClipboardText } from "../utils/clipboard";
+import {
+  SettingActionRow,
+  SettingCopy,
+  SettingDisclosure,
+  SettingNoteStatus,
+  SettingsGroup,
+} from "./settings/SettingsLayout";
+import type { SettingNotice } from "./settings/useSettingAction";
+import "./ConnectionsAndDevicesSettings.css";
 
 type UpdateState = (
   operation: () => Promise<PrivateConnectStateView>,
@@ -24,7 +34,7 @@ export function ConnectionsAndDevicesSettings({
   const [state, setState] = useState<PrivateConnectStateView | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<SettingNotice | null>(null);
   const [projectSelections, setProjectSelections] = useState<
     Record<string, string[]>
   >({});
@@ -42,21 +52,19 @@ export function ConnectionsAndDevicesSettings({
     return () => { current = false; };
   }, [state?.invitation?.url]);
 
-  if (loaded.error) {
+  if (loaded.error || !state) {
     return (
-      <section className="settings-card">
-        <h3>Inertia Private Connect</h3>
-        <p>{loaded.error}</p>
-        <button type="button" onClick={loaded.retry}>Retry</button>
-      </section>
-    );
-  }
-  if (!state) {
-    return (
-      <section className="settings-card">
-        <h3>Inertia Private Connect</h3>
-        <p>Loading Private Connect…</p>
-      </section>
+      <SettingsGroup title="Inertia Private Connect" headingId="private-connect-heading" className="private-connect-settings">
+        <SettingActionRow
+          id="private-connect"
+          className="runtime-log-setting"
+          title="Status"
+          details={<small role="status">{loaded.error ?? "Loading Private Connect…"}</small>}
+          actions={loaded.error
+            ? <button type="button" className="secondary-button" onClick={loaded.retry}>Retry</button>
+            : undefined}
+        />
+      </SettingsGroup>
     );
   }
 
@@ -65,11 +73,12 @@ export function ConnectionsAndDevicesSettings({
     setMessage(null);
     try {
       setState(await operation());
-      setMessage(typeof success === "string" ? success : success());
+      setMessage({ tone: "info", text: typeof success === "string" ? success : success() });
     } catch (error) {
-      setMessage(error instanceof Error
-        ? error.message
-        : "Private Connect could not be updated.");
+      setMessage({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Private Connect could not be updated.",
+      });
     } finally {
       setBusy(false);
     }
@@ -87,123 +96,111 @@ export function ConnectionsAndDevicesSettings({
     if (!state.invitation) return;
     try {
       if (!await writeClipboardText(state.invitation.url)) throw new Error("Clipboard write failed.");
-      setMessage("Pairing link copied.");
+      setMessage({ tone: "info", text: "Pairing link copied." });
     } catch {
-      setMessage("Copy failed. Select the link and copy it manually.");
+      setMessage({ tone: "error", text: "Copy failed. Select the link and copy it manually." });
     }
   };
 
   const currentDevices = state.devices.filter((device) =>
     device.revokedAt === null && Date.parse(device.expiresAt) > Date.now()
   );
+  const toggleUnavailable = busy || !state.available;
+  const pairingUnavailable = busy || state.status !== "ready";
 
   return (
-    <div className="settings-stack">
-      <section className="settings-card" aria-labelledby="private-connect-heading" data-setting-id="private-connect">
-        <div className="settings-card-heading">
-          <div><span className={`status-dot ${state.status}`} /></div>
-          <span>
-            <h3 id="private-connect-heading">Inertia Private Connect</h3>
-            <p>Use your own Tailscale tailnet to open this online computer on another device.</p>
-          </span>
-        </div>
-        <div className="settings-rows private-connect-settings-rows">
-          <div className="settings-row">
-            <span><strong>Status</strong><small>{statusLabel(state)}</small></span>
-            <button
-              type="button"
-              disabled={busy || !state.available}
-              onClick={() => void update(
-                () => window.inertia.setPrivateConnectEnabled({ enabled: !state.enabled }),
-                state.enabled ? "Private Connect disabled." : "Private Connect ready.",
+    <>
+      <SettingsGroup
+        title="Inertia Private Connect"
+        headingId="private-connect-heading"
+        description="Open Inertia on another device through your own Tailscale tailnet."
+        className="private-connect-settings"
+      >
+        <SettingActionRow
+          id="private-connect"
+          className="runtime-log-setting"
+          title="Status"
+          description={statusLabel(state)}
+          actions={(
+            <>
+              {state.diagnostics.setupUrl && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void window.inertia.openExternal(state.diagnostics.setupUrl!)}
+                >
+                  <ExternalLink size={14} aria-hidden="true" />Finish Tailscale setup
+                </button>
               )}
-            >
-              {state.enabled ? "Disable" : "Enable"}
-            </button>
-          </div>
-          <div className="settings-row">
-            <span>
-              <strong>Open on another device</strong>
-              <small>{state.externalUrl ?? "Turn on Private Connect to create a private link."}</small>
-            </span>
+              <button
+                type="button"
+                className="secondary-button"
+                aria-disabled={toggleUnavailable || undefined}
+                onClick={() => {
+                  if (toggleUnavailable) return;
+                  void update(
+                    () => window.inertia.setPrivateConnectEnabled({ enabled: !state.enabled }),
+                    state.enabled ? "Private Connect disabled." : "Private Connect ready.",
+                  );
+                }}
+              >
+                <Power size={14} aria-hidden="true" />{state.enabled ? "Disable" : "Enable"}
+              </button>
+            </>
+          )}
+        />
+        <SettingActionRow
+          className="runtime-log-setting"
+          title="Open on another device"
+          description={state.externalUrl ?? "Turn on Private Connect to create a private link."}
+          actions={(
             <button
               type="button"
-              disabled={busy || state.status !== "ready"}
-              onClick={() => void createInvitation()}
+              className="secondary-button"
+              aria-disabled={pairingUnavailable || undefined}
+              onClick={() => {
+                if (!pairingUnavailable) void createInvitation();
+              }}
             >
-              Create pairing link
+              <Link size={14} aria-hidden="true" />Create pairing link
             </button>
+          )}
+        />
+        {state.invitation && (
+          <div className="private-connect-pairing" role="group" aria-labelledby="pairing-link-heading">
+            <SettingCopy
+              title="Pairing link"
+              titleId="pairing-link-heading"
+              description="Expires in five minutes. Share it only with a device on your tailnet."
+            />
+            {qr && (
+              <img
+                className="private-connect-qr"
+                src={qr}
+                alt="Short-lived Private Connect pairing QR code"
+              />
+            )}
+            <div className="private-connect-link">
+              <input
+                className="setting-input"
+                aria-label="Private Connect pairing link"
+                value={state.invitation.url}
+                readOnly
+              />
+              <button type="button" className="secondary-button" onClick={() => void copyInvitation()}>
+                <Copy size={14} aria-hidden="true" />Copy link
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         {state.status === "error" && (
-          <p className="settings-card-note">
+          <p className="private-connect-note">
             {state.statusMessage ?? "Private Connect could not be established safely."}
           </p>
         )}
-        {state.diagnostics.setupUrl && (
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void window.inertia.openExternal(state.diagnostics.setupUrl!)}
-          >
-            Finish Tailscale setup
-          </button>
-        )}
-        {state.notice && <p className="settings-card-note">{state.notice}</p>}
-        {message && <p className="settings-card-note" role="status">{message}</p>}
-      </section>
-
-      {state.invitation && (
-        <section className="settings-card" aria-labelledby="pairing-link-heading">
-          <div className="settings-card-heading">
-            <div>QR</div>
-            <span>
-              <h3 id="pairing-link-heading">Pair a browser</h3>
-              <p>This link expires in five minutes and is safe to share only with a device on your tailnet.</p>
-            </span>
-          </div>
-          {qr && (
-            <img
-              className="private-connect-qr"
-              src={qr}
-              alt="Short-lived Private Connect pairing QR code"
-            />
-          )}
-          <div className="settings-actions">
-            <input
-              aria-label="Private Connect pairing link"
-              value={state.invitation.url}
-              readOnly
-            />
-            <button type="button" onClick={() => void copyInvitation()}>Copy link</button>
-          </div>
-        </section>
-      )}
-
-      <section className="settings-card" aria-labelledby="paired-devices-heading" data-setting-id="paired-devices">
-        <div className="settings-card-heading">
-          <div>●</div>
-          <span>
-            <h3 id="paired-devices-heading">Paired devices</h3>
-            <p>Monitor is read-only. Collaborate can prompt, answer non-secret questions, and stop an active run.</p>
-          </span>
-        </div>
-        {currentDevices.length === 0 ? (
-          <p className="settings-card-note">No browsers are paired.</p>
-        ) : (
-          <div className="private-connect-device-list">
-            {currentDevices.map((device) => (
-              <PairedDeviceEditor
-                key={device.id}
-                device={device}
-                projects={projects}
-                busy={busy}
-                update={update}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+        {state.notice && <p className="private-connect-note">{state.notice}</p>}
+        <SettingNoteStatus notice={message} />
+      </SettingsGroup>
 
       {state.pendingPairings.map((pending) => {
         const selected = projectSelections[pending.requestId] ?? [];
@@ -215,104 +212,117 @@ export function ConnectionsAndDevicesSettings({
               : [...selected, projectId],
           }));
         };
+        const approvalUnavailable = busy || selected.length === 0;
+        const approve = (preset: PrivateConnectPreset, success: string): void => {
+          if (approvalUnavailable) return;
+          void update(
+            () => window.inertia.approvePrivateConnectPairing({
+              requestId: pending.requestId,
+              preset,
+              projectIds: selected,
+              grantDays: 30,
+            }),
+            success,
+          );
+        };
         return (
-          <section
-            className="settings-card pairing-approval"
+          <SettingsGroup
             key={pending.requestId}
-            aria-labelledby={`pairing-${pending.requestId}`}
+            title={`${pending.deviceLabel} wants to connect`}
+            headingId={`pairing-${pending.requestId}`}
+            className="private-connect-approval"
           >
-            <h3 id={`pairing-${pending.requestId}`}>{pending.deviceLabel} wants to connect</h3>
-            <p>Comparison code: <strong className="private-connect-code">{pending.comparisonCode}</strong></p>
-            <p className="settings-card-note">Network metadata: {pending.tailnetLabel ?? "not available"}</p>
+            <p className="private-connect-facts">
+              Comparison code <strong className="private-connect-code">{pending.comparisonCode}</strong>
+              {" · "}Network {pending.tailnetLabel ?? "not available"}
+            </p>
             <ProjectGrantFields
               projects={projects}
               selected={selected}
               onToggle={toggleProject}
             />
-            <div className="settings-actions">
+            <div className="private-connect-actions">
               <button
                 type="button"
-                disabled={busy || selected.length === 0}
-                onClick={() => void update(
-                  () => window.inertia.approvePrivateConnectPairing({
-                    requestId: pending.requestId,
-                    preset: "monitor",
-                    projectIds: selected,
-                    grantDays: 30,
-                  }),
-                  "Monitor access approved.",
-                )}
+                className="secondary-button"
+                aria-disabled={busy || undefined}
+                onClick={() => {
+                  if (!busy) void update(() => window.inertia.denyPrivateConnectPairing(pending.requestId), "Pairing denied.");
+                }}
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                aria-disabled={approvalUnavailable || undefined}
+                onClick={() => approve("monitor", "Monitor access approved.")}
               >
                 Allow Monitor
               </button>
               <button
                 type="button"
-                disabled={busy || selected.length === 0}
-                onClick={() => void update(
-                  () => window.inertia.approvePrivateConnectPairing({
-                    requestId: pending.requestId,
-                    preset: "collaborate",
-                    projectIds: selected,
-                    grantDays: 30,
-                  }),
-                  "Collaborate access approved.",
-                )}
+                className="secondary-button"
+                aria-disabled={approvalUnavailable || undefined}
+                onClick={() => approve("collaborate", "Collaborate access approved.")}
               >
                 Allow Collaborate
               </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void update(
-                  () => window.inertia.denyPrivateConnectPairing(pending.requestId),
-                  "Pairing denied.",
-                )}
-              >
-                Deny
-              </button>
             </div>
-          </section>
+          </SettingsGroup>
         );
       })}
 
-      <section className="settings-card" aria-labelledby="private-connect-security-heading">
-        <div className="settings-card-heading">
-          <div>↺</div>
-          <span>
-            <h3 id="private-connect-security-heading">Security activity</h3>
-            <p>Recent local authority events. Prompt text and private content are never recorded here.</p>
-          </span>
-        </div>
-        {(state.audit ?? []).length === 0 ? (
-          <p className="settings-card-note">No Private Connect security activity yet.</p>
-        ) : (
-          <div className="private-connect-audit-list">
-            {[...(state.audit ?? [])].reverse().map((event) => (
-              <div key={event.id}>
-                <span><strong>{event.detail}</strong><small>{event.type}</small></span>
-                <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString(INTERFACE_LOCALE)}</time>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <details className="settings-card private-connect-diagnostics">
-        <summary>Advanced diagnostics</summary>
-        <dl>
-          <div><dt>Tailscale</dt><dd>{state.diagnostics.tailscale}</dd></div>
-          <div><dt>MagicDNS</dt><dd>{state.diagnostics.magicDns}</dd></div>
-          <div><dt>Gateway port</dt><dd>{state.diagnostics.gatewayPort ?? "off"}</dd></div>
-          <div><dt>Serve port</dt><dd>{state.diagnostics.servePort ?? "off"}</dd></div>
-          <div><dt>Mapping</dt><dd>{state.diagnostics.mappingOwnership}</dd></div>
-          <div><dt>Inertia</dt><dd>{state.diagnostics.buildVersion ?? "unknown"}</dd></div>
-          <div><dt>Protocol</dt><dd>{state.diagnostics.protocolVersion ?? 1}</dd></div>
-          {state.diagnostics.errorClass && (
-            <div><dt>Last safe error</dt><dd>{state.diagnostics.errorClass}</dd></div>
-          )}
-        </dl>
-      </details>
-    </div>
+      <div data-setting-id="paired-devices">
+        <SettingsGroup
+          title="Paired devices"
+          headingId="paired-devices-heading"
+          description="Monitor is read-only. Collaborate can prompt, answer non-secret questions and stop an active run."
+          className="private-connect-devices"
+        >
+          {currentDevices.length === 0 ? (
+            <p className="private-connect-note">No browsers are paired.</p>
+          ) : currentDevices.map((device) => (
+            <PairedDeviceEditor
+              key={device.id}
+              device={device}
+              projects={projects}
+              busy={busy}
+              update={update}
+            />
+          ))}
+          <SettingDisclosure summary="Security activity" className="private-connect-disclosure">
+            <p className="private-connect-note">Recent local authority events. Prompt text and private content are never recorded.</p>
+            {(state.audit ?? []).length === 0 ? (
+              <p className="private-connect-note">No security activity yet.</p>
+            ) : (
+              <ul className="private-connect-audit-list" aria-label="Security activity">
+                {[...(state.audit ?? [])].reverse().map((event) => (
+                  <li key={event.id}>
+                    <span><strong>{event.detail}</strong><small>{event.type}</small></span>
+                    <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString(INTERFACE_LOCALE)}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SettingDisclosure>
+          <SettingDisclosure summary="Advanced diagnostics" className="private-connect-disclosure private-connect-diagnostics">
+            <dl>
+              <div><dt>Tailscale</dt><dd>{state.diagnostics.tailscale}</dd></div>
+              <div><dt>MagicDNS</dt><dd>{state.diagnostics.magicDns}</dd></div>
+              <div><dt>Gateway port</dt><dd>{state.diagnostics.gatewayPort ?? "off"}</dd></div>
+              <div><dt>Serve port</dt><dd>{state.diagnostics.servePort ?? "off"}</dd></div>
+              <div><dt>Mapping</dt><dd>{state.diagnostics.mappingOwnership}</dd></div>
+              <div><dt>Inertia</dt><dd>{state.diagnostics.buildVersion ?? "unknown"}</dd></div>
+              <div><dt>Protocol</dt><dd>{state.diagnostics.protocolVersion ?? 1}</dd></div>
+              {state.diagnostics.errorClass && (
+                <div><dt>Last safe error</dt><dd>{state.diagnostics.errorClass}</dd></div>
+              )}
+            </dl>
+          </SettingDisclosure>
+        </SettingsGroup>
+      </div>
+    </>
   );
 }
 
@@ -370,10 +380,12 @@ function PairedDeviceEditor({
     `${device.label} access updated. The browser must reconnect.`,
   );
 
+  const saveUnavailable = busy || projectIds.length === 0 || !validFutureDate(expiresAt);
+
   return (
-    <article className="private-connect-device">
+    <div className="private-connect-device" role="group" aria-label={device.label}>
       <div className="private-connect-device-heading">
-        <span>
+        <span className="setting-copy">
           <strong>{device.label}</strong>
           <small>
             Last connected {device.lastSeenAt
@@ -384,20 +396,20 @@ function PairedDeviceEditor({
         <button
           type="button"
           className="secondary-button"
-          disabled={busy}
-          onClick={() => void update(
-            () => window.inertia.revokePrivateConnectDevice(device.id),
-            "Device revoked.",
-          )}
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            if (!busy) void update(() => window.inertia.revokePrivateConnectDevice(device.id), "Device revoked.");
+          }}
         >
           Revoke
         </button>
       </div>
-      <div className="settings-form-grid private-connect-device-fields">
+      <div className="private-connect-device-fields">
         <label>
           Access
           <select
-            aria-label={`${device.label} access`}
+            className="setting-select"
+            aria-label={`Access for ${device.label}`}
             value={preset}
             onChange={(event) => setPreset(event.currentTarget.value as PrivateConnectPreset)}
           >
@@ -408,8 +420,9 @@ function PairedDeviceEditor({
         <label>
           Expires
           <input
+            className="setting-input"
             type="datetime-local"
-            aria-label={`${device.label} expiry`}
+            aria-label={`Expires for ${device.label}`}
             value={expiresAt}
             onChange={(event) => setExpiresAt(event.currentTarget.value)}
           />
@@ -420,16 +433,19 @@ function PairedDeviceEditor({
         selected={projectIds}
         onToggle={toggleProject}
       />
-      <div className="settings-actions">
+      <div className="private-connect-actions">
         <button
           type="button"
-          disabled={busy || projectIds.length === 0 || !validFutureDate(expiresAt)}
-          onClick={() => void save()}
+          className="secondary-button"
+          aria-disabled={saveUnavailable || undefined}
+          onClick={() => {
+            if (!saveUnavailable) void save();
+          }}
         >
           Save access
         </button>
       </div>
-    </article>
+    </div>
   );
 }
 
@@ -451,7 +467,7 @@ function ProjectGrantFields({
     <fieldset className="private-connect-projects">
       <legend>Projects this device may access</legend>
       {projects.length === 0 ? (
-        <p className="settings-card-note">No projects are available to share.</p>
+        <p className="private-connect-note">No projects are available to share.</p>
       ) : projects.map((project) => (
         <label key={project.id}>
           <input

@@ -19,7 +19,7 @@ For an older bare runtime lock, or when exact native cleanup remains unavailable
 3. Open Inertia again. It verifies that Windows has started a new boot session
    before retiring records from the previous session. Saved projects, messages,
    and attachments remain in place; an unfinished turn is marked interrupted.
-4. If startup remains blocked, open **Settings → Lifecycle Integrity** and copy
+4. If startup remains blocked, open **Settings → Help** and copy
    the support summary for investigation.
 
 Windows Restart performs a full boot cycle. Fast Startup can retain kernel state

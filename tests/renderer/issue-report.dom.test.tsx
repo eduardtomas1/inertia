@@ -25,8 +25,8 @@ it("guides model/reasoning selection into a saved private chat, edits the previe
   const view = render(<IssueReportSettings {...props} />);
   await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "support.report.get" }));
   fireEvent.change(screen.getByLabelText("What happened?"), { target: { value: "The chat fails after I cancel a running turn." } });
-  fireEvent.change(screen.getByLabelText("Report agent and model"), { target: { value: "1" } });
-  fireEvent.change(screen.getByLabelText("Report reasoning"), { target: { value: "high" } });
+  fireEvent.change(screen.getByLabelText("Agent and model"), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
   fireEvent.click(screen.getByRole("button", { name: "Create private report chat" }));
   await screen.findByLabelText("Private report chat");
   expect(saved()?.selection).toMatchObject({ modelId: "claude-test", reasoningEffort: "high" });

@@ -10,6 +10,15 @@
       "budget": 2238846
     }
   },
+  "mergedOnConsolidation": {
+    "baseline": "e2f10369",
+    "coreJavaScript": {
+      "baselineBytes": 2262074,
+      "implementationBytes": 2262312,
+      "deltaBytes": 238,
+      "budget": 2262312
+    }
+  },
   "unchangedBudgets": {
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 860500,

@@ -1,27 +1,12 @@
 {
-  "baseline": "8c651b73 (consolidate/settings-diagnostics-background-tasks)",
+  "baseline": "ba893150 (consolidate/settings-diagnostics-background-tasks, which already carries the Muted colours setting)",
   "platform": "macOS arm64, Node 22.23.2, same package-lock.json",
-  "note": "mainWorkbenchFirstLoadJavaScript and coreJavaScript had no headroom; each cap grows by exactly its measured delta. Palette generation stays lazily loaded.",
+  "note": "Picked-colour accents add 852 bytes to the lazily loaded palette generator, counted in coreJavaScript; that cap grows by exactly 852 bytes. Every other budget is byte-identical to the baseline.",
   "measurements": {
-    "mainWorkbenchFirstLoadJavaScript": {
-      "beforeBytes": 867469,
-      "afterBytes": 867611,
-      "deltaBytes": 142
-    },
-    "detachedChatFirstLoadJavaScript": {
-      "beforeBytes": 660967,
-      "afterBytes": 661109,
-      "deltaBytes": 142
-    },
-    "settingsJavaScript": {
-      "beforeBytes": 79238,
-      "afterBytes": 79584,
-      "deltaBytes": 346
-    },
     "coreJavaScript": {
-      "beforeBytes": 2262312,
-      "afterBytes": 2263231,
-      "deltaBytes": 919
+      "beforeBytes": 2265207,
+      "afterBytes": 2266059,
+      "deltaBytes": 852
     }
   }
 }

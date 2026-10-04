@@ -225,16 +225,26 @@ it("measures desktop workloads on the prepared bundle before any Electron end-to
   );
 });
 
-it("measures release desktop workloads on the release bundle before packaging", () => {
+it("measures release desktop workloads on a freshly built bundle before the unit suite and packaging", () => {
   const steps = parse(source(".github/workflows/release-platforms.yml")).jobs.build.steps as Array<{ name: string; if?: string; run?: string; "continue-on-error"?: boolean }>;
-  const bundle = steps.findIndex((step) => step.name === "Build the release application bundle once");
+  const benchmarkBundle = steps.findIndex((step) => step.name === "Build the application bundle for the desktop benchmark");
+  expect(steps[benchmarkBundle]!.run).toBe("npm run build:bundle");
+  expect(steps[benchmarkBundle]!.if).toBeUndefined();
   const measurements = steps.map((step, index) => ({ step, index }))
     .filter(({ step }) => step.run?.includes("benchmark:desktop:built"));
-  expect(measurements.map(({ index }) => index)).toEqual([bundle + 1, bundle + 2]);
+  expect(measurements.map(({ index }) => index)).toEqual([benchmarkBundle + 1, benchmarkBundle + 2]);
   expect(measurements.map(({ step }) => step.if)).toEqual(["runner.os != 'Linux'", "runner.os == 'Linux'"]);
-  const firstPackage = steps.findIndex((step) => /^Build (?:macOS|Windows|Linux) release package$/u.test(step.name));
-  expect(firstPackage).toBe(bundle + 3);
-  for (const { step } of measurements) expect(step["continue-on-error"]).not.toBe(true);
+  for (const { step } of measurements) {
+    expect(step["continue-on-error"]).not.toBe(true);
+  }
+  const unitSuites = steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => /^npm test\b/u.test(step.run ?? "") || step.run?.includes("npm test -- --maxWorkers=2"));
+  expect(unitSuites).toHaveLength(2);
+  for (const { index } of unitSuites) expect(index).toBeGreaterThan(benchmarkBundle + 2);
+  const releaseBundle = steps.findIndex((step) => step.run === "npm run build:packaged");
+  expect(releaseBundle).toBeGreaterThan(Math.max(...unitSuites.map(({ index }) => index)));
+  expect(steps.findIndex((step) => /^Build (?:macOS|Windows|Linux) release package$/u.test(step.name)))
+    .toBeGreaterThan(releaseBundle);
 });
 
 it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {

@@ -202,6 +202,17 @@ jobs:
       - name: Enforce the isolated browser-evidence CPU budget
         run: npm run test:browser-evidence-cpu-budget
 
+      - name: Build the application bundle for the desktop benchmark
+        run: npm run build:bundle
+
+      - name: Measure release-candidate desktop workloads
+        if: runner.os != 'Linux'
+        run: npm run benchmark:desktop:built
+
+      - name: Measure release-candidate desktop workloads under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+
       - name: Run the complete release unit suite
         if: runner.os != 'Windows'
         run: |
@@ -236,14 +247,6 @@ jobs:
       - name: Build the release application bundle once
         id: application_bundle
         run: npm run build:packaged
-
-      - name: Measure release-candidate desktop workloads
-        if: runner.os != 'Linux'
-        run: npm run benchmark:desktop:built
-
-      - name: Measure release-candidate desktop workloads under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Build macOS release package
         if: runner.os == 'macOS'

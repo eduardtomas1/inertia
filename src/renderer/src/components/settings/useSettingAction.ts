@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export const SETTING_SAVED_MESSAGE = "Saved";
 export const SETTING_SAVE_FAILED_MESSAGE = "Couldn't save. Try again.";
@@ -118,7 +118,7 @@ export function useOptimisticSetting<T>(
   const [draft, setDraft] = useState<{ value: T } | null>(null);
   const persistRef = useRef(persist);
   const failureRef = useRef(failure);
-  useEffect(() => {
+  useLayoutEffect(() => {
     persistRef.current = persist;
     failureRef.current = failure;
   }, [failure, persist]);

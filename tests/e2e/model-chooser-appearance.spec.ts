@@ -35,7 +35,7 @@ test("keeps branded model sources and rows legible across themes and narrow wind
   await expect(gateways).toHaveCount(5);
   for (const gateway of await gateways.all()) {
     await gateway.click();
-    const enabled = page.getByRole("switch", { name: "Enabled", exact: true });
+    const enabled = page.getByRole("switch", { name: "Use this backend", exact: true });
     await expect(enabled).toBeChecked();
     await enabled.click();
     await expect(enabled).not.toBeChecked();

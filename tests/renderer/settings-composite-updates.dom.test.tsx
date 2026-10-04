@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
@@ -472,17 +473,19 @@ describe("Settings composite updates", () => {
 
     await openAgents();
     const contract = await screen.findByLabelText("Codex capability contract");
-    expect(contract).toHaveClass("is-verified");
+    const details = contract.closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    expect(within(details).getByText("Details")).toBeInTheDocument();
     expect(contract).toHaveTextContent("Verified for 1.0.0");
-    expect(contract).toHaveTextContent("codex-app-server · aaaaaaaaaaaa");
     expect(contract).toHaveTextContent(
       "23 of 28 declared capabilities are available now.",
     );
-    expect(contract.querySelector("code")).toHaveAttribute(
+    expect(within(contract).getByText("codex-app-server")).toHaveAttribute(
       "title",
       manifestDigest,
     );
     expect(contract).not.toHaveTextContent(manifestDigest);
+    expect(screen.queryByText("Capability contract")).not.toBeInTheDocument();
   });
 
   it("expands model-aware capability reasons without exposing private configuration", async () => {
@@ -508,8 +511,9 @@ describe("Settings composite updates", () => {
       }]}
     />);
     await openAgents();
-    const summary = await screen.findByText("Feature availability");
-    const details = summary.closest("details")!;
+    const contract = await screen.findByLabelText("Codex capability contract");
+    const details = contract.closest("details")!;
+    const summary = within(details).getByText("Details");
     expect(details).not.toHaveAttribute("open");
     fireEvent.click(summary);
     expect(details).toHaveAttribute("open");

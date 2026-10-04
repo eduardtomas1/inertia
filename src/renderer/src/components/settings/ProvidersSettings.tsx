@@ -16,6 +16,7 @@ import {
   ProviderActionIcon,
   ProviderStatus,
   providerSetupAction,
+  providerStateLabel,
 } from "../ProviderStatus";
 import { loadLifecycleIntegritySettings } from "../settingsSectionLoaders";
 import { useSectionMemory, type SettingsSectionMemory } from "./sectionMemory";
@@ -199,6 +200,11 @@ export function ProvidersSettings({
     });
   };
   const selectedStateId = useId();
+  const selectedProviderMessage = selectedProvider?.statusMessage
+    && selectedProvider.installState !== "not-installed"
+    && selectedProvider.statusMessage.toLowerCase() !== providerStateLabel(selectedProvider).toLowerCase()
+    ? selectedProvider.statusMessage
+    : null;
   const binaryValue = selectedProvider
     ? selectedProvider.id === "codex"
       ? settings.codexBinaryPath || selectedProvider.executable || ""
@@ -272,7 +278,7 @@ export function ProvidersSettings({
                       : selectedProvider.label}
                   </strong>
                   <ProviderStatus provider={selectedProvider} id={selectedStateId} />
-                  {selectedProvider.statusMessage && <small>{selectedProvider.statusMessage}</small>}
+                  {selectedProviderMessage && <small>{selectedProviderMessage}</small>}
                 </span>
                 {selectedProviderAction && (
                   <button

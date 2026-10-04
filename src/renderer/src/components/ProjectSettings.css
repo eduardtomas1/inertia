@@ -4,7 +4,8 @@
 }
 
 .project-chooser-row {
-  margin-bottom: 20px;
+  margin-bottom: 8px;
+  padding-inline: 4px;
 }
 
 .project-chooser {
@@ -157,7 +158,10 @@
 }
 
 .project-action-form .project-action-arguments {
+  display: grid;
+  min-width: 0;
   grid-column: 1 / -1;
+  gap: 6px;
 }
 
 .project-action-form textarea {

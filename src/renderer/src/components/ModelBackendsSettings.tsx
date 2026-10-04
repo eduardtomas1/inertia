@@ -488,8 +488,10 @@ export function ModelBackendsSettings({
               title={identityLabel(profile)}
             >
               <strong>{profile.displayName}</strong>
-              <small>{profile.endpointHost ?? (profile.preset === "native" ? "Harness managed" : "Endpoint hidden")}</small>
-              <BackendProfileState profile={profile} />
+              <span className="backend-profile-rail-meta">
+                <small>{profile.endpointHost ?? (profile.preset === "native" ? "Harness managed" : "Endpoint hidden")}</small>
+                <BackendProfileState profile={profile} />
+              </span>
             </button>
           ))}
         </aside>

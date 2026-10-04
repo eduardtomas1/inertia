@@ -309,16 +309,22 @@ async function captureProjectStates(viewport: Viewport): Promise<void> {
   await expect(budget).toHaveAttribute("aria-invalid", "true");
   await capture(evidenceName("projects", "spend-limit-invalid", viewport)(null));
   await budget.fill("");
-  await expect(budget).toHaveAttribute("aria-invalid", "false");
+  await expect(budget).not.toHaveAttribute("aria-invalid");
 }
 
 async function captureAgentStates(viewport: Viewport): Promise<void> {
   await openSection(sectionLabel("agents"));
-  const editor = page.locator(".provider-settings-editor-body");
   await page.getByRole("button", { name: "Configure Codex" }).click();
   await waitForSettledSection();
-  await capturePages(evidenceName("agents", "codex", viewport), { scroller: editor });
-  await scrollContentTo(0, editor);
+  const backends = page.locator(".backend-settings");
+  const backendsTop = Math.max(0, Math.floor((await offsetWithinContent(backends)).top) - 16);
+  await capturePages(evidenceName("agents", "codex", viewport), { end: backendsTop });
+  const details = page.locator(".provider-settings-details > summary");
+  await details.click();
+  await scrollContentTo(Math.max(0, Math.floor((await offsetWithinContent(details)).top) - 160));
+  await capture(evidenceName("agents", "codex-details", viewport)(null));
+  await details.click();
+  await scrollContentTo(0);
 
   await page.getByRole("button", { name: "Configure Claude" }).click();
   await waitForSettledSection();
@@ -328,8 +334,6 @@ async function captureAgentStates(viewport: Viewport): Promise<void> {
   await waitForSettledSection();
   await capture(evidenceName("agents", "cli-missing", viewport)(null));
 
-  const backends = page.locator(".backend-settings");
-  const backendsTop = Math.max(0, Math.floor((await offsetWithinContent(backends)).top) - 16);
   await capturePages(evidenceName("agents", "custom-backends", viewport), { start: backendsTop });
   await page.getByRole("button", { name: "New profile" }).click();
   const cancel = page.getByRole("button", { name: "Cancel profile editing" });

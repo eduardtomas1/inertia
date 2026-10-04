@@ -214,14 +214,15 @@
 
 .provider-settings-binary-control {
   display: flex;
-  width: min(360px, 55%);
+  width: min(420px, 60%);
   min-width: 0;
-  flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 6px;
 }
 
 .provider-settings-binary-control > .setting-input {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   color: var(--text-soft);
   font-family: var(--font-mono);
@@ -381,7 +382,7 @@
   font-size: var(--ui-font-secondary);
 }
 
-@container providers (max-width: 640px) {
+@container providers (max-width: 760px) {
   .provider-settings-shell {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -429,11 +430,6 @@
   .provider-settings-editor-body .setting-field-control,
   .provider-settings-binary-control {
     width: 100%;
-    align-items: stretch;
-  }
-
-  .provider-settings-binary-actions {
-    justify-content: flex-start;
   }
 }
 

@@ -63,7 +63,15 @@
   overflow-wrap: anywhere;
 }
 
-.backend-profile-rail-item > small {
+.backend-profile-rail-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+}
+
+.backend-profile-rail-meta > small {
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
@@ -173,11 +181,15 @@
 
 .backend-credential-control {
   display: flex;
-  width: min(320px, 55%);
+  width: min(360px, 60%);
   min-width: 0;
-  flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 6px;
+}
+
+.backend-credential-control > .setting-input {
+  min-width: 0;
+  flex: 1;
 }
 
 .backend-credential-actions,
@@ -459,7 +471,7 @@
   border-top: 1px solid var(--border);
 }
 
-@container backends (max-width: 640px) {
+@container backends (max-width: 760px) {
   .backend-settings-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -476,8 +488,9 @@
     padding: 6px 10px;
   }
 
-  .backend-profile-rail-item > small {
+  .backend-profile-rail-meta {
     flex: 1 1 auto;
+    justify-content: space-between;
   }
 
   .backend-profile-editor {
@@ -500,11 +513,6 @@
 
   .backend-credential-control {
     width: 100%;
-    align-items: stretch;
-  }
-
-  .backend-credential-actions {
-    justify-content: flex-start;
   }
 
   .backend-choice-grid,

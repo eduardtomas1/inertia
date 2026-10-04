@@ -101,7 +101,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         disabled={disabled || !request} failure={saveFailure}
         validate={(name) => name ? null : "Enter a project name."}
         onSave={(name) => send(update({ name }))} />
-      <SettingRow id="project-icon" title="Icon" description="A symbol, or a small image stored only on this device." notice={notice("project-icon")}>
+      <SettingRow id="project-icon" title="Project icon" description="A symbol, or a small image stored only on this device." notice={notice("project-icon")}>
         <div className="project-setting-control">
           <div className="project-icon-controls"><ProjectIcon project={project} size={20} />
             <button type="button" className="secondary-button" disabled={blocked} aria-expanded={iconsOpen} onClick={() => setIconsOpen(!iconsOpen)}>Choose icon</button>
@@ -116,7 +116,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
             onClick={() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); setIconsOpen(false); }}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={18} /></button>)}</div>}
         </div>
       </SettingRow>
-      <SettingRow id="project-colour" title="Colour" description="Its chats inherit the colour." notice={notice("project-colour")}>
+      <SettingRow id="project-colour" title="Project colour" description="Its chats inherit the colour." notice={notice("project-colour")}>
         <div className="project-setting-control">
           <ProjectColorPicker value={preferences.color} disabled={blocked} onChange={(color) => setAppearance("project-colour", { color })} />
         </div>
@@ -180,8 +180,10 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         }}>
           <label>Name<input className="setting-input" required maxLength={80} value={actionName} onChange={(event) => setActionName(event.target.value)} disabled={blocked} /></label>
           <label>Executable<input className="setting-input" required maxLength={4096} value={executable} onChange={(event) => setExecutable(event.target.value)} disabled={blocked} placeholder="npm" /></label>
-          <label className="project-action-arguments">Arguments (one per line)<textarea className="setting-input" rows={3} value={args} aria-describedby={`${project.id}-arguments-help`} onChange={(event) => setArgs(event.target.value)} disabled={blocked} placeholder={"run\nbuild"} />
-            <small id={`${project.id}-arguments-help`}>Passed literally. No shell expansion, pipes or command substitution.</small></label>
+          <div className="project-action-arguments">
+            <label>Arguments (one per line)<textarea className="setting-input" rows={3} value={args} aria-describedby={`${project.id}-arguments-help`} onChange={(event) => setArgs(event.target.value)} disabled={blocked} placeholder={"run\nbuild"} /></label>
+            <small id={`${project.id}-arguments-help`}>Passed literally. No shell expansion, pipes or command substitution.</small>
+          </div>
           <div><button type="button" className="secondary-button" onClick={() => setActionOpen(false)}>Cancel</button><button type="submit" className="primary-button" disabled={blocked || !actionName.trim() || !executable.trim()}>Save action</button></div>
         </form>}
       </div>

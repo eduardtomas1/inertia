@@ -23,7 +23,7 @@ describe("project settings", () => {
     const { request } = setup();
     expect(screen.queryByText("All machines")).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Renamed studio" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Save$/u }));
+    fireEvent.blur(screen.getByRole("textbox", { name: "Project name" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: project.updatedAt, name: "Renamed studio" } }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Add action" })).toBeEnabled());
@@ -38,7 +38,36 @@ describe("project settings", () => {
       preferences: { actions: [{ name: "Check", executable: "node", args: ["--version", "literal & data"] }] } } });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save action" })).not.toBeInTheDocument());
   });
-  it("allows keyboard project search and discards the previous project's unsaved name", async () => {
+  it("saves the name on Enter with row-level feedback, never while typing, and keeps an empty name as a local error", async () => {
+    const { container, request } = setup();
+    const field = screen.getByRole("textbox", { name: "Project name" });
+    const row = container.querySelector<HTMLElement>('[data-setting-id="project-name"]')!;
+    expect(screen.queryByRole("button", { name: /^Save$/u })).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "  " } });
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.blur(field);
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription("Enter a project name.");
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: " Studio two " } });
+    expect(field).not.toHaveAttribute("aria-invalid");
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
+      projectId: project.id, expectedUpdatedAt: project.updatedAt, name: "Studio two" } }));
+    expect(await within(row).findByText("Saved")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("shows a failed rename in the name row and keeps the typed name", async () => {
+    const { container, request } = setup();
+    request.mockRejectedValueOnce(new Error("The project changed in another window. Refresh and try again."));
+    const field = screen.getByRole("textbox", { name: "Project name" });
+    fireEvent.change(field, { target: { value: "Renamed studio" } });
+    fireEvent.blur(field);
+    const row = container.querySelector<HTMLElement>('[data-setting-id="project-name"]')!;
+    expect(await within(row).findByRole("alert")).toHaveTextContent("changed in another window");
+    expect(field).toHaveValue("Renamed studio");
+  });
+  it("allows keyboard project search and does not carry a draft name into the next project", async () => {
     setup();
     fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Private unsaved name" } });
     fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
@@ -59,34 +88,40 @@ describe("project settings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("changed in another window");
     expect(screen.getByRole("combobox", { name: "Agent browser access" })).toBeEnabled();
   });
-  it("saves an optional Claude spend limit, rejects amounts the schema rejects, and clears back to no limit", async () => {
+  it("saves an optional Claude spend limit on blur, rejects amounts the schema rejects, and clears back to no limit", async () => {
     const view = setup();
     const field = screen.getByRole("textbox", { name: "Claude spend limit per turn (USD)" });
+    const row = view.container.querySelector<HTMLElement>('[data-setting-id="project-spend-limit"]')!;
     expect(field).toHaveValue("");
     expect(field).toHaveAttribute("placeholder", "No limit");
+    expect(field).toHaveAttribute("inputmode", "decimal");
     expect(screen.getByText(/subagents count toward it/u)).toBeInTheDocument();
     for (const value of ["0", "-1", "10000.01", "1.234", "abc"]) {
       fireEvent.change(field, { target: { value } });
-      expect(field).toHaveAttribute("aria-invalid", "false");
+      expect(field).not.toHaveAttribute("aria-invalid");
       expect(screen.queryByText(/0\.01 to 10,000/u)).not.toBeInTheDocument();
       fireEvent.blur(field);
       expect(field).toHaveAttribute("aria-invalid", "true");
       expect(field).toHaveAccessibleDescription(/0\.01 to 10,000/u);
       expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();
     }
+    expect(view.request).not.toHaveBeenCalled();
     fireEvent.change(field, { target: { value: "2.50" } });
-    expect(field).toHaveAttribute("aria-invalid", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
+    expect(field).not.toHaveAttribute("aria-invalid");
+    fireEvent.blur(field);
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: 2.5 } } }));
-    await waitFor(() => expect(field).toBeEnabled());
+    expect(await within(row).findByText("Saved")).toBeInTheDocument();
     view.request.mockClear();
     const saved = { ...project, updatedAt: "2026-09-09T08:01:00.000Z", preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: 2.5 } };
     view.rerender(<ProjectSettings {...view.props} projects={[saved, view.props.projects[1]!]} />);
-    expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();
+    expect(field).toHaveValue("2.5");
+    fireEvent.change(field, { target: { value: "2.50" } });
+    fireEvent.blur(field);
+    expect(view.request).not.toHaveBeenCalled();
     fireEvent.change(field, { target: { value: "" } });
-    expect(field).toHaveAttribute("aria-invalid", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
+    expect(field).not.toHaveAttribute("aria-invalid");
+    fireEvent.keyDown(field, { key: "Enter" });
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: saved.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: null } } }));
   });

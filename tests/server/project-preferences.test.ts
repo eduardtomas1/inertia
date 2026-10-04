@@ -208,6 +208,16 @@ describe("durable project and thread organization", () => {
     expect(parseProjectPreferences([stored])).toEqual(defaultProjectPreferences());
   });
 
+  it("resets only an unknown default access and keeps every other stored preference", () => {
+    const kept = { ...defaultProjectPreferences(), autoPull: true, claudeMaxBudgetUsd: 2.5, icon: { kind: "symbol" as const, name: "globe" as const },
+      actions: [{ id: "22222222-2222-4222-8222-222222222222", name: "Test", executable: "npm", args: ["test"] }] };
+    for (const defaultAccessMode of ["read-only", 1, { mode: "full" }]) {
+      expect(parseProjectPreferences(JSON.stringify({ ...kept, defaultAccessMode }))).toEqual({ ...kept, defaultAccessMode: null });
+    }
+    expect(parseProjectPreferences(JSON.stringify({ ...kept, defaultAccessMode: "read-only", colorEmphasis: "everything" })))
+      .toEqual({ ...kept, defaultAccessMode: null });
+  });
+
   it("accepts only non-empty, well-formed appearance patches and merges them over current preferences", () => {
     expect(projectAppearancePatchSchema.safeParse({}).success).toBe(false);
     expect(projectAppearancePatchSchema.safeParse({ color: { kind: "palette", name: "blue" } }).success).toBe(true);

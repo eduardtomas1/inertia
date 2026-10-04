@@ -219,6 +219,61 @@ describe("Settings anchors", () => {
     expect(wrap).toHaveFocus();
   });
 
+  it("skips a hidden first control when it lands on the diagnostics for a selected incident", async () => {
+    installFullBridge();
+    const style = document.createElement("style");
+    style.textContent = ".diagnostics-filter-disclosure > summary { display: none; }";
+    document.head.append(style);
+    const tabIndex = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "tabIndex")!;
+    const summaryTabIndex = vi.spyOn(HTMLElement.prototype, "tabIndex", "get").mockImplementation(function (this: HTMLElement) {
+      return this.localName === "summary" && !this.hasAttribute("tabindex") ? 0 : tabIndex.get!.call(this);
+    });
+    try {
+      render(<SettingsView {...settingsViewProps({
+        target: { section: "help", anchor: "diagnostics-incidents", selection: { incidentId: "11111111-1111-4111-8111-111111111111" } },
+      })} />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Show all incidents" })).toHaveFocus());
+    } finally {
+      summaryTabIndex.mockRestore();
+      style.remove();
+    }
+  });
+
+  it("focuses the row itself when its only control cannot take focus", async () => {
+    const style = document.createElement("style");
+    style.textContent = "[data-setting-id=\"terminal-font-size\"] input { display: none; }";
+    document.head.append(style);
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "terminal-font-size" } })} />);
+      await waitFor(() => expect(document.querySelector('[data-setting-id="terminal-font-size"]')).toHaveFocus());
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("focuses the section title when the anchored row is hidden", async () => {
+    const style = document.createElement("style");
+    style.textContent = "[data-setting-id=\"terminal-font-size\"] { display: none; }";
+    document.head.append(style);
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "terminal-font-size" } })} />);
+      await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Chats" })).toHaveFocus());
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("focuses the row itself when its control refuses focus", async () => {
+    const focus = vi.spyOn(HTMLInputElement.prototype, "focus").mockImplementation(() => undefined);
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "terminal-font-size" } })} />);
+      await waitFor(() => expect(document.querySelector('[data-setting-id="terminal-font-size"]')).toHaveFocus());
+      expect(focus).toHaveBeenCalled();
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it("falls back to the section title for an unknown anchor", async () => {
     render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "missing-row" } })} />);
     await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Chats" })).toHaveFocus());

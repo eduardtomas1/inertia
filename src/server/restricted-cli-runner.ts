@@ -52,7 +52,7 @@ export interface RestrictedCliOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   failureMessage: string;
-  classifyFailure?(stderr: string): string | null;
+  classifyFailure?(output: string): string | null;
 }
 
 export interface RestrictedCliDependencies {
@@ -234,7 +234,7 @@ export async function runRestrictedCli(
         stderr: Buffer.concat(stderr).toString("utf8"),
       };
       if (code === 0) finish(undefined, result);
-      else finish(new RestrictedCliError("failed", options.failureMessage, undefined, options.classifyFailure?.(result.stderr) ?? null));
+      else finish(new RestrictedCliError("failed", options.failureMessage, undefined, options.classifyFailure?.([result.stderr, result.stdout].filter(Boolean).join("\n")) ?? null));
     });
     child.stdin.on("error", () => undefined);
     child.stdin.end(options.input ?? "");

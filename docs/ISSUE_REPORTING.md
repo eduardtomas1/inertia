@@ -48,7 +48,7 @@ The description, steps, title and body are scrubbed before they are stored and a
 
 **Create on GitHub** first saves any edits, then publishes. If the final scrub changes the text, nothing is published and the updated preview is shown for review. Publication uses the user's existing GitHub CLI login through the restricted CLI runner: `gh auth status`, then `gh issue create --repo eduardtomas1/inertia --body-file -` with the body on stdin and a hidden report marker. No auth environment variables are forwarded. The deadline is 30 seconds with a 16 KiB output ceiling, and only a URL in the fixed repository is accepted.
 
-When the page opens, a read-only `gh auth status` check (10-second deadline) reports problems directly under the card heading before you write anything. The runtime runs one check at a time and reuses its result for 30 seconds. Failures are classified from the CLI's error output, which never leaves the runtime:
+When the page opens, a read-only `gh auth status` check (10-second deadline) reports problems directly under the card heading before you write anything. The runtime runs one check at a time and reuses its result for 30 seconds. Failures are classified from the CLI's error and standard output (newer gh versions print some sign-in failures to standard output), which never leave the runtime:
 
 | State | Message |
 | --- | --- |

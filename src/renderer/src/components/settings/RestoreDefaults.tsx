@@ -68,7 +68,7 @@ export function RestoreDefaults({
           }}
         >
           <strong>Restore defaults?</strong>
-          <small>{RESTORE_DEFAULTS_SCOPE}</small>
+          <small>This cannot be undone.</small>
           <div>
             <button ref={cancel} type="button" className="secondary-button" onClick={close}>Cancel</button>
             <button type="button" className="secondary-button is-danger" disabled={disabled} onClick={restore}>Restore defaults</button>

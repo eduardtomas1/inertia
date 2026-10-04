@@ -82,6 +82,33 @@ it.each([
   expect(scrubReportText(text)).toBe(expected);
 });
 
+it.each([
+  ["error at /Users/John Smith/secret-app/src/a.ts", "error at [private path]"],
+  ["open /Users/eduard/Client Work/Acme Merger/plan.md", "open [private path]"],
+  ["failed at /Users/John Smith/a.ts. Then it stopped", "failed at [private path] Then it stopped"],
+  ["\"/Users/John Smith/a.ts\" was opened", "\"[private path]\" was opened"],
+  ["~/My Projects/app/x.ts failed twice", "[private path] failed twice"],
+  ["$HOME/My Projects/app failed", "[private path] failed"],
+  ["at Users/John Smith/x.ts and src/main.ts", "at [private path] and src/main.ts"],
+  ["see /tmp/a@example.com", "see [private path][redacted email]"],
+])("removes a whole path with spaces and keeps the prose after it: %s", (text, expected) => {
+  expect(scrubReportText(text)).toBe(expected);
+});
+
+it.each([
+  ["git clone git@github.com:acme-private/secret-roadmap.git", "git clone [redacted URL]"],
+  ["scp build eduard@devbox.corp.example:/srv/acme/secret now", "scp build [redacted URL] now"],
+  ["key AIzaSyA1234567890abcdefghijklmnopqrstu", "key [redacted token]"],
+  ["key npm_abcdefghijklmnopqrstuvwxyz0123456789", "key [redacted token]"],
+  ["key hf_abcdefghijklmnopqrstuvwxyz01234", "key [redacted token]"],
+])("removes an SSH remote or a known token format: %s", (text, expected) => {
+  expect(scrubReportText(text)).toBe(expected);
+});
+
+it("keeps an email before a colon and words that only resemble token prefixes", () => {
+  expect(scrubReportText("Ask bob@example.com: he saw it. Run npm-run-all, npm_config_cache and hf_hub.")).toBe("Ask [redacted email]: he saw it. Run npm-run-all, npm_config_cache and hf_hub.");
+});
+
 it("is idempotent", () => {
   const samples = [
     "Authorization=Bearer abcdef", "Authorization: Token abcdef", "{\"token\": \"abc\"}", "{\\\"password\\\":\\\"hunter\\\"}",

@@ -2,6 +2,126 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.66 — 2026-10-04
+
+Start a chat without opening a project, let a chat continue when your
+subscription quota resets, attach large files that agents read from disk, and
+search Help. Text fields get the usual right-click editing menu, and a round of
+reliability and safety fixes comes with them.
+
+### New
+
+- Start a chat without a project: choose **No project** in the composer's
+  project selector, **Start without a project** in the command palette, or the
+  **Start without a project** button on the first-run screen. Each such chat
+  works in its own plain folder inside Inertia's data directory, with no Git
+  repository. These chats have their own **No project** sidebar section, with
+  separate Done and Snoozed lists, shown only when it has chats, and they stay
+  out of project lists and filters. Changing the project keeps your draft.
+- Deleting or archiving a chat without a project keeps its folder, and with
+  confirmations on, the confirmation says where it is kept. If the folder is
+  missing or replaced, the chat can still be read and says to start a new chat
+  without a project.
+- When a chat stops at a subscription limit with a known reset time, the
+  composer offers **Resume at reset** and **Snooze until reset**. A resume can
+  be cancelled and survives restarts. At the reset, Inertia checks the account,
+  the chat and fresh quota, then sends "Continue from where you stopped." once.
+  Inertia must be running to resume, and a resume missed by more than an hour
+  waits for **Resume now**. Snoozing never sends a message. This works with
+  native Codex, Claude, Cursor, Kimi Code and OpenCode Go accounts.
+- **Usage → Limits** now shows quota for native Cursor, Kimi Code and OpenCode
+  Go accounts. On macOS, a Cursor login kept in the Keychain is read only when
+  you open or refresh Limits, so those accounts can snooze until the reset but
+  not resume automatically, and the composer says why. Antigravity's CLI reports
+  no reset times, and Limits says so.
+- Right-click a text field in the main window or a detached chat for **Undo**,
+  **Redo**, **Cut**, **Copy**, **Paste**, **Paste and Match Style**, **Delete**
+  and **Select All**. Selected text elsewhere offers **Copy**. Opened from the
+  keyboard, the menu appears at the field instead of at the mouse pointer.
+- Search Help from the **Search help** field, which has focus when Help opens.
+  Words match by their beginning, including shortcuts such as "cmd k". Use the
+  arrow keys to move through the results, Enter to open an entry's setting or
+  topic, and Escape to clear the search. New Help entries cover chats without a
+  project, large files and pasted text, provider sessions, the task-end sound,
+  attachment previews, Resume at reset, reviewed screenshots and custom colors.
+
+### Chats and attachments
+
+- Attach up to 100 files per message, up to 50 MiB each, with no combined limit
+  for ordinary files, instead of 8 files, 10 MiB each and 20 MiB per message.
+  Any file type can be attached, including archives; a file without a preview
+  shows its file information.
+- Agents receive the saved path, name and size of documents and other files and
+  read what they need with their own tools, instead of having file contents
+  copied into the prompt. Images still use the provider's image input.
+- A turn can read its own chat's attachments without an approval prompt in
+  Claude, Cursor, Kimi Code and OpenCode. Writes, another chat's attachments and
+  everything else still follow the selected access mode. Codex and Antigravity
+  are unchanged.
+- Pasted text of 32 KiB or more, or text that would exceed the message limit,
+  becomes a text attachment. Shift-paste keeps it inline, and if the import
+  fails the text returns to the draft.
+- Images up to 50 MiB are accepted and resized to 10 MiB each in their displayed
+  orientation, with up to 80 MiB of images per message. Claude, Cursor and Kimi
+  Code take at most 20 MiB of images per message, and every provider at most 32
+  images. A message over its provider's limit is refused before anything is
+  sent, and its text and attachments stay in the composer or the queue.
+- `.env`, `.pem` and `.key` files are refused by name, so credentials and
+  private keys stay out of attachment storage, which agents can read.
+- A large text preview shows the first 1 MiB with a visible notice that the
+  complete file is saved. A text file with binary content or another encoding
+  is kept without a preview and delivered by path.
+- Uploads are sent in pieces and no longer hold up attachments or sends in
+  another window. Unsent attachments can use up to 16 GiB, always leaving 512
+  MiB of disk free, and a full disk is reported as full storage.
+- Sent image thumbnails load only while visible, at most two at a time, the
+  focused one first and then in page order. A thumbnail that stalls frees its
+  place and is retried. Images are fully decoded before they are accepted, so
+  a damaged image is refused, and checking a large attachment for its preview
+  no longer pauses the rest of the app.
+- Inertia 0.0.65 and earlier understand at most 8 attachments and 20 MiB per
+  message, 10 MiB per file and only previewable file types. If you go back to
+  one of them, it hides the other attachments of existing messages and deletes
+  their stored files at startup. Upgrading again does not restore them.
+
+### Providers
+
+- Approval requests from Codex are tied to the turn or subagent turn that asked.
+  A request that arrives after you stop a turn, or **Approve** on a card whose
+  turn has ended, is refused to Codex and the card shows as cancelled. Tools
+  Inertia runs for Codex are cancelled when Codex's turn ends.
+- A tool call the provider has already cancelled can no longer run or ask for
+  approval, and cancelling one cleans up its pending approval.
+- Cursor receives `CURSOR_AUTH_TOKEN`, `CURSOR_API_ENDPOINT` and
+  `AGENT_CLI_CREDENTIAL_STORE` from your environment, and the token is redacted
+  from Cursor's output.
+- Importing a recovery file from a release that still had Gemini chats moves
+  them to Antigravity, as upgrading the database already does.
+
+### Reliability and safety
+
+- Removing, renaming or reconfiguring the hidden project that holds chats
+  without a project is refused, its folder cannot be added as a project, and
+  every folder operation stays inside the chat's own folder. Duo explains that
+  it needs a project.
+- Recovery files now use format version 3, which records chats without a
+  project. Older Inertia builds cannot read version 3 files; version 1 and 2
+  files import as before.
+- In **Settings → Model backends**, a save that finishes after you switch
+  profiles or cancel no longer discards your edits. Private Connect drafts and
+  delivery warnings stay with the chat that sent them.
+- Reverting or undoing selected changes keeps a file's UTF-8 byte-order mark,
+  and Git review and reversal look up the repository once per operation, so
+  they start about a quarter fewer Git processes.
+- A terminal tab closed while it was starting no longer keeps retrying.
+- On Linux and macOS, Inertia confirms that an agent's processes stopped only
+  when it actually saw them stop; a process listing that timed out no longer
+  counts as proof. On Linux, Inertia no longer briefly runs more helper
+  processes than its limit.
+- Add @napi-rs/keyring 2.1.0, packaged on macOS only for the Cursor Keychain
+  login, and smol-toml 1.9.0 for Kimi Code's configuration. CI now certifies
+  each change on the platforms it affects, in shorter parallel jobs.
+
 ## 0.0.65 — 2026-09-30
 
 Find help inside Inertia, hear when a task ends, choose your own light and

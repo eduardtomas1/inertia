@@ -112,15 +112,18 @@ describe("New chats single home", () => {
       backendDefaults: [{ scope: "global", projectId: null, selection: teamSelection, updatedAt: "2026-08-01T00:00:00.000Z" }],
       onLoadBackendProfile: vi.fn(async () => ({ ...teamProfile(), baseUrl: "https://team.example.test/v1" })),
     })} />);
-    const model = screen.getByRole("combobox", { name: "Default model for new chats" });
+    const model = screen.getByRole("combobox", { name: "Model" });
     expect(model).toHaveValue(modelRouteIdentityKey(teamSelection));
     expect((model as HTMLSelectElement).selectedOptions[0]).toHaveTextContent("Team model");
-    expect(screen.getByRole("combobox", { name: "Default reasoning for new chats" })).toHaveValue("medium");
-    expect(screen.getAllByRole("combobox", { name: /new chats/u })).toHaveLength(5);
+    expect(screen.getByRole("combobox", { name: "Reasoning" })).toHaveValue("medium");
+    const newChatNames = ["Model", "Reasoning", "Work mode", "Access", "Where new chats run"];
+    expect(within(screen.getByRole("region", { name: "New chats" })).getAllByRole("combobox")
+      .map((select) => select.getAttribute("aria-label"))).toEqual(newChatNames);
 
     fireEvent.click(screen.getByRole("button", { name: "Agents" }));
     await screen.findByRole("heading", { name: "Custom backends" });
     expect(screen.queryByRole("combobox", { name: /default/iu })).toBeNull();
+    for (const name of newChatNames) expect(screen.queryByRole("combobox", { name })).toBeNull();
     expect(screen.queryByText("New chat defaults")).toBeNull();
   });
 
@@ -138,7 +141,7 @@ describe("New chats single home", () => {
       onUpdate,
     })} />);
     const claudeDefault = modelRouteIdentityKey(providerNativeModelSelection({ providerId: "claude" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Default model for new chats" }), { target: { value: claudeDefault } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: claudeDefault } });
     await waitFor(() => expect(within(row("new-chat-model")).getByRole("status")).toHaveTextContent("Saved"));
     expect(onSetDefaultModel).toHaveBeenCalledExactlyOnceWith({ defaultProvider: "claude", defaultModel: "", defaultReasoningEffort: "" });
     expect(onSetBackendDefault).not.toHaveBeenCalled();
@@ -156,7 +159,7 @@ describe("New chats single home", () => {
       onSetBackendDefault,
       onSetDefaultModel,
     })} />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Default model for new chats" }), { target: { value: modelRouteIdentityKey(teamSelection) } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: modelRouteIdentityKey(teamSelection) } });
     await waitFor(() => expect(onSetBackendDefault).toHaveBeenCalledOnce());
     expect(onSetBackendDefault).toHaveBeenCalledWith(null, expect.objectContaining({ backendProfileId: "custom:team", modelId: "team-model" }));
     expect(onSetDefaultModel).not.toHaveBeenCalled();
@@ -171,7 +174,7 @@ describe("New chats single home", () => {
       backendProfiles: [teamProfile()],
       onSetBackendDefault,
     })} />);
-    const model = screen.getByRole("combobox", { name: "Default model for new chats" });
+    const model = screen.getByRole("combobox", { name: "Model" });
     const before = (model as HTMLSelectElement).value;
     model.focus();
     fireEvent.change(model, { target: { value: modelRouteIdentityKey(teamSelection) } });
@@ -190,7 +193,7 @@ describe("New chats single home", () => {
       providers: [settingsProvider("codex", "Codex")],
       onSetDefaultModel,
     })} />);
-    const reasoning = screen.getByRole("combobox", { name: "Default reasoning for new chats" });
+    const reasoning = screen.getByRole("combobox", { name: "Reasoning" });
     expect(reasoning).toHaveAttribute("aria-disabled", "true");
     expect(reasoning).toBeEnabled();
     expect(reasoning).toHaveValue("");

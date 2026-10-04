@@ -18,7 +18,7 @@ export function SettingsPage({
 }): React.JSX.Element {
   return (
     <div className={clsx("settings-content", className)}>
-      <h2 ref={headingRef} className="visually-hidden" tabIndex={-1}>{title}</h2>
+      <h2 ref={headingRef} className="settings-page-title" tabIndex={-1}>{title}</h2>
       {children}
     </div>
   );

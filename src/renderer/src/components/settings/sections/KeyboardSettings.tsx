@@ -11,7 +11,7 @@ import {
 } from "@shared/keybindings";
 import type { SnapshotState } from "@shared/snapshots";
 import { SettingSelect } from "../SettingControls";
-import { SettingRow, SettingsGroup, SettingStatus } from "../SettingsLayout";
+import { SettingRow, SettingsGroup } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
 import { useSnapshotSettings } from "../useSnapshotSettings";
 
@@ -114,17 +114,19 @@ export function KeyboardSettings({
           <SettingRow id="open-settings" title="Open settings" description="Also closes Settings. This shortcut is fixed.">
             <span className="setting-keys"><kbd>{primaryModifier}</kbd><kbd>,</kbd></span>
           </SettingRow>
-        </div>
-        <div className="settings-keybinding-actions" data-setting-id="reset-shortcuts">
-          <button
-            className="secondary-button settings-keybinding-reset"
-            type="button"
-            disabled={disabled || atDefaults}
-            onClick={() => { void reset.run(() => persist({ ...DEFAULT_APP_KEYBINDINGS })); }}
-          >
-            <RotateCcw size={14} />Reset shortcuts
-          </button>
-          <SettingStatus notice={reset.notice} />
+          <SettingRow id="reset-shortcuts" title="Default shortcuts" notice={reset.notice}>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={disabled}
+              aria-disabled={atDefaults || undefined}
+              onClick={() => {
+                if (!atDefaults) void reset.run(() => persist({ ...DEFAULT_APP_KEYBINDINGS }));
+              }}
+            >
+              <RotateCcw size={14} aria-hidden="true" />Reset shortcuts
+            </button>
+          </SettingRow>
         </div>
       </SettingsGroup>
       <SnapshotShortcut />

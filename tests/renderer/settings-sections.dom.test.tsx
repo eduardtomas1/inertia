@@ -49,14 +49,20 @@ describe("Keyboard settings", () => {
     const reset = screen.getByRole("button", { name: "Reset shortcuts" });
     expect(screen.getByLabelText("Search everything key")).toHaveValue("g");
 
+    expect(reset).not.toHaveAttribute("aria-disabled");
+    reset.focus();
     fireEvent.click(reset);
     expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ keybindings: DEFAULT_APP_KEYBINDINGS });
     expect(screen.getByLabelText("Search everything key")).toHaveValue("k");
-    expect(reset).toBeDisabled();
+    expect(reset).toHaveAttribute("aria-disabled", "true");
+    expect(reset).toBeEnabled();
+    expect(reset).toHaveFocus();
     expect(await within(row("reset-shortcuts")).findByText("Saved")).toHaveAttribute("role", "status");
 
     view.rerender(<SettingsView {...settingsViewProps({ target: { section: "keyboard" }, onUpdate })} />);
-    expect(reset).toBeDisabled();
+    expect(reset).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(reset);
+    expect(onUpdate).toHaveBeenCalledOnce();
   });
 
   it("restores the saved shortcuts and shows an error when the save fails", async () => {
@@ -133,5 +139,33 @@ describe("Codex executable settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Use automatic" }));
     await act(async () => reject(new Error("rejected")));
     expect(within(row("provider-binary-path")).getByRole("alert")).toHaveTextContent("Couldn't save. Try again.");
+  });
+});
+
+describe("Settings shell", () => {
+  it("titles each section with one visible heading named after its navigation item", async () => {
+    render(<SettingsView {...settingsViewProps({ target: { section: "keyboard" } })} />);
+    const title = screen.getByRole("heading", { level: 2 });
+    expect(title).toHaveTextContent("Keyboard");
+    expect(title).not.toHaveClass("visually-hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Chats"));
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+  });
+
+  it("scrolls the active section into the navigation strip when the section changes", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
+      const navigation = screen.getByRole("navigation", { name: "Settings sections" });
+      const help = within(navigation).getByRole("button", { name: "Help" });
+      scrollIntoView.mockClear();
+      fireEvent.click(help);
+      await waitFor(() => expect(scrollIntoView.mock.contexts).toContain(help));
+      expect(scrollIntoView.mock.calls[scrollIntoView.mock.contexts.indexOf(help)]).toEqual([{ block: "nearest", inline: "nearest" }]);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
   });
 });

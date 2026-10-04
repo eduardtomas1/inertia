@@ -83,6 +83,18 @@ describe("Theme library", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: null });
   });
 
+  it("labels each choice group by its visible row title and shows only theme names on the cards", () => {
+    const { container } = render(<ThemeLibrary settings={{ theme: "system", colorTheme: "inertia" }} disabled={false} onUpdate={vi.fn()} />);
+    const labelled = (element: HTMLElement): string | null | undefined =>
+      document.getElementById(element.getAttribute("aria-labelledby") ?? "")?.textContent;
+    expect(labelled(screen.getByRole("radiogroup", { name: "Appearance" }))).toBe("Appearance");
+    expect(labelled(screen.getByRole("group", { name: "Colour theme" }))).toBe("Colour theme");
+    expect(labelled(screen.getByRole("group", { name: "Custom colours" }))).toBe("Custom colours");
+    const cards = [...container.querySelectorAll<HTMLElement>(".color-theme-option")];
+    expect(cards.map((card) => card.textContent)).toEqual(COLOR_THEME_OPTIONS.map(({ label }) => label));
+    expect(container.querySelectorAll("h4, .color-theme-selected")).toHaveLength(0);
+  });
+
   it("names each hex field by its visible label", () => {
     render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia" }} disabled={false} onUpdate={vi.fn()} />);
     for (const label of ["Light colour", "Dark colour"]) {

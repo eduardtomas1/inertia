@@ -80,10 +80,10 @@ test.afterAll(async () => {
 });
 
 const NEW_CHAT_SELECTS = [
-  "Default model for new chats",
-  "Default reasoning for new chats",
-  "Default work mode for new chats",
-  "Default access for new chats",
+  "Model",
+  "Reasoning",
+  "Work mode",
+  "Access",
   "Where new chats run",
 ] as const;
 
@@ -132,7 +132,7 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
     const bounds = await option.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds!.width).toBeGreaterThan(0);
-    if (name === "Default model for new chats") await capture(testInfo, "new-chat-default-model-picker-light");
+    if (name === "Model") await capture(testInfo, "new-chat-default-model-picker-light");
     await page.keyboard.press("Escape");
     await expect(control).toBeFocused();
   }
@@ -147,7 +147,7 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await app.expectNoViewportOverflow();
   await capture(testInfo, "provider-settings-configuration-dark-narrow");
   await page.getByRole("button", { name: "Chats", exact: true }).click();
-  const access = page.getByRole("combobox", { name: "Default access for new chats", exact: true });
+  const access = page.getByRole("combobox", { name: "Access", exact: true });
   await access.click();
   const fullAccess = access.getByRole("option", { name: "Full access", exact: true });
   await expect(fullAccess).toBeVisible();
@@ -178,16 +178,16 @@ test("selects new-chat defaults with pointer and keyboard and preserves them aft
     await expect.poll(() => selectedLabel(control)).toMatch(option);
     await expect(control).toBeFocused();
   };
-  const reasoning = select("Default reasoning for new chats");
+  const reasoning = select("Reasoning");
 
-  await choose("Default model for new chats", "GPT-5.2 Codex Mini");
+  await choose("Model", "GPT-5.2 Codex Mini");
   await expect(reasoning).toHaveValue("");
   await expect(reasoning.getByRole("option", { name: "High", exact: true })).toHaveCount(0);
-  await choose("Default model for new chats", "GPT-5.3 Codex");
-  await choose("Default reasoning for new chats", "High");
+  await choose("Model", "GPT-5.3 Codex");
+  await choose("Reasoning", "High");
   await expect(reasoning).toHaveValue("high");
-  await choose("Default work mode for new chats", "Plan");
-  await choose("Default access for new chats", "Full access");
+  await choose("Work mode", "Plan");
+  await choose("Access", "Full access");
 
   const location = select("Where new chats run");
   await location.focus();
@@ -200,10 +200,10 @@ test("selects new-chat defaults with pointer and keyboard and preserves them aft
   ({ page } = await app.restart());
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Chats", exact: true }).click();
-  await expect.poll(() => selectedLabel(select("Default model for new chats"))).toBe("GPT-5.3 Codex");
-  await expect(select("Default reasoning for new chats")).toHaveValue("high");
-  await expect(select("Default work mode for new chats")).toHaveValue("plan");
-  await expect(select("Default access for new chats")).toHaveValue("full");
+  await expect.poll(() => selectedLabel(select("Model"))).toBe("GPT-5.3 Codex");
+  await expect(select("Reasoning")).toHaveValue("high");
+  await expect(select("Work mode")).toHaveValue("plan");
+  await expect(select("Access")).toHaveValue("full");
   await expect(select("Where new chats run")).toHaveValue("worktree");
   expect(app.rendererErrors).toEqual([]);
 });

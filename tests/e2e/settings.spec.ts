@@ -287,7 +287,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await expect(page.getByText("Partial", { exact: true }).first()).toBeVisible();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
   const globalDefault = page.getByRole("combobox", {
-    name: "Default model for new chats",
+    name: "Model",
     exact: true,
   });
   await globalDefault.selectOption({

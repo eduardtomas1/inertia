@@ -202,7 +202,7 @@ export function CompletionSoundSettings({
 
   return (
     <div className="completion-sound-settings" data-setting-id="completion-sound">
-      <SettingRow id="completion-sound-enabled" title="Sound when a task ends" description="Play a short sound when an agent finishes or stops with an error. Desktop notifications are unchanged.">
+      <SettingRow id="completion-sound-enabled" title="Sound when a task ends" description="Plays when an agent finishes or stops with an error.">
         <Switch label="Sound when a task ends" checked={value.enabled} disabled={disabled} onChange={(enabled) => {
           void commit({ enabled });
           if (enabled) preview(latest.current.sound);
@@ -224,8 +224,8 @@ export function CompletionSoundSettings({
         <div className="completion-sound-options">
           <div className="completion-sound-heading">
             <span id="completion-sound-label">Sound</span>
-            <button type="button" className="completion-sound-button" disabled={disabled} onClick={() => preview(value.sound)}>
-              <Play size={12} aria-hidden="true" />Preview
+            <button type="button" className="secondary-button" disabled={disabled} onClick={() => preview(value.sound)}>
+              <Play size={14} aria-hidden="true" />Preview
             </button>
           </div>
           <div className="completion-sound-choices" role="radiogroup" aria-labelledby="completion-sound-label" {...sounds.groupProps}>
@@ -245,9 +245,9 @@ export function CompletionSoundSettings({
             <div className="completion-sound-library">
               <div className="completion-sound-heading">
                 <span id="completion-sound-library-label">Your sounds</span>
-                <button ref={importRef} type="button" className="completion-sound-button" disabled={disabled || full}
+                <button ref={importRef} type="button" className="secondary-button" disabled={disabled || full}
                   aria-disabled={importing || removing > 0 || undefined} onClick={() => void importSound()}>
-                  <Upload size={12} aria-hidden="true" />{importing ? "Importing…" : "Import sound…"}
+                  <Upload size={14} aria-hidden="true" />{importing ? "Importing…" : "Import sound…"}
                 </button>
               </div>
               {value.library.length > 0 && (

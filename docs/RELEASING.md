@@ -18,8 +18,8 @@ data/workspace environment overrides, so it cannot be pointed at stable data.
 To install Canary, open the exact `canary-vMAJOR.MINOR.PATCH` GitHub prerelease,
 download the Canary-named package for the target platform and verify it against
 that release's `SHA256SUMS.txt` before running the installer. It installs beside
-stable Inertia rather than replacing it. On first launch, confirm **Canary
-channel · isolated profile** in **Settings → General → Application updates**;
+stable Inertia rather than replacing it. On first launch, confirm **Inertia
+Canary** and **Canary rollback** in **Settings → Help → About and updates**;
 stable projects and conversations are intentionally not imported. Use **Check
 now** for subsequent Canary updates. Before any update download begins, the
 application must show a verified last-known-good build; use **Prepare rollback**

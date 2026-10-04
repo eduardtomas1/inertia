@@ -58,7 +58,9 @@ describe("Restore defaults confirmation", () => {
     const group = screen.getByRole("group", { name: "Confirm restore defaults" });
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(within(group).getByText("Restore defaults?")).toBeInTheDocument();
-    expect(within(group).getByText(RESTORE_DEFAULTS_SCOPE)).toBeInTheDocument();
+    expect(within(group).getByText("This cannot be undone.")).toBeInTheDocument();
+    expect(within(group).queryByText(RESTORE_DEFAULTS_SCOPE)).toBeNull();
+    expect(screen.getAllByText(RESTORE_DEFAULTS_SCOPE)).toHaveLength(1);
     expect(within(group).getByRole("button", { name: "Cancel" })).toHaveFocus();
     const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
     act(() => { within(group).getByRole("button", { name: "Cancel" }).dispatchEvent(escape); });

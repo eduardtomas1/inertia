@@ -278,6 +278,69 @@ such as `// @inertia-harness cursor-acp`. The portable architecture test compare
 those unique owners with `createDefaultAgentHarnessRegistry()`, so adding or
 removing a production harness without portable conformance coverage fails CI.
 
+## Desktop benchmark first-open gate
+
+Settings and the command palette must open in under 100 ms (250 ms on hosted
+Intel macOS). That gate used to read one sample, taken on the first launch
+after the build. On hosted macOS arm64 that sample depended on the runner:
+it crossed 100 ms in 2 of the 10 main runs from 2026-09-30 to 2026-10-01
+(104.9 and 143.7 ms), in 2 of 3 diagnostic runs measured before any E2E
+(100.1 and 206.3 ms) and in 10 of 30 samples measured after E2E. It failed
+the v0.0.66 release build with 119 ms.
+
+The benchmark now opens both surfaces once on the fresh-profile launch, without
+gating that warm-up. It then relaunches the same profile five times and gates
+the median. The report keeps the warm-up and every sample. In CI the Linux x64
+benchmark runs right after the Electron binary is prepared, before any
+Electron end-to-end project. In the release build job it runs on its own
+`npm run build:bundle` before the unit suite. The single `build:packaged`
+bundle that packaging and smoke consume is built later, unchanged.
+
+Hosted proof on 2026-10-04 (settings first open, ms; runs
+[37195371151](https://github.com/eduardtomas1/inertia/actions/runs/37195371151),
+[37197578474](https://github.com/eduardtomas1/inertia/actions/runs/37197578474),
+[37198662061](https://github.com/eduardtomas1/inertia/actions/runs/37198662061)
+and [37195531018](https://github.com/eduardtomas1/inertia/actions/runs/37195531018)):
+
+| Runner and position | Warm-up | Five measured relaunches | Median |
+| --- | ---: | --- | ---: |
+| macOS arm64, fresh 1 | 40.9 | 33.4, 60.0, 46.0, 58.6, 85.0 | 58.6 |
+| macOS arm64, fresh 2 | 79.0 | 130.8, 60.0, 83.4, 45.0, 69.4 | 69.4 |
+| macOS arm64, fresh 3 | 41.5 | 77.3, 69.9, 72.7, 66.3, 59.7 | 69.9 |
+| macOS arm64, fresh 4 | 62.1 | 113.6, 36.9, 64.4, 74.6, 55.3 | 64.4 |
+| macOS arm64, fresh 5 | 74.5 | 67.9, 65.5, 63.9, 74.8, 85.4 | 67.9 |
+| macOS arm64, fresh 6 | 92.1 | 85.1, 60.3, 114.8, 61.3, 75.1 | 75.1 |
+| macOS arm64, release order 1 | 36.1 | 53.0, 39.3, 40.0, 38.3, 47.8 | 40.0 |
+| macOS arm64, release order 2 | 67.2 | 98.1, 84.9, 70.4, 72.4, 158.7 | 84.9 |
+| macOS arm64, release order 3 | 36.7 | 99.1, 42.4, 38.1, 39.0, 44.6 | 42.4 |
+| macOS arm64, release order 4 | 153.8 | 40.2, 76.5, 66.1, 60.6, 53.0 | 60.6 |
+| Linux x64 under Xvfb, fresh | 57.4 | 61.2, 60.0, 62.2, 57.3, 65.1 | 61.2 |
+| Windows x64, fresh | 50.1 | 52.9, 52.3, 53.5, 49.7, 50.7 | 52.3 |
+| macOS x64, fresh (250 ms target) | 93.6 | 106.1, 350.8, 160.1, 296.9, 135.6 | 160.1 |
+| macOS arm64, after 27 min of E2E | 52.5 | 55.0, 62.4, 53.9, 63.2, 54.2 | 55.0 |
+| macOS arm64, after 44 min of E2E | 95.7 | 299.6, 126.9, 395.3, 108.2, 338.8 | 299.6 |
+| macOS arm64, after the unit suite 1 | 41.2 | 102.5, 59.9, 55.4, 37.4, 58.1 | 58.1 |
+| macOS arm64, after the unit suite 2 | 97.2 | 188.3, 235.2, 526.0, 114.0, 232.6 | 232.6 |
+| macOS arm64, after the unit suite 3 | 59.4 | 53.4, 46.8, 45.7, 50.0, 83.3 | 50.0 |
+| macOS arm64, after the unit suite 4 | 78.6 | 67.8, 119.5, 45.3, 55.6, 100.3 | 67.8 |
+| macOS arm64, after the unit suite 5 | 58.8 | 74.1, 102.9, 38.1, 70.0, 42.0 | 70.0 |
+| macOS arm64, after the unit suite 6 | 84.0 | 57.2, 53.4, 50.2, 53.8, 74.3 | 53.8 |
+
+"Fresh" builds and then measures, which is the CI position. "Release order"
+runs the platform guard, the CPU budget check and `build:bundle` first, which
+is the release position. Every median in those positions is below the target,
+although 6 of their 65 measured samples and one warm-up are not. Two of the eight runners
+measured after a heavy phase failed the median too. On both, the unrelated
+2,000 ms streaming long-task ceiling failed in the same run (2,087 and
+3,147 ms), so the whole runner was saturated. That is why the benchmark now
+runs before the heavy phases instead of relying on the median alone.
+
+The five relaunches add 30 to 60 s to the macOS arm64 benchmark step (181 to
+219 s, against 137 to 169 s for recent main and release runs). They add
+about 50 s on Linux x64, 35 s on Windows x64 and 90 s on macOS x64. The
+release build job also spends 26 to 42 s on the extra bundle build on macOS
+arm64, and 38 to 78 s on the other platforms.
+
 ## Measured baseline
 
 These are successful runs from the repository before this change:

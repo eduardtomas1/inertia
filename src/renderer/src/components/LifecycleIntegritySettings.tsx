@@ -1,6 +1,5 @@
 import { useState } from "react";
-import clsx from "clsx";
-import { Copy, FolderOpen, ShieldCheck } from "lucide-react";
+import { Copy, FolderOpen } from "lucide-react";
 
 import {
   appUpdatePreparationDiagnostic,
@@ -66,50 +65,43 @@ export function LifecycleIntegritySettings(
     const contract = props.provider.capabilityContract;
     if (!contract) return null;
     return (
-      <div className="provider-settings-field">
-        <span>Capability contract</span>
-        <div
-          className={clsx(
-            "provider-settings-capability-contract",
-            contract.installationVerified ? "is-verified" : "is-unverified",
-          )}
-          aria-label={`${props.provider.label} capability contract`}
-        >
-          <ShieldCheck size={15} aria-hidden="true" />
-          <span>
-            <strong>
+      <SettingDisclosure className="provider-settings-details" summary="Details">
+        <dl className="provider-settings-facts" aria-label={`${props.provider.label} capability contract`}>
+          <div>
+            <dt>Installation</dt>
+            <dd>
               {contract.installationVerified
                 ? `Verified for ${contract.installedVersion ?? "this installation"}`
                 : "Waiting for exact installation verification"}
-            </strong>
-            <code title={contract.manifestDigest}>
-              {contract.harnessId}
-              {" · "}
-              {contract.manifestDigest.slice(0, 12)}
-            </code>
-          </span>
-          <small>
-            {contract.installationVerified
-              ? `${contract.currentlyAvailableCount} of ${contract.declaredCapabilityCount} declared capabilities are available now.`
-              : "Optional provider features remain unavailable until version and protocol evidence match this manifest."}
-          </small>
-          {contract.capabilities && (
-            <SettingDisclosure className="provider-settings-capability-details" summary="Feature availability">
-              <ul aria-label={`${props.provider.label} feature availability`}>
-                {contract.capabilities.filter(({ id }) => CAPABILITY_LABELS[id]).map(({ id, state }) => (
-                  <li key={id}>
-                    <span>{CAPABILITY_LABELS[id]}</span>
-                    <span className={state === "available" ? "is-ready" : undefined}>
-                      {CAPABILITY_STATES[state]}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p>Availability can also depend on the model and settings of each chat.</p>
-            </SettingDisclosure>
-          )}
-        </div>
-      </div>
+            </dd>
+          </div>
+          <div>
+            <dt>Capabilities</dt>
+            <dd>
+              {contract.installationVerified
+                ? `${contract.currentlyAvailableCount} of ${contract.declaredCapabilityCount} declared capabilities are available now.`
+                : "Optional provider features stay unavailable until version and protocol evidence match."}
+            </dd>
+          </div>
+          <div>
+            <dt>Contract</dt>
+            <dd title={contract.manifestDigest}>{contract.harnessId}</dd>
+          </div>
+        </dl>
+        {contract.capabilities && (
+          <>
+            <ul className="provider-settings-features" aria-label={`${props.provider.label} feature availability`}>
+              {contract.capabilities.filter(({ id }) => CAPABILITY_LABELS[id]).map(({ id, state }) => (
+                <li key={id}>
+                  <span>{CAPABILITY_LABELS[id]}</span>
+                  <span>{CAPABILITY_STATES[state]}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="provider-settings-features-note">Availability can also depend on the model and settings of each chat.</p>
+          </>
+        )}
+      </SettingDisclosure>
     );
   }
 

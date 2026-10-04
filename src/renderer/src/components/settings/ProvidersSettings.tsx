@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Bot, FolderOpen, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { FolderOpen, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 
 import type {
@@ -10,18 +10,18 @@ import type {
   ProviderMaintenanceProviderId,
 } from "@shared/contracts";
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
-import { providerVersionLabel } from "../../utils/providerStatus";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import { ProviderMaintenanceNotice } from "../ProviderMaintenanceNotice";
 import {
   ProviderActionIcon,
   ProviderStatus,
   providerSetupAction,
-  providerStateDetail,
 } from "../ProviderStatus";
 import { loadLifecycleIntegritySettings } from "../settingsSectionLoaders";
 import { useSectionMemory, type SettingsSectionMemory } from "./sectionMemory";
-import { SettingStatus } from "./SettingsLayout";
+import { IconButton } from "../ui";
+import { SettingCopy } from "./SettingsLayout";
+import "./ProvidersSettings.css";
 import { useSettingAction } from "./useSettingAction";
 
 export interface ProvidersSettingsProps {
@@ -198,6 +198,12 @@ export function ProvidersSettings({
       setProviderIdentityLabelsDraft(providerIdentityLabels);
     });
   };
+  const selectedStateId = useId();
+  const binaryValue = selectedProvider
+    ? selectedProvider.id === "codex"
+      ? settings.codexBinaryPath || selectedProvider.executable || ""
+      : selectedProvider.executable ?? ""
+    : "";
   return (
     <section
       className="settings-card provider-settings-section"
@@ -207,63 +213,45 @@ export function ProvidersSettings({
       <div className="settings-card-heading provider-settings-heading">
         <span>
           <h3 id="providers-heading">Providers</h3>
-          <p>Use the coding tools and accounts already installed on this computer.</p>
         </span>
-        <span className="provider-settings-heading-actions">
-          <small>Local provider status</small>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Refresh all providers"
-            title="Refresh all providers"
-            disabled={disabled}
-            onClick={() => onRefreshProvider()}
-          >
-            <RefreshCw size={13} />
-          </button>
-        </span>
+        <IconButton
+          label="Refresh all providers"
+          aria-disabled={disabled || undefined}
+          onClick={() => { if (!disabled) onRefreshProvider(); }}
+        >
+          <RefreshCw size={14} aria-hidden="true" />
+        </IconButton>
       </div>
 
       <div className="provider-settings-shell">
-        <div className="provider-settings-rail" aria-label="Provider accounts">
+        <div className="provider-settings-rail" role="group" aria-label="Provider accounts">
           {providers.map((provider) => {
             const identityLabel = providerIdentityLabelsDraft[provider.id];
             const selected = selectedProvider?.id === provider.id;
+            const stateId = `provider-settings-state-${provider.id}`;
             return (
-              <div
-                className={clsx(
-                  "provider-settings-list-row",
-                  selected && "is-selected",
-                )}
+              <button
+                type="button"
+                className={clsx("provider-settings-list-row", selected && "is-selected")}
                 key={provider.id}
+                aria-label={`Configure ${provider.label}`}
+                aria-describedby={stateId}
+                aria-pressed={selected}
+                onClick={() => {
+                  setSelectedProviderId(provider.id);
+                  setProviderDetailTab("configuration");
+                }}
               >
-                <button
-                  type="button"
-                  aria-label={`Configure ${provider.label}`}
-                  aria-pressed={selected}
-                  onClick={() => {
-                    setSelectedProviderId(provider.id);
-                    setProviderDetailTab("configuration");
-                  }}
-                >
-                  <ProviderBrandIcon
-                    providerId={provider.id}
-                    label={`${provider.label} icon`}
-                    size={17}
-                  />
-                  <span>
-                    <span className="provider-settings-list-title">
-                      <strong>{identityLabel ?? provider.label}</strong>
-                      {provider.version && <code>{providerVersionLabel(provider.version)}</code>}
-                    </span>
-                    <small>
-                      {identityLabel ? `${provider.label} · ` : ""}
-                      {providerStateDetail(provider)}
-                    </small>
-                  </span>
-                </button>
-                <ProviderStatus provider={provider} compact />
-              </div>
+                <ProviderBrandIcon
+                  providerId={provider.id}
+                  label={`${provider.label} icon`}
+                  size={16}
+                />
+                <span className="provider-settings-list-copy">
+                  <strong>{identityLabel ?? provider.label}</strong>
+                  <ProviderStatus provider={provider} id={stateId} />
+                </span>
+              </button>
             );
           })}
         </div>
@@ -272,35 +260,30 @@ export function ProvidersSettings({
           {selectedProvider ? (
             <>
               <header className="provider-settings-editor-header">
+                <ProviderBrandIcon
+                  providerId={selectedProvider.id}
+                  label={`${selectedProvider.label} icon`}
+                  size={16}
+                />
                 <span className="provider-settings-editor-copy">
-                  <span className="provider-settings-editor-title">
-                    <ProviderBrandIcon
-                      providerId={selectedProvider.id}
-                      label={`${selectedProvider.label} icon`}
-                      size={17}
-                    />
-                    <strong>
-                      {selectedProviderIdentityLabel ?? selectedProvider.label}
-                    </strong>
-                    {selectedProvider.version && (
-                      <code>{providerVersionLabel(selectedProvider.version)}</code>
-                    )}
-                  </span>
-                  <small>
+                  <strong>
                     {selectedProviderIdentityLabel
-                      ? `${selectedProvider.label} · `
-                      : ""}
-                    {providerStateDetail(selectedProvider)}
-                  </small>
+                      ? `${selectedProviderIdentityLabel} · ${selectedProvider.label}`
+                      : selectedProvider.label}
+                  </strong>
+                  <ProviderStatus provider={selectedProvider} id={selectedStateId} />
+                  {selectedProvider.statusMessage && <small>{selectedProvider.statusMessage}</small>}
                 </span>
                 {selectedProviderAction && (
                   <button
                     type="button"
                     className="secondary-button provider-settings-account-action"
-                    disabled={disabled}
-                    onClick={() => selectedProviderAction === "connect"
-                      ? onConnectProvider(selectedProvider.id)
-                      : onRefreshProvider(selectedProvider.id)}
+                    aria-disabled={disabled || undefined}
+                    onClick={() => {
+                      if (disabled) return;
+                      if (selectedProviderAction === "connect") onConnectProvider(selectedProvider.id);
+                      else onRefreshProvider(selectedProvider.id);
+                    }}
                   >
                     <ProviderActionIcon action={selectedProviderAction} />
                     {selectedProviderAction === "connect"
@@ -353,88 +336,76 @@ export function ProvidersSettings({
                   id="provider-settings-configuration-panel"
                   aria-labelledby="provider-settings-configuration-tab"
                 >
-                  <label className="provider-settings-field" data-setting-id="provider-display-name">
-                    <span className="setting-title">Account name<SettingStatus notice={labelAction.notice} /></span>
-                    <input
-                      aria-label="Account name"
-                      value={selectedProviderIdentityLabel ?? ""}
-                      maxLength={48}
-                      placeholder={`${selectedProvider.label} account`}
-                      disabled={disabled}
-                      onChange={(event) => updateProviderIdentityLabelDraft(
-                        selectedProvider.id,
-                        event.currentTarget.value,
-                      )}
-                      onBlur={(event) => commitProviderIdentityLabel(
-                        selectedProvider.id,
-                        event.currentTarget.value,
-                      )}
+                  <div className="setting-row setting-text-field" data-setting-id="provider-display-name">
+                    <SettingCopy
+                      title="Account name"
+                      description="Shown wherever Inertia names this account."
+                      notice={labelAction.notice}
                     />
-                    <small>Optional label shown anywhere Inertia identifies this account.</small>
-                  </label>
-
-                  <div className="provider-settings-field">
-                    <span>Account status</span>
-                    <div className="provider-settings-status-line">
-                      <ProviderStatus provider={selectedProvider} />
-                      {selectedProvider.statusMessage && (
-                        <small>{selectedProvider.statusMessage}</small>
-                      )}
-                    </div>
-                    <small>Authentication remains in the provider&apos;s official flow.</small>
+                    <span className="setting-field-control">
+                      <input
+                        className="setting-input"
+                        aria-label="Account name"
+                        value={selectedProviderIdentityLabel ?? ""}
+                        maxLength={48}
+                        placeholder={`${selectedProvider.label} account`}
+                        disabled={disabled}
+                        onChange={(event) => updateProviderIdentityLabelDraft(
+                          selectedProvider.id,
+                          event.currentTarget.value,
+                        )}
+                        onBlur={(event) => commitProviderIdentityLabel(
+                          selectedProvider.id,
+                          event.currentTarget.value,
+                        )}
+                      />
+                    </span>
                   </div>
 
-                  {LifecycleIntegritySettings && (
-                    <LifecycleIntegritySettings
-                      surface="provider-capability"
-                      provider={selectedProvider}
+                  <div className="setting-row provider-settings-binary" data-setting-id="provider-binary-path">
+                    <SettingCopy
+                      title="Executable"
+                      description={selectedProvider.id === "codex"
+                        ? "Found automatically. A file you choose is version-checked before it is saved."
+                        : undefined}
+                      notice={binaryAction.notice}
                     />
-                  )}
-
-                  <div className="provider-settings-field" data-setting-id="provider-binary-path">
-                    <span className="setting-title">Executable<SettingStatus notice={binaryAction.notice} /></span>
-                    <div className="provider-settings-binary-row">
+                    <span className="provider-settings-binary-control">
                       <input
+                        className="setting-input"
                         aria-label={`${selectedProvider.label} executable path`}
-                        value={selectedProvider.id === "codex"
-                          ? settings.codexBinaryPath
-                            || selectedProvider.executable
-                            || ""
-                          : selectedProvider.executable ?? ""}
+                        value={binaryValue}
                         placeholder={`No working ${selectedProvider.label} executable detected`}
                         readOnly
-                        title={selectedProvider.executable ?? undefined}
+                        title={binaryValue || undefined}
                       />
                       {selectedProvider.id === "codex" && (
-                        <div>
+                        <span className="provider-settings-binary-actions">
                           <button
                             type="button"
                             className="secondary-button"
-                            disabled={disabled}
-                            onClick={onChooseCodexBinary}
+                            aria-disabled={disabled || undefined}
+                            onClick={() => { if (!disabled) onChooseCodexBinary(); }}
                           >
-                            <FolderOpen size={13} />
+                            <FolderOpen size={14} aria-hidden="true" />
                             Browse
                           </button>
                           {settings.codexBinaryPath && (
                             <button
                               type="button"
                               className="secondary-button"
-                              disabled={disabled}
-                              onClick={() => { void binaryAction.run(() => onUpdate({ codexBinaryPath: "" })); }}
+                              aria-disabled={disabled || binaryAction.busy || undefined}
+                              onClick={() => {
+                                if (disabled || binaryAction.busy) return;
+                                void binaryAction.run(() => onUpdate({ codexBinaryPath: "" }));
+                              }}
                             >
-                              <Trash2 size={13} />
                               Use automatic
                             </button>
                           )}
-                        </div>
+                        </span>
                       )}
-                    </div>
-                    <small>
-                      {selectedProvider.id === "codex"
-                        ? "Checks official, package-manager, custom-home, and PATH installs. Manual selections are version-checked before saving."
-                        : `Detected from the ${selectedProvider.label} installation available to Inertia.`}
-                    </small>
+                    </span>
                   </div>
 
                   <div className="provider-settings-maintenance" data-setting-id="provider-updates">
@@ -453,8 +424,15 @@ export function ProvidersSettings({
                     />
                   </div>
 
+                  {LifecycleIntegritySettings && (
+                    <LifecycleIntegritySettings
+                      surface="provider-capability"
+                      provider={selectedProvider}
+                    />
+                  )}
+
                   <p className="provider-settings-privacy-note">
-                    Inertia stores no provider account passwords or tokens.
+                    Sign-in stays in the provider&apos;s own flow. Inertia stores no provider passwords or tokens.
                   </p>
                 </div>
               ) : (
@@ -484,25 +462,20 @@ export function ProvidersSettings({
                       </div>
                     ))
                   ) : (
-                    <div className="provider-settings-empty-models">
-                      <Bot size={20} />
-                      <strong>No models reported yet</strong>
-                      <small>Refresh or connect this provider to load its model catalog.</small>
-                    </div>
+                    <p className="provider-settings-empty">
+                      No models reported yet. Refresh or connect this provider to load them.
+                    </p>
                   )}
                 </div>
               )}
             </>
           ) : (
-            <div className="provider-settings-empty-models">
-              <Bot size={20} />
-              <strong>No providers detected</strong>
-              <small>Refresh to check the supported provider installations.</small>
-            </div>
+            <p className="provider-settings-empty">
+              No providers detected. Refresh to check again.
+            </p>
           )}
         </div>
       </div>
-
     </section>
   );
 }

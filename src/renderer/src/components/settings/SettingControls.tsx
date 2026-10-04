@@ -165,11 +165,13 @@ export function SettingTextField({
   maxLength,
   type = "text",
   autoComplete,
+  inputMode,
   disabled = false,
   layout = "row",
   className,
   normalize = (draft) => draft.trim(),
   validate,
+  failure,
   onSave,
 }: {
   id: string;
@@ -181,11 +183,13 @@ export function SettingTextField({
   maxLength?: number;
   type?: "text" | "url";
   autoComplete?: string;
+  inputMode?: "decimal";
   disabled?: boolean;
   layout?: "row" | "stacked";
   className?: string;
   normalize?: (draft: string) => string;
   validate?: (value: string) => string | null;
+  failure?: Failure;
   onSave: Persist<string>;
 }): React.JSX.Element {
   const action = useSettingAction();
@@ -214,7 +218,7 @@ export function SettingTextField({
     setError(null);
     setDraft(null);
     setPending(next);
-    void action.run(() => onSave(next)).then((ok) => {
+    void action.run(() => onSave(next), { failure }).then((ok) => {
       if (ok) return;
       setPending((current) => (current === next ? null : current));
       setDraft((current) => current ?? next);
@@ -233,6 +237,7 @@ export function SettingTextField({
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
           autoComplete={autoComplete}
+          inputMode={inputMode}
           disabled={disabled}
           maxLength={maxLength}
           placeholder={placeholder}

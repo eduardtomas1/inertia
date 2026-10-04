@@ -383,6 +383,35 @@ describe("completion sound settings", () => {
     expect(screen.getByRole("combobox", { name: "Play sound" })).toHaveValue("every");
   });
 
+  it("confirms turning the sound on in its own row", async () => {
+    renderSettings(DEFAULT_COMPLETION_SOUND);
+    fireEvent.click(screen.getByRole("switch", { name: "Sound when a task ends" }));
+    const row = document.querySelector<HTMLElement>('[data-setting-id="completion-sound-enabled"]')!;
+    await waitFor(() => expect(row.querySelector('[role="status"]')).toHaveTextContent("Saved"));
+  });
+
+  it("reports a failed attempt to turn the sound on and turns the switch back off", async () => {
+    const { onUpdate } = renderSettings(DEFAULT_COMPLETION_SOUND);
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    const toggle = screen.getByRole("switch", { name: "Sound when a task ends" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(screen.getByRole("alert").closest("[data-setting-id]")).toHaveAttribute("data-setting-id", "completion-sound-enabled");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("confirms a sound choice and reports one that could not be saved", async () => {
+    const { onUpdate } = renderSettings(enabled);
+    fireEvent.click(screen.getByRole("radio", { name: /Glass/u }));
+    const heading = screen.getByText("Sound", { selector: "#completion-sound-label" }).parentElement!;
+    await waitFor(() => expect(heading.querySelector('[role="status"]')).toHaveTextContent("Saved"));
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    fireEvent.click(screen.getByRole("radio", { name: /Bell/u }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(heading).toContainElement(screen.getByRole("alert"));
+    expect(screen.getByRole("radio", { name: /Chime/u })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("hides the library where the desktop bridge is unavailable", () => {
     renderSettings(enabled);
     expect(screen.queryByRole("button", { name: "Import sound…" })).not.toBeInTheDocument();

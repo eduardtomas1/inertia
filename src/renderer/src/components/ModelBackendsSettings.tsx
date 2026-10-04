@@ -24,6 +24,7 @@ import {
   updateBackendDraftModel,
 } from "../utils/backendProfileDraft";
 import { useRovingRadios } from "../hooks/useRovingRadios";
+import { providerIconDefinition } from "../utils/providerIcons";
 import { IconButton, LoadingMark, Switch } from "./ui";
 import { SettingDisclosure, SettingCopy } from "./settings/SettingsLayout";
 import "./ModelBackendsSettings.css";
@@ -96,8 +97,13 @@ function harnessLabel(profile: Pick<ModelBackendProfileView, "harnessId">): stri
   return `${harness} harness`;
 }
 
+function profileName(profile: ModelBackendProfileView): string {
+  if (profile.preset !== "native") return profile.displayName;
+  return providerIconDefinition(profile.id.replace(/^builtin:/u, ""))?.label ?? profile.displayName;
+}
+
 function identityLabel(profile: ModelBackendProfileView): string {
-  return `${harnessLabel(profile)} · ${profile.displayName}`;
+  return `${harnessLabel(profile)} · ${profileName(profile)}`;
 }
 
 function statusLabel(profile: ModelBackendProfileView): string {
@@ -487,10 +493,10 @@ export function ModelBackendsSettings({
               key={profile.id}
               title={identityLabel(profile)}
             >
-              <strong>{profile.displayName}</strong>
+              <strong>{profileName(profile)}</strong>
               <span className="backend-profile-rail-meta">
                 <small>{profile.endpointHost ?? (profile.preset === "native" ? "Harness managed" : "Endpoint hidden")}</small>
-                <BackendProfileState profile={profile} />
+                {profile.preset !== "native" && <BackendProfileState profile={profile} />}
               </span>
             </button>
           ))}

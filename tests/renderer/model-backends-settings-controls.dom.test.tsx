@@ -71,6 +71,21 @@ function settingsProps(
 }
 
 describe("model backend settings controls", () => {
+  it("shows a harness-managed profile under the app's provider name without a readiness state", () => {
+    const native = profile({
+      id: "builtin:antigravity", displayName: "Google Antigravity", harnessId: "antigravity-cli", protocol: "antigravity-managed",
+      authenticationMode: "harness-managed", source: "built-in", preset: "native", baseUrl: null, endpointHost: null,
+      endpointIdentity: null, canDelete: false, canDisable: false,
+    });
+    render(<ModelBackendsSettings {...settingsProps({ profiles: [native, profile()] })} />);
+    const rail = screen.getByRole("complementary", { name: "Backend profiles" });
+    const row = within(rail).getAllByRole("button")[0]!;
+    expect(row).toHaveTextContent("Antigravity");
+    expect(row).not.toHaveTextContent("Google Antigravity");
+    expect(row).toHaveTextContent("Harness managed");
+    expect(row).not.toHaveTextContent("Ready");
+  });
+
   it("keeps the Model ID field focused while its identifier is typed", async () => {
     const user = userEvent.setup();
     render(<ModelBackendsSettings {...settingsProps()} />);

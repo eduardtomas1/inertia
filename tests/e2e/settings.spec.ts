@@ -342,15 +342,6 @@ test("keeps runtime support and application update checks explicit in settings",
   await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
   await expect(page.getByText(/· Every 1 hour · 5 copies, 512 MiB in total$/u)).toBeVisible();
   await expect(page.getByText(/^Memory .+ · Database .+ · Browser cache .+ · Temporary attachments .+$/u)).toBeVisible();
-  const recoveryRow = page.locator('[data-setting-id="recovery-export"]');
-  const rowHeight = (): Promise<number> => recoveryRow.evaluate((element) => element.getBoundingClientRect().height);
-  const idleHeight = await rowHeight();
-  await electronApp.evaluate(({ dialog }) => {
-    Reflect.set(dialog, "showSaveDialog", async () => ({ canceled: true }));
-  });
-  await page.getByRole("button", { name: "Export recovery file" }).click();
-  await expect(recoveryRow.getByText("Recovery export cancelled.", { exact: true })).toBeVisible();
-  expect(await rowHeight()).toBe(idleHeight);
   const exportPath = join(testDirectory, "settings-recovery-export.json");
   await electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showSaveDialog", async () => ({

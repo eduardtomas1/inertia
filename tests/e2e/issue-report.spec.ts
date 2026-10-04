@@ -32,7 +32,10 @@ test("preserves the private report chat and requires a reviewed preview before p
     for (const name of ["Agent and model", "Reasoning", "Diagnostic scope"]) {
       const control = page.getByRole("combobox", { name, exact: true });
       await expect(control).toHaveCSS("appearance", "base-select");
-      if (await control.isDisabled()) continue;
+      if (await control.isDisabled()) {
+        await expect(control).toHaveCSS("opacity", "0.72");
+        continue;
+      }
       await control.click();
       await expect.poll(() => control.evaluate((element) => element.matches(":open"))).toBe(true);
       await expect(control.getByRole("option").last()).toBeVisible();

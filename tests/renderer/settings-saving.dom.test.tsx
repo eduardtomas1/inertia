@@ -140,7 +140,7 @@ describe("Settings saving", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Message timestamps" }));
     await waitFor(() => expect(within(settingRow("message-timestamps")).getByRole("alert"))
       .toHaveTextContent("Couldn't save. Try again."));
-    expect(setActionError.mock.calls).toEqual([[null]]);
+    expect(setActionError).not.toHaveBeenCalled();
   });
 
   it("reports a failed project save only in its row, not as an app error", async () => {
@@ -158,7 +158,7 @@ describe("Settings saving", () => {
     })} />);
     fireEvent.click(await screen.findByRole("switch", { name: "Pin to top of project lists" }));
     await waitFor(() => expect(within(settingRow("project-pin")).getByRole("alert")).toBeInTheDocument());
-    expect(setActionError.mock.calls).toEqual([[null]]);
+    expect(setActionError).not.toHaveBeenCalled();
   });
 
   it("sends every settings save without the app error report", async () => {

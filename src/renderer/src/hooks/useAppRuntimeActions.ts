@@ -125,7 +125,7 @@ export function useAppRuntimeActions(options: {
     const passive = runOptions?.passive === true;
     if (!passive) {
       setBusyAction(key);
-      setActionError(null);
+      if (runOptions?.reportError !== false) setActionError(null);
     }
     try {
       const event = await sendCommand(withRequestId(command));

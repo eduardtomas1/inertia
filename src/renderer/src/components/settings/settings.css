@@ -325,7 +325,11 @@
 }
 
 .setting-note-status:empty {
-  margin-top: -5px;
+  min-height: calc(var(--ui-font-micro) * 1.4);
+}
+
+.setting-note-status:empty:has(+ .setting-note-status.is-error) {
+  display: none;
 }
 
 .setting-select,

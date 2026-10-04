@@ -59,10 +59,10 @@ function settingsOptions(): HTMLElement[] {
 describe("Command palette settings entries", () => {
   it("lists a setting by its title with the section as context and opens Settings at its row", () => {
     const { onOpenSettings, onClose, search } = renderPalette();
-    fireEvent.change(search, { target: { value: "theme" } });
+    fireEvent.change(search, { target: { value: "mode" } });
     const [theme] = settingsOptions();
-    expect(theme).toHaveTextContent("ThemeAppearance");
-    expect(theme!.querySelector("mark")).toHaveTextContent("Theme");
+    expect(theme).toHaveTextContent("ModeAppearance");
+    expect(theme!.querySelector("mark")).toHaveTextContent("Mode");
     expect(screen.getAllByRole("option")[0]).toBe(theme);
 
     fireEvent.keyDown(search, { key: "Enter" });

@@ -393,7 +393,7 @@
 }
 
 .setting-select option {
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: 7px 9px;
   border-radius: var(--radius-small);
   overflow-wrap: anywhere;

@@ -211,6 +211,7 @@ test("runs a saved action only on explicit selection through the real terminal",
 test("starts a new chat in a project with that project's default access", async () => {
   await app.close();
   app = await createThreadFixture(false, "full");
+  await app.resizeWindow(1440, 920);
   const page = app.page;
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
   const newChatIn = async (project: string): Promise<void> => {

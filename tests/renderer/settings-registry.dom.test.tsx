@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
@@ -249,6 +249,46 @@ describe("Settings anchors", () => {
     } finally {
       style.remove();
     }
+  });
+
+  it("keeps focus on Private Connect while its state loads", async () => {
+    installFullBridge();
+    let resolveState: (value: typeof privateConnectState) => void = () => undefined;
+    const bridge = window.inertia as unknown as Record<string, unknown>;
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: new Proxy({}, {
+        get: (_target, key: string) => key === "getPrivateConnectState"
+          ? () => new Promise((resolve) => { resolveState = resolve; })
+          : bridge[key],
+      }),
+    });
+    render(<SettingsView {...settingsViewProps({ target: { section: "devices", anchor: "private-connect" } })} />);
+    const row = (): HTMLElement => document.querySelector<HTMLElement>('[data-setting-id="private-connect"]')!;
+    await waitFor(() => expect(row()).toHaveFocus());
+    await act(async () => { resolveState(privateConnectState); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Disable" })).toHaveFocus());
+  });
+
+  it("leaves focus where the user moved it while Private Connect loads", async () => {
+    installFullBridge();
+    let resolveState: (value: typeof privateConnectState) => void = () => undefined;
+    const bridge = window.inertia as unknown as Record<string, unknown>;
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: new Proxy({}, {
+        get: (_target, key: string) => key === "getPrivateConnectState"
+          ? () => new Promise((resolve) => { resolveState = resolve; })
+          : bridge[key],
+      }),
+    });
+    render(<SettingsView {...settingsViewProps({ target: { section: "devices", anchor: "private-connect" } })} />);
+    await waitFor(() => expect(document.querySelector('[data-setting-id="private-connect"]')).toHaveFocus());
+    const navigation = screen.getByRole("button", { name: "Data" });
+    navigation.focus();
+    await act(async () => { resolveState(privateConnectState); });
+    expect(await screen.findByRole("button", { name: "Disable" })).not.toHaveFocus();
+    expect(navigation).toHaveFocus();
   });
 
   it("focuses the section title when the anchored row is hidden", async () => {

@@ -52,21 +52,7 @@ export function ConnectionsAndDevicesSettings({
     return () => { current = false; };
   }, [state?.invitation?.url]);
 
-  if (loaded.error || !state) {
-    return (
-      <SettingsGroup title="Inertia Private Connect" headingId="private-connect-heading" className="private-connect-settings">
-        <SettingActionRow
-          id="private-connect"
-          className="runtime-log-setting"
-          title="Status"
-          details={<small role="status">{loaded.error ?? "Loading Private Connect…"}</small>}
-          actions={loaded.error
-            ? <button type="button" className="secondary-button" onClick={loaded.retry}>Retry</button>
-            : undefined}
-        />
-      </SettingsGroup>
-    );
-  }
+  const ready = loaded.error ? null : state;
 
   const update: UpdateState = async (operation, success) => {
     setBusy(true);
@@ -93,41 +79,42 @@ export function ConnectionsAndDevicesSettings({
   };
 
   const copyInvitation = async (): Promise<void> => {
-    if (!state.invitation) return;
+    if (!ready?.invitation) return;
     try {
-      if (!await writeClipboardText(state.invitation.url)) throw new Error("Clipboard write failed.");
+      if (!await writeClipboardText(ready.invitation.url)) throw new Error("Clipboard write failed.");
       setMessage({ tone: "info", text: "Pairing link copied." });
     } catch {
       setMessage({ tone: "error", text: "Copy failed. Select the link and copy it manually." });
     }
   };
 
-  const currentDevices = state.devices.filter((device) =>
+  const currentDevices = (ready?.devices ?? []).filter((device) =>
     device.revokedAt === null && Date.parse(device.expiresAt) > Date.now()
   );
-  const toggleUnavailable = busy || !state.available;
-  const pairingUnavailable = busy || state.status !== "ready";
+  const toggleUnavailable = busy || !ready?.available;
+  const pairingUnavailable = busy || ready?.status !== "ready";
 
   return (
     <>
       <SettingsGroup
         title="Inertia Private Connect"
         headingId="private-connect-heading"
-        description="Open Inertia on another device through your own Tailscale tailnet."
+        description={ready ? "Open Inertia on another device through your own Tailscale tailnet." : undefined}
         className="private-connect-settings"
       >
         <SettingActionRow
           id="private-connect"
           className="runtime-log-setting"
           title="Status"
-          description={statusLabel(state)}
-          actions={(
+          description={ready ? statusLabel(ready) : undefined}
+          details={ready ? undefined : <small role="status">{loaded.error ?? "Loading Private Connect…"}</small>}
+          actions={ready ? (
             <>
-              {state.diagnostics.setupUrl && (
+              {ready.diagnostics.setupUrl && (
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={() => void window.inertia.openExternal(state.diagnostics.setupUrl!)}
+                  onClick={() => void window.inertia.openExternal(ready.diagnostics.setupUrl!)}
                 >
                   <ExternalLink size={14} aria-hidden="true" />Finish Tailscale setup
                 </button>
@@ -139,70 +126,76 @@ export function ConnectionsAndDevicesSettings({
                 onClick={() => {
                   if (toggleUnavailable) return;
                   void update(
-                    () => window.inertia.setPrivateConnectEnabled({ enabled: !state.enabled }),
-                    state.enabled ? "Private Connect disabled." : "Private Connect ready.",
+                    () => window.inertia.setPrivateConnectEnabled({ enabled: !ready.enabled }),
+                    ready.enabled ? "Private Connect disabled." : "Private Connect ready.",
                   );
                 }}
               >
-                <Power size={14} aria-hidden="true" />{state.enabled ? "Disable" : "Enable"}
+                <Power size={14} aria-hidden="true" />{ready.enabled ? "Disable" : "Enable"}
               </button>
             </>
-          )}
+          ) : loaded.error
+            ? <button type="button" className="secondary-button" onClick={loaded.retry}>Retry</button>
+            : undefined}
         />
-        <SettingActionRow
-          className="runtime-log-setting"
-          title="Open on another device"
-          description={state.externalUrl ?? "Turn on Private Connect to create a private link."}
-          actions={(
-            <button
-              type="button"
-              className="secondary-button"
-              aria-disabled={pairingUnavailable || undefined}
-              onClick={() => {
-                if (!pairingUnavailable) void createInvitation();
-              }}
-            >
-              <Link size={14} aria-hidden="true" />Create pairing link
-            </button>
-          )}
-        />
-        {state.invitation && (
-          <div className="private-connect-pairing" role="group" aria-labelledby="pairing-link-heading">
-            <SettingCopy
-              title="Pairing link"
-              titleId="pairing-link-heading"
-              description="Expires in five minutes. Share it only with a device on your tailnet."
+        {ready && (
+          <>
+            <SettingActionRow
+              className="runtime-log-setting"
+              title="Open on another device"
+              description={ready.externalUrl ?? "Turn on Private Connect to create a private link."}
+              actions={(
+                <button
+                  type="button"
+                  className="secondary-button"
+                  aria-disabled={pairingUnavailable || undefined}
+                  onClick={() => {
+                    if (!pairingUnavailable) void createInvitation();
+                  }}
+                >
+                  <Link size={14} aria-hidden="true" />Create pairing link
+                </button>
+              )}
             />
-            {qr && (
-              <img
-                className="private-connect-qr"
-                src={qr}
-                alt="Short-lived Private Connect pairing QR code"
-              />
+            {ready.invitation && (
+              <div className="private-connect-pairing" role="group" aria-labelledby="pairing-link-heading">
+                <SettingCopy
+                  title="Pairing link"
+                  titleId="pairing-link-heading"
+                  description="Expires in five minutes. Share it only with a device on your tailnet."
+                />
+                {qr && (
+                  <img
+                    className="private-connect-qr"
+                    src={qr}
+                    alt="Short-lived Private Connect pairing QR code"
+                  />
+                )}
+                <div className="private-connect-link">
+                  <input
+                    className="setting-input"
+                    aria-label="Private Connect pairing link"
+                    value={ready.invitation.url}
+                    readOnly
+                  />
+                  <button type="button" className="secondary-button" onClick={() => void copyInvitation()}>
+                    <Copy size={14} aria-hidden="true" />Copy link
+                  </button>
+                </div>
+              </div>
             )}
-            <div className="private-connect-link">
-              <input
-                className="setting-input"
-                aria-label="Private Connect pairing link"
-                value={state.invitation.url}
-                readOnly
-              />
-              <button type="button" className="secondary-button" onClick={() => void copyInvitation()}>
-                <Copy size={14} aria-hidden="true" />Copy link
-              </button>
-            </div>
-          </div>
+            {ready.status === "error" && (
+              <p className="private-connect-note">
+                {ready.statusMessage ?? "Private Connect could not be established safely."}
+              </p>
+            )}
+            {ready.notice && <p className="private-connect-note">{ready.notice}</p>}
+            <SettingNoteStatus notice={message} />
+          </>
         )}
-        {state.status === "error" && (
-          <p className="private-connect-note">
-            {state.statusMessage ?? "Private Connect could not be established safely."}
-          </p>
-        )}
-        {state.notice && <p className="private-connect-note">{state.notice}</p>}
-        <SettingNoteStatus notice={message} />
       </SettingsGroup>
 
-      {state.pendingPairings.map((pending) => {
+      {ready?.pendingPairings.map((pending) => {
         const selected = projectSelections[pending.requestId] ?? [];
         const toggleProject = (projectId: string): void => {
           setProjectSelections((current) => ({
@@ -273,7 +266,7 @@ export function ConnectionsAndDevicesSettings({
         );
       })}
 
-      <div data-setting-id="paired-devices">
+      {ready && <div data-setting-id="paired-devices">
         <SettingsGroup
           title="Paired devices"
           headingId="paired-devices-heading"
@@ -293,11 +286,11 @@ export function ConnectionsAndDevicesSettings({
           ))}
           <SettingDisclosure summary="Security activity" className="private-connect-disclosure">
             <p className="private-connect-note">Recent local authority events. Prompt text and private content are never recorded.</p>
-            {(state.audit ?? []).length === 0 ? (
+            {(ready.audit ?? []).length === 0 ? (
               <p className="private-connect-note">No security activity yet.</p>
             ) : (
               <ul className="private-connect-audit-list" aria-label="Security activity">
-                {[...(state.audit ?? [])].reverse().map((event) => (
+                {[...(ready.audit ?? [])].reverse().map((event) => (
                   <li key={event.id}>
                     <span><strong>{event.detail}</strong><small>{event.type}</small></span>
                     <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString(INTERFACE_LOCALE)}</time>
@@ -308,20 +301,20 @@ export function ConnectionsAndDevicesSettings({
           </SettingDisclosure>
           <SettingDisclosure summary="Advanced diagnostics" className="private-connect-disclosure private-connect-diagnostics">
             <dl>
-              <div><dt>Tailscale</dt><dd>{state.diagnostics.tailscale}</dd></div>
-              <div><dt>MagicDNS</dt><dd>{state.diagnostics.magicDns}</dd></div>
-              <div><dt>Gateway port</dt><dd>{state.diagnostics.gatewayPort ?? "off"}</dd></div>
-              <div><dt>Serve port</dt><dd>{state.diagnostics.servePort ?? "off"}</dd></div>
-              <div><dt>Mapping</dt><dd>{state.diagnostics.mappingOwnership}</dd></div>
-              <div><dt>Inertia</dt><dd>{state.diagnostics.buildVersion ?? "unknown"}</dd></div>
-              <div><dt>Protocol</dt><dd>{state.diagnostics.protocolVersion ?? 1}</dd></div>
-              {state.diagnostics.errorClass && (
-                <div><dt>Last safe error</dt><dd>{state.diagnostics.errorClass}</dd></div>
+              <div><dt>Tailscale</dt><dd>{ready.diagnostics.tailscale}</dd></div>
+              <div><dt>MagicDNS</dt><dd>{ready.diagnostics.magicDns}</dd></div>
+              <div><dt>Gateway port</dt><dd>{ready.diagnostics.gatewayPort ?? "off"}</dd></div>
+              <div><dt>Serve port</dt><dd>{ready.diagnostics.servePort ?? "off"}</dd></div>
+              <div><dt>Mapping</dt><dd>{ready.diagnostics.mappingOwnership}</dd></div>
+              <div><dt>Inertia</dt><dd>{ready.diagnostics.buildVersion ?? "unknown"}</dd></div>
+              <div><dt>Protocol</dt><dd>{ready.diagnostics.protocolVersion ?? 1}</dd></div>
+              {ready.diagnostics.errorClass && (
+                <div><dt>Last safe error</dt><dd>{ready.diagnostics.errorClass}</dd></div>
               )}
             </dl>
           </SettingDisclosure>
         </SettingsGroup>
-      </div>
+      </div>}
     </>
   );
 }

@@ -86,6 +86,6 @@ See [AGENTS.md](AGENTS.md) for repository conventions and [RELEASING.md](docs/RE
 
 If an older Windows update leaves startup blocked by unconfirmed process cleanup, follow the [profile recovery steps](docs/WINDOWS_STARTUP_RECOVERY.md).
 
-See [Troubleshooting](docs/user/troubleshooting.md) for fixes grouped by symptom. Refresh a provider in **Settings → Agents** if it stops responding. For app problems, use **Settings → Help → Support → Copy support summary**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
+See [Troubleshooting](docs/user/troubleshooting.md) for fixes grouped by symptom. Refresh a provider in **Settings → Agents** if it stops responding. For app problems, use **Settings → Help → Diagnostics → Copy support summary**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
 
 [Apache 2.0](LICENSE). Packaged builds include third-party notices and dependency licenses.

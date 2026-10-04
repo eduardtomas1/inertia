@@ -189,6 +189,9 @@ describe("Settings composite updates", () => {
       value: {
         getPlatform: () => "linux",
         getAppHealth: vi.fn(async () => null),
+        queryDiagnostics: vi.fn(async () => ({ records: [], events: [], capture: true, since: null, total: 0,
+          nextOffset: null, persistence: "available", runtime: "ready", dropped: 0, revision: 1,
+          currentIncidentIds: [], facets: { providerIds: [], projectIds: [] } })),
       },
     });
     const lifecycleDiagnostics: RuntimeLifecycleDiagnosticSnapshot = {
@@ -224,9 +227,8 @@ describe("Settings composite updates", () => {
     />);
     fireEvent.click(screen.getByRole("button", { name: "Help" }));
 
-    expect(await screen.findByText("Waiting for provider cleanup")).toBeVisible();
-    expect(screen.getByText(/1 active turn · 1 open interaction/u))
-      .toHaveTextContent("generation 123456789abc");
+    const health = await screen.findByRole("group", { name: "Process health" });
+    expect(health).toHaveTextContent("Waiting for provider cleanup · 1 active turn · 1 open interaction");
     expect(document.body).not.toHaveTextContent("conversation-secret-id");
 
     const blockedUpdate: AppUpdateStatus = {
@@ -254,7 +256,7 @@ describe("Settings composite updates", () => {
       }}
       appUpdateStatus={blockedUpdate}
     />);
-    expect(await screen.findByText("Update blocked by active work")).toBeVisible();
+    expect(await screen.findByText(/Update blocked by active work/u)).toBeVisible();
   });
 
   it("keeps healthy local metrics visible beside bounded partial warnings", async () => {
@@ -292,8 +294,8 @@ describe("Settings composite updates", () => {
 
     const warning = await screen.findByText("Partial health data: Browser cache storage could not be measured.");
     expect(warning).toHaveAttribute("role", "status");
-    expect(screen.getByText("Memory 30 MiB · Database 4.0 KiB · Browser cache unavailable · Temporary attachments 512 B")).toBeVisible();
-    expect(screen.getByText(/^Main 10 MiB · Interface 20 MiB · Local service unavailable · Measured/u)).toBeVisible();
+    expect(screen.getByText(/^Database 4\.0 KiB · Browser cache unavailable · Temporary attachments 512 B · Measured/u)).toBeVisible();
+    expect(screen.queryByText(/Memory|Local service/u)).toBeNull();
   });
 
   it.each([

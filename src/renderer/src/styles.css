@@ -9675,12 +9675,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: var(--surface-strong);
+  background: var(--text-muted);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
   transition: transform var(--motion-fast) var(--motion-ease);
 }
 
 .switch-control[data-checked="true"] .switch-thumb {
+  background: var(--accent-text);
   transform: translateX(16px);
 }
 

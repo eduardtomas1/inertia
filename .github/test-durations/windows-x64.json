@@ -836,7 +836,6 @@
     "tests/server/harness-capabilities.test.ts": 31,
     "tests/server/isolated-review-commands.test.ts": 19,
     "tests/server/isolated-run-controller.test.ts": 337,
-    "tests/server/issue-report-provider.test.ts": 206,
     "tests/server/issue-report.test.ts": 5610,
     "tests/server/kimi-acp-harness.test.ts": 19956,
     "tests/server/kimi-acp-session.test.ts": 8,

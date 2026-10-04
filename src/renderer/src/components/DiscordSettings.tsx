@@ -50,6 +50,16 @@ export function DiscordSettings({
     restorePostFocus.current = false;
     postTrigger.current?.focus();
   }, [confirming]);
+  const releaseFailed = discord.notice?.tone === "error";
+  const [captureOff, setCaptureOff] = useState(false);
+  useEffect(() => {
+    if (!releaseFailed || incidentId) return;
+    let active = true;
+    void window.inertia.queryDiagnostics({ limit: 1 })
+      .then((page) => { if (active) setCaptureOff(!page.capture); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [releaseFailed, incidentId]);
   const reportValidation = async (code: RendererDiagnostic["code"]): Promise<void> => {
     try {
       const result = await window.inertia.reportValidationDiagnostic({ code, correlationId: crypto.randomUUID() });
@@ -285,6 +295,7 @@ export function DiscordSettings({
       <div className="release-info-status">
         <SettingNoteStatus notice={discord.notice ?? (storageError ? { tone: "info", text: storageError } : null)} />
       </div>
+      {releaseFailed && !incidentId && captureOff && <p className="settings-card-note">Diagnostics capture is off, so this was not recorded.</p>}
       {incidentId && <button type="button" className="secondary-button discord-diagnostic-link" onClick={() => navigateDiagnosticContext({
         section: "help", anchor: "diagnostics-incidents", selection: { incidentId },
       })}>View diagnostics</button>}

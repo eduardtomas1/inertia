@@ -2,8 +2,9 @@
 
 Settings → Data → Storage → **Attachment storage** controls originals
 retained by this Inertia profile. Images and documents share this space across
-active and archived chats. The existing Local resource health panel separately
-reports app RAM, database size, browser cache and temporary attachment bytes.
+active and archived chats. The Local storage panel above it separately reports
+database size, browser cache and temporary attachment bytes; app memory and CPU
+are in Settings → Help → Diagnostics under Process health.
 
 ## Disk capacity and ownership
 

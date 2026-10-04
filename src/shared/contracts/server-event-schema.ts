@@ -1105,7 +1105,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return unknownEventType(type);
   }
 }
-import { issueReportSchema } from "../issue-report";
+import { issueReportResult } from "../issue-report";
 import { messageQueueResultSchema } from "../queued-messages";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
@@ -1114,7 +1114,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,
-  "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
+  "support.report": issueReportResult,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),

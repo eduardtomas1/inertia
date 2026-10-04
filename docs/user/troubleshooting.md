@@ -16,7 +16,7 @@ OpenCode keeps admitted approval and question requests open while you decide. It
 
 ## A provider feature is unavailable
 
-Open **Settings → Agents** and choose the provider. Its feature availability list shows which features are ready, need setup, or are checked when a chat starts. The installation status above it shows the version Inertia verified. Some features depend on the selected model; Cursor only offers reasoning choices observed for that model.
+Open **Settings → Agents**, choose the provider and open **Details** to see which features are ready, need setup, or are checked when a chat starts. The installation status above it shows the version Inertia verified. Some features depend on the selected model; Cursor only offers reasoning choices observed for that model.
 
 ## I can't open another chat window
 
@@ -46,7 +46,7 @@ The recovery notice explains what happened and offers recovery actions, includin
 
 ## Check local storage and backups
 
-Open **Settings → Data → Storage**. **Local resource health** and **Full local database backup** measure the database, browser cache and temporary attachments while open, and show backup retention and the last validated backup. Backup files and saved attachment files are excluded from those measured totals. Clearing browser cache keeps chats and backups; archiving a chat keeps its data.
+Open **Settings → Data → Storage**. **Local storage** and **Full local database backup** measure the database, browser cache and temporary attachments while open, and show backup retention and the last validated backup. Backup files and saved attachment files are excluded from those measured totals. Clearing browser cache keeps chats and backups; archiving a chat keeps its data.
 
 ## Startup is blocked on Windows after an update
 
@@ -54,7 +54,7 @@ Follow the [profile recovery steps](../WINDOWS_STARTUP_RECOVERY.md).
 
 ## Report a problem
 
-- **Settings → Help → Report an issue** guides you through a private report. You review the exact text before anything is submitted to GitHub. See [Guided issue reporting](../ISSUE_REPORTING.md).
-- **Settings → Help → Support → Copy support summary** copies a bounded summary you can attach to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml).
+- **Settings → Help → Report an issue** builds the exact issue for you to review and edit. Nothing is submitted until you choose **Create on GitHub**. See [Issue reporting](../ISSUE_REPORTING.md).
+- **Settings → Help → Diagnostics → Copy support summary** copies a bounded summary you can attach to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml).
 
 Don't share raw logs, databases or credentials.

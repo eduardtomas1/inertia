@@ -386,16 +386,16 @@ test("keeps runtime support and application update checks explicit in settings",
     { exact: true },
   )).toBeVisible();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
-  await expect(page.getByText("Local lifecycle and failure metadata, without prompts, source, tokens or credentials.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "Diagnostics", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
-  await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();
+  await expect(page.getByText("Support summary copied", { exact: false })).toBeVisible();
   const supportSummary = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
   expect(supportSummary).toContain("Inertia support summary");
   expect(supportSummary).toContain("Privacy: prompts, source, project paths");
   expect(supportSummary).not.toContain(workspaceDirectory);
   expect(supportSummary).not.toContain("sample.ts");
   await page.getByRole("button", { name: "Reveal log folder" }).click();
-  await expect(page.getByText("Runtime log folder opened.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Log folder opened.", { exact: true })).toBeVisible();
 
   const logDirectory = join(testDirectory, "electron-profile", "logs", "runtime");
   await expect.poll(async () => (await stat(logDirectory)).isDirectory()).toBe(true);

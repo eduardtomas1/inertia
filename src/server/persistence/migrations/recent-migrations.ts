@@ -12,6 +12,7 @@ import { queuedMessagesMigration } from "./queued-messages";
 import { turnSessionRecoveryMigration } from "./turn-session-recovery";
 import { workingIndicatorMigration } from "./working-indicator";
 import { scratchProjectMigration } from "./scratch-project";
+import { issueReportPreviewMigration } from "./issue-report-preview";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -27,4 +28,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   scratchProjectMigration,
   limitResetMigration,
   notificationPreferencesMigration,
+  issueReportPreviewMigration,
 ];

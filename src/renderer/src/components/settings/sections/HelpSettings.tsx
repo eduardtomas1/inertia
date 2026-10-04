@@ -2,19 +2,17 @@ import { Compass } from "lucide-react";
 
 import type {
   Conversation,
-  ModelBackendProfileView,
   Project,
   ProviderInfo,
   RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import { useLoadedSurface } from "../../../hooks/useLoadedSurface";
-import type { DiagnosticSelection, SettingsSection } from "../../../lib/settingsTarget";
+import type { DiagnosticSelection } from "../../../lib/settingsTarget";
 import { openWelcomeGuide } from "../../../utils/welcomeGuide";
 import type { IssueReportSettingsProps } from "../../IssueReportSettings";
 import {
   loadDiagnosticsSettings,
   loadIssueReportSettings,
-  loadLifecycleIntegritySettings,
 } from "../../settingsSectionLoaders";
 import { AppUpdateSettings, type AppUpdateSettingsProps } from "../AppUpdateSettings";
 import { SettingActionRow, SettingsGroup } from "../SettingsLayout";
@@ -23,20 +21,16 @@ import { SettingsSectionFallback } from "../SettingsSectionFallback";
 export const loadHelpSections = (): Promise<unknown> => Promise.all([
   loadIssueReportSettings(),
   loadDiagnosticsSettings(),
-  loadLifecycleIntegritySettings(),
 ]);
 
 export interface HelpSettingsProps extends AppUpdateSettingsProps {
   disabled: boolean;
   providers: ProviderInfo[];
-  backendProfiles: ModelBackendProfileView[];
   projects: Project[];
-  regularProjects: Project[];
   conversations: Conversation[];
   selection?: DiagnosticSelection;
   lifecycleDiagnostics?: RuntimeLifecycleDiagnosticSnapshot;
   onReportCommand?: IssueReportSettingsProps["request"];
-  onNavigate: (section: SettingsSection) => void;
   onRevealRuntimeLogs: () => Promise<string>;
   onCopyRuntimeDiagnosticReport: () => Promise<{ copied: boolean; eventCount: number }>;
 }
@@ -44,43 +38,34 @@ export interface HelpSettingsProps extends AppUpdateSettingsProps {
 export function HelpSettings({
   disabled,
   providers,
-  backendProfiles,
   projects,
-  regularProjects,
   conversations,
   selection,
   lifecycleDiagnostics,
   onReportCommand,
-  onNavigate,
   onRevealRuntimeLogs,
   onCopyRuntimeDiagnosticReport,
   ...appUpdate
 }: HelpSettingsProps): React.JSX.Element {
   const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, true);
   const DiagnosticsSettings = useLoadedSurface(loadDiagnosticsSettings, true);
-  const LifecycleIntegritySettings = useLoadedSurface(loadLifecycleIntegritySettings, true);
-  if (!IssueReportSettings || !DiagnosticsSettings || !LifecycleIntegritySettings) return <SettingsSectionFallback />;
+  if (!IssueReportSettings || !DiagnosticsSettings) return <SettingsSectionFallback />;
   return (
     <>
       {onReportCommand && (
-        <IssueReportSettings
-          providers={providers}
-          backendProfiles={backendProfiles}
-          projects={regularProjects}
-          disabled={disabled}
-          request={onReportCommand}
-          onProviderSetup={() => onNavigate("agents")}
-        />
+        <IssueReportSettings providers={providers} disabled={disabled} request={onReportCommand} />
       )}
-      <DiagnosticsSettings projects={projects} conversations={conversations} providers={providers} selection={selection} />
+      <DiagnosticsSettings
+        projects={projects}
+        conversations={conversations}
+        providers={providers}
+        selection={selection}
+        lifecycleDiagnostics={lifecycleDiagnostics}
+        appUpdateStatus={appUpdate.appUpdateStatus}
+        onRevealRuntimeLogs={onRevealRuntimeLogs}
+        onCopyRuntimeDiagnosticReport={onCopyRuntimeDiagnosticReport}
+      />
       <SettingsGroup title="Support" headingId="support-heading">
-        <LifecycleIntegritySettings
-          surface="runtime-diagnostics"
-          diagnostics={lifecycleDiagnostics}
-          appUpdateStatus={appUpdate.appUpdateStatus}
-          onRevealRuntimeLogs={onRevealRuntimeLogs}
-          onCopyRuntimeDiagnosticReport={onCopyRuntimeDiagnosticReport}
-        />
         <SettingActionRow
           id="welcome-guide"
           className="runtime-log-setting"

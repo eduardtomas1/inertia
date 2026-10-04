@@ -66,18 +66,7 @@ function props(target: ComponentProps<typeof SettingsView>["target"]): Component
   };
 }
 
-function optionLabels(select: HTMLElement): string[] {
-  return within(select).getAllByRole("option").map(({ textContent }) => textContent ?? "");
-}
-
 describe("settings project lists", () => {
-  it("keeps the folder for chats without a project out of the issue report scope", async () => {
-    Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
-    render(<SettingsView {...props({ section: "help" })} />);
-    const scope = await screen.findByRole("combobox", { name: "Diagnostic scope" });
-    expect(optionLabels(scope)).toEqual(["App only", "Studio · counts only"]);
-  });
-
   it("keeps the folder for chats without a project out of the project chooser", async () => {
     Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => "darwin" } });
     render(<SettingsView {...props({ section: "projects" })} />);

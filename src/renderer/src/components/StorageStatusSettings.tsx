@@ -24,17 +24,6 @@ interface StorageStatusSettingsProps {
   onClearCache(): Promise<void>;
 }
 
-function processMemory(health: AppHealthSnapshot): string {
-  const renderer = health.rendererProcesses
-    ? formatBytes(health.rendererProcesses.reduce((total, process) => total + process.memoryBytes, 0))
-    : "unavailable";
-  return [
-    `Main ${health.mainProcess ? formatBytes(health.mainProcess.memoryBytes) : "unavailable"}`,
-    `Interface ${renderer}`,
-    `Local service ${health.runtimeProcess ? formatBytes(health.runtimeProcess.memoryBytes) : "unavailable"}`,
-  ].join(" · ");
-}
-
 export function StorageStatusSettings({
   health,
   healthUnavailable,
@@ -48,13 +37,10 @@ export function StorageStatusSettings({
     <SettingActionRow
       id="resource-health"
       className="runtime-log-setting"
-      title="Local resource health"
+      title="Local storage"
       details={health ? <>
         <small className="data-facts">
-          {`Memory ${formatHealthBytes(health.totalMemoryBytes)} · Database ${formatHealthBytes(health.databaseBytes)} · Browser cache ${formatHealthBytes(health.cacheBytes)} · Temporary attachments ${formatHealthBytes(health.temporaryAttachmentBytes)}`}
-        </small>
-        <small className="data-facts">
-          {processMemory(health)}
+          {`Database ${formatHealthBytes(health.databaseBytes)} · Browser cache ${formatHealthBytes(health.cacheBytes)} · Temporary attachments ${formatHealthBytes(health.temporaryAttachmentBytes)}`}
           {" · Measured "}
           <time dateTime={health.sampledAt}>{new Date(health.sampledAt).toLocaleTimeString(INTERFACE_LOCALE)}</time>
         </small>

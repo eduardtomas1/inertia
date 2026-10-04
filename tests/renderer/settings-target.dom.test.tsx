@@ -190,11 +190,12 @@ describe("Settings external section targets", () => {
     />);
     expect(await screen.findByLabelText("Access Phone")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Help" }));
     expect(getAppHealth).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
     await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/Memory 1\.0 KiB · Database 5\.0 MiB · Browser cache unavailable/u)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Data" }));
+    await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/^Database 5\.0 MiB · Browser cache unavailable/u)).toBeVisible();
     expect(screen.getByText("Full local database backup")).toBeVisible();
     expect(screen.getByText("Chats, settings and attachment records, without secrets or attachment files.")).toBeVisible();
     expect(document.querySelector('[data-setting-id="database-backup"] .data-facts'))

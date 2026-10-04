@@ -414,7 +414,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Diagnostics",
-        detail: "Settings → Help keeps a local history of incidents that you can search, filter and export.",
+        detail: "Settings → Help keeps a local history of app events and incidents that you can search, filter, export or clear. Capture can be turned off there.",
         jump: "Open Settings → Help",
       },
       {
@@ -424,7 +424,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Support summary",
-        detail: "Copy support summary in Settings → Help copies a bounded summary to attach to a bug report.",
+        detail: "Copy support summary, under Diagnostics in Settings → Help, copies a bounded summary to attach to a bug report.",
       },
       {
         name: "Updates",

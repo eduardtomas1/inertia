@@ -120,6 +120,25 @@ describe("restricted CLI runner", () => {
     );
   });
 
+  it("classifies a failed exit from its bounded stderr without exposing the stderr", async () => {
+    const classifyFailure = vi.fn((stderr: string) => stderr.includes("not logged") ? "signed-out" : null);
+    const failure = await runRestrictedCli(
+      process.execPath,
+      ["-e", "process.stderr.write('You are not logged into any GitHub hosts.');process.exit(1)"],
+      {
+        cwd: process.cwd(),
+        environment: { PATH: process.env.PATH },
+        failureMessage: "Fixture failed.",
+        classifyFailure,
+      },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(RestrictedCliError);
+    expect(failure).toMatchObject({ code: "failed", reason: "signed-out", message: "Fixture failed." });
+    expect(String((failure as Error).message)).not.toContain("logged");
+    expect(classifyFailure).toHaveBeenCalledWith("You are not logged into any GitHub hosts.");
+  });
+
   it("terminates an owned process tree when a read is cancelled", async () => {
     const controller = new AbortController();
     const terminateProcessTree = vi.fn(async () => true);

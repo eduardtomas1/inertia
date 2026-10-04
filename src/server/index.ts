@@ -690,7 +690,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     handlers: [
       queuedMessages.handler,
       ...usageRuntime.handlers,
-      createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
+      createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
         broadcastSnapshot: flushSnapshot,

@@ -222,7 +222,7 @@ describe("Settings anchors", () => {
   it("skips a hidden first control when it lands on the diagnostics for a selected incident", async () => {
     installFullBridge();
     const style = document.createElement("style");
-    style.textContent = ".diagnostics-filter-disclosure > summary { display: none; }";
+    style.textContent = ".diagnostics-search { display: none; }";
     document.head.append(style);
     const tabIndex = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "tabIndex")!;
     const summaryTabIndex = vi.spyOn(HTMLElement.prototype, "tabIndex", "get").mockImplementation(function (this: HTMLElement) {
@@ -232,7 +232,7 @@ describe("Settings anchors", () => {
       render(<SettingsView {...settingsViewProps({
         target: { section: "help", anchor: "diagnostics-incidents", selection: { incidentId: "11111111-1111-4111-8111-111111111111" } },
       })} />);
-      await waitFor(() => expect(screen.getByRole("button", { name: "Show all incidents" })).toHaveFocus());
+      await waitFor(() => expect(screen.getByRole("button", { name: "Show all" })).toHaveFocus());
     } finally {
       summaryTabIndex.mockRestore();
       style.remove();

@@ -50,7 +50,7 @@ Open **Settings → Help** and choose **Show welcome guide**.
 - [Snapshots and compaction receipts](../SNAPSHOTS_AND_COMPACTION.md)
 - [Inertia Agent Browser](../AGENT_BROWSER.md)
 - [Private Connect](../PRIVATE_CONNECT.md) and its [security model](../PRIVATE_CONNECT_SECURITY.md)
-- [Guided issue reporting](../ISSUE_REPORTING.md)
+- [Issue reporting](../ISSUE_REPORTING.md)
 
 ### Can I choose my own theme colors?
 

@@ -75,7 +75,7 @@ describe("Keyboard settings", () => {
 });
 
 describe("Archived chats", () => {
-  it("restores an archived chat and counts archived chats in the navigation", async () => {
+  it("restores an archived chat and keeps the navigation free of counts", async () => {
     const archived = { ...conversation("33333333-3333-4333-8333-333333333333"), title: "Old investigation", archivedAt: "2026-09-01T00:00:00.000Z" };
     const onUnarchive = vi.fn();
     render(<SettingsView {...settingsViewProps({
@@ -84,7 +84,9 @@ describe("Archived chats", () => {
       archived: [archived],
       onUnarchive,
     })} />);
-    expect(screen.getByRole("button", { name: /^Data 1$/u })).toHaveAttribute("aria-current", "page");
+    const navigation = within(screen.getByRole("navigation", { name: "Settings sections" }));
+    expect(navigation.getByRole("button", { name: "Data" })).toHaveAttribute("aria-current", "page");
+    expect(navigation.getByRole("button", { name: "Data" })).toHaveTextContent(/^Data$/u);
     const thread = within(await screen.findByRole("list", { name: "Archived chats" }));
     expect(thread.getByText("Old investigation")).toBeVisible();
     fireEvent.click(thread.getByRole("button", { name: "Restore Old investigation" }));

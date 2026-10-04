@@ -187,7 +187,6 @@ const SettingsShell = memo(function SettingsShell({
               >
                 <Icon size={15} />
                 <span>{item.label}</span>
-                {item.id === "data" && view.archived.length > 0 && <small>{view.archived.length}</small>}
               </button>
             );
           })}

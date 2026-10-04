@@ -91,7 +91,7 @@ test("renders partial health failures without hiding healthy metrics", async ({
   });
   try {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
+    await page.getByRole("button", { name: "Data", exact: true }).click();
     await expect(page.getByText("Partial health data", { exact: true }))
       .toBeVisible();
     await expect(page.getByRole("region", { name: "Storage", exact: true })

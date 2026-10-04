@@ -33,7 +33,7 @@ test("manages retained files across chats, persists disk settings and confirms c
     let page = app.page;
     const open = async () => {
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await page.getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
+      await page.getByRole("button", { name: "Data", exact: true }).click();
     };
     await open();
     await expect(page.getByText(/2 of 65,536 files/u)).toBeVisible();

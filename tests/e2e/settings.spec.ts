@@ -11,7 +11,7 @@ import {
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
-import { expectFlatSettingsSections } from "./support/settings-assertions";
+import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -80,6 +80,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Text density" }).getByRole("radio", { name: "Comfortable" }).click();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Chats", exact: true }).click();
+  await expectBorderlessSettingsRows(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("switch", { name: "Wrap code by default" }).click();
   await expect(page.getByRole("switch", { name: "Wrap code by default" })).toHaveAttribute("aria-checked", "true");
   const providers = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
@@ -336,8 +337,8 @@ test("changes the theme only from Settings", async () => {
 
 test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u }).click();
-  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: /^Data(?: \d+)?$/u })).toHaveAttribute("aria-current", "page");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
   await expect(page.getByText(/· Every 1 hour · 5 copies, 512 MiB in total$/u)).toBeVisible();
   await expect(page.getByText(/^Memory .+ · Database .+ · Browser cache .+ · Temporary attachments .+$/u)).toBeVisible();

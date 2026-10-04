@@ -9646,39 +9646,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--surface-muted);
 }
 
-
-.settings-form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-}
-
-.settings-form-grid label {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--text-soft);
-  font-size: 8.5px;
-  font-weight: 610;
-}
-
-.settings-form-grid input,
-.settings-form-grid select {
-  width: 100%;
-  height: 38px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-medium);
-  outline: 0;
-  color: var(--text);
-  background: var(--surface-strong);
-  font-size: 9.5px;
-}
-
-.settings-form-grid input:focus,
-.settings-form-grid select:focus { border-color: var(--accent); }
-
 .switch-control {
   position: relative;
   width: 37px;
@@ -10055,10 +10022,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .changes-layout,
   .files-layout {
     grid-template-columns: minmax(130px, 36%) minmax(0, 1fr);
-  }
-
-  .settings-form-grid {
-    grid-template-columns: 1fr;
   }
 
   .message-scroll {
@@ -13065,13 +13028,7 @@ button.sent-attachment-open:focus-visible {
   height: var(--ui-control-height);
 }
 
-.settings-form-grid input,
-.settings-form-grid select {
-  font-size: var(--ui-font-secondary);
-}
-
-.settings-card-note,
-.settings-form-grid label {
+.settings-card-note {
   font-size: var(--ui-font-micro);
 }
 

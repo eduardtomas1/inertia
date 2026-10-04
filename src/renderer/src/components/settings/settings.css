@@ -325,7 +325,11 @@
 }
 
 .setting-note-status:empty {
-  margin-top: -5px;
+  min-height: calc(var(--ui-font-micro) * 1.4);
+}
+
+.setting-note-status:empty:has(+ .setting-note-status.is-error) {
+  display: none;
 }
 
 .setting-select,
@@ -518,7 +522,7 @@
   margin-top: 0;
 }
 
-.settings-content .secondary-button[aria-disabled="true"] {
+.settings-content :is(.primary-button, .secondary-button)[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: var(--disabled-opacity);
 }

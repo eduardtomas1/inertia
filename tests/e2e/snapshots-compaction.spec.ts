@@ -112,8 +112,9 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await app.expectNoViewportOverflow();
     await save(`snapshot-settings-privacy-${theme}`);
     await navigation.getByRole("button", { name: "Keyboard", exact: true }).click();
+    await expect(setup.getByRole("combobox", { name: "Window snapshot" })).not.toHaveAttribute("aria-disabled", "true");
     await setup.getByRole("combobox", { name: "Window snapshot" }).selectOption("accelerator");
-    await expect(setup.getByRole("combobox", { name: "Window snapshot" })).toBeEnabled();
+    await expect(setup.getByRole("combobox", { name: "Window snapshot" })).not.toHaveAttribute("aria-disabled", "true");
     await page.reload();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();

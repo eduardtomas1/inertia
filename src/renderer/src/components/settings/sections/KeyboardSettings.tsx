@@ -41,7 +41,7 @@ function SnapshotShortcut(): React.JSX.Element | null {
         description="Works while another app is in front."
         value={state?.shortcut ?? "accelerator"}
         options={options}
-        disabled={pending || !state?.available}
+        inactive={pending || !state?.available}
         failure={(cause) => cause instanceof Error ? cause.message : "Snapshots unavailable."}
         onChange={(shortcut) => state ? configure({ type: "configure", enabled: state.enabled, shortcut }) : undefined}
       />

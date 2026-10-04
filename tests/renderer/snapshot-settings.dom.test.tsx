@@ -15,7 +15,7 @@ it("keeps the configuration result when an older focus refresh resolves later", 
   window.inertia = { ...original, snapshot };
   render(<SnapshotSettings />);
   const toggle = screen.getByRole("switch", { name: "Window snapshots" });
-  await waitFor(() => expect(toggle).toBeEnabled());
+  await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
   fireEvent.focus(window);
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle).toBeChecked());
@@ -35,7 +35,7 @@ it("shows the disabled authoritative state after shortcut registration fails", a
   fireEvent.click(toggle);
   expect(await screen.findByRole("alert")).toHaveTextContent("Shortcut is already registered.");
   await waitFor(() => expect(toggle).not.toBeChecked());
-  expect(toggle).toBeEnabled();
+  expect(toggle).not.toHaveAttribute("aria-disabled");
   expect(snapshot).toHaveBeenLastCalledWith({ type: "state" });
 });
 

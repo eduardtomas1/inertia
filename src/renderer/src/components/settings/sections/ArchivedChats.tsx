@@ -27,6 +27,9 @@ export function ArchivedChats({
   const [limit, setLimit] = useState(ARCHIVED_CHATS_PAGE_SIZE);
   const firstNewRow = useRef<number | null>(null);
   const list = useRef<HTMLUListElement>(null);
+  const filter = useRef<HTMLInputElement>(null);
+  const empty = useRef<HTMLParagraphElement>(null);
+  const restoring = useRef<{ id: string; index: number } | null>(null);
   const providerLabels = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
   const matches = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase(INTERFACE_LOCALE);
@@ -44,11 +47,20 @@ export function ArchivedChats({
     firstNewRow.current = null;
     list.current?.querySelectorAll<HTMLButtonElement>("button")[index]?.focus();
   }, [limit]);
+  useLayoutEffect(() => {
+    const pending = restoring.current;
+    if (!pending || matches.some((chat) => chat.id === pending.id)) return;
+    restoring.current = null;
+    if (document.activeElement !== document.body) return;
+    const rows = list.current?.querySelectorAll<HTMLButtonElement>("button");
+    (rows?.[Math.min(pending.index, rows.length - 1)] ?? filter.current ?? empty.current)?.focus();
+  }, [matches]);
   return (
     <SettingsGroup title="Archived chats" headingId="archive-heading">
       <div className="archived-chats" data-setting-id="archived-threads">
         {archived.length > 0 && (
           <input
+            ref={filter}
             className="setting-input archived-chats-filter"
             type="search"
             aria-label="Filter archived chats"
@@ -61,18 +73,21 @@ export function ArchivedChats({
           />
         )}
         {archived.length === 0
-          ? <p className="archived-chats-empty">No archived chats.</p>
+          ? <p ref={empty} className="archived-chats-empty" tabIndex={-1}>No archived chats.</p>
           : matches.length === 0
             ? <p className="archived-chats-empty">No archived chats match this filter.</p>
             : (
               <ul ref={list} className="archive-list" aria-label="Archived chats">
-                {shown.map((chat) => (
+                {shown.map((chat, index) => (
                   <li className="archive-row" key={chat.id}>
                     <span className="setting-copy">
                       <strong title={chat.title}>{chat.title}</strong>
                       <small>{providerLabels.get(chat.providerId) ?? chat.providerId}</small>
                     </span>
-                    <button type="button" className="secondary-button" aria-label={`Restore ${chat.title}`} disabled={disabled} onClick={() => onUnarchive(chat)}>
+                    <button type="button" className="secondary-button" aria-label={`Restore ${chat.title}`} disabled={disabled} onClick={() => {
+                      restoring.current = { id: chat.id, index };
+                      onUnarchive(chat);
+                    }}>
                       <ArchiveRestore size={14} aria-hidden="true" />Restore
                     </button>
                   </li>

@@ -1,6 +1,6 @@
 # Offline application diagnostics
 
-Open **Settings → Diagnostics** to read the newest warnings and errors, filter by
+Open **Settings → Help → Diagnostics** to read the newest warnings and errors, filter by
 severity/subsystem/provider/project/time, or search explanations, codes and
 correlation references. Expand an incident for the observed cause, uncertainty,
 next step, timestamp and occurrence count. Original inline errors remain visible.

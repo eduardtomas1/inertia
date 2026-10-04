@@ -72,7 +72,7 @@ credentials.
 
 ## Explicit recovery export
 
-Settings → Archive & data exposes a native save/open-dialog flow for recovery
+Settings → Data → Export and import exposes a native save/open-dialog flow for recovery
 JSON. The renderer never supplies a filesystem path. The utility runtime writes
 exports through a private temporary file, `fsync`, and atomic rename; imports
 reject symlinks, oversized files, malformed JSON, unknown keys, and changed

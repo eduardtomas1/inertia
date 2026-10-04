@@ -32,6 +32,7 @@ export function AppUpdateSettings({
   const isCanary = appUpdateStatus?.channel === "canary";
   const CanaryRollbackSetting = useLoadedSurface(loadCanaryRollbackSetting, isCanary);
   const checking = action.pending === "check" || checkingAppUpdate;
+  const checkBlocked = checking || BUSY_UPDATE_STATES.includes(appUpdateStatus?.state ?? "");
   const runUpdateAction = (operation: () => Promise<void>, failure: string): void => {
     void action.run(operation, { key: "update", success: null, failure });
   };
@@ -64,8 +65,9 @@ export function AppUpdateSettings({
             <button
               type="button"
               className="secondary-button"
-              disabled={checking || BUSY_UPDATE_STATES.includes(appUpdateStatus?.state ?? "")}
+              aria-disabled={checkBlocked || undefined}
               onClick={() => {
+                if (checkBlocked) return;
                 void action.run(onCheckAppUpdate, {
                   key: "check",
                   exclusive: true,

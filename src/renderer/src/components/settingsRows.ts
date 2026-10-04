@@ -29,6 +29,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   section("appearance", "Appearance", {
     Theme: [
       ["appearance-mode", "Mode", ["theme", "appearance", "dark mode", "light mode", "system", "colour", "color", "custom colours", "palette", "general"]],
+      ["muted-custom-colours", "Muted colours", ["pale", "soft", "saturation", "custom colours", "colour", "color"]],
     ],
     "Scale and density": [
       ["interface-scale", "Interface scale", ["zoom", "font", "font size", "text size", "bigger", "smaller", "general"]],

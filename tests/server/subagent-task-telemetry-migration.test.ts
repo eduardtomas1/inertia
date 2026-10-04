@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
-import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
+import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 import { subagentTaskTelemetryMigration } from "../../src/server/persistence/migrations/subagent-task-telemetry";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
@@ -47,7 +47,7 @@ function runMigrationAgain(database: Database.Database): void {
 
 describe("subagent task telemetry migration", () => {
   it("is schema version 90", () => {
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(90);
+    expect(runtimeMigrationCatalog().find(({ name }) => name === subagentTaskTelemetryMigration.name)?.version).toBe(90);
     expect(subagentTaskTelemetryMigration.name).toBe("PersistSubagentTaskTelemetry");
   });
 
@@ -100,7 +100,7 @@ describe("subagent task telemetry migration", () => {
         database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
       }
       database.exec("DROP INDEX workspace_runs_conversation_started_idx");
-      database.prepare("DELETE FROM schema_migrations WHERE version = 90").run();
+      database.prepare("DELETE FROM schema_migrations WHERE version >= 90").run();
       expect(tableInfo(database)).toEqual(tableInfo(reference));
       expect(schemaVersion(database)).toBe(89);
     } finally {

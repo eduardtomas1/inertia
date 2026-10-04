@@ -26,6 +26,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "tool_use_count",
     "duration_ms",
   ]],
+  [91, "app_state", ["muted_custom_colors"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

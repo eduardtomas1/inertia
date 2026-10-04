@@ -319,6 +319,7 @@ export interface StateRow {
   dark_color_theme?: ColorThemeId | null;
   light_custom_color?: string | null;
   dark_custom_color?: string | null;
+  muted_custom_colors?: number;
   compact_sidebar: 0 | 1;
   show_timestamps: 0 | 1;
   terminal_font_size: number;

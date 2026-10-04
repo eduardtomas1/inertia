@@ -73,7 +73,7 @@ export function ThemeLibrary({
   disabled,
   onUpdate,
 }: {
-  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor">;
+  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor" | "mutedCustomColors">;
   disabled: boolean;
   onUpdate: (settings: Partial<AppSettings>) => void;
 }): React.JSX.Element {
@@ -163,9 +163,9 @@ export function ThemeLibrary({
         <strong id={`${titleId}-custom`}>Custom colours</strong>
       </span>
       <div className="custom-theme-options" role="group" aria-labelledby={`${titleId}-custom`}>
-        <CustomThemeColor mode="light" value={settings.lightCustomColor} disabled={disabled}
+        <CustomThemeColor mode="light" value={settings.lightCustomColor} muted={settings.mutedCustomColors} disabled={disabled}
           onChange={(lightCustomColor) => onUpdate({ lightCustomColor })} />
-        <CustomThemeColor mode="dark" value={settings.darkCustomColor} disabled={disabled}
+        <CustomThemeColor mode="dark" value={settings.darkCustomColor} muted={settings.mutedCustomColors} disabled={disabled}
           onChange={(darkCustomColor) => onUpdate({ darkCustomColor })} />
       </div>
     </div>

@@ -22,6 +22,7 @@ const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold"
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 91) database.exec("ALTER TABLE app_state DROP COLUMN muted_custom_colors");
   if (version < 90) {
     for (const column of telemetryColumns) database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
     database.exec("DROP INDEX workspace_runs_conversation_started_idx");
@@ -67,13 +68,14 @@ describe("database health check for settings and subagent columns", () => {
     ...notificationColumns.map((column) => ({ version: 90, sql: `ALTER TABLE app_state DROP COLUMN ${column}` })),
     ...telemetryColumns.map((column) => ({ version: 90, sql: `ALTER TABLE subagent_traces DROP COLUMN ${column}` })),
     { version: 90, sql: "DROP INDEX workspace_runs_conversation_started_idx" },
+    { version: 91, sql: "ALTER TABLE app_state DROP COLUMN muted_custom_colors" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

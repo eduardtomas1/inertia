@@ -182,6 +182,7 @@ export interface AppSettings {
   darkColorTheme?: ColorThemeId;
   lightCustomColor?: string | null;
   darkCustomColor?: string | null;
+  mutedCustomColors?: boolean;
   compactSidebar: boolean;
   showTimestamps: boolean;
   terminalFontSize: number;
@@ -350,6 +351,7 @@ export const defaultSettings: AppSettings = {
   autoRemoveOldAttachments: false,
   theme: "system",
   colorTheme: "inertia",
+  mutedCustomColors: false,
   compactSidebar: false,
   showTimestamps: true,
   terminalFontSize: 13,

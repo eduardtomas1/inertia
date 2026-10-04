@@ -707,6 +707,11 @@
       "version": 90,
       "name": "PersistSubagentTaskTelemetry",
       "digest": "381d58213931bf6518e30e06b4f6763d44619361793e0b1d050f1a4d12076efa"
+    },
+    {
+      "version": 91,
+      "name": "PersistMutedCustomColors",
+      "digest": "953d3c401e62c801ef1a2c726e2a82b55adceb03ea12691c2907308deb2fec94"
     }
   ]
 }

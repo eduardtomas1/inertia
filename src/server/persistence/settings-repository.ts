@@ -42,6 +42,7 @@ export class SettingsRepository {
       : update.lightColorTheme !== undefined || update.colorTheme !== undefined ? null : current.lightCustomColor;
     const darkCustomColor = update.darkCustomColor !== undefined ? update.darkCustomColor
       : update.darkColorTheme !== undefined || update.colorTheme !== undefined ? null : current.darkCustomColor;
+    const mutedCustomColors = Boolean(next.mutedCustomColors) && Boolean(lightCustomColor || darkCustomColor);
     this.context.database.prepare(`
       UPDATE app_state SET
         theme = ?, color_theme = ?, light_color_theme = ?, dark_color_theme = ?, light_custom_color = ?, dark_custom_color = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
@@ -63,7 +64,8 @@ export class SettingsRepository {
         working_indicator_json = ?,
         completion_sound_json = ?,
         quota_warnings_enabled = ?, quota_warning_threshold = ?,
-        notify_only_in_background = ?
+        notify_only_in_background = ?,
+        muted_custom_colors = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -106,6 +108,7 @@ export class SettingsRepository {
         : state.completion_sound_json ?? "{}",
       Number(next.quotaWarnings.enabled), next.quotaWarnings.firstThreshold,
       Number(next.notifyOnlyInBackground),
+      Number(mutedCustomColors),
     );
   }
 

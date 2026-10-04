@@ -1,7 +1,7 @@
 import type { AppSettings } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 
-import { cachedCustomColor } from "./customTheme";
+import { cachedCustomColor, cachedMutedCustomColors } from "./customTheme";
 import { layoutStorage } from "./layoutStorage";
 import { cachedColorTheme, cachedThemePreference } from "./theme";
 
@@ -10,6 +10,7 @@ export function cachedAppSettings(): AppSettings {
     ...defaultSettings,
     lightCustomColor: cachedCustomColor(layoutStorage, "light"),
     darkCustomColor: cachedCustomColor(layoutStorage, "dark"),
+    mutedCustomColors: cachedMutedCustomColors(layoutStorage),
     theme: cachedThemePreference(layoutStorage) ?? defaultSettings.theme,
     colorTheme: cachedColorTheme(layoutStorage)
       ?? defaultSettings.colorTheme,

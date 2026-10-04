@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { defaultSettings } from "../../src/shared/contracts/app";
 import {
-  RESTORE_DEFAULTS_CONFIRMATION,
   RESTORE_DEFAULTS_KEEPS,
   RESTORE_DEFAULTS_RESETS,
+  RESTORE_DEFAULTS_SCOPE,
   restoredDefaultSettings,
 } from "../../src/shared/restore-defaults";
 
@@ -17,8 +17,8 @@ describe("restore defaults copy", () => {
   });
 
   it("states every reset and kept item in the confirmation", () => {
-    for (const { label } of RESTORE_DEFAULTS_RESETS) expect(RESTORE_DEFAULTS_CONFIRMATION).toContain(label);
-    for (const kept of RESTORE_DEFAULTS_KEEPS) expect(RESTORE_DEFAULTS_CONFIRMATION).toContain(kept);
+    for (const { label } of RESTORE_DEFAULTS_RESETS) expect(RESTORE_DEFAULTS_SCOPE).toContain(label);
+    for (const kept of RESTORE_DEFAULTS_KEEPS) expect(RESTORE_DEFAULTS_SCOPE).toContain(kept);
   });
 
   it("keeps imported sounds", () => {

@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
 import type { SettingsSection } from "../../src/renderer/src/lib/settingsTarget";
 import { defaultSettings } from "../../src/shared/contracts";
+import { RESTORE_DEFAULTS_SCOPE } from "../../src/shared/restore-defaults";
 import { settingsViewProps } from "./settings-view-fixtures";
 
 beforeEach(() => {
@@ -45,19 +46,42 @@ describe("Settings radio controls", () => {
 });
 
 describe("Restore defaults confirmation", () => {
-  it("asks before restoring and restores only after confirmation", async () => {
-    const confirm = vi.fn(() => false);
+  it("asks inline with Cancel focused, cancels with Escape and restores only after confirmation", async () => {
+    const confirm = vi.fn(() => true);
     vi.stubGlobal("confirm", confirm);
     const onRestoreDefaults = vi.fn(async () => undefined);
     render(<SettingsView {...settingsViewProps({ target: { section: "data" }, onRestoreDefaults })} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Restore defaults" }));
-    expect(confirm).toHaveBeenCalledOnce();
+    const trigger = await screen.findByRole("button", { name: "Restore defaults…" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const group = screen.getByRole("group", { name: "Confirm restore defaults" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(within(group).getByText("Restore defaults?")).toBeInTheDocument();
+    expect(within(group).getByText(RESTORE_DEFAULTS_SCOPE)).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { within(group).getByRole("button", { name: "Cancel" }).dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("group", { name: "Confirm restore defaults" })).toBeNull();
+    expect(trigger).toHaveFocus();
     expect(onRestoreDefaults).not.toHaveBeenCalled();
 
-    confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    fireEvent.click(trigger);
+    fireEvent.click(within(screen.getByRole("group", { name: "Confirm restore defaults" })).getByRole("button", { name: "Cancel" }));
+    expect(trigger).toHaveFocus();
+    expect(onRestoreDefaults).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    const restore = within(screen.getByRole("group", { name: "Confirm restore defaults" })).getByRole("button", { name: "Restore defaults" });
+    expect(restore).toHaveClass("is-danger");
+    restore.focus();
+    fireEvent.click(restore);
     expect(onRestoreDefaults).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("group", { name: "Confirm restore defaults" })).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await screen.findByText("Defaults restored.")).toBeInTheDocument();
   });
 
   it("restores defaults without asking when destructive confirmations are off", async () => {
@@ -73,6 +97,7 @@ describe("Restore defaults confirmation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Restore defaults" }));
 
     expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Confirm restore defaults" })).toBeNull();
     expect(onRestoreDefaults).toHaveBeenCalledOnce();
   });
 });

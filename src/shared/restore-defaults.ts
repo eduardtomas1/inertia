@@ -39,8 +39,6 @@ function sentenceList(items: readonly string[]): string {
 
 export const RESTORE_DEFAULTS_SCOPE = `Resets ${sentenceList(RESTORE_DEFAULTS_RESETS.map(({ label }) => label))}. Keeps ${sentenceList(RESTORE_DEFAULTS_KEEPS)}.`;
 
-export const RESTORE_DEFAULTS_CONFIRMATION = `Restore defaults? ${RESTORE_DEFAULTS_SCOPE}`;
-
 export function restoredDefaultSettings(current: Pick<AppSettings, "completionSound">): AppSettingsUpdate {
   return {
     ...defaultSettings,

@@ -518,7 +518,7 @@
   margin-top: 0;
 }
 
-.settings-content .secondary-button[aria-disabled="true"] {
+.settings-content :is(.primary-button, .secondary-button)[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: var(--disabled-opacity);
 }

@@ -47,7 +47,7 @@ it.each(["Linux x86_64", "MacIntel", "Win32"])("offers only supported snapshot s
   cleanup();
   render(<KeyboardSettings keybindings={DEFAULT_APP_KEYBINDINGS} disabled={false} onUpdate={vi.fn(async () => undefined)} />);
   const shortcut = await screen.findByRole("combobox", { name: "Window snapshot" });
-  await waitFor(() => expect(shortcut).toBeEnabled());
+  await waitFor(() => expect(shortcut).not.toHaveAttribute("aria-disabled"));
   expect(within(shortcut).queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
 });
 

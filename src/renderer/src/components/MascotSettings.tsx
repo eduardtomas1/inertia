@@ -26,12 +26,14 @@ export function MascotSettings() {
   }, []);
   const bridge = window.inertiaMascot;
   if (!bridge) return null;
+  const held = busy !== null || undefined;
   const run = (
     kind: NonNullable<typeof busy>,
     operation: () => Promise<void>,
     failure: string,
     report = setError,
   ): void => {
+    if (held) return;
     setBusy(kind);
     setError("");
     setSpriteError("");
@@ -65,6 +67,7 @@ export function MascotSettings() {
   const shown = pending ?? snapshot?.sprites;
   const counts = shown && `${MASCOT_SPRITE_STATES.length} states, ${shown.animated} animated`;
   const discardPreview = (): void => {
+    if (held) return;
     setPending(null);
     setSpriteError("");
     setNotice("");
@@ -73,11 +76,11 @@ export function MascotSettings() {
     <div className="mascot-settings">
       <div className="setting-row" data-setting-id="desktop-mascot">
         <span className="setting-copy"><strong>Desktop mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
-        <Switch label="Desktop mascot" checked={enabled} disabled={busy !== null || !snapshot} onChange={(value) => configure({ enabled: value })} />
+        <Switch label="Desktop mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure({ enabled: value })} />
       </div>
       <div className="setting-row" data-setting-id="mascot-motion">
         <span className="setting-copy"><strong>Animate mascot</strong></span>
-        <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} disabled={busy !== null || !snapshot} inactive={!enabled} onChange={(motion) => configure({ motion })} />
+        <Switch label="Animate mascot" checked={snapshot?.preferences.motion ?? true} inactive={held || !snapshot || !enabled} onChange={(motion) => configure({ motion })} />
       </div>
       {enabled && snapshot && <div className="mascot-settings-controls">
         <span role="status">{MASCOT_LABELS[snapshot.status.phase]}</span>
@@ -96,8 +99,8 @@ export function MascotSettings() {
             <small>{pending ? `Preview: ${counts}. Apply to use them.` : shown ? `Using your sprites: ${counts}.` : "Import your own artwork for each state. The built-in mascot stays until you apply a set."}</small>
           </span>
           <div>
-            <button className="secondary-button" type="button" disabled={busy !== null} onClick={exportTemplate}>{busy === "export" ? "Exporting…" : "Export template"}</button>
-            <button className="secondary-button" type="button" disabled={busy !== null} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
+            <button className="secondary-button" type="button" aria-disabled={held} onClick={exportTemplate}>{busy === "export" ? "Exporting…" : "Export template"}</button>
+            <button className="secondary-button" type="button" aria-disabled={held} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
           </div>
         </div>
         <details className="mascot-sprite-guide">
@@ -129,9 +132,9 @@ export function MascotSettings() {
         {spriteError && <p role="alert" className="mascot-sprites-error">{spriteError}</p>}
         {(pending || snapshot.sprites) && <div className="mascot-sprites-actions">
           {pending ? <>
-            <button className="primary-button" type="button" disabled={busy !== null} onClick={() => applySprites(pending)}>{busy === "apply" ? "Applying…" : "Apply sprites"}</button>
-            <button className="secondary-button" type="button" disabled={busy !== null} onClick={discardPreview}>Discard preview</button>
-          </> : <button className="secondary-button" type="button" disabled={busy !== null} onClick={resetSprites}>{busy === "reset" ? "Resetting…" : "Reset to default"}</button>}
+            <button className="primary-button" type="button" aria-disabled={held} onClick={() => applySprites(pending)}>{busy === "apply" ? "Applying…" : "Apply sprites"}</button>
+            <button className="secondary-button" type="button" aria-disabled={held} onClick={discardPreview}>Discard preview</button>
+          </> : <button className="secondary-button" type="button" aria-disabled={held} onClick={resetSprites}>{busy === "reset" ? "Resetting…" : "Reset to default"}</button>}
         </div>}
         {notice && <p role="status" className="settings-card-note">{notice}</p>}
         {shown && !enabled && <p className="settings-card-note">Turn on Desktop mascot above to see these sprites on your desktop.</p>}

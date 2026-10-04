@@ -15,6 +15,7 @@ export function RestoreDefaults({
 }): React.JSX.Element {
   const action = useSettingAction();
   const restore = (): void => {
+    if (action.busy) return;
     if (confirmDestructiveActions && !window.confirm(RESTORE_DEFAULTS_CONFIRMATION)) return;
     void action.run(onRestoreDefaults, { exclusive: true, success: "Defaults restored." });
   };
@@ -26,7 +27,7 @@ export function RestoreDefaults({
       description={RESTORE_DEFAULTS_SCOPE}
       notice={action.notice}
       actions={(
-        <button type="button" className="secondary-button" disabled={disabled || action.busy} onClick={restore}>
+        <button type="button" className="secondary-button" disabled={disabled} aria-disabled={action.busy || undefined} onClick={restore}>
           <RotateCcw size={14} />Restore defaults
         </button>
       )}

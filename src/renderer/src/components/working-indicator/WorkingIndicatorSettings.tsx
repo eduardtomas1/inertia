@@ -245,7 +245,8 @@ export function WorkingIndicatorSettings({
             <Switch
               label="Glow"
               checked={value.glow}
-              disabled={disabled || preview.color === "ink"}
+              disabled={disabled}
+              inactive={preview.color === "ink"}
               onChange={(glow) => commit({ glow })}
             />
           </SettingRow>
@@ -273,7 +274,8 @@ export function WorkingIndicatorSettings({
             <Switch
               label="Animate tool and step activity"
               checked={value.style === "automatic" && value.activity}
-              disabled={disabled || value.style !== "automatic"}
+              disabled={disabled}
+              inactive={value.style !== "automatic"}
               onChange={(activity) => commit({ activity })}
             />
           </SettingRow>

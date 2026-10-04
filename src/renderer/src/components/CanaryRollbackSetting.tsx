@@ -25,6 +25,7 @@ export default function CanaryRollbackSetting(): React.JSX.Element {
   }, []);
 
   const run = (operation: () => Promise<CanaryRollbackStatus>): void => {
+    if (action.busy) return;
     void action.run(async () => {
       try {
         setStatus(await operation());
@@ -53,9 +54,9 @@ export default function CanaryRollbackSetting(): React.JSX.Element {
           </small>
         )}
         actions={status?.state === "ready" && status.version !== INERTIA_VERSION ? (
-          <button type="button" className="secondary-button" disabled={action.busy} onClick={() => run(window.inertia.openCanaryRollback)}><RotateCcw size={14} aria-hidden="true" />{window.inertia.getPlatform() === "linux" ? "Show rollback file" : "Open rollback"} v{status.version}</button>
+          <button type="button" className="secondary-button" aria-disabled={action.busy || undefined} onClick={() => run(window.inertia.openCanaryRollback)}><RotateCcw size={14} aria-hidden="true" />{window.inertia.getPlatform() === "linux" ? "Show rollback file" : "Open rollback"} v{status.version}</button>
         ) : status?.state !== "ready" ? (
-          <button type="button" className="secondary-button" disabled={action.busy} onClick={() => run(window.inertia.prepareCanaryRollback)}><ShieldCheck size={14} aria-hidden="true" />Prepare rollback</button>
+          <button type="button" className="secondary-button" aria-disabled={action.busy || undefined} onClick={() => run(window.inertia.prepareCanaryRollback)}><ShieldCheck size={14} aria-hidden="true" />Prepare rollback</button>
         ) : null}
       />
     </>

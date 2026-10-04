@@ -37,7 +37,7 @@ export function SnapshotSettings(): React.JSX.Element {
       title="Window snapshots"
       description="Attach the foreground window and its accessibility context to the selected chat with a global shortcut. Experimental."
       checked={state?.enabled ?? false}
-      disabled={pending || !state?.available}
+      inactive={pending || !state?.available}
       failure={failureMessage}
       onChange={(enabled) => state ? configure({ type: "configure", enabled, shortcut: state.shortcut }) : undefined}
     />

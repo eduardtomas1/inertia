@@ -73,7 +73,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
           : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : !storage && !readFailed ? "Checking attachment usage…" : "Attachment usage unavailable. Refresh to check again."}</small>
         {readFailed && !action.notice && <small role="status">Storage usage could not be read. Refresh to try again.</small>}
       </>}
-      actions={<button ref={refreshRef} type="button" className="secondary-button" disabled={blocked} onClick={() => { setConfirm(null); setRevision((value) => value + 1); }}>Refresh storage</button>}
+      actions={<button ref={refreshRef} type="button" className="secondary-button" disabled={disabled} aria-disabled={busy || undefined} onClick={() => { if (busy) return; setConfirm(null); setRevision((value) => value + 1); }}>Refresh storage</button>}
     />
     <SettingSelect
       id="attachment-storage-limit"
@@ -93,7 +93,8 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
         <Switch
           label="Free space automatically when full"
           checked={settings.autoRemoveOldAttachments}
-          disabled={blocked}
+          disabled={disabled}
+          inactive={busy}
           onChange={(next) => {
             triggerRef.current = autoRemoveRef.current?.querySelector("button") ?? null;
             if (next) setConfirm("automatic");
@@ -127,7 +128,8 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       <small>This removes original images and documents from finished chats across the app, including archived chats. Messages remain, but those attachments will no longer open. Running chats are protected.</small>
       <div>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => { setConfirm(null); triggerRef.current?.focus(); }}>Cancel</button>
-        <button type="button" className="secondary-button is-danger" disabled={blocked} onClick={() => {
+        <button type="button" className="secondary-button is-danger" disabled={disabled} aria-disabled={busy || undefined} onClick={() => {
+          if (busy) return;
           restoreFocusRef.current = true;
           void (confirm === "cleanup"
             ? perform(cleanup, (message) => message ?? null)

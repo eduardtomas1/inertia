@@ -251,12 +251,13 @@ describe("working indicator settings", () => {
   it("enables activity indicators only for Automatic and preserves the saved switch", () => {
     renderSettings({ ...automatic, activity: true });
     const activity = screen.getByRole("switch", { name: "Animate tool and step activity" });
-    expect(activity).toBeEnabled();
+    expect(activity).not.toHaveAttribute("aria-disabled");
     expect(activity).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("radio", { name: "Shaping" }));
-    expect(activity).toBeDisabled();
-    fireEvent.click(screen.getByRole("radio", { name: "Automatic" }));
     expect(activity).toBeEnabled();
+    expect(activity).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Automatic" }));
+    expect(activity).not.toHaveAttribute("aria-disabled");
     expect(activity).toHaveAttribute("aria-checked", "true");
   });
 
@@ -284,7 +285,11 @@ describe("working indicator settings", () => {
 
   it("disables glow for theme ink and validates custom colours", () => {
     const { view, onUpdate } = renderSettings();
-    expect(screen.getByRole("switch", { name: "Glow" })).toBeDisabled();
+    const glow = screen.getByRole("switch", { name: "Glow" });
+    expect(glow).toBeEnabled();
+    expect(glow).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(glow);
+    expect(onUpdate).not.toHaveBeenCalled();
     const input = view.container.querySelector('input[type="color"]') as HTMLInputElement;
     fireEvent.input(input, { target: { value: "#12AB9F" } });
     expect(onUpdate).not.toHaveBeenCalled();
@@ -295,7 +300,7 @@ describe("working indicator settings", () => {
       workingIndicator: { ...DEFAULT_WORKING_INDICATOR, color: "custom", customColor: "#12ab9f" },
     });
     expect(screen.getByRole("radio", { name: "Custom colour, #12ab9f" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("switch", { name: "Glow" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Glow" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("opens the native picker from the single Custom swatch but not while arrowing past it", () => {

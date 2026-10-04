@@ -123,8 +123,8 @@ describe("mascot custom sprite settings", () => {
     let finishImport: (value: Awaited<ReturnType<MascotSettingsBridge["importSprites"]>>) => void = () => undefined;
     bridge.importSprites.mockReturnValueOnce(new Promise((resolve) => { finishImport = resolve; }));
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
-    expect(await screen.findByRole("button", { name: "Importing…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Export template" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Importing…" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Export template" })).toHaveAttribute("aria-disabled", "true");
     finishImport({ status: "invalid", message: "idle.png is missing." });
     expect(await within(section).findByRole("alert")).toHaveTextContent("idle.png is missing.");
 
@@ -174,7 +174,7 @@ describe("mascot animation setting", () => {
     const bridge = install();
     render(<MascotSettings />);
     const control = await screen.findByRole("switch", { name: "Animate mascot" });
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Desktop mascot" })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Desktop mascot" })).not.toHaveAttribute("aria-disabled"));
     expect(control).toHaveAttribute("aria-disabled", "true");
     control.focus();
     expect(control).toHaveFocus();

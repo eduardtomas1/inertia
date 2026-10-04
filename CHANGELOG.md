@@ -66,6 +66,8 @@ reliability and safety fixes comes with them.
   Code take at most 20 MiB of images per message, and every provider at most 32
   images. A message over its provider's limit is refused before anything is
   sent, and its text and attachments stay in the composer or the queue.
+- A queued message over its provider's image limit is refused at once, without
+  first reading each of its images.
 - `.env`, `.pem` and `.key` files are refused by name, so credentials and
   private keys stay out of attachment storage, which agents can read.
 - A large text preview shows the first 1 MiB with a visible notice that the

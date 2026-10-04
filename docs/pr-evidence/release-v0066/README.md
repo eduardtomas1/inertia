@@ -3,8 +3,8 @@
 This preparation integrates main `070aa5a7` (#562). It bumps the package and
 lockfile root versions from 0.0.65 to 0.0.66, adds the curated 0.0.66
 changelog section and adds this report. No README view changed, so no image is
-replaced. No application behaviour, dependency graph, migration, release
-workflow or gate limit changes.
+replaced. The only application change is the queued image-limit fix described
+below. No dependency graph, migration, release workflow or gate limit changes.
 
 The changelog groups the release as New, Chats and attachments, Providers, and
 Reliability and safety. It covers every change since `v0.0.65` (peeled commit
@@ -24,6 +24,7 @@ Reliability and safety. It covers every change since `v0.0.65` (peeled commit
 - #559 Trim CI certification tiers and prune low-value tests.
 - #561 Shorten the Electron critical path and reuse Git lookups per operation.
 - #562 Search the in-app Help and cover recent features.
+- This PR: check provider image limits before per-image work on a queued send.
 
 #559 and #561's CI changes and test pruning have no user-visible effect and
 share one line under Reliability and safety. #555 and #557 share the thumbnail
@@ -65,6 +66,38 @@ not canonical" and was not rerun; the run on `1053edf2` (#561), 37130416429,
 passed on its first attempt. The scheduled nightly runs on `1113506e` and `2ef3c2a4` failed;
 the latter in the macOS x64 unit suite. The run on `070aa5a7` (#562),
 37185977320, was still in progress when this report was written.
+
+## Queued image-limit fix
+
+This PR's first CI run, 37187146011, timed out at 15,000 ms in the macOS x64
+unit suite on `tests/server/queued-message-runtime.test.ts` "keeps a queued
+message and its images when the provider refuses its image count" (8,099 ms on
+main's run for `070aa5a7`, 3,651 ms on macOS ARM64). Sending a queued message
+read each of its images from attachment storage, one helper process per image,
+before checking the provider's image count and size limits. The test queues 33
+images, so the refused send started 33 helper processes in sequence. Measured
+locally on macOS ARM64 over five runs: queueing 3,567 to 3,600 ms (66 helper
+processes), sending 1,618 to 1,626 ms (33 helper processes), preview 49 to 52
+ms.
+
+A queued send now checks the limits against the queued message's saved image
+types and sizes first. A refused message is blocked with the same error, keeps
+its attachments and previews, and never reaches the provider; the existing
+check after reading the images is unchanged. The test now also asserts that
+no image is read on a refused send; it failed before the fix with 33 reads.
+After the fix, sending takes 2 ms with no helper process, over five runs.
+Queueing the 33 images still starts 66 helper processes; that is the product's
+retention path and is unchanged.
+
+Verification on the release candidate with the fix, macOS ARM64, Node 22.23.2,
+each command on its own:
+
+- `npm run check:quality` exited 0.
+- `npm test -- tests/server/queued-message-runtime.test.ts`, five runs: 21 of
+  21 passed each time, 8.70 to 9.13 seconds per run.
+- `npm test -- --maxWorkers=2`, discovery confined as above: 11,392 passed with
+  140 skips in 1,078 files, in 437.8 seconds. It exited 1 only for the same
+  expected `providers.test.ts` failure.
 
 ## Packaging
 
@@ -135,4 +168,6 @@ asset replacement is part of this preparation.
 
 - `package.json` and `package-lock.json`: root version 0.0.66.
 - `CHANGELOG.md`: the curated 0.0.66 section.
+- `src/server/runtime/commands/turn-interaction-commands.ts` and
+  `tests/server/queued-message-runtime.test.ts`: the queued image-limit fix.
 - This release preparation evidence report.

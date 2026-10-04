@@ -60,10 +60,14 @@ test("real operation failures survive restart and remain readable/copyable after
     await expect(page.locator(".diagnostics-event").first()).toBeVisible();
     await app.expectNoViewportOverflow();
     const column = await page.locator(".diagnostics").evaluate((element) => {
-      const content = element.closest(".settings-content")!.getBoundingClientRect();
+      const box = element.closest(".settings-content")!;
+      const bounds = box.getBoundingClientRect();
+      const style = getComputedStyle(box);
+      const left = bounds.left + parseFloat(style.paddingLeft);
+      const right = bounds.right - parseFloat(style.paddingRight);
       const view = element.closest(".settings-view")!.getBoundingClientRect();
       const navigation = document.querySelector(".settings-navigation")!.getBoundingClientRect();
-      return { left: content.left - navigation.right, right: view.right - content.right, width: content.width };
+      return { left: left - navigation.right, right: view.right - right, width: bounds.width };
     });
     expect(column.left).toBeGreaterThanOrEqual(20);
     expect(column.right).toBeGreaterThanOrEqual(20);

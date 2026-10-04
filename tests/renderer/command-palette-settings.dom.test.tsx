@@ -92,9 +92,11 @@ describe("Command palette settings entries", () => {
     expect(screen.queryByRole("group", { name: "Settings" })).not.toBeInTheDocument();
   });
 
-  it("keeps the Open settings action, which opens Settings without a target", () => {
+  it("keeps the Open settings action, which opens Settings without a target, and lists it once", () => {
     const { onOpenSettings, search } = renderPalette();
     fireEvent.change(search, { target: { value: "open settings" } });
+    expect(screen.getAllByRole("option", { name: /Open settings/u })).toHaveLength(1);
+    expect(settingsOptions().map((option) => option.textContent)).not.toContain("Open settingsKeyboard");
     fireEvent.click(within(screen.getByRole("group", { name: "Actions" })).getByRole("option", { name: /Open settings/u }));
     expect(onOpenSettings).toHaveBeenCalledExactlyOnceWith();
   });

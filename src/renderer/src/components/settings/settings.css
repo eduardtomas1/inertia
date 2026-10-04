@@ -167,6 +167,11 @@
   line-height: 1.45;
 }
 
+.settings-card > .settings-card-heading + * {
+  margin-top: 0;
+  border-top: 0;
+}
+
 .settings-rows {
   overflow: visible;
 }
@@ -515,11 +520,14 @@
   line-height: 1.4;
 }
 
-.settings-content .secondary-button {
+.settings-content :is(.primary-button, .secondary-button) {
   min-height: var(--control-height);
-  padding: 0 10px;
   border-radius: var(--radius-small);
   font-size: var(--ui-font-secondary);
+}
+
+.settings-content .secondary-button {
+  padding: 0 10px;
   font-weight: 560;
 }
 

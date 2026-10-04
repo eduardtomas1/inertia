@@ -62,7 +62,7 @@ test("opens the command palette and manages a thread", async () => {
   await expect(search).toBeFocused();
   await search.pressSequentially("settings");
   await expect(search).toHaveValue("settings");
-  const settingsOption = page.getByRole("group", { name: "Actions" }).getByRole("option", { name: /Open settings/ });
+  const settingsOption = page.getByRole("option", { name: /Open settings/ });
   await expect(settingsOption).toHaveAttribute("aria-selected", "true");
   if (process.platform === "win32") await settingsOption.click();
   else await search.press("Enter");

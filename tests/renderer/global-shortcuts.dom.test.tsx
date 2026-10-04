@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -208,7 +208,7 @@ describe("global shortcut DOM integration", () => {
 
     fireEvent.change(search, { target: { value: "settings" } });
     expect(search).toHaveValue("settings");
-    expect(within(screen.getByRole("group", { name: "Actions" })).getByRole("option", { name: /Open settings/u }))
+    expect(screen.getByRole("option", { name: /Open settings/u }))
       .toHaveAttribute("aria-selected", "true");
   });
 

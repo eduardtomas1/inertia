@@ -109,18 +109,40 @@ async function expectLayoutHolds(app: AppFixture, row: Locator): Promise<void> {
   const layout = await row.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const dock = element.closest(".composer")!.getBoundingClientRect();
+    const frame = element.parentElement!.querySelector(":scope > .composer-surface")!.getBoundingClientRect();
     const buttons = [...element.querySelectorAll("button")];
     return {
       inside: bounds.left >= dock.left - 0.5 && bounds.right <= dock.right + 0.5 && bounds.top >= dock.top,
+      attached: Math.abs(bounds.bottom - frame.top) <= 1,
+      narrower: bounds.left > frame.left + 4 && bounds.right < frame.right - 4,
       overflow: element.scrollWidth - element.clientWidth,
       nested: buttons.filter((button) => button.parentElement?.closest("button")).length,
       clipped: buttons.filter((button) => button.scrollWidth > button.clientWidth + 1).length,
     };
   });
   expect(layout.inside).toBe(true);
+  expect(layout.attached).toBe(true);
+  expect(layout.narrower).toBe(true);
   expect(layout.overflow).toBeLessThanOrEqual(1);
   expect(layout.nested).toBe(0);
   expect(layout.clipped).toBe(0);
+}
+
+async function captureSizes(row: Locator, info: TestInfo, name: string): Promise<void> {
+  const page = app.page;
+  await expectLayoutHolds(app, row);
+  await capture(page, info, `${name}-dark-wide`);
+  await setAppearanceInPlace(app, "light");
+  await capture(page, info, `${name}-light-wide`);
+  await app.resizeWindow(1000, 800);
+  await expectLayoutHolds(app, row);
+  await capture(page, info, `${name}-light-narrow`);
+  await setAppearanceInPlace(app, "dark");
+  await capture(page, info, `${name}-dark-narrow`);
+  await app.resizeWindow(760, 600);
+  await expectLayoutHolds(app, row);
+  await capture(page, info, `${name}-dark-760x600`);
+  await app.resizeWindow(1440, 920);
 }
 
 let app!: AppFixture;
@@ -198,19 +220,7 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await expect(resume).not.toHaveAttribute("aria-disabled", "true");
     await expect(snooze).toBeVisible();
     await expect(row.getByRole("alert")).toHaveCount(0);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-offer-dark");
-    await setAppearanceInPlace(app, "light");
-    await capture(page, info, "limit-reset-offer-light");
-    await app.resizeWindow(1000, 800);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-offer-light-narrow");
-    await setAppearanceInPlace(app, "dark");
-    await capture(page, info, "limit-reset-offer-dark-narrow");
-    await app.resizeWindow(760, 600);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-offer-dark-760x600");
-    await app.resizeWindow(1440, 920);
+    await captureSizes(row, info, "limit-reset-offer");
 
     writeFileSync(statePath, JSON.stringify({ resetsAt: MOVED_RESET }));
     await resume.focus();
@@ -221,7 +231,10 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await expect(resume).toBeFocused();
     await expectLayoutHolds(app, row);
     await resume.blur();
-    await capture(page, info, "limit-reset-error-dark");
+    await capture(page, info, "limit-reset-error-dark-wide");
+    await setAppearanceInPlace(app, "light");
+    await capture(page, info, "limit-reset-error-light-wide");
+    await setAppearanceInPlace(app, "dark");
 
     await page.reload();
     await focusAppWindow(app.electronApp, page);
@@ -235,15 +248,7 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await expect(cancel).not.toHaveAttribute("aria-disabled", "true");
     await expectLayoutHolds(app, row);
     await cancel.blur();
-    await capture(page, info, "limit-reset-dark");
-    await setAppearanceInPlace(app, "light");
-    await capture(page, info, "limit-reset-light");
-    await app.resizeWindow(1000, 800);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-light-narrow");
-    await setAppearanceInPlace(app, "dark");
-    await capture(page, info, "limit-reset-dark-narrow");
-    await app.resizeWindow(1440, 920);
+    await captureSizes(row, info, "limit-reset-scheduled");
 
     await snooze.focus();
     await page.keyboard.press("Enter");
@@ -252,7 +257,7 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await expect(snoozed).toBeFocused();
     await expectLayoutHolds(app, row);
     await snoozed.blur();
-    await capture(page, info, "limit-reset-snoozed-dark");
+    await captureSizes(row, info, "limit-reset-snoozed");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);
@@ -264,20 +269,11 @@ test("explains a blocked resume inside the composer dock", async ({ browserName:
   try {
     await app.resizeWindow(1440, 920);
     const row = await showChat(app, seed.blocked);
-    const page = app.page;
     await expect(row.getByText("Resume needs attention", { exact: true })).toBeVisible();
     await expect(row.getByText(BLOCKED_ERROR, { exact: true })).toBeVisible();
     await expect(row.getByRole("alert")).toHaveCount(0);
     await expect(row.getByRole("button", { name: "Cancel resume", exact: true })).toBeEnabled();
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-blocked-dark");
-    await setAppearanceInPlace(app, "light");
-    await capture(page, info, "limit-reset-blocked-light");
-    await app.resizeWindow(760, 600);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-blocked-light-760x600");
-    await setAppearanceInPlace(app, "dark");
-    await app.resizeWindow(1440, 920);
+    await captureSizes(row, info, "limit-reset-blocked");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);
@@ -289,21 +285,12 @@ test("offers Resume now for a missed resume inside the composer dock", async ({ 
   try {
     await app.resizeWindow(1440, 920);
     const row = await showChat(app, seed.missed);
-    const page = app.page;
     await expect(row.getByText("Resume missed", { exact: true })).toBeVisible();
     await expect(row.getByRole("status")).toHaveText("Inertia was closed or asleep at the reset, so nothing was sent.");
     await expect(row.getByRole("button", { name: "Resume now", exact: true })).toBeEnabled();
     await expect(row.getByRole("button", { name: "Cancel resume", exact: true })).toBeEnabled();
     await expect(row.getByRole("alert")).toHaveCount(0);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-missed-dark");
-    await setAppearanceInPlace(app, "light");
-    await capture(page, info, "limit-reset-missed-light");
-    await app.resizeWindow(760, 600);
-    await expectLayoutHolds(app, row);
-    await capture(page, info, "limit-reset-missed-light-760x600");
-    await setAppearanceInPlace(app, "dark");
-    await app.resizeWindow(1440, 920);
+    await captureSizes(row, info, "limit-reset-missed");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);

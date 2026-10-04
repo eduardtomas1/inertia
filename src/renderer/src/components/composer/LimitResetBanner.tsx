@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { CircleAlert, Clock3, Gauge } from "lucide-react";
+import { CircleAlert, Clock3 } from "lucide-react";
 import type { LimitResetResult } from "@shared/limit-reset";
 import type { LimitResetCommand, LimitResetCommandRunner } from "./limitResetClient";
 import { INTERFACE_LOCALE } from "../../lib/locale";
@@ -85,7 +85,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   useLayoutEffect(() => {
     if (busy || !keepFocus.current) return;
     keepFocus.current = false;
-    if (!document.activeElement || document.activeElement === document.body) rowRef.current?.querySelector("button")?.focus();
+    if (document.activeElement === document.body) rowRef.current?.querySelector("button")?.focus();
   });
   const mutate = async (command: LimitResetCommand): Promise<void> => {
     if (busy || disabled) return;
@@ -127,7 +127,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const resetsAt = plan?.resetsAt ?? offer!.resetsAt;
   const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) >= Date.parse(resetsAt);
   const when = new Date(resetsAt).toLocaleString(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const Icon = blocked || missed ? CircleAlert : pending ? Clock3 : Gauge;
+  const Icon = blocked || missed ? CircleAlert : Clock3;
   const state = pending ? "scheduled" : blocked ? "blocked" : missed ? "missed" : "offer";
   const title = pending ? "Resume scheduled" : blocked ? "Resume needs attention" : missed ? "Resume missed" : "Usage limit reached";
   const schedule = (): void => {

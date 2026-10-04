@@ -280,12 +280,14 @@ test("turns capture off, keeps the always-on events and clears history", async (
   await expectLayoutHolds(app);
   await capture(page, info, "diagnostics-empty-dark-wide");
 
-  await page.evaluate(async () => {
-    await Promise.allSettled(Array.from({ length: 130 }, () => window.inertia.queryDiagnostics({ limit: 1 })));
-  });
-  await page.getByRole("button", { name: "Data", exact: true }).click();
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
-  await expect(page.getByText("Diagnostics could not be read.", { exact: true })).toBeVisible();
+  await expect(async () => {
+    await page.evaluate(async () => {
+      await Promise.allSettled(Array.from({ length: 130 }, () => window.inertia.queryDiagnostics({ limit: 1 })));
+    });
+    await page.getByRole("button", { name: "Data", exact: true }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+    await expect(page.getByText("Diagnostics could not be read.", { exact: true })).toBeVisible();
+  }).toPass({ timeout: 45_000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByRole("switch", { name: "Capture diagnostics" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();

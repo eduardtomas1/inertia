@@ -6,7 +6,7 @@ import type {
   ProviderId,
   ProviderInfo,
 } from "./contracts";
-import { effectiveDefaultProviderId } from "./default-provider";
+import { effectiveDefaultProviderId, providerMayRun } from "./default-provider";
 import {
   providerIdForHarness,
   providerNativeModelSelection,
@@ -43,6 +43,7 @@ function validBackendDefault(
   const nativeProviderId = providerIdForHarness(selection.harnessId);
   if (selection.backendProfileId.startsWith("builtin:") && nativeProviderId) {
     const provider = snapshot.providers.find(({ id }) => id === nativeProviderId);
+    if (provider && !providerMayRun(provider)) return null;
     const knownRemoved = selection.modelId !== "provider-default"
       && provider?.metadataState.models.freshness === "fresh"
       && !provider.models.some(({ id }) => id === selection.modelId);

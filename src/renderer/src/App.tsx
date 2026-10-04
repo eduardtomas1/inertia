@@ -10,6 +10,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AppSettings,
+  type AppSettingsUpdate,
   type Conversation,
   type Project,
   type ProviderId,
@@ -738,7 +739,7 @@ export default function App(): React.JSX.Element {
       payload: { conversationId: request.conversationId, requestId: request.id, answers },
     });
   };
-  const updateSettings = async (updates: Partial<AppSettings>): Promise<void> => {
+  const updateSettings = async (updates: AppSettingsUpdate): Promise<void> => {
     await run("settings.update", {
       type: "settings.update",
       payload: updates,

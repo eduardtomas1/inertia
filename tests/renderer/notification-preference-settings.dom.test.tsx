@@ -41,7 +41,7 @@ describe("quota warning rows", () => {
     const onUpdate = vi.fn(async () => undefined);
     const { container } = render(<QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 15 }} disabled={false} onUpdate={onUpdate} />);
     await act(async () => { fireEvent.click(screen.getByRole("switch", { name: "Quota warnings" })); });
-    expect(onUpdate).toHaveBeenCalledWith({ quotaWarnings: { enabled: false, firstThreshold: 15 } });
+    expect(onUpdate).toHaveBeenCalledWith({ quotaWarnings: { enabled: false } });
     expect(within(row(container, "quota-warnings")).getByRole("status")).toHaveTextContent("Saved");
   });
 
@@ -53,8 +53,19 @@ describe("quota warning rows", () => {
     expect(within(select).getAllByRole("option").map((option) => option.textContent))
       .toEqual(["25% remaining", "15% remaining", "5% remaining"]);
     await act(async () => { fireEvent.change(select, { target: { value: "5" } }); });
-    expect(onUpdate).toHaveBeenCalledWith({ quotaWarnings: { enabled: true, firstThreshold: 5 } });
+    expect(onUpdate).toHaveBeenCalledWith({ quotaWarnings: { firstThreshold: 5 } });
     expect(within(row(container, "quota-warning-threshold")).getByRole("status")).toHaveTextContent("Saved");
+  });
+
+  it("keeps a threshold chosen just before warnings are turned off", () => {
+    const onUpdate = vi.fn(() => new Promise<void>(() => undefined));
+    render(<QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 25 }} disabled={false} onUpdate={onUpdate} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Warn when below" }), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Quota warnings" }));
+    expect(onUpdate.mock.calls).toEqual([
+      [{ quotaWarnings: { firstThreshold: 5 } }],
+      [{ quotaWarnings: { enabled: false } }],
+    ]);
   });
 
   it("keeps the threshold focusable but unavailable while warnings are off", () => {

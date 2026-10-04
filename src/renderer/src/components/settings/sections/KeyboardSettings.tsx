@@ -43,7 +43,7 @@ function SnapshotShortcut(): React.JSX.Element | null {
         options={options}
         inactive={pending || !state?.available}
         failure={(cause) => cause instanceof Error ? cause.message : "Snapshots unavailable."}
-        onChange={(shortcut) => state ? configure({ type: "configure", enabled: state.enabled, shortcut }) : undefined}
+        onChange={async (shortcut) => { if (state) await configure({ type: "configure", enabled: state.enabled, shortcut }); }}
       />
     </SettingsGroup>
   );

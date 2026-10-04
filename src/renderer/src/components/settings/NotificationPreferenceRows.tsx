@@ -1,8 +1,8 @@
-import type { AppSettings } from "@shared/contracts";
+import type { AppSettings, AppSettingsUpdate } from "@shared/contracts";
 import { QUOTA_WARNING_THRESHOLDS, type QuotaWarningThreshold } from "@shared/quota-warnings";
 import { SettingSelect, SettingSwitch } from "./SettingControls";
 
-type Update = (settings: Partial<AppSettings>) => Promise<void>;
+type Update = (settings: AppSettingsUpdate) => Promise<void>;
 
 const QUOTA_WARNING_OPTIONS = QUOTA_WARNING_THRESHOLDS.map((threshold) => ({
   value: String(threshold) as `${QuotaWarningThreshold}`,
@@ -46,7 +46,7 @@ export function QuotaWarningSettings({
         title="Quota warnings"
         checked={warnings.enabled}
         disabled={disabled}
-        onChange={(enabled) => onUpdate({ quotaWarnings: { ...warnings, enabled } })}
+        onChange={(enabled) => onUpdate({ quotaWarnings: { enabled } })}
       />
       <SettingSelect
         id="quota-warning-threshold"
@@ -55,7 +55,7 @@ export function QuotaWarningSettings({
         options={QUOTA_WARNING_OPTIONS}
         disabled={disabled}
         inactive={!warnings.enabled}
-        onChange={(value) => onUpdate({ quotaWarnings: { ...warnings, firstThreshold: Number(value) as QuotaWarningThreshold } })}
+        onChange={(value) => onUpdate({ quotaWarnings: { firstThreshold: Number(value) as QuotaWarningThreshold } })}
       />
     </>
   );

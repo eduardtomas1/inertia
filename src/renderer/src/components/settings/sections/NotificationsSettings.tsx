@@ -1,4 +1,4 @@
-import type { AppSettings } from "@shared/contracts";
+import type { AppSettings, AppSettingsUpdate } from "@shared/contracts";
 import { useLoadedSurface } from "../../../hooks/useLoadedSurface";
 import { CompletionSoundSettings } from "../../notifications/CompletionSoundSettings";
 import { loadMascotSettings } from "../../settingsSectionLoaders";
@@ -13,7 +13,7 @@ export function NotificationsSettings({
 }: {
   settings: AppSettings;
   disabled: boolean;
-  onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
+  onUpdate: (settings: AppSettingsUpdate) => Promise<void>;
 }): React.JSX.Element {
   const MascotSettings = useLoadedSurface(loadMascotSettings, true);
   return (

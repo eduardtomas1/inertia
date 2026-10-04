@@ -48,6 +48,7 @@ describe("mascot custom sprite settings", () => {
     expect(format).toHaveTextContent("To animate a state, add a .webp or .gif with the same name, like working.webp.");
     expect(format).toHaveTextContent("When animation is paused or reduced motion is on, the still PNG is shown.");
     const required = within(section).getByRole("list", { name: "Required files" });
+    expect(guide).toContainElement(required);
     expect(within(required).getAllByRole("listitem").map((item) => [
       item.querySelector("code")!.textContent,
       item.querySelector("strong")!.textContent,
@@ -70,7 +71,7 @@ describe("mascot custom sprite settings", () => {
     const rejected = await within(section).findByRole("alert");
     expect(rejected).toHaveTextContent("idea.png must be 96 × 96 pixels, not 128 × 128.");
     expect(rejected).toHaveClass("mascot-sprites-error");
-    expect(rejected.previousElementSibling).toBe(within(section).getByRole("list", { name: "Required files" }));
+    expect(rejected.previousElementSibling).toBe(guide);
 
     bridge.importSprites.mockResolvedValueOnce({ status: "ready", sprites: sprites("0123456789abcdef", 2) });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
@@ -133,7 +134,7 @@ describe("mascot custom sprite settings", () => {
     const apply = await screen.findByRole("button", { name: "Apply sprites" });
     expect(apply).toHaveClass("primary-button");
     expect(screen.getByRole("button", { name: "Discard preview" })).toHaveClass("secondary-button");
-    expect(section).toHaveTextContent("Turn on Desktop mascot above to see these sprites on your desktop.");
+    expect(section).toHaveTextContent("Turn on Show mascot above to see these sprites on your desktop.");
 
     bridge.importSprites.mockResolvedValueOnce({ status: "invalid", message: "working.png is missing." });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
@@ -174,7 +175,7 @@ describe("mascot animation setting", () => {
     const bridge = install();
     render(<MascotSettings />);
     const control = await screen.findByRole("switch", { name: "Animate mascot" });
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Desktop mascot" })).not.toHaveAttribute("aria-disabled"));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Show mascot" })).not.toHaveAttribute("aria-disabled"));
     expect(control).toHaveAttribute("aria-disabled", "true");
     control.focus();
     expect(control).toHaveFocus();

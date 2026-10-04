@@ -42,6 +42,12 @@ function results(): HTMLElement {
   return screen.getByRole("listbox", { name: "Matching settings" });
 }
 
+async function chooseProject(name: string): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Choose project" }));
+  fireEvent.click(await screen.findByRole("option", { name }));
+  expect(screen.getByRole("button", { name: "Choose project" })).toHaveTextContent(name);
+}
+
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   Object.defineProperty(window, "inertia", {
@@ -145,6 +151,42 @@ describe("Settings search", () => {
     fireEvent.keyDown(field, { key: "Enter" });
     await waitFor(() => expect(document.querySelector('[data-setting-id="project-colour-emphasis"]')!.contains(document.activeElement)).toBe(true));
     expect(screen.getByRole("button", { name: "Choose project" })).toHaveTextContent("Website");
+  });
+
+  it("keeps the project chosen in the picker when a project row is found", async () => {
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "projects" },
+      projects: [studio, website],
+      onReportCommand: vi.fn(async () => ({ type: "request.ok" as const, requestId: "search" })),
+    })} />);
+    await chooseProject("Website");
+    fireEvent.keyDown(type("pin to top"), { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Pin to top of project lists" })).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Choose project" })).toHaveTextContent("Website");
+  });
+
+  it("opens the all-projects rows after a project was chosen in the picker", async () => {
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "projects" },
+      projects: [studio, website],
+      onReportCommand: vi.fn(async () => ({ type: "request.ok" as const, requestId: "search" })),
+    })} />);
+    await chooseProject("Website");
+    fireEvent.keyDown(type("compact sidebar"), { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Compact sidebar" })).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Choose project" })).toHaveTextContent("All projects");
+  });
+
+  it("remembers the chosen project when Projects is opened again from the section list", async () => {
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "projects" },
+      projects: [studio, website],
+      onReportCommand: vi.fn(async () => ({ type: "request.ok" as const, requestId: "search" })),
+    })} />);
+    await chooseProject("Website");
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    expect(await screen.findByRole("button", { name: "Choose project" })).toHaveTextContent("Website");
   });
 
   it("leaves out project rows when there are no projects", () => {

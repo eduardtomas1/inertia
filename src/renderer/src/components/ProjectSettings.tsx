@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Folders, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import type { SettingsTarget } from "../lib/settingsTarget";
 import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectAppearancePatch, type ProjectPreferences } from "../../../shared/project-preferences";
 import { modelSelectionSchema } from "../../../shared/model-routing";
 import { PROJECT_REPOSITORY_DISPLAY_LIMITS, projectRepositoryDisplayLimit } from "../../../shared/project-repository-limit";
@@ -15,10 +16,13 @@ import { Switch } from "./ui";
 import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { useSettingAction } from "./settings/useSettingAction";
+import { rememberProjectChoice, type SettingsSectionMemory } from "./settings/sectionMemory";
 import "./ProjectSettings.css";
 
 interface Props {
   initialProjectId?: string;
+  target?: SettingsTarget | null;
+  memory?: SettingsSectionMemory;
   projects: Project[];
   conversations: Conversation[];
   providers: ProviderInfo[];
@@ -55,7 +59,7 @@ function ProjectSelect({ label, value, disabled, inactive, options, onChange }: 
   </select>;
 }
 
-function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
+function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "target" | "memory" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
   const preferences = project.preferences ?? defaultProjectPreferences();
   const action = useSettingAction();
   const [noticeRow, setNoticeRow] = useState<string | null>(null);
@@ -102,7 +106,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   };
   return <>
     <SettingsGroup title="General">
-      <SettingTextField id="project-name" title="Name" label="Project name" value={project.name} maxLength={80}
+      <SettingTextField id="project-name" title="Name" value={project.name} maxLength={80}
         disabled={disabled || !request} failure={saveFailure}
         validate={(name) => name ? null : "Enter a project name."}
         onSave={(name) => send(update({ name }))} />
@@ -213,7 +217,13 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
 }
 
 export function ProjectSettings(props: Props): React.JSX.Element {
-  const [selectedId, setSelectedId] = useState<string | null>(props.initialProjectId ?? null);
+  const { memory, target } = props;
+  const [selection, setSelection] = useState({ target, projectId: props.initialProjectId ?? null });
+  const selectedId = selection.target === target ? selection.projectId : props.initialProjectId ?? null;
+  const setSelectedId = (projectId: string | null): void => setSelection({ target, projectId });
+  useEffect(() => {
+    if (memory) rememberProjectChoice(memory, target ?? null, selectedId);
+  }, [memory, selectedId, target]);
   const [chooserOpen, setChooserOpen] = useState(false);
   const chooser = useRef<HTMLButtonElement>(null);
   const selected = props.projects.find(({ id }) => id === selectedId);

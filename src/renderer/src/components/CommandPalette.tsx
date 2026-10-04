@@ -11,6 +11,7 @@ import { openHelpGuide } from "../utils/helpGuide";
 import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
 import { isProjectSettingsRow, SETTINGS_SECTION_ROWS } from "./settingsRows";
+import { searchSettings } from "./settings/settingsMatcher";
 
 export type CommandPaletteView = "search" | "new-chat";
 
@@ -61,10 +62,10 @@ function byGroup(left: PaletteItem, right: PaletteItem): number {
   return groupOrder.indexOf(left.group) - groupOrder.indexOf(right.group);
 }
 
-function filterItems(items: PaletteItem[], query: string, limit = true): PaletteItem[] {
+function filterItems(items: PaletteItem[], query: string, limit = true, wordMatches?: ReadonlySet<string>): PaletteItem[] {
   const needle = query.trim().toLocaleLowerCase();
   return items
-    .map((item) => ({ item, rank: score(item.label, item.detail, needle, item.keywords) }))
+    .map((item) => ({ item, rank: score(item.label, item.detail, needle, item.keywords) || (wordMatches?.has(item.id) ? 1 : 0) }))
     .filter(({ rank }) => rank > 0)
     .sort((left, right) => right.rank - left.rank)
     .slice(0, limit ? needle ? 18 : 14 : undefined)
@@ -74,7 +75,8 @@ function filterItems(items: PaletteItem[], query: string, limit = true): Palette
 
 function searchItems(items: PaletteItem[], settings: PaletteItem[], query: string): PaletteItem[] {
   if (!query.trim()) return filterItems(items, query);
-  return [...filterItems(items, query), ...filterItems(settings, query)].sort(byGroup);
+  const wordMatches = new Set(searchSettings(query, SETTINGS_SECTION_ROWS).flatMap(({ results }) => results.map(({ row }) => `settings:${row.id}`)));
+  return [...filterItems(items, query), ...filterItems(settings, query, true, wordMatches)].sort(byGroup);
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {

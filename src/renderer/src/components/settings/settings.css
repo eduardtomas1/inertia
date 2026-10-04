@@ -253,6 +253,26 @@
   .response-density-setting > [role="radiogroup"] > button.is-active {
     outline: 1px solid CanvasText;
   }
+
+  .settings-content .switch-thumb {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .settings-content .switch-control[data-checked="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .settings-content .switch-control[data-checked="true"] .switch-thumb {
+    background: HighlightText;
+  }
+
+  .settings-content .setting-select::picker-icon {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
 }
 
 @media (max-width: 900px) {
@@ -359,7 +379,11 @@
 }
 
 .setting-select::picker-icon {
-  color: var(--text-muted);
+  width: 14px;
+  height: 14px;
+  background: var(--text-muted);
+  content: "";
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 .setting-select:hover:not(:disabled):not([aria-disabled="true"]) {
@@ -378,7 +402,7 @@
 }
 
 .setting-select option {
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: 7px 9px;
   border-radius: var(--radius-small);
   overflow-wrap: anywhere;

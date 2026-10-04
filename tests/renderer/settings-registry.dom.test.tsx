@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
@@ -217,6 +217,112 @@ describe("Settings anchors", () => {
     view.rerender(<SettingsView {...settingsViewProps({ target, settings: { ...defaultSettings, wrapDiffs: false } })} />);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(wrap).toHaveFocus();
+  });
+
+  it("skips a hidden first control when it lands on the diagnostics for a selected incident", async () => {
+    installFullBridge();
+    const style = document.createElement("style");
+    style.textContent = ".diagnostics-filter-disclosure > summary { display: none; }";
+    document.head.append(style);
+    const tabIndex = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "tabIndex")!;
+    const summaryTabIndex = vi.spyOn(HTMLElement.prototype, "tabIndex", "get").mockImplementation(function (this: HTMLElement) {
+      return this.localName === "summary" && !this.hasAttribute("tabindex") ? 0 : tabIndex.get!.call(this);
+    });
+    try {
+      render(<SettingsView {...settingsViewProps({
+        target: { section: "help", anchor: "diagnostics-incidents", selection: { incidentId: "11111111-1111-4111-8111-111111111111" } },
+      })} />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Show all incidents" })).toHaveFocus());
+    } finally {
+      summaryTabIndex.mockRestore();
+      style.remove();
+    }
+  });
+
+  it("focuses the row itself when its only control cannot take focus", async () => {
+    const style = document.createElement("style");
+    style.textContent = "[data-setting-id=\"terminal-font-size\"] input { display: none; }";
+    document.head.append(style);
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "terminal-font-size" } })} />);
+      await waitFor(() => expect(document.querySelector('[data-setting-id="terminal-font-size"]')).toHaveFocus());
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("keeps focus on Private Connect while its state loads", async () => {
+    installFullBridge();
+    let resolveState: (value: typeof privateConnectState) => void = () => undefined;
+    const bridge = window.inertia as unknown as Record<string, unknown>;
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: new Proxy({}, {
+        get: (_target, key: string) => key === "getPrivateConnectState"
+          ? () => new Promise((resolve) => { resolveState = resolve; })
+          : bridge[key],
+      }),
+    });
+    render(<SettingsView {...settingsViewProps({ target: { section: "devices", anchor: "private-connect" } })} />);
+    const row = (): HTMLElement => document.querySelector<HTMLElement>('[data-setting-id="private-connect"]')!;
+    await waitFor(() => expect(row()).toHaveFocus());
+    await act(async () => { resolveState(privateConnectState); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Disable" })).toHaveFocus());
+  });
+
+  it("leaves focus where the user moved it while Private Connect loads", async () => {
+    installFullBridge();
+    let resolveState: (value: typeof privateConnectState) => void = () => undefined;
+    const bridge = window.inertia as unknown as Record<string, unknown>;
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: new Proxy({}, {
+        get: (_target, key: string) => key === "getPrivateConnectState"
+          ? () => new Promise((resolve) => { resolveState = resolve; })
+          : bridge[key],
+      }),
+    });
+    render(<SettingsView {...settingsViewProps({ target: { section: "devices", anchor: "private-connect" } })} />);
+    await waitFor(() => expect(document.querySelector('[data-setting-id="private-connect"]')).toHaveFocus());
+    const navigation = screen.getByRole("button", { name: "Data" });
+    navigation.focus();
+    await act(async () => { resolveState(privateConnectState); });
+    expect(await screen.findByRole("button", { name: "Disable" })).not.toHaveFocus();
+    expect(navigation).toHaveFocus();
+  });
+
+  it("lands on a plain line in Provider updates when the provider has no update status", async () => {
+    installFullBridge();
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "agents", anchor: "provider-updates" },
+      providers: [settingsProvider("codex", "Codex")],
+    })} />);
+    const row = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-setting-id="provider-updates"]');
+    await waitFor(() => expect(row()).toHaveFocus());
+    expect(row()).toHaveTextContent("No updates available.");
+  });
+
+  it("focuses the section title when the anchored row is hidden", async () => {
+    const style = document.createElement("style");
+    style.textContent = "[data-setting-id=\"terminal-font-size\"] { display: none; }";
+    document.head.append(style);
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "terminal-font-size" } })} />);
+      await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Chats" })).toHaveFocus());
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("focuses the row itself when its control refuses focus", async () => {
+    const focus = vi.spyOn(HTMLInputElement.prototype, "focus").mockImplementation(() => undefined);
+    try {
+      render(<SettingsView {...settingsViewProps({ target: { section: "chats", anchor: "terminal-font-size" } })} />);
+      await waitFor(() => expect(document.querySelector('[data-setting-id="terminal-font-size"]')).toHaveFocus());
+      expect(focus).toHaveBeenCalled();
+    } finally {
+      focus.mockRestore();
+    }
   });
 
   it("falls back to the section title for an unknown anchor", async () => {

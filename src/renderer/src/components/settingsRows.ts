@@ -28,7 +28,7 @@ function section(id: SettingsSection, label: string, groups: Record<string, read
 export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   section("appearance", "Appearance", {
     Theme: [
-      ["appearance-mode", "Theme", ["appearance", "dark mode", "light mode", "system", "colour", "color", "custom colours", "palette", "general"]],
+      ["appearance-mode", "Mode", ["theme", "appearance", "dark mode", "light mode", "system", "colour", "color", "custom colours", "palette", "general"]],
     ],
     "Scale and density": [
       ["interface-scale", "Interface scale", ["zoom", "font", "font size", "text size", "bigger", "smaller", "general"]],
@@ -70,18 +70,16 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
     Alerts: [
       ["desktop-notifications", "Desktop notifications", ["alerts", "notify", "mute", "general"]],
       ["notify-only-in-background", "Only when Inertia is in the background", ["focus", "foreground", "quiet", "mute", "notifications"]],
+      ["quota-warnings", "Quota warnings", ["limit", "limits", "usage", "quota", "rate limit"]],
+      ["quota-warning-threshold", "Warn when below", ["threshold", "percent", "remaining", "quota", "limit"]],
     ],
     Sound: [
       ["completion-sound", "Completion sound", ["sounds", "chime", "audio", "custom sounds", "your sounds", "import sound", "general"]],
       ["completion-sound-enabled", "Sound when a task ends", ["sounds", "audio", "mute", "chime"]],
       ["completion-sound-when", "Play sound", ["long task", "duration", "only after", "long tasks", "threshold", "quiet", "sounds"]],
     ],
-    "Quota warnings": [
-      ["quota-warnings", "Quota warnings", ["limit", "limits", "usage", "quota", "rate limit"]],
-      ["quota-warning-threshold", "Warn when below", ["threshold", "percent", "remaining", "quota", "limit"]],
-    ],
     "Desktop mascot": [
-      ["desktop-mascot", "Desktop mascot", ["mascot", "companion", "sprites", "custom sprites", "general"]],
+      ["desktop-mascot", "Show mascot", ["desktop mascot", "mascot", "companion", "sprites", "custom sprites", "general"]],
       ["mascot-motion", "Animate mascot", ["mascot", "animation", "motion", "pause"]],
     ],
   }),

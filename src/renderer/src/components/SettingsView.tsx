@@ -7,7 +7,7 @@ import { structurallyEqual } from "../utils/structuralEquality";
 import { SettingsPage } from "./settings/SettingsLayout";
 import { SettingsSearch } from "./settings/SettingsSearch";
 import { SettingsSectionFallback } from "./settings/SettingsSectionFallback";
-import type { SettingsSectionMemory } from "./settings/sectionMemory";
+import { chosenProjectId, type SettingsSectionMemory } from "./settings/sectionMemory";
 import type { SettingsSectionContext, SettingsViewProps } from "./settings/settingsTypes";
 import {
   prefetchSettingsSection,
@@ -54,18 +54,32 @@ function useStableSettingsProps(props: SettingsViewProps): SettingsViewProps {
   return stable.current as unknown as SettingsViewProps;
 }
 
-function focusSettingRow(row: HTMLElement): void {
+function focusIfShown(element: HTMLElement): boolean {
+  if (!element.checkVisibility()) return false;
+  element.focus();
+  return document.activeElement === element;
+}
+
+function focusRowControl(row: HTMLElement): boolean {
+  return [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element.tabIndex >= 0).some(focusIfShown);
+}
+
+function focusSettingRow(row: HTMLElement, heading: HTMLElement | null): MutationObserver | null {
   for (let details = row.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
     details.open = true;
   }
   row.scrollIntoView?.({ block: "center" });
-  const control = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].find((element) => element.tabIndex >= 0);
-  if (control) {
-    control.focus();
-    return;
+  if (focusRowControl(row)) return null;
+  if (row.checkVisibility()) row.tabIndex = -1;
+  if (!focusIfShown(row)) {
+    heading?.focus();
+    return null;
   }
-  row.tabIndex = -1;
-  row.focus();
+  const observer = new MutationObserver(() => {
+    if (document.activeElement !== row || focusRowControl(row)) observer.disconnect();
+  });
+  observer.observe(row, { childList: true, subtree: true });
+  return observer;
 }
 
 function SettingsSectionHost({
@@ -103,18 +117,22 @@ const SettingsShell = memo(function SettingsShell({
   const focusRequest = useRef<FocusRequest | null>(target?.anchor ? { anchor: target.anchor } : null);
   const previousTarget = useRef(target);
   const focusRootOnMount = useRef(!target?.anchor);
+  const settlingRow = useRef<MutationObserver | null>(null);
   useEffect(() => {
     if (focusRootOnMount.current) rootRef.current?.focus();
+    return () => settlingRow.current?.disconnect();
   }, []);
   const resolveFocus = useCallback(() => {
     const request = focusRequest.current;
     if (!request) return;
     focusRequest.current = null;
+    settlingRow.current?.disconnect();
+    settlingRow.current = null;
     const row = request.anchor
       ? [...rootRef.current?.querySelectorAll<HTMLElement>("[data-setting-id]") ?? []]
         .find((element) => element.dataset.settingId === request.anchor)
       : undefined;
-    if (row) focusSettingRow(row);
+    if (row) settlingRow.current = focusSettingRow(row, headingRef.current);
     else headingRef.current?.focus();
   }, []);
   useEffect(() => {
@@ -148,11 +166,11 @@ const SettingsShell = memo(function SettingsShell({
   );
   const openRow = useCallback((row: SettingsRowMetadata) => {
     const projectId = isProjectSettingsRow(row)
-      ? (target?.section === "projects" ? target.projectId : undefined) ?? regularProjects[0]?.id
+      ? chosenProjectId(memory, target) ?? regularProjects[0]?.id
       : undefined;
     setQuery("");
     setLocalTarget({ base: externalTarget, target: { section: row.sectionId, anchor: row.id, ...(projectId ? { projectId } : {}) } });
-  }, [externalTarget, regularProjects, target]);
+  }, [externalTarget, memory, regularProjects, target]);
   const allConversations = useMemo(
     () => [...view.conversations, ...view.archived],
     [view.archived, view.conversations],

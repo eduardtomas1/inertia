@@ -16,7 +16,7 @@ import {
 
 interface BackendProfilesOptions {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
 }
 
 function backendProfileResult(event: ServerEvent): ModelBackendProfileDetail {
@@ -140,7 +140,7 @@ export function useBackendProfiles({
           })),
         },
       },
-    });
+    }, { reportError: false });
   }, [run]);
 
   const clearBackendDefault = useCallback(async (

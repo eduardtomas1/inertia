@@ -80,14 +80,15 @@ describe("quota warning rows", () => {
 });
 
 describe("notifications section", () => {
-  it("places the background-only row under desktop notifications and the quota rows in their own group", async () => {
+  it("places the background-only row under desktop notifications and the quota rows in Alerts", async () => {
     const onUpdate = vi.fn(async () => undefined);
     const { container, rerender } = render(<NotificationsSettings settings={defaultSettings} disabled={false} onUpdate={onUpdate} />);
     const ids = [...container.querySelectorAll("[data-setting-id]")].map((element) => element.getAttribute("data-setting-id"));
     expect(ids.indexOf("notify-only-in-background")).toBe(ids.indexOf("desktop-notifications") + 1);
-    expect(screen.getByRole("heading", { name: "Quota warnings" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Quota warnings" })).toBeChecked();
-    expect(screen.getByRole("combobox", { name: "Warn when below" })).toHaveValue("25");
+    expect(screen.queryByRole("heading", { name: "Quota warnings" })).toBeNull();
+    const alerts = screen.getByRole("region", { name: "Alerts" });
+    expect(within(alerts).getByRole("switch", { name: "Quota warnings" })).toBeChecked();
+    expect(within(alerts).getByRole("combobox", { name: "Warn when below" })).toHaveValue("25");
     expect(screen.getByRole("switch", { name: "Only when Inertia is in the background" })).not.toHaveAttribute("aria-disabled");
 
     rerender(<NotificationsSettings settings={{ ...defaultSettings, desktopNotifications: false, quotaWarnings: { enabled: false, firstThreshold: 5 } }} disabled={false} onUpdate={onUpdate} />);

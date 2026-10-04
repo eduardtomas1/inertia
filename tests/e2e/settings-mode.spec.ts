@@ -35,6 +35,15 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
 
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
+  const keySelect = page.getByRole("combobox", { name: "Search everything key" });
+  const pickerOpen = (): Promise<boolean> => keySelect.evaluate((element) => element.matches(":open"));
+  expect(await keySelect.evaluate((element) => getComputedStyle(element, "::picker-icon").maskImage)).toContain("m6 9 6 6 6-6");
+  await keySelect.click();
+  await expect.poll(pickerOpen).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(pickerOpen).toBe(false);
+  await expect(settings).toBeVisible();
+  await expect(keySelect).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(settings).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
@@ -87,5 +96,21 @@ test("finds a setting with Settings search, lands on its row and keeps the searc
   await field.press("Escape");
   await expect(settings).toBeHidden();
   await app.resizeWindow(1440, 920);
+  expect(rendererErrors).toEqual([]);
+});
+
+test("keeps an action row's height when its notice appears", async () => {
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true }).click();
+  const recoveryRow = page.locator('[data-setting-id="recovery-export"]');
+  const rowHeight = (): Promise<number> => recoveryRow.evaluate((element) => element.getBoundingClientRect().height);
+  const idleHeight = await rowHeight();
+  await app.electronApp.evaluate(({ dialog }) => {
+    Reflect.set(dialog, "showSaveDialog", async () => ({ canceled: true }));
+  });
+  await recoveryRow.getByRole("button", { name: "Export recovery file" }).click();
+  await expect(recoveryRow.getByText("Recovery export cancelled.", { exact: true })).toBeVisible();
+  expect(await rowHeight()).toBe(idleHeight);
+  await page.getByRole("button", { name: "Close settings", exact: true }).click();
   expect(rendererErrors).toEqual([]);
 });

@@ -68,6 +68,7 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
       await info.attach(label, { path, contentType: "image/png" });
     };
     await expect(section).toContainText("Each state needs a PNG: 96 × 96 pixels, a single frame, up to 512 KB.");
+    await section.getByText("How custom sprites work", { exact: true }).click();
     await expect(section.getByRole("list", { name: "Required files" }).getByRole("listitem").filter({ hasText: "idea.png" })).toContainText("Complete");
     for (const appearance of ["light", "dark"] as const) {
       await theme(appearance);

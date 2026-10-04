@@ -22,6 +22,7 @@ import { DevicesSettings, loadDevicesSections } from "./settings/sections/Device
 import { HelpSettings, loadHelpSections } from "./settings/sections/HelpSettings";
 import { KeyboardSettings } from "./settings/sections/KeyboardSettings";
 import { NotificationsSettings } from "./settings/sections/NotificationsSettings";
+import { chosenProjectId } from "./settings/sectionMemory";
 import type { SettingsSectionContext } from "./settings/settingsTypes";
 import {
   loadAttachmentStorageSettings,
@@ -127,7 +128,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     load: lazySection(async () => (await import("./ProjectSettings")).ProjectSettings),
     prefetch: [],
     select: (context) => ({
-      initialProjectId: context.target?.section === "projects" ? context.target.projectId : undefined,
+      initialProjectId: chosenProjectId(context.memory, context.target) ?? undefined,
+      target: context.target,
+      memory: context.memory,
       projects: context.regularProjects,
       conversations: context.conversations,
       providers: context.providers,
@@ -135,7 +138,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       backendDefaults: context.backendDefaults,
       backendProfiles: context.backendProfiles,
       disabled: context.disabled,
-      request: context.onReportCommand,
+      request: context.onSaveCommand ?? context.onReportCommand,
       onUpdateSettings: context.onUpdate,
     }),
     instanceKey: (context) => context.target?.section === "projects" ? context.target.projectId ?? "all" : "all",
@@ -196,7 +199,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       providers: context.providers,
       archived: context.archived,
       databaseBackup: context.databaseBackup,
-      onReportCommand: context.onReportCommand,
+      onReportCommand: context.onSaveCommand ?? context.onReportCommand,
       onUpdate: context.onUpdate,
       onUnarchive: context.onUnarchive,
       onRestoreDefaults: context.onRestoreDefaults,

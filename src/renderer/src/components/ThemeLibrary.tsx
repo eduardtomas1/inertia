@@ -85,7 +85,7 @@ export function ThemeLibrary({
   return (
     <div className="theme-library" data-setting-id="appearance-mode">
       <span className="setting-copy">
-        <strong id={`${titleId}-appearance`}>Appearance</strong>
+        <strong id={`${titleId}-appearance`}>Mode</strong>
       </span>
       <div
         className="appearance-mode-options"

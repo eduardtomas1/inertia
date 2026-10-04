@@ -46,6 +46,7 @@ import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation, ReplacementChatRequest } from "../../lib/newConversation";
 import { replacementChatRequest } from "../../utils/modelRouteTransition";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import type { SettingsViewProps } from "../settings/settingsTypes";
 import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
@@ -141,6 +142,21 @@ export function chatResumeAvailability(
   return continuationRefusal
     ? { kind: "unavailable", resume: null, reason: continuationRefusal }
     : providerTerminalResumeAvailability(conversation, provider);
+}
+
+type SettingsSaveRunner = (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
+
+export function settingsSaveActions(run: SettingsSaveRunner): Pick<SettingsViewProps, "onSaveCommand" | "onUpdate" | "onSetDefaultModel" | "onRestoreDefaults"> {
+  const onSaveCommand = (command: CommandWithoutId): Promise<ServerEvent> => run(command.type, command, { reportError: false });
+  const save = async (command: CommandWithoutId): Promise<void> => {
+    await onSaveCommand(command);
+  };
+  return {
+    onSaveCommand,
+    onUpdate: (payload) => save({ type: "settings.update", payload }),
+    onSetDefaultModel: (payload) => save({ type: "settings.default-model.set", payload }),
+    onRestoreDefaults: () => save({ type: "settings.restore-defaults", payload: {} }),
+  };
 }
 
 export function replacementChatStarter(
@@ -265,7 +281,7 @@ export interface WorkspaceSceneActions {
   followUpSubagent: (trace: SubagentTrace) => void;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
@@ -603,13 +619,7 @@ export function createWorkspaceSceneModel({
       lifecycleDiagnostics: connection.status === "online"
         ? connection.snapshot?.lifecycleDiagnostics
         : undefined,
-      onUpdate: actions.updateSettings,
-      onSetDefaultModel: async (payload) => {
-        await actions.run("settings.default-model.set", { type: "settings.default-model.set", payload });
-      },
-      onRestoreDefaults: async () => {
-        await actions.run("settings.restore-defaults", { type: "settings.restore-defaults", payload: {} });
-      },
+      ...settingsSaveActions(actions.run),
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
         actions.refreshProvider(providerId);

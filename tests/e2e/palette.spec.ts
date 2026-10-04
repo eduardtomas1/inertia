@@ -78,7 +78,7 @@ test("opens a setting from the palette on its row", async () => {
   const search = page.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
   await expect(search).toBeFocused();
   await search.pressSequentially("theme");
-  const theme = page.getByRole("group", { name: "Settings" }).getByRole("option", { name: /^Theme/u });
+  const theme = page.getByRole("group", { name: "Settings" }).getByRole("option", { name: /^Mode/u });
   await expect(theme).toHaveAttribute("aria-selected", "true");
   if (process.platform === "win32") await theme.click();
   else await search.press("Enter");

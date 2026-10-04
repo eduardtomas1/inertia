@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachmentStorageSettings } from "../../src/renderer/src/components/AttachmentStorageSettings";
 import CanaryRollbackSetting from "../../src/renderer/src/components/CanaryRollbackSetting";
@@ -72,6 +72,7 @@ describe("busy settings controls keep focus", () => {
     const view = render(<SnapshotSettings />);
     const toggle = screen.getByRole("switch", { name: "Window snapshots" });
     await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
+    await act(async () => undefined);
     press(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute("aria-disabled", "true"));
     expectHeldWhileBusy(toggle);
@@ -83,6 +84,7 @@ describe("busy settings controls keep focus", () => {
     render(<KeyboardSettings keybindings={DEFAULT_APP_KEYBINDINGS} disabled={false} onUpdate={vi.fn(async () => undefined)} />);
     const shortcut = await screen.findByRole("combobox", { name: "Window snapshot" });
     await waitFor(() => expect(shortcut).not.toHaveAttribute("aria-disabled"));
+    await act(async () => undefined);
     shortcut.focus();
     fireEvent.change(shortcut, { target: { value: "both-shift" } });
     await waitFor(() => expect(shortcut).toHaveAttribute("aria-disabled", "true"));
@@ -221,7 +223,7 @@ describe("focus survives controls that close themselves", () => {
     expect(screen.queryByRole("form", { name: "New action" })).toBeNull();
     expect(add).toHaveFocus();
     press(add);
-    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Check" } });
     fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
     press(screen.getByRole("button", { name: "Save action" }));
     await waitFor(() => expect(request).toHaveBeenCalled());
@@ -235,7 +237,7 @@ describe("focus survives controls that close themselves", () => {
     const { request, view } = renderProject(full);
     const add = screen.getByRole("button", { name: "Add action" });
     press(add);
-    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Last" } });
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Last" } });
     fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "node" } });
     press(screen.getByRole("button", { name: "Save action" }));
     await waitFor(() => expect(request).toHaveBeenCalled());

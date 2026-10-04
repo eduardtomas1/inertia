@@ -198,7 +198,7 @@ export function useSplitWorkspaceScene({
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
-    runOptions?: { passive?: boolean },
+    runOptions?: { passive?: boolean; reportError?: boolean },
   ): Promise<ServerEvent> => {
     const busyKey = `${busyPrefix}${key}`;
     const passive = runOptions?.passive === true;
@@ -213,7 +213,7 @@ export function useSplitWorkspaceScene({
       }
       return event;
     } catch (error) {
-      setActionError(
+      if (runOptions?.reportError !== false) setActionError(
         error instanceof Error
           ? error.message
           : "That split-chat action could not be completed.",

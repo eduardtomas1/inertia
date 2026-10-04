@@ -1,8 +1,13 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
-import { defaultSettings } from "../../src/shared/contracts";
+import { settingsSaveActions } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
+import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
+import { useBackendProfiles } from "../../src/renderer/src/hooks/useBackendProfiles";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { defaultSettings, type Project } from "../../src/shared/contracts";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { settingsViewProps } from "./settings-view-fixtures";
 
 function deferredSave(): { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } {
@@ -14,6 +19,13 @@ function deferredSave(): { promise: Promise<void>; resolve: () => void; reject: 
   });
   return { promise, resolve, reject };
 }
+
+const studio: Project = {
+  id: "11111111-1111-4111-8111-111111111111", name: "Studio", path: "/workspace/studio", normalizedPath: "/workspace/studio",
+  repositoryIdentity: null, repositoryRoot: "/workspace/studio", repositoryRelativePath: "", groupingMode: null,
+  gitRepositoryLimit: 16, color: "#5661d8", status: "ready", createdAt: "2026-09-09T08:00:00.000Z",
+  updatedAt: "2026-09-09T08:00:00.000Z", preferences: defaultProjectPreferences(),
+};
 
 function settingRow(id: string): HTMLElement {
   const row = document.querySelector<HTMLElement>(`[data-setting-id="${id}"]`);
@@ -116,6 +128,57 @@ describe("Settings saving", () => {
     expect(timestamps).toBeChecked();
     expect(within(settingRow("message-timestamps")).getByRole("alert"))
       .toHaveTextContent("Couldn't save. Try again.");
+  });
+
+  it("reports a failed settings save only in its row, not as an app error", async () => {
+    const setActionError = vi.fn();
+    const { result } = renderHook(() => useAppRuntimeActions({
+      sendCommand: vi.fn().mockRejectedValue(new Error("The local service disconnected.")),
+      refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+    }));
+    render(<SettingsView {...settingsViewProps({ target: { section: "chats" }, ...settingsSaveActions(result.current.run) })} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Message timestamps" }));
+    await waitFor(() => expect(within(settingRow("message-timestamps")).getByRole("alert"))
+      .toHaveTextContent("Couldn't save. Try again."));
+    expect(setActionError.mock.calls).toEqual([[null]]);
+  });
+
+  it("reports a failed project save only in its row, not as an app error", async () => {
+    const setActionError = vi.fn();
+    const { result } = renderHook(() => useAppRuntimeActions({
+      sendCommand: vi.fn().mockRejectedValue(new Error("The local service disconnected.")),
+      refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+    }));
+    const run = result.current.run;
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "projects", projectId: studio.id },
+      projects: [studio],
+      onReportCommand: (command) => run(command.type, command),
+      ...settingsSaveActions(run),
+    })} />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Pin to top of project lists" }));
+    await waitFor(() => expect(within(settingRow("project-pin")).getByRole("alert")).toBeInTheDocument());
+    expect(setActionError.mock.calls).toEqual([[null]]);
+  });
+
+  it("sends every settings save without the app error report", async () => {
+    const run = vi.fn(async () => ({ type: "request.ok" as const, requestId: "settings" }));
+    const actions = settingsSaveActions(run);
+    await actions.onUpdate({ showTimestamps: false });
+    await actions.onSetDefaultModel({ defaultProvider: "codex", defaultModel: "", defaultReasoningEffort: "" });
+    await actions.onRestoreDefaults();
+    expect(run.mock.calls).toEqual([
+      ["settings.update", { type: "settings.update", payload: { showTimestamps: false } }, { reportError: false }],
+      ["settings.default-model.set", { type: "settings.default-model.set", payload: { defaultProvider: "codex", defaultModel: "", defaultReasoningEffort: "" } }, { reportError: false }],
+      ["settings.restore-defaults", { type: "settings.restore-defaults", payload: {} }, { reportError: false }],
+    ]);
+  });
+
+  it("sets the new chat backend default without the app error report", async () => {
+    const run = vi.fn(async () => ({ type: "request.ok" as const, requestId: "settings" }));
+    const { result } = renderHook(() => useBackendProfiles({ request: vi.fn(), run }));
+    await result.current.setBackendDefault(null, providerNativeModelSelection({ providerId: "codex" }));
+    expect(run).toHaveBeenCalledExactlyOnceWith("backend.default.set", expect.objectContaining({ type: "backend.default.set" }), { reportError: false });
   });
 
   it("confirms a successful radio save in its row", async () => {

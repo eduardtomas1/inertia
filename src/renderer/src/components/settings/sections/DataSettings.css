@@ -11,7 +11,8 @@
   margin-top: 0;
 }
 
-.attachment-storage-confirm {
+.attachment-storage-confirm,
+.restore-defaults-confirm {
   display: grid;
   gap: 6px;
   margin-top: 10px;
@@ -20,18 +21,21 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.attachment-storage-confirm strong {
+.attachment-storage-confirm strong,
+.restore-defaults-confirm strong {
   font-size: var(--ui-font-secondary);
   font-weight: 620;
 }
 
-.attachment-storage-confirm small {
+.attachment-storage-confirm small,
+.restore-defaults-confirm small {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);
   line-height: 1.4;
 }
 
-.attachment-storage-confirm > div {
+.attachment-storage-confirm > div,
+.restore-defaults-confirm > div {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -39,7 +43,8 @@
   margin-top: 4px;
 }
 
-.attachment-storage-confirm .secondary-button.is-danger {
+.attachment-storage-confirm .secondary-button.is-danger,
+.restore-defaults-confirm .secondary-button.is-danger {
   color: var(--danger);
 }
 
@@ -100,7 +105,8 @@
 }
 
 @media (forced-colors: active) {
-  .attachment-storage-confirm {
+  .attachment-storage-confirm,
+  .restore-defaults-confirm {
     border: 1px solid CanvasText;
   }
 }

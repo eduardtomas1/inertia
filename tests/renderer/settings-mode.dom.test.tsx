@@ -103,13 +103,18 @@ describe("Settings as a mode", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
-  it("keeps Escape for open menus, selects and modal dialogs", () => {
+  it("leaves Settings with Escape from a closed select", () => {
+    render(<Harness />);
+    openFrom("Open settings");
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
+    pressEscape(screen.getByLabelText("Search everything key"));
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
+  });
+
+  it("keeps Escape for open menus and modal dialogs", () => {
     render(<Harness />);
     openFrom("Open settings");
     pressEscape(screen.getByRole("menuitem", { name: "Menu item" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
-    pressEscape(screen.getByLabelText("Search everything key"));
-    pressEscape(screen.getByLabelText("New chat key").querySelector("option")!);
     const dialog = document.createElement("div");
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");

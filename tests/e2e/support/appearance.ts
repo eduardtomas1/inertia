@@ -19,7 +19,7 @@ export async function setAppearance(
   if (await html.getAttribute("data-theme") === theme) return;
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  await page.getByRole("radiogroup", { name: "Appearance" })
+  await page.getByRole("radiogroup", { name: "Mode" })
     .getByRole("radio", { name: theme === "dark" ? "Dark" : "Light", exact: true })
     .click();
   await expect(html).toHaveAttribute("data-theme", theme);

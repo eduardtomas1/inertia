@@ -22,6 +22,7 @@ export function BackgroundNotificationSetting({
     <SettingSwitch
       id="notify-only-in-background"
       title="Only when Inertia is in the background"
+      description="Skips desktop notifications while an Inertia window is in front."
       checked={settings.notifyOnlyInBackground}
       disabled={disabled}
       inactive={!settings.desktopNotifications}
@@ -44,6 +45,7 @@ export function QuotaWarningSettings({
       <SettingSwitch
         id="quota-warnings"
         title="Quota warnings"
+        description="Shows a notice in Inertia when an account's remaining quota drops below the chosen level."
         checked={warnings.enabled}
         disabled={disabled}
         onChange={(enabled) => onUpdate({ quotaWarnings: { enabled } })}
@@ -51,6 +53,7 @@ export function QuotaWarningSettings({
       <SettingSelect
         id="quota-warning-threshold"
         title="Warn when below"
+        description="The first notice appears at this level and again at each lower one."
         value={`${warnings.firstThreshold}`}
         options={QUOTA_WARNING_OPTIONS}
         disabled={disabled}

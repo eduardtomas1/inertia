@@ -57,6 +57,17 @@ describe("quota warning rows", () => {
     expect(within(row(container, "quota-warning-threshold")).getByRole("status")).toHaveTextContent("Saved");
   });
 
+  it("says what each notification row does", () => {
+    const { container } = render(<>
+      <BackgroundNotificationSetting settings={{ desktopNotifications: true, notifyOnlyInBackground: false }} disabled={false} onUpdate={vi.fn(async () => undefined)} />
+      <QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 25 }} disabled={false} onUpdate={vi.fn(async () => undefined)} />
+    </>);
+    const row = (id: string) => container.querySelector(`[data-setting-id="${id}"]`);
+    expect(row("notify-only-in-background")).toHaveTextContent("Skips desktop notifications while an Inertia window is in front.");
+    expect(row("quota-warnings")).toHaveTextContent("Shows a notice in Inertia when an account's remaining quota drops below the chosen level.");
+    expect(row("quota-warning-threshold")).toHaveTextContent("The first notice appears at this level and again at each lower one.");
+  });
+
   it("keeps a threshold chosen just before warnings are turned off", () => {
     const onUpdate = vi.fn(() => new Promise<void>(() => undefined));
     render(<QuotaWarningSettings warnings={{ enabled: true, firstThreshold: 25 }} disabled={false} onUpdate={onUpdate} />);

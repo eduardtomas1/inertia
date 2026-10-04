@@ -72,12 +72,20 @@ describe("project repository display limit", () => {
     expect(advanced).not.toHaveAttribute("open");
     expect(within(advanced).getByText("Advanced")).toBeInTheDocument();
     expect(row(container, "project-repository-limit")).toContainElement(select);
-    expect(select).toHaveValue("32");
+    expect(select).toHaveValue("128");
     expect(within(select).getAllByRole("option").map((option) => option.textContent))
-      .toEqual(["Show up to 16 repositories", "Show up to 32 repositories"]);
+      .toEqual(["Show up to 16 repositories", "Show up to 32 repositories", "Show up to 128 repositories"]);
 
     fireEvent.change(select, { target: { value: "16" } });
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: {
       projectId: project.id, expectedUpdatedAt: project.updatedAt, gitRepositoryLimit: 16 } }));
+  });
+
+  it("shows a stored limit outside the two choices as it is", () => {
+    setup({ project: { ...project, gitRepositoryLimit: 24 } });
+    const select = screen.getByRole("combobox", { name: "Repository display limit" });
+    expect(select).toHaveValue("24");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent))
+      .toEqual(["Show up to 16 repositories", "Show up to 24 repositories", "Show up to 32 repositories"]);
   });
 });

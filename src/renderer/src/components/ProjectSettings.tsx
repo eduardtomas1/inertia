@@ -5,7 +5,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { SettingsTarget } from "../lib/settingsTarget";
 import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectAppearancePatch, type ProjectPreferences } from "../../../shared/project-preferences";
 import { modelSelectionSchema } from "../../../shared/model-routing";
-import { PROJECT_REPOSITORY_DISPLAY_LIMITS, projectRepositoryDisplayLimit } from "../../../shared/project-repository-limit";
+import { projectRepositoryLimitChoices } from "../../../shared/project-repository-limit";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { ProjectSearchDialog } from "./ProjectSearchDialog";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
@@ -38,7 +38,6 @@ interface Props {
 
 const workspaceOptions = { local: "Current checkout", worktree: "New worktree" };
 const accessOptions: Record<AppSettings["defaultAccessMode"], string> = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" };
-const repositoryLimitOptions = Object.fromEntries(PROJECT_REPOSITORY_DISPLAY_LIMITS.map((limit) => [String(limit), `Show up to ${limit} repositories`]));
 const groupingOptions: Record<AppSettings["projectGrouping"], string> = { repository: "By repository", "repository-path": "By repository and folder", separate: "Keep separate" };
 const budgetPattern = /^\d+(?:\.\d{1,2})?$/u;
 const budgetError = "Use 0.01 to 10,000 with up to two decimals, or empty for no limit.";
@@ -201,8 +200,8 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </div>
       <SettingDisclosure summary="Advanced" className="project-settings-advanced">
         <SettingRow id="project-repository-limit" title="Repository display limit" notice={notice("project-repository-limit")}>
-          <ProjectSelect label="Repository display limit" value={String(projectRepositoryDisplayLimit(project.gitRepositoryLimit))} disabled={unavailable} inactive={saving}
-            options={repositoryLimitOptions} onChange={(value) => void change("project-repository-limit", update({ gitRepositoryLimit: Number(value) }))} />
+          <ProjectSelect label="Repository display limit" value={String(project.gitRepositoryLimit)} disabled={unavailable} inactive={saving}
+            options={Object.fromEntries(projectRepositoryLimitChoices(project.gitRepositoryLimit).map((limit) => [String(limit), `Show up to ${limit} repositories`]))} onChange={(value) => void change("project-repository-limit", update({ gitRepositoryLimit: Number(value) }))} />
         </SettingRow>
       </SettingDisclosure>
     </SettingsGroup>

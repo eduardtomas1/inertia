@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { AppView } from "../appView";
 import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 
-const ESCAPE_OWNERS = 'select, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .xterm';
+const ESCAPE_OWNERS = 'select:open, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .xterm';
 
 export interface SettingsMode {
   settingsTarget: SettingsTarget | null;

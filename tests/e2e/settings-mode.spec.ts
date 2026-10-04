@@ -35,6 +35,14 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
 
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
+  const keySelect = page.getByRole("combobox", { name: "Search everything key" });
+  const pickerOpen = (): Promise<boolean> => keySelect.evaluate((element) => element.matches(":open"));
+  await keySelect.click();
+  await expect.poll(pickerOpen).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(pickerOpen).toBe(false);
+  await expect(settings).toBeVisible();
+  await expect(keySelect).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(settings).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

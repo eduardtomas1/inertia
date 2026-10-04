@@ -8,9 +8,10 @@ rework). They are the "before" half of every pair in the rework PR. The
 
 - macOS 27.0.1 (26A434), Apple M5 Pro, arm64
 - Electron 44.4.5, Node.js 22
-- Device scale 2 (built-in Retina display), so a 1440 × 920 window gives a
-  2880 × 1840 image
-- Window sizes: wide 1440 × 920, narrow 1000 × 800, tight 760 × 600
+- Device scale 2 (built-in Retina display)
+- Window sizes and image sizes: wide 1440 × 920 gives 2880 × 1736 (the page
+  below the window frame), narrow 1000 × 800 gives 2000 × 1600, tight
+  760 × 600 gives 1520 × 1200
 
 ## Fixture
 

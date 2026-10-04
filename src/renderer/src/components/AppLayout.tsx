@@ -118,7 +118,7 @@ interface AppLayoutActions {
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
   openSettingsSection: (section: SettingsSection) => void;
-  openSettingsTarget: (target: SettingsTarget) => void;
+  openSettings: (target?: SettingsTarget) => void;
   closeSettings: () => void;
   createConversation: (
     project?: Project | null,
@@ -914,7 +914,7 @@ export const AppLayout = memo(function AppLayout({
         createConversationIn={(project) => actions.createConversation(project)}
         openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
-        openSettings={(target) => target ? actions.openSettingsTarget(target) : setView("settings")}
+        openSettings={actions.openSettings}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}

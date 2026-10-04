@@ -5,6 +5,7 @@ import { ISSUE_REPOSITORY, ISSUE_REPOSITORY_URL, REPORT_BODY_LIMIT, REPORT_TEXT_
 import { ISSUE_GITHUB_MESSAGES, manualIssueUrl } from "@shared/issue-report-github";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { writeClipboardText } from "../utils/clipboard";
+import { readIssueReportDraft, writeIssueReportDraft } from "./issueReportDraft";
 import "./IssueReportSettings.css";
 
 export interface IssueReportSettingsProps {
@@ -90,18 +91,46 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
     return event.result.report;
   }, [apply]);
 
+  const draftReady = useRef(false);
+  const restoreDraft = useCallback((saved: IssueReport | null) => {
+    const draft = readIssueReportDraft(saved?.id ?? null, saved?.revision ?? null);
+    draftReady.current = true;
+    if (!draft || !mounted.current) return;
+    setDescription(draft.description);
+    setSteps(draft.steps);
+    setProviderId(draft.providerId);
+    setAttachDiagnostics(draft.attachDiagnostics);
+    if (saved) {
+      setTitle(draft.title);
+      setBody(draft.body);
+      setView(draft.view);
+    }
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     void command({ type: "support.report.get" }).then(
-      () => command({ type: "support.report.github" }).catch(() => undefined),
+      (saved) => {
+        restoreDraft(saved);
+        return command({ type: "support.report.github" }).catch(() => undefined);
+      },
       () => {
+        draftReady.current = true;
         if (!mounted.current) return;
         setLoaded(true);
         setLoadFailed(true);
       },
     );
     return () => { mounted.current = false; };
-  }, [command]);
+  }, [command, restoreDraft]);
+
+  useEffect(() => {
+    if (!draftReady.current) return;
+    writeIssueReportDraft({
+      reportId: report?.id ?? null, revision: report?.revision ?? null, view,
+      description, steps, providerId, attachDiagnostics, title, body,
+    });
+  }, [attachDiagnostics, body, description, providerId, report?.id, report?.revision, steps, title, view]);
 
   useEffect(() => {
     if (report?.status !== "submitting" || busy) return;

@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  window.sessionStorage.clear();
   bridge.copyText.mockClear();
   bridge.openExternal.mockClear();
   if (previous) Object.defineProperty(window, "inertia", previous);
@@ -378,4 +379,14 @@ it("still asks before replacing a preview edited by hand when publishing it fail
   fireEvent.click(screen.getByRole("button", { name: "Preview issue" }));
   expect(await screen.findByRole("group", { name: "Replace your edited preview?" })).toBeVisible();
   expect(commands(request, "support.report.prepare")).toHaveLength(0);
+});
+
+it("keeps unsaved preview edits when the page is closed and opened again", async () => {
+  const { props, request } = fixture(saved("preview"));
+  const first = render(<IssueReportSettings {...props} />);
+  fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Edited before closing Settings" } });
+  first.unmount();
+  render(<IssueReportSettings {...props} />);
+  await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Edited before closing Settings"));
+  expect(commands(request, "support.report.edit")).toHaveLength(0);
 });

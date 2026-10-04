@@ -178,6 +178,7 @@ describe("Settings as a mode", () => {
     render(<Harness overrides={{ onReportCommand: onReportCommand as never }} />);
     openFrom("Open settings");
     fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Help" })).toHaveFocus());
     const description = await screen.findByRole("textbox", { name: "What happened" });
     await waitFor(() => expect(description).toBeEnabled());
     fireEvent.change(description, { target: { value: "Typed for five minutes before pressing Escape" } });
@@ -198,6 +199,7 @@ describe("Settings as a mode", () => {
     render(<Harness overrides={{ archived: [archived] }} />);
     openFrom("Open settings");
     fireEvent.click(screen.getByRole("button", { name: "Data" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Data" })).toHaveFocus());
     const filter = await screen.findByRole("searchbox", { name: "Filter archived chats" });
     filter.focus();
     fireEvent.change(filter, { target: { value: "zebra" } });
@@ -216,6 +218,7 @@ describe("Settings as a mode", () => {
     render(<Harness overrides={{ onUpdate }} />);
     openFrom("Open settings");
     fireEvent.click(screen.getByRole("button", { name: "Devices & integrations" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Devices & integrations" })).toHaveFocus());
     const repository = await screen.findByLabelText("Repository URL");
     repository.focus();
     fireEvent.change(repository, { target: { value: "https://gitlab.com/acme/widgets" } });

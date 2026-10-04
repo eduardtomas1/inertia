@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { AttachmentStorageSettings } from "../../src/renderer/src/components/AttachmentStorageSettings";
 import { defaultSettings, type ServerEvent } from "../../src/shared/contracts";
@@ -29,7 +29,7 @@ it("requires confirmation for both explicit deletion and automatic eviction and 
   render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={onUpdate} />);
   const remove = await screen.findByRole("button", { name: /Remove oldest files \(64/u });
   fireEvent.click(remove);
-  expect(screen.getByRole("group", { name: "Confirm attachment deletion" })).toHaveFocus();
+  expect(within(screen.getByRole("group", { name: "Confirm attachment deletion" })).getByRole("button", { name: "Cancel" })).toHaveFocus();
   expect(screen.getByText(/including archived chats/u)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(request.mock.calls).toHaveLength(1);
@@ -85,4 +85,32 @@ it("reports usage as loading until the first read settles and as unavailable onl
   fail(new Error("fixture read failed"));
   expect(await screen.findByText("Attachment usage unavailable. Refresh to check again.")).toBeVisible();
   expect(screen.getByText(/Storage usage could not be read/u)).toBeVisible();
+});
+
+it("reports the automatic-removal save in its own row", async () => {
+  const request = vi.fn().mockResolvedValue(response());
+  const onUpdate = vi.fn().mockResolvedValue(undefined);
+  render(<AttachmentStorageSettings settings={{ ...defaultSettings, autoRemoveOldAttachments: true }} disabled={false} request={request} onUpdate={onUpdate} />);
+  await screen.findByRole("button", { name: /Remove oldest files \(64/u });
+  fireEvent.click(screen.getByRole("switch", { name: "Free space automatically when full" }));
+  const autoRemove = document.querySelector<HTMLElement>('[data-setting-id="attachment-auto-remove"]')!;
+  const removeOldest = document.querySelector<HTMLElement>('[data-setting-id="attachment-remove-oldest"]')!;
+  expect(await within(autoRemove).findByText("Saved")).toBeInTheDocument();
+  expect(within(removeOldest).queryByText("Saved")).toBeNull();
+});
+
+it("keeps Escape inside the confirmation while files are being removed", async () => {
+  let finish!: (event: ServerEvent) => void;
+  const request = vi.fn(async ({ type }: { type: string }) => type === "attachment.storage.cleanup"
+    ? await new Promise<ServerEvent>((resolve) => { finish = resolve; })
+    : response());
+  render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Remove oldest files \(64/u }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove stored files" }));
+  const confirmation = screen.getByRole("group", { name: "Confirm attachment deletion" });
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  act(() => { confirmation.dispatchEvent(escape); });
+  expect(escape.defaultPrevented).toBe(true);
+  expect(screen.getByRole("group", { name: "Confirm attachment deletion" })).toBeInTheDocument();
+  await act(async () => finish(response({ records: 64, bytes: 80 * 1024 ** 2 })));
 });

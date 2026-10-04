@@ -253,6 +253,21 @@
   .response-density-setting > [role="radiogroup"] > button.is-active {
     outline: 1px solid CanvasText;
   }
+
+  .settings-content .switch-thumb {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .settings-content .switch-control[data-checked="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .settings-content .switch-control[data-checked="true"] .switch-thumb {
+    background: HighlightText;
+  }
 }
 
 @media (max-width: 900px) {

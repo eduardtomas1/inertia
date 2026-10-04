@@ -19,7 +19,8 @@ it("shows global disk usage and changes the budget without deleting attachments"
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ attachmentStorageGiB: 64 }));
   expect(request.mock.calls.every(([command]) => command.type === "attachment.storage.get")).toBe(true);
   expect(screen.getByText("100 MiB used · 70 of 65,536 files · 500 GiB free")).toBeVisible();
-  expect(screen.queryByText(/temporary disk budget/u)).toBeNull();
+  expect(screen.getByText(/Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files\./u)).toBeVisible();
+  expect(screen.getByText(/Each message takes up to 100 files, 50 MiB each\./u)).toBeVisible();
 });
 
 it("requires confirmation for both explicit deletion and automatic eviction and allows cancellation", async () => {

@@ -66,7 +66,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       id="attachment-storage"
       className="runtime-log-setting"
       title="Attachment storage"
-      description="Original images and documents kept on this device."
+      description="Original images and documents kept on this device. Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Each message takes up to 100 files, 50 MiB each."
       details={<>
         <small role="status" className="data-facts">{storage?.state === "ready"
           ? `${formatBytes(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${formatBytes(storage.availableDiskBytes)} free`}`

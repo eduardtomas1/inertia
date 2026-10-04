@@ -270,14 +270,14 @@ test("previews an opaque file as stored, not as a failure", async ({ browserName
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("storage settings show the attachment limit and usage at every width", async ({ browserName: _browserName }, info) => {
+test("storage settings state the temporary budget the registry enforces", async ({ browserName: _browserName }, info) => {
   const page = app.page;
   await app.resizeWindow(1440, 920);
   await setAppearanceInPlace(app, "dark");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Data", exact: true }).click();
+  await page.getByRole("button", { name: /^Archive & data(?: \d+)?$/u }).click();
   const card = page.locator(".attachment-storage-setting");
-  await expect(card.getByRole("combobox", { name: "Attachment storage limit" })).toHaveValue("16");
+  await expect(card.getByRole("combobox", { name: "Global attachment disk budget" })).toHaveValue("16");
   await card.evaluate((element) => element.scrollIntoView({ block: "start" }));
   await app.expectNoViewportOverflow();
   await capture(page, info, "storage-settings-dark-wide");
@@ -289,6 +289,6 @@ test("storage settings show the attachment limit and usage at every width", asyn
   await capture(page, info, "storage-settings-light-narrow");
   await setAppearanceInPlace(app, "dark");
   await capture(page, info, "storage-settings-dark-narrow");
-  await expect(card.locator(".data-facts")).toContainText(/ used · \d[\d,]* of 65,536 files · /u);
+  await expect(card).toContainText("temporary disk budget of 16 GiB and 1,024 files");
   expect(app.rendererErrors).toEqual([]);
 });

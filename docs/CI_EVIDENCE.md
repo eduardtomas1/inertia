@@ -125,8 +125,10 @@ with its own `npm run build:packaged` for its exact source/target/configuration:
   `electron` matrix): every target that runs the complete Electron suite gets
   both jobs. The first runs the single-worker display-sensitive project and, on
   Linux x64, keeps the provider-settings screenshots. The second runs the
-  isolated project and then the sequential runtime-recovery project, followed
-  on Linux x64 by the desktop benchmark when one is planned. Windows keeps one
+  isolated project and then the sequential runtime-recovery project. On Linux
+  x64 the desktop benchmark, when one is planned, runs first in that job, right
+  after the Electron binary is prepared and before any Electron end-to-end
+  project. Windows keeps one
   Electron instance per runner, so both Windows architectures replace the
   isolated job with `<label> Electron (isolated 1/2)` and
   `<label> Electron (isolated 2/2)`, each running

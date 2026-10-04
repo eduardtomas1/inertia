@@ -3,11 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachmentStorageSettings } from "../../src/renderer/src/components/AttachmentStorageSettings";
 import CanaryRollbackSetting from "../../src/renderer/src/components/CanaryRollbackSetting";
 import type { IssueReportSettingsProps } from "../../src/renderer/src/components/IssueReportSettings";
-import { MascotSettings } from "../../src/renderer/src/components/MascotSettings";
+import { MascotSettings as MascotRows } from "../../src/renderer/src/components/MascotSettings";
 import { ProjectSettings } from "../../src/renderer/src/components/ProjectSettings";
 import { SnapshotSettings } from "../../src/renderer/src/components/SnapshotSettings";
 import { AppUpdateSettings } from "../../src/renderer/src/components/settings/AppUpdateSettings";
 import { RestoreDefaults } from "../../src/renderer/src/components/settings/RestoreDefaults";
+import { useSettingAction } from "../../src/renderer/src/components/settings/useSettingAction";
 import { ArchivedChats } from "../../src/renderer/src/components/settings/sections/ArchivedChats";
 import { KeyboardSettings } from "../../src/renderer/src/components/settings/sections/KeyboardSettings";
 import { defaultSettings, type Conversation, type Project, type ServerEvent } from "../../src/shared/contracts";
@@ -33,6 +34,10 @@ function expectHeldWhileBusy(control: HTMLElement): void {
 function press(control: HTMLElement): void {
   control.focus();
   fireEvent.click(control);
+}
+
+function MascotSettings(): React.JSX.Element {
+  return <MascotRows showAction={useSettingAction()} motionAction={useSettingAction()} />;
 }
 
 describe("busy settings controls keep focus", () => {

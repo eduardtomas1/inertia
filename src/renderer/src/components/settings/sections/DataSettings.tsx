@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArchiveRestore, Download } from "lucide-react";
+import { Download, Import } from "lucide-react";
 
 import type {
   AppSettings,
@@ -140,7 +140,7 @@ export function DataSettings({
           actions={(
             <>
               <button type="button" className="secondary-button" aria-disabled={recoveryUnavailable || undefined} onClick={exportRecoveryData}><Download size={14} aria-hidden="true" />{recovery.pending === "export" ? "Exporting…" : "Export recovery file"}</button>
-              <button type="button" className="secondary-button" aria-disabled={recoveryUnavailable || undefined} onClick={importRecoveryData}><ArchiveRestore size={14} aria-hidden="true" />{recovery.pending === "import" ? "Importing…" : "Import recovery file"}</button>
+              <button type="button" className="secondary-button" aria-disabled={recoveryUnavailable || undefined} onClick={importRecoveryData}><Import size={14} aria-hidden="true" />{recovery.pending === "import" ? "Importing…" : "Import recovery file"}</button>
             </>
           )}
         />

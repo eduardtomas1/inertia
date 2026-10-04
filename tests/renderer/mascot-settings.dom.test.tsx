@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MascotSettings } from "../../src/renderer/src/components/MascotSettings";
+import { MascotSettings as MascotRows } from "../../src/renderer/src/components/MascotSettings";
+import { useSettingAction } from "../../src/renderer/src/components/settings/useSettingAction";
+
+function MascotSettings(): React.JSX.Element {
+  return <MascotRows showAction={useSettingAction()} motionAction={useSettingAction()} />;
+}
 import { emptyMascotStatus, type MascotSettingsBridge, type MascotSnapshot } from "../../src/shared/mascot";
 import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 

@@ -123,7 +123,11 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   for (const name of NEW_CHAT_SELECTS) {
     const control = page.getByRole("combobox", { name, exact: true });
     await expect(control).toBeEnabled();
-    if (await control.getAttribute("aria-disabled") === "true") continue;
+    if (await control.getAttribute("aria-disabled") === "true") {
+      expect(name).toBe("Reasoning");
+      await expect(control.getByRole("option")).toHaveCount(1);
+      continue;
+    }
     await control.click();
     await expect(control).toHaveCSS("appearance", "base-select");
     await expect.poll(() => control.evaluate((element) => element.matches(":open"))).toBe(true);
@@ -174,7 +178,9 @@ test("selects new-chat defaults with pointer and keyboard and preserves them aft
   const choose = async (name: string, option: string | RegExp): Promise<void> => {
     const control = select(name);
     await control.click();
-    await control.getByRole("option", { name: option, exact: true }).first().click();
+    const choice = control.getByRole("option", { name: option, exact: true });
+    await expect(choice).toHaveCount(1);
+    await choice.click();
     await expect.poll(() => selectedLabel(control)).toMatch(option);
     await expect(control).toBeFocused();
   };

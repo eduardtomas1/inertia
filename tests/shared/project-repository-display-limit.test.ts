@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { clientCommandSchema } from "../../src/shared/contracts";
 import {
   PROJECT_REPOSITORY_DISPLAY_LIMITS,
-  projectRepositoryDisplayLimit,
+  projectRepositoryLimitChoices,
 } from "../../src/shared/project-repository-limit";
 
 describe("project repository display limit", () => {
@@ -11,12 +11,11 @@ describe("project repository display limit", () => {
     expect(PROJECT_REPOSITORY_DISPLAY_LIMITS).toEqual([16, 32]);
   });
 
-  it("maps every stored limit to one offered choice", () => {
-    expect(projectRepositoryDisplayLimit(16)).toBe(16);
-    expect(projectRepositoryDisplayLimit(31)).toBe(16);
-    expect(projectRepositoryDisplayLimit(32)).toBe(32);
-    expect(projectRepositoryDisplayLimit(128)).toBe(32);
-    expect(projectRepositoryDisplayLimit(1_024)).toBe(32);
+  it("offers the stored limit itself when it is not one of the two choices", () => {
+    expect(projectRepositoryLimitChoices(16)).toEqual([16, 32]);
+    expect(projectRepositoryLimitChoices(32)).toEqual([16, 32]);
+    expect(projectRepositoryLimitChoices(24)).toEqual([16, 24, 32]);
+    expect(projectRepositoryLimitChoices(1_024)).toEqual([16, 32, 1_024]);
   });
 
   it("accepts every offered choice at the command boundary", () => {

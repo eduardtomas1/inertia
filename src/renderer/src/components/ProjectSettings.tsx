@@ -5,7 +5,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { SettingsTarget } from "../lib/settingsTarget";
 import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectAppearancePatch, type ProjectPreferences } from "../../../shared/project-preferences";
 import { modelSelectionSchema } from "../../../shared/model-routing";
-import { PROJECT_REPOSITORY_DISPLAY_LIMITS, projectRepositoryDisplayLimit } from "../../../shared/project-repository-limit";
+import { projectRepositoryLimitChoices } from "../../../shared/project-repository-limit";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { ProjectSearchDialog } from "./ProjectSearchDialog";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
@@ -16,6 +16,7 @@ import { Switch } from "./ui";
 import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { FULL_ACCESS_CAUTION } from "./settings/accessCaution";
+import { ProjectRemoval } from "./settings/ProjectRemoval";
 import { useSettingAction } from "./settings/useSettingAction";
 import { rememberProjectChoice, type SettingsSectionMemory } from "./settings/sectionMemory";
 import "./ProjectSettings.css";
@@ -37,7 +38,6 @@ interface Props {
 
 const workspaceOptions = { local: "Current checkout", worktree: "New worktree" };
 const accessOptions: Record<AppSettings["defaultAccessMode"], string> = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" };
-const repositoryLimitOptions = Object.fromEntries(PROJECT_REPOSITORY_DISPLAY_LIMITS.map((limit) => [String(limit), `Show up to ${limit} repositories`]));
 const groupingOptions: Record<AppSettings["projectGrouping"], string> = { repository: "By repository", "repository-path": "By repository and folder", separate: "Keep separate" };
 const budgetPattern = /^\d+(?:\.\d{1,2})?$/u;
 const budgetError = "Use 0.01 to 10,000 with up to two decimals, or empty for no limit.";
@@ -200,18 +200,24 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </div>
       <SettingDisclosure summary="Advanced" className="project-settings-advanced">
         <SettingRow id="project-repository-limit" title="Repository display limit" notice={notice("project-repository-limit")}>
-          <ProjectSelect label="Repository display limit" value={String(projectRepositoryDisplayLimit(project.gitRepositoryLimit))} disabled={unavailable} inactive={saving}
-            options={repositoryLimitOptions} onChange={(value) => void change("project-repository-limit", update({ gitRepositoryLimit: Number(value) }))} />
+          <ProjectSelect label="Repository display limit" value={String(project.gitRepositoryLimit)} disabled={unavailable} inactive={saving}
+            options={Object.fromEntries(projectRepositoryLimitChoices(project.gitRepositoryLimit).map((limit) => [String(limit), `Show up to ${limit} repositories`]))} onChange={(value) => void change("project-repository-limit", update({ gitRepositoryLimit: Number(value) }))} />
         </SettingRow>
       </SettingDisclosure>
     </SettingsGroup>
     <SettingsGroup title="Danger zone">
-      <SettingRow id="project-remove" title="Remove project" description="Removes the project and its chats from Inertia. Files on disk are not touched." notice={notice("project-remove")}>
-        <button type="button" className="secondary-button is-danger" disabled={unavailable} aria-disabled={busy || busyProject || undefined} onClick={() => {
-          if (blocked || busyProject || !request || !window.confirm(`Remove “${project.name}” and its chats from Inertia? This cannot be undone. Files on disk will not be deleted.`)) return;
+      <ProjectRemoval
+        projectName={project.name}
+        confirmDestructiveActions={settings.confirmDestructiveActions}
+        disabled={unavailable}
+        busy={saving}
+        running={busyProject}
+        notice={notice("project-remove")}
+        onRemove={() => {
+          if (blocked || busyProject || !request) return;
           void change("project-remove", { type: "project.remove", payload: { projectId: project.id } }).then((removed) => { if (removed) onRemoved(); });
-        }}><Trash2 size={14} aria-hidden="true" />Remove project</button>
-      </SettingRow>
+        }}
+      />
     </SettingsGroup>
     <span className="visually-hidden" role="status">{saving ? "Saving project settings" : ""}</span>
   </>;

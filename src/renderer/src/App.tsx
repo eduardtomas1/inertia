@@ -9,7 +9,6 @@ import {
   type AgentApprovalDecision,
   type AgentApprovalRequest,
   type AgentInputRequest,
-  type AppSettings,
   type AppSettingsUpdate,
   type Conversation,
   type Project,

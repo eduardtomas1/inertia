@@ -17,7 +17,7 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("leaves Settings with Escape, reopens at the last section and keeps typed text", async () => {
+test("leaves Settings with Escape after reverting an unsaved field first and reopens at the last section", async () => {
   const settings = page.getByRole("main", { name: "Settings" });
   const sidebarSettings = page.getByRole("complementary", { name: "Project navigation" })
     .getByRole("button", { name: "Settings", exact: true });
@@ -103,14 +103,59 @@ test("keeps an action row's height when its notice appears", async () => {
   await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Data", exact: true }).click();
   const recoveryRow = page.locator('[data-setting-id="recovery-export"]');
+  await expect(page.locator(".settings-view [aria-busy='true']")).toHaveCount(0);
+  await expect(page.locator('[data-setting-id="attachment-storage"] .data-facts')).toContainText(" used · ");
   const rowHeight = (): Promise<number> => recoveryRow.evaluate((element) => element.getBoundingClientRect().height);
   const idleHeight = await rowHeight();
   await app.electronApp.evaluate(({ dialog }) => {
+    Reflect.set(globalThis, "__restoreShowSaveDialog", dialog.showSaveDialog);
     Reflect.set(dialog, "showSaveDialog", async () => ({ canceled: true }));
   });
-  await recoveryRow.getByRole("button", { name: "Export recovery file" }).click();
-  await expect(recoveryRow.getByText("Recovery export cancelled.", { exact: true })).toBeVisible();
-  expect(await rowHeight()).toBe(idleHeight);
+  try {
+    await recoveryRow.getByRole("button", { name: "Export recovery file" }).click();
+    await expect(recoveryRow.getByText("Recovery export cancelled.", { exact: true })).toBeVisible();
+    expect(await rowHeight()).toBe(idleHeight);
+  } finally {
+    await app.electronApp.evaluate(({ dialog }) => {
+      Reflect.set(dialog, "showSaveDialog", Reflect.get(globalThis, "__restoreShowSaveDialog"));
+      Reflect.deleteProperty(globalThis, "__restoreShowSaveDialog");
+    });
+  }
   await page.getByRole("button", { name: "Close settings", exact: true }).click();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("keeps a switch row's size and control position at 760 × 600 after Saved and after an error", async () => {
+  await app.resizeWindow(760, 600);
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
+  await sections.getByRole("button", { name: "Chats", exact: true }).click();
+  const geometry = (id: string) => page.locator(`[data-setting-id="${id}"]`).evaluate((element) => {
+    const row = element.getBoundingClientRect();
+    const control = element.querySelector('[role="switch"]')!.getBoundingClientRect();
+    return { height: row.height, width: row.width, controlX: control.x - row.x, controlY: control.y - row.y };
+  });
+  const timestamps = page.locator('[data-setting-id="message-timestamps"]');
+  await timestamps.scrollIntoViewIfNeeded();
+  const idle = await geometry("message-timestamps");
+  await timestamps.getByRole("switch").click();
+  await expect(timestamps.getByText("Saved", { exact: true })).toBeVisible();
+  expect(await geometry("message-timestamps")).toEqual(idle);
+  await timestamps.getByRole("switch").click();
+  await expect(timestamps.getByText("Saved", { exact: true })).toBeVisible();
+
+  await app.electronApp.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler("inertia:mascot-configure");
+    ipcMain.handle("inertia:mascot-configure", async () => { throw new Error("fixture mascot failure"); });
+  });
+  await sections.getByRole("button", { name: "Notifications", exact: true }).click();
+  const mascot = page.locator('[data-setting-id="desktop-mascot"]');
+  await mascot.scrollIntoViewIfNeeded();
+  const mascotIdle = await geometry("desktop-mascot");
+  await mascot.getByRole("switch", { name: "Show mascot" }).click();
+  await expect(mascot.getByRole("alert")).toHaveText("Could not update the mascot. Try again.");
+  expect(await geometry("desktop-mascot")).toEqual(mascotIdle);
+  await page.getByRole("button", { name: "Close settings", exact: true }).click();
+  await app.resizeWindow(1440, 920);
   expect(rendererErrors).toEqual([]);
 });

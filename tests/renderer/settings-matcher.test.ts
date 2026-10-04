@@ -37,7 +37,20 @@ describe("settings search matcher", () => {
   it("ranks title matches above keyword matches above group matches", () => {
     expect(ids("theme")).toEqual(["theme", "scale", "glow"]);
     const [group] = searchSettings("theme", sections);
-    expect(group!.results.map(({ score }) => score)).toEqual([9, 4, 2]);
+    expect(group!.results.map(({ score }) => score)).toEqual([11, 4, 2]);
+  });
+
+  it("puts a whole-word title match before a longer word with the same prefix", () => {
+    const rows: SettingsSectionRows[] = [{
+      id: "chats",
+      label: "Chats",
+      rows: [
+        { id: "model", sectionId: "chats", title: "Model", keywords: ["provider"], group: "New chats" },
+        { id: "work-mode", sectionId: "chats", title: "Work mode", keywords: ["build"], group: "New chats" },
+      ],
+    }];
+    expect(ids("mode", rows)).toEqual(["work-mode", "model"]);
+    expect(ids("mod", rows)).toEqual(["model", "work-mode"]);
   });
 
   it("matches word prefixes, not the middle of words", () => {

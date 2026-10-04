@@ -19,6 +19,7 @@ const TITLE_WEIGHT = 8;
 const KEYWORD_WEIGHT = 4;
 const GROUP_WEIGHT = 2;
 const SECTION_WEIGHT = 1;
+const WHOLE_WORD_BONUS = 2;
 const WORD = /[\p{L}\p{N}]+/gu;
 
 export function normalizeSearchText(value: string): string {
@@ -67,7 +68,7 @@ function scoreRow(row: SettingsRowMetadata, sectionLabel: string, tokens: readon
         : prefixes(group, token) ? GROUP_WEIGHT
           : prefixes(section, token) ? SECTION_WEIGHT : 0;
     if (weight === 0) return 0;
-    score += weight;
+    score += weight === TITLE_WEIGHT && title.includes(token) ? weight + WHOLE_WORD_BONUS : weight;
   }
   return normalizeSearchText(row.title).startsWith(tokens.join(" ")) ? score + 1 : score;
 }

@@ -72,6 +72,7 @@ describe("busy settings controls keep focus", () => {
     const view = render(<SnapshotSettings />);
     const toggle = screen.getByRole("switch", { name: "Window snapshots" });
     await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
+    await act(async () => undefined);
     press(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute("aria-disabled", "true"));
     expectHeldWhileBusy(toggle);
@@ -83,6 +84,7 @@ describe("busy settings controls keep focus", () => {
     render(<KeyboardSettings keybindings={DEFAULT_APP_KEYBINDINGS} disabled={false} onUpdate={vi.fn(async () => undefined)} />);
     const shortcut = await screen.findByRole("combobox", { name: "Window snapshot" });
     await waitFor(() => expect(shortcut).not.toHaveAttribute("aria-disabled"));
+    await act(async () => undefined);
     shortcut.focus();
     fireEvent.change(shortcut, { target: { value: "both-shift" } });
     await waitFor(() => expect(shortcut).toHaveAttribute("aria-disabled", "true"));

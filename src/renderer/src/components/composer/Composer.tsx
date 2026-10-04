@@ -971,6 +971,7 @@ export const Composer = memo(function Composer({
       >
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
+        {limitResetRow}
         {goal && (
           <Suspense fallback={null}>
             <ChatGoalControl
@@ -997,7 +998,7 @@ export const Composer = memo(function Composer({
         )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
-          contextCards={<>{limitResetRow}{conversationContextHandoffEnabled && (
+          contextCards={<>{conversationContextHandoffEnabled && (
             <>
               <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
               <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />

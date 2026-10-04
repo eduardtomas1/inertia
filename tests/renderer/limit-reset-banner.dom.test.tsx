@@ -254,6 +254,31 @@ describe("quota reset row inside the composer", () => {
     expect(cancel).toHaveFocus();
     expect(cancel).not.toHaveAttribute("aria-disabled");
   });
+  it("keeps focus in the row when Resume now replaces the missed actions", async () => {
+    const missed = pending(); missed.plan!.state = "missed"; missed.offer = null;
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(missed).mockResolvedValueOnce({ ...pending(), offer: null });
+    render(banner(run));
+    const resumeNow = await screen.findByRole("button", { name: "Resume now" });
+    resumeNow.focus();
+    fireEvent.click(resumeNow);
+    await screen.findByText("Resume scheduled");
+    expect(screen.getByRole("button", { name: "Cancel resume" })).toHaveFocus();
+  });
+  it("leaves focus where the user moved it while Resume now was pending", async () => {
+    const missed = pending(); missed.plan!.state = "missed"; missed.offer = null;
+    let resolve!: (value: LimitResetResult) => void;
+    const resumed = new Promise<LimitResetResult>((done) => { resolve = done; });
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValueOnce(missed).mockReturnValueOnce(resumed);
+    render(<>{banner(run)}<textarea aria-label="Message" /></>);
+    const resumeNow = await screen.findByRole("button", { name: "Resume now" });
+    resumeNow.focus();
+    fireEvent.click(resumeNow);
+    const message = screen.getByRole("textbox", { name: "Message" });
+    message.focus();
+    await act(async () => { resolve({ ...pending(), offer: null }); await resumed; });
+    expect(screen.getByText("Resume scheduled")).toBeVisible();
+    expect(message).toHaveFocus();
+  });
   it("marks unavailable actions without removing them from the focus order", async () => {
     const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: { failedTurnId, resetsAt, canResume: false, unavailableReason: "Secure storage is unavailable, so Inertia cannot confirm the account at the reset." } });
     render(<LimitResetBanner conversationId={conversationId} latestTurnId={failedTurnId} snoozedUntil={resetsAt} disabled={false} providerState="ready" onCommand={run} />);

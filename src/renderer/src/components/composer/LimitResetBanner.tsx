@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, Clock3 } from "lucide-react";
 import type { LimitResetResult } from "@shared/limit-reset";
 import type { LimitResetCommand, LimitResetCommandRunner } from "./limitResetClient";
@@ -93,8 +93,16 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     const timer = window.setTimeout(refresh, delay);
     return () => window.clearTimeout(timer);
   }, [active, result, conversationId, disabled, refresh]);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const keepFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (busy || !keepFocus.current) return;
+    keepFocus.current = false;
+    if (document.activeElement === document.body) rowRef.current?.querySelector("button")?.focus();
+  });
   const mutate = async (command: LimitResetCommand): Promise<void> => {
     if (busy || disabled) return;
+    keepFocus.current = rowRef.current?.contains(document.activeElement) ?? false;
     const owner = generation.current;
     revision.current += 1;
     setBusy(true);
@@ -144,7 +152,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     if (!offer || snoozed) return;
     void mutate({ type: "conversation.limit-reset.snooze", payload: { conversationId, failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt } });
   };
-  return <div className="limit-reset" role="group" aria-label="Usage limit" data-state={state}>
+  return <div ref={rowRef} className="limit-reset" role="group" aria-label="Usage limit" data-state={state}>
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
       <strong>{title}</strong>

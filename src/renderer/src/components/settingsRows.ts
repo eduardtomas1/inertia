@@ -100,24 +100,27 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   }),
   section("projects", "Projects", {
     "All projects": [
+      ["project-chooser", "Project", ["choose project", "select project", "all projects"]],
       ["project-grouping", "Group projects", ["repository", "folder", "grouping", "logical project grouping", "general"]],
       ["compact-sidebar", "Compact sidebar", ["sidebar", "density", "navigation", "compact project navigation", "general"]],
     ],
-    Project: [
+    General: [
       ["project-name", "Name", ["rename project", "project name"]],
       ["project-icon", "Project icon", ["image", "symbol"]],
       ["project-colour", "Project colour", ["color", "tint"]],
       ["project-colour-emphasis", "Colour shows on", ["color", "tint"]],
       ["project-pin", "Pin to top", ["favourite", "favorite", "pin project"]],
+    ],
+    "New chats": [
       ["project-model", "Model", ["default model", "project model", "override"]],
       ["project-workspace", "Where new chats run", ["worktree", "checkout", "branch", "workspace"]],
       ["project-default-access", "Default access", ["access", "full access", "supervised", "auto-accept edits", "permissions"]],
-      ["project-auto-pull", "Automatically pull", ["git", "branch", "pull", "source control"]],
       ["project-browser-access", "Agent browser access", ["preview browser", "browser"]],
       ["project-spend-limit", "Claude spend limit per turn", ["budget", "cost", "usd", "limit", "token"]],
     ],
     Checkout: [
       ["project-grouping-override", "Group this project", ["repository", "grouping"]],
+      ["project-auto-pull", "Automatically pull", ["git", "branch", "pull", "source control"]],
       ["project-actions", "Actions", ["commands", "scripts", "project actions"]],
       ["project-repository-limit", "Repository display limit", ["repositories", "nested", "sidebar", "limit", "advanced"]],
     ],

@@ -113,7 +113,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
     const backends = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true });
     await backends.click();
     await expect(backends).toHaveAttribute("aria-current", "page");
-    await expect(page.getByLabel("Model backend profiles")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Custom backends" })).toBeVisible();
   };
   const setAppearance = async (
     theme: "Light" | "Dark" | "System",
@@ -183,12 +183,12 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await expect(profileRail.getByText("Kimi", { exact: true })).toBeVisible();
   await expect(profileRail.locator(".backend-profile-rail-item").filter({
     hasText: /^OpenAI/u,
-  }).locator(".backend-profile-dot")).toHaveClass(/is-ready/u);
+  }).locator(".backend-profile-state")).toHaveText("Ready");
   await expect(profileRail.getByRole("button", {
-    name: "Kimi api.kimi.com",
-  }).locator(".backend-profile-dot")).not.toHaveClass(/is-ready/u);
+    name: /^Kimi api\.kimi\.com/u,
+  }).locator(".backend-profile-state")).not.toHaveText("Ready");
   await profileRail.getByText("Kimi", { exact: true }).click();
-  await expect(page.getByText("Backend credential", { exact: true })).toBeVisible();
+  await expect(page.locator(".backend-credential-row").getByText("Credential", { exact: true })).toBeVisible();
   await expect(page.getByPlaceholder("Add credential")).toBeVisible();
 
   const appearances = [
@@ -269,7 +269,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   });
   await page.getByRole("button", { name: "Create profile" }).click();
   await expect(page.getByText("Visual gateway with an intentionally long profile name for truncation", { exact: true }).first()).toBeVisible();
-  const enable = page.getByRole("switch", { name: "Enabled", exact: true });
+  const enable = page.getByRole("switch", { name: "Use this backend", exact: true });
   await expect(enable).toHaveAttribute("aria-checked", "false");
 
   const probe = page.getByRole("button", { name: "Test connection" });
@@ -278,7 +278,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await page.screenshot({
     path: testInfo.outputPath("model-backends-narrow-probe-loading.png"),
   });
-  await expect(page.locator(".backend-status-strip").getByText("limited", {
+  await expect(page.locator(".backend-connection-row").getByText("Limited", {
     exact: true,
   })).toBeVisible();
   await expect(probe).toBeVisible();
@@ -307,7 +307,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   await expect(enable).toHaveAttribute("aria-checked", "false");
   await expect.poll(globalBackendDefaults).toBe(0);
   await probe.click();
-  await expect(page.locator(".backend-status-strip").getByText("failed", {
+  await expect(page.locator(".backend-connection-row").getByText("Failed", {
     exact: true,
   })).toBeVisible();
   await page.screenshot({

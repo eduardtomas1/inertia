@@ -31,17 +31,17 @@ export function ProjectModelDefault({ projectId, providers, backendProfiles, bac
   }
   const reasoningOptions = routes.find(({ key }) => key === selected.key)?.reasoningOptions ?? [];
   return <div className="project-model-controls">
-    <select aria-label="Project default model" value={saved ? selected.key : ""} disabled={disabled} onChange={(event) => {
+    <select className="setting-select" aria-label="Project default model" value={saved ? selected.key : ""} disabled={disabled} onChange={(event) => {
       if (!event.target.value) { onChange(null); return; }
       const route = routes.find(({ key }) => key === event.target.value);
       if (route?.selectable) onChange(route.selection);
     }}>
-      <option value="">Default ({inherited.displayName})</option>
+      <option value="">Default ({inherited.modelId === "provider-default" ? `${inherited.providerLabel} default` : inherited.displayName})</option>
       {saved && !routes.some(({ key }) => key === selected.key) && <option value={selected.key} disabled>{selected.displayName} — unavailable</option>}
       {[...groups].map(([label, choices]) => <optgroup key={label} label={label}>{choices.map((route) =>
         <option key={route.key} value={route.key} disabled={!route.selectable}>{route.displayName}{route.selectable ? "" : " — unavailable"}</option>)}</optgroup>)}
     </select>
-    {saved && <select aria-label="Project default reasoning" value={saved.reasoningEffort ?? ""}
+    {saved && <select className="setting-select" aria-label="Project default reasoning" value={saved.reasoningEffort ?? ""}
       disabled={disabled || !selected.selectable || reasoningOptions.length === 0} onChange={(event) => {
         const value = event.target.value;
         if (value && !reasoningOptions.includes(value)) return;

@@ -182,8 +182,17 @@ describe("Help search", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Themes" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(props.onOpenSettings).toHaveBeenCalledExactlyOnceWith("appearance");
+    expect(props.onOpenSettings).toHaveBeenCalledExactlyOnceWith({ section: "appearance" });
     expect(props.onLeave).toHaveBeenCalledOnce();
+  });
+
+  it("opens Settings at the row an entry names", async () => {
+    const props = hostProps();
+    const { dialog, type } = await openHelp(props);
+    type("incidents");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Diagnostics" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(props.onOpenSettings).toHaveBeenCalledExactlyOnceWith({ section: "help", anchor: "diagnostics-incidents" });
   });
 
   it("opens the topic of an entry without its own action and clears the query", async () => {

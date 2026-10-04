@@ -22,6 +22,7 @@ export interface HelpEntry {
   detail: string;
   shortcut?: AppShortcutAction;
   jump?: string;
+  anchor?: string;
 }
 
 export interface HelpTopic {
@@ -420,15 +421,19 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Diagnostics",
         detail: "Settings → Help keeps a local history of app events and incidents that you can search, filter, export or clear. Capture can be turned off there.",
         jump: "Open Settings → Help",
+        anchor: "diagnostics-incidents",
       },
       {
         name: "Report an issue",
         detail: "Report an issue in Settings → Help drafts a report. You review the exact text before anything is submitted to GitHub.",
         jump: "Open Settings → Help",
+        anchor: "report-issue",
       },
       {
         name: "Support summary",
         detail: "Copy support summary, under Diagnostics in Settings → Help, copies a bounded summary to attach to a bug report.",
+        jump: "Open Settings → Help",
+        anchor: "runtime-diagnostics",
       },
       {
         name: "Updates",

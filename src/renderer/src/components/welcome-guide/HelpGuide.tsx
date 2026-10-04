@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import type { AppShortcutAction } from "@shared/keybindings";
 
-import type { SettingsSection } from "../../lib/settingsTarget";
+import type { SettingsTarget } from "../../lib/settingsTarget";
 import {
   GuideDemo,
   GuideDialog,
@@ -34,7 +34,7 @@ export function HelpGuide({
   shortcutLabel: (action: AppShortcutAction) => string;
   onClose: () => void;
   onCommand: (command: HelpCommand) => void;
-  onOpenSettings: (section: SettingsSection) => void;
+  onOpenSettings: (target: SettingsTarget) => void;
 }): React.JSX.Element {
   const titleId = useId();
   const resultsId = useId();
@@ -86,15 +86,15 @@ export function HelpGuide({
     setQuery("");
     search.current?.focus();
   };
-  const jump = (target: HelpJump): void => {
+  const jump = (target: HelpJump, anchor?: string): void => {
     close();
     if ("command" in target) onCommand(target.command);
-    else onOpenSettings(target.settings);
+    else onOpenSettings(anchor ? { section: target.settings, anchor } : { section: target.settings });
   };
   const open = ({ topic: owner, entry }: HelpSearchHit): void => {
     const target = owner.jumps.find(({ label }) => label === entry.jump);
     if (target) {
-      jump(target);
+      jump(target, entry.anchor);
       return;
     }
     setQuery("");

@@ -6,7 +6,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { closeHelpGuide, settleHelpGuideRequest } from "../utils/helpGuide";
 import { DialogPresence, useDialogPresence } from "./DialogPresence";
 import { loadWelcomeGuide } from "./lazySurfaceLoaders";
-import type { SettingsSection } from "../lib/settingsTarget";
+import type { SettingsTarget } from "../lib/settingsTarget";
 import type { HelpCommand } from "./welcome-guide/helpTopics";
 
 export function HelpGuideHost({
@@ -18,7 +18,7 @@ export function HelpGuideHost({
 }: {
   shortcutLabel: (action: AppShortcutAction) => string;
   commands: Record<HelpCommand, () => void>;
-  onOpenSettings: (section: SettingsSection) => void;
+  onOpenSettings: (target: SettingsTarget) => void;
   onLeave: () => void;
   onLoadError: (message: string) => void;
 }): React.JSX.Element {
@@ -60,9 +60,9 @@ export function HelpGuideHost({
             onLeave();
             commands[command]();
           }}
-          onOpenSettings={(section) => {
+          onOpenSettings={(target) => {
             onLeave();
-            onOpenSettings(section);
+            onOpenSettings(target);
           }}
         />
       )}

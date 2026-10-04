@@ -39,6 +39,13 @@ function helpTopicProblems(topics: readonly HelpTopic[]): string[] {
       if (entry.jump !== undefined && !topic.jumps.some(({ label }) => label === entry.jump)) {
         problems.push(`${topic.id}: entry ${entry.name} names missing jump ${entry.jump}`);
       }
+      if (entry.anchor !== undefined) {
+        const target = topic.jumps.find(({ label }) => label === entry.jump);
+        const section = target && "settings" in target ? target.settings : undefined;
+        if (!SETTINGS_ROWS.some(({ id, sectionId }) => id === entry.anchor && sectionId === section)) {
+          problems.push(`${topic.id}: entry ${entry.name} anchors to missing row ${entry.anchor}`);
+        }
+      }
     }
     for (const jump of topic.jumps) {
       if ("command" in jump) {

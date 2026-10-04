@@ -962,7 +962,7 @@ export const AppLayout = memo(function AppLayout({
           "daily-work": () => setDailyWorkOpen(true),
           "welcome-guide": openWelcomeGuide,
         }}
-        onOpenSettings={actions.openSettingsSection}
+        onOpenSettings={actions.openSettings}
         onLeave={() => setSidebarOpen(false)}
         onLoadError={setActionError}
       />

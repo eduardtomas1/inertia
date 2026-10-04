@@ -270,7 +270,7 @@ describe("Help", () => {
       }
     }
 
-    expect(props.onOpenSettings.mock.calls.map(([section]) => section)).toEqual(expectedSettings);
+    expect(props.onOpenSettings.mock.calls.map(([target]) => target)).toEqual(expectedSettings.map((section) => ({ section })));
     expect(props.onLeave).toHaveBeenCalledTimes(expectedSettings.length + commandCalls);
     expect(Object.values(props.commands).every((command) => command.mock.calls.length > 0)).toBe(true);
   });

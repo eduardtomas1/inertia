@@ -71,7 +71,7 @@
 }
 
 .settings-search-group mark {
-  border-radius: 2px;
+  border-radius: var(--radius-small);
   color: var(--text);
   background: var(--accent-soft);
   font-weight: 650;

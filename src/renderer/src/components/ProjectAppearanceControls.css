@@ -48,7 +48,7 @@
   width: 26px;
   height: 26px;
   flex: 0 0 26px;
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   border: 1px solid var(--border-strong);
   background: var(--surface-muted);
   color: var(--text-soft);
@@ -73,32 +73,32 @@
   min-height: 26px;
   padding: 3px 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   background: var(--surface-muted);
   color: var(--text);
   font: inherit;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--ui-font-secondary);
 }
 .project-color-hex:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .project-color-hex[aria-invalid="true"] { border-color: var(--danger); }
-.project-color-error { flex-basis: 100%; color: var(--danger); font-size: 11px; }
+.project-color-error { flex-basis: 100%; color: var(--danger); font-size: var(--ui-font-secondary); }
 .project-emphasis-picker {
   display: inline-flex;
   padding: 2px;
   gap: 2px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-medium);
   background: var(--surface-muted);
 }
 .project-emphasis-picker > .project-emphasis-option {
   min-height: 24px;
   padding: 3px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-small);
   background: transparent;
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: var(--ui-font-secondary);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -119,7 +119,7 @@
   min-height: 28px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   background: transparent;
   cursor: pointer;
 }

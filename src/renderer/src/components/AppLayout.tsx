@@ -46,7 +46,7 @@ import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
-import type { SettingsSection } from "../lib/settingsTarget";
+import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
@@ -118,6 +118,7 @@ interface AppLayoutActions {
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
   openSettingsSection: (section: SettingsSection) => void;
+  openSettingsTarget: (target: SettingsTarget) => void;
   closeSettings: () => void;
   createConversation: (
     project?: Project | null,
@@ -913,7 +914,7 @@ export const AppLayout = memo(function AppLayout({
         createConversationIn={(project) => actions.createConversation(project)}
         openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
-        openSettings={() => setView("settings")}
+        openSettings={(target) => target ? actions.openSettingsTarget(target) : setView("settings")}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}

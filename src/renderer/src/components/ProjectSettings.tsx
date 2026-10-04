@@ -16,6 +16,7 @@ import { Switch } from "./ui";
 import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { FULL_ACCESS_CAUTION } from "./settings/accessCaution";
+import { ProjectRemoval } from "./settings/ProjectRemoval";
 import { useSettingAction } from "./settings/useSettingAction";
 import { rememberProjectChoice, type SettingsSectionMemory } from "./settings/sectionMemory";
 import "./ProjectSettings.css";
@@ -206,12 +207,18 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </SettingDisclosure>
     </SettingsGroup>
     <SettingsGroup title="Danger zone">
-      <SettingRow id="project-remove" title="Remove project" description="Removes the project and its chats from Inertia. Files on disk are not touched." notice={notice("project-remove")}>
-        <button type="button" className="secondary-button is-danger" disabled={unavailable} aria-disabled={busy || busyProject || undefined} onClick={() => {
-          if (blocked || busyProject || !request || !window.confirm(`Remove “${project.name}” and its chats from Inertia? This cannot be undone. Files on disk will not be deleted.`)) return;
+      <ProjectRemoval
+        projectName={project.name}
+        confirmDestructiveActions={settings.confirmDestructiveActions}
+        disabled={unavailable}
+        busy={saving}
+        running={busyProject}
+        notice={notice("project-remove")}
+        onRemove={() => {
+          if (blocked || busyProject || !request) return;
           void change("project-remove", { type: "project.remove", payload: { projectId: project.id } }).then((removed) => { if (removed) onRemoved(); });
-        }}><Trash2 size={14} aria-hidden="true" />Remove project</button>
-      </SettingRow>
+        }}
+      />
     </SettingsGroup>
     <span className="visually-hidden" role="status">{saving ? "Saving project settings" : ""}</span>
   </>;

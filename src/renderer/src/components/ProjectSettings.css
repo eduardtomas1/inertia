@@ -223,3 +223,42 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.project-remove-confirm {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: var(--radius-medium);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.project-remove-confirm strong {
+  font-size: var(--ui-font-secondary);
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.project-remove-confirm small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+}
+
+.project-remove-confirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.project-remove-confirm .secondary-button.is-danger {
+  color: var(--danger);
+}
+
+@media (forced-colors: active) {
+  .project-remove-confirm {
+    border: 1px solid CanvasText;
+  }
+}

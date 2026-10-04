@@ -75,8 +75,8 @@ export function MascotSettings() {
   return (
     <div className="mascot-settings">
       <div className="setting-row" data-setting-id="desktop-mascot">
-        <span className="setting-copy"><strong>Desktop mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
-        <Switch label="Desktop mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure({ enabled: value })} />
+        <span className="setting-copy"><strong>Show mascot</strong><small>A tiny companion above your windows, showing live chat status.</small></span>
+        <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure({ enabled: value })} />
       </div>
       <div className="setting-row" data-setting-id="mascot-motion">
         <span className="setting-copy"><strong>Animate mascot</strong></span>
@@ -137,7 +137,7 @@ export function MascotSettings() {
           </> : <button className="secondary-button" type="button" aria-disabled={held} onClick={resetSprites}>{busy === "reset" ? "Resetting…" : "Reset to default"}</button>}
         </div>}
         {notice && <p role="status" className="settings-card-note">{notice}</p>}
-        {shown && !enabled && <p className="settings-card-note">Turn on Desktop mascot above to see these sprites on your desktop.</p>}
+        {shown && !enabled && <p className="settings-card-note">Turn on Show mascot above to see these sprites on your desktop.</p>}
       </section>}
       {error && <p role="alert" className="settings-card-note">{error}</p>}
     </div>

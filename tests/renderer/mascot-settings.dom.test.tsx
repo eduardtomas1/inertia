@@ -133,7 +133,7 @@ describe("mascot custom sprite settings", () => {
     const apply = await screen.findByRole("button", { name: "Apply sprites" });
     expect(apply).toHaveClass("primary-button");
     expect(screen.getByRole("button", { name: "Discard preview" })).toHaveClass("secondary-button");
-    expect(section).toHaveTextContent("Turn on Desktop mascot above to see these sprites on your desktop.");
+    expect(section).toHaveTextContent("Turn on Show mascot above to see these sprites on your desktop.");
 
     bridge.importSprites.mockResolvedValueOnce({ status: "invalid", message: "working.png is missing." });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
@@ -174,7 +174,7 @@ describe("mascot animation setting", () => {
     const bridge = install();
     render(<MascotSettings />);
     const control = await screen.findByRole("switch", { name: "Animate mascot" });
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Desktop mascot" })).not.toHaveAttribute("aria-disabled"));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Show mascot" })).not.toHaveAttribute("aria-disabled"));
     expect(control).toHaveAttribute("aria-disabled", "true");
     control.focus();
     expect(control).toHaveFocus();

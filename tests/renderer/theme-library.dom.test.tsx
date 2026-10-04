@@ -15,7 +15,7 @@ describe("Theme library", () => {
       />,
     );
 
-    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeVisible();
+    expect(screen.getByRole("radiogroup", { name: "Mode" })).toBeVisible();
     expect(screen.getByRole("radio", { name: "System" })).toBeChecked();
     expect(screen.getByRole("group", { name: "Colour theme" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Inertia theme" })).toHaveAttribute("aria-pressed", "true");
@@ -87,7 +87,7 @@ describe("Theme library", () => {
     const { container } = render(<ThemeLibrary settings={{ theme: "system", colorTheme: "inertia" }} disabled={false} onUpdate={vi.fn()} />);
     const labelled = (element: HTMLElement): string | null | undefined =>
       document.getElementById(element.getAttribute("aria-labelledby") ?? "")?.textContent;
-    expect(labelled(screen.getByRole("radiogroup", { name: "Appearance" }))).toBe("Appearance");
+    expect(labelled(screen.getByRole("radiogroup", { name: "Mode" }))).toBe("Mode");
     expect(labelled(screen.getByRole("group", { name: "Colour theme" }))).toBe("Colour theme");
     expect(labelled(screen.getByRole("group", { name: "Custom colours" }))).toBe("Custom colours");
     const cards = [...container.querySelectorAll<HTMLElement>(".color-theme-option")];

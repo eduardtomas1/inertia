@@ -9,9 +9,9 @@ export const RESTORE_DEFAULTS_RESETS = [
       "showThinking", "autoCollapseWorkLog", "autoScrollToFinalAnswer", "showTimestamps", "showChangedFileSummaries",
       "defaultCodeWrap", "autoOpenPlan", "confirmDestructiveActions", "usageDisplayMode", "wrapDiffs", "ignoreWhitespace",
       "terminalFontSize", "desktopNotifications", "notifyOnlyInBackground", "completionSound", "quotaWarnings",
-      "projectGrouping", "compactSidebar",
     ],
   },
+  { label: "project grouping and the compact sidebar", keys: ["projectGrouping", "compactSidebar"] },
   { label: "keyboard shortcuts", keys: ["keybindings"] },
   {
     label: "the new-chat defaults, including a custom backend chosen for new chats",

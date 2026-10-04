@@ -21,6 +21,11 @@ describe("restore defaults copy", () => {
     for (const kept of RESTORE_DEFAULTS_KEEPS) expect(RESTORE_DEFAULTS_SCOPE).toContain(kept);
   });
 
+  it("names project grouping and the compact sidebar apart from the projects it keeps", () => {
+    expect(RESTORE_DEFAULTS_RESETS.find(({ label }) => label === "project grouping and the compact sidebar")?.keys)
+      .toEqual(["projectGrouping", "compactSidebar"]);
+  });
+
   it("keeps imported sounds", () => {
     const library = [{ file: "0123456789abcdef.wav" as const, name: "Bell" }];
     expect(restoredDefaultSettings({ completionSound: { ...defaultSettings.completionSound, library } }).completionSound)

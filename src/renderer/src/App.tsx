@@ -1024,6 +1024,7 @@ export default function App(): React.JSX.Element {
     openBackendSetup,
     openProjectSettings,
     openSettingsSection,
+    openSettings,
     closeSettings: settingsMode.closeSettings,
     createConversation,
     updateSettings,

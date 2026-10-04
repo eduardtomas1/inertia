@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 
-import type { SettingsSection } from "../lib/settingsTarget";
+import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { structurallyEqual } from "../utils/structuralEquality";
 import { SettingsPage } from "./settings/SettingsLayout";
+import { SettingsSearch } from "./settings/SettingsSearch";
 import { SettingsSectionFallback } from "./settings/SettingsSectionFallback";
 import type { SettingsSectionMemory } from "./settings/sectionMemory";
 import type { SettingsSectionContext, SettingsViewProps } from "./settings/settingsTypes";
@@ -14,9 +15,11 @@ import {
   SETTINGS_SECTIONS,
   type SettingsSectionDefinition,
 } from "./settingsSections";
+import { isProjectSettingsRow, type SettingsRowMetadata } from "./settingsRows";
 import "./SettingsView.css";
 
 type FocusRequest = { anchor?: string };
+type LocalTarget = { base: SettingsTarget | null; target: SettingsTarget };
 type PropRecord = Record<string, unknown>;
 
 const IDENTITY_PROPS = new Set(["target"]);
@@ -52,6 +55,9 @@ function useStableSettingsProps(props: SettingsViewProps): SettingsViewProps {
 }
 
 function focusSettingRow(row: HTMLElement): void {
+  for (let details = row.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
+    details.open = true;
+  }
   row.scrollIntoView?.({ block: "center" });
   const control = [...row.querySelectorAll<HTMLElement>(FOCUSABLE)].find((element) => element.tabIndex >= 0);
   if (control) {
@@ -81,11 +87,14 @@ function SettingsSectionHost({
 }
 
 const SettingsShell = memo(function SettingsShell({
-  target = null,
+  target: externalTarget = null,
   initialSection = "appearance",
   onSectionChange,
   ...view
 }: SettingsViewProps): React.JSX.Element {
+  const [localTarget, setLocalTarget] = useState<LocalTarget | null>(null);
+  const target = localTarget?.base === externalTarget ? localTarget.target : externalTarget;
+  const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [section, setSection] = useState<SettingsSection>(target?.section ?? initialSection);
@@ -126,6 +135,18 @@ const SettingsShell = memo(function SettingsShell({
     () => view.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch"),
     [view.projects],
   );
+  const hasProjects = regularProjects.length > 0;
+  const searchSections = useMemo(
+    () => hasProjects ? SETTINGS_SECTIONS : SETTINGS_SECTIONS.map((item) => ({ ...item, rows: item.rows.filter((row) => !isProjectSettingsRow(row)) })),
+    [hasProjects],
+  );
+  const openRow = useCallback((row: SettingsRowMetadata) => {
+    const projectId = isProjectSettingsRow(row)
+      ? (target?.section === "projects" ? target.projectId : undefined) ?? regularProjects[0]?.id
+      : undefined;
+    setQuery("");
+    setLocalTarget({ base: externalTarget, target: { section: row.sectionId, anchor: row.id, ...(projectId ? { projectId } : {}) } });
+  }, [externalTarget, regularProjects, target]);
   const allConversations = useMemo(
     () => [...view.conversations, ...view.archived],
     [view.archived, view.conversations],
@@ -142,7 +163,8 @@ const SettingsShell = memo(function SettingsShell({
   return (
     <main ref={rootRef} className="settings-view" aria-label="Settings" tabIndex={-1}>
       <aside className="settings-navigation">
-        <nav aria-label="Settings sections">
+        <SettingsSearch query={query} sections={searchSections} onQueryChange={setQuery} onChoose={openRow} />
+        {query.trim() === "" && <nav aria-label="Settings sections">
           {SETTINGS_SECTIONS.map((item) => {
             const Icon = item.icon;
             const prefetch = (): void => prefetchSettingsSection(item);
@@ -163,7 +185,7 @@ const SettingsShell = memo(function SettingsShell({
               </button>
             );
           })}
-        </nav>
+        </nav>}
       </aside>
       <SettingsPage title={definition.label} headingRef={headingRef} className={definition.contentClassName}>
         <SettingsSectionHost key={definition.id} definition={definition} context={context} onReady={resolveFocus} />

@@ -201,11 +201,14 @@
   line-height: 1.4;
 }
 
-.settings-content .secondary-button {
+.settings-content :is(.primary-button, .secondary-button) {
   min-height: var(--control-height);
-  padding: 0 10px;
   border-radius: var(--radius-small);
   font-size: var(--ui-font-secondary);
+}
+
+.settings-content .secondary-button {
+  padding: 0 10px;
   font-weight: 560;
 }
 

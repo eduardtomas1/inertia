@@ -49,3 +49,43 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });
+
+test("finds a setting with Settings search, lands on its row and keeps the search above the narrow section strip", async () => {
+  await app.resizeWindow(1440, 920);
+  const settings = page.getByRole("main", { name: "Settings" });
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Comma" : "Control+Comma");
+  await expect(settings).toBeVisible();
+  const field = page.getByRole("combobox", { name: "Search settings" });
+  await field.click();
+  await field.pressSequentially("ignore white");
+  const results = page.getByRole("listbox", { name: "Matching settings" });
+  await expect(results.getByRole("option", { name: "Ignore whitespace" })).toHaveAttribute("aria-selected", "true");
+  await expect(sections).toHaveCount(0);
+  await field.press("Enter");
+  await expect(page.getByRole("switch", { name: "Ignore whitespace" })).toBeFocused();
+  await expect(sections.getByRole("button", { name: "Chats", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(field).toHaveValue("");
+
+  await field.click();
+  await field.pressSequentially("zzzz");
+  await expect(page.getByText("No settings match", { exact: true })).toBeVisible();
+  await field.press("Escape");
+  await expect(field).toHaveValue("");
+  await expect(settings).toBeVisible();
+
+  await app.resizeWindow(860, 700);
+  const fieldBox = await field.boundingBox();
+  const sectionsBox = await sections.boundingBox();
+  expect(fieldBox && sectionsBox && fieldBox.y + fieldBox.height <= sectionsBox.y).toBe(true);
+  await field.pressSequentially("theme");
+  await expect(sections).toHaveCount(0);
+  const resultsBox = await results.boundingBox();
+  expect(fieldBox && resultsBox && resultsBox.y >= fieldBox.y + fieldBox.height).toBe(true);
+  await field.press("Escape");
+  await expect(sections).toBeVisible();
+  await field.press("Escape");
+  await expect(settings).toBeHidden();
+  await app.resizeWindow(1440, 920);
+  expect(rendererErrors).toEqual([]);
+});

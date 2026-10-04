@@ -225,7 +225,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Search everything",
-        detail: "Find commands, projects, chats and saved messages. Type at least two characters to search your messages and final answers across unarchived chats.",
+        detail: "Find commands, settings, projects, chats and saved messages. Type at least two characters to search your messages and final answers across unarchived chats.",
         shortcut: "search",
       },
       {
@@ -319,7 +319,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       { name: "New chat", detail: "Start a chat in the current project.", shortcut: "new-chat" },
       { name: "Project navigation", detail: "Show or hide the sidebar.", shortcut: "toggle-sidebar" },
       { name: "Terminal", detail: "Show or hide the terminal.", shortcut: "toggle-terminal" },
-      { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Escape leaves Settings." },
+      { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Search settings finds a setting by name; ↑, ↓ and Enter open it. Escape clears the search, then leaves Settings." },
       {
         name: "Chats and transcript",
         detail: "Shift+F10 opens a focused chat's actions. In the transcript, Alt+↑ and Alt+↓ move between turns.",

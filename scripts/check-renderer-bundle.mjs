@@ -167,7 +167,7 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 26_902,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 26_908,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

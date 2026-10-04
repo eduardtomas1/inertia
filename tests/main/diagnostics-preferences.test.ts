@@ -1,4 +1,4 @@
-import { lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -25,7 +25,7 @@ it("persists the capture choice privately and replaces it without leaving tempor
   if (process.platform !== "win32") expect(lstatSync(join(root, file)).mode & 0o777).toBe(0o600);
 });
 
-it("rejects malformed, non-strict and oversized preference files", () => {
+it("reports malformed, non-strict and oversized preference files as unreadable", () => {
   const root = directory();
   for (const content of [
     "not json",
@@ -35,7 +35,7 @@ it("rejects malformed, non-strict and oversized preference files", () => {
     JSON.stringify({ enabled: false, since: null, padding: "x".repeat(600) }),
   ]) {
     writeFileSync(join(root, file), content);
-    expect(readDiagnosticsPreferences(root)).toBeNull();
+    expect(readDiagnosticsPreferences(root)).toBe("unreadable");
   }
   expect(() => writeDiagnosticsPreferences(root, { enabled: "off" } as never)).toThrow("Invalid diagnostics settings.");
 });
@@ -63,7 +63,55 @@ it.skipIf(process.platform === "win32")("does not follow a preferences symlink",
   const outside = join(root, "outside.json");
   writeFileSync(outside, JSON.stringify({ enabled: false, since: null }));
   symlinkSync(outside, join(root, file));
-  expect(readDiagnosticsPreferences(root)).toBeNull();
+  expect(readDiagnosticsPreferences(root)).toBe("unreadable");
   expect(() => writeDiagnosticsPreferences(root, { enabled: true, since: null })).toThrow("unavailable");
   expect(JSON.parse(readFileSync(outside, "utf8"))).toEqual({ enabled: false, since: null });
+});
+
+function journalEvents(path: string): string[] {
+  const journal = join(path, "runtime.log");
+  if (!existsSync(journal)) return [];
+  return readFileSync(journal, "utf8").trim().split("\n").filter(Boolean).map((line) => (JSON.parse(line) as { event: string }).event);
+}
+
+it("turns capture on with no marker when the preference file is missing", () => {
+  const root = directory();
+  const diagnostics = openRuntimeDiagnostics(root);
+  expect(diagnostics.captureState()).toEqual({ enabled: true, since: null });
+  expect(journalEvents(diagnostics.directory)).toEqual([]);
+});
+
+it.each([
+  ["corrupt", "{\"enabled\":"],
+  ["tampered", JSON.stringify({ enabled: "false", since: null })],
+  ["oversized", JSON.stringify({ enabled: true, since: null, padding: "x".repeat(600) })],
+])("keeps capture off and records why when the preference file is %s", (_name, content) => {
+  const root = directory();
+  writeFileSync(join(root, file), content);
+  const diagnostics = openRuntimeDiagnostics(root);
+  expect(diagnostics.captureState()).toEqual({ enabled: false, since: null });
+  diagnostics.record("runtime.state", { phase: "ready", generation: 1 });
+  expect(journalEvents(diagnostics.directory)).toEqual(["diagnostics.preferences-unreadable"]);
+});
+
+it.skipIf(process.platform === "win32")("keeps capture off when the preference file is a symlink or cannot be read", () => {
+  const root = directory();
+  writeFileSync(join(root, "outside.json"), JSON.stringify({ enabled: true, since: null }));
+  symlinkSync(join(root, "outside.json"), join(root, file));
+  expect(openRuntimeDiagnostics(root).captureState().enabled).toBe(false);
+  rmSync(join(root, file));
+  writeFileSync(join(root, file), JSON.stringify({ enabled: true, since: null }));
+  chmodSync(join(root, file), 0o000);
+  try {
+    if (process.getuid?.() !== 0) expect(openRuntimeDiagnostics(root).captureState().enabled).toBe(false);
+  } finally { chmodSync(join(root, file), 0o600); }
+});
+
+it("syncs the directory after the new preference file is in place", () => {
+  const root = directory();
+  const synced: unknown[] = [];
+  writeDiagnosticsPreferences(root, { enabled: false, since: null }, (path) => {
+    synced.push(path, readDiagnosticsPreferences(root));
+  });
+  expect(synced).toEqual([realpathSync(root), { enabled: false, since: null }]);
 });

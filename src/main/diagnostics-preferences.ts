@@ -14,7 +14,7 @@ import {
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
-import { FILE_OPEN_NO_FOLLOW } from "../node/platform-file-open-flags.js";
+import { FILE_OPEN_DIRECTORY, FILE_OPEN_NO_FOLLOW } from "../node/platform-file-open-flags.js";
 import type { DiagnosticCaptureState } from "./runtime-diagnostics.js";
 
 const FILE_NAME = "diagnostics-preferences.json";
@@ -34,24 +34,44 @@ function parse(value: unknown): DiagnosticCaptureState | null {
     : null;
 }
 
-export function readDiagnosticsPreferences(directory: string): DiagnosticCaptureState | null {
+export function readDiagnosticsPreferences(directory: string): DiagnosticCaptureState | null | "unreadable" {
+  let descriptor: number;
   try {
-    const descriptor = openSync(join(realpathSync(directory), FILE_NAME), constants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
+    descriptor = openSync(join(realpathSync(directory), FILE_NAME), constants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : "unreadable";
+  }
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > MAX_BYTES) return "unreadable";
+    const bytes = Buffer.alloc(MAX_BYTES + 1);
+    const read = readSync(descriptor, bytes, 0, bytes.length, 0);
+    return (read <= MAX_BYTES ? parse(JSON.parse(bytes.subarray(0, read).toString("utf8"))) : null) ?? "unreadable";
+  } catch {
+    return "unreadable";
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function syncDirectory(directory: string): void {
+  try {
+    const descriptor = openSync(directory, constants.O_RDONLY | FILE_OPEN_DIRECTORY);
     try {
-      const stat = fstatSync(descriptor);
-      if (!stat.isFile() || stat.size > MAX_BYTES) return null;
-      const bytes = Buffer.alloc(MAX_BYTES + 1);
-      const read = readSync(descriptor, bytes, 0, bytes.length, 0);
-      return read <= MAX_BYTES ? parse(JSON.parse(bytes.subarray(0, read).toString("utf8"))) : null;
+      fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);
     }
   } catch {
-    return null;
+    return;
   }
 }
 
-export function writeDiagnosticsPreferences(directory: string, input: DiagnosticCaptureState): void {
+export function writeDiagnosticsPreferences(
+  directory: string,
+  input: DiagnosticCaptureState,
+  syncParent: (directory: string) => void = syncDirectory,
+): void {
   const preferences = parse(input);
   if (!preferences) throw new Error("Invalid diagnostics settings.");
   const root = realpathSync(directory);
@@ -80,6 +100,7 @@ export function writeDiagnosticsPreferences(directory: string, input: Diagnostic
       closeSync(descriptor);
     }
     renameSync(temporary, path);
+    syncParent(root);
   } finally {
     if (lstatExists(temporary)) unlinkSync(temporary);
   }

@@ -13,7 +13,11 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 export function openRuntimeDiagnostics(userDataDirectory: string): RuntimeDiagnostics {
   removeStaleDiagnosticsPreferenceFiles(userDataDirectory);
   const capture = readDiagnosticsPreferences(userDataDirectory);
-  return new RuntimeDiagnostics(runtimeDiagnosticsDirectory(userDataDirectory), capture ? { capture } : {});
+  const directory = runtimeDiagnosticsDirectory(userDataDirectory);
+  if (capture !== "unreadable") return new RuntimeDiagnostics(directory, capture ? { capture } : {});
+  const diagnostics = new RuntimeDiagnostics(directory, { capture: { enabled: false, since: null } });
+  diagnostics.record("diagnostics.preferences-unreadable");
+  return diagnostics;
 }
 
 export interface DiagnosticsMainIpcOptions {

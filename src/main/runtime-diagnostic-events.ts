@@ -12,6 +12,7 @@ export const RUNTIME_DIAGNOSTIC_EVENTS = [
   "diagnostics.capture-started",
   "diagnostics.capture-stopped",
   "diagnostics.history-cleared",
+  "diagnostics.preferences-unreadable",
   "logs.reveal",
   "main.failure",
   "renderer.crash",
@@ -34,6 +35,7 @@ export const ALWAYS_ON_DIAGNOSTIC_EVENTS: ReadonlySet<RuntimeDiagnosticEvent> = 
   "diagnostics.capture-started",
   "diagnostics.capture-stopped",
   "diagnostics.history-cleared",
+  "diagnostics.preferences-unreadable",
 ]);
 
 export const RENDERER_GONE_REASONS = [
@@ -87,6 +89,7 @@ const EVENT_PRESENTATION: Record<RuntimeDiagnosticEvent, Presentation & { subsys
   "diagnostics.capture-started": { severity: "info", subsystem: "application", title: "Diagnostics capture turned on" },
   "diagnostics.capture-stopped": { severity: "info", subsystem: "application", title: "Diagnostics capture turned off" },
   "diagnostics.history-cleared": { severity: "info", subsystem: "application", title: "Diagnostics history cleared" },
+  "diagnostics.preferences-unreadable": { severity: "warning", subsystem: "application", title: "Diagnostics settings could not be read, so capture is off" },
   "logs.reveal": { severity: "info", subsystem: "application", title: "Log folder opened" },
   "main.failure": { severity: "error", subsystem: "application", title: "An app operation failed" },
   "renderer.crash": { severity: "error", subsystem: "application", title: "The app window stopped unexpectedly" },

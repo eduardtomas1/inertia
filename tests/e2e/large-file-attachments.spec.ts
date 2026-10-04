@@ -270,7 +270,7 @@ test("previews an opaque file as stored, not as a failure", async ({ browserName
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("storage settings state the temporary budget the registry enforces", async ({ browserName: _browserName }, info) => {
+test("storage settings show the attachment limit and usage at every width", async ({ browserName: _browserName }, info) => {
   const page = app.page;
   await app.resizeWindow(1440, 920);
   await setAppearanceInPlace(app, "dark");
@@ -289,6 +289,6 @@ test("storage settings state the temporary budget the registry enforces", async 
   await capture(page, info, "storage-settings-light-narrow");
   await setAppearanceInPlace(app, "dark");
   await capture(page, info, "storage-settings-dark-narrow");
-  await expect(card).toContainText("temporary disk budget of 16 GiB and 1,024 files");
+  await expect(card.locator(".data-facts")).toContainText(/ used · \d[\d,]* of 65,536 files · /u);
   expect(app.rendererErrors).toEqual([]);
 });

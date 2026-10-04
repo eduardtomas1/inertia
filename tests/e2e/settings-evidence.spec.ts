@@ -439,6 +439,35 @@ async function captureNarrowSearch(viewport: Viewport): Promise<void> {
   await expect(search).toHaveValue("");
 }
 
+async function captureRestoreDefaultsConfirm(viewport: Viewport): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Restore defaults…" });
+  await trigger.scrollIntoViewIfNeeded();
+  await trigger.click();
+  const confirm = page.getByRole("group", { name: "Confirm restore defaults" });
+  await expect(confirm).toContainText("This cannot be undone.");
+  await expect(confirm.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+  await confirm.scrollIntoViewIfNeeded();
+  await capture(evidenceName("data", "restore-confirm", viewport)(null), { keepFocus: true });
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await scrollContentTo(0);
+}
+
+async function captureForcedColours(viewport: Viewport): Promise<void> {
+  await setAppearanceInPlace(app, viewport.theme);
+  await app.resizeWindow(viewport.width, viewport.height);
+  await openSection(sectionLabel("notifications"));
+  await page.emulateMedia({ forcedColors: "active" });
+  try {
+    await expect.poll(() => page.evaluate(() => matchMedia("(forced-colors: active)").matches)).toBe(true);
+    await page.waitForTimeout(200);
+    await capture(evidenceName("notifications", "alerts-forced-colours", viewport)(null));
+  } finally {
+    await page.emulateMedia({ forcedColors: "none" });
+  }
+}
+
 async function captureDiscordError(viewport: Viewport): Promise<void> {
   await setAppearanceInPlace(app, viewport.theme);
   await app.resizeWindow(viewport.width, viewport.height);
@@ -505,6 +534,7 @@ async function captureEveryState(viewport: Viewport): Promise<void> {
   await captureDiscordStates(viewport);
   await captureCardSection("data", viewport);
   await captureArchivedStates(viewport);
+  await captureRestoreDefaultsConfirm(viewport);
   await captureCardSection("help", viewport);
   await captureDiagnosticStates(viewport);
 }
@@ -673,6 +703,7 @@ test("captures every Settings section for PR evidence", async () => {
   for (const viewport of VIEWPORTS) {
     await test.step(`${viewport.theme} ${viewport.size}`, () => captureViewport(viewport));
   }
+  await test.step("forced colours", () => captureForcedColours(VIEWPORTS[0]));
   await test.step("Discord error", () => captureDiscordError(VIEWPORTS[0]));
   expect(app.rendererErrors).toEqual([]);
 });

@@ -37,6 +37,7 @@ test("leaves Settings with Escape, reopens at the last section and keeps typed t
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
   const keySelect = page.getByRole("combobox", { name: "Search everything key" });
   const pickerOpen = (): Promise<boolean> => keySelect.evaluate((element) => element.matches(":open"));
+  expect(await keySelect.evaluate((element) => getComputedStyle(element, "::picker-icon").maskImage)).toContain("m6 9 6 6 6-6");
   await keySelect.click();
   await expect.poll(pickerOpen).toBe(true);
   await page.keyboard.press("Escape");

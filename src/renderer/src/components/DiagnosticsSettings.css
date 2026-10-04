@@ -4,7 +4,6 @@
   max-width: none;
   flex: 1;
   box-sizing: border-box;
-  padding: 32px clamp(20px, 3vw, 40px) 48px;
   container-type: inline-size;
 }
 

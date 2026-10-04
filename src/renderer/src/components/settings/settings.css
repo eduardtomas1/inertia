@@ -151,9 +151,12 @@
 
 .setting-disclosure > summary {
   display: flex;
+  min-height: var(--control-height);
   align-items: center;
   gap: 6px;
   color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  font-weight: 500;
   cursor: default;
   list-style: none;
 }

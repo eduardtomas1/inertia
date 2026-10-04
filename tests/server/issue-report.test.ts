@@ -323,17 +323,19 @@ it("upgrades schema 68 transactionally and retains saved report progress", () =>
   } finally { database.close(); }
 });
 
+const MIGRATED_BODY = "## What happened\n\nThe chat stopped after cancelling.\n\n## Steps to reproduce\n\nNot provided.\n\n## Environment\n\nNot collected. This report was saved by an earlier version of Inertia.\n\n## Diagnostics\n\nNot attached.";
+
 it.each([
-  ["validating", "preview", ""],
-  ["draft", "preview", ""],
-  ["cancelled", "preview", ""],
-  ["failed", "preview", ""],
-  ["uncertain", "uncertain", "Check GitHub before proceeding."],
-  ["retired", "retired", "Check GitHub before proceeding."],
-  ["submitting", "submitting", "Check GitHub before proceeding."],
-  ["submitted", "submitted", "Check GitHub before proceeding."],
-  ["preview", "preview", "Check GitHub before proceeding."],
-])("upgrades a saved %s report from schema 87 to the reviewed preview shape", (status, expected, notice) => {
+  ["validating", "preview", "", MIGRATED_BODY],
+  ["draft", "preview", "", MIGRATED_BODY],
+  ["cancelled", "preview", "", MIGRATED_BODY],
+  ["failed", "preview", "", MIGRATED_BODY],
+  ["uncertain", "uncertain", "Check GitHub before proceeding.", null],
+  ["retired", "retired", "Check GitHub before proceeding.", null],
+  ["submitting", "submitting", "Check GitHub before proceeding.", null],
+  ["submitted", "submitted", "Check GitHub before proceeding.", null],
+  ["preview", "preview", "Check GitHub before proceeding.", MIGRATED_BODY],
+])("upgrades a saved %s report from schema 87 to the reviewed preview shape", (status, expected, notice, body) => {
   const database = new Database(":memory:");
   try {
     migrateRuntimeDatabase(database, 87);
@@ -348,9 +350,45 @@ it.each([
     const upgraded = JSON.parse(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get() as string) as unknown;
     expect(issueReportSchema.parse(upgraded)).toEqual({
       id: legacy.id, revision: 4, status: expected, description: legacy.description, steps: "", providerId: null, attachDiagnostics: false,
-      title: legacy.title, body: legacy.body, notice, issueUrl: null,
+      title: legacy.title, body: body ?? legacy.body, notice, issueUrl: null,
     });
     expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+  } finally { database.close(); }
+});
+
+it.each(["draft", "validating", "cancelled", "failed", "preview"])("regenerates a %s validation-era body so its local validation assessment cannot be published", (status) => {
+  const database = new Database(":memory:");
+  try {
+    migrateRuntimeDatabase(database, 88);
+    const legacy = {
+      id: "11111111-1111-4111-8111-111111111111", revision: 2, status, description: "The chat stopped after cancelling.", projectId: null, selection: {},
+      evidence: "{\"version\":\"0.0.60\"}", answer: "SYNTHETIC_ASSESSMENT reproduced locally", title: "Cancelled chat",
+      body: "## Problem\n\nThe chat stopped after cancelling.\n\n## Local validation\n\nSYNTHETIC_ASSESSMENT reproduced locally\n\n## Safe diagnostic evidence\n\n```json\n{\"version\":\"0.0.60\"}\n```",
+      notice: "", issueUrl: null,
+    };
+    database.prepare("INSERT INTO issue_report_draft VALUES (1, ?)").run(JSON.stringify(legacy));
+    migrateRuntimeDatabase(database);
+    const upgraded = issueReportSchema.parse(JSON.parse(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get() as string));
+    expect(upgraded).toMatchObject({ status: "preview", title: "Cancelled chat", body: MIGRATED_BODY });
+    expect(upgraded.body).not.toContain("Local validation");
+    expect(JSON.stringify(upgraded)).not.toContain("SYNTHETIC_ASSESSMENT");
+  } finally { database.close(); }
+});
+
+it.each([
+  ["missing", {}],
+  ["blank", { description: "   " }],
+  ["not text", { description: 42 }],
+])("clears a validation-era body and keeps the title when the description is %s", (_name, description) => {
+  const database = new Database(":memory:");
+  try {
+    migrateRuntimeDatabase(database, 88);
+    const legacy = { id: "11111111-1111-4111-8111-111111111111", revision: 2, status: "validating", ...description, title: "Cancelled chat", body: "## Local validation\n\nSYNTHETIC_ASSESSMENT", answer: "SYNTHETIC_ASSESSMENT", notice: "", issueUrl: null };
+    database.prepare("INSERT INTO issue_report_draft VALUES (1, ?)").run(JSON.stringify(legacy));
+    migrateRuntimeDatabase(database);
+    const upgraded = JSON.parse(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get() as string) as Record<string, unknown>;
+    expect(upgraded).toMatchObject({ status: "preview", title: "Cancelled chat", body: "" });
+    expect(JSON.stringify(upgraded)).not.toContain("SYNTHETIC_ASSESSMENT");
   } finally { database.close(); }
 });
 

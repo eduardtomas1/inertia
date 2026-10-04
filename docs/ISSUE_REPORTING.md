@@ -63,6 +63,6 @@ A failure of the sign-in check that runs before publishing leaves the report ret
 
 ## Storage
 
-The latest report is stored in the application database. Schema 69 added the table; schema 88 converts reports saved by earlier versions to the current shape (drafts and reports from the removed validation step become editable previews). Revision checks reject stale writes. Only the latest report is kept, and **Start another report** replaces it when the new one is previewed.
+The latest report is stored in the application database. Schema 69 added the table; schema 89 converts reports saved by earlier versions to the current shape (drafts and reports from the removed validation step become editable previews). The body of every report that becomes an editable preview is rebuilt from its description, so the old local validation assessment and evidence are not kept; its Environment section says it was not collected, and changing the form and previewing again rebuilds it in full. When the saved description is missing or blank, the body is left empty and the title is kept. Reports that were already submitted, submitting, uncertain or retired keep their body. Revision checks reject stale writes. Only the latest report is kept, and **Start another report** replaces it when the new one is previewed.
 
 Tests use synthetic input and a stubbed GitHub CLI; they never create public issues.

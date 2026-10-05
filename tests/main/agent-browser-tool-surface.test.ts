@@ -126,6 +126,38 @@ describe("Browser tool surface", () => {
     expect(contents.stop).toHaveBeenCalled();
   });
 
+  it("returns from navigate only once Chromium stops loading, so an approval can follow at once", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = contents as unknown as { loadURL(url: string): Promise<void>; loading: boolean };
+    const load = page.loadURL.bind(page);
+    vi.spyOn(page, "loadURL").mockImplementation(async (url) => {
+      await load(url);
+      page.loading = true;
+      setTimeout(() => {
+        page.loading = false;
+        contents.emit("did-stop-loading");
+      }, 30);
+    });
+    const history = contents.navigationHistory;
+    history.canGoBack.mockReturnValue(true);
+    history.getEntryAtIndex.mockImplementation((index: number) => ({
+      title: "", url: ["about:blank", "http://127.0.0.1:3000/", "http://127.0.0.1:3000/next"][index] ?? "",
+    }));
+    for (const command of [
+      { action: "history", direction: "reload" },
+      { action: "history", direction: "back" },
+    ] as const) {
+      const navigated = await broker.perform(runIdentity, { action: "navigate", url: "http://127.0.0.1:3000/next" });
+      expect(navigated).toMatchObject({ ok: true, state: { tabs: [{ loading: false }] } });
+      const prepared = await broker.perform(runIdentity, { action: "prepare-approval", command });
+      expect(prepared, JSON.stringify(command)).toMatchObject({ ok: true });
+      await broker.perform(runIdentity, {
+        action: "discard-approval",
+        token: (JSON.parse((prepared as unknown as { text: string }).text) as { token: string }).token,
+      });
+    }
+  });
+
   it("opens schemeless loopback addresses over http", async () => {
     const { broker, contents } = await loadedHarness();
     await expect(broker.perform(runIdentity, { action: "navigate", url: "localhost:5173/settings" }))

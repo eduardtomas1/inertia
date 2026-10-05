@@ -812,9 +812,11 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         settled = true;
         clearTimeout(timer);
         contents.removeListener("destroyed", onDestroyed);
+        contents.removeListener("did-stop-loading", onStopped);
         scope.signal.removeEventListener("abort", onAbort);
         action();
       };
+      const onStopped = (): void => finish(() => resolve(true));
       const onAbort = (): void => finish(() => {
         if (!contents.isDestroyed()) contents.stop();
         reject(new Error("browser-action-cancelled"));
@@ -827,8 +829,10 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       contents.once("destroyed", onDestroyed);
       scope.signal.addEventListener("abort", onAbort, { once: true });
       contents.loadURL(url).then(() => {
-        if (!contents.isDestroyed()) settleAgentPageDebuggerBootstrap(contents);
-        finish(() => resolve(true));
+        if (contents.isDestroyed()) return;
+        settleAgentPageDebuggerBootstrap(contents);
+        if (!contents.isLoading()) finish(() => resolve(true));
+        else if (!settled) contents.once("did-stop-loading", onStopped);
       }, (error: unknown) => {
         if (error instanceof Error && /\bERR_ABORTED\b/u.test(error.message)) {
           finish(() => {

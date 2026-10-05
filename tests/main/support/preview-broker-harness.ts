@@ -252,6 +252,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     loading = false;
     crashed = false;
     isLoading(): boolean { return this.loading; }
+    isLoadingMainFrame(): boolean { return this.loading; }
     isCrashed(): boolean { return this.crashed; }
     isDestroyed(): boolean { return this.destroyed; }
     reload(): void {}

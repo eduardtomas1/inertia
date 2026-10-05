@@ -468,7 +468,11 @@ A `timeout` result states whether the action had already been sent to the
 page. When it had, the agent is told to take a snapshot before repeating it,
 because a click or submission cannot be undone by cancelling.
 
-Navigation waits for the page to load. A page that is still loading near the
+Navigation waits for the page to load, and then for Chromium to report that
+the tab has stopped loading, which can come shortly after the load event. A
+navigate result therefore never reports a finished page as still loading,
+and an approval for the next action, such as a reload or going back, can be
+prepared at once without a snapshot first. A page that is still loading near the
 deadline is not stopped: the result is successful, reports `loading: true`,
 and tells the agent to wait or take a snapshot. A navigation started by a
 click is treated the same way after 20 seconds. A failed load returns

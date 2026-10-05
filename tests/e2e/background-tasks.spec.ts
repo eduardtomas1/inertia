@@ -254,7 +254,7 @@ function seedFixture(app: AppFixture): Seed {
         description: "Review the usage refactor for regressions.",
         progress: "Reading the provider adapters",
         model: "claude-sonnet-4-5",
-        activity: "Grep",
+        activity: "Reading the provider adapters",
         usage: usage({ totalTokens: 18_600 }),
         toolUseCount: 9,
         updatedAt: ago(70_000),

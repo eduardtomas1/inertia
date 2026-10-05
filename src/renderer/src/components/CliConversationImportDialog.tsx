@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from "react-dom";
 import { ArrowLeft, ArrowRight, Check, Download, RefreshCw, Search, X } from "lucide-react";
 import type { Project, ServerEvent } from "@shared/contracts";
-import { cliProviderLabel, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan } from "@shared/cli-conversations";
+import { cliOmissionText, cliProviderLabel, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan } from "@shared/cli-conversations";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { diagnosticErrorReference } from "../utils/diagnosticNavigation";
@@ -18,11 +18,9 @@ const importShortcut = mac ? "Meta+Enter" : "Control+Enter";
 const cardLabel = (date: Date): string => date.toLocaleString(undefined, date.getFullYear() === new Date().getFullYear()
   ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
   : { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
-const scanNote = ({ limited, skipped, oversized }: Pick<CliConversationScan, "limited" | "skipped" | "oversized">): string | null => {
-  const unreadable = Math.max(0, skipped - oversized);
+const scanNote = ({ limited, skipped }: Pick<CliConversationScan, "limited" | "skipped">): string | null => {
   const parts = [
-    oversized > 0 ? `${plural(oversized, "conversation")} ${oversized === 1 ? "is" : "are"} too large to import` : null,
-    unreadable > 0 ? `${plural(unreadable, "conversation")} could not be read` : null,
+    skipped > 0 ? `${plural(skipped, "conversation")} could not be read` : null,
     limited ? "showing recent conversations only" : null,
   ].filter((part): part is string => part !== null);
   if (!parts.length) return null;
@@ -205,7 +203,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
             <div className="cli-import-open-scroll">
               {busy === "preview" ? <p className="cli-import-state" role="status">Loading conversation…</p>
                 : preview && <div className="cli-import-messages">
-                  {preview.omittedMessages > 0 && <p className="cli-import-omitted">{plural(preview.omittedMessages, "earlier message")} not shown.</p>}
+                  {preview.omittedMessages > 0 && <p className="cli-import-omitted">{cliOmissionText({ omitted: preview.omittedMessages, total: preview.omittedMessages + preview.messages.length }, alreadyImported)}</p>}
                   {preview.messages.map((message, index) => <article key={index} className={`cli-import-message is-${message.role}`}
                     aria-label={message.role === "user" ? "You" : cliProviderLabel(preview.candidate.providerId)}>
                     <p>{message.content}</p>
@@ -238,6 +236,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
                         <time dateTime={item.updatedAt}>{cardLabel(new Date(item.updatedAt))}</time>
                         {item.importedConversationId && <span>Imported</span>}
                       </span>
+                      {item.importedOmission && <span className="cli-import-card-omission">{cliOmissionText(item.importedOmission, true)}</span>}
                     </button>
                   </div>;
                 })}

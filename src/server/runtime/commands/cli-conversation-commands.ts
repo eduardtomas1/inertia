@@ -29,7 +29,7 @@ export function createCliConversationCommandHandler(deps: {
       const value = await discovery.read(projectId, workspace, command.payload.candidateId);
       if (deps.store.projectPath(projectId) !== workspace) throw new RuntimeRequestError("The project changed. Scan again.");
       if (command.type === "conversation.cli.preview") {
-        deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.preview", preview: discovery.preview(command.payload.candidateId, value, ownership(value.providerId, value.transcript.sessionId).importedConversationId) } });
+        deps.send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "conversation.cli.preview", preview: discovery.preview(command.payload.candidateId, value, ownership(value.providerId, value.transcript.sessionId)) } });
       } else {
         if (value.revision !== command.payload.revision) throw new RuntimeRequestError("The CLI conversation changed since your preview. Preview it again before importing.");
         const selection = providerNativeModelSelection({ providerId: value.providerId });
@@ -37,6 +37,7 @@ export function createCliConversationCommandHandler(deps: {
         const conversationId = deps.store.importCliConversation({
           projectId, sourceKey: value.sourceKey, providerId: value.providerId, sessionId: value.transcript.sessionId, cwd: value.transcript.cwd,
           title: value.transcript.title, messages: value.transcript.messages,
+          omittedMessages: value.transcript.omittedMessages, omittedBytes: value.transcript.omittedBytes, droppedRecords: value.droppedRecords,
           selection, continuationIdentity: route.continuationIdentity,
         });
         deps.broadcastSnapshot();

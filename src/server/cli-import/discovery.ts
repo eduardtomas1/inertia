@@ -2,26 +2,34 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
-import type { CliConversationCandidate, CliConversationPreview, CliConversationScan, CliProvider } from "../../shared/cli-conversations";
+import { CLI_TRANSCRIPT_READ_DEADLINE_MS, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan, type CliProvider } from "../../shared/cli-conversations";
 import { environmentValue, expandHomePath } from "../environment";
 import { acpEnvironmentSecretValues } from "../provider/acp-redaction";
 import type { CliSessionOwnership } from "../persistence/cli-conversation-import";
 import { RuntimeRequestError } from "../runtime-errors";
-import { EmptyCliTranscript, parseCliTranscript, transcriptWorkspace, type ParsedCliTranscript } from "./transcript";
+import { CLI_HEAD_CHUNK_BYTES, CLI_RECORD_MAX_BYTES, CliTranscriptDeadline, readCliLines } from "./line-reader";
+import { CliTranscriptParser, EmptyCliTranscript, transcriptHeader, type CliTranscriptHeader, type ParsedCliTranscript } from "./transcript";
 
-export const CLI_TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
-const HEAD_CHUNK_BYTES = 16 * 1024;
+export const CLI_SCAN_FULL_READ_BYTES = 16 * 1024 * 1024;
 const HEAD_MAX_BYTES = 1024 * 1024;
+const SCAN_PREFIX_BYTES = 4 * 1024 * 1024;
 const MAX_CANDIDATES = 100;
 const GRANT_LIFETIME_MS = 10 * 60 * 1000;
-export interface CliScanLimits { entries: number; reads: number; headerBytes: number; bytes: number; milliseconds: number }
-const DEFAULT_SCAN_LIMITS: CliScanLimits = { entries: 3_000, reads: 1_000, headerBytes: 32 * 1024 * 1024, bytes: 64 * 1024 * 1024, milliseconds: 5_000 };
+export interface CliScanLimits {
+  entries: number; reads: number; headerBytes: number; bytes: number; milliseconds: number;
+  fullReadBytes: number; prefixBytes: number; recordBytes: number; readMilliseconds: number;
+}
+const DEFAULT_SCAN_LIMITS: CliScanLimits = {
+  entries: 3_000, reads: 1_000, headerBytes: 32 * 1024 * 1024, bytes: 64 * 1024 * 1024, milliseconds: 5_000,
+  fullReadBytes: CLI_SCAN_FULL_READ_BYTES, prefixBytes: SCAN_PREFIX_BYTES, recordBytes: CLI_RECORD_MAX_BYTES, readMilliseconds: CLI_TRANSCRIPT_READ_DEADLINE_MS,
+};
 interface Root { providerId: CliProvider; path: string }
 interface Grant { projectId: string; workspace: string; root: string; path: string; providerId: CliProvider; expiresAt: number }
 interface Found { grant: Grant; candidate: Omit<CliConversationCandidate, "id"> }
-export interface ReadCliConversation { transcript: ParsedCliTranscript; revision: string; sourceKey: string; providerId: CliProvider }
+export interface ReadCliConversation { transcript: ParsedCliTranscript; revision: string; sourceKey: string; providerId: CliProvider; droppedRecords: number }
+interface StreamOptions { secrets: readonly string[]; recordBytes: number; deadline: number; signal?: AbortSignal; limit?: number }
 
 export function cliConversationRoots(environment: NodeJS.ProcessEnv = process.env): Root[] {
   const root = (key: string, fallback: string): string => {
@@ -55,42 +63,43 @@ async function openTranscript(root: string, path: string) {
   }
 }
 
-async function readHead(root: string, path: string, provider: CliProvider): Promise<{ cwd: string | null; bytes: number }> {
-  const { handle } = await openTranscript(root, path);
+export function localAbsolutePath(path: string): boolean {
+  return isAbsolute(path) && !path.includes("\0") && !/^[\\/]{2}/u.test(path);
+}
+
+async function readHead(root: string, path: string, provider: CliProvider, signal?: AbortSignal): Promise<{ header: CliTranscriptHeader | null; bytes: number }> {
+  const { handle, pinned } = await openTranscript(root, path);
   try {
-    let head = Buffer.alloc(0);
-    while (head.length < HEAD_MAX_BYTES) {
-      const chunk = Buffer.alloc(HEAD_CHUNK_BYTES);
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, head.length);
-      head = Buffer.concat([head, chunk.subarray(0, bytesRead)]);
-      const ended = bytesRead < chunk.length;
-      const cwd = transcriptWorkspace(`${head.toString("utf8")}${ended ? "\n" : ""}`, provider);
-      if (cwd !== undefined || ended) return { cwd: cwd ?? null, bytes: head.length };
-    }
-    return { cwd: null, bytes: head.length };
+    let header: CliTranscriptHeader | null | undefined;
+    const read = await readCliLines(handle, {
+      size: pinned.size, limit: HEAD_MAX_BYTES, chunkBytes: CLI_HEAD_CHUNK_BYTES, deadline: Number.POSITIVE_INFINITY, signal,
+      onLine: (line) => {
+        header = transcriptHeader(line, provider);
+        return header !== undefined;
+      },
+    });
+    return { header: header ?? null, bytes: read.bytes };
   } finally { await handle.close(); }
 }
 
-class OversizedTranscript extends Error {}
-
-async function readTranscript(root: string, path: string): Promise<{ source: string; date: string; bytes: number; revision: string }> {
+async function streamTranscript(root: string, path: string, provider: CliProvider, options: StreamOptions) {
   const { handle, before, pinned } = await openTranscript(root, path);
   try {
-    if (before.size > CLI_TRANSCRIPT_MAX_BYTES || pinned.size > CLI_TRANSCRIPT_MAX_BYTES) throw new OversizedTranscript("Transcript is too large.");
     if (pinned.size !== before.size) throw new Error("Transcript changed.");
-    const buffer = Buffer.alloc(pinned.size + 1);
-    let offset = 0;
-    while (offset < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
-      if (!bytesRead) break;
-      offset += bytesRead;
-    }
+    const parser = new CliTranscriptParser(provider, pinned.mtime.toISOString(), options.secrets);
+    const read = await readCliLines(handle, {
+      size: pinned.size, limit: options.limit, deadline: options.deadline, signal: options.signal, maxLineBytes: options.recordBytes,
+      onLine: (line, terminated) => { parser.line(line, terminated); },
+    });
     const after = await handle.stat();
     const current = await lstat(path);
-    if (offset !== pinned.size || after.size !== pinned.size || after.mtimeMs !== pinned.mtimeMs || after.ctimeMs !== pinned.ctimeMs
-      || current.dev !== pinned.dev || current.ino !== pinned.ino || relative(path, await realpath(path)) !== "") throw new Error("Transcript changed.");
-    const bytes = buffer.subarray(0, offset);
-    return { source: bytes.toString("utf8"), date: after.mtime.toISOString(), bytes: offset, revision: createHash("sha256").update(bytes).digest("hex") };
+    if ((options.limit === undefined && (!read.complete || read.bytes !== pinned.size)) || after.size !== pinned.size || after.mtimeMs !== pinned.mtimeMs
+      || after.ctimeMs !== pinned.ctimeMs || current.dev !== pinned.dev || current.ino !== pinned.ino || relative(path, await realpath(path)) !== "") throw new Error("Transcript changed.");
+    const transcript = parser.finish();
+    return {
+      transcript: read.complete ? transcript : { ...transcript, updatedAt: pinned.mtime.toISOString() },
+      revision: read.revision, bytes: read.bytes, droppedRecords: read.droppedRecords,
+    };
   } finally { await handle.close(); }
 }
 
@@ -125,7 +134,7 @@ export class CliConversationDiscovery {
     const inWorkspace = (cwd: string): Promise<boolean> => {
       let match = resolved.get(cwd);
       if (!match) {
-        match = isAbsolute(cwd) && !cwd.includes("\0")
+        match = localAbsolutePath(cwd)
           ? realpath(cwd).then((path) => relative(workspace, path) === "", () => false)
           : Promise.resolve(false);
         resolved.set(cwd, match);
@@ -135,7 +144,6 @@ export class CliConversationDiscovery {
     const found: Found[] = [];
     let limited = false;
     let skipped = 0;
-    let oversized = 0;
     for (const providerId of ["codex", "claude"] as const) {
       const roots = this.roots.filter((root) => root.providerId === providerId);
       if (!roots.length) continue;
@@ -143,7 +151,6 @@ export class CliConversationDiscovery {
       found.push(...result.found);
       limited ||= result.limited;
       skipped += result.skipped;
-      oversized += result.oversized;
     }
     found.sort((left, right) => right.candidate.updatedAt.localeCompare(left.candidate.updatedAt, "en"));
     if (found.length > MAX_CANDIDATES) limited = true;
@@ -154,7 +161,7 @@ export class CliConversationDiscovery {
       return { id, ...candidate };
     });
     while (this.grants.size > 400) this.grants.delete(this.grants.keys().next().value!);
-    return { candidates, limited, skipped, oversized };
+    return { candidates, limited, skipped };
   }
 
   private async scanProvider(
@@ -164,11 +171,10 @@ export class CliConversationDiscovery {
     workspace: string,
     inWorkspace: (cwd: string) => Promise<boolean>,
     imported: (provider: CliProvider, sessionId: string) => CliSessionOwnership,
-  ): Promise<{ found: Found[]; limited: boolean; skipped: number; oversized: number }> {
+  ): Promise<{ found: Found[]; limited: boolean; skipped: number }> {
     const found: Found[] = [];
     let limited = false;
     let skipped = 0;
-    let oversized = 0;
     let entries = 0;
     let reads = 0;
     let headerBytes = 0;
@@ -211,31 +217,32 @@ export class CliConversationDiscovery {
     for (const file of files) {
       if (exhausted()) break;
       reads += 1;
-      let head: { cwd: string | null; bytes: number };
-      try { head = await readHead(file.root, file.path, providerId); } catch { continue; }
+      let head: Awaited<ReturnType<typeof readHead>>;
+      try { head = await readHead(file.root, file.path, providerId, this.signal); } catch { continue; }
       headerBytes += head.bytes;
-      if (!head.cwd || !await inWorkspace(head.cwd)) continue;
+      if (!head.header || !await inWorkspace(head.header.cwd)) continue;
+      const named = providerId === "codex" || basename(file.path, ".jsonl") === head.header.sessionId;
+      const known = named ? head.header.sessionId : undefined;
+      if (known && (seen.has(known) || imported(providerId, known).owned)) continue;
       if (found.length >= MAX_CANDIDATES || bytes >= this.limits.bytes) { limited = true; break; }
-      if (file.size > CLI_TRANSCRIPT_MAX_BYTES) { oversized += 1; skipped += 1; continue; }
       try {
-        const read = await readTranscript(file.root, file.path);
-        bytes += read.bytes;
-        const transcript = parseCliTranscript(read.source, providerId, read.date, this.secrets);
+        const { transcript } = await this.scanRead(file, providerId);
+        bytes += transcript.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
         if (!await inWorkspace(transcript.cwd) || seen.has(transcript.sessionId)) continue;
         seen.add(transcript.sessionId);
         const ownership = imported(providerId, transcript.sessionId);
         if (ownership.owned) continue;
         found.push({
           grant: { projectId, workspace, root: file.root, path: file.path, providerId, expiresAt: Date.now() + GRANT_LIFETIME_MS },
-          candidate: { providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId, opening: transcript.opening },
+          candidate: { providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, opening: transcript.opening },
         });
       } catch (error) {
+        this.signal?.throwIfAborted();
         if (error instanceof EmptyCliTranscript) continue;
         skipped += 1;
-        if (error instanceof OversizedTranscript) oversized += 1;
       }
     }
-    return { found, limited, skipped, oversized };
+    return { found, limited, skipped };
   }
 
   async read(projectId: string, workspacePath: string, candidateId: string): Promise<ReadCliConversation> {
@@ -245,19 +252,43 @@ export class CliConversationDiscovery {
     try {
       const workspace = await realpath(workspacePath);
       if (relative(workspace, grant.workspace) !== "") throw new Error("Workspace changed.");
-      const read = await readTranscript(grant.root, grant.path);
-      const transcript = parseCliTranscript(read.source, grant.providerId, read.date, this.secrets);
-      if (!isAbsolute(transcript.cwd) || relative(workspace, await realpath(transcript.cwd)) !== "") throw new Error("Workspace changed.");
+      const read = await streamTranscript(grant.root, grant.path, grant.providerId, this.streamOptions());
+      const { transcript } = read;
+      if (!localAbsolutePath(transcript.cwd) || relative(workspace, await realpath(transcript.cwd)) !== "") throw new Error("Workspace changed.");
       this.signal?.throwIfAborted();
-      return { transcript, revision: read.revision, sourceKey: createHash("sha256").update(`${grant.providerId}\0${grant.root}\0${transcript.sessionId}`).digest("hex"), providerId: grant.providerId };
-    } catch {
+      return {
+        transcript, revision: read.revision, providerId: grant.providerId, droppedRecords: read.droppedRecords,
+        sourceKey: createHash("sha256").update(`${grant.providerId}\0${grant.root}\0${transcript.sessionId}`).digest("hex"),
+      };
+    } catch (error) {
+      this.signal?.throwIfAborted();
+      if (error instanceof CliTranscriptDeadline) {
+        throw new RuntimeRequestError(`This CLI conversation took longer than ${Math.round(this.limits.readMilliseconds / 1000)} seconds to read. Try again.`);
+      }
       throw new RuntimeRequestError("This CLI conversation changed or is no longer readable. Scan again.");
     }
   }
 
-  preview(candidateId: string, value: ReadCliConversation, importedConversationId: string | null): CliConversationPreview {
+  private async scanRead(file: { root: string; path: string; size: number }, providerId: CliProvider) {
+    if (file.size <= this.limits.fullReadBytes) return await streamTranscript(file.root, file.path, providerId, this.streamOptions());
+    try {
+      return await streamTranscript(file.root, file.path, providerId, { ...this.streamOptions(), limit: this.limits.prefixBytes });
+    } catch (error) {
+      if (!(error instanceof EmptyCliTranscript)) throw error;
+      return await streamTranscript(file.root, file.path, providerId, this.streamOptions());
+    }
+  }
+
+  private streamOptions(): StreamOptions {
+    return { secrets: this.secrets, recordBytes: this.limits.recordBytes, deadline: Date.now() + this.limits.readMilliseconds, signal: this.signal };
+  }
+
+  preview(candidateId: string, value: ReadCliConversation, ownership: Pick<CliSessionOwnership, "importedConversationId" | "omission">): CliConversationPreview {
     return {
-      candidate: { id: candidateId, providerId: value.providerId, title: value.transcript.title, updatedAt: value.transcript.updatedAt, importedConversationId, opening: value.transcript.opening },
+      candidate: {
+        id: candidateId, providerId: value.providerId, title: value.transcript.title, updatedAt: value.transcript.updatedAt,
+        importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, opening: value.transcript.opening,
+      },
       revision: value.revision, messages: value.transcript.messages, omittedMessages: value.transcript.omittedMessages,
     };
   }

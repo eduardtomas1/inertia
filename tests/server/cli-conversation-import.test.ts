@@ -7,7 +7,7 @@ import Database from "better-sqlite3";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { CliConversationDiscovery, CLI_TRANSCRIPT_MAX_BYTES, cliConversationRoots, type CliScanLimits } from "../../src/server/cli-import/discovery";
+import { CliConversationDiscovery, CLI_SCAN_FULL_READ_BYTES, cliConversationRoots, type CliScanLimits } from "../../src/server/cli-import/discovery";
 import { providerChildEnvironment } from "../../src/server/environment";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { RuntimeStore } from "../../src/server/database";
@@ -24,7 +24,7 @@ import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, 
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const directories: string[] = [];
-const unowned = () => ({ importedConversationId: null, owned: false });
+const unowned = () => ({ importedConversationId: null, omission: null, owned: false });
 const stores: RuntimeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) store.close(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }); await cleanupTurnControllerTestDirectories(); });
 async function fixture() {
@@ -84,10 +84,10 @@ describe("CLI conversation import authority and persistence", () => {
     await rm(f.file); await symlink(join(f.other, "hidden.jsonl"), f.file);
     await expect(f.discovery.read("project", f.workspace, scan.candidates[0]!.id)).rejects.toThrow(/no longer readable/u);
   });
-  it("skips oversized files and cancels scans without publishing candidates", async () => {
+  it("lists files over the full-read bound from their head and cancels scans without publishing candidates", async () => {
     const f = await fixture();
-    await truncate(f.file, CLI_TRANSCRIPT_MAX_BYTES + 1);
-    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [], skipped: 1 });
+    await writeFile(f.file, `${f.content()}\n`); await truncate(f.file, CLI_SCAN_FULL_READ_BYTES + 1);
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ title: "Continue the sidebar work" }], skipped: 0 });
     const controller = new AbortController(); controller.abort();
     const discovery = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions }], [], controller.signal);
     await expect(discovery.scan("project", f.workspace, unowned)).rejects.toThrow();
@@ -98,7 +98,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId });
     const identity = continuationIdentityForSelection(selection, "native-fixture");
-    const input = { projectId: project.id, sourceKey: "a".repeat(64), providerId, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages: [{ role: "user" as const, content: "Earlier work", createdAt: "2099-09-25T10:00:00.000Z" }, { role: "assistant" as const, content: "Preserved order", createdAt: "2026-09-25T10:00:00.000Z" }, { role: "user" as const, content: "Same timestamp", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity: identity };
+    const input = { projectId: project.id, sourceKey: "a".repeat(64), providerId, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages: [{ role: "user" as const, content: "Earlier work", createdAt: "2099-09-25T10:00:00.000Z" }, { role: "assistant" as const, content: "Preserved order", createdAt: "2026-09-25T10:00:00.000Z" }, { role: "user" as const, content: "Same timestamp", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity: identity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 };
     const previous = store.shellSnapshot().activeConversationId;
     const conversationId = store.importCliConversation(input);
     expect(store.conversation(conversationId)).toMatchObject({ projectId: project.id, providerId, providerSessionId: f.sessionId, continuationIdentity: identity, accessMode: "supervised", interactionMode: "build" });
@@ -151,16 +151,16 @@ describe("CLI conversation import authority and persistence", () => {
     expect(broadcastSnapshot).not.toHaveBeenCalled();
     expect(store.shellSnapshot().conversations).toEqual([]);
   });
-  it("counts only this project's unreadable or oversized files as skipped", async () => {
+  it("counts only this project's unreadable files as skipped and lists large ones", async () => {
     const f = await fixture();
     await writeFile(join(f.sessions, "other-broken.jsonl"), `${f.content(f.other)}\n{broken\n{}`);
-    await writeFile(join(f.sessions, "other-large.jsonl"), f.content(f.other)); await truncate(join(f.sessions, "other-large.jsonl"), CLI_TRANSCRIPT_MAX_BYTES + 1);
+    await writeFile(join(f.sessions, "other-large.jsonl"), f.content(f.other)); await truncate(join(f.sessions, "other-large.jsonl"), CLI_SCAN_FULL_READ_BYTES + 1);
     await writeFile(join(f.sessions, "missing-folder.jsonl"), f.content(join(f.root, "deleted")) + "\n{broken\n{}");
     await writeFile(join(f.sessions, "headerless.jsonl"), "invalid\n");
-    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 0, oversized: 0 });
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 0 });
     await writeFile(join(f.sessions, "own-broken.jsonl"), `${f.content()}\n{broken\n{}`);
-    await writeFile(join(f.sessions, "own-large.jsonl"), f.content()); await truncate(join(f.sessions, "own-large.jsonl"), CLI_TRANSCRIPT_MAX_BYTES + 1);
-    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ providerId: "codex" }], skipped: 2, oversized: 1 });
+    await writeFile(join(f.sessions, "own-large.jsonl"), `${f.content().replace(f.sessionId, randomUUID())}\n`); await truncate(join(f.sessions, "own-large.jsonl"), CLI_SCAN_FULL_READ_BYTES + 1);
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ providerId: "codex" }, { providerId: "codex" }], skipped: 1 });
   });
   it("gives each provider its own scan budget so a large Codex history cannot hide Claude conversations", async () => {
     const f = await fixture();
@@ -254,7 +254,7 @@ describe("CLI conversation import authority and persistence", () => {
       const sessionId = randomUUID();
       const selection = providerNativeModelSelection({ providerId });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
-      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity });
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
       const unavailable = { reason: "provider-error", message: "The saved provider session is no longer available.", sessionUnavailable: true } as const;
       const label = providerId === "codex" ? "Codex" : "Claude Code";
       for (const content of ["Continue.", "Try again."]) {
@@ -302,6 +302,26 @@ describe("CLI conversation import authority and persistence", () => {
     if (again.kind !== "conversation.cli.preview") throw new Error("Missing preview");
     expect(again.preview.candidate.importedConversationId).toBe(imported.conversationId);
   });
+  it("treats a session an Inertia turn ran on as owned after the chat moved to another session, without reading it", async () => {
+    const f = await fixture(); const store = new RuntimeStore(join(f.root, "inertia.sqlite"), f.workspace); stores.push(store);
+    const project = store.createProject("Studio", f.workspace);
+    const selection = providerNativeModelSelection({ providerId: "codex" });
+    const replaced = randomUUID();
+    const chat = store.importCliConversation({ projectId: project.id, sourceKey: "9".repeat(64), providerId: "codex", sessionId: randomUUID(), cwd: f.workspace, title: "Native chat",
+      messages: [{ role: "user", content: "Native work", createdAt: "2026-09-25T09:00:00.000Z" }], omittedMessages: 0, omittedBytes: 0, droppedRecords: 0,
+      selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") });
+    const database = Reflect.get(store, "database") as Database.Database;
+    database.prepare("DELETE FROM cli_conversation_imports WHERE conversation_id = ?").run(chat);
+    database.prepare("UPDATE agent_turns SET origin = NULL, provider_session_before = ?, provider_session_after = NULL WHERE conversation_id = ?").run(replaced, chat);
+    store.updateConversation(chat, { providerSessionId: null });
+    expect(store.cliSessionOwnership("codex", replaced)).toMatchObject({ importedConversationId: null, owned: true });
+    await writeFile(join(f.sessions, "replaced.jsonl"), [JSON.stringify({ type: "session_meta", payload: { id: replaced, cwd: f.workspace, model_provider: "openai" } }),
+      JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "x".repeat(100 * 1024) }] } })].join("\n"));
+    await utimes(f.file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+    const scan = await f.both({ bytes: 16 * 1024 }).scan("project", f.workspace, (provider, sessionId) => store.cliSessionOwnership(provider, sessionId));
+    expect(scan).toMatchObject({ limited: false, candidates: [{ title: "Continue the sidebar work" }] });
+    expect(scan.candidates).toHaveLength(1);
+  });
   it("skips Codex subagent rollouts from their header without reading them in full or counting them", async () => {
     const f = await fixture();
     await utimes(f.file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
@@ -313,7 +333,7 @@ describe("CLI conversation import authority and persistence", () => {
       ].join("\n"));
     }
     const scan = await f.both({ bytes: 1024 * 1024 }).scan("project", f.workspace, unowned);
-    expect(scan).toMatchObject({ limited: false, skipped: 0, oversized: 0, candidates: [{ title: "Continue the sidebar work" }] });
+    expect(scan).toMatchObject({ limited: false, skipped: 0, candidates: [{ title: "Continue the sidebar work" }] });
   });
   it("finds archived Codex sessions under the same budget", async () => {
     const f = await fixture();
@@ -337,7 +357,7 @@ describe("CLI conversation import authority and persistence", () => {
       const selection = providerNativeModelSelection({ providerId: "claude" });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
       const projectId = runtime.store.conversation(runtime.conversationId).projectId;
-      const importChat = (cwd: string) => runtime.store.importCliConversation({ projectId, sourceKey: randomUUID().replaceAll("-", "").padEnd(64, "0"), providerId: "claude", sessionId: randomUUID(), cwd, title: "Imported", messages: [{ role: "user", content: "Earlier", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity });
+      const importChat = (cwd: string) => runtime.store.importCliConversation({ projectId, sourceKey: randomUUID().replaceAll("-", "").padEnd(64, "0"), providerId: "claude", sessionId: randomUUID(), cwd, title: "Imported", messages: [{ role: "user", content: "Earlier", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
       const cwdFor = async (conversationId: string) => {
         const queued = runtime.controller.queue({ conversationId, content: "Continue." });
         runtime.controller.start(queued.turn.id);
@@ -376,7 +396,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId: "codex" });
     const messages = Array.from({ length: 30 }, (_, index) => ({ role: index % 2 === 0 ? "user" as const : "assistant" as const, content: `Message ${index}`, createdAt: new Date(Date.parse("2026-06-10T10:00:00.000Z") + index * 60_000).toISOString() }));
-    const input = { projectId: project.id, sourceKey: "c".repeat(64), providerId: "codex" as const, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") };
+    const input = { projectId: project.id, sourceKey: "c".repeat(64), providerId: "codex" as const, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 };
     const dailyRange = { date: "2026-06-10", fromInclusive: "2026-06-10T00:00:00.000Z", toExclusive: "2026-06-11T00:00:00.000Z", timeZone: "UTC" };
     const usageRange = { days: 30 as const, fromInclusive: "2026-06-01T00:00:00.000Z", toExclusive: "2026-07-01T00:00:00.000Z", endDate: "2026-06-30", timeZone: "UTC" };
     const dashboards = () => JSON.parse(JSON.stringify({ daily: store.dailyWork(dailyRange), usage: store.usageDashboard(usageRange) }).replace(/"generatedAt":"[^"]+"/gu, '"generatedAt":""')) as unknown;
@@ -410,7 +430,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId: "claude" });
     const messages = [{ role: "user" as const, content: "Question", createdAt: "2026-06-10T10:00:00.000Z" }, { role: "assistant" as const, content: "Answer", createdAt: "2026-06-10T10:01:00.000Z" }];
-    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "invalid", providerId: "claude", sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") })).toThrow();
+    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "invalid", providerId: "claude", sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 })).toThrow();
     const raw = new Database(dbPath, { readonly: true });
     try {
       expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });
@@ -425,12 +445,12 @@ describe("CLI conversation import authority and persistence", () => {
       { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<recommended_plugins>p</recommended_plugins>" }] } },
       ...["One", "Two", "Three"].map((text) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } })),
     ].map((item) => JSON.stringify(item)).join("\n"));
-    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ title: "Continue the sidebar work" }], skipped: 0, oversized: 0 });
+    expect(await f.discovery.scan("project", f.workspace, unowned)).toMatchObject({ candidates: [{ title: "Continue the sidebar work" }], skipped: 0 });
     const dbPath = join(f.root, "inertia.sqlite");
     const store = new RuntimeStore(dbPath, f.workspace); stores.push(store);
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId: "codex" });
-    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "e".repeat(64), providerId: "codex", sessionId: id, cwd: f.workspace, title: "Assistant only", messages: ["One", "Two", "Three"].map((content, index) => ({ role: "assistant" as const, content, createdAt: `2026-06-10T10:0${index}:00.000Z` })), selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") })).toThrow("This CLI conversation has no user message to import.");
+    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "e".repeat(64), providerId: "codex", sessionId: id, cwd: f.workspace, title: "Assistant only", messages: ["One", "Two", "Three"].map((content, index) => ({ role: "assistant" as const, content, createdAt: `2026-06-10T10:0${index}:00.000Z` })), selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 })).toThrow("This CLI conversation has no user message to import.");
     const raw = new Database(dbPath, { readonly: true });
     try {
       expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });

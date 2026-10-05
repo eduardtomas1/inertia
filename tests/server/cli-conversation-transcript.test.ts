@@ -91,7 +91,13 @@ describe("native CLI transcript projection", () => {
     for (const payload of [{ ...meta.payload, id: "../../escape" }, { ...meta.payload, cwd: "" }, { ...meta.payload, model_provider: "custom" }]) {
       expect(() => parseCliTranscript(lines({ ...meta, payload }, codex("user", "Hello")), "codex", date)).toThrow();
     }
-    expect(() => parseCliTranscript(lines(claude("u1", null, "user", "Hello"), { ...claude("a1", "u1", "assistant", "No"), sessionId: "different" }), "claude", date)).toThrow(/identity/u);
+  });
+  it("resumes the newest Claude session of a resumed transcript that starts with the earlier session's copied records", () => {
+    const resumed = "01962fd7-9000-7000-8000-123456789abc";
+    const result = parseCliTranscript(lines(claude("u1", null, "user", "Earlier request"), claude("a1", "u1", "assistant", "Earlier reply"),
+      { ...claude("u2", "a1", "user", "Resumed request"), sessionId: resumed }, { ...claude("a2", "u2", "assistant", "Resumed reply"), sessionId: resumed }), "claude", date);
+    expect(result.sessionId).toBe(resumed);
+    expect(result.messages.map(({ content }) => content)).toEqual(["Earlier request", "Earlier reply", "Resumed request", "Resumed reply"]);
   });
   it("drops injected Codex context blocks and keeps real prose around them", () => {
     const result = parseCliTranscript(lines(meta,

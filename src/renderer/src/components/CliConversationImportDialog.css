@@ -258,6 +258,16 @@
   margin-left: auto;
 }
 
+.cli-import-card-omission {
+  position: relative;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cli-import-open {
   display: flex;
   min-height: 0;

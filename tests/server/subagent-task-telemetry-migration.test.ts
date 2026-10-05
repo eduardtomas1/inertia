@@ -100,7 +100,7 @@ describe("subagent task telemetry migration", () => {
         database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
       }
       database.exec("DROP INDEX workspace_runs_conversation_started_idx");
-      database.exec("DROP TABLE cli_conversation_imports; ALTER TABLE agent_turns DROP COLUMN origin");
+      database.exec("DROP TABLE cli_conversation_imports; DROP INDEX agent_turns_provider_session_before_idx; DROP INDEX agent_turns_provider_session_after_idx; ALTER TABLE agent_turns DROP COLUMN origin");
       database.prepare("DELETE FROM schema_migrations WHERE version >= 90").run();
       expect(tableInfo(database)).toEqual(tableInfo(reference));
       expect(schemaVersion(database)).toBe(89);

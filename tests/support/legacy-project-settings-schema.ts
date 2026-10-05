@@ -3,6 +3,8 @@ import type Database from "better-sqlite3";
 export function removeProjectSettingsFromLegacyFixture(database: Database.Database): void {
   database.exec(`
     DROP TABLE IF EXISTS cli_conversation_imports;
+    DROP INDEX IF EXISTS agent_turns_provider_session_before_idx;
+    DROP INDEX IF EXISTS agent_turns_provider_session_after_idx;
     DROP TABLE IF EXISTS usage_limited_turns;
     DROP TABLE IF EXISTS usage_limit_resume_plans;
     DROP TABLE IF EXISTS queued_messages;

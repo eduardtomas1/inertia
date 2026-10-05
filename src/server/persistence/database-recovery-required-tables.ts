@@ -72,5 +72,9 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
   tables: REQUIRED_TABLES_BY_SCHEMA_VERSION,
   columns: REQUIRED_COLUMNS_BY_SCHEMA_VERSION,
-  indexes: [[90, "workspace_runs_conversation_started_idx"]],
+  indexes: [
+    [90, "workspace_runs_conversation_started_idx"],
+    [92, "agent_turns_provider_session_before_idx"],
+    [92, "agent_turns_provider_session_after_idx"],
+  ],
 };

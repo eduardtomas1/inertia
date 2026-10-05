@@ -22,7 +22,7 @@ const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold"
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
 
 function labelSchema(database: Database.Database, version: number): void {
-  if (version < 92) database.exec("DROP TABLE cli_conversation_imports; ALTER TABLE agent_turns DROP COLUMN origin");
+  if (version < 92) database.exec("DROP TABLE cli_conversation_imports; DROP INDEX agent_turns_provider_session_before_idx; DROP INDEX agent_turns_provider_session_after_idx; ALTER TABLE agent_turns DROP COLUMN origin");
   if (version < 91) database.exec("ALTER TABLE app_state DROP COLUMN muted_custom_colors");
   if (version < 90) {
     for (const column of telemetryColumns) database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
@@ -72,6 +72,7 @@ describe("database health check for settings and subagent columns", () => {
     { version: 91, sql: "ALTER TABLE app_state DROP COLUMN muted_custom_colors" },
     { version: 92, sql: "DROP TABLE cli_conversation_imports" },
     { version: 92, sql: "ALTER TABLE agent_turns DROP COLUMN origin" },
+    { version: 92, sql: "DROP INDEX agent_turns_provider_session_after_idx" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });

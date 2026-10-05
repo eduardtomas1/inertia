@@ -8,12 +8,12 @@ import { deferred } from "./composer-fixtures";
 
 const project = { id: "11111111-1111-4111-8111-111111111111", name: "Studio" };
 const candidates: CliConversationCandidate[] = [
-  { id: "22222222-2222-4222-8222-222222222222", providerId: "codex", title: "Build the sidebar", updatedAt: "2026-09-25T10:00:00.000Z", importedConversationId: null, opening: { user: "Sidebar request", assistant: "Sidebar answer" } },
-  { id: "33333333-3333-4333-8333-333333333333", providerId: "claude", title: "Review accessibility", updatedAt: "2026-09-24T16:30:00.000Z", importedConversationId: null, opening: { user: "Accessibility request", assistant: null } },
+  { id: "22222222-2222-4222-8222-222222222222", providerId: "codex", title: "Build the sidebar", updatedAt: "2026-09-25T10:00:00.000Z", importedConversationId: null, importedOmission: null, opening: { user: "Sidebar request", assistant: "Sidebar answer" } },
+  { id: "33333333-3333-4333-8333-333333333333", providerId: "claude", title: "Review accessibility", updatedAt: "2026-09-24T16:30:00.000Z", importedConversationId: null, importedOmission: null, opening: { user: "Accessibility request", assistant: null } },
 ];
 const importedId = "44444444-4444-4444-8444-444444444444";
 const result = (value: Extract<ServerEvent, { type: "request.result" }>["result"]): ServerEvent => ({ type: "request.result", requestId: "test", result: value });
-const scanOf = (items: CliConversationCandidate[]): ServerEvent => result({ kind: "conversation.cli.scan", scan: { candidates: items, limited: false, skipped: 0, oversized: 0 } });
+const scanOf = (items: CliConversationCandidate[]): ServerEvent => result({ kind: "conversation.cli.scan", scan: { candidates: items, limited: false, skipped: 0 } });
 const scan = scanOf([candidates[1]!, candidates[0]!]);
 const previewOf = (candidate: CliConversationCandidate, user: string, reply?: string): ServerEvent => result({ kind: "conversation.cli.preview", preview: { candidate, revision: "a".repeat(64), omittedMessages: 0,
   messages: [{ role: "user", content: user, createdAt: candidate.updatedAt }, ...reply ? [{ role: "assistant" as const, content: reply, createdAt: candidate.updatedAt }] : []] } });
@@ -224,10 +224,10 @@ describe("CLI import dialog", () => {
     expect(document.querySelector(".cli-import-note")).toBeNull();
   });
   it.each([
-    ["oversized and unreadable files", { limited: false, skipped: 5, oversized: 3 }, "3 conversations are too large to import; 2 conversations could not be read."],
-    ["one unreadable file", { limited: false, skipped: 1, oversized: 0 }, "1 conversation could not be read."],
-    ["a limited scan", { limited: true, skipped: 0, oversized: 0 }, "Showing recent conversations only."],
-    ["every case at once", { limited: true, skipped: 2, oversized: 1 }, "1 conversation is too large to import; 1 conversation could not be read; showing recent conversations only."],
+    ["unreadable files", { limited: false, skipped: 2 }, "2 conversations could not be read."],
+    ["one unreadable file", { limited: false, skipped: 1 }, "1 conversation could not be read."],
+    ["a limited scan", { limited: true, skipped: 0 }, "Showing recent conversations only."],
+    ["every case at once", { limited: true, skipped: 1 }, "1 conversation could not be read; showing recent conversations only."],
   ])("summarises %s in one muted line under the gallery", async (_case, counts, sentence) => {
     const summary = { candidates: [candidates[0]!], ...counts };
     const request = requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(result({ kind: "conversation.cli.scan", scan: summary })) : undefined);

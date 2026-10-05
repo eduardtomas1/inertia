@@ -3,7 +3,7 @@ import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
 import { MAX_QUEUED_MESSAGES, type MessageQueueResult } from "../../shared/queued-messages";
-import { queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
+import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
 import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
@@ -52,7 +52,7 @@ export function createQueuedMessageRuntime(
     const manual = manualId ?? (retry === first.id && first.state === "waiting" ? retry : undefined);
     if (!manual && first.state !== "waiting") return;
     if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
-      retryAfterCleanup(conversationId, manualId);
+      retryAfterCleanup(conversationId, manual);
       return;
     }
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
@@ -173,21 +173,29 @@ export function createQueuedMessageRuntime(
     try { await operation; } finally { enqueueing.delete(input.id); }
   }
 
+  const undeliveredQueueFull = (): RuntimeRequestError => new RuntimeRequestError(
+    "This follow-up did not reach the agent, and this chat already has three queued messages. Remove one and send it again.",
+  );
   const assertRoomForUndelivered = (conversationId: string): void => {
-    if (store.queuedMessages.list(conversationId).length < MAX_QUEUED_MESSAGES) return;
-    throw new RuntimeRequestError("This follow-up did not reach the agent, and this chat already has three queued messages. Remove one and send it again.");
+    if (store.queuedMessages.list(conversationId).length >= MAX_QUEUED_MESSAGES) throw undeliveredQueueFull();
   };
   const undeliveredFollowUps: NonNullable<TurnInteractionCommandDependencies["undeliveredFollowUps"]> = {
     async enqueue(input, handoffId) {
       assertRoomForUndelivered(input.conversationId);
-      await enqueue(input, handoffId);
+      await enqueue(input, handoffId).catch((error: unknown) => {
+        throw error instanceof QueuedMessageLimitError ? undeliveredQueueFull() : error;
+      });
       void schedule(input.conversationId).catch(() => undefined);
       return result(input.conversationId, input.id);
     },
     adopt(input) {
       const conversation = requireConversation(input.conversationId);
       assertRoomForUndelivered(conversation.id);
-      store.queuedMessages.add({ ...input, conversation, digest: queuedIntentDigest(input.content, input.attachments) });
+      try {
+        store.queuedMessages.add({ ...input, conversation, digest: queuedIntentDigest(input.content, input.attachments) });
+      } catch (error) {
+        throw error instanceof QueuedMessageLimitError ? undeliveredQueueFull() : error;
+      }
       changed(conversation.id);
       void schedule(conversation.id).catch(() => undefined);
       return result(conversation.id, input.id);

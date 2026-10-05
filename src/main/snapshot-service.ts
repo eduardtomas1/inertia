@@ -38,6 +38,8 @@ export function snapshotFailureMessage(category: SnapshotFailureCategory, platfo
   }
 }
 
+const HELPER_DENIED = "macOS lists Inertia as allowed in Accessibility and Screen Recording, but denied access to its snapshot helper, so nothing was captured. Snapshots cannot capture windows with this build on this Mac.";
+
 export interface SnapshotWorkerResult { png: Buffer; source: SnapshotSource }
 const ACCELERATOR = "CommandOrControl+Alt+S";
 
@@ -94,7 +96,7 @@ export class SnapshotService {
       this.message = "Allow Inertia in Accessibility and Screen Recording, then enable Snapshots again.";
       return this.state();
     }
-    const trigger = (): void => { if (this.enabled && !this.busy) void this.onCapture().catch(() => undefined); };
+    const trigger = (): void => { if (this.enabled) void this.onCapture().catch(() => undefined); };
     if (this.shortcut === "accelerator") {
       this.enabled = globalShortcut.register(ACCELERATOR, trigger);
       if (!this.enabled) this.message = "The snapshot shortcut is already used by another app.";
@@ -172,8 +174,10 @@ export class SnapshotService {
           } else {
             const category = SNAPSHOT_FAILURE_CATEGORIES.find((value) => data.ok === false && value === data.code) ?? "native-failure";
             const phase = SNAPSHOT_CAPTURE_PHASES.find((value) => value === data.phase);
-            this.onFailure(phase ? { category, phase } : { category });
-            error = new SnapshotError(snapshotFailureMessage(category));
+            const helperDenied = category === "permission-denied" && process.platform === "darwin" && this.state().permission === "granted";
+            const diagnostic = helperDenied ? "helper-permission-denied" : category;
+            this.onFailure(phase ? { category: diagnostic, phase } : { category: diagnostic });
+            error = new SnapshotError(helperDenied ? HELPER_DENIED : snapshotFailureMessage(category));
           }
           try { child.postMessage("received"); } catch { stop("Snapshot capture stopped before completing."); }
         });

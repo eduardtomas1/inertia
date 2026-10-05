@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages";
 import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "./runtimeQueueClient";
+import { setRuntimeQueueLength } from "./runtimeQueueEvents";
 
 const pendingLoads = new WeakMap<QueueCommandRunner, Map<string, Promise<MessageQueueResult>>>();
 function loadQueue(run: QueueCommandRunner, conversationId: string): Promise<MessageQueueResult> {
@@ -61,6 +62,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
     const timer = window.setInterval(refresh, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
   }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
+  useEffect(() => setRuntimeQueueLength(conversationId, queue.length), [conversationId, queue.length]);
   const first = queue[0];
   if (!first) return null;
   const dispatching = first.state === "dispatching";

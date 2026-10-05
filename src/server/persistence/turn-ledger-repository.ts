@@ -29,6 +29,7 @@ import {
 } from "../runtime/turns/request-context";
 import {
   MAX_RUNTIME_INTERRUPTION_ENTRIES,
+  RUNTIME_INTERRUPTION_REASONS,
   type RuntimeInterruption,
 } from "../runtime/turns/turn-runtime-interruption-note";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
@@ -332,6 +333,19 @@ export class TurnLedgerRepository {
       }
       return { message, turn };
     })();
+  }
+
+  runtimeInterruptionSource(conversationId: string): string | null {
+    const recent = this.context.database.prepare(`
+      SELECT id, status, terminal_reason FROM agent_turns
+      WHERE conversation_id = ?
+      ORDER BY requested_at DESC, id DESC
+      LIMIT ?
+    `).all(conversationId, MAX_RUNTIME_INTERRUPTION_ENTRIES) as Array<{ id: string; status: string; terminal_reason: string | null }>;
+    const reached = recent.find(({ terminal_reason }) => terminal_reason !== "turn-start-failed");
+    return reached?.status === "interrupted" && RUNTIME_INTERRUPTION_REASONS.includes(reached.terminal_reason ?? "")
+      ? reached.id
+      : null;
   }
 
   runtimeInterruption(turnId: string): RuntimeInterruption {

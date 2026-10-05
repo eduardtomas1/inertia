@@ -7,7 +7,7 @@ import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/share
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { RuntimeStore } from "../../src/server/database";
-import { queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src/server/persistence/queued-message-repository";
+import { QueuedMessageLimitError, queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src/server/persistence/queued-message-repository";
 import { MessageSendPreparationTimeoutError } from "../../src/server/runtime/commands/message-send-preparation";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
@@ -110,6 +110,28 @@ describe("stop and send", () => {
     } finally { await f.close(); }
   });
 
+  it("keeps a repeated Stop and send explicit when provider cleanup outlasts the dispatch wait", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      f.provider.deferOwnedStop("settled");
+      const id = randomUUID();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      await f.stopAndSend(id, initial.turn.id);
+      await f.stopAndSend(id, initial.turn.id);
+      await vi.advanceTimersByTimeAsync(31_000);
+      vi.useRealTimers();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      expect(f.provider.runCount).toBe(1);
+      f.provider.resolve({ status: "cancelled" });
+      f.provider.resolveOwnedStop();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+      expect(f.provider.runCount).toBe(2);
+    } finally { vi.useRealTimers(); f.provider.resolveOwnedStop(); await f.close(); }
+  });
+
   it("keeps the message queued and leaves a different running turn alone", async () => {
     const f = await fixture();
     try {
@@ -184,6 +206,19 @@ describe("follow-ups that never reach the running agent", () => {
       expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
       f.provider.resolve({ status: "completed" }); await f.drain();
       expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("names the queue limit when another message fills the queue during a refused follow-up", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      f.provider.steerSupported = false;
+      vi.spyOn(f.store.queuedMessages, "add").mockImplementationOnce(() => {
+        throw new QueuedMessageLimitError();
+      });
+      await expect(f.followUp()).rejects.toThrow("This follow-up did not reach the agent, and this chat already has three queued messages.");
+      expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
     } finally { await f.close(); }
   });
 

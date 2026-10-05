@@ -38,6 +38,7 @@ import {
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
+import { useRuntimeQueueLength } from "./runtimeQueueEvents";
 import { useComposerMenus } from "./useComposerMenus";
 import { useComposerNewChatOffer } from "./useComposerNewChatOffer";
 import { useTextareaAutosize } from "./useTextareaAutosize";
@@ -150,6 +151,7 @@ export const Composer = memo(function Composer({
   shownAttachmentsRef.current = attachments;
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const queueingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
   const { stopping, stopClaimRef, stop } = useComposerStopAction({
     conversationId: conversation.id, running, onStop,
@@ -484,6 +486,10 @@ export const Composer = memo(function Composer({
       await queueCurrentMessage(stopAndSendTurnId);
       return;
     }
+    if (followUpState === "stop-and-send" && queuedMessageCount > 0) {
+      setAttachmentError("Send or remove the queued message first.");
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -707,9 +713,15 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
-  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand ? latestKnownTurn?.id ?? null : null;
+  const queuedMessageCount = useRuntimeQueueLength(conversation.id);
+  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
-  const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => { if (!canQueue || conversationContext.isReferencing()) return;
+  const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
+    if (!canQueue || queueingRef.current || conversationContext.isReferencing()) return;
+    queueingRef.current = true;
+    try { await queueDraft(stopTurnId); } finally { queueingRef.current = false; }
+  };
+  const queueDraft = async (stopTurnId?: string): Promise<void> => {
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;

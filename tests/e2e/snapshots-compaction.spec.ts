@@ -124,6 +124,41 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
   finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
 });
 
+for (const theme of ["dark", "light"] as const) test(`opens the chat for a pending snapshot and explains a busy shortcut in ${theme}`, async ({ browserName: _browserName }, testInfo) => {
+  const app = await createAppFixture({ name: "snapshot-outcomes", initialState: "conversation", windowDisplay: "primary", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+    const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
+    try { store.updateSettings({ theme }); } finally { store.close(); }
+  } });
+  let bodyFailure: { error: unknown } | undefined;
+  try {
+    const page = app.page; await app.resizeWindow(1100, 760);
+    await closeWorkspaceTools(page);
+    const deliver = (delivery: unknown) => app.electronApp.evaluate(({ BrowserWindow }, value) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed() && candidate.webContents.getURL().includes("index.html"));
+      if (!window) throw new Error("Workbench window unavailable");
+      window.webContents.send("inertia:snapshot-ready", value);
+    }, delivery);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByRole("main", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+    await deliver({ pending: true });
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await expect(page.getByRole("main", { name: "Settings", exact: true })).toHaveCount(0);
+    const save = async (name: string) => { const path = testInfo.outputPath(`${name}-${theme}.png`); await page.screenshot({ path, animations: "disabled" }); await testInfo.attach(name, { path, contentType: "image/png" }); };
+    await save("snapshot-outcome-pending");
+    const message = "A snapshot is already being captured. Try again when it finishes.";
+    await deliver({ notice: message });
+    const notice = page.getByRole("alert").filter({ hasText: message });
+    await expect(notice).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await app.expectNoViewportOverflow();
+    await save("snapshot-outcome-notice");
+    await notice.getByRole("button", { name: "Dismiss error" }).click();
+    await expect(notice).toHaveCount(0);
+    expect(app.rendererErrors).toEqual([]);
+  } catch (error) { bodyFailure = { error }; throw error; }
+  finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
+});
 test("loads snapshot native bindings in the Electron utility runtime without desktop access", async () => {
   const app = await createAppFixture({ name: "snapshot-native-bindings", initialState: "conversation", windowDisplay: "primary" });
   try {

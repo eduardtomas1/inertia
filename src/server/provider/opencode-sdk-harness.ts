@@ -1105,7 +1105,7 @@ export function exactOpenCodeSteerReceipt(
   if (
     receipt?.id !== id
     || receipt.sessionID !== sessionId
-    || receipt.delivery !== "steer"
+    || (receipt.delivery !== "steer" && receipt.delivery !== "queue")
     || prompt?.text !== text
     || files.length !== fileUris.length
   ) return false;

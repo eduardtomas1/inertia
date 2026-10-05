@@ -85,10 +85,10 @@ describe("duration-aware Windows test shards", () => {
       loadWindowsDurationManifest(),
     ]);
     expect(manifest.source).toMatchObject({
-      workflowRunId: 37044241468,
-      headSha: "fe6e0b3d0cfadfb13e69047a47d2df92cc1f80fb",
+      workflowRunId: 37377198691,
+      headSha: "92822a2682701206e37f567714807528866d815d",
       conclusion: "success",
-      jobIds: [110962707642, 110962707847, 110962707707, 110962707762],
+      jobIds: [112005446336, 112005447291, 112005447867, 112005447750],
     });
     const measuredFiles = Object.keys(manifest.durationsMs);
     expect(measuredFiles.length).toBeGreaterThanOrEqual(Math.floor(files.length * 0.9));

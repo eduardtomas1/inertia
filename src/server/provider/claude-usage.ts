@@ -99,12 +99,17 @@ function modelUsageBreakdown(value: unknown): UsageBreakdown | null {
   return (breakdown.totalTokens ?? 0) > 0 ? breakdown : null;
 }
 
-function lastIteration(value: unknown): Record<string, unknown> | undefined {
+function lastMessageIteration(value: unknown): Record<string, unknown> | undefined {
   const usage = objectValue(value);
   const iterations = Array.isArray(usage?.iterations) ? usage.iterations : [];
   for (let index = iterations.length - 1; index >= 0; index -= 1) {
     const iteration = objectValue(iterations[index]);
-    if (iteration) return iteration;
+    if (
+      iteration
+      && (iteration.type === undefined
+        || iteration.type === "message"
+        || iteration.type === "fallback_message")
+    ) return iteration;
   }
   return undefined;
 }
@@ -154,7 +159,7 @@ export function parseClaudeUsage(
   const modelTotals = modelUsageBreakdown(result.modelUsage);
   const aggregate = modelTotals ?? mainLoop;
   const contextApiUsage = usageBreakdown(contextUsage?.apiUsage);
-  const iteration = lastIteration(resultUsage);
+  const iteration = lastMessageIteration(resultUsage);
   const iterationUsage = usageBreakdown(iteration);
   const resultTurns = tokenCount(result.num_turns, false);
 

@@ -223,6 +223,52 @@ describe("Claude Agent SDK usage accounting", () => {
     });
   });
 
+  it.each([
+    ["compaction", 173_000],
+    ["advisor_message", 173_000],
+    ["fallback_message", 3_500],
+    [undefined, 3_500],
+  ])("derives context occupancy from the last message iteration when a %s entry trails it", (type, usedTokens) => {
+    expect(parseClaudeUsage({
+      num_turns: 4,
+      usage: {
+        input_tokens: 10_000,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 500,
+        iterations: [
+          {
+            type: "message",
+            input_tokens: 150_000,
+            cache_read_input_tokens: 20_000,
+            cache_creation_input_tokens: 0,
+            output_tokens: 3_000,
+          },
+          {
+            ...(type ? { type } : {}),
+            input_tokens: 2_000,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: 1_500,
+          },
+        ],
+      },
+      modelUsage: { "claude-test": { contextWindow: 200_000 } },
+    }, { selectedModelId: "claude-test" })?.usedTokens).toBe(usedTokens);
+  });
+
+  it("keeps context occupancy unknown when the only iteration is a compaction", () => {
+    expect(parseClaudeUsage({
+      num_turns: 3,
+      usage: {
+        input_tokens: 10_000,
+        output_tokens: 500,
+        iterations: [{ type: "compaction", input_tokens: 2_000, output_tokens: 1_500 }],
+      },
+      modelUsage: { "claude-test": { contextWindow: 200_000 } },
+    }, { selectedModelId: "claude-test" })?.usedTokens).toBeNull();
+  });
+
   it("uses custom route configuration as a window, never as fabricated occupancy", () => {
     expect(parseClaudeUsage({}, {
       selectedModelId: "k3",

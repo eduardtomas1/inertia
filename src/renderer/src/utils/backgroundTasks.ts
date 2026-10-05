@@ -118,10 +118,9 @@ export function backgroundTaskCurrentActivity(trace: SubagentTrace): string | nu
 }
 
 export function backgroundTaskDoingNow(trace: SubagentTrace): string | null {
-  if (!isLiveSubagentTrace(trace)) return trace.result;
-  const activity = backgroundTaskCurrentActivity(trace);
-  if (activity && trace.progress && !/\s/u.test(activity.trim())) return trace.progress;
-  return activity ?? trace.progress;
+  return isLiveSubagentTrace(trace)
+    ? backgroundTaskCurrentActivity(trace) ?? trace.progress
+    : trace.result;
 }
 
 export function backgroundTaskElapsedMs(trace: SubagentTrace, now: number): number | null {

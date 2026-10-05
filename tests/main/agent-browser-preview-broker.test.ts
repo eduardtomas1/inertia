@@ -1040,7 +1040,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "sensitive",
-        message: expect.stringMatching(/holds a password value.*Navigate to the page again/u),
+        message: expect.stringMatching(/holds a password or another sensitive value.*Navigate to the page again/u),
       });
     pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "password" });
     await expect(broker.perform(conversationId, { action: "screenshot" }))

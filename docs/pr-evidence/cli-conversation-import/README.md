@@ -44,8 +44,21 @@ candidate or preview title may be clipped.
   from the first paint. When a scan was limited or left files out, one muted
   line under the gallery says so. All motion is off under reduced motion.
 - Search matches titles and the opening request and reply.
-- The settings entry is one Row in the Checkout card: "Import Codex and
-  Claude Code conversations started in this checkout."
+- The settings entry is the first row of the Checkout group in Settings →
+  Projects, built from the shared Settings row: "CLI conversations",
+  "Import Codex and Claude Code conversations started in this checkout." and
+  an "Import conversations…" button. Settings search finds it, and Help →
+  Getting started has an "Import CLI conversations" entry.
+
+## After merging main
+
+Main rebuilt Settings into nine sections. The entry moved from the old
+Checkout card into the new Projects section; the dialog is unchanged. All
+"after" captures below were regenerated from the merged branch.
+
+| Before the merge (839ca644) | After the merge |
+| --- | --- |
+| ![Before the merge: settings](before-merge-settings-row-light-wide.png) | ![After the merge: settings](settings-row-light-wide.png) |
 
 ## Before and after
 

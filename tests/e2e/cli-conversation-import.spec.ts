@@ -122,9 +122,7 @@ test("imports both native histories, persists duplicates across restart, and res
   await expect(importedTimeline.first()).toContainText("The settings panel needs a clear focus order, visible focus rings, and Escape to return to the previous view.");
   await expect(importedTimeline.last()).toContainText("Check settings section 8 for keyboard traps.");
   await expect(app.page.getByText("Settings section 8 keeps focus inside its controls and returns it on Escape.", { exact: true })).toBeVisible();
-  await app.page.getByRole("complementary", { name: "Project navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
-  await app.page.getByRole("button", { name: "General", exact: true }).click();
-  await app.page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await setAppearanceInPlace(app, "dark");
   await openImporter(app.page);
   await dialog.getByRole("button", { name: new RegExp(codexTitle, "u") }).click();
   await expect(dialog.getByRole("button", { name: "Open chat", exact: true })).toBeEnabled();

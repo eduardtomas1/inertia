@@ -961,6 +961,70 @@ setInterval(() => {}, 1000);
   });
 
   it.each([
+    "serve --hostname --port --cors --service --stdio",
+    "serve --pure --hostname --port",
+  ])("rejects OpenCode 2 with an explicit unsupported-version message when serve help is %s", async (serveHelp) => {
+    const executable = join(temporaryRoot(), "opencode");
+    const probes: string[][] = [];
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: async () => ({
+        cleanupConfirmed: true,
+        outcome: "verified",
+      }),
+      probeProcess: async (_candidate, args) => {
+        probes.push([...args]);
+        return {
+          exitCode: 0,
+          output: args[0] === "--version" ? "2.0.22" : serveHelp,
+          started: true,
+          timedOut: false,
+          cleanupConfirmed: true,
+        };
+      },
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage: "OpenCode 2 is not supported yet; use OpenCode 1.x (opencode-ai).",
+    });
+    expect(probes).toEqual([
+      ["--version"],
+      ["serve", "--help"],
+    ]);
+  });
+
+  it("selects an OpenCode 1.x CLI over an OpenCode 2 CLI", async () => {
+    const root = temporaryRoot();
+    const legacy = join(root, "legacy", "opencode");
+    const next = join(root, "next", "opencode");
+    await expect(detectProvider("opencode", { command: "opencode" }, {
+      executableCandidates: async () => [next, legacy],
+      probeOpenCodePureIsolation: async () => ({
+        cleanupConfirmed: true,
+        outcome: "verified",
+      }),
+      probeProcess: async (candidate, args) => ({
+        exitCode: 0,
+        output: args[0] === "--version"
+          ? candidate === next ? "2.0.22" : "1.18.34"
+          : args[0] === "serve"
+            ? "--pure run without external plugins"
+            : "Credentials\n0 credentials\nEnvironment\n1 environment variable",
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+      }),
+    })).resolves.toMatchObject({
+      executable: legacy,
+      version: "1.18.34",
+      canRun: true,
+    });
+  });
+
+  it.each([
     {
       outcome: "incompatible",
       cleanupConfirmed: true,

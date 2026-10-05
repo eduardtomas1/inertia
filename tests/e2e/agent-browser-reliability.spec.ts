@@ -174,7 +174,7 @@ test("an agent can browse without the Browser panel, through a login, and on pag
     action: "navigate", url: `${app.previewUrl}agent-browser-large-credential`,
   })).resolves.toMatchObject({ ok: true });
   const lateCredential = await browser(backgroundConversationId, { action: "snapshot" });
-  expect(lateCredential).toMatchObject({ ok: false, code: "sensitive" });
+  expect(lateCredential).toMatchObject({ ok: true });
   expect(JSON.stringify(lateCredential)).not.toContain("late-password-sentinel");
   await expect(pageValue<number>(asyncUrl, "window.__loads")).resolves.toBe(2);
 
@@ -207,15 +207,13 @@ test("an agent can browse without the Browser panel, through a login, and on pag
     action: "type", ref: refFor(login, "Username"), text: "admin", replace: true,
   })).resolves.toMatchObject({ ok: true });
   await expect(browser(conversationId, {
-    action: "type", ref: refFor(login, "Password field"), text: "login-password-sentinel", replace: true,
+    action: "type", ref: refFor(login, "Password"), text: "login-password-sentinel", replace: true,
   })).resolves.toMatchObject({ ok: true });
-  const withheld = await browser(conversationId, { action: "snapshot" });
-  expect(withheld).toMatchObject({
-    ok: false,
-    code: "sensitive",
-    message: expect.stringMatching(/password value.*Navigate to the page again/u),
-  });
-  await expect(browser(conversationId, { action: "click", ref: refFor(login, "Sign in") }))
+  const filled = await browser(conversationId, { action: "snapshot" });
+  expect(JSON.stringify(filled)).not.toContain("login-password-sentinel");
+  const redacted = parsed(filled);
+  expect(redacted.elements).toContainEqual(expect.objectContaining({ name: "Password", value: "[redacted]" }));
+  await expect(browser(conversationId, { action: "click", ref: refFor(redacted, "Sign in") }))
     .resolves.toMatchObject({ ok: true });
   expect(parsed(await browser(conversationId, {
     action: "wait", text: "Welcome back", state: "present", timeoutMs: 8_000,

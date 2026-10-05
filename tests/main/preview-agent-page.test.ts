@@ -1554,7 +1554,7 @@ describe("agent browser semantic snapshots", () => {
     expect(parsedFirstSnapshot).toMatchObject({
       title: "[redacted]",
       text: "[redacted]",
-      elements: [{ name: "Password field", value: "[redacted]" }],
+      elements: [{ name: "Sensitive field", value: "[redacted]" }],
     });
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
     const expectedRef = parsedFirstSnapshot.elements[0]!.ref;
@@ -1801,8 +1801,8 @@ describe("agent browser semantic snapshots", () => {
       url: "http://127.0.0.1:3000",
       text: "Sign in [redacted] Keep this account secure",
       elements: [
-        { role: "input", name: "Password field", value: "[redacted]" },
-        { role: "input", name: "Password field", value: "[redacted]" },
+        { role: "input", name: "[redacted]", value: "[redacted]" },
+        { role: "input", name: "[redacted]", value: "[redacted]" },
       ],
     });
 
@@ -1810,21 +1810,21 @@ describe("agent browser semantic snapshots", () => {
       .resolves.toMatchObject({
         found: true,
         editable: true,
-        label: "page element",
+        label: "[redacted]",
         x: 120,
         y: 50,
       });
     expect(focus).toHaveBeenCalledOnce();
     expect(select).toHaveBeenCalledOnce();
     await expect(locateAgentPageRef(contents as never, "e2"))
-      .resolves.toMatchObject({ found: true, label: "page element" });
+      .resolves.toMatchObject({ found: true, label: "[redacted]" });
 
     const changedSecret = "changed-password-after-the-snapshot";
     input.value = changedSecret;
     input.labels[0]!.innerText = changedSecret;
     mirror.innerText = changedSecret;
     await expect(locateAgentPageRef(contents as never, "e2"))
-      .resolves.toMatchObject({ found: true, label: "page element" });
+      .resolves.toMatchObject({ found: true, label: "[redacted]" });
 
     input.value = secret;
     input.labels[0]!.innerText = secret;
@@ -1837,7 +1837,7 @@ describe("agent browser semantic snapshots", () => {
     };
     expect(revealed.elements[0]).toMatchObject({
       role: "input",
-      name: "Password field",
+      name: "[redacted]",
       value: "[redacted]",
     });
 

@@ -85,7 +85,10 @@ async function run(): Promise<void> {
     await perform({ action: "tab-open", url: `${url}?after-timeout` });
     await capture();
     await perform({ action: "navigate", url: `${url}private` });
-    for (const action of ["snapshot", "screenshot"] as const) {
+    const privateSnapshot = await perform({ action: "snapshot" });
+    assert(!privateSnapshot.text.includes("native-password-sentinel"));
+    assert(privateSnapshot.text.includes("[redacted]"));
+    for (const action of ["screenshot"] as const) {
       const refused = await broker.perform(contextId, { action });
       assert(!refused.ok && refused.code === "sensitive", JSON.stringify(refused));
       assert(!JSON.stringify(refused).includes("native-password-sentinel"));
@@ -97,7 +100,7 @@ async function run(): Promise<void> {
     assert(!nested.text.includes("Local browser diagnostic"));
     await perform({ action: "screenshot" });
     console.log(`NATIVE_BROWSER_EVIDENCE ${JSON.stringify({ platform: process.platform, arch: process.arch,
-      electron: process.versions.electron, captures, timeoutRecovered: true, privacyRefusals: 2,
+      electron: process.versions.electron, captures, timeoutRecovered: true, privacyRefusals: 1,
       framesNotInspected: true })}`);
   } finally {
     broker.close("primary", contextId);

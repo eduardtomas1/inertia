@@ -185,6 +185,9 @@ function withheldEvidenceMessage(reason: AgentPageWithheldReason, subject: strin
   if (reason === "password") {
     return `${subject} withheld because this document holds a password value, which Inertia never sends to a model.${recovery}`;
   }
+  if (reason === "redaction-limit") {
+    return `${subject} withheld because this document exceeds the limit for safely hiding sensitive values.${recovery}`;
+  }
   if (reason === "hidden-input") {
     return `${subject} withheld because text was typed into a control Inertia cannot inspect (inside a closed shadow root), so it could be a password.${recovery}`;
   }
@@ -812,7 +815,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (capture) {
         await this.rendererOperation(contents, () => setAgentPageFrozen(contents, true), { scope, phase: "page-freeze" });
       }
-      const before = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents), { scope, phase: "privacy-check" });
+      const before = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents, "semantic"), { scope, phase: "privacy-check" });
       if (before.withheld) {
         return { ok: false, result: failure("sensitive", withheldEvidenceMessage(before.withheld, "Page content is")) };
       }
@@ -825,7 +828,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         scope,
         phase: "page-snapshot",
       });
-      const after = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents), { scope, phase: "privacy-check" });
+      const after = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents, "semantic"), { scope, phase: "privacy-check" });
       if (after.withheld) {
         return { ok: false, result: failure("sensitive", withheldEvidenceMessage(after.withheld, "Page content is")) };
       }

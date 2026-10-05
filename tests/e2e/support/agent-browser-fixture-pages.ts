@@ -1,4 +1,6 @@
 import type { ServerResponse } from "node:http";
+import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 
 export const NATIVE_CREDENTIAL_AUDIT_ROUTES = [
   "set-attribute",
@@ -66,6 +68,16 @@ export function serveAgentBrowserPrivacyFixture(
   url: string | undefined,
   response: ServerResponse,
 ): boolean {
+  if (url === "/agent-browser-react-login") {
+    const script = buildSync({
+      entryPoints: [fileURLToPath(new URL("agent-browser-react-login.ts", import.meta.url))],
+      bundle: true, write: false, platform: "browser", format: "iife",
+      define: { "process.env.NODE_ENV": '"production"' },
+    }).outputFiles[0]!.text;
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(`<!doctype html><title>React login</title><div id="root"></div><script>${script}</script>`);
+    return true;
+  }
   if (url === "/agent-browser-post-refusal-safe") {
     response.writeHead(200, {
       "Content-Type": "text/html",

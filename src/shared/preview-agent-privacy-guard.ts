@@ -1,3 +1,5 @@
+import type { createPreviewAgentPrivacyRuntime } from "./preview-agent-sensitive-fields.js";
+
 interface AgentBrowserPrivacyState {
   refs: Map<string, Element>;
   nodes: WeakMap<Element, string>;
@@ -24,7 +26,7 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
 
 export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
 export const PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT = "__inertia_agent_credential_signal__";
-export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input" | "document-too-large";
+export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input" | "document-too-large" | "redaction-limit";
 export const PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL = "inertia:preview-agent-input-refusal";
 export type PreviewAgentInputRefusal = "disabled" | "file" | "nested" | "retargeted";
 
@@ -35,11 +37,19 @@ export function installPreviewAgentShadowBoundarySignal(
 ): void {
   const dispatch = EventTarget.prototype.dispatchEvent;
   const EventConstructor = Event;
+  const CustomEventConstructor = typeof CustomEvent === "function" ? CustomEvent : undefined;
+  const stringify = JSON.stringify;
   const signalShadowBoundary = (): void => {
     dispatch.call(document, new EventConstructor(eventName));
   };
-  const signal = (): void => {
-    dispatch.call(document, new EventConstructor(credentialEventName));
+  const signal = (...values: string[]): void => {
+    // Known values stay inside the page/preload boundary. The isolated world
+    // remembers them for redaction; an event without values means inspection
+    // is unsafe and must still withhold evidence.
+    const event = values.length > 0 && CustomEventConstructor
+      ? new CustomEventConstructor(credentialEventName, { detail: stringify(values) })
+      : new EventConstructor(credentialEventName);
+    dispatch.call(document, event);
   };
   const shadowDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "attachShadow");
   const attachShadow = shadowDescriptor?.value as Element["attachShadow"] | undefined;
@@ -184,11 +194,30 @@ export function installPreviewAgentShadowBoundarySignal(
   const nativeWeakSetAdd = WeakSet.prototype.add;
   const nativeWeakSetHas = WeakSet.prototype.has;
   const ownValueInputs = new WeakSet<object>();
+  const monitoredValues = new WeakMap<object, { get: () => unknown; set: (value: unknown) => void; last: unknown }>();
+  const nativeWeakMapGet = WeakMap.prototype.get;
+  const nativeWeakMapSet = WeakMap.prototype.set;
   const inputPrototype = typeof HTMLInputElement === "undefined"
     ? undefined
     : HTMLInputElement.prototype;
   const nativeString = String;
   const nativeLowerCase = String.prototype.toLowerCase;
+  const getAttribute = Element.prototype.getAttribute;
+  const sensitiveInput = (input: unknown): boolean => {
+    if (Reflect.apply(nativeLowerCase, nativeString(Reflect.apply(inputTypeGetter!, input, [])), []) === "password") return true;
+    if (typeof getAttribute !== "function") return false;
+    return ["id", "name", "autocomplete", "placeholder", "aria-label"].some((name) => {
+      const value = Reflect.apply(getAttribute, input, [name]) as string | null;
+      return typeof value === "string" && (value.length > 1_200
+        || /password|passcode|passphrase|token|secret|credential|api[\s_-]?key|private[\s_-]?key|authorization|one[\s_-]?time[\s_-]?code|(?:authentication|authenticator|verification|security|mfa|2fa)[\s_-]*code|cc-number|cc-csc/iu.test(value));
+    });
+  };
+  const signalValue = (input: unknown, value: unknown): void => {
+    if (!sensitiveInput(input)) return;
+    if (typeof value !== "string") signal();
+    else if (value.length > 4_096) signal();
+    else if (value) signal(value);
+  };
   const isNativeInput = (input: unknown): boolean => {
     try {
       return Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
@@ -212,13 +241,23 @@ export function installPreviewAgentShadowBoundarySignal(
     try {
       const assignedValue = Reflect.apply(inputValueGetter!, input, []) as string;
       const defaultValue = Reflect.apply(inputDefaultValueGetter!, input, []) as string;
-      const isPassword = Reflect.apply(nativeLowerCase, inputType, []) === "password";
+      const isPassword = Reflect.apply(nativeLowerCase, inputType, []) === "password" || sensitiveInput(input);
       const ownValueShadowed = Reflect.apply(
         nativeWeakSetHas,
         ownValueInputs,
         [input as object],
       ) as boolean;
-      if (isPassword && (ownValueShadowed || assignedValue || defaultValue)) signal();
+      if (!isPassword) return;
+      const monitored = Reflect.apply(nativeWeakMapGet, monitoredValues, [input as object]) as
+        { last: unknown } | undefined;
+      if (ownValueShadowed && !monitored) signal();
+      else {
+        if (assignedValue || defaultValue) {
+          if (assignedValue.length > 4_096 || defaultValue.length > 4_096) signal();
+          else signal(assignedValue, defaultValue);
+        }
+        if (monitored?.last) signalValue(input, monitored.last);
+      }
     } catch {
       signal();
     }
@@ -233,8 +272,40 @@ export function installPreviewAgentShadowBoundarySignal(
       ) as PropertyDescriptor | undefined;
       if (!ownValue) return;
       Reflect.apply(nativeWeakSetAdd, ownValueInputs, [input as object]);
-      const inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
-      if (Reflect.apply(nativeLowerCase, inputType, []) === "password") signal();
+      const existing = Reflect.apply(nativeWeakMapGet, monitoredValues, [input as object]) as
+        { get: () => unknown; set: (value: unknown) => void; last: unknown } | undefined;
+      if (existing?.get === ownValue.get && existing?.set === ownValue.set) {
+        signalPasswordValue(input, true);
+        return;
+      }
+      // React installs a configurable getter/setter pair even on empty,
+      // uncontrolled inputs. Observe actual use without calling its getter
+      // during inspection or trusting a framework name/function source.
+      if (ownValue.configurable && typeof ownValue.get === "function" && typeof ownValue.set === "function") {
+        const record = {
+          last: "" as unknown,
+          get(this: HTMLInputElement): unknown {
+            const value = Reflect.apply(ownValue.get!, this, []);
+            record.last = value;
+            signalValue(this, value);
+            return value;
+          },
+          set(this: HTMLInputElement, value: unknown): void {
+            record.last = value;
+            signalValue(this, value);
+            Reflect.apply(ownValue.set!, this, [value]);
+            signalPasswordValue(this, true);
+          },
+        };
+        Reflect.apply(objectDefineProperty!, Object, [input, "value", {
+          ...ownValue, get: record.get, set: record.set,
+        }]);
+        Reflect.apply(nativeWeakMapSet, monitoredValues, [input as object, record]);
+      } else {
+        // Non-configurable or opaque replacements cannot be monitored.
+        Reflect.apply(nativeWeakMapSet, monitoredValues, [input as object, undefined]);
+      }
+      signalPasswordValue(input, true);
     } catch {
       // Once a descriptor mutation has succeeded on a real input, an
       // uninspectable target can hide a page-readable value from every native
@@ -611,6 +682,7 @@ export function installPreviewAgentShadowBoundarySignal(
  * repair for already-created test documents.
  */
 export function installPreviewAgentPrivacyGuard(
+  privacy: ReturnType<typeof createPreviewAgentPrivacyRuntime>,
   reportRefusal?: (refusal: PreviewAgentInputRefusal) => void,
 ): void {
   const owner = globalThis as AgentBrowserPrivacyGlobal;
@@ -628,41 +700,18 @@ export function installPreviewAgentPrivacyGuard(
     owner.__inertiaAgentBrowser = state;
   }
   if (state.privacyGuardInstalled) return;
-  const maximumRememberedValues = 32;
   const maximumScanNodes = 4_000;
-  const maximumValueSourceCharacters = 4_096;
-  const normalize = (value: unknown): string => String(value ?? "")
-    .slice(0, maximumValueSourceCharacters)
-    .replace(/\s+/gu, " ").trim();
   const exactToken = (value: unknown, expected: string, maximum: number): boolean => (
     typeof value === "string" && value.length <= maximum
     && value.trim().toLowerCase() === expected
   );
-  const remember = (value: unknown): void => {
-    const normalized = normalize(value);
-    if (!normalized) return;
-    state.passwordValues.delete(normalized);
-    state.passwordValues.add(normalized);
-    while (state.passwordValues.size > maximumRememberedValues) {
-      const oldest = state.passwordValues.values().next().value as string | undefined;
-      if (oldest === undefined) break;
-      state.passwordValues.delete(oldest);
-    }
-  };
   const inspect = (input: HTMLInputElement, wasPassword = false): void => {
-    const knownPassword = wasPassword
-      || exactToken(input.type, "password", 20)
-      || state.passwordNodes.has(input);
-    if (!knownPassword && state.passwordValues.size === 0) return;
-    const value = normalize(input.value);
-    if (knownPassword || (value && state.passwordValues.has(value))) {
-      state.passwordNodes.add(input);
-      remember(value);
-    }
+    if (wasPassword) state.passwordNodes.add(input);
+    privacy.inspect(state, input);
   };
   const inputElement = (node: unknown): HTMLInputElement | null => {
     const candidate = node as Partial<HTMLInputElement> | null;
-    return candidate?.tagName === "INPUT" ? candidate as HTMLInputElement : null;
+    return ["INPUT", "TEXTAREA", "SELECT"].includes(candidate?.tagName ?? "") ? candidate as HTMLInputElement : null;
   };
   interface ScanBudget { exhausted: boolean; remaining: number }
   const scanBudget = (): ScanBudget => ({ exhausted: false, remaining: maximumScanNodes });
@@ -680,14 +729,17 @@ export function installPreviewAgentPrivacyGuard(
   };
   const inspectInputs = (root: Partial<Pick<Element, "getElementsByTagName">>): boolean => {
     if (typeof root.getElementsByTagName !== "function") return false;
-    const inputs = root.getElementsByTagName("input");
-    let index = 0;
-    for (; index < maximumScanNodes; index += 1) {
-      const input = inputs[index];
-      if (!input) return true;
-      inspect(input);
+    let scanned = 0;
+    for (const tag of ["input", "textarea", "select"]) {
+      const inputs = root.getElementsByTagName(tag);
+      for (let index = 0; index < inputs.length; index += 1) {
+        if (scanned++ >= maximumScanNodes) {
+          withhold("document-too-large");
+          return true;
+        }
+        inspect(inputs[index] as HTMLInputElement);
+      }
     }
-    if (inputs[index]) withhold("document-too-large");
     return true;
   };
   const inspectTree = (node: Node, budget: ScanBudget): void => {
@@ -725,7 +777,20 @@ export function installPreviewAgentPrivacyGuard(
   activationTarget.addEventListener(nestedBoundaryEvent, () => {
     state.shadowRootsObserved = true;
   }, true);
-  activationTarget.addEventListener(credentialSignalEvent, () => {
+  activationTarget.addEventListener(credentialSignalEvent, (event) => {
+    // Only bounded primitive data crosses the main-world signal. A page may
+    // add redactions, but cannot clear remembered secrets or a refusal.
+    const detail = (event as CustomEvent<unknown>).detail;
+    if (typeof detail === "string" && detail.length <= 50_000) {
+      try {
+        const values: unknown = JSON.parse(detail);
+        if (Array.isArray(values) && values.length > 0 && values.length <= 2
+          && values.every((value) => typeof value === "string" && value.length <= 4_096)) {
+          for (const value of values) privacy.remember(state, value);
+          return;
+        }
+      } catch { /* An invalid signal remains uninspectable. */ }
+    }
     withhold("credential-signal");
   }, true);
   if (document.documentElement) inspectTree(document.documentElement, scanBudget());
@@ -903,7 +968,7 @@ export function installPreviewAgentPrivacyGuard(
   });
   observer.observe(document, {
     attributes: true,
-    attributeFilter: ["type"],
+    attributeFilter: ["type", "name", "id", "autocomplete", "placeholder", "aria-label", "aria-labelledby"],
     attributeOldValue: true,
     childList: true,
     subtree: true,

@@ -116,7 +116,7 @@ export async function expectDocumentStartPrivacyGuard(
   );
   expect(evidence, `privacy evidence remained available for ${url}`).toMatchObject({
     opened: { ok: true },
-    snapshot: { ok: false, code: "sensitive" },
+    snapshot: { ok: true },
     screenshot: { ok: false, code: "sensitive" },
     closed: { ok: true },
     restored: { ok: true },
@@ -241,7 +241,7 @@ export async function expectScreenshotPrivacyGuard(
     screenshot: {
       ok: false,
       code: "sensitive",
-      message: "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.",
+      message: expect.stringMatching(/Screenshots (?:are unavailable|are withheld)/u),
     },
     closed: { ok: true },
     restored: { ok: true },
@@ -288,7 +288,7 @@ export async function expectWindowCapturePrivacyGuard(
       const elements = initial.text
         ? (JSON.parse(initial.text) as { elements: Array<{ name: string; ref: string }> }).elements
         : [];
-      const ref = elements.find((element) => element.name === "Password field")?.ref;
+      const ref = elements.find((element) => element.name === "Window guarded password")?.ref;
       const typed = ref ? await runtime.agentBrowser(request.conversationId, {
         action: "type", ref, replace: true, text: request.secret,
       }) : null;
@@ -315,7 +315,7 @@ export async function expectWindowCapturePrivacyGuard(
     initial: { ok: true },
     typed: { ok: true },
     pageState: { inputEmpty: true, mirrorMatched: true },
-    snapshot: { ok: false, code: "sensitive" },
+    snapshot: { ok: true },
     screenshot: { ok: false, code: "sensitive" },
     closed: { ok: true },
     restored: { ok: true },
@@ -417,8 +417,10 @@ export async function expectPasswordAssignmentPrivacyGuard(
     page: { produced: true, route, supported: true },
     route,
     screenshot: { code: "sensitive", ok: false },
-    snapshot: { code: "sensitive", ok: false },
+    snapshot: NATIVE_CREDENTIAL_AUDIT_ROUTES.indexOf(route) < 10
+      ? { code: undefined, ok: true } : { code: "sensitive", ok: false },
   })));
+  expect(JSON.stringify(audit)).not.toContain("hunter2");
   await preview.getByRole("button", { name: /Evidence/u }).click();
   const evidence = preview.getByRole("list", { name: "Browser evidence timeline" });
   await expect(evidence).not.toContainText("hunter2");

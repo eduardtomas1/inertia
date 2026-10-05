@@ -6,6 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectPasswordAssignmentPrivacyGuard, expectScreenshotPrivacyGuard, expectStructuralCoverage, expectWindowCapturePrivacyGuard } from "./support/agent-browser-security";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
+import { expectSensitiveFieldInteraction } from "./support/agent-browser-sensitive-interaction";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -168,4 +169,8 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
   });
 
   expect(app.rendererErrors).toEqual([]);
+});
+
+test("keeps React password replacement and same-document MFA usable with hidden values", async () => {
+  await expectSensitiveFieldInteraction(app, conversationId);
 });

@@ -367,6 +367,7 @@ export function createPreviewBrokerHarness(
     getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
   };
   const recordOperationFailure = vi.fn();
+  const confirmPageUnload = vi.fn((_window: unknown) => false);
   const getWindow = vi.fn(() => window as typeof window | null);
   const unregisterHealth: Array<ReturnType<typeof vi.fn>> = [];
   const broker = new PreviewBroker({
@@ -374,11 +375,12 @@ export function createPreviewBrokerHarness(
     openExternal: vi.fn(async () => undefined),
     stateChannel: "preview-state",
     recordOperationFailure,
+    confirmPageUnload,
     registerHealthRenderer: () => {
       const unregister = vi.fn();
       unregisterHealth.push(unregister);
       return unregister;
     },
   });
-  return { broker, children, recordOperationFailure, window, getWindow, unregisterHealth };
+  return { broker, children, recordOperationFailure, confirmPageUnload, window, getWindow, unregisterHealth };
 }

@@ -18,6 +18,7 @@ import {
 } from "../shared/browser-evidence.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
+import { recordAgentPageUnloadPrompt } from "./preview-agent-dialogs.js";
 import { captureAgentPageInputRefusal } from "./preview-agent-input.js";
 import { agentOperationBudget, agentOperationFailure, AgentOperationScope } from "./preview-agent-scope.js";
 import {
@@ -64,6 +65,7 @@ interface PreviewBrokerOptions {
   stateChannel: string;
   registerHealthRenderer?(contents: WebContents): () => void;
   recordOperationFailure?(failure: PreviewAgentOperationFailure): void;
+  confirmPageUnload?(window: BrowserWindow): boolean;
   partitionPrefix?: string;
   now?(): number;
 }
@@ -774,6 +776,14 @@ export class PreviewBroker {
           sameDocument,
           this.#evidenceAuthority(session, currentTab.id),
         );
+      },
+      allowUnload: (currentTab) => {
+        if (session.operation && session.activeTabId === currentTab.id) {
+          recordAgentPageUnloadPrompt(currentTab.view.webContents);
+          return true;
+        }
+        const window = this.#window();
+        return window ? this.options.confirmPageUnload?.(window) === true : false;
       },
       userInput: () => {
         if (this.#sessions.get(session.contextId) !== session) return;

@@ -219,13 +219,27 @@ describe("Browser tool surface", () => {
     });
   });
 
-  it("lets a page leave even when its beforeunload handler asks to stay, and reports it", async () => {
-    const { broker, contents } = await loadedHarness();
-    const prevented = { preventDefault: vi.fn() };
-    contents.emit("will-prevent-unload", prevented);
-    expect(prevented.preventDefault).toHaveBeenCalledOnce();
+  it("asks the user before a page they are using is left, and lets an agent action leave and report it", async () => {
+    const { broker, contents, confirmPageUnload } = await loadedHarness();
+    const userLeave = { preventDefault: vi.fn() };
+    contents.emit("will-prevent-unload", userLeave);
+    expect(confirmPageUnload).toHaveBeenCalledOnce();
+    expect(userLeave.preventDefault).not.toHaveBeenCalled();
+    confirmPageUnload.mockReturnValueOnce(true);
+    contents.emit("will-prevent-unload", userLeave);
+    expect(userLeave.preventDefault).toHaveBeenCalledOnce();
+    const quiet = await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(JSON.parse((quiet as unknown as { text: string }).text)).not.toHaveProperty("dialogs");
+
+    const waiting = broker.perform(runIdentity, { action: "wait", text: "never", state: "present", timeoutMs: 1_000 });
+    await vi.waitFor(() => expect(pageTools.semanticPageSnapshot).toHaveBeenCalled());
+    const agentLeave = { preventDefault: vi.fn() };
+    contents.emit("will-prevent-unload", agentLeave);
+    expect(agentLeave.preventDefault).toHaveBeenCalledOnce();
+    expect(confirmPageUnload).toHaveBeenCalledTimes(2);
+    await waiting;
     const clicked = await broker.perform(runIdentity, { action: "click", ref: "e1" });
-    expect(JSON.parse((clicked as { text: string }).text)).toMatchObject({
+    expect(JSON.parse((clicked as unknown as { text: string }).text)).toMatchObject({
       dialogs: [{ kind: "beforeunload", message: "", answer: "accept" }],
     });
   });

@@ -105,6 +105,14 @@ so a dialog the override cannot reach, for example one opened from an
 embedded frame, is still answered silently and never shown. A dialog raised
 by a page that then navigates away is lost with its document.
 
+A page that asks to stay when it is left (`beforeunload`) is handled by who
+is leaving it. While an agent action is running on that tab, the page is
+allowed to leave and the next navigation, history, click, type or press
+result reports a `beforeunload` dialog answered `accept`. Otherwise the user
+is leaving it, and Inertia asks with its own native confirmation, "Leave this
+page?", whose default is Stay and which shows no page text; the page leaves
+only if the user chooses Leave.
+
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at
 most 4,000, and `inertia_browser_wait_for` `text` at most 200. The runtime tool

@@ -14,6 +14,7 @@ import {
   turnStatusLabel,
   type ResponseTimelineCompatibility,
 } from "../../utils/responseTimeline";
+import { messageContextMenu } from "./messageContextMenu";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -91,7 +92,7 @@ function CompatibilityDisclosure({
               </div>
             ))}
             {compatibility.messages.map((message) => (
-              <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1}>
+              <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
                 <div className="message-meta"><span>{message.role === "assistant" ? "Agent" : message.role === "user" ? "You" : "System"}</span><MessageOrigin message={message} />{props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}</div>
                 {message.role === "assistant"
                   ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />

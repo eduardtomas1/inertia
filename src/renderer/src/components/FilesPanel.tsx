@@ -55,6 +55,7 @@ import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
+import { projectPathContextMenu } from "../utils/contextMenu";
 import { useStableActions } from "../hooks/useStableController";
 import { buildFileTreeGitIndex, type FileTreeGitState } from "../utils/fileTreeGit";
 import { directoryChain, freshWorkspaceDirectoryPages, visibleDirectoryEntries } from "../utils/workspaceDirectoryPages";
@@ -759,6 +760,13 @@ export function FilesPanel({
     }
   };
   const treeActions = useStableActions({ activate: activateRow, keyDown: onTreeKeyDown });
+  const treeContextMenu = useCallback((row: WorkspaceTreeRow) => projectPathContextMenu<HTMLButtonElement>("file", {
+    projectId,
+    conversationId,
+    projectRoot,
+    relativePath: row.entry.path,
+    directory: row.entry.kind === "directory",
+  }), [conversationId, projectId, projectRoot]);
 
   useEffect(() => {
     setFileExplorerOpen(true);
@@ -905,6 +913,7 @@ export function FilesPanel({
             treeRef={fileListRef}
             onActivate={treeActions.activate}
             onKeyDown={treeActions.keyDown}
+            contextMenuFor={treeContextMenu}
           />
           {!searchActive && error && treeRows.length > 0 && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">{error}</p>

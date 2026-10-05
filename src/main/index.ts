@@ -108,6 +108,7 @@ import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
+import { registerContextMenuIpc } from "./context-menu-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { runtimeIssueEvidenceBroker } from "./runtime-issue-evidence-broker.js";
@@ -512,6 +513,7 @@ function registerIpcHandlers(): void {
   );
 
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
+  registerContextMenuIpc({ channel: IPC.showContextMenu, assertTrusted: assertTrustedChatIpc, isPackaged: () => app.isPackaged });
 
   registerAppUpdateIpc({
     ipcMain,

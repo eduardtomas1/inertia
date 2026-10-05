@@ -282,6 +282,8 @@ const bridge: MainWindowBridge = Object.freeze({
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
+  showContextMenu: (request: Parameters<DesktopBridge["showContextMenu"]>[0]) =>
+    ipcRenderer.invoke(IPC.showContextMenu, request) as ReturnType<DesktopBridge["showContextMenu"]>,
   showThreadNotification: (request: Parameters<DesktopBridge["showThreadNotification"]>[0]) =>
     ipcRenderer.invoke(IPC.showThreadNotification, request) as Promise<boolean>,
   onThreadNotificationActivated: (listener: (conversationId: string) => void) =>

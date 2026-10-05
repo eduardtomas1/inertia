@@ -21,6 +21,7 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { providerAuthBrowserUrlFromTerminal } from "../utils/providerAuthBrowser";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
+import { terminalPasteKeyHandler } from "../utils/terminalContextMenu";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
 import "./ProviderAuthDialog.css";
@@ -181,10 +182,7 @@ export function ProviderAuthDialog({
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    const pastesWithControl = window.inertia?.getPlatform() !== "darwin";
-    terminal.attachCustomKeyEventHandler((event) => !(pastesWithControl
-      && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-      && event.code === "KeyV"));
+    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform()));
     terminal.open(mount);
     fit.fit();
     terminalRef.current = terminal;

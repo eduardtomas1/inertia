@@ -354,6 +354,29 @@ setInterval(() => {}, 1000);
     expect(readFileSync(join(root, "other.txt"), "utf8")).toBe("other staged\n");
   });
 
+  it("reviews and commits a tracked file that matches an ignore rule", async () => {
+    const root = repository();
+    writeFileSync(join(root, ".gitignore"), "build/\n");
+    mkdirSync(join(root, "build"));
+    writeFileSync(join(root, "build", "keep.txt"), "kept before\n");
+    git(root, "add", "--", ".gitignore");
+    git(root, "add", "-f", "--", "build/keep.txt");
+    git(root, "commit", "-q", "-m", "Track an ignored path");
+    writeFileSync(join(root, "build", "keep.txt"), "kept reviewed\n");
+    writeFileSync(join(root, "build", "output.txt"), "ignored output\n");
+    const review = await captureGitCommitReview(root);
+
+    await commitReviewedChanges(
+      root,
+      "Commit tracked ignored path",
+      ["build/keep.txt"],
+      review.fingerprint,
+    );
+
+    expect(git(root, "show", "HEAD:build/keep.txt")).toBe("kept reviewed");
+    expect(git(root, "ls-tree", "-r", "--name-only", "HEAD")).not.toContain("build/output.txt");
+  });
+
   const pathspecMetacharacterNames = [
     { name: "docs/[a].md", windows: true },
     { name: "docs/:(glob)a.md", windows: false },

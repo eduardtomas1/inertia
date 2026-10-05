@@ -142,4 +142,78 @@ describe("Browser tool surface", () => {
     expect((await broker.perform(runIdentity, { action: "tabs" }) as { state: Record<string, unknown> }).state)
       .not.toHaveProperty("controller");
   });
+
+  it("arms the confirmation answer only around the agent's own click and reports the page's dialogs", async () => {
+    const { broker, contents } = await loadedHarness();
+    const timeline: string[] = [];
+    const page = contents as unknown as {
+      executeJavaScriptInIsolatedWorld(world: number, scripts: Array<{ code: string }>): Promise<unknown>;
+    };
+    const original = page.executeJavaScriptInIsolatedWorld.bind(page);
+    vi.spyOn(page, "executeJavaScriptInIsolatedWorld").mockImplementation(async (world, scripts) => {
+      const code = scripts[0]?.code ?? "";
+      const armed = /__inertia_agent_dialog_answer__", \{ detail: "(accept|dismiss)"/u.exec(code)?.[1];
+      if (armed) timeline.push(`arm:${armed}`);
+      if (code.includes("__inertiaAgentDialogs")) {
+        timeline.push("read");
+        return [{ kind: "confirm", message: "Delete [redacted]?", answer: "accept" }];
+      }
+      return await original(world, scripts);
+    });
+    const sent = contents.sendInputEvent.bind(contents);
+    vi.spyOn(contents as unknown as { sendInputEvent(input: Record<string, unknown>): void }, "sendInputEvent")
+      .mockImplementation((input) => {
+        if (input.type === "mouseDown") timeline.push("mouseDown");
+        sent(input as never);
+      });
+
+    const accepted = await broker.perform(runIdentity, { action: "click", ref: "e1", dialog: "accept" });
+    expect(JSON.parse((accepted as { text: string }).text)).toMatchObject({
+      clicked: "e1",
+      dialogs: [{ kind: "confirm", message: "Delete [redacted]?", answer: "accept" }],
+    });
+    expect(timeline).toEqual(["arm:accept", "mouseDown", "arm:dismiss", "read"]);
+
+    timeline.length = 0;
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e1" })).resolves.toMatchObject({ ok: true });
+    expect(timeline).toEqual(["mouseDown", "read"]);
+    timeline.length = 0;
+    const typed = await broker.perform(runIdentity, { action: "type", ref: "e1", text: "a", replace: true });
+    expect(JSON.parse((typed as { text: string }).text)).toMatchObject({ typed: "e1", dialogs: [{ kind: "confirm" }] });
+    timeline.length = 0;
+    await expect(broker.perform(runIdentity, { action: "press", key: "Enter", dialog: "accept" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(timeline).toEqual(["arm:accept", "arm:dismiss", "read"]);
+  });
+
+  it("lets a page leave even when its beforeunload handler asks to stay, and reports it", async () => {
+    const { broker, contents } = await loadedHarness();
+    const prevented = { preventDefault: vi.fn() };
+    contents.emit("will-prevent-unload", prevented);
+    expect(prevented.preventDefault).toHaveBeenCalledOnce();
+    const clicked = await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(JSON.parse((clicked as { text: string }).text)).toMatchObject({
+      dialogs: [{ kind: "beforeunload", message: "", answer: "accept" }],
+    });
+  });
+
+  it("reports the page's dialogs once in the next snapshot", async () => {
+    const { broker, contents } = await loadedHarness();
+    const send = contents.debugger.sendCommand.getMockImplementation()!;
+    let reads = 0;
+    contents.debugger.sendCommand.mockImplementation(async (method, params) => {
+      if (method === "Runtime.evaluate" && String(params?.expression).includes("__inertiaAgentDialogs")) {
+        reads += 1;
+        return { result: { value: reads === 1 ? [{ kind: "alert", message: "Saved", answer: "accept" }] : [] } };
+      }
+      return await send(method, params);
+    });
+    await expect(broker.perform(runIdentity, { action: "snapshot" })).resolves.toMatchObject({ ok: true });
+    expect(pageTools.semanticPageSnapshot).toHaveBeenLastCalledWith(contents, [], {
+      dialogs: [{ kind: "alert", message: "Saved", answer: "accept" }],
+    });
+    await expect(broker.perform(runIdentity, { action: "snapshot" })).resolves.toMatchObject({ ok: true });
+    expect(pageTools.semanticPageSnapshot).toHaveBeenLastCalledWith(contents, []);
+    contents.debugger.sendCommand.mockImplementation(send);
+  });
 });

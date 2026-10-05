@@ -297,11 +297,11 @@ export class PreviewBroker {
               case "history":
                 return await this.#operations.history(session, command.direction, operation, validate);
               case "click":
-                return await this.#operations.click(session, command.ref, operation, validate);
+                return await this.#operations.click(session, command.ref, operation, validate, command.dialog);
               case "type":
                 return await this.#operations.type(session, command.ref, command.text, command.replace, operation, validate);
               case "press":
-                return await this.#operations.press(session, command.key, operation, validate);
+                return await this.#operations.press(session, command.key, operation, validate, command.dialog);
               case "scroll":
                 return await this.#operations.scroll(session, command.deltaY, operation, validate);
               case "tabs":

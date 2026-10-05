@@ -302,6 +302,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
 export function createPreviewBrokerPageTools() {
   return {
     AGENT_BROWSER_WORLD_ID: 999,
+    PRIVACY_RUNTIME: "({ redact: (_state, value) => value })",
     agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
     agentPageActivationTargetStillFocused: vi.fn<() => Promise<boolean>>(async () => true),
     agentPageEvidencePrivacy: vi.fn<() => Promise<{

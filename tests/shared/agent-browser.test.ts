@@ -41,6 +41,15 @@ describe("agent browser boundary", () => {
       expect(parseAgentBrowserCommand({ action: "history", direction })).toEqual({ action: "history", direction });
     }
     expect(parseAgentBrowserCommand({ action: "history", direction: "home" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "click", ref: "e1", dialog: "accept" }))
+      .toEqual({ action: "click", ref: "e1", dialog: "accept" });
+    expect(parseAgentBrowserCommand({ action: "press", key: "Enter", dialog: "accept" }))
+      .toEqual({ action: "press", key: "Enter", dialog: "accept" });
+    expect(parseAgentBrowserCommand({ action: "click", ref: "e1", dialog: "dismiss" }))
+      .toEqual({ action: "click", ref: "e1" });
+    expect(parseAgentBrowserCommand({ action: "click", ref: "e1", dialog: "yes" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "type", ref: "e1", text: "a", replace: true, dialog: "accept" }))
+      .toBeNull();
     expect(parseAgentBrowserCommand({ action: "history", direction: "back", url: "http://localhost:3000" }))
       .toBeNull();
     expect(parseAgentBrowserCommand({ action: "scroll", deltaY: 2_001 }))

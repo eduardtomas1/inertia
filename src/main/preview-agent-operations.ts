@@ -8,6 +8,7 @@ import {
   type AgentBrowserState,
 } from "../shared/agent-browser.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
+import type { PreviewAgentDialogAnswer } from "../shared/preview-agent-dialogs.js";
 import type { BrowserEvidenceCapture } from "./browser-evidence-capture.js";
 import { AgentBrowserRefusal, changedGeometry, providerVisiblePageUrl, stopForAbort } from "./preview-agent-action.js";
 import type { BrowserApprovalGuard } from "./preview-agent-approvals.js";
@@ -21,6 +22,7 @@ import {
   type AgentPageNotInspected,
 } from "./preview-agent-page.js";
 import { sendAgentPageInput } from "./preview-agent-control.js";
+import { agentDialogDetail, armAgentPageDialogs, takeAgentPageDialogs, takeAgentPageUnloadPrompts } from "./preview-agent-dialogs.js";
 import { navigationFailureMessage, withheldEvidenceMessage } from "./preview-agent-messages.js";
 import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, type PreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
@@ -341,7 +343,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     const loaded = await this.#agentLoad(contents, target, scope, validate);
     stopForAbort(scope.signal);
     this.host.record(session, "navigate", "Agent navigated the page");
-    return this.#stateResult(session, this.#loadNote(contents, loaded));
+    return this.#navigationResult(session, contents, loaded);
   }
 
   async history(
@@ -367,7 +369,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     const label = direction === "back" ? "Agent went back a page"
       : direction === "forward" ? "Agent went forward a page" : "Agent reloaded the page";
     this.host.record(session, "navigate", label);
-    return this.#stateResult(session, this.#loadNote(contents, loaded));
+    return this.#navigationResult(session, contents, loaded);
   }
 
   async openTab(
@@ -399,7 +401,13 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     return this.#stateResult(session, this.#loadNote(tab.view.webContents, loaded));
   }
 
-  async click(session: Session, ref: string, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
+  async click(
+    session: Session,
+    ref: string,
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+    dialog?: PreviewAgentDialogAnswer,
+  ): Promise<AgentBrowserResult> {
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
@@ -468,14 +476,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       validate?.(finalTarget);
       sendAgentPageInput(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 });
       sendAgentPageInput(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 });
-    }, scope, ref);
+    }, scope, ref, dialog);
     if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Take a new inertia_browser_snapshot for current refs.");
     if (deliveryRefusal) return failure("invalid", deliveryRefusal === "file"
       ? "File inputs cannot be activated by the Browser agent."
       : deliveryRefusal === "disabled" ? "That page element became disabled during the click."
         : "The click could not be delivered because the page reported a target Inertia cannot inspect. Take a new snapshot and click a listed control.");
     this.host.record(session, "click", "Agent clicked a page element", { x, y });
-    return this.#stateResult(session, { clicked: ref });
+    return this.#stateResult(session, { clicked: ref, ...await this.#dialogDetail(contents, scope) });
   }
 
   async type(
@@ -570,10 +578,20 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     }, scope);
     stopForAbort(scope.signal);
     this.host.record(session, "type", "Agent typed in a page element", { x, y });
-    return this.#stateResult(session, { typed: ref, characters: text.length });
+    return this.#stateResult(session, {
+      typed: ref,
+      characters: text.length,
+      ...await this.#dialogDetail(contents, scope),
+    });
   }
 
-  async press(session: Session, key: string, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
+  async press(
+    session: Session,
+    key: string,
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+    dialog?: PreviewAgentDialogAnswer,
+  ): Promise<AgentBrowserResult> {
     stopForAbort(scope.signal);
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
@@ -601,11 +619,11 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         sendAgentPageInput(contents, { type: "keyDown", keyCode, ...keyModifiers });
         sendAgentPageInput(contents, { type: "keyUp", keyCode, ...keyModifiers });
       }
-    }, scope);
+    }, scope, undefined, dialog);
     const refusal = activationBlocked || deliveryRefusal;
     if (refusal) return failure("invalid", agentPageActivationFailureMessage(refusal));
     this.host.record(session, "press", `Agent pressed ${key}`);
-    return this.#stateResult(session, { pressed: key });
+    return this.#stateResult(session, { pressed: key, ...await this.#dialogDetail(contents, scope) });
   }
 
   async scroll(session: Session, deltaY: number, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
@@ -629,9 +647,22 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     return this.#stateResult(session, { scrolled: deltaY });
   }
 
+  async #dialogDetail(contents: PreviewContents, scope: AgentOperationScope): Promise<Record<string, unknown>> {
+    return agentDialogDetail(await this.rendererOperation(
+      contents,
+      () => takeAgentPageDialogs(contents),
+      { scope, phase: "page-dialogs" },
+    ));
+  }
+
   #stateResult(session: Session, detail?: Record<string, unknown>): AgentBrowserResult {
     const state = this.host.agentState(session);
     return successfulAgentBrowserResult(boundedAgentStateText(state, detail), state);
+  }
+
+  #navigationResult(session: Session, contents: PreviewContents, loaded: boolean): AgentBrowserResult {
+    const detail = { ...this.#loadNote(contents, loaded), ...agentDialogDetail(takeAgentPageUnloadPrompts(contents)) };
+    return this.#stateResult(session, Object.keys(detail).length > 0 ? detail : undefined);
   }
 
   #loadNote(contents: PreviewContents, loaded: boolean): Record<string, unknown> | undefined {
@@ -690,7 +721,10 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         ...(gaps.frames ? ["frames" as const] : []),
         ...(gaps.shadowRoots ? ["shadow-roots" as const] : []),
       ];
-      const text = await this.rendererOperation(contents, () => semanticPageSnapshot(contents, observed), {
+      const dialogs = capture ? await this.#dialogDetail(contents, scope) : {};
+      const text = await this.rendererOperation(contents, () => (Object.keys(dialogs).length > 0
+        ? semanticPageSnapshot(contents, observed, dialogs)
+        : semanticPageSnapshot(contents, observed)), {
         scope,
         phase: "page-snapshot",
       });
@@ -825,6 +859,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     dispatch: () => void | Promise<void>,
     scope: AgentOperationScope,
     expectedClickRef?: string,
+    dialog?: PreviewAgentDialogAnswer,
   ): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {
     stopForAbort(scope.signal);
     const chooserGeneration = await this.rendererOperation(
@@ -838,12 +873,19 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         () => setAgentPageInputGuard(contents, true, expectedClickRef),
         { scope, phase: "input-guard" },
       );
+      if (dialog === "accept") {
+        await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "accept"), { scope, phase: "page-dialogs" });
+      }
       beginAgentPageInputRefusalCapture(contents);
       await settleAgentPageInput(contents, dispatch, scope.signal);
       const isolated = await this.rendererOperation(contents, () => agentPageInputRefusal(contents), { scope, phase: "input-guard" });
       return capturedAgentPageInputRefusal(contents) ?? isolated;
     } finally {
       if (!contents.isDestroyed()) {
+        if (dialog === "accept") {
+          await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "dismiss"), { phase: "page-dialogs" })
+            .catch(() => undefined);
+        }
         await this.rendererOperation(
           contents,
           () => setAgentPageInputGuard(contents, false),

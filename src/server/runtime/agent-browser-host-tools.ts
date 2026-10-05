@@ -49,13 +49,14 @@ const navigateSchema = z.object({
   (value) => (value.url === undefined) !== (value.history === undefined),
   "Provide exactly one of url or history.",
 );
-const clickSchema = z.object({ ref: refSchema }).strict();
+const dialogSchema = z.enum(["accept", "dismiss"]).optional();
+const clickSchema = z.object({ ref: refSchema, dialog: dialogSchema }).strict();
 const typeSchema = z.object({
   ref: refSchema,
   text: textSchema,
   replace: z.boolean().default(true),
 }).strict();
-const pressSchema = z.object({ key: keySchema }).strict();
+const pressSchema = z.object({ key: keySchema, dialog: dialogSchema }).strict();
 const scrollSchema = z.object({ deltaY: deltaSchema }).strict();
 const waitSchema = z.object({
   text: boundedText(MAX_AGENT_BROWSER_WAIT_TEXT_CHARS).min(1)
@@ -96,6 +97,7 @@ const objectSchema = (
 });
 const refProperty = { type: "string", pattern: REF_PATTERN, description: "An element ref from the latest inertia_browser_snapshot." };
 const urlProperty = { type: "string", minLength: 1, maxLength: MAX_AGENT_BROWSER_URL_CHARS, pattern: NUL_FREE_PATTERN, description: `A local development URL such as http://localhost:3000. At most ${MAX_AGENT_BROWSER_URL_CHARS} Unicode code points.` };
+const dialogProperty = { type: "string", enum: ["accept", "dismiss"], default: "dismiss", description: "How to answer a confirm() dialog this action raises: dismiss (default) or accept. alert() is acknowledged and prompt() returns nothing either way." };
 const tabIdProperty = { type: "string", format: "uuid", pattern: AGENT_BROWSER_TAB_ID_PATTERN, description: "A tab id from inertia_browser_tabs." };
 
 export const AGENT_BROWSER_TOOL_DEFINITIONS:
@@ -125,7 +127,7 @@ readonly ProviderHostToolDefinition[] = [
   {
     name: "inertia_browser_click",
     description: "Click one visible element in the active Inertia Browser page by its ref from the latest inertia_browser_snapshot. Waits for any navigation the click starts.",
-    inputSchema: objectSchema({ ref: refProperty }, ["ref"]),
+    inputSchema: objectSchema({ ref: refProperty, dialog: dialogProperty }, ["ref"]),
     inputValidator: clickSchema,
     readOnly: false,
     destructive: true,
@@ -145,7 +147,7 @@ readonly ProviderHostToolDefinition[] = [
   {
     name: "inertia_browser_press",
     description: "Press one key in the active Inertia Browser page. The key goes to the focused element, so click or type into it first.",
-    inputSchema: objectSchema({ key: { type: "string", enum: [...AGENT_BROWSER_KEYS] } }, ["key"]),
+    inputSchema: objectSchema({ key: { type: "string", enum: [...AGENT_BROWSER_KEYS] }, dialog: dialogProperty }, ["key"]),
     inputValidator: pressSchema,
     readOnly: false,
     destructive: true,
@@ -267,7 +269,7 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
     }
     case "inertia_browser_click": {
       const args = clickSchema.parse(call.arguments);
-      return { action: "click", ref: args.ref };
+      return { action: "click", ref: args.ref, ...(args.dialog === "accept" ? { dialog: "accept" as const } : {}) };
     }
     case "inertia_browser_type": {
       const args = typeSchema.parse(call.arguments);
@@ -275,7 +277,7 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
     }
     case "inertia_browser_press": {
       const args = pressSchema.parse(call.arguments);
-      return { action: "press", key: args.key };
+      return { action: "press", key: args.key, ...(args.dialog === "accept" ? { dialog: "accept" as const } : {}) };
     }
     case "inertia_browser_scroll": {
       const args = scrollSchema.parse(call.arguments);

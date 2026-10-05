@@ -8,6 +8,7 @@ import {
   previewAppShortcutKey,
 } from "./preview-keyboard.js";
 import { agentPageInputIsUser } from "./preview-agent-control.js";
+import { recordAgentPageUnloadPrompt } from "./preview-agent-dialogs.js";
 import { hardenDesktopSession } from "./preview-session.js";
 
 export interface PreviewTab {
@@ -80,6 +81,10 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
     const target = options.targetContents();
     if (!target || target.isDestroyed()) return;
     target.sendInputEvent(forwardedKeyboardInput(input));
+  });
+  contents.on("will-prevent-unload", (event) => {
+    event.preventDefault();
+    recordAgentPageUnloadPrompt(contents);
   });
   contents.on("input-event", (_event, input) => {
     if (agentPageInputIsUser(contents, input)) options.userInput?.(tab);

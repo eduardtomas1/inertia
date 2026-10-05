@@ -33,13 +33,17 @@ function safeLabel(value: string): string {
   return sanitizeBrowserEvidenceText(value, "page control", 300).text;
 }
 
+function acceptsDialog(command: { dialog?: "accept" }): string {
+  return command.dialog === "accept" ? " and accept the page's confirmation dialog" : "";
+}
+
 function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: PreviewAgentTarget | null): string {
   // Page titles can echo arbitrary passwords. A stable tab number identifies
   // the inspected page without copying its untrusted title into an approval.
   const page = `Browser tab ${tab.pageNumber}`;
   const control = `${safeLabel(target?.role || "control")}: ${safeLabel(target?.label ?? "page control")}`;
   switch (command.action) {
-    case "click": return `${page}\nClick ${control}`;
+    case "click": return `${page}\nClick ${control}${acceptsDialog(command)}`;
     case "type": {
       // The evidence sanitizer is deliberately bounded. Show an explicitly
       // labelled preview; never silently claim an excerpt is the complete text.
@@ -52,7 +56,7 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
     case "navigate": return `${page}\nNavigate: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}`;
     case "history": return `${page}\n${command.direction === "back" ? "Go back to the previous page"
       : command.direction === "forward" ? "Go forward to the next page" : "Reload the page"}`;
-    case "press": return `${page}\nPress: ${command.key}`;
+    case "press": return `${page}\nPress: ${command.key}${acceptsDialog(command)}`;
     case "scroll": return `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;
     case "tab-close": return `${page}\nClose this tab`;

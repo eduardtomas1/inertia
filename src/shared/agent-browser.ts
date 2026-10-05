@@ -63,9 +63,9 @@ export type AgentBrowserCommand =
   | { action: "screenshot" }
   | { action: "navigate"; url: string }
   | { action: "history"; direction: "back" | "forward" | "reload" }
-  | { action: "click"; ref: string }
+  | { action: "click"; ref: string; dialog?: "accept" }
   | { action: "type"; ref: string; text: string; replace: boolean }
-  | { action: "press"; key: AgentBrowserKey }
+  | { action: "press"; key: AgentBrowserKey; dialog?: "accept" }
   | { action: "scroll"; deltaY: number }
   | { action: "wait"; text?: string; state: "present" | "absent"; timeoutMs: number }
   | { action: "tabs" }
@@ -178,6 +178,10 @@ function safeUrl(value: unknown): value is string {
   return safeCommandText(value, MAX_AGENT_BROWSER_URL_CHARS, true);
 }
 
+function safeDialog(value: unknown): boolean {
+  return value === undefined || value === "accept" || value === "dismiss";
+}
+
 function safeTabId(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
@@ -201,10 +205,11 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
         ? { action: "history", direction: value.direction }
         : null;
     case "click":
-      return exactKeys(value, ["action", "ref"])
+      return exactKeys(value, ["action", "ref"], ["dialog"])
         && typeof value.ref === "string"
         && SAFE_REF_PATTERN.test(value.ref)
-        ? { action: "click", ref: value.ref }
+        && safeDialog(value.dialog)
+        ? { action: "click", ref: value.ref, ...(value.dialog === "accept" ? { dialog: "accept" as const } : {}) }
         : null;
     case "type":
       return exactKeys(value, ["action", "ref", "text", "replace"])
@@ -222,10 +227,15 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
           }
         : null;
     case "press":
-      return exactKeys(value, ["action", "key"])
+      return exactKeys(value, ["action", "key"], ["dialog"])
         && typeof value.key === "string"
         && SAFE_KEYS.has(value.key as AgentBrowserKey)
-        ? { action: "press", key: value.key as AgentBrowserKey }
+        && safeDialog(value.dialog)
+        ? {
+            action: "press",
+            key: value.key as AgentBrowserKey,
+            ...(value.dialog === "accept" ? { dialog: "accept" as const } : {}),
+          }
         : null;
     case "scroll":
       return exactKeys(value, ["action", "deltaY"])

@@ -43,6 +43,19 @@ describe("Browser approval authority", () => {
     await expect(f.execute(approval.token)).rejects.toThrow("new approval");
   });
 
+  it.each([
+    [{ action: "click", ref: "e1", dialog: "accept" }, "Click textbox: Message and accept the page's confirmation dialog"],
+    [{ action: "press", key: "Meta+Enter", dialog: "accept" }, "Press: Meta+Enter and accept the page's confirmation dialog"],
+    [{ action: "click", ref: "e1" }, "Click textbox: Message"],
+    [{ action: "history", direction: "back" }, "Go back to the previous page"],
+    [{ action: "history", direction: "reload" }, "Reload the page"],
+  ] as const)("names what %j will do in its approval", async (command, detail) => {
+    const f = fixture();
+    f.setTarget({ found: true, role: "textbox", label: "Message", editable: true, sensitive: false });
+    const approval = await f.prepare(command as AgentBrowserCommand);
+    expect(approval.detail).toBe(`Browser tab 1\n${detail}`);
+  });
+
   it.each(["tab", "document", "closed", "label", "sensitive", "disabled"])(
     "refuses a changed %s after approval",
     async (change) => {

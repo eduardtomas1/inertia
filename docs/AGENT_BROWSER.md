@@ -52,9 +52,9 @@ advertises the same arguments the runtime validates:
 | --- | --- | --- |
 | `inertia_browser_navigate` | exactly one of `url` or `history` | Open a local development URL, or go `back`, `forward` or `reload`, and wait for the page to load. |
 | `inertia_browser_snapshot` | none | Read the active page and get element refs. |
-| `inertia_browser_click` | `ref` | Click one element from the latest snapshot. |
+| `inertia_browser_click` | `ref`, optional `dialog` | Click one element from the latest snapshot. |
 | `inertia_browser_type` | `ref`, `text`, optional `replace` | Type into one editable element. |
-| `inertia_browser_press` | `key` | Send one allowlisted key to the focused element. |
+| `inertia_browser_press` | `key`, optional `dialog` | Send one allowlisted key to the focused element. |
 | `inertia_browser_scroll` | `deltaY` | Scroll the page vertically. |
 | `inertia_browser_wait_for` | optional `text`, `state`, `timeoutMs` | Wait for text to appear or disappear, or for loading to finish. |
 | `inertia_browser_screenshot` | none | Capture one local Evidence image. |
@@ -76,6 +76,26 @@ and Meta+Enter, sent as trusted input with their modifiers. Every Enter
 variant goes through the same guarded activation path as Enter. Control+Enter
 and Meta+Enter send key down and key up only, which is what shortcut handlers
 listen for, so they never insert a line break.
+
+Pages cannot open native dialogs. The Browser preload replaces `alert`,
+`confirm` and `prompt` in the page's main world before page scripts run,
+using only built-ins captured at that moment: `alert` returns at once,
+`confirm` returns the answer armed for the current agent action (false unless
+that action asked to accept) and `prompt` returns null. Each call is recorded
+through a DOM event with a primitive detail to the isolated Browser world,
+which keeps at most 20 per document with messages of at most 1,024
+characters. The next snapshot, click, type or press result reports them once
+as `dialogs: [{"kind","message","answer"}]`, with messages passed through the
+same redaction as page text and the report bounded to 8 KiB.
+`inertia_browser_click` and `inertia_browser_press` accept
+`dialog: "accept" | "dismiss"` (default `dismiss`); `accept` arms the answer
+only while that action and its settling run, and in a Supervised chat its
+approval says "and accept the page's confirmation dialog". A page that asks
+to stay when it is left (`beforeunload`) is allowed to leave, and the
+navigation result reports it as a `beforeunload` dialog. The `disableDialogs`
+web preference stays on, so a dialog the override cannot reach, for example
+one opened from an embedded frame, is still answered silently and never shown.
+A dialog raised by a page that then navigates away is lost with its document.
 
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at

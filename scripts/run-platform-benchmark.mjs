@@ -17,6 +17,7 @@ const child = spawn(process.execPath, [
   "--config",
   "vitest.benchmark.config.ts",
   "tests/performance/platform.benchmark.test.ts",
+  "tests/performance/checkpoint.benchmark.test.ts",
 ], {
   env: {
     ...process.env,

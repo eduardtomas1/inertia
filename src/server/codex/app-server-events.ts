@@ -420,6 +420,11 @@ export class CodexAppServerEvents {
         this.host.cancel("malformed-protocol");
         return;
       }
+      if (parsedApproval.undisplayable) {
+        this.host.writeMessage({ id, result: codexApprovalResult(parsedApproval.protocol, "deny") });
+        this.emitActivity("system", "info", "Declined a Codex command that Inertia cannot display safely");
+        return;
+      }
       if (approval.availableDecisions.length === 0) {
         const message =
           "Codex offered no approval decision supported by this client.";

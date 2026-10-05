@@ -2248,6 +2248,91 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
+  it.each([
+    ["multiline-approval", "Approve command", "/bin/zsh -lc 'python3 - <<EOF\nprint(1)\nEOF'"],
+    ["write-stdin-approval", "Send input to running command", "write_stdin --session-id 7 'yes\n'"],
+  ] as const)("shows the exact %s command and completes the supervised turn", async (scenario, title, command) => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = scenario;
+    const manager = trackedManager(fake.command);
+    const approvals: ProviderApprovalEvent["request"][] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `conversation-${scenario}`,
+      cwd: fake.root,
+      prompt: "Run the script",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => {
+        approvals.push(event.request);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+          { runId: event.runId, turnId: event.turnId },
+        )).toBe(true);
+      },
+      onInput: (event) => expect(manager.respondToInput(
+        event.conversationId,
+        event.request.requestId,
+        { choice: ["Safe"] },
+        { runId: event.runId, turnId: event.turnId },
+      )).toBe(true),
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(approvals).toEqual([expect.objectContaining({
+      kind: "command",
+      title,
+      command,
+      availableDecisions: ["approve", "cancel"],
+    })]);
+    expect(captured(fake.capturePath).find(({ id }) => id === "approval-rpc"))
+      .toMatchObject({ result: { decision: "accept" } });
+    await manager.disposeAll();
+  });
+
+  it("declines a command approval it cannot display and lets the turn continue", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "undisplayable-approval";
+    const manager = trackedManager(fake.command);
+    const approvals: string[] = [];
+    const activities: Array<{ phase: string; label: string }> = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-undisplayable-approval",
+      cwd: fake.root,
+      prompt: "Clear the screen",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => approvals.push(event.request.requestId),
+      onActivity: (event) => activities.push(event),
+      onInput: (event) => expect(manager.respondToInput(
+        event.conversationId,
+        event.request.requestId,
+        { choice: ["Safe"] },
+        { runId: event.runId, turnId: event.turnId },
+      )).toBe(true),
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(result).not.toHaveProperty("failure");
+    expect(approvals).toEqual([]);
+    expect(activities).toContainEqual(expect.objectContaining({
+      phase: "info",
+      label: "Declined a Codex command that Inertia cannot display safely",
+    }));
+    expect(captured(fake.capturePath).find(({ id }) => id === "approval-rpc"))
+      .toMatchObject({ result: { decision: "decline" } });
+    await manager.disposeAll();
+  });
+
   it("fails an unrepresentable Codex input request without exposing a partial prompt", async () => {
     const fake = createFakeAppServer(roots, true);
     // Keep the real writer and child. The rejected peer may be stopped before

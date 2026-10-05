@@ -541,6 +541,12 @@ if (message.method === "turn/start") {
       ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: null }
     : process.env.INERTIA_APP_SERVER_SCENARIO === "mixed-decisions"
       ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["accept", "acceptForSession", { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["prefix_rule(allow = [npm, test])"] } }, "decline", "cancel"] }
+    : process.env.INERTIA_APP_SERVER_SCENARIO === "multiline-approval"
+      ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "/bin/zsh -lc 'python3 - <<EOF\\nprint(1)\\nEOF'", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] }
+    : process.env.INERTIA_APP_SERVER_SCENARIO === "write-stdin-approval"
+      ? { kind: "writeStdin", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), approvalId: "stdin-approval-1", environmentId: "local", command: "write_stdin --session-id 7 'yes\\n'", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] }
+    : process.env.INERTIA_APP_SERVER_SCENARIO === "undisplayable-approval"
+      ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "/bin/zsh -lc 'printf \\u001b[2J'", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] }
     : approvalMethod === "execCommandApproval"
       ? { conversationId: approvalThreadId, callId: "command-1", command: ["npm", "test"], parsedCmd: [], cwd: process.cwd(), reason: "Validate the change" }
     : approvalMethod === "applyPatchApproval"

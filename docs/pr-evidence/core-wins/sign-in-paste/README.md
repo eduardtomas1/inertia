@@ -7,7 +7,7 @@ Each image is taken right after **Copy link** and then **Open again** in the bro
 - Before: focus stays on the **Open again** button (hollow terminal cursor). Coming back from the browser and pressing ⌘V or Ctrl+V pastes into a button, so the code is lost, and Enter opens the browser again.
 - After: the terminal has focus (solid bar cursor), so the paste lands at the provider's prompt. A window refocus never restores a helper-bar button.
 
-The native right-click menu in the dialog (Copy, Paste, Select All; no Clear) is recorded by `tests/e2e/provider-auth-input.spec.ts` and listed in [../right-click/README.md](../right-click/README.md).
+The native right-click menu in the dialog (Copy, Paste, Select all; no Clear) is recorded by `tests/e2e/provider-auth-input.spec.ts` and listed in [../right-click/README.md](../right-click/README.md).
 
 | Theme | Before | After |
 | --- | --- | --- |

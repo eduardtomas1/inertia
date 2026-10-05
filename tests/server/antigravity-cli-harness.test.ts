@@ -13,6 +13,7 @@ import {
   ANTIGRAVITY_AUTH_REQUIRED_MESSAGE,
   ANTIGRAVITY_HEADLESS_ARGUMENTS,
   antigravityArguments,
+  antigravityDeclinedNotice,
   antigravityResultFailure,
   antigravityUserLine,
   parseAntigravityLine,
@@ -338,6 +339,27 @@ describe("Antigravity stream parsing", () => {
       event: "result",
       result: { conversation_id: "", status: "ERROR", error: "authentication failed or timed out" },
     }))).toMatchObject([{ kind: "result", result: { conversationId: null } }]);
+  });
+
+  it("recognizes only the headless auto-denial notice as a declined approval", () => {
+    for (const line of [
+      "jetski: no output produced — a tool required the \"mcp\" permission that headless mode cannot prompt for, so it was auto-denied.",
+      "jetski: no output produced - a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied.",
+      "mode cannot prompt for, so it was auto-denied.",
+      "Tool run_command was soft-denied in headless mode.",
+    ]) {
+      expect(antigravityDeclinedNotice(line)).toBe(true);
+    }
+    for (const line of [
+      "Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)).",
+      "Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.",
+      "warning: rename C:\\Users\\me\\.gemini\\state.tmp → state.pb: Access is denied.",
+      "Error: 403 PERMISSION_DENIED: the caller does not have permission",
+      "EACCES: permission denied, open '/home/me/.gemini/antigravity-cli/log'",
+      "statusLine refresh: TerminateProcess: Access is denied",
+    ]) {
+      expect(antigravityDeclinedNotice(line)).toBe(false);
+    }
   });
 
   it("rejects malformed lines", () => {
@@ -740,10 +762,14 @@ process.exit(1);
     expect(usage).toEqual([]);
   });
 
-  it("reports declined approvals and still completes the turn", async () => {
+  it.each([
+    { notice: true, declined: 1 },
+    { notice: false, declined: 0 },
+  ])("reports $declined declined approvals and still completes the turn", async ({ notice, declined }) => {
     const root = fixtureRoot("antigravity declined");
     const { command } = fakeAgy(root, `
-process.stderr.write("Tool run_command was soft-denied because it requires approval\\n");
+process.stderr.write("warning: rename state.tmp → state.pb: Access is denied.\\n");
+${notice ? `process.stderr.write("jetski: no output produced — a tool required the \\"command\\" permission that headless mode cannot prompt for, so it was auto-denied.\\nAdd an allow-rule under permissions.allow in settings.json (e.g. command(<target>)).\\nAlternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\\n");` : ""}
 emit({ event: "result", result: { status: "SUCCESS", response: "Skipped the command", error: "" } });
 setTimeout(() => process.exit(0), 50);
 `);
@@ -752,11 +778,10 @@ setTimeout(() => process.exit(0), 50);
       onActivity: (event) => activities.push(event),
     });
     expect(result.status).toBe("completed");
-    expect(activities).toContainEqual(expect.objectContaining({
-      kind: "system",
-      phase: "info",
-      label: "Antigravity declined an action that needs approval",
-    }));
+    expect(activities.filter((event) =>
+      event.kind === "system"
+      && event.phase === "info"
+      && event.label === "Antigravity declined an action that needs approval")).toHaveLength(declined);
   });
 
   it("fails closed and stops the process on malformed output", async () => {

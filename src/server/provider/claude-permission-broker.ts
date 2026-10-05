@@ -7,7 +7,8 @@ import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { claudeQuestions } from "./claude-questions";
 import type { ProviderRunInput } from "./contracts";
-import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
+import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+import type { AgentApprovalDecision, AgentInputRequest, AgentPlanStep } from "./interactions";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
@@ -39,7 +40,11 @@ export class ClaudePermissionBroker {
   readonly canUseTool: CanUseTool = async (toolName, toolInput, callbackOptions) => {
     const { emitter, input } = this.options;
     if (callbackOptions.signal.aborted || this.options.cancelled()) return deny("User cancelled the request.", true);
-    if (this.options.hostToolNames?.has(toolName)) {
+    const mcpServer = callbackOptions.mcpServer;
+    if (
+      this.options.hostToolNames?.has(toolName)
+      && (!mcpServer || (mcpServer.source === "sdk" && mcpServer.name === INERTIA_HOST_MCP_NAME))
+    ) {
       return { behavior: "allow", updatedInput: toolInput };
     }
     if (!this.options.providerNativeToolsAvailable) {
@@ -52,8 +57,12 @@ export class ClaudePermissionBroker {
         return deny("Claude exceeded the bounded question budget.", true);
       }
       const requestId = randomUUID();
-      const request = claudeQuestions(requestId, callbackOptions.toolUseID, toolInput);
-      if (request.questions.length === 0) return deny("Claude sent an invalid question request.");
+      let request: AgentInputRequest;
+      try {
+        request = claudeQuestions(requestId, callbackOptions.toolUseID, toolInput);
+      } catch (error) {
+        return deny(error instanceof Error ? error.message : "Claude sent an invalid question request.");
+      }
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
         this.inputs.set(requestId, { resolve, settled: false });
         callbackOptions.signal.addEventListener("abort", () => this.settleInput(requestId, {}), { once: true });

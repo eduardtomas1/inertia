@@ -130,16 +130,16 @@ describe("Browser tool surface", () => {
     });
     const tabs = await broker.perform(runIdentity, { action: "tabs" });
     expect(tabs).toMatchObject({ ok: true, state: { controller: "user" } });
-    expect(JSON.parse((tabs as { text: string }).text)).toMatchObject({ controller: "user" });
+    expect(JSON.parse((tabs as unknown as { text: string }).text)).toMatchObject({ controller: "user" });
     await expect(broker.perform(runIdentity, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true, state: { controller: "user" } });
     const after = await broker.perform(runIdentity, { action: "tabs" });
     expect(after).toMatchObject({ ok: true });
-    expect((after as { state: Record<string, unknown> }).state).not.toHaveProperty("controller");
+    expect((after as unknown as { state: Record<string, unknown> }).state).not.toHaveProperty("controller");
 
     await expect(broker.perform(runIdentity, { action: "click", ref: "e1" }))
       .resolves.toMatchObject({ ok: true });
-    expect((await broker.perform(runIdentity, { action: "tabs" }) as { state: Record<string, unknown> }).state)
+    expect((await broker.perform(runIdentity, { action: "tabs" }) as unknown as { state: Record<string, unknown> }).state)
       .not.toHaveProperty("controller");
   });
 
@@ -160,11 +160,12 @@ describe("Browser tool surface", () => {
       }
       return await original(world, scripts);
     });
-    const sent = contents.sendInputEvent.bind(contents);
-    vi.spyOn(contents as unknown as { sendInputEvent(input: Record<string, unknown>): void }, "sendInputEvent")
+    const sender = contents as unknown as { sendInputEvent(input: Record<string, unknown>): void };
+    const sent = sender.sendInputEvent.bind(sender);
+    vi.spyOn(sender, "sendInputEvent")
       .mockImplementation((input) => {
         if (input.type === "mouseDown") timeline.push("mouseDown");
-        sent(input as never);
+        sent(input);
       });
 
     const accepted = await broker.perform(runIdentity, { action: "click", ref: "e1", dialog: "accept" });
@@ -217,7 +218,7 @@ describe("Browser tool surface", () => {
     contents.debugger.sendCommand.mockImplementation(send);
   });
 
-  function isolatedScripts(contents: { executeJavaScriptInIsolatedWorld?: unknown }, offscreen: () => boolean) {
+  function isolatedScripts(contents: object, offscreen: () => boolean) {
     const page = contents as unknown as {
       executeJavaScriptInIsolatedWorld(world: number, scripts: Array<{ code: string }>): Promise<unknown>;
     };

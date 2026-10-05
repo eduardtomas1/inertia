@@ -20,18 +20,18 @@ describe("agent page input ownership", () => {
     sendAgentPageInput(page as never, { type: "mouseDown", x: 40, y: 20, button: "left", clickCount: 1 });
     sendAgentPageInput(page as never, { type: "keyDown", keyCode: "Tab" });
     expect(page.sendInputEvent).toHaveBeenCalledTimes(2);
-    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 40.4, y: 19.6 })).toBe(false);
-    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", keyCode: "Tab" })).toBe(false);
-    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 40, y: 20 })).toBe(true);
-    expect(agentPageInputIsUser(page as never, { type: "keyDown", keyCode: "a" })).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 40.4, y: 19.6 } as never)).toBe(false);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", keyCode: "Tab" } as never)).toBe(false);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 40, y: 20 } as never)).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "keyDown", keyCode: "a" } as never)).toBe(true);
     sendAgentPageInput(page as never, { type: "mouseDown", x: 40, y: 20, button: "left", clickCount: 1 });
-    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 300, y: 200 })).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 300, y: 200 } as never)).toBe(true);
   });
 
   it("ignores pointer movement, wheels and characters, which are not the user taking over", () => {
     const page = contents();
     for (const type of ["mouseMove", "mouseUp", "mouseWheel", "char", "keyUp", "mouseEnter"]) {
-      expect(agentPageInputIsUser(page as never, { type, x: 1, y: 1 }), type).toBe(false);
+      expect(agentPageInputIsUser(page as never, { type, x: 1, y: 1 } as never), type).toBe(false);
     }
   });
 
@@ -40,11 +40,11 @@ describe("agent page input ownership", () => {
     const page = contents();
     sendAgentPageInput(page as never, { type: "keyDown", keyCode: "Tab" });
     vi.advanceTimersByTime(2_001);
-    expect(agentPageInputIsUser(page as never, { type: "keyDown", keyCode: "Tab" })).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "keyDown", keyCode: "Tab" } as never)).toBe(true);
     for (let index = 0; index < 65; index += 1) {
       sendAgentPageInput(page as never, { type: "mouseDown", x: index * 10, y: 0, button: "left", clickCount: 1 });
     }
-    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 0, y: 0 })).toBe(true);
-    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 640, y: 0 })).toBe(false);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 0, y: 0 } as never)).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 640, y: 0 } as never)).toBe(false);
   });
 });

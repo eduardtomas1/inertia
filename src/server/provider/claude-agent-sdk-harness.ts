@@ -601,7 +601,13 @@ function startClaudeRun(
               pendingFollowUpIds.delete(userMessageId);
             }
             if (pendingFollowUpIds.size > 0 && (message.queued_turn_count ?? 0) > 0) {
+              const technicalDetail = claudeResultDetail(message, launchCredentials, options.input.cwd);
+              emitter.activity("system", "failed", routeFailure(claudeResultFailure(claudeResultReason(message))), {
+                activityId: message.uuid,
+                ...(technicalDetail ? { detail: technicalDetail } : {}),
+              });
               messageProjector.resetTurnOutput();
+              terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
               continue;
             }
           }
@@ -669,19 +675,8 @@ function startClaudeRun(
       const finalMessage = completion.result;
       if (finalMessage.subtype !== "success" || finalMessage.is_error) {
         const startupFailure = claudeStartupFailure(finalMessage);
-        const resultReason = finalMessage.subtype === "success"
-          ? finalMessage.terminal_reason ?? "api_error"
-          : startupFailure?.reason ?? finalMessage.subtype;
-        const technicalDetail = sanitizeProviderFailureDetail(
-          (finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
-            .filter((value): value is string => typeof value === "string")
-            .join("\n"),
-          launchCredentials,
-          {
-            workspaceRoot: options.input.cwd,
-            maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-          },
-        );
+        const resultReason = claudeResultReason(finalMessage);
+        const technicalDetail = claudeResultDetail(finalMessage, launchCredentials, options.input.cwd);
         const projectedFailure = messageProjector.preferredFailure();
         const resultError = routeFailure(
           projectedFailure?.message
@@ -975,6 +970,28 @@ function claudeLifecycleFailure(
     case "prompt-unanswered":
       return "Claude finished the request without returning an answer.";
   }
+}
+
+function claudeResultReason(
+  result: Extract<SDKMessage, { type: "result" }>,
+): Parameters<typeof claudeResultFailure>[0] {
+  return result.subtype === "success"
+    ? result.terminal_reason ?? "api_error"
+    : claudeStartupFailure(result)?.reason ?? result.subtype;
+}
+
+function claudeResultDetail(
+  result: Extract<SDKMessage, { type: "result" }>,
+  credentials: readonly string[],
+  workspaceRoot: string,
+): string | null {
+  return sanitizeProviderFailureDetail(
+    (result.subtype === "success" ? [result.result] : result.errors)
+      .filter((value): value is string => typeof value === "string")
+      .join("\n"),
+    credentials,
+    { workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
+  );
 }
 
 function claudeResultFailure(

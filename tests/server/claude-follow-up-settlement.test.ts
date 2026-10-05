@@ -2,6 +2,7 @@
 import type { SDKMessage, SDKResultMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentHarnessEvent } from "../../src/server/provider/agent-harness";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
@@ -11,6 +12,8 @@ import {
 } from "../helpers/claude-agent-sdk-protocol";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+
+const FIXTURE_CREDENTIAL = "fixture-anthropic-credential";
 
 function claudeTurnError(
   kind: "success-error" | "error_max_turns",
@@ -22,8 +25,14 @@ function claudeTurnError(
     ...(queuedTurnCount === undefined ? {} : { queued_turn_count: queuedTurnCount }),
   };
   return kind === "success-error"
-    ? { ...claudeSuccessResult("API Error: 529 overloaded"), is_error: true, terminal_reason: "api_error", ...correlation }
-    : { ...claudeErrorResult(kind, ["Maximum turns exceeded"]), ...correlation };
+    ? { ...claudeSuccessResult(`API Error: 529 overloaded ${FIXTURE_CREDENTIAL}`), is_error: true, terminal_reason: "api_error", ...correlation }
+    : { ...claudeErrorResult(kind, [`Maximum turns exceeded ${FIXTURE_CREDENTIAL}`]), ...correlation };
+}
+
+function claudeTurnErrorMessage(kind: "success-error" | "error_max_turns"): string {
+  return kind === "success-error"
+    ? "Claude could not complete the request."
+    : "Claude reached the maximum number of agent turns.";
 }
 
 describe("Claude accepted follow-up settlement", () => {
@@ -255,9 +264,7 @@ describe("Claude accepted follow-up settlement", () => {
           .toBe("settled");
         await expect(run.result).resolves.toMatchObject({
           status: "failed", cleanupConfirmed: true,
-          error: `${kind === "success-error"
-            ? "Claude could not complete the request."
-            : "Claude reached the maximum number of agent turns."} Your follow-up was not answered.`,
+          error: `${claudeTurnErrorMessage(kind)} Your follow-up was not answered.`,
           failure: { terminalEvent: `result/${kind === "success-error" ? "api_error" : kind}` },
         });
         expect(close).toHaveBeenCalledOnce();
@@ -277,6 +284,7 @@ describe("Claude accepted follow-up settlement", () => {
       let ready!: () => void;
       const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
       const close = vi.fn();
+      const events: AgentHarnessEvent[] = [];
       const harness = createClaudeAgentSdkHarness({
         createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
           const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
@@ -291,7 +299,8 @@ describe("Claude accepted follow-up settlement", () => {
       const run = harness.start({
         input: nativeProviderRunInput({ providerId: "claude", conversationId: "error-follow-up",
           cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
-        executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+        executable: process.execPath, environment: { ANTHROPIC_API_KEY: FIXTURE_CREDENTIAL },
+        providerNativeToolsAvailable: true, callbacks: { onEvent: (event) => events.push(event) },
       });
       await initialConsumed;
       if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
@@ -300,7 +309,55 @@ describe("Claude accepted follow-up settlement", () => {
       expect(result).toMatchObject({ status: "completed", cleanupConfirmed: true });
       expect(result.error).toBeUndefined();
       expect(result.text).toContain("Follow-up answered");
+      const failures = events.filter((event) => event.type === "activity" && event.phase === "failed");
+      expect(failures).toEqual([expect.objectContaining({
+        kind: "system",
+        label: claudeTurnErrorMessage(kind),
+        detail: expect.stringContaining(kind === "success-error" ? "API Error: 529 overloaded" : "Maximum turns exceeded"),
+      })]);
+      expect(JSON.stringify(events)).not.toContain(FIXTURE_CREDENTIAL);
       expect(close).toHaveBeenCalledOnce();
     },
   );
+
+  it("settles failed when Claude reports a queued follow-up after an error result and then goes silent", async () => {
+    const root = portableFixtureRoot("Claude error result with silent queued follow-up");
+    roots.push(root);
+    let ready!: () => void;
+    const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const close = vi.fn();
+    const harness = createClaudeAgentSdkHarness({
+      terminalSubagentDrainTimeoutMs: 25,
+      createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+        const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        const initial = (await iterator.next()).value!;
+        ready();
+        await iterator.next();
+        yield claudeTurnError("error_max_turns", initial.uuid, 1);
+        await released;
+      })(), { close }),
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({ providerId: "claude", conversationId: "silent-error-follow-up",
+        cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+      executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+    });
+    try {
+      await initialConsumed;
+      if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+      await expect(run.extension.steer?.({ content: "Also do this", imagePaths: [] })).resolves.toBe(true);
+      await expect(run.result).resolves.toMatchObject({
+        status: "failed", cleanupConfirmed: true,
+        error: `${claudeTurnErrorMessage("error_max_turns")} Your follow-up was not answered.`,
+        failure: { terminalEvent: "result/error_max_turns" },
+      });
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      run.cancel(true);
+      release();
+      await run.result;
+    }
+  });
 });

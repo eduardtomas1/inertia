@@ -1022,16 +1022,15 @@ function handleCursorUpdate(
         );
       }
       return;
-    case "usage_update":
-      contextUsage.usedTokens = tokenCount(update.used);
-      contextUsage.maxTokens = tokenCount(update.size);
-      if (
-        contextUsage.usedTokens === null
-        || contextUsage.maxTokens === null
-        || contextUsage.usedTokens > contextUsage.maxTokens
-      ) {
+    case "usage_update": {
+      const usedTokens = tokenCount(update.used);
+      const maxTokens = tokenCount(update.size);
+      if (usedTokens === null || maxTokens === null) {
         throw new Error("Cursor ACP sent a malformed usage update.");
       }
+      if (usedTokens > maxTokens) return;
+      contextUsage.usedTokens = usedTokens;
+      contextUsage.maxTokens = maxTokens;
       emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
@@ -1049,6 +1048,7 @@ function handleCursorUpdate(
         },
       });
       return;
+    }
     case "compaction_update":
       compactions.observeUpdate(update);
       return;
@@ -1065,12 +1065,6 @@ function handleCursorUpdate(
     case "session_message_chunk":
       throw new Error("Cursor ACP sent a subagent update without negotiated support.");
   }
-  const unsupportedUpdate: never = update;
-  throw new Error(
-    `Cursor ACP sent an unsupported session update: ${String(
-      (unsupportedUpdate as { sessionUpdate?: unknown }).sessionUpdate,
-    )}.`,
-  );
 }
 
 function cursorToolActivityPhase(

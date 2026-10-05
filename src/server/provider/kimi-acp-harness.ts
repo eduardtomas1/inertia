@@ -1060,16 +1060,15 @@ function handleKimiUpdate(
         );
       }
       return;
-    case "usage_update":
-      contextUsage.usedTokens = tokenCount(update.used);
-      contextUsage.maxTokens = tokenCount(update.size);
-      if (
-        contextUsage.usedTokens === null
-        || contextUsage.maxTokens === null
-        || contextUsage.usedTokens > contextUsage.maxTokens
-      ) {
+    case "usage_update": {
+      const usedTokens = tokenCount(update.used);
+      const maxTokens = tokenCount(update.size);
+      if (usedTokens === null || maxTokens === null) {
         throw new Error("Kimi Code ACP sent a malformed usage update.");
       }
+      if (usedTokens > maxTokens) return;
+      contextUsage.usedTokens = usedTokens;
+      contextUsage.maxTokens = maxTokens;
       emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
@@ -1087,6 +1086,7 @@ function handleKimiUpdate(
         },
       });
       return;
+    }
     case "compaction_update":
       compactions.observeUpdate(update);
       return;
@@ -1103,12 +1103,6 @@ function handleKimiUpdate(
     case "session_message_chunk":
       throw new Error("Kimi ACP sent a subagent update without negotiated support.");
   }
-  const unsupportedUpdate: never = update;
-  throw new Error(
-    `Kimi ACP sent an unsupported session update: ${String(
-      (unsupportedUpdate as { sessionUpdate?: unknown }).sessionUpdate,
-    )}.`,
-  );
 }
 
 function failedKimiRun(

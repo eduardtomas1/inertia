@@ -126,6 +126,26 @@ describe("ACP session update validation", () => {
     })).toThrow("malformed session update envelope");
   });
 
+  it("passes newer session update kinds through and keeps unnegotiated ACP kinds rejected", () => {
+    expect(parseAcpSessionNotification({
+      sessionId: "session-1",
+      update: { sessionUpdate: "future_kind_from_newer_agent", value: 1 },
+    }).update).toEqual({ sessionUpdate: "future_kind_from_newer_agent", value: 1 });
+    for (const sessionUpdate of [
+      "notice",
+      "subagent_update",
+      "session_message",
+      "session_message_chunk",
+      "future\nkind",
+      "x".repeat(1_001),
+    ]) {
+      expect(() => parseAcpSessionNotification({
+        sessionId: "session-1",
+        update: { sessionUpdate },
+      })).toThrow("malformed session update envelope");
+    }
+  });
+
   it("keeps protocol identifiers bounded and control-free", () => {
     const accepted = "a".repeat(1_000);
     expect(parseAcpSessionNotification({

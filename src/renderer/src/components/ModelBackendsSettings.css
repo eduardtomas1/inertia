@@ -53,8 +53,8 @@
   text-align: left;
 }
 
-.backend-profile-rail-item:hover {
-  background: var(--surface-hover);
+.backend-profile-rail-item:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--selected-surface) 50%, transparent);
 }
 
 .backend-profile-rail-item.is-active {

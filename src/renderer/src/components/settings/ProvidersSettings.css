@@ -57,8 +57,8 @@
   text-align: left;
 }
 
-.provider-settings-list-row:hover {
-  background: var(--surface-hover);
+.provider-settings-list-row:hover:not(.is-selected) {
+  background: color-mix(in srgb, var(--selected-surface) 50%, transparent);
 }
 
 .provider-settings-list-row.is-selected {

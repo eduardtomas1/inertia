@@ -2,11 +2,14 @@
 // @inertia-harness opencode-sdk
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { PermissionRuleset } from "@opencode-ai/sdk/v2";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import type { ProviderSubagentEvent, ProviderUsageEvent } from "../../src/server/provider/contracts";
+import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
+import { openCodePermissions } from "../../src/server/provider/opencode-host-tools";
 import {
   createOpenCodeSdkHarness,
   exactOpenCodeSteerReceipt,
@@ -195,6 +198,38 @@ describe("OpenCode SDK harness", { concurrent: false }, () => {
     )).toBe(false);
   });
 
+  it.each([
+    ["full", "build", "allow"],
+    ["auto-edit", "build", "allow"],
+    ["supervised", "build", "ask"],
+    ["full", "plan", "deny"],
+    ["auto-edit", "plan", "deny"],
+    ["supervised", "plan", "deny"],
+  ] as const)("resolves %s access edits in %s mode after the native agent rules", (access, mode, expected) => {
+    const wildcard = (value: string, pattern: string) => new RegExp(
+      `^${pattern.replace(/[.+^${}()|[\]\\]/gu, "\\$&").replace(/\*/gu, ".*").replace(/\?/gu, ".")}$`,
+      "su",
+    ).test(value);
+    const planAgentRules: PermissionRuleset = [
+      { permission: "*", pattern: "*", action: "allow" },
+      { permission: "question", pattern: "*", action: "allow" },
+      { permission: "plan_exit", pattern: "*", action: "allow" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      { permission: "edit", pattern: ".opencode/plans/*.md", action: "allow" },
+    ];
+    const agentRules = mode === "plan"
+      ? planAgentRules
+      : [{ permission: "*", pattern: "*", action: "allow" } as const];
+    const evaluate = (permission: string, pattern: string) =>
+      [...agentRules, ...openCodePermissions(access, mode)].findLast((rule) =>
+        wildcard(permission, rule.permission) && wildcard(pattern, rule.pattern))?.action ?? "ask";
+
+    expect(evaluate("edit", "src/index.ts")).toBe(expected);
+    expect(evaluate("edit", ".opencode/plans/plan.md")).toBe(expected);
+    expect(evaluate("question", "*")).toBe("allow");
+    expect(evaluate(`${INERTIA_HOST_MCP_NAME}_send_message`, "*")).toBe("allow");
+  });
+
   it("rejects direction-changing approval titles, details, and paths", () => {
     expect(openCodeApprovalDisplay({
       permission: "bash",
@@ -371,6 +406,8 @@ server.listen(port, "127.0.0.1", () => {
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ method: string; path: string; body?: Record<string, unknown> }>;
     expect(captured.filter(({ path }) => path === "/provider")).toHaveLength(1);
     expect(captured.find(({ path }) => path === "/session")?.body).toMatchObject({ agent: "plan", model: { id: "model-a", providerID: "fake", variant: "high" } });
+    const sessionPermission = captured.find(({ path }) => path === "/session")?.body?.permission as PermissionRuleset | undefined;
+    expect(sessionPermission?.at(-1)).toEqual({ permission: "edit", pattern: "*", action: "deny" });
     expect(captured.find(({ path }) => path.endsWith("/prompt_async"))?.body).toMatchObject({
       agent: "plan",
       model: { modelID: "model-a", providerID: "fake" },

@@ -227,7 +227,16 @@ export type DesktopNotificationKind =
   | "completed"
   | "approval"
   | "input"
-  | "failed";
+  | "failed"
+  | "usage-limited";
+
+export const DESKTOP_NOTIFICATION_COPY: Readonly<Record<DesktopNotificationKind, readonly [string, string]>> = {
+  completed: ["Inertia finished", "A coding task completed."],
+  approval: ["Inertia needs approval", "A coding task is waiting for approval."],
+  input: ["Inertia needs your input", "A coding task is waiting for your answer."],
+  failed: ["Inertia task failed", "A coding task needs attention."],
+  "usage-limited": ["Usage limit reached", "A coding task stopped at its usage limit."],
+};
 
 export interface DesktopNotificationRequest {
   conversationId: string;
@@ -326,9 +335,8 @@ export function parseDesktopNotificationRequest(
     || (value.onlyInBackground !== undefined && typeof value.onlyInBackground !== "boolean")
     || typeof value.conversationId !== "string"
     || !UUID_PATTERN.test(value.conversationId)
-    || !["completed", "approval", "input", "failed"].includes(
-      String(value.kind),
-    )
+    || typeof value.kind !== "string"
+    || !Object.hasOwn(DESKTOP_NOTIFICATION_COPY, value.kind)
   ) return null;
   return value as unknown as DesktopNotificationRequest;
 }

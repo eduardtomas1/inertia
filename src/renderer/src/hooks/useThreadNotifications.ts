@@ -1,17 +1,17 @@
 import { useEffect, useRef } from "react";
 
-import type { AppSnapshot, Conversation } from "@shared/contracts";
+import type { AppSnapshot, Conversation, ConversationLatestTurnSummary } from "@shared/contracts";
 import type { DesktopNotificationKind } from "@shared/desktop";
 
 export function threadNotificationKind(
   previous: Conversation,
-  current: Conversation,
+  current: Conversation & { latestTurn?: Pick<ConversationLatestTurnSummary, "usageLimited"> | null },
 ): DesktopNotificationKind | null {
   if (current.status === "needs-input" && previous.status !== "needs-input") {
     return current.attentionKind === "approval" ? "approval" : "input";
   }
   if (current.status === "failed" && previous.status !== "failed") {
-    return "failed";
+    return current.latestTurn?.usageLimited ? "usage-limited" : "failed";
   }
   if (
     current.status === "completed"

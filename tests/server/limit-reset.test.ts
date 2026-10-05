@@ -16,6 +16,7 @@ import { UsageLimitsRepository } from "../../src/server/persistence/usage-limits
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 import { UsageLimitsService } from "../../src/server/usage/limits-service";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
+import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
 import type { NativeUsageReader } from "../../src/server/usage/native";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
@@ -546,6 +547,21 @@ describe("cached reports for providers without a structured usage-limit signal",
       expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId: turn.id, canResume: true });
       expect(read).toHaveBeenCalledOnce();
     } finally { db.close(); }
+  });
+});
+
+describe("usage-limited chat summary", () => {
+  it("marks the usage-limited latest turn in conversation shells and validates the flag at the event boundary", () => {
+    const shell = store.conversationShell(conversationId)!;
+    expect(shell.latestTurn).toMatchObject({ id: failedTurnId, status: "failed", usageLimited: true });
+    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversationId)?.latestTurn).toMatchObject({ usageLimited: true });
+    const event = { type: "conversation.shell.updated", conversation: shell, runs: [] };
+    expect(serverEventSchema.safeParse(event).success).toBe(true);
+    expect(serverEventSchema.safeParse({ ...event, conversation: { ...shell, latestTurn: { ...shell.latestTurn, usageLimited: "yes" } } }).success).toBe(false);
+    vi.setSystemTime(instant + 1_000);
+    begin();
+    expect(store.conversationShell(conversationId)!.latestTurn).not.toHaveProperty("usageLimited");
+    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversationId)?.latestTurn).not.toHaveProperty("usageLimited");
   });
 });
 

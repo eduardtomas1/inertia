@@ -1,11 +1,14 @@
-import type { Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
+import type { Conversation, ConversationLatestTurnSummary, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
 import {
   indexConversationWorkspaceRuns,
   selectConversationWorkspaceRun,
   workspaceRunAttentionView,
 } from "../../../shared/attention";
 
-export type SidebarThreadStatus = "working" | "approval" | "input" | "failed" | "completed" | "idle";
+export type SidebarThreadStatus = "working" | "approval" | "input" | "failed" | "limited" | "completed" | "idle";
+type SidebarConversation = Conversation & {
+  latestTurn?: Pick<ConversationLatestTurnSummary, "status" | "usageLimited"> | null;
+};
 
 export interface ClassicSidebarSearchResult {
   projects: Project[];
@@ -149,12 +152,12 @@ export function hasUnreadCompletion(conversation: Conversation, activeConversati
 }
 
 function sidebarThreadViewForRun(
-  conversation: Conversation,
+  conversation: SidebarConversation,
   activeConversationId: string | null,
   run: WorkspaceRun | null,
 ): SidebarThreadView {
   const runAttention = run ? workspaceRunAttentionView(run) : null;
-  const status: SidebarThreadStatus = run?.status === "waiting"
+  const reported: SidebarThreadStatus = run?.status === "waiting"
     ? conversation.attentionKind === "approval" ? "approval" : "input"
     : run?.status === "running"
       ? "working"
@@ -173,12 +176,17 @@ function sidebarThreadViewForRun(
                   : conversation.status === "completed"
                     ? "completed"
                     : "idle";
+  const status: SidebarThreadStatus = reported === "failed"
+    && conversation.latestTurn?.status === "failed"
+    && conversation.latestTurn.usageLimited === true
+    ? "limited"
+    : reported;
   return {
     conversation,
     run,
     status,
     needsAttention: runAttention?.needsAttention
-      ?? (status === "approval" || status === "input" || status === "failed"),
+      ?? (status === "approval" || status === "input" || status === "failed" || status === "limited"),
     unread: Boolean(conversation.markedUnreadAt) || (runAttention?.unread ?? hasUnreadCompletion(conversation, activeConversationId)),
     hidden: runAttention?.bucket === "hidden",
     settled: conversation.settledAt !== null,
@@ -186,7 +194,7 @@ function sidebarThreadViewForRun(
 }
 
 export function sidebarThreadView(
-  conversation: Conversation,
+  conversation: SidebarConversation,
   activeConversationId: string | null,
   runs: readonly WorkspaceRun[] = [],
 ): SidebarThreadView {
@@ -198,7 +206,7 @@ export function sidebarThreadView(
 }
 
 export function sidebarThreadViewMap(
-  conversations: readonly Conversation[],
+  conversations: readonly SidebarConversation[],
   activeConversationId: string | null,
   runs: readonly WorkspaceRun[] = [],
 ): ReadonlyMap<string, SidebarThreadView> {
@@ -218,12 +226,13 @@ const statusPriority: Record<SidebarThreadStatus, number> = {
   input: 1,
   working: 2,
   failed: 3,
+  limited: 3,
   completed: 4,
   idle: 5,
 };
 
 export function sortActivityThreads(
-  conversations: readonly Conversation[],
+  conversations: readonly SidebarConversation[],
   activeConversationId: string | null,
   runs: readonly WorkspaceRun[] = [],
 ): SidebarThreadView[] {

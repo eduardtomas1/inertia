@@ -7,7 +7,7 @@ import {
 } from "../../src/renderer/src/components/AppLayout";
 import { threadNotificationKind } from "../../src/renderer/src/hooks/useThreadNotifications";
 import type { Conversation } from "../../src/shared/contracts";
-import { parseDesktopNotificationRequest } from "../../src/shared/desktop";
+import { DESKTOP_NOTIFICATION_COPY, parseDesktopNotificationRequest } from "../../src/shared/desktop";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 function conversation(
@@ -122,6 +122,16 @@ describe("thread notifications", () => {
       completedAt: "2026-08-09T09:01:00.000Z",
     }))).toBe("completed");
     expect(threadNotificationKind(idle, conversation("running"))).toBeNull();
+  });
+
+  it("names a stop at a usage limit instead of calling it a failure", () => {
+    const limitedTurn = { usageLimited: true };
+    expect(threadNotificationKind(conversation("running"), { ...conversation("failed"), latestTurn: limitedTurn })).toBe("usage-limited");
+    expect(threadNotificationKind(conversation("failed"), { ...conversation("failed"), latestTurn: limitedTurn })).toBeNull();
+    expect(threadNotificationKind(conversation("running"), { ...conversation("failed"), latestTurn: { usageLimited: false } })).toBe("failed");
+    expect(DESKTOP_NOTIFICATION_COPY["usage-limited"]).toEqual(["Usage limit reached", "A coding task stopped at its usage limit."]);
+    expect(parseDesktopNotificationRequest({ conversationId: "11111111-1111-4111-8111-111111111111", kind: "usage-limited" }))
+      .toEqual({ conversationId: "11111111-1111-4111-8111-111111111111", kind: "usage-limited" });
   });
 
   it("accepts only the privacy-safe, exact IPC request shape", () => {

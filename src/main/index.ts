@@ -31,6 +31,7 @@ import {
 import {
   type AppHealthSnapshot,
   parseDesktopNotificationRequest,
+  DESKTOP_NOTIFICATION_COPY,
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
@@ -597,13 +598,7 @@ function registerIpcHandlers(): void {
     if (detachedChatMain?.isFocusedForNotification(request.conversationId)) return false;
     if (request.onlyInBackground && inertiaWindowInForeground(BrowserWindow.getAllWindows())) return false;
     if (!Notification.isSupported()) return false;
-    const copy = {
-      completed: ["Inertia finished", "A coding task completed."],
-      approval: ["Inertia needs approval", "A coding task is waiting for approval."],
-      input: ["Inertia needs your input", "A coding task is waiting for your answer."],
-      failed: ["Inertia task failed", "A coding task needs attention."],
-    } as const;
-    const [title, body] = copy[request.kind];
+    const [title, body] = DESKTOP_NOTIFICATION_COPY[request.kind];
     const notification = new Notification({ title, body });
     notification.once("click", () => {
       if (detachedChatMain?.focusForNotification(request.conversationId)) return;

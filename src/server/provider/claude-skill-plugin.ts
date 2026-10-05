@@ -44,6 +44,7 @@ const MAX_STAGED_FILES = 256;
 const MAX_STAGED_FILE_BYTES = 1024 * 1024;
 const MAX_STAGED_TOTAL_BYTES = 8 * 1024 * 1024;
 const MAX_STAGED_DEPTH = 12;
+const REFUSED_SKILL_FIELDS: readonly string[] = ["allowed-tools", "hooks", "model", "context"];
 
 export const CLAUDE_ISOLATED_SKILL_PLUGIN_NAME = "inertia-selected-skills";
 
@@ -399,16 +400,48 @@ function yamlScalar(
   return { nextIndex: index + 1, value };
 }
 
-function parseSkillFrontmatter(
+function skillFrontmatterSections(
   content: Buffer,
-  directoryName: string,
-): Omit<ClaudeFilesystemSkill, "path" | "scope"> | null {
+): { frontmatter: string[]; body: string } | null {
   const text = content.toString("utf8");
   if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return null;
   const lines = text.replace(/\r\n/gu, "\n").split("\n");
   const closing = lines.slice(1, 257).findIndex((line) => line === "---");
   if (closing < 0) return null;
-  const frontmatter = lines.slice(1, closing + 1);
+  return {
+    frontmatter: lines.slice(1, closing + 1),
+    body: lines.slice(closing + 2).join("\n"),
+  };
+}
+
+function refusedSkillField(content: Buffer): string | undefined {
+  return skillFrontmatterSections(content)?.frontmatter
+    .map((line) => /^([A-Za-z][A-Za-z0-9_-]{0,63}):/u.exec(line)?.[1])
+    .find((field) => field !== undefined && REFUSED_SKILL_FIELDS.includes(field));
+}
+
+function stagedSkillContent(
+  content: Buffer,
+  metadata: Omit<ClaudeFilesystemSkill, "path" | "scope">,
+): Buffer {
+  return Buffer.from([
+    "---",
+    `name: ${JSON.stringify(metadata.name)}`,
+    `description: ${JSON.stringify(metadata.description)}`,
+    ...(metadata.argumentHint
+      ? [`argument-hint: ${JSON.stringify(metadata.argumentHint)}`]
+      : []),
+    "---",
+    skillFrontmatterSections(content)?.body ?? "",
+  ].join("\n"), "utf8");
+}
+
+function parseSkillFrontmatter(
+  content: Buffer,
+  directoryName: string,
+): Omit<ClaudeFilesystemSkill, "path" | "scope"> | null {
+  const frontmatter = skillFrontmatterSections(content)?.frontmatter;
+  if (!frontmatter) return null;
   const values = new Map<string, string>();
   for (let index = 0; index < frontmatter.length;) {
     const line = frontmatter[index]!;
@@ -661,6 +694,7 @@ async function copyBoundedDirectory(
       if (entry.isSymbolicLink()) {
         throw new Error("A selected Claude skill contains a symbolic link.");
       }
+      if (depth === 0 && entry.name.toLowerCase() === "skill.md") continue;
       if (entry.isDirectory()) {
         await copyBoundedDirectory(
           sourceRoot,
@@ -735,7 +769,7 @@ export async function stageClaudeSkillPlugin(
   const uniqueNames = new Set<string>();
   const selected: Array<{
     input: ClaudeSkillInput;
-    metadataContent: Buffer;
+    skillContent: Buffer;
     sourceRoot: string;
     skillDirectory: string;
   }> = [];
@@ -755,12 +789,23 @@ export async function stageClaudeSkillPlugin(
       MAX_SKILL_FILE_BYTES,
       options,
     );
-    if (!metadataContent || !parseSkillFrontmatter(metadataContent, input.name)) {
+    const refusedField = metadataContent && !options.metadataOnly
+      ? refusedSkillField(metadataContent)
+      : undefined;
+    if (refusedField) {
+      throw new Error(
+        `The Claude skill "${input.name}" sets ${refusedField} in SKILL.md, which Inertia does not allow. Remove that field to use the skill.`,
+      );
+    }
+    const metadata = metadataContent
+      ? parseSkillFrontmatter(metadataContent, input.name)
+      : null;
+    if (!metadataContent || !metadata) {
       throw new Error("A selected Claude skill failed revalidation.");
     }
     selected.push({
       input,
-      metadataContent,
+      skillContent: stagedSkillContent(metadataContent, metadata),
       sourceRoot: matched.skillDirectory,
       skillDirectory: matched.skillDirectory,
     });
@@ -828,25 +873,6 @@ export async function stageClaudeSkillPlugin(
           destination,
           async () => await mkdir(destination, { mode: 0o700 }),
         );
-        budget.files += 1;
-        budget.bytes += skill.metadataContent.byteLength;
-        if (
-          budget.files > MAX_STAGED_FILES
-          || budget.bytes > MAX_STAGED_TOTAL_BYTES
-        ) {
-          throw new Error("Discovered Claude skills exceed the staging limits.");
-        }
-        const metadataPath = join(destination, "SKILL.md");
-        await runClaudeSkillFilesystemOperation(
-          options,
-          "writeFile",
-          metadataPath,
-          async () => await writeFile(
-            metadataPath,
-            skill.metadataContent,
-            { mode: 0o600, flag: "wx" },
-          ),
-        );
       } else {
         await copyBoundedDirectory(
           skill.sourceRoot,
@@ -857,6 +883,27 @@ export async function stageClaudeSkillPlugin(
           options,
         );
       }
+      budget.files += 1;
+      budget.bytes += skill.skillContent.byteLength;
+      if (
+        budget.files > MAX_STAGED_FILES
+        || budget.bytes > MAX_STAGED_TOTAL_BYTES
+      ) {
+        throw new Error(options.metadataOnly
+          ? "Discovered Claude skills exceed the staging limits."
+          : "Selected Claude skills exceed the staging limits.");
+      }
+      const skillPath = join(destination, "SKILL.md");
+      await runClaudeSkillFilesystemOperation(
+        options,
+        "writeFile",
+        skillPath,
+        async () => await writeFile(
+          skillPath,
+          skill.skillContent,
+          { mode: 0o600, flag: "wx" },
+        ),
+      );
     }
     return {
       path: pluginPath,

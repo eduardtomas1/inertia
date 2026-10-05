@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 const native = vi.hoisted(() => ({ execFile: vi.fn() }));
 vi.mock("node:child_process", async (original) => ({ ...await original<typeof import("node:child_process")>(), execFile: native.execFile }));
-import { captureMacWindowPng, listMacWindows, matchMacWindow, type MacWindowInfo } from "../../src/main/snapshot-macos-window";
+import { captureMacWindowPng, listMacWindows, matchMacWindow, readMacString, type MacWindowInfo } from "../../src/main/snapshot-macos-window";
 
 const bounds = { x: 50, y: 60, width: 800, height: 600 };
 function window(id: number, overrides: Partial<MacWindowInfo> = {}): MacWindowInfo {
@@ -66,5 +66,13 @@ describe.runIf(process.platform === "darwin")("macOS window server list", () => 
       expect(Object.values(entry.bounds).every(Number.isFinite)).toBe(true);
       expect(entry.title).toBeNull();
     }
+  });
+});
+
+describe.runIf(process.platform === "darwin")("macOS window titles", () => {
+  it("reads a real CoreFoundation string as UTF-16 and bounds its length", () => {
+    expect(readMacString("Release checklist — Ñandú 🦊")).toBe("Release checklist — Ñandú 🦊");
+    expect(readMacString("x".repeat(1500))).toBe("x".repeat(1000));
+    expect(readMacString("")).toBeNull();
   });
 });

@@ -28,6 +28,12 @@ export function matchMacWindow(windows: readonly MacWindowInfo[], target: MacWin
 }
 
 let libraries = false;
+function openLibraries(): void {
+  if (libraries) return;
+  openLibrary({ library: "inertia-snapshot-cg", path: "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics" });
+  openLibrary({ library: "inertia-snapshot-cf", path: "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation" });
+  libraries = true;
+}
 const keys = new Map<string, JsExternal>();
 function call<T>(library: string, funcName: string, retType: FfiType, paramsType: FfiType[], paramsValue: unknown[]): T {
   return load({ library, funcName, retType, paramsType, paramsValue } as never) as T;
@@ -67,12 +73,16 @@ function text(reference: JsExternal | null): string | null {
   return String.fromCharCode(...units) || null;
 }
 
+export function readMacString(value: string): string | null {
+  openLibraries();
+  const reference = call<JsExternal>("inertia-snapshot-cf", "CFStringCreateWithCString", DataType.External,
+    [DataType.I64, DataType.String, DataType.U32], [0, value, 0x08000100]);
+  try { return text(reference); }
+  finally { call("inertia-snapshot-cf", "CFRelease", DataType.Void, [DataType.External], [reference]); }
+}
+
 export function listMacWindows(target: MacWindowTarget): MacWindowInfo[] {
-  if (!libraries) {
-    openLibrary({ library: "inertia-snapshot-cg", path: "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics" });
-    openLibrary({ library: "inertia-snapshot-cf", path: "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation" });
-    libraries = true;
-  }
+  openLibraries();
   const list = call<JsExternal>("inertia-snapshot-cg", "CGWindowListCopyWindowInfo", DataType.External,
     [DataType.U32, DataType.U32], [1 | 16, 0]);
   if (isNullPointer(list)) return [];

@@ -80,7 +80,7 @@ export function createOpenCodeHostTools(input: {
     onApproval: input.onApproval,
     onApprovalResolved: input.onApprovalResolved,
   });
-  const session = createProviderHostToolMcpSession(runtime);
+  const session = createProviderHostToolMcpSession(runtime, {}, { destructiveHints: true });
   let connection: ProviderHostToolMcpConnection | undefined;
   let installed = false;
   let cleanupPromise: Promise<void> | undefined;

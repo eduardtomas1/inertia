@@ -62,6 +62,12 @@ The audit is deterministic and provider-neutral. It does not claim to judge
 color, typography, imagery, canvas, animation, or pixel quality, and it does
 not change screenshot approval or redaction boundaries.
 
+Each tool definition also states whether it only reads (`readOnly`) and
+whether it changes the page (`destructive`); both are part of the definition
+digest. A transport advertises the destructive hint only when its native
+permission layer already defers to Inertia, as described in
+`docs/AGENT_BROWSER.md`.
+
 The frontend loop is therefore:
 
 1. inspect the current semantic snapshot;

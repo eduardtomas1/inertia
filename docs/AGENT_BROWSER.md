@@ -261,6 +261,18 @@ action. Auto-edit and Full Access use their existing provider access contract
 without adding a second interaction approval, but do not release local image
 bytes.
 
+Tools that change the page or its tabs (navigate, click, type, press, open
+tab, close tab) carry the MCP `destructiveHint`; snapshot, screenshot, tabs
+and wait carry `readOnlyHint` and `idempotentHint`; every Browser tool carries
+`openWorldHint: false` because only loopback pages are reachable. Claude and
+OpenCode receive the destructive hint because Inertia already allows its own
+tools in their native permission layers, so the hint cannot add a prompt
+before Inertia's approval. Codex receives dynamic tools, which carry no
+annotations. Cursor and Kimi keep `destructiveHint: false`: in a Supervised
+chat Inertia shows their native permission requests to the user, and neither
+agent documents whether it asks for permission because of this hint, so the
+hint could add a second prompt. Antigravity does not receive Inertia tools.
+
 An aborted or settled call loses browser authority immediately. Every request
 carries a fresh UUID plus the server-owned conversation, run, and turn UUIDs.
 Cancellation must match all three identities. The main process rejects reused

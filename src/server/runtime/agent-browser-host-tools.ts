@@ -113,6 +113,7 @@ readonly ProviderHostToolDefinition[] = [
     },
     inputValidator: navigateSchema,
     readOnly: false,
+    destructive: true,
   },
   {
     name: "inertia_browser_snapshot",
@@ -127,6 +128,7 @@ readonly ProviderHostToolDefinition[] = [
     inputSchema: objectSchema({ ref: refProperty }, ["ref"]),
     inputValidator: clickSchema,
     readOnly: false,
+    destructive: true,
   },
   {
     name: "inertia_browser_type",
@@ -138,6 +140,7 @@ readonly ProviderHostToolDefinition[] = [
     }, ["ref", "text"]),
     inputValidator: typeSchema,
     readOnly: false,
+    destructive: true,
   },
   {
     name: "inertia_browser_press",
@@ -145,6 +148,7 @@ readonly ProviderHostToolDefinition[] = [
     inputSchema: objectSchema({ key: { type: "string", enum: [...AGENT_BROWSER_KEYS] } }, ["key"]),
     inputValidator: pressSchema,
     readOnly: false,
+    destructive: true,
   },
   {
     name: "inertia_browser_scroll",
@@ -186,6 +190,7 @@ readonly ProviderHostToolDefinition[] = [
     inputSchema: objectSchema({ url: urlProperty }),
     inputValidator: openTabSchema,
     readOnly: false,
+    destructive: true,
   },
   {
     name: "inertia_browser_select_tab",
@@ -200,6 +205,7 @@ readonly ProviderHostToolDefinition[] = [
     inputSchema: objectSchema({ tabId: tabIdProperty }, ["tabId"]),
     inputValidator: tabSchema,
     readOnly: false,
+    destructive: true,
   },
 ] as const;
 

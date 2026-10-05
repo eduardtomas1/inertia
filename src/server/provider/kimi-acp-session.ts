@@ -12,30 +12,11 @@ import { readBoundedProviderImage } from "./provider-image-read";
 import { assertAcpConfigSelection } from "./acp-config-options";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
-const MAX_COMPACTION_INSTRUCTION_CHARS = 4_000;
 
 export type KimiControlRequest = <T>(
   request: Promise<T>,
   method: string,
 ) => Promise<T>;
-
-export async function waitForKimiCommandAdvertisement(
-  advertisement: Promise<void>,
-  timeoutMs: number,
-): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      advertisement,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, Math.max(0, timeoutMs));
-        timer.unref();
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 export async function withKimiRpcDeadline<T>(
   request: Promise<T>,
@@ -213,16 +194,6 @@ export async function kimiPrompt(
   }
   blocks.push({ type: "text", text: prompt });
   return blocks;
-}
-
-export function kimiCompactCommand(instruction: string | undefined): string {
-  const focus = instruction?.trim();
-  if (!focus) return "/compact";
-  if (
-    focus.length > MAX_COMPACTION_INSTRUCTION_CHARS
-    || focus.includes("\0")
-  ) throw new Error("Kimi Code received an invalid compaction focus instruction.");
-  return `/compact ${focus}`;
 }
 
 function imageMediaType(path: string): string | undefined {

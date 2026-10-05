@@ -38,6 +38,23 @@ const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-ch
 let threadId = "thread-new";
 let turnId = "turn-1";
 let heldInterruptId;
+const turnStartedAt = Math.floor(Date.now() / 1000);
+const turnError = (message) => ({ message, codexErrorInfo: null, additionalDetails: null, misalignment: null });
+const turnShape = (id, status, error = null, startedAt = turnStartedAt) => ({
+  id,
+  items: [],
+  itemsView: "notLoaded",
+  status,
+  error,
+  startedAt,
+  completedAt: status === "inProgress" ? null : turnStartedAt,
+  durationMs: status === "inProgress" ? null : 0,
+});
+const sandboxPolicy = (mode) => mode === "danger-full-access"
+  ? { type: "dangerFullAccess" }
+  : mode === "workspace-write"
+    ? { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
+    : { type: "readOnly", networkAccess: false };
 const requestInput = () => send({
 id: "input-rpc",
 method: "item/tool/requestUserInput",
@@ -45,6 +62,7 @@ params: {
   threadId,
   turnId,
   itemId: "input-item",
+  isBlocking: true,
   autoResolutionMs: null,
   questions: [{
     id: "choice",
@@ -52,7 +70,9 @@ params: {
     question: "Which path should Codex take?",
     isOther: true,
     isSecret: false,
-    options: [{ label: "Safe", description: "Use the bounded path." }],
+    options: process.env.INERTIA_APP_SERVER_SCENARIO === "free-text-input"
+      ? null
+      : [{ label: "Safe", description: "Use the bounded path." }],
   }],
 },
 });
@@ -82,16 +102,16 @@ if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-events") {
 }
 send({ method: "turn/plan/updated", params: { threadId, turnId, explanation: "A native plan", plan: [{ step: "Inspect", status: "completed" }, { step: "Implement", status: "inProgress" }] } });
 send({ method: "item/reasoning/summaryTextDelta", params: { threadId, turnId, itemId: "reasoning-1", summaryIndex: 0, delta: "Checking the safest path." } });
-send({ method: "item/started", params: { threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test" } } });
-send({ method: "item/completed", params: { threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test", aggregatedOutput: "passed" } } });
-send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: { totalTokens: 11839, inputTokens: 11833, cachedInputTokens: 3456, outputTokens: 6, reasoningOutputTokens: 0 }, last: { totalTokens: 126, inputTokens: 120, cachedInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 }, modelContextWindow: 258400 } } });
+send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test" } } });
+send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test", aggregatedOutput: "passed" } } });
+send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: { totalTokens: 11839, inputTokens: 11833, cachedInputTokens: 3456, cacheWriteInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 }, last: { totalTokens: 126, inputTokens: 120, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 }, modelContextWindow: 258400 } } });
 send({ method: "account/rateLimits/updated", params: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 41, windowDurationMins: 300, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
 send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "Hello " } });
 send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "from Codex" } });
 if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
-  send({ method: "turn/completed", params: { threadId: "child-approval", turn: { id: "child-approval-turn", status: "completed", items: [], error: null } } });
+  send({ method: "turn/completed", params: { threadId: "child-approval", turn: turnShape("child-approval-turn", "completed") } });
 }
-send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
 const message = JSON.parse(line);
@@ -133,18 +153,41 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
     return send({ id: message.id, result: { thread: { id: "thread-unrelated" }, cwd: process.cwd(), model: "fake", serviceTier: null } });
   }
   threadId = message.params.threadId || "thread-new";
-  send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake", serviceTier: message.params.serviceTier ?? null, initialTurnsPage: message.method === "thread/resume" ? { data: [{ id: "previous-turn" }] } : null } });
+  send({ id: message.id, result: {
+    thread: { id: threadId },
+    model: message.params.model ?? "fake",
+    modelProvider: message.params.modelProvider ?? "openai",
+    serviceTier: message.params.serviceTier ?? null,
+    disabledPluginIds: [],
+    cwd: process.cwd(),
+    instructionSources: [],
+    approvalPolicy: message.params.approvalPolicy ?? "on-request",
+    approvalsReviewer: message.params.approvalsReviewer ?? "user",
+    sandbox: sandboxPolicy(message.params.sandbox),
+    reasoningEffort: null,
+    ...(message.method === "thread/resume" ? {
+      collaborationMode: null,
+      initialTurnsPage: { data: [{ id: "previous-turn" }] },
+      turnsBackwardsCursor: null,
+      itemsBackwardsCursor: null,
+    } : {}),
+  } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-completion") {
-    send({ method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape("stale-turn", "completed") } });
   }
+  return;
+}
+if (message.method === "thread/settings/update") {
+  send({ id: message.id, result: {} });
+  send({ method: "thread/settings/updated", params: { threadId, threadSettings: { disabledPluginIds: [], cwd: process.cwd(), approvalPolicy: "on-request", approvalsReviewer: "user", sandboxPolicy: { type: "readOnly", networkAccess: false }, activePermissionProfile: null, model: "fake", modelProvider: "openai", serviceTier: null, effort: message.params.effort ?? null, summary: "auto", collaborationMode: { mode: "default", settings: { model: "fake", reasoning_effort: message.params.effort ?? null, developer_instructions: null } }, multiAgentMode: "explicitRequestOnly", personality: null } } });
   return;
 }
 if (message.method === "thread/compact/start") {
   send({ id: message.id, result: {} });
-  send({ method: "turn/started", params: { threadId, turn: { id: "compact-turn-1", status: "inProgress", items: [], error: null } } });
+  send({ method: "turn/started", params: { threadId, turn: turnShape("compact-turn-1", "inProgress") } });
   send({ method: "item/started", params: { threadId, turnId: "compact-turn-1", startedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
   send({ method: "item/completed", params: { threadId, turnId: "compact-turn-1", completedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
-  send({ method: "turn/completed", params: { threadId, turn: { id: "compact-turn-1", status: "completed", items: [], error: null } } });
+  send({ method: "turn/completed", params: { threadId, turn: turnShape("compact-turn-1", "completed") } });
   return;
 }
 if (message.method === "thread/turns/list") {
@@ -154,8 +197,8 @@ if (message.method === "thread/goal/set") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-live-mutation-error") {
     sendBatch([
       { id: message.id, error: { code: -32000, message: "goal mutation rejected" } },
-      { method: "error", params: { threadId, turnId, error: { message: "parent turn failed after goal mutation" }, willRetry: false } },
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "failed", items: [], error: { message: "parent turn failed after goal mutation" } } } },
+      { method: "error", params: { threadId, turnId, error: turnError("parent turn failed after goal mutation"), willRetry: false } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "failed", turnError("parent turn failed after goal mutation")) } },
     ]);
     return;
   }
@@ -180,7 +223,7 @@ if (message.method === "thread/goal/set") {
       { method: "thread/goal/updated", params: { threadId, turnId, goal: activeGoal } },
       { id: message.id, result: { goal } },
       { method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } },
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
     ]);
     return;
   }
@@ -188,18 +231,18 @@ if (message.method === "thread/goal/set") {
     turnId = "goal-terminal-after-start-turn";
     sendBatch([
       { id: message.id, result: { goal } },
-      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
       { method: "thread/goal/updated", params: { threadId, turnId, goal: { ...goal, status: "budgetLimited", tokenBudget: 12_000, tokensUsed: 12_000, updatedAt: 1800000001 } } },
     ]);
     setTimeout(() => {
       send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-terminal-message", delta: "Final goal turn output." } });
-      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     }, 10);
     return;
   }
   send({ id: message.id, result: { goal } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-response-only") {
-    setTimeout(() => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }), 10);
+    setTimeout(() => send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } }), 10);
     return;
   }
   send({ method: "thread/goal/updated", params: { threadId, goal } });
@@ -208,13 +251,13 @@ if (message.method === "thread/goal/set") {
     && process.env.INERTIA_APP_SERVER_SCENARIO !== "goal-wait-for-interrupt"
   ) return;
   turnId = "goal-turn-1";
-  send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-wait-for-interrupt") return;
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-1", delta: "First goal turn. " } });
-  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+  send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
   setTimeout(() => {
     turnId = "goal-turn-2";
-    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
     send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "goal-message-2", delta: "Second goal turn." } });
     const completedGoal = {
       ...goal,
@@ -224,7 +267,7 @@ if (message.method === "thread/goal/set") {
       updatedAt: 1800000008,
     };
     send({ method: "thread/goal/updated", params: { threadId, turnId, goal: completedGoal } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
   }, 10);
   return;
 }
@@ -236,62 +279,62 @@ if (message.method === "thread/goal/clear") {
 if (message.method === "turn/start") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-before-response") {
     sendBatch([
-      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress" } } },
-      { id: "approval-rpc", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } },
-      { id: message.id, result: { turn: { id: turnId, status: "inProgress" } } },
+      { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
+      { id: "approval-rpc", method: "item/commandExecution/requestApproval", params: { kind: "command", threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "npm test", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] } },
+      { id: message.id, result: { turn: turnShape(turnId, "inProgress", null, null) } },
     ]);
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" || process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume") {
-    send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    send({ id: message.id, result: { turn: turnShape(turnId, "inProgress", null, null) } });
     sendBatch([
-      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
       { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "fresh-message", delta: "Answered from a fresh thread" } },
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
     ]);
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-turn-before-response") {
     sendBatch([
-      { method: "turn/started", params: { threadId, turn: { id: "stale-turn", status: "inProgress", items: [], error: null } } },
-      { method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } },
+      { method: "turn/started", params: { threadId, turn: turnShape("stale-turn", "inProgress") } },
+      { method: "turn/completed", params: { threadId, turn: turnShape("stale-turn", "completed") } },
     ]);
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-started-before-response") {
-    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") {
     sendBatch([
-      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
       { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "early-message", delta: "Hello from Codex" } },
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
     ]);
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-flood-before-response") {
     sendBatch([
-      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
       ...Array.from({ length: 256 }, (unused, index) => ({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "flood", delta: String(index) } })),
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
     ]);
   }
-  send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  send({ id: message.id, result: { turn: turnShape(turnId, "inProgress", null, null) } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") return;
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
     return process.stdout.write(
       "x".repeat(16 * 1024 * 1024 + 1) + "\\n"
       + JSON.stringify({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "trailing", delta: "must be ignored" } }) + "\\n"
-      + JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }) + "\\n"
+      + JSON.stringify({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } }) + "\\n"
     );
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO !== "turn-started-before-response") {
-    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering") {
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "legacy-large-frame") {
     send({ method: "account/rateLimits/updated", params: { padding: "x".repeat(1024 * 1024 + 32) } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "protocol-burst-overflow") {
@@ -329,43 +372,42 @@ if (message.method === "turn/start") {
       { method: "thread/environment/connected", params: { threadId, environmentId: "workspace-environment" } },
       { method: "thread/environment/disconnected", params: { threadId, environmentId: "workspace-environment" } },
       { method: "thread/settings/updated", params: { threadId, threadSettings: { cwd: process.cwd(), approvalPolicy: "untrusted", approvalsReviewer: "auto_review", sandboxPolicy: { type: "readOnly", networkAccess: false }, activePermissionProfile: null, model: "model-b", modelProvider: "openai", serviceTier: "priority", effort: "high", summary: "auto", collaborationMode: { mode: "default", settings: {} }, multiAgentMode: "explicitRequestOnly", personality: "pragmatic" } } },
-      { method: "error", params: { threadId, turnId, itemId: "retry-1", error: { message: "Temporary upstream failure." }, willRetry: true } },
+      { method: "error", params: { threadId, turnId, error: turnError("Temporary upstream failure."), willRetry: true } },
       { method: "model/rerouted", params: { threadId, turnId, fromModel: "model-a", toModel: "model-b", reason: "highRiskCyberActivity" } },
       { method: "hook/started", params: { threadId, turnId, run: { id: "hook-1", eventName: "stop", status: "running", statusMessage: null, entries: [] } } },
       { method: "hook/completed", params: { threadId, turnId, run: { id: "hook-1", eventName: "stop", status: "completed", statusMessage: "Hook passed.", entries: [{ kind: "context", text: "Checked policy." }] } } },
       { method: "hook/completed", params: { threadId, turnId, run: { id: "hook-stopped", eventName: "stop", status: "stopped", statusMessage: "Hook was stopped.", entries: [] } } },
-      { method: "item/started", params: { threadId, turnId, item: { id: "command-rich", type: "commandExecution", command: "npm run check", status: "inProgress" } } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "command-rich", type: "commandExecution", command: "npm run check", status: "inProgress" } } },
       { method: "item/commandExecution/outputDelta", params: { threadId, turnId, itemId: "command-rich", delta: "checking..." } },
       { method: "item/commandExecution/terminalInteraction", params: { threadId, turnId, itemId: "command-rich", processId: "process-1", stdin: "y\\n" } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "command-rich", type: "commandExecution", command: "npm run check", status: "failed", aggregatedOutput: "check failed" } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "command-declined", type: "commandExecution", command: "npm publish", status: "declined", aggregatedOutput: "" } } },
-      { method: "item/started", params: { threadId, turnId, item: { id: "files-rich", type: "fileChange", status: "inProgress", changes: [{ path: "src/example.ts", kind: "update", diff: "" }] } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "command-rich", type: "commandExecution", command: "npm run check", status: "failed", aggregatedOutput: "check failed" } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "command-declined", type: "commandExecution", command: "npm publish", status: "declined", aggregatedOutput: "" } } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "files-rich", type: "fileChange", status: "inProgress", changes: [{ path: "src/example.ts", kind: "update", diff: "" }] } } },
       { method: "item/fileChange/outputDelta", params: { threadId, turnId, itemId: "files-rich", delta: "Applying patch" } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "files-rich", type: "fileChange", status: "completed", changes: [{ path: "src/example.ts", kind: "update", diff: "" }] } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "files-declined", type: "fileChange", status: "declined", changes: [{ path: "src/declined.ts", kind: "update", diff: "" }] } } },
-      { method: "item/started", params: { threadId, turnId, item: { id: "mcp-rich", type: "mcpToolCall", server: "docs", tool: "search", status: "inProgress", arguments: {} } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "files-rich", type: "fileChange", status: "completed", changes: [{ path: "src/example.ts", kind: "update", diff: "" }] } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "files-declined", type: "fileChange", status: "declined", changes: [{ path: "src/declined.ts", kind: "update", diff: "" }] } } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "mcp-rich", type: "mcpToolCall", server: "docs", tool: "search", status: "inProgress", arguments: {} } } },
       { method: "item/mcpToolCall/progress", params: { threadId, turnId, itemId: "mcp-rich", message: "Searching official docs" } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "mcp-rich", type: "mcpToolCall", server: "docs", tool: "search", status: "completed", arguments: {}, result: { content: [{ type: "text", text: "Found the reference." }], structuredContent: null }, error: null } } },
-      { method: "item/started", params: { threadId, turnId, item: { id: "dynamic-rich", type: "dynamicToolCall", tool: "preview", status: "inProgress", arguments: {} } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "dynamic-rich", type: "dynamicToolCall", tool: "preview", status: "completed", arguments: {}, contentItems: [{ type: "inputText", text: "Preview ready." }], success: true } } },
-      { method: "item/started", params: { threadId, turnId, item: { id: "web-rich", type: "webSearch", query: "Codex App Server", action: { type: "search", query: "Codex App Server", queries: null } } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "web-rich", type: "webSearch", query: "Codex App Server", action: { type: "search", query: "Codex App Server", queries: null } } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "image-rich", type: "imageView", path: path.join(process.cwd(), "reference.png") } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "generated-rich", type: "imageGeneration", status: "completed", revisedPrompt: null, result: "generated.png" } } },
-      { method: "item/started", params: { threadId, turnId, item: { id: "compact-rich", type: "contextCompaction" } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "compact-rich", type: "contextCompaction" } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "reason-rich", type: "reasoning", summary: ["Verified the provider surface."], content: [] } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "mcp-rich", type: "mcpToolCall", server: "docs", tool: "search", status: "completed", arguments: {}, result: { content: [{ type: "text", text: "Found the reference." }], structuredContent: null }, error: null } } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "dynamic-rich", type: "dynamicToolCall", tool: "preview", status: "inProgress", arguments: {} } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "dynamic-rich", type: "dynamicToolCall", tool: "preview", status: "completed", arguments: {}, contentItems: [{ type: "inputText", text: "Preview ready." }], success: true } } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "web-rich", type: "webSearch", query: "Codex App Server", action: { type: "search", query: "Codex App Server", queries: null } } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "web-rich", type: "webSearch", query: "Codex App Server", action: { type: "search", query: "Codex App Server", queries: null } } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "image-rich", type: "imageView", path: path.join(process.cwd(), "reference.png") } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "generated-rich", type: "imageGeneration", status: "completed", revisedPrompt: null, result: "generated.png" } } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "compact-rich", type: "contextCompaction" } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "compact-rich", type: "contextCompaction" } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "reason-rich", type: "reasoning", summary: ["Verified the provider surface."], content: [] } } },
       { method: "item/plan/delta", params: { threadId, turnId, itemId: "plan-rich", delta: "Verifying implementation" } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "plan-rich", type: "plan", text: "1. Inspect\\n2. Verify" } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "plan-rich", type: "plan", text: "1. Inspect\\n2. Verify" } } },
       { method: "item/plan/delta", params: { threadId, turnId, itemId: "plan-rich", delta: "STALE_PLAN_DELTA" } },
       { method: "turn/diff/updated", params: { threadId, turnId, diff: "diff --git a/src/example.ts b/src/example.ts" } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "review-in", type: "enteredReviewMode", review: "Review changes" } } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "review-out", type: "exitedReviewMode", review: "No findings" } } },
-      { method: "thread/compacted", params: { threadId, turnId } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "review-in", type: "enteredReviewMode", review: "Review changes" } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "review-out", type: "exitedReviewMode", review: "No findings" } } },
       { method: "future/notification", params: { threadId, turnId, payload: "ignored safely" } },
       { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-rich", delta: "Done" } },
-      { method: "item/completed", params: { threadId, turnId, item: { id: "message-rich", type: "agentMessage", text: "Done", phase: "final_answer" } } },
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "message-rich", type: "agentMessage", text: "Done", phase: "final_answer" } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
     ]);
     return;
   }
@@ -381,7 +423,7 @@ if (message.method === "turn/start") {
     return process.stdout.write("{not-json}\\n");
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "premature-exit") {
-    send({ method: "item/started", params: { threadId, turnId, item: { id: "command-before-exit", type: "commandExecution", command: "npm test" } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "command-before-exit", type: "commandExecution", command: "npm test" } } });
     console.error("token=super-secret-value");
     return process.exit(7);
   }
@@ -389,7 +431,7 @@ if (message.method === "turn/start") {
     return process.kill(process.pid, "SIGTERM");
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "terminal-then-exit") {
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     return setTimeout(() => process.exit(9), 5_000);
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-input") {
@@ -400,6 +442,8 @@ if (message.method === "turn/start") {
         threadId,
         turnId,
         itemId: "input-item",
+        isBlocking: true,
+        autoResolutionMs: null,
         // One more question than the shared MAX_AGENT_INPUT_QUESTIONS allows.
         questions: Array.from({ length: 5 }, (_, index) => ({
           id: "question-" + index,
@@ -429,88 +473,88 @@ if (message.method === "turn/start") {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited") {
       send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { ...activeGoal, status: "budgetLimited", tokenBudget: 12000, tokensUsed: 12000, timeUsedSeconds: 4, updatedAt: 1800000004 } } });
     }
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     if (
       process.env.INERTIA_APP_SERVER_SCENARIO === "goal-no-continuation"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-budget-limited"
     ) return;
     setTimeout(() => {
       turnId = "goal-resume-turn-2";
-      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
       send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "resume-message-2", delta: "Automatic continuation." } });
       send({ method: "thread/goal/updated", params: { threadId, turnId, goal: { ...activeGoal, status: "complete", tokensUsed: 500, timeUsedSeconds: 3, updatedAt: 1800000003 } } });
-      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     }, 10);
     return;
   }
-  send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
+  send({ method: "turn/completed", params: { threadId, turn: turnShape("orphan-turn", "completed") } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO?.startsWith("steer-receipt-")) return;
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "steer-and-collab") {
-    send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-1"], prompt: "Inspect the tests", model: "gpt-5.5-codex-mini", reasoningEffort: "low", agentsStates: { "child-1": { status: "pendingInit", message: null } } } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-1"], prompt: "Inspect the tests", model: "gpt-5.5-codex-mini", reasoningEffort: "low", agentsStates: { "child-1": { status: "pendingInit", message: null } } } } });
     send({ method: "thread/started", params: { thread: { id: "child-1", parentThreadId: threadId, agentNickname: "Scout", agentRole: "researcher", preview: "Inspect the tests" } } });
-    send({ method: "item/started", params: { threadId: "child-1", turnId: "child-turn-1", item: { id: "child-mcp-1", type: "mcpToolCall", server: "docs", tool: "search", status: "inProgress", arguments: { query: "CHILD_MCP_ARGUMENT" } } } });
-    send({ method: "thread/tokenUsage/updated", params: { threadId: "child-1", turnId: "child-turn-1", tokenUsage: { total: { totalTokens: 2048, inputTokens: 1900, cachedInputTokens: 512, outputTokens: 148, reasoningOutputTokens: 32 }, last: { totalTokens: 700, inputTokens: 640, cachedInputTokens: 128, cacheWriteInputTokens: 16, outputTokens: 60, reasoningOutputTokens: 12 }, modelContextWindow: 128000 } } });
-    send({ method: "item/completed", params: { threadId: "child-1", turnId: "child-turn-1", item: { type: "agentMessage", id: "child-message-1", text: "Found coverage." } } });
-    send({ method: "turn/completed", params: { threadId: "child-1", turn: { id: "child-turn-1", status: "completed", items: [], error: null } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId: "child-1", turnId: "child-turn-1", item: { id: "child-mcp-1", type: "mcpToolCall", server: "docs", tool: "search", status: "inProgress", arguments: { query: "CHILD_MCP_ARGUMENT" } } } });
+    send({ method: "thread/tokenUsage/updated", params: { threadId: "child-1", turnId: "child-turn-1", tokenUsage: { total: { totalTokens: 2048, inputTokens: 1900, cachedInputTokens: 512, cacheWriteInputTokens: 16, outputTokens: 148, reasoningOutputTokens: 32 }, last: { totalTokens: 700, inputTokens: 640, cachedInputTokens: 128, cacheWriteInputTokens: 16, outputTokens: 60, reasoningOutputTokens: 12 }, modelContextWindow: 128000 } } });
+    send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId: "child-1", turnId: "child-turn-1", item: { type: "agentMessage", id: "child-message-1", text: "Found coverage." } } });
+    send({ method: "turn/completed", params: { threadId: "child-1", turn: turnShape("child-turn-1", "completed") } });
     return;
   }
   if (
     process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child-cancel"
   ) {
-    send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-late", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-late"], prompt: "Finish after the parent", model: null, reasoningEffort: null, agentsStates: { "child-late": { status: "running", message: "Still checking" } } } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-late", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-late"], prompt: "Finish after the parent", model: null, reasoningEffort: null, agentsStates: { "child-late": { status: "running", message: "Still checking" } } } } });
     send({ method: "thread/started", params: { thread: { id: "child-late", parentThreadId: threadId, agentNickname: "Late verifier", agentRole: "reviewer", preview: "Finish after the parent" } } });
-    send({ method: "turn/started", params: { threadId: "child-late", turn: { id: "child-late-turn", status: "inProgress", items: [], error: null } } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "turn/started", params: { threadId: "child-late", turn: turnShape("child-late-turn", "inProgress") } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child-cancel") return;
     setTimeout(() => {
-      send({ method: "item/completed", params: { threadId: "child-late", turnId: "child-late-turn", item: { type: "agentMessage", id: "child-late-message", text: "Verified after the parent." } } });
-      send({ method: "turn/completed", params: { threadId: "child-late", turn: { id: "child-late-turn", status: "completed", items: [], error: null } } });
+      send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId: "child-late", turnId: "child-late-turn", item: { type: "agentMessage", id: "child-late-message", text: "Verified after the parent." } } });
+      send({ method: "turn/completed", params: { threadId: "child-late", turn: turnShape("child-late-turn", "completed") } });
       turnId = "turn-after-child-late";
-      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
       send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-after-child-late", delta: "Integrated the delegated result." } });
-      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     }, 20);
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "completed-then-stale-error") {
-    send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-stale", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-stale"], prompt: "Report the real outcome", model: null, reasoningEffort: null, agentsStates: { "child-stale": { status: "running", message: "Checking" } } } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-stale", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-stale"], prompt: "Report the real outcome", model: null, reasoningEffort: null, agentsStates: { "child-stale": { status: "running", message: "Checking" } } } } });
     send({ method: "thread/started", params: { thread: { id: "child-stale", parentThreadId: threadId, agentNickname: "Outcome verifier", agentRole: "reviewer", preview: "Report the real outcome" } } });
-    send({ method: "item/completed", params: { threadId: "child-stale", turnId: "child-stale-turn", item: { type: "agentMessage", id: "child-stale-message", text: "The child completed successfully." } } });
-    send({ method: "turn/completed", params: { threadId: "child-stale", turn: { id: "child-stale-turn", status: "completed", items: [], error: null } } });
-    send({ method: "item/completed", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale", tool: "wait", status: "failed", senderThreadId: threadId, receiverThreadIds: ["child-stale"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-stale": { status: "errored", message: "Stale parent summary" } } } } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId: "child-stale", turnId: "child-stale-turn", item: { type: "agentMessage", id: "child-stale-message", text: "The child completed successfully." } } });
+    send({ method: "turn/completed", params: { threadId: "child-stale", turn: turnShape("child-stale-turn", "completed") } });
+    send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale", tool: "wait", status: "failed", senderThreadId: threadId, receiverThreadIds: ["child-stale"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-stale": { status: "errored", message: "Stale parent summary" } } } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "nested-collab") {
-    send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-parent", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-parent"], prompt: "Coordinate nested work", model: "gpt-5.5-codex", reasoningEffort: "high", agentsStates: { "child-parent": { status: "running", message: "Coordinating" } } } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-parent", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-parent"], prompt: "Coordinate nested work", model: "gpt-5.5-codex", reasoningEffort: "high", agentsStates: { "child-parent": { status: "running", message: "Coordinating" } } } } });
     send({ method: "thread/started", params: { thread: { id: "child-parent", parentThreadId: threadId, agentNickname: "Coordinator", agentRole: "lead", preview: "Coordinate nested work" } } });
-    send({ method: "item/started", params: { threadId: "child-parent", turnId: "child-parent-turn", item: { id: "child-parent-command", type: "commandExecution", command: "npm run lint -- --fix", status: "inProgress" } } });
-    send({ method: "item/completed", params: { threadId: "child-parent", turnId: "child-parent-turn", item: { id: "child-parent-command", type: "commandExecution", command: "npm run lint -- --fix", status: "completed", aggregatedOutput: "CHILD_COMMAND_OUTPUT" } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId: "child-parent", turnId: "child-parent-turn", item: { id: "child-parent-command", type: "commandExecution", command: "npm run lint -- --fix", status: "inProgress" } } });
+    send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId: "child-parent", turnId: "child-parent-turn", item: { id: "child-parent-command", type: "commandExecution", command: "npm run lint -- --fix", status: "completed", aggregatedOutput: "CHILD_COMMAND_OUTPUT" } } });
     send({ method: "thread/tokenUsage/updated", params: { threadId: "thread-foreign", turnId: "foreign-turn", tokenUsage: { total: { totalTokens: 999999 }, last: { totalTokens: 999 }, modelContextWindow: 1000 } } });
-    send({ method: "item/started", params: { threadId: "child-parent", turnId: "child-parent-turn", item: { type: "collabAgentToolCall", id: "spawn-grandchildren", tool: "spawnAgent", status: "inProgress", senderThreadId: "child-parent", receiverThreadIds: ["grandchild-a", "grandchild-b"], prompt: "Check two independent paths", model: null, reasoningEffort: null, agentsStates: { "grandchild-a": { status: "running", message: "Checking A" }, "grandchild-b": { status: "pendingInit", message: null } } } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId: "child-parent", turnId: "child-parent-turn", item: { type: "collabAgentToolCall", id: "spawn-grandchildren", tool: "spawnAgent", status: "inProgress", senderThreadId: "child-parent", receiverThreadIds: ["grandchild-a", "grandchild-b"], prompt: "Check two independent paths", model: null, reasoningEffort: null, agentsStates: { "grandchild-a": { status: "running", message: "Checking A" }, "grandchild-b": { status: "pendingInit", message: null } } } } });
     send({ method: "thread/started", params: { thread: { id: "grandchild-a", parentThreadId: "child-parent", agentNickname: "Nested A", agentRole: "tester", preview: "Check path A" } } });
     send({ method: "thread/started", params: { thread: { id: "grandchild-b", parentThreadId: "child-parent", agentNickname: "Nested B", agentRole: "tester", preview: "Check path B" } } });
-    send({ method: "item/started", params: { threadId: "grandchild-a", turnId: "grandchild-a-turn", item: { id: "grandchild-a-files", type: "fileChange", status: "inProgress", changes: [{ path: "src/nested-a.ts", kind: "update", diff: "" }] } } });
-    send({ method: "thread/tokenUsage/updated", params: { threadId: "grandchild-a", turnId: "grandchild-a-turn", tokenUsage: { total: { totalTokens: 5400, inputTokens: 5000, cachedInputTokens: 1200, outputTokens: 400, reasoningOutputTokens: 64 }, last: { totalTokens: 900, inputTokens: 800, cachedInputTokens: 300, cacheWriteInputTokens: 50, outputTokens: 100, reasoningOutputTokens: 16 }, modelContextWindow: 258400 } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId: "grandchild-a", turnId: "grandchild-a-turn", item: { id: "grandchild-a-files", type: "fileChange", status: "inProgress", changes: [{ path: "src/nested-a.ts", kind: "update", diff: "" }] } } });
+    send({ method: "thread/tokenUsage/updated", params: { threadId: "grandchild-a", turnId: "grandchild-a-turn", tokenUsage: { total: { totalTokens: 5400, inputTokens: 5000, cachedInputTokens: 1200, cacheWriteInputTokens: 50, outputTokens: 400, reasoningOutputTokens: 64 }, last: { totalTokens: 900, inputTokens: 800, cachedInputTokens: 300, cacheWriteInputTokens: 50, outputTokens: 100, reasoningOutputTokens: 16 }, modelContextWindow: 258400 } } });
     send({ method: "thread/tokenUsage/updated", params: { threadId: "grandchild-b", turnId: "grandchild-b-turn", tokenUsage: "malformed" } });
-    send({ method: "turn/completed", params: { threadId: "grandchild-a", turn: { id: "grandchild-a-turn", status: "completed", items: [], error: null } } });
-    send({ method: "turn/completed", params: { threadId: "grandchild-b", turn: { id: "grandchild-b-turn", status: "failed", items: [], error: { message: "Path B failed." } } } });
-    send({ method: "turn/completed", params: { threadId: "child-parent", turn: { id: "child-parent-turn", status: "completed", items: [], error: null } } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "turn/completed", params: { threadId: "grandchild-a", turn: turnShape("grandchild-a-turn", "completed") } });
+    send({ method: "turn/completed", params: { threadId: "grandchild-b", turn: turnShape("grandchild-b-turn", "failed", turnError("Path B failed.")) } });
+    send({ method: "turn/completed", params: { threadId: "child-parent", turn: turnShape("child-parent-turn", "completed") } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     return;
   }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "unknown-collab-state") {
-    send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-unknown", tool: "spawnAgent", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-future", "child-shutdown"], prompt: "Preserve unknown states", model: null, reasoningEffort: null, agentsStates: { "child-future": { status: "futureState", message: "A newer provider state" }, "child-shutdown": { status: "shutdown", message: "Worker shut down" } } } } });
-    send({ method: "item/completed", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale-shutdown", tool: "wait", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-shutdown"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-shutdown": { status: "futureState", message: "A stale live snapshot" } } } } });
-    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-unknown", tool: "spawnAgent", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-future", "child-shutdown"], prompt: "Preserve unknown states", model: null, reasoningEffort: null, agentsStates: { "child-future": { status: "futureState", message: "A newer provider state" }, "child-shutdown": { status: "shutdown", message: "Worker shut down" } } } } });
+    send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale-shutdown", tool: "wait", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-shutdown"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-shutdown": { status: "futureState", message: "A stale live snapshot" } } } } });
+    send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     setTimeout(() => {
-      send({ method: "turn/completed", params: { threadId: "child-shutdown", turn: { id: "child-shutdown-turn", status: "completed", items: [], error: null } } });
-      send({ method: "item/completed", params: { threadId: "child-future", turnId: "child-future-turn", item: { type: "agentMessage", id: "child-future-message", text: "The future state completed directly." } } });
-      send({ method: "turn/completed", params: { threadId: "child-future", turn: { id: "child-future-turn", status: "completed", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId: "child-shutdown", turn: turnShape("child-shutdown-turn", "completed") } });
+      send({ method: "item/completed", params: { completedAtMs: Date.now(), threadId: "child-future", turnId: "child-future-turn", item: { type: "agentMessage", id: "child-future-message", text: "The future state completed directly." } } });
+      send({ method: "turn/completed", params: { threadId: "child-future", turn: turnShape("child-future-turn", "completed") } });
       turnId = "turn-after-future-child";
-      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } });
+      send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } });
     }, 20);
     return;
   }
@@ -532,15 +576,21 @@ if (message.method === "turn/start") {
       ? "child-approval"
       : threadId;
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
-    send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-approval", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: [approvalThreadId], prompt: "Run a supervised check", model: null, reasoningEffort: null, agentsStates: { [approvalThreadId]: { status: "running", message: "Waiting for approval" } } } } });
+    send({ method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-approval", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: [approvalThreadId], prompt: "Run a supervised check", model: null, reasoningEffort: null, agentsStates: { [approvalThreadId]: { status: "running", message: "Waiting for approval" } } } } });
     send({ method: "thread/started", params: { thread: { id: approvalThreadId, parentThreadId: threadId, agentNickname: "Approval verifier", agentRole: "tester", preview: "Run a supervised check" } } });
   }
   const params = process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-decisions"
-    ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["acceptForSession"] }
+    ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "npm test", cwd: process.cwd(), commandActions: [], availableDecisions: ["acceptForSession"] }
     : process.env.INERTIA_APP_SERVER_SCENARIO === "nullable-decisions"
-      ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: null }
+      ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "npm test", cwd: process.cwd(), commandActions: [], availableDecisions: null }
     : process.env.INERTIA_APP_SERVER_SCENARIO === "mixed-decisions"
-      ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["accept", "acceptForSession", { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["prefix_rule(allow = [npm, test])"] } }, "decline", "cancel"] }
+      ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "npm test", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "acceptForSession", { acceptWithExecpolicyAmendment: { execpolicy_amendment: ["prefix_rule(allow = [npm, test])"] } }, "decline", "cancel"] }
+    : process.env.INERTIA_APP_SERVER_SCENARIO === "multiline-approval"
+      ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "/bin/zsh -lc 'python3 - <<EOF\\nprint(1)\\nEOF'", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] }
+    : process.env.INERTIA_APP_SERVER_SCENARIO === "write-stdin-approval"
+      ? { kind: "writeStdin", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), approvalId: "stdin-approval-1", environmentId: "local", command: "write_stdin --session-id 7 'yes\\n'", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] }
+    : process.env.INERTIA_APP_SERVER_SCENARIO === "undisplayable-approval"
+      ? { kind: "command", threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), environmentId: null, command: "/bin/zsh -lc 'printf \\u001b[2J'", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] }
     : approvalMethod === "execCommandApproval"
       ? { conversationId: approvalThreadId, callId: "command-1", command: ["npm", "test"], parsedCmd: [], cwd: process.cwd(), reason: "Validate the change" }
     : approvalMethod === "applyPatchApproval"
@@ -568,18 +618,22 @@ if (message.method === "turn/start") {
           },
         }
     : {
+        kind: "command",
         threadId: approvalThreadId,
         turnId,
         itemId: "command-1",
         startedAtMs: Date.now(),
+        environmentId: null,
         command: "npm test",
         cwd: process.cwd(),
+        commandActions: [],
         reason: "Validate the change",
         networkApprovalContext: { host: "registry.npmjs.org", protocol: "https" },
         additionalPermissions: {
           network: { enabled: true },
           fileSystem: { read: [path.join(process.cwd(), "fixtures")], write: [path.join(process.cwd(), "coverage")], entries: [] },
         },
+        availableDecisions: ["accept", "acceptForSession", "cancel"],
       };
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "server-resolved-approval") {
     send({ id: "approval-rpc", method: approvalMethod, params });
@@ -592,7 +646,7 @@ if (message.method === "turn/start") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
     params.turnId = "child-approval-turn";
     send({ id: "approval-rpc", method: approvalMethod, params });
-    return send({ method: "turn/started", params: { threadId: approvalThreadId, turn: { id: "child-approval-turn", status: "inProgress" } } });
+    return send({ method: "turn/started", params: { threadId: approvalThreadId, turn: turnShape("child-approval-turn", "inProgress") } });
   }
   return send({ id: "approval-rpc", method: approvalMethod, params });
 }
@@ -618,7 +672,7 @@ if (message.method === "turn/steer") {
   if (scenario === "steer-receipt-late") {
     setTimeout(() => sendBatch([
       { id: message.id, result: { turnId } },
-      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
     ]), 1_500);
     return;
   }
@@ -629,23 +683,23 @@ if (message.method === "turn/steer") {
     : { turnId };
   sendBatch([
     { id: message.id, result: receipt },
-    { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
   ]);
   return;
 }
 if (message.id === "late-approval" && message.method === undefined) {
   send({ id: heldInterruptId, result: {} });
-  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+  send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "interrupted") } });
   return;
 }
 if (message.method === "turn/interrupt") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-after-interrupt") {
     heldInterruptId = message.id;
-    send({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId, itemId: "command-late", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd() } });
+    send({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { kind: "command", threadId, turnId, itemId: "command-late", startedAtMs: Date.now(), environmentId: null, command: "npm test", cwd: process.cwd(), commandActions: [], availableDecisions: ["accept", "cancel"] } });
     return;
   }
   send({ id: message.id, result: {} });
-  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+  send({ method: "turn/completed", params: { threadId, turn: turnShape(turnId, "interrupted") } });
 }
 });
 `);

@@ -933,7 +933,27 @@ describe("production provider lifecycle conformance", () => {
   );
 
   it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) =>
-    harnessId === "cursor-acp" || harnessId === "kimi-acp"))(
+    harnessId === "kimi-acp"))(
+    "$harnessId refuses explicit compaction before launch",
+    async (route) => {
+      const controlled = controlledManager(route, route.providerId, true);
+      const input = inputFor(route);
+      await controlled.manager.detect(route.providerId);
+      expect(controlled.manager.providerCapabilityAdmissible(
+        input,
+        "compaction",
+      )).toBe(false);
+      expect(() => controlled.manager.run({
+        ...input,
+        sessionId: "kimi-session",
+        operation: { kind: "compact" },
+      })).toThrow(/does not attest 'compaction'/u);
+      expect(controlled.starts).toHaveLength(0);
+    },
+  );
+
+  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) =>
+    harnessId === "cursor-acp"))(
     "$harnessId admits an exact negotiation attempt without advertising availability",
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);

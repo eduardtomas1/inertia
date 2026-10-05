@@ -47,6 +47,77 @@ describe("Codex protocol seams", () => {
     );
   });
 
+  it("displays multi-line, tabbed, and terminal-input commands exactly", () => {
+    const owner = { threadId: "thread-1", turnId: "turn-1", itemId: "call-1", startedAtMs: 1, environmentId: null };
+    for (const command of [
+      "/bin/zsh -lc 'python3 - <<'\"'\"'EOF'\"'\"'\nprint(1)\nEOF'",
+      "/bin/zsh -lc 'cat <<-EOF\n\tindented\nEOF'",
+      "/bin/zsh -lc 'printf a\r\nb'",
+    ]) {
+      const parsed = parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+        kind: "command",
+        ...owner,
+        command,
+        cwd: "/workspace",
+        commandActions: [],
+        availableDecisions: ["accept", "cancel"],
+      });
+      expect(parsed).toMatchObject({
+        protocol: "decision",
+        request: { kind: "command", title: "Approve command", command, detail: command, availableDecisions: ["approve", "cancel"] },
+      });
+      expect(parsed).not.toHaveProperty("undisplayable");
+    }
+    const stdin = parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      kind: "writeStdin",
+      ...owner,
+      approvalId: "stdin-approval",
+      command: "write_stdin --session-id 7 'yes\n'",
+      cwd: "/workspace",
+      availableDecisions: ["accept", "cancel"],
+    });
+    expect(stdin).toMatchObject({
+      protocol: "decision",
+      request: {
+        kind: "command",
+        title: "Send input to running command",
+        command: "write_stdin --session-id 7 'yes\n'",
+        availableDecisions: ["approve", "cancel"],
+      },
+    });
+    expect(stdin).not.toHaveProperty("undisplayable");
+  });
+
+  it("marks a command it cannot display safely for a bounded decline", () => {
+    for (const command of [
+      `echo ${"x".repeat(4_000)}`,
+      "npm\u001btest",
+      "npm\u007ftest",
+      "npm\u0000test",
+      "echo ‮evil",
+      "echo  next",
+      "   ",
+    ]) {
+      const parsed = parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+        kind: "command",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        command,
+        cwd: "/workspace",
+      });
+      expect(parsed).toMatchObject({ protocol: "decision", undisplayable: true });
+      expect(JSON.stringify(parsed?.request)).not.toContain(command);
+    }
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: ["npm", "test"],
+      cwd: "/workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: "npm\u001btest",
+      cwd: "relative-workspace",
+    })).toBeUndefined();
+  });
+
   it("represents installed legacy supervised approvals without exposing patch content", () => {
     expect(parseCodexApprovalRequest("execCommandApproval", {
       conversationId: "thread-legacy",
@@ -204,10 +275,6 @@ describe("Codex protocol seams", () => {
       },
     })).toBeUndefined();
     expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
-      command: `echo ${"x".repeat(4_000)}`,
-      cwd: "/workspace",
-    })).toBeUndefined();
-    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
       command: "npm test",
       cwd: "relative-workspace",
     })).toBeUndefined();
@@ -258,13 +325,6 @@ describe("Codex protocol seams", () => {
       },
     })).toBeUndefined();
     for (const controlCharacter of ["\t", "\u001b", "\u007f"]) {
-      expect(parseCodexApprovalRequest(
-        "item/commandExecution/requestApproval",
-        {
-          command: `npm${controlCharacter}test`,
-          cwd: "/workspace",
-        },
-      )).toBeUndefined();
       expect(parseCodexApprovalRequest(
         "item/permissions/requestApproval",
         {
@@ -368,6 +428,28 @@ describe("Codex protocol seams", () => {
     });
     expect(codexInputAnswers(request!, { target: ["Local"] })).toEqual({ target: { answers: ["Local"] } });
     expect(codexInputAnswers(request!, { target: [""] })).toBeUndefined();
+  });
+
+  it("treats schema-native null options as a free-text question", () => {
+    const request = parseCodexInputRequest("item/tool/requestUserInput", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      isBlocking: true,
+      autoResolutionMs: null,
+      questions: [{
+        id: "notes", header: "Notes", question: "Anything else?", isOther: true, isSecret: false, options: null,
+      }],
+    });
+
+    expect(request).toMatchObject({
+      autoResolutionMs: null,
+      questions: [{ id: "notes", header: "Notes", question: "Anything else?", isOther: true, options: [] }],
+    });
+    expect(codexInputAnswers(request!, { notes: ["Ship it"] })).toEqual({ notes: { answers: ["Ship it"] } });
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [{ id: "notes", question: "Anything else?", options: "none" }],
+    })).toBeUndefined();
   });
 
   it("rejects user-input payloads that cannot be represented without truncation", () => {

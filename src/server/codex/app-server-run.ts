@@ -941,9 +941,6 @@ export async function openCodexTurn({
     approvalsReviewer: "user",
     sandbox: accessPolicy.threadSandbox,
     ...(options.model ? { model: options.model } : {}),
-    ...(options.reasoningEffort
-      ? { effort: options.reasoningEffort }
-      : {}),
     ...(options.serviceTier !== undefined
       ? { serviceTier: options.serviceTier }
       : {}),
@@ -1024,6 +1021,12 @@ export async function openCodexTurn({
 
   if (options.goalStart) {
     setPhase("starting-turn");
+    if (options.reasoningEffort) {
+      await request("thread/settings/update", {
+        threadId: openedThreadId,
+        effort: options.reasoningEffort,
+      });
+    }
     const params: JsonObject = {
       threadId: openedThreadId,
       status: "active",

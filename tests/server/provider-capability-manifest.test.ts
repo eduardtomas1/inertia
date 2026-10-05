@@ -183,7 +183,11 @@ describe("provider capability manifests", () => {
     const kimi = manifest("kimi-acp");
     expect(capability(kimi, "structured-input").support).toBe("native");
     expect(capability(kimi, "images").support).toBe("negotiated");
-    expect(capability(kimi, "compaction").support).toBe("negotiated");
+    expect(capability(kimi, "compaction")).toMatchObject({
+      support: "unavailable",
+      fallback: "reject-unsupported-operation",
+      unavailableReasonCode: "unsupported-operation",
+    });
     expect(capability(kimi, "model-discovery").support).toBe("negotiated");
     expect(capability(kimi, "maintenance-update").support)
       .toBe("unavailable");

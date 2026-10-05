@@ -420,6 +420,13 @@ export class CodexAppServerEvents {
         this.host.cancel("malformed-protocol");
         return;
       }
+      if (parsedApproval.undisplayable) {
+        this.host.writeMessage({ id, result: codexApprovalResult(parsedApproval.protocol, "deny") });
+        this.emitActivity("system", "info", params.kind === "writeStdin"
+          ? "Declined input to a running command that Inertia cannot display safely"
+          : "Declined a Codex command that Inertia cannot display safely");
+        return;
+      }
       if (approval.availableDecisions.length === 0) {
         const message =
           "Codex offered no approval decision supported by this client.";
@@ -721,6 +728,11 @@ export class CodexAppServerEvents {
       this.host.options.onText?.(delta);
       return;
     }
+    if (method === "item/reasoning/summaryPartAdded") {
+      const itemId = boundedText(params.itemId, 512);
+      if (itemId && this.reasoningDeltaItems.has(itemId)) this.host.options.onReasoning?.("\n");
+      return;
+    }
     if (method === "item/reasoning/summaryTextDelta") {
       const delta = stringValue(params.delta);
       if (!delta) return;
@@ -828,10 +840,6 @@ export class CodexAppServerEvents {
           : "Codex rerouted the model",
         reason ? { detail: `Reason:\n${reason}` } : undefined,
       );
-      return;
-    }
-    if (method === "thread/compacted") {
-      this.emitActivity("system", "completed", "Context compacted");
       return;
     }
     if (method === "item/plan/delta") {

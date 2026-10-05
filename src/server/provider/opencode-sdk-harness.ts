@@ -529,7 +529,7 @@ function startOpenCodeRun(
             {
               sessionID: sessionId!,
               directory: options.input.cwd,
-              permission: openCodePermissions(options.input.access),
+              permission: openCodePermissions(options.input.access, options.input.interactionMode),
             },
             { signal, throwOnError: true },
           ),
@@ -541,7 +541,7 @@ function startOpenCodeRun(
             directory: options.input.cwd,
             ...(selectedModel ? { model: { id: selectedModel.id, providerID: selectedModel.providerID, ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}) } } : {}),
             ...(agent ? { agent: agent.name } : {}),
-            permission: openCodePermissions(options.input.access),
+            permission: openCodePermissions(options.input.access, options.input.interactionMode),
           }, { signal, throwOnError: true }),
         );
         const safeSessionId = hostTools?.redactPayload(created.data.id)

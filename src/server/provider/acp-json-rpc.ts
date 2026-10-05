@@ -113,8 +113,13 @@ function validSessionUpdate(update: Record<string, unknown> & { sessionUpdate: s
           || update._meta === null
           || Boolean(record(update._meta))
         );
-    default:
+    case "notice":
+    case "subagent_update":
+    case "session_message":
+    case "session_message_chunk":
       return false;
+    default:
+      return validProtocolIdentifier(update.sessionUpdate);
   }
 }
 

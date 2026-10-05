@@ -63,9 +63,7 @@ import {
 } from "./kimi-acp-support";
 import {
   configureKimiSession,
-  kimiCompactCommand,
   kimiPrompt,
-  waitForKimiCommandAdvertisement,
   withKimiRpcDeadline,
 } from "./kimi-acp-session";
 import { providerProcessInvocation } from "./process";
@@ -79,11 +77,9 @@ import {
   validateKimiInitialize,
 } from "./kimi-acp-projection";
 import { selectKimiAcpAuthMethod } from "./acp-terminal-auth";
-import {
-  AcpCompactionProjection,
-  unconfirmedAcpCompactionFailure,
-} from "./acp-compaction-projection";
+import { AcpCompactionProjection } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import { KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from "../../shared/provider";
 import {
   kimiInputOptions,
   type KimiInputOptions,
@@ -98,10 +94,8 @@ const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_TOOL_STATE_TEXT_CHARS = 4 * 1024;
-const MAX_AVAILABLE_COMMANDS = 256;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
-const COMMAND_ADVERTISEMENT_TIMEOUT_MS = 2_000;
 const CONTROL_RPC_TIMEOUT_MS = 30_000;
 
 export const KIMI_ACP_CAPABILITIES = {
@@ -125,8 +119,6 @@ export const KIMI_ACP_CAPABILITIES = {
 export interface KimiAcpHarnessOptions {
   /** Test seam for the owned ACP process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
-  /** Test seam for the bounded post-resume command advertisement wait. */
-  commandAdvertisementTimeoutMs?: number;
   /** Test seam for bounded initialize/auth/session/configuration RPCs. */
   controlRpcTimeoutMs?: number;
   /** Test seam for proving host-tool cleanup authority. */
@@ -176,7 +168,6 @@ export function createKimiAcpHarness(
     start: (startOptions) => startKimiRun(
       startOptions,
       options.terminateProcessTree,
-      options.commandAdvertisementTimeoutMs,
       options.controlRpcTimeoutMs,
       options.createHostMcpSession,
     ),
@@ -186,7 +177,6 @@ export function createKimiAcpHarness(
 function startKimiRun(
   options: AgentHarnessStartOptions,
   terminateProcessTree?: ProcessTreeTerminator,
-  commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
   createHostMcpSession = createProviderHostToolMcpSession,
 ): AgentHarnessRun {
@@ -239,16 +229,10 @@ function startKimiRun(
   let promptInFlight = false;
   let supportsImages = false;
   let activeContext: acp.ClientContext | undefined;
-  let availableCommandNames: Set<string> | null = null;
-  let acceptsCommandAdvertisement = false;
   let activeFailurePhase = "initialize";
   let activeTerminalEvent = "initialize";
   let processError: Error | undefined;
   let wireError: Error | undefined;
-  let resolveCommandAdvertisement!: () => void;
-  const commandAdvertisement = new Promise<void>((resolve) => {
-    resolveCommandAdvertisement = resolve;
-  });
   let child: ChildProcessWithoutNullStreams;
   let requestProcessTermination = (_force: boolean): void => {};
 
@@ -327,17 +311,6 @@ function startKimiRun(
           || params.sessionId !== sessionId
         ) return;
         if (
-          acceptsCommandAdvertisement
-          && params.update.sessionUpdate === "available_commands_update"
-        ) {
-          availableCommandNames = new Set(
-            params.update.availableCommands
-              .slice(0, MAX_AVAILABLE_COMMANDS)
-              .map(({ name }) => name.replace(/^\//u, "").toLowerCase()),
-          );
-          resolveCommandAdvertisement();
-        }
-        if (
           !sessionReady
           || !promptInFlight
         ) return;
@@ -361,6 +334,14 @@ function startKimiRun(
     });
 
   emitter.status("starting");
+  if (options.input.operation?.kind === "compact") {
+    return failedKimiRun(options.input, {
+      reason: "provider-error",
+      message: KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+      phase: "operation",
+      terminalEvent: "operation/compact-unsupported",
+    }, emitter);
+  }
   try {
     const invocation = kimiAcpProcessInvocation(
       options.executable,
@@ -474,7 +455,6 @@ function startKimiRun(
       let modes: SessionModeState | null | undefined;
       let configOptions: SessionConfigOption[] | null | undefined;
       if (options.input.sessionId) {
-        acceptsCommandAdvertisement = true;
         const supportsSessionResume = Boolean(
           initialized.agentCapabilities?.sessionCapabilities?.resume
           || initialized.agentCapabilities?.loadSession === true,
@@ -544,30 +524,8 @@ function startKimiRun(
       );
       emitKimiMetadata(configuredOptions, supportsImages, emitter);
 
-      if (options.input.operation?.kind === "compact") {
-        await waitForKimiCommandAdvertisement(
-          commandAdvertisement,
-          commandAdvertisementTimeoutMs,
-        );
-        if (availableCommandNames === null) {
-          throw new Error(
-            "This Kimi ACP session did not advertise its available commands.",
-          );
-        }
-        if (!availableCommandNames.has("compact")) {
-          emitter.capability("compaction", false);
-          throw new Error(
-            "This Kimi ACP session does not advertise its compact command.",
-          );
-        }
-        emitter.capability("compaction", true);
-      }
-
-      const providerPrompt = options.input.operation?.kind === "compact"
-        ? kimiCompactCommand(options.input.operation.instruction)
-        : options.input.prompt;
       const prompt = await kimiPrompt(
-        providerPrompt,
+        options.input.prompt,
         options.input.imagePaths ?? [],
         initialized,
         promptPreparationAbort.signal,
@@ -591,14 +549,10 @@ function startKimiRun(
       if (response.usage) {
         emitKimiPromptUsage(response.usage, contextUsage, emitter);
       }
-      const compactionFailure = options.input.operation?.kind === "compact"
-        && compactions.completionEvidence() !== "completed"
-        ? unconfirmedAcpCompactionFailure("Kimi")
-        : undefined;
       if (
         !cancelRequested
         && response.stopReason === "end_turn"
-        && (options.input.operation?.kind === "compact" ? !compactionFailure : turnEvidence.seen)
+        && turnEvidence.seen
       ) {
         finishOutputStreams();
       } else {
@@ -610,12 +564,8 @@ function startKimiRun(
           // Current Kimi ACP collapses most internal failed turns into
           // end_turn. Empty turns can fail closed; partial-output failures are
           // wire-indistinguishable until the upstream adapter exposes them.
-          ? options.input.operation?.kind === "compact"
-            ? compactionFailure
-              ? finish("failed", compactionFailure.message, compactionFailure)
-              : finish("completed")
-            : turnEvidence.seen
-              ? finish("completed")
+          ? turnEvidence.seen
+            ? finish("completed")
             : (() => {
                 const failure: ProviderRunFailure = {
                   reason: "provider-error",
@@ -1110,16 +1060,15 @@ function handleKimiUpdate(
         );
       }
       return;
-    case "usage_update":
-      contextUsage.usedTokens = tokenCount(update.used);
-      contextUsage.maxTokens = tokenCount(update.size);
-      if (
-        contextUsage.usedTokens === null
-        || contextUsage.maxTokens === null
-        || contextUsage.usedTokens > contextUsage.maxTokens
-      ) {
+    case "usage_update": {
+      const usedTokens = tokenCount(update.used);
+      const maxTokens = tokenCount(update.size);
+      if (usedTokens === null || maxTokens === null) {
         throw new Error("Kimi Code ACP sent a malformed usage update.");
       }
+      if (usedTokens > maxTokens) return;
+      contextUsage.usedTokens = usedTokens;
+      contextUsage.maxTokens = maxTokens;
       emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
@@ -1137,6 +1086,7 @@ function handleKimiUpdate(
         },
       });
       return;
+    }
     case "compaction_update":
       compactions.observeUpdate(update);
       return;
@@ -1148,13 +1098,11 @@ function handleKimiUpdate(
       return;
     case "notice":
       throw new Error("Kimi ACP sent a notice without negotiated support.");
+    case "subagent_update":
+    case "session_message":
+    case "session_message_chunk":
+      throw new Error("Kimi ACP sent a subagent update without negotiated support.");
   }
-  const unsupportedUpdate: never = update;
-  throw new Error(
-    `Kimi ACP sent an unsupported session update: ${String(
-      (unsupportedUpdate as { sessionUpdate?: unknown }).sessionUpdate,
-    )}.`,
-  );
 }
 
 function failedKimiRun(
@@ -1168,6 +1116,7 @@ function failedKimiRun(
     providerId: "kimi",
     result: Promise.resolve({
       ...providerRunTerminal(input, "failed", failure),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       text: "",
       textTruncated: false,
       exitCode: null,

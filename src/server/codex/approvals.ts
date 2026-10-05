@@ -25,6 +25,7 @@ export interface ParsedCodexApprovalRequest {
   providerThreadId?: string;
   providerTurnId?: string;
   requestedPermissions?: JsonObject;
+  undisplayable?: true;
 }
 
 export function isCodexApprovalRequestMethod(method: string): boolean {
@@ -47,6 +48,13 @@ function strictBoundedText(
     || value.length > maxChars
   ) return undefined;
   return value.trim().length > 0 ? value : undefined;
+}
+
+function commandText(value: unknown): string | undefined {
+  return typeof value === "string"
+    && strictBoundedText(value.replaceAll("\t", " "), 4_000, true)
+    ? value
+    : undefined;
 }
 
 function exactFilesystemPath(value: unknown): string | undefined {
@@ -322,7 +330,10 @@ function isKnownPersistentApprovalDecision(value: unknown): boolean {
 
 export function parseCodexApprovalRequest(method: string, params: JsonObject): ParsedCodexApprovalRequest | undefined {
   const requestId = randomUUID();
-  const command = strictBoundedText(params.command, 4_000);
+  const command = commandText(params.command);
+  const undisplayable = method === "item/commandExecution/requestApproval"
+    && typeof params.command === "string"
+    && !command;
   const cwd = exactFilesystemPath(params.cwd);
   const reason = strictBoundedText(params.reason, 1_000, true);
   const providerThreadId = strictBoundedText(params.threadId, 512);
@@ -336,6 +347,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     method !== "execCommandApproval"
     && Object.prototype.hasOwnProperty.call(params, "command")
     && !command
+    && !undisplayable
   ) return undefined;
   if (
     Object.prototype.hasOwnProperty.call(params, "threadId")
@@ -464,10 +476,13 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
       protocol: "decision",
       ...(providerThreadId ? { providerThreadId } : {}),
       ...(providerTurnId ? { providerTurnId } : {}),
+      ...(undisplayable ? { undisplayable } : {}),
       request: {
         requestId,
         kind: "command",
-        title: "Approve command",
+        title: params.kind === "writeStdin"
+          ? "Send input to running command"
+          : "Approve command",
         ...(command ? { command } : {}),
         ...(cwd ? { cwd } : {}),
         ...(reason ? { reason } : {}),

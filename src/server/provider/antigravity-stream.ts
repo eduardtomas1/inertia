@@ -200,7 +200,7 @@ export function antigravityAuthRequired(detail: string): boolean {
 }
 
 export function antigravityDeclinedNotice(line: string): boolean {
-  return /\b(?:soft[- ]denied|denied|declined|requires approval|needs approval)\b/iu.test(line);
+  return /\b(?:auto|soft)-denied\b/iu.test(line);
 }
 
 export function antigravityFailure(

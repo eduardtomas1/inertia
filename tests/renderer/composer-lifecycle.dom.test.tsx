@@ -24,6 +24,7 @@ import {
   versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
+import { KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from "../../src/shared/provider";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
   DRAFT_PERSISTENCE_DELAY_MS,
@@ -497,6 +498,28 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(input).toHaveValue(""));
     expect(screen.getByText("Context compacted with the focus instruction."))
       .toBeVisible();
+  });
+
+  it("refuses /compact for Kimi Code and says why in the command menu", async () => {
+    const current = {
+      ...conversation("07070707-0707-4707-8707-070707070708"),
+      providerId: "kimi" as const,
+      modelSelection: providerNativeModelSelection({ providerId: "kimi" }),
+    };
+    const onCompact = vi.fn(async () => ({ message: "Compacted.", instructionForwarded: false }));
+    render(<Composer {...composerProps(current, { onCompact })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/com" } });
+    expect(await screen.findByText(`Unavailable: ${KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON}`))
+      .toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "/compact keep the plan" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByRole("alert"))
+      .toHaveTextContent(KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON));
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(input).toHaveValue("/compact keep the plan");
   });
 
   it("settles the hidden compaction owner without touching the active draft", async () => {

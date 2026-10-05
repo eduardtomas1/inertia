@@ -10,6 +10,7 @@ import {
 
 import {
   ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+  KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
   type ProviderId,
 } from "../../../../shared/provider";
 import type { CompactComposerCommand } from "../../utils/composerCommands";
@@ -73,7 +74,9 @@ export function useComposerCompaction(options: {
   const activeOperations = useRef(new Map<string, number>());
   const compactUnavailableReason = continuationRefusal ?? (providerId === "antigravity"
     ? ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
-    : null);
+    : providerId === "kimi"
+      ? KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
+      : null);
   const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {
     setCompactNotices((current) => {

@@ -2,6 +2,148 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.67 — 2026-10-05
+
+A rebuilt Settings page with search, a Diagnostics page you control, a
+three-step Report an issue, and a Background tasks panel that shows what each
+sub-agent is doing and the tokens it uses. Custom colours now reach the whole
+app, and every provider integration is brought up to date with its current
+release, with fixes for turns that could fail or end the wrong way.
+
+### Settings
+
+- Settings is one page with nine sections in a fixed order: **Appearance**,
+  **Chats**, **Notifications**, **Keyboard**, **Projects**, **Agents**,
+  **Devices & integrations**, **Data** and **Help**. Settings that lived in two
+  or three places now have one home; new-chat defaults live only in **Chats →
+  New chats**, and projects show just their own overrides as "Default (…)".
+- Every control saves on its own and says "Saved", or the error, in its own
+  row. Typing quickly in the Discord repository URL no longer drops characters,
+  and the terminal font slider no longer snaps back.
+- Settings behaves as a mode: ⌘, (Ctrl+, on Windows and Linux) opens and closes
+  it, the header gear becomes **Close settings**, and Escape leaves it. Text
+  you are typing is never thrown away: the first Escape only leaves the field.
+  The last section is remembered and focus returns where it was.
+- Search inside Settings from the field above the section list, and find any
+  setting from the command palette, which now has one entry per setting.
+- New settings: quota warnings at 25, 15 or 5 % remaining; desktop
+  notifications only while Inertia is in the background; a default access mode
+  per project; **Animate mascot**; and the repository display limit.
+- When the stored default provider for new chats is not installed, connected or
+  runnable, new chats use the first ready provider, and the Model row says so.
+- The Discord repository URL must be an HTTPS GitHub or GitLab repository, and
+  **Post release to Discord…** asks for confirmation first. **Restore
+  defaults** moves to the end of **Data**, says what it resets and keeps, and
+  asks inline. Archived chats are listed newest first with a filter and pages
+  of 20.
+
+### Diagnostics and Report an issue
+
+- **Settings → Help → Diagnostics** has a switch to turn diagnostics capture off
+  and on, **Clear history**, and one **Recent events** list with filters and
+  search. Copy support summary, Reveal log folder and process health moved
+  here. While capture is off nothing is stored except a minimal record of app
+  start and stop, runtime failures, restarts and renderer crashes.
+- Runtime error output, main-process failures you can act on and renderer
+  crashes are now recorded as coded events instead of being lost. Incidents
+  have their own log budget, so they no longer push out lifecycle events.
+- **Report an issue** is three steps: describe it, review an editable preview,
+  and create it on GitHub, copy it or open GitHub yourself. The AI validation
+  step and its model choices are gone, and nothing it wrote is published. A
+  sign-in problem shows before you start writing, hand edits are never replaced
+  without asking, and a report whose publication is uncertain is never created
+  twice.
+- Reports carry the Inertia version and channel, OS, Electron version,
+  architecture and provider, and with **Attach diagnostics** on, the
+  pseudonymised diagnostics of the last 24 hours. The scrubber now keeps
+  ordinary error lines and redacts secrets, tokens, credentials in URLs, email
+  addresses and absolute paths, including paths with spaces.
+
+### Background tasks
+
+- The Agents panel is now **Background tasks**: one plain list per chat of what
+  runs in the background, what each task is doing, its model, tokens and tool
+  uses, with Stop where stopping works. Finished tasks fold into one row and the
+  list covers the whole chat. Commands you started, Git operations and review
+  runs appear in the same list. The shortcut (A) and saved layouts are
+  unchanged.
+- In the chat, each turn with sub-agents shows one line, such as "2 agents
+  working" or "4 agents finished · 1 failed", that opens the panel on that
+  turn's tasks. It replaces the expandable delegated-tasks block.
+- Codex, Claude and OpenCode report per-task tokens and activity, and OpenCode's
+  child sessions now appear as tasks. Cursor reports its tasks when they
+  finish.
+
+### Appearance
+
+- A custom colour now drives the whole app at the strength of a preset theme:
+  accent, focus ring, links, the selected row, the terminal cursor and the send
+  button start from your colour and move only as far as contrast requires.
+- A new **Muted colours** switch in **Appearance → Theme** softens every
+  colour derived from your hues without changing their lightness.
+- The **Resume at reset** / **Snooze until reset** row is a quiet tab on top of
+  the composer instead of looking like part of the chat.
+
+### Providers and dependencies
+
+- **Codex:** Inertia is checked against Codex 0.160.0. A command approval with
+  several lines, such as a heredoc or a multi-line `python -c`, or a request to
+  send input to a running command, no longer fails the whole turn: the approval
+  is shown, and input to a running command is titled **Send input to running
+  command**. A command too long or unsafe to display is declined on its own and
+  the turn continues. Goal turns now use the reasoning effort you chose, and a
+  Codex question without options is asked as a free-text question.
+- **Claude:** Claude Agent SDK 0.3.289 (Claude Code 2.1.289). A chat refused
+  because your organization's settings don't allow its API provider now says
+  so. A follow-up you sent while Claude was answering is still answered when the
+  first answer ends in an error, or the error says it was not answered. The
+  Bash command now appears in its activity, context use after a compaction is
+  read from the right entry, and a rejected rate limit marks the turn as
+  usage-limited, so it can be resumed or snoozed until the reset.
+- **Claude skills:** a selected repository skill can no longer grant itself
+  tools, hooks or a model: those fields are ignored and its tool permissions
+  always go through Inertia's approvals. A skill that sets `context` or
+  `agent` is not offered, and is refused by name if selected.
+- **Cursor:** a sign-in, plan, payment or settings message from Cursor ends the
+  turn as an error instead of appearing as the answer. "Upgrade your plan"
+  counts as a usage limit, and "Please sign in" asks you to connect Cursor.
+  In plan mode Cursor's plan is shown to you for approval instead of being
+  cancelled.
+- **Kimi Code:** **/compact** is no longer offered, because Kimi Code compacts
+  in the background without reporting when it finishes, and Inertia used to
+  stop that compaction while reporting a failure.
+- **Cursor and Kimi Code:** a newer kind of progress update that Inertia does
+  not know yet is ignored instead of ending the turn, and an impossible context
+  size report is ignored instead of failing it.
+- **OpenCode:** plan mode now always denies file edits, whatever the access
+  mode; before, Full access and Auto-edit could edit in plan mode. OpenCode 2
+  is reported as not supported yet, and a 1.x install is used when both are
+  present.
+- **Antigravity:** only Antigravity's own auto-denial notice counts as a
+  declined approval; other lines mentioning "denied" no longer do.
+- Updated the Claude Agent SDK to 0.3.289, Anthropic SDK to 0.131.0, Agent
+  Client Protocol SDK to 1.7.0, MCP SDK to 1.32.0, OpenCode SDK to 1.18.34,
+  Electron to 44.5.1, electron-updater to 6.8.10, `@napi-rs/canvas` to 1.0.10,
+  xa11y to 0.15.2, pdf.js to 6.4.299, Lucide to 1.52.0 and ws to 8.22.0, with
+  electron-builder 26.17.0, Vitest 5.0.3 and oxlint 1.86.0 for building and
+  testing. Transitive `hono`, `fast-uri` and `ip-address` updates clear the
+  production audit.
+
+### Reliability and safety
+
+- The Git, Open and Run menus in the chat header close when you switch chat or
+  project before a click can land on a stale menu.
+- Cursor notifications that arrive together with the end of a prompt are
+  attributed in the order they were sent, and the usage-limit row retries an
+  empty first load.
+- CI only: the desktop benchmark gates on a warmed median of five launches,
+  clipboard-reading end-to-end tests run alone on the shared display, the mascot
+  approval test records the main window's state, and a Windows diagnostic test
+  is no longer bound by PowerShell startup time.
+- Migrations 88 to 91 store the new notification preferences, convert saved
+  issue reports to editable previews, add background task details and store
+  the muted colours choice.
+
 ## 0.0.66 — 2026-10-04
 
 Start a chat without opening a project, let a chat continue when your

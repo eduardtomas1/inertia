@@ -514,9 +514,6 @@ function startCodexCompaction(
           approvalsReviewer: "user",
           sandbox: accessPolicy.threadSandbox,
           ...(options.input.model ? { model: options.input.model } : {}),
-          ...(options.input.reasoningEffort
-            ? { effort: options.input.reasoningEffort }
-            : {}),
           ...(serviceTier !== undefined ? { serviceTier } : {}),
           ...(modelProvider ? {
             modelProvider: modelProvider.providerId,

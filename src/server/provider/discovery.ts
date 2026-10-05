@@ -304,6 +304,10 @@ function antigravityVersionSupportsHeadless(version: string | undefined): boolea
     && compareVersions(version, ANTIGRAVITY_MINIMUM_HEADLESS_VERSION) >= 0;
 }
 
+function openCodeVersionIsSupported(version: string | undefined): boolean {
+  return versionParts(version)[0]! < 2;
+}
+
 function nativeExecutablePreference(executable: string): number {
   return /\.exe$/iu.test(executable) ? 1 : 0;
 }
@@ -578,7 +582,9 @@ async function detectProviderRecordingCleanup(
       versionReady: providerId === "antigravity"
         ? antigravityCandidateIsIdentified(executable)
           && antigravityVersionSupportsHeadless(version)
-        : true,
+        : providerId === "opencode"
+          ? openCodeVersionIsSupported(version)
+          : true,
       acpReady,
       appServerReady,
       serveReady,
@@ -643,11 +649,14 @@ async function detectProviderRecordingCleanup(
           antigravityCandidateIsIdentified(executable)
           && probe.started && !probe.timedOut && probe.exitCode === 0)
       : undefined;
-    const providerWithoutPureServe =
-      providerId === "opencode" &&
-      versionProbes.some(
-        ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
-      );
+    const openCodeInstalls = providerId === "opencode"
+      ? versionProbes.filter(
+          ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+        )
+      : [];
+    const providerWithoutPureServe = openCodeInstalls.length > 0;
+    const openCodeTwoOnly = providerWithoutPureServe
+      && openCodeInstalls.every(({ version }) => !openCodeVersionIsSupported(version));
     return {
       provider,
       available: providerWithoutAcp || providerWithoutPureServe || Boolean(antigravityInstall),
@@ -664,6 +673,8 @@ async function detectProviderRecordingCleanup(
           ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${ANTIGRAVITY_MINIMUM_HEADLESS_VERSION} or newer; run 'agy update'`
         : providerWithoutAcp
           ? `${providerShortName(provider.name)} CLI found, but ACP is unavailable`
+          : openCodeTwoOnly
+            ? "OpenCode 2 is not supported yet; use OpenCode 1.x (opencode-ai)."
           : providerWithoutPureServe
             ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
             : providerId === "codex"

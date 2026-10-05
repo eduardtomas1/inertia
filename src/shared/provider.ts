@@ -12,3 +12,6 @@ export function harnessImageInputUnavailableReason(harnessId: string): string | 
 
 export const ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON =
   "Antigravity's headless mode does not expose explicit context compaction.";
+
+export const KIMI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON =
+  "Kimi Code compacts context in the background and does not report when it finishes, so Inertia can't confirm explicit compaction.";

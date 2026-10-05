@@ -37,8 +37,12 @@ export interface OpenCodeHostTools {
 
 export function openCodePermissions(
   access: "full" | "supervised" | "auto-edit",
+  interactionMode: "build" | "plan",
 ): PermissionRuleset {
-  if (access === "full") return [{ permission: "*", pattern: "*", action: "allow" }];
+  const planEdits = interactionMode === "plan"
+    ? [{ permission: "edit", pattern: "*", action: "deny" } as const]
+    : [];
+  if (access === "full") return [{ permission: "*", pattern: "*", action: "allow" }, ...planEdits];
   return [
     { permission: "*", pattern: "*", action: "ask" },
     ...(access === "auto-edit" ? [{ permission: "edit", pattern: "*", action: "allow" } as const] : []),
@@ -52,6 +56,7 @@ export function openCodePermissions(
       pattern: "*",
       action: "allow",
     },
+    ...planEdits,
   ];
 }
 

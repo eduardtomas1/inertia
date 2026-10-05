@@ -112,8 +112,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
     const messages = readFileSync(capturePath, "utf8").trim().split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(messages.find(({ method }) => method === (sessionId ? "thread/resume" : "thread/start")))
-      .toMatchObject({ params: { model: "gpt-6.1-sol", effort: reasoningEffort } });
+    const opened = messages.find(({ method }) => method === (sessionId ? "thread/resume" : "thread/start"));
+    expect(opened).toMatchObject({ params: { model: "gpt-6.1-sol" } });
+    expect(opened?.params).not.toHaveProperty("effort");
     const turn = messages.find(({ method }) => method === "turn/start");
     expect(turn).toMatchObject({ params: { model: "gpt-6.1-sol", effort: reasoningEffort } });
     if (interactionMode === "plan") {

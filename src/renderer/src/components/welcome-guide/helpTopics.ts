@@ -105,7 +105,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Follow-ups",
-        detail: "While an agent works, Enter sends a follow-up and Tab queues it for the next turn. Send now sends a queued message right away.",
+        detail: "While an agent works, Enter sends a follow-up and Tab queues it for the next turn. A follow-up that arrives as the turn ends is queued instead. Agents that cannot take a message mid-turn offer Stop and send. Send now sends a queued message right away.",
       },
       {
         name: "Model, reasoning and mode",

@@ -74,7 +74,7 @@ lease; it does not mean an in-memory absence proves cleanup.
 | Agent child turn | `AgentThreadManager`; parent provider/conversation/run/turn + child conversation + handoff ID | active child registry / durable conversation provenance | Child's own turn controller; parent cannot synthesize its result | Stop targets the exact active child and waits for provider cleanup. Depth, active-child, access-ceiling, and source-turn checks are revalidated before every mutation. |
 | Approval request | Turn interaction coordinator; provider/conversation/run/turn + request/call ID | one open interaction / durable projected interaction state | Current exact turn interaction state | A response atomically consumes the open request. Duplicate, replayed, late, cancelled, cross-provider, cross-run, and cross-turn responses are rejected. |
 | Structured user-input request | Turn interaction coordinator; same tuple plus input request ID | one open interaction / durable projected interaction state | Current exact turn interaction state | Schema validation and exact-owner dispatch are required. Timeout and response race through one terminal interaction transition; root terminal cleanup retires it. |
-| Follow-up/steer request | Turn controller; exact active tuple + serialized follow-up ID | process-local per-turn tail/queue; provider acknowledgement is persisted after dispatch | Current root turn | Attachment resolution and owner identity are revalidated immediately before dispatch. Cancel, terminal, continuation change, or replacement rejects queued/late work. A pre-ack in-flight follow-up has no separate durable queue record and is resolved through turn recovery after a crash. |
+| Follow-up/steer request | Turn controller; exact active tuple + serialized follow-up ID | process-local per-turn tail/queue; provider acknowledgement is persisted after dispatch | Current root turn | Attachment resolution and owner identity are revalidated immediately before dispatch. Cancel, terminal, continuation change, or replacement rejects queued/late work. A follow-up that definitely never reached the provider (the turn stopped accepting input before dispatch, or the provider refused it) is stored in the durable message queue under its request ID and sent after the turn completes; one the provider may have received stays ambiguous and is never queued or resent. A pre-ack in-flight follow-up has no separate durable queue record and is resolved through turn recovery after a crash. |
 | Host-tool request | Process-local host-tool bridge; Inertia tuple + native provider thread/turn/tool-call ID | exact-turn bridge/call registry / no provider payload persisted | Host bridge policy and exact root turn | Cancellation/terminal revokes authority and settles pending calls. Approval cannot be supplied by the provider. Late/replayed native calls are deterministic failures. |
 | Attachment work | Main attachment broker/store runner; handoff/request ID + conversation/attachment identity + owning runtime record | request and claim registries / attachment metadata and one-shot worker protocol | Main-process broker for filesystem result; turn controller for transcript use | One-shot result acknowledgement, worker close, claim release, and exact runtime ownership. Partial/corrupt work preserves user content and is reconciled without exposing paths. |
 | Artifact generation | Turn artifact owner; conversation/run/turn + artifact operation ID | pending artifact/turn state / generated attachment and turn records | Root turn's authoritative settlement controls publication | Generation is cancelled/rejected after terminal; durable artifacts remain downstream of settlement and are never used to revive a turn. Recovery preserves content under uncertainty. |
@@ -316,6 +316,14 @@ so only its recognised missing-conversation result counts.
 The token no longer retires native sessions, so a harness change that makes
 previously saved sessions unusable must retire them explicitly with a
 migration, as schema 65 did for Codex.
+
+When Inertia quits, crashes or restarts while a turn runs, that turn is
+recorded as interrupted and its live delegated tasks as lost. The first turn
+after it carries one hidden instruction that says so: the interrupted request
+and up to ten lost tasks, each at most 160 characters, the whole note at most
+4 KiB. The instruction is counted in that turn's execution manifest. It is
+derived from the previous turn rather than stored as a flag, so the turn after
+that, whose previous turn is not the interrupted one, does not repeat it.
 
 A fresh session in an established chat does not start blank. The request
 carries the chat's earlier visible messages that were already sent to the

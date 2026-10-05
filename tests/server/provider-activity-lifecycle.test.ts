@@ -102,6 +102,7 @@ async function runtime(providerId: ProviderId = "codex") {
   const scheduler = new FakeTurnScheduler();
   const events: ServerEvent[] = [];
   const shells: string[] = [];
+  const shellRunStates: (string | undefined)[] = [];
   let sequence = 0;
   const controller = new TurnController(
     store,
@@ -113,6 +114,9 @@ async function runtime(providerId: ProviderId = "codex") {
       broadcast: (event) => events.push(event),
       broadcastConversationShell: (conversationId) => {
         shells.push(conversationId);
+        shellRunStates.push(
+          store.conversationShell(conversationId)?.latestTurn?.runState?.state,
+        );
       },
       broadcastSnapshot: () => undefined,
       providerInfo: () => [providerInfo(providerId)],
@@ -146,6 +150,7 @@ async function runtime(providerId: ProviderId = "codex") {
     },
     input.runId,
     input.turnId,
+    workspace,
   );
   return {
     store,
@@ -160,6 +165,8 @@ async function runtime(providerId: ProviderId = "codex") {
     scheduler,
     events,
     shells,
+    shellRunStates,
+    workspace,
   };
 }
 
@@ -838,7 +845,7 @@ describe("durable provider activity lifecycle contract", () => {
     }
     runTimers(value.scheduler, 64);
     expect(activityEvents(value).at(-1)?.detail)
-      .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output.slice(0, output.lastIndexOf("\n") + 1)}`);
     codex.handleNotification("item/completed", {
       ...owned,
       item: item("streamed", {
@@ -939,13 +946,161 @@ describe("durable provider activity lifecycle contract", () => {
     });
 
     const projected = value.events.slice(events);
-    expect(updates).toHaveBeenCalledTimes(11);
+    expect(updates).toHaveBeenCalledTimes(12);
     expect(workspaceRunUpdates).toHaveBeenCalledTimes(1);
     expect(projected.filter(({ type }) => type === "agent.activity"))
-      .toHaveLength(12);
+      .toHaveLength(13);
     expect(value.shells.length - shells).toBe(2);
     expect(turnActivities(value)[0]?.detail)
       .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    await finish(value);
+  });
+
+  it("publishes the shell when work resumes after a retry or delegation", async () => {
+    const value = await runtime();
+    const identity = {
+      providerId: "codex" as const,
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+    };
+    const resumes = [
+      () => value.emitter.activity("tool", "started", "Read file", {
+        activityId: "resumed-tool",
+      }),
+      () => value.provider.emit({ ...identity, type: "text", text: "Working again." }),
+      () => value.provider.emit({
+        ...identity,
+        type: "plan",
+        explanation: null,
+        steps: [{ step: "Verify", status: "inProgress" }],
+      }),
+    ];
+    for (const [index, resume] of resumes.entries()) {
+      value.provider.emit({
+        ...identity,
+        type: "status",
+        status: index === 1 ? "delegated" : "retrying",
+      });
+      expect(value.shellRunStates.at(-1))
+        .toBe(index === 1 ? "delegated" : "retrying");
+      const shells = value.shells.length;
+      resume();
+      expect(value.shells.length - shells).toBe(1);
+      expect(value.shellRunStates.at(-1)).toBe("running");
+    }
+    await finish(value);
+  });
+
+  it("keeps credentials and workspace paths split across Codex output chunks out of the record", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const pathSplit = Math.floor(value.workspace.length / 2);
+    const chunks = [
+      "token ghp_abcdefghij", "klmnopqrstuvwxyz0123\n",
+      "auth Bearer abcdefgh", "ijklmnop1234\n",
+      "slack xoxb-12345678", "90abcdefghij\n",
+      "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0", ".abcdefghijklmnop\n",
+      "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKC", "AQEA1234\nabcdEFGH5678\n", "-----END RSA PRIVATE KEY-----\n",
+      `open ${value.workspace.slice(0, pathSplit)}`, `${value.workspace.slice(pathSplit)}/src/index.ts\n`,
+    ];
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "split", type: "commandExecution", command: "env", status: "inProgress" },
+    });
+    chunks.forEach((delta) => {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "split",
+        delta,
+      });
+      runTimers(value.scheduler, 64);
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "split",
+        type: "commandExecution",
+        command: "env",
+        status: "completed",
+        aggregatedOutput: chunks.join(""),
+      },
+    });
+
+    const recorded = [
+      ...activityEvents(value).map(({ detail }) => detail ?? ""),
+      ...turnActivities(value).map(({ detail }) => detail ?? ""),
+    ].join("\n");
+    for (const leaked of [
+      "klmnopqrstuvwxyz0123",
+      "ijklmnop1234",
+      "90abcdefghij",
+      "abcdefghijklmnop",
+      "MIIEow",
+      "AQEA1234",
+      "abcdEFGH5678",
+      value.workspace.slice(pathSplit),
+    ]) {
+      expect(recorded).not.toContain(leaked);
+    }
+    expect(turnActivities(value)[0]?.detail).toContain(
+      "open <workspace>/src/index.ts\n",
+    );
+    await finish(value);
+  });
+
+  it("appends the end of a command whose output deltas stopped before it finished", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const streamed = Array.from({ length: 20 }, (_, index) => `line ${index}\n`);
+    const ending = "line 20\n\nSummary: 2 tests failed\n";
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "capped", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    for (const delta of streamed) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "capped",
+        delta,
+      });
+    }
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "capped",
+        type: "commandExecution",
+        command: "npm test",
+        status: "failed",
+        aggregatedOutput: streamed.join("") + ending,
+      },
+    });
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "rewritten", type: "commandExecution", command: "make", status: "inProgress" },
+    });
+    codex.handleNotification("item/commandExecution/outputDelta", {
+      ...owned,
+      itemId: "rewritten",
+      delta: "building\n",
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "rewritten",
+        type: "commandExecution",
+        command: "make",
+        status: "completed",
+        aggregatedOutput: "[output trimmed by Codex]\nbuilt\n",
+      },
+    });
+
+    expect(turnActivities(value).map(({ detail }) => detail).sort()).toEqual([
+      "Command:\nmake\n\nOutput:\nbuilding\n\n\nOutput:\n[output trimmed by Codex]\nbuilt",
+      `Command:\nnpm test\n\nOutput:\n${streamed.join("")}${ending}`,
+    ]);
     await finish(value);
   });
 });

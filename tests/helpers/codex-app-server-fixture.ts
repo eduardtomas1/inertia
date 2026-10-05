@@ -411,6 +411,18 @@ if (message.method === "turn/start") {
     ]);
     return;
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "capped-command-output") {
+    sendBatch([
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "command-capped", type: "commandExecution", command: "npm test", status: "inProgress" } } },
+      { method: "item/commandExecution/outputDelta", params: { threadId, turnId, itemId: "command-capped", delta: "line 1\\n" } },
+      { method: "item/commandExecution/outputDelta", params: { threadId, turnId, itemId: "command-capped", delta: "line 2\\nline 3" } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "command-capped", type: "commandExecution", command: "npm test", status: "failed", aggregatedOutput: "line 1\\nline 2\\nline 3\\nSummary: 2 failed\\n" } } },
+      { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-capped", delta: "Done" } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "message-capped", type: "agentMessage", text: "Done", phase: "final_answer" } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "thread-deleted") {
     send({ method: "thread/deleted", params: { threadId } });
     return;

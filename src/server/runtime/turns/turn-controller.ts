@@ -1041,7 +1041,9 @@ export class TurnController {
           || event.type === "plan"
         )
       ) {
-        this.transition(active, "running");
+        if (this.transition(active, "running")) {
+          broadcastTurnConversationShell(this.hooks, active);
+        }
       }
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");

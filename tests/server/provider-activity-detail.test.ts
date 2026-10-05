@@ -117,6 +117,47 @@ describe("provider activity detail boundary", () => {
     )).toBe("Output:\nkey [redacted]\n");
   });
 
+  it("adds no blank line when a redacted prompt line continues the output", () => {
+    let detail = "Command:\nrun\n\nOutput:\nstart\n";
+    for (let index = 0; index < 6; index += 1) {
+      detail = appendProviderActivityOutput(
+        detail,
+        sanitizeProviderActivityDetail("system prompt: hidden\n", {
+          preserveWhitespace: true,
+        })!,
+        true,
+      );
+    }
+
+    expect(detail).toBe(
+      `Command:\nrun\n\nOutput:\nstart\n${"system_prompt=[redacted]\n".repeat(6)}`,
+    );
+  });
+
+  it("keeps the command line when the turn budget leaves no room for more detail", () => {
+    for (const merged of [
+      mergeProviderActivityDetailWithinTurnBudget(
+        "Command:\nls",
+        "Output:\nmore",
+        MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS,
+      ),
+      mergeProviderActivityOutputWithinTurnBudget(
+        "Command:\nls",
+        "more\n",
+        false,
+        MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS,
+      ),
+      mergeProviderActivityOutputWithinTurnBudget(
+        "Command:\nls",
+        "more\n",
+        false,
+        MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS - 5,
+      ),
+    ]) {
+      expect(merged.detail?.startsWith("Command:\nls")).toBe(true);
+    }
+  });
+
   it("keeps streamed output within the activity and turn budgets", () => {
     let detail: string | null = null;
     let totalChars = 0;

@@ -69,7 +69,8 @@ against the same loopback policy before it starts: going back or forward is
 refused unless the adjacent history entry is a local page, and reload is
 refused unless the tab shows one. Chromium can skip history entries, so the
 page it actually commits is checked again; a step that lands anywhere other
-than a local page is stopped and reported as `unavailable`. Reload loads the
+than a local page is stopped, the tab is cleared to a blank page, and the
+step is reported as `unavailable`. Reload loads the
 current address again with an ordinary GET through the same path as
 navigate, so it never resubmits a form. For an address with a fragment, as a
 hash router uses, loading the same address would only move within the page,
@@ -509,7 +510,9 @@ each mouse press it sends with its position and each key press with its key,
 at most 64 at a time and for two seconds each, and consuming only the
 matching event when Chromium reports it, so a different key the user presses
 in that window still counts as the user;
-pointer movement, wheel scrolling and key releases never count as the user.
+pointer movement, wheel scrolling and key releases never count as the user. When the user takes over after the agent's navigation has already
+committed, while Chromium finishes loading, Inertia stops waiting but does
+not stop the page, so a link the user has just clicked keeps loading.
 
 If a page's renderer crashes, or the inspection connection to a page is lost,
 the next command says so and that navigating to the page again recovers it.

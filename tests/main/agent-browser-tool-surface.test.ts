@@ -137,6 +137,29 @@ describe("Browser tool surface", () => {
       message: "The history entry Chromium opened is not a local development page, so Inertia stopped it. Navigate to a local URL instead.",
     });
     expect(contents.stop).toHaveBeenCalled();
+    expect(contents.getURL()).toBe("about:blank");
+  });
+
+  it("leaves the user's own history navigation alone when they take over after it commits", async () => {
+    const { broker, contents } = await loadedHarness();
+    const history = contents.navigationHistory;
+    history.getEntryAtIndex.mockImplementation((index: number) => ({
+      title: "", url: ["about:blank", "http://127.0.0.1:3000/first", "http://127.0.0.1:3000/"][index] ?? "",
+    }));
+    history.canGoBack.mockReturnValue(true);
+    history.goBack.mockImplementationOnce(() => {
+      contents.setURL("http://127.0.0.1:3000/first");
+      contents.emit("did-navigate", {}, "http://127.0.0.1:3000/first");
+    });
+    const page = contents as unknown as { loading: boolean };
+    page.loading = true;
+    contents.stop.mockClear();
+    const going = broker.perform(runIdentity, { action: "history", direction: "back" });
+    await vi.waitFor(() => expect(history.goBack).toHaveBeenCalled());
+    contents.emit("input-event", {}, { type: "mouseDown", x: 3, y: 3 });
+    await expect(going).resolves.toMatchObject({ ok: false, code: "interrupted" });
+    expect(contents.stop).not.toHaveBeenCalled();
+    page.loading = false;
   });
 
   it("asks once per five seconds, only for the tab on screen, and names the tab", async () => {
@@ -164,6 +187,24 @@ describe("Browser tool surface", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("leaves the user's own navigation alone when they take over after the page has committed", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = contents as unknown as { loadURL(url: string): Promise<void>; loading: boolean };
+    const load = page.loadURL.bind(page);
+    vi.spyOn(page, "loadURL").mockImplementationOnce(async (url) => {
+      await load(url);
+      page.loading = true;
+    });
+    contents.stop.mockClear();
+    const navigating = broker.perform(runIdentity, { action: "navigate", url: "http://127.0.0.1:3000/next" });
+    await vi.waitFor(() => expect(contents.getURL()).toBe("http://127.0.0.1:3000/next"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    contents.emit("input-event", {}, { type: "mouseDown", x: 3, y: 3 });
+    await expect(navigating).resolves.toMatchObject({ ok: false, code: "interrupted" });
+    expect(contents.stop).not.toHaveBeenCalled();
+    page.loading = false;
   });
 
   it("returns from navigate only once Chromium stops loading, so an approval can follow at once", async () => {

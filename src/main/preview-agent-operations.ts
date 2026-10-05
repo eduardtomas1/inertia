@@ -829,18 +829,21 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     scope.inputSent = true;
     return await new Promise<boolean>((resolve, reject) => {
       let settled = false;
+      let committed = false;
       const finish = (action: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         contents.removeListener("destroyed", onDestroyed);
         contents.removeListener("did-stop-loading", onStopped);
+        contents.removeListener("did-navigate", onCommitted);
         scope.signal.removeEventListener("abort", onAbort);
         action();
       };
       const onStopped = (): void => finish(() => resolve(true));
+      const onCommitted = (): void => { committed = true; };
       const onAbort = (): void => finish(() => {
-        if (!contents.isDestroyed()) contents.stop();
+        if (!contents.isDestroyed() && !(scope.interrupted && committed)) contents.stop();
         reject(new Error("browser-action-cancelled"));
       });
       const onDestroyed = (): void => finish(() => reject(
@@ -849,9 +852,11 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       const timer = setTimeout(() => finish(() => resolve(false)), waitMs);
       timer.unref();
       contents.once("destroyed", onDestroyed);
+      contents.on("did-navigate", onCommitted);
       scope.signal.addEventListener("abort", onAbort, { once: true });
       contents.loadURL(url).then(() => {
         if (contents.isDestroyed()) return;
+        committed = true;
         settleAgentPageDebuggerBootstrap(contents);
         if (!contents.isLoading()) finish(() => resolve(true));
         else if (!settled) contents.once("did-stop-loading", onStopped);

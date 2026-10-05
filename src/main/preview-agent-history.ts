@@ -52,7 +52,7 @@ export function agentHistoryRefusal(
 export async function agentHistoryNavigation(
   contents: WebContents,
   direction: "back" | "forward",
-  scope: { signal: AbortSignal; inputSent: boolean },
+  scope: { signal: AbortSignal; inputSent: boolean; interrupted: boolean },
   waitMs: number,
 ): Promise<boolean> {
   const { signal } = scope;
@@ -75,12 +75,19 @@ export async function agentHistoryNavigation(
     const refuseRemote = (url: string): boolean => {
       if (localPage(url)) return false;
       finish(() => {
-        if (!contents.isDestroyed()) contents.stop();
-        reject(new AgentBrowserRefusal(failure("unavailable", NOT_LOCAL_HISTORY_MESSAGE)));
+        const refusal = new AgentBrowserRefusal(failure("unavailable", NOT_LOCAL_HISTORY_MESSAGE));
+        if (contents.isDestroyed()) {
+          reject(refusal);
+          return;
+        }
+        contents.stop();
+        contents.loadURL("about:blank").then(() => reject(refusal), () => reject(refusal));
       });
       return true;
     };
+    let committed = false;
     const onNavigated = (_event: unknown, url: string): void => {
+      committed = true;
       if (refuseRemote(url)) return;
       if (!contents.isLoading()) finish(() => resolve(true));
     };
@@ -111,7 +118,7 @@ export async function agentHistoryNavigation(
       new Error("The active Browser tab was closed during navigation."),
     ));
     const onAbort = (): void => finish(() => {
-      if (!contents.isDestroyed()) contents.stop();
+      if (!contents.isDestroyed() && !(scope.interrupted && committed)) contents.stop();
       reject(new Error("browser-action-cancelled"));
     });
     const timer = setTimeout(() => finish(() => resolve(false)), waitMs);

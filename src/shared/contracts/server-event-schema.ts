@@ -125,7 +125,8 @@ function providerMaintenanceStatus(value: unknown): boolean {
     && nullableStringField(value, "latestVersion")
     && nullableStringField(value, "checkedAt")
     && nullableStringField(value, "updateLabel")
-    && nullableStringField(value, "message");
+    && nullableStringField(value, "message")
+    && nullableStringField(value, "manualCommand");
 }
 
 function providerMaintenanceOperation(value: unknown): boolean {

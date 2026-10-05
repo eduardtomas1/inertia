@@ -376,6 +376,7 @@ describe("draft turn anchoring", () => {
       updateLabel: null,
       instructionsUrl: "https://example.test/update",
       message: null,
+      manualCommand: null,
     }} />);
 
     expect(await screen.findByText("codex update available")).toBeVisible();

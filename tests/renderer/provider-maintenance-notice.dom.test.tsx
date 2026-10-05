@@ -16,6 +16,7 @@ const status: ProviderMaintenanceStatus = {
   updateLabel: null,
   instructionsUrl: "https://github.com/openai/codex#installing-and-running-codex-cli",
   message: "Latest-version check timed out. This Codex installation is not writable by your account.",
+  manualCommand: null,
 };
 
 describe("Settings provider maintenance", () => {
@@ -48,5 +49,37 @@ describe("Settings provider maintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(2));
     expect(props.onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("shows the exact command when Inertia cannot run the update itself", () => {
+    const props = {
+      providerLabel: "Codex",
+      operation: null,
+      showStatus: true,
+      dismissible: false,
+      onRefresh: vi.fn(async () => undefined),
+      onOpenInstructions: vi.fn(),
+      onUpdate: vi.fn(async () => undefined),
+      onCancel: vi.fn(async () => undefined),
+    };
+    const { rerender } = render(<ProviderMaintenanceNotice {...props} status={{
+      ...status,
+      message: "Your account cannot write this installation.",
+      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@latest",
+    }} />);
+    expect(screen.getByText(/Your account cannot write this installation\./u)).toBeInTheDocument();
+    expect(screen.getByText("sudo npm install -g --prefix /usr @openai/codex@latest").tagName).toBe("CODE");
+    expect(screen.queryByRole("button", { name: /Update/u })).not.toBeInTheDocument();
+
+    rerender(<ProviderMaintenanceNotice {...props} status={{
+      ...status,
+      latestVersion: "1.1.0",
+      versionStatus: "update-available",
+      updateAvailability: "available",
+      message: null,
+      manualCommand: "npm install -g --prefix ~/.npm-global @openai/codex@latest",
+    }} />);
+    expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
+    expect(screen.queryByText(/npm install/u)).not.toBeInTheDocument();
   });
 });

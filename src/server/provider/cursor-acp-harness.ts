@@ -1,7 +1,5 @@
 import { AcpSecretRedactor } from "./acp-redaction";
 import { acpStopReasonMessage } from "./acp-stop-reasons";
-import { acpPermissionDetail } from "./acp-permission-detail";
-import { acpAttachmentReadAllowed } from "./attachment-read-grant";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
@@ -12,7 +10,6 @@ import type {
   ContentBlock,
   InitializeResponse,
   RequestPermissionRequest,
-  RequestPermissionResponse,
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
@@ -78,9 +75,13 @@ import {
   parseCursorTodosRequest,
 } from "./cursor-acp-extensions";
 import {
+  askCursorPermission,
   cursorOneShotPermissionOption,
+  cursorPermission,
   cursorPermissionDisplayIsSafe,
   isCursorFileMutationKind,
+  MAX_PENDING_CURSOR_INTERACTIONS,
+  type PendingCursorApproval,
 } from "./cursor-acp-permissions";
 import { emitCursorMetadata } from "./cursor-acp-metadata";
 import { readBoundedProviderImage } from "./provider-image-read";
@@ -100,7 +101,6 @@ const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
-const MAX_PENDING_INTERACTIONS = 64;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_TOOL_ACTIVITY_ID_CHARS = 1_000;
 const MAX_TOOL_STATE_TEXT_CHARS = 4_000;
@@ -141,7 +141,6 @@ export const CURSOR_ACP_CAPABILITIES = {
   },
 } as const satisfies CursorAcpHarnessCapabilities;
 
-interface PendingApproval { resolve: (decision: AgentApprovalDecision) => void; settled: boolean }
 interface PendingInput { resolve: (answers: Record<string, string[]>) => void; settled: boolean }
 interface CursorContextUsage { usedTokens: number | null; maxTokens: number | null }
 
@@ -198,7 +197,7 @@ function startCursorRun(
   const promptPreparationAbort = new AbortController();
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const secretRedactor = new AcpSecretRedactor(options.environment);
-  const approvals = new Map<string, PendingApproval>();
+  const approvals = new Map<string, PendingCursorApproval>();
   const inputs = new Map<string, PendingInput>();
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
@@ -355,7 +354,7 @@ function startCursorRun(
       const requestId = randomUUID();
       const request = cursorQuestions(requestId, params);
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
-        if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+        if (inputs.size >= MAX_PENDING_CURSOR_INTERACTIONS) {
           throw new Error("Cursor exceeded the bounded question budget.");
         }
         inputs.set(requestId, { resolve, settled: false });
@@ -403,7 +402,7 @@ function startCursorRun(
           { optionId: "reject-plan", name: "Deny", kind: "reject_once" },
         ],
       };
-      const decision = await cursorPermission(
+      const decision = await (options.input.interactionMode === "plan" ? askCursorPermission : cursorPermission)(
         permission, permission, signal, options, emitter.rich, approvals,
       );
       if (!ownsActivePrompt() || signal.aborted || decision.outcome.outcome !== "selected") {
@@ -785,72 +784,6 @@ async function waitForCursorCommandAdvertisement(
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-async function cursorPermission(
-  params: RequestPermissionRequest,
-  displayParams: RequestPermissionRequest,
-  signal: AbortSignal,
-  options: AgentHarnessStartOptions,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-  approvals: Map<string, PendingApproval>,
-): Promise<RequestPermissionResponse> {
-  const allow = cursorOneShotPermissionOption(params.options, true);
-  if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
-    return { outcome: { outcome: "selected", optionId: allow.optionId } };
-  }
-  if (options.input.interactionMode === "plan") {
-    return { outcome: { outcome: "cancelled" } };
-  }
-  const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
-  if (
-    options.input.access === "full"
-    || (options.input.access === "auto-edit" && fileMutation)
-  ) {
-    return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } };
-  }
-  if (!cursorPermissionDisplayIsSafe(displayParams)) {
-    return { outcome: { outcome: "cancelled" } };
-  }
-  const requestId = randomUUID();
-  const decision = await new Promise<AgentApprovalDecision>((resolve) => {
-    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("Cursor exceeded the bounded approval budget.");
-    }
-    approvals.set(requestId, { resolve, settled: false });
-    signal.addEventListener("abort", () => {
-      const pending = approvals.get(requestId);
-      if (!pending || pending.settled) return;
-      pending.settled = true;
-      approvals.delete(requestId);
-      emit({ type: "approval-resolved", requestId, decision: "cancel" });
-      resolve("cancel");
-    }, { once: true });
-    emit({
-      type: "approval",
-      request: {
-        requestId,
-        kind: params.toolCall.kind === "execute"
-          ? "command"
-          : fileMutation
-            ? "file-change"
-            : "permissions",
-        title: bounded(
-          displayParams.toolCall.title || "Cursor requested permission",
-        ),
-        detail: bounded(acpPermissionDetail(displayParams, "Cursor requested permission.")),
-        cwd: options.input.cwd,
-        permissionRoots: [],
-        availableDecisions: ["approve", "deny", "cancel"],
-      },
-    });
-  });
-  if (decision === "cancel") return { outcome: { outcome: "cancelled" } };
-  const selected = cursorOneShotPermissionOption(
-    params.options,
-    decision === "approve",
-  );
-  return selected ? { outcome: { outcome: "selected", optionId: selected.optionId } } : { outcome: { outcome: "cancelled" } };
 }
 
 function handleCursorUpdate(

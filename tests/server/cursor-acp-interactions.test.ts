@@ -119,13 +119,16 @@ describe("Cursor ACP plan approval policy", { concurrent: false }, () => {
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
   it.each([
-    { access: "supervised", decision: "approve", outcome: "accepted" },
-    { access: "supervised", decision: "deny", outcome: "rejected" },
-    { access: "supervised", decision: "cancel", outcome: "cancelled" },
-    { access: "auto-edit", decision: "approve", outcome: "accepted" },
-    { access: "full", decision: "approve", outcome: "accepted" },
-  ] as const)("uses $access/$decision authority for a $outcome plan", async ({ access, decision, outcome }) => {
-    const root = portableFixtureRoot(`Cursor plan ${access} ${decision}`);
+    { mode: "build", access: "supervised", decision: "approve", outcome: "accepted" },
+    { mode: "build", access: "supervised", decision: "deny", outcome: "rejected" },
+    { mode: "build", access: "supervised", decision: "cancel", outcome: "cancelled" },
+    { mode: "build", access: "auto-edit", decision: "approve", outcome: "accepted" },
+    { mode: "build", access: "full", decision: "approve", outcome: "accepted" },
+    { mode: "plan", access: "supervised", decision: "approve", outcome: "accepted" },
+    { mode: "plan", access: "supervised", decision: "deny", outcome: "rejected" },
+    { mode: "plan", access: "full", decision: "deny", outcome: "rejected" },
+  ] as const)("uses $mode $access/$decision authority for a $outcome plan", async ({ mode, access, decision, outcome }) => {
+    const root = portableFixtureRoot(`Cursor plan ${mode} ${access} ${decision}`);
     roots.push(root);
     const responsePath = join(root, "plan-response.json");
     const command = portableNodeExecutable(root, "cursor-agent");
@@ -137,7 +140,8 @@ let promptId;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "fixture" } } });
-  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-plan-session" } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-plan-session", modes: { currentModeId: "agent", availableModes: [{ id: "agent", name: "Agent" }, { id: "plan", name: "Plan" }] } } });
+  if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
   if (message.method === "session/prompt") {
     promptId = message.id;
     return send({ jsonrpc: "2.0", id: 100, method: "cursor/create_plan", params: { toolCallId: "plan-tool", plan: "Inspect then verify", todos: [{ id: "inspect", content: "Inspect", status: "pending" }] } });
@@ -157,14 +161,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const plans: Array<string | null> = [];
     const result = manager.run(nativeProviderRunInput({
       providerId: "cursor", conversationId: "cursor-plan", cwd: root,
-      prompt: "Plan", interactionMode: "build", access,
+      prompt: "Plan", interactionMode: mode, access,
     }), {
       onApproval: (event) => { approval = event; },
       onPlan: (event) => { plans.push(event.explanation); },
     });
     void result.then(() => { settled = true; });
     try {
-      if (access === "supervised") {
+      if (access === "supervised" || mode === "plan") {
         await waitFor("Cursor plan decision boundary", () => Boolean(approval) || settled);
         expect(approval).toBeDefined();
         const event = approval!;
@@ -192,7 +196,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       if (approval) expect(manager.respondToApproval(approval.conversationId, approval.request.requestId, "approve", {
         runId: approval.runId, turnId: approval.turnId,
       })).toBe(false);
-      else expect(access).not.toBe("supervised");
+      else expect(access !== "supervised" && mode === "build").toBe(true);
     } finally {
       manager.cancel("cursor-plan");
       await result;

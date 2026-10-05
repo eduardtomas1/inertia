@@ -21,8 +21,10 @@ const lastRequest = () => bridge.showContextMenu.mock.calls.at(-1)![0];
 async function choose(element: Element, action: ContextMenuAction): Promise<void> {
   bridge.showContextMenu.mockResolvedValueOnce(action);
   fireEvent.contextMenu(element, { clientX: 5, clientY: 9 });
-  await act(async () => undefined);
+  await settleMenu();
 }
+
+const settleMenu = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -52,6 +54,7 @@ describe("file tree context menu", () => {
   it("describes a file by project identity and runs path actions without the page naming labels", async () => {
     const file = renderFiles().getByRole("treeitem", { name: "README.md" });
     fireEvent.contextMenu(file, { clientX: 5, clientY: 9 });
+    await settleMenu();
     expect(lastRequest()).toEqual({
       kind: "file", projectId, conversationId, relativePath: "README.md", directory: false, anchor: { x: 5, y: 9 },
     });
@@ -83,6 +86,7 @@ describe("file tree context menu", () => {
     const file = tree.getByRole("treeitem", { name: "README.md" });
     file.focus();
     fireEvent.keyDown(file, { key: "ContextMenu" });
+    await settleMenu();
     fireEvent.keyDown(file, { key: "F10", shiftKey: true });
     expect(bridge.showContextMenu).toHaveBeenCalledTimes(2);
     expect(document.activeElement).toBe(file);
@@ -137,6 +141,7 @@ describe("changed file context menu", () => {
     const row = screen.getByRole("navigation", { name: "Git repositories and changed files" })
       .querySelector(".workspace-repository-file")!;
     fireEvent.contextMenu(row);
+    await settleMenu();
     expect(lastRequest()).toEqual({
       kind: "diff-file", projectId, conversationId, relativePath: "notes.md", anchor: { x: 0, y: 0 },
     });

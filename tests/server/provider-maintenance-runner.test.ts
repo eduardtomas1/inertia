@@ -462,7 +462,6 @@ describe("provider maintenance runner", () => {
       BUN_INSTALL: "/home/ada/.bun",
       VOLTA_HOME: "/home/ada/.volta",
       CODEX_HOME: "/home/ada/.codex-work",
-      HOMEBREW_PREFIX: "/home/linuxbrew/.linuxbrew",
     });
   });
 

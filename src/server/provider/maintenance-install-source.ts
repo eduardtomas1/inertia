@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, lstat, open, realpath } from "node:fs/promises";
+import { access, lstat, open, readlink, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
@@ -23,8 +23,8 @@ const SNAP_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u;
 export const PROVIDER_MAINTENANCE_ENVIRONMENT_KEYS = [
   "BUN_INSTALL",
   "CODEX_HOME",
-  "HOMEBREW_PREFIX",
   "PNPM_HOME",
+  "UV_TOOL_DIR",
   "VOLTA_HOME",
 ] as const;
 
@@ -81,6 +81,7 @@ export interface ProviderInstallSourceDependencies {
   realpath?: (path: string) => Promise<string>;
   lstat?: (path: string) => Promise<FileInfo>;
   readScript?: (path: string) => Promise<string | null>;
+  readlink?: (path: string) => Promise<string>;
   executableCandidates?: typeof executableCandidates;
   packageSpec?: (
     providerId: ProviderMaintenanceProviderId,
@@ -100,7 +101,8 @@ interface ProviderInstallDefinition {
   packageRange: string;
   commands: readonly string[];
   homebrew: readonly HomebrewName[];
-  allowScripts: boolean;
+  allowScripts: readonly string[];
+  uvTool: string | null;
 }
 
 const DEFINITIONS: Readonly<
@@ -112,7 +114,8 @@ const DEFINITIONS: Readonly<
     packageRange: "latest",
     commands: ["codex"],
     homebrew: [{ kind: "formula", name: "codex" }, { kind: "cask", name: "codex" }],
-    allowScripts: false,
+    allowScripts: [],
+    uvTool: null,
   },
   claude: {
     label: "Claude",
@@ -120,7 +123,8 @@ const DEFINITIONS: Readonly<
     packageRange: "latest",
     commands: ["claude"],
     homebrew: [{ kind: "cask", name: "claude-code" }],
-    allowScripts: true,
+    allowScripts: ["@anthropic-ai/claude-code"],
+    uvTool: null,
   },
   cursor: {
     label: "Cursor",
@@ -128,7 +132,8 @@ const DEFINITIONS: Readonly<
     packageRange: "latest",
     commands: ["cursor-agent", "agent", "cursor"],
     homebrew: [],
-    allowScripts: false,
+    allowScripts: [],
+    uvTool: null,
   },
   kimi: {
     label: "Kimi",
@@ -136,7 +141,8 @@ const DEFINITIONS: Readonly<
     packageRange: "latest",
     commands: ["kimi"],
     homebrew: [],
-    allowScripts: false,
+    allowScripts: ["@moonshot-ai/kimi-code", "node-pty"],
+    uvTool: "kimi-cli",
   },
   opencode: {
     label: "OpenCode",
@@ -144,7 +150,8 @@ const DEFINITIONS: Readonly<
     packageRange: "1",
     commands: ["opencode"],
     homebrew: [{ kind: "formula", name: "opencode" }],
-    allowScripts: false,
+    allowScripts: ["opencode-ai"],
+    uvTool: null,
   },
   antigravity: {
     label: "Antigravity",
@@ -152,7 +159,8 @@ const DEFINITIONS: Readonly<
     packageRange: "latest",
     commands: ["agy", "antigravity"],
     homebrew: [],
-    allowScripts: false,
+    allowScripts: [],
+    uvTool: null,
   },
 };
 
@@ -163,6 +171,8 @@ const SYSTEM_PREFIXES = [
   "/opt/local",
   "/home/linuxbrew/.linuxbrew",
 ] as const;
+
+const SUDO_PREFIXES: readonly string[] = ["/usr", "/usr/local", "/opt/local"];
 
 const SYSTEM_PACKAGE_ROOTS = [
   "/bin/",
@@ -217,6 +227,7 @@ class InstallSourceContext {
   readonly lstat: (path: string) => Promise<FileInfo>;
   readonly access: (path: string, mode: number) => Promise<void>;
   readonly readScript: (path: string) => Promise<string | null>;
+  readonly readlink: (path: string) => Promise<string>;
   readonly candidates: typeof executableCandidates;
   hit: string;
   real: string;
@@ -233,6 +244,7 @@ class InstallSourceContext {
     this.lstat = dependencies.lstat ?? lstat;
     this.access = dependencies.access ?? access;
     this.readScript = dependencies.readScript ?? boundedScript;
+    this.readlink = dependencies.readlink ?? readlink;
     this.candidates = dependencies.executableCandidates ?? executableCandidates;
     this.hit = input.executable;
     this.real = input.executable;
@@ -350,10 +362,14 @@ function update(
   manager: string | null,
   manualCommand: string | null,
 ): ProviderInstallSource {
+  const range = context.definition.packageRange;
   return {
     installMethod,
     update: {
       ...action,
+      ...(!action.versionPin && /^\d+$/u.test(range)
+        ? { versionPin: { major: Number(range), argumentIndex: null, command: null } }
+        : {}),
       installMethod,
       label: `Update ${context.definition.label}${manager ? ` with ${manager}` : ""}`,
     },
@@ -392,11 +408,10 @@ function nativeSource(context: InstallSourceContext): ProviderInstallSource | nu
       : {});
   }
   if (providerId === "claude") {
-    const nativeBinary = context.join(home, ".local", "bin", platform === "win32" ? "claude.exe" : "claude");
     if (
       !context.under(real, context.join(home, ".local", "share", "claude"))
       && !context.under(real, context.join(home, ".claude", "local"))
-      && !context.same(real, nativeBinary)
+      && !(platform === "win32" && context.same(real, context.join(home, ".local", "bin", "claude.exe")))
     ) return null;
     return native(["update"], "claude update");
   }
@@ -432,7 +447,7 @@ async function bunSource(
   const packageRoot = context.join(bunHome, "install", "global", "node_modules", ...packageName.split("/"));
   if (!context.under(context.real, packageRoot)) return null;
   const bun = context.join(bunHome, "bin", context.platform === "win32" ? "bun.exe" : "bun");
-  const args = ["add", "-g", ...(context.definition.allowScripts ? ["--trust"] : []), context.spec()];
+  const args = ["add", "-g", ...(context.definition.allowScripts.length > 0 ? ["--trust"] : []), context.spec()];
   const manualCommand = ["bun", ...args].join(" ");
   if (!await context.runnable(bun)) {
     return manual("bun-global", "Inertia could not find the bun that installed this CLI.", manualCommand);
@@ -481,7 +496,7 @@ async function pnpmSource(
   const args = [
     "add",
     "-g",
-    ...(context.definition.allowScripts ? [`--allow-build=${packageName}`] : []),
+    ...context.definition.allowScripts.map((name) => `--allow-build=${name}`),
     context.spec(),
   ];
   const manualCommand = ["pnpm", ...args].join(" ");
@@ -526,6 +541,27 @@ async function yarnSource(
     args,
     lockKey: `yarn-global:${globalDirectory}`,
   }, "yarn", manualCommand);
+}
+
+async function uvToolSource(context: InstallSourceContext): Promise<ProviderInstallSource | null> {
+  const tool = context.definition.uvTool;
+  if (!tool || context.platform === "win32") return null;
+  const configured = context.env("UV_TOOL_DIR");
+  const toolDirectory = configured
+    ?? context.join(context.env("XDG_DATA_HOME") ?? context.join(context.home, ".local", "share"), "uv", "tools");
+  if (!context.under(context.real, context.join(toolDirectory, tool))) return null;
+  const args = ["tool", "upgrade", tool];
+  const manualCommand = ["uv", ...args].join(" ");
+  const uv = (await context.candidates("uv", context.input.environment))[0];
+  if (!uv) {
+    return manual("uv-tool", "Inertia could not find uv to update this CLI.", manualCommand);
+  }
+  return update(context, "uv-tool", {
+    executable: uv,
+    args,
+    ...(configured ? { environment: { UV_TOOL_DIR: configured } } : {}),
+    lockKey: `uv-tool:${toolDirectory}`,
+  }, "uv", manualCommand);
 }
 
 async function voltaSource(
@@ -670,7 +706,7 @@ async function npmSource(
   const location = npmLocation(context, packageName);
   if (!location) return null;
   const windows = context.platform === "win32";
-  const scripts = context.definition.allowScripts ? [`--allow-scripts=${packageName}`] : [];
+  const scripts = context.definition.allowScripts.map((name) => `--allow-scripts=${name}`);
   const displayPrefix = context.display(location.prefix);
   const manualCommand = windows
     ? ["npm", "install", "-g", ...scripts, context.spec()].join(" ")
@@ -683,13 +719,10 @@ async function npmSource(
       return manual("npm-global", `Inertia could not verify the npm installation that owns this ${context.definition.label} CLI.`);
     }
     if (problem === "read-only") {
-      const system = SYSTEM_PREFIXES.some((prefix) => prefix === location.prefix);
       return manual(
         "npm-global",
-        system
-          ? "Your account cannot write this installation."
-          : "Your account cannot write this installation.",
-        system && manualCommand ? `sudo ${manualCommand}` : null,
+        "Your account cannot write this installation.",
+        SUDO_PREFIXES.includes(location.prefix) && manualCommand ? `sudo ${manualCommand}` : null,
       );
     }
   }
@@ -759,11 +792,17 @@ async function homebrewSource(context: InstallSourceContext): Promise<ProviderIn
   };
 }
 
-function snapSource(context: InstallSourceContext): ProviderInstallSource | null {
-  const hit = /^\/snap\/bin\/([^/.]+)(?:\.[^/]+)?$/u.exec(context.key(context.hit))?.[1];
+async function snapSource(context: InstallSourceContext): Promise<ProviderInstallSource | null> {
+  if (context.platform !== "linux") return null;
   const real = /^\/snap\/([^/]+)\//u.exec(context.key(context.real))?.[1];
-  const name = real && real !== "bin" ? real : hit;
-  if (!name || context.platform !== "linux") return null;
+  let hit = /^\/snap\/bin\/([^/]+)$/u.exec(context.key(context.hit))?.[1];
+  if (hit && (!real || real === "bin")) {
+    const target = await context.readlink(context.hit).catch(() => null);
+    const app = target ? posix.basename(target) : null;
+    if (app && app !== "snap") hit = app;
+  }
+  const name = real && real !== "bin" ? real : hit?.split(".", 1)[0];
+  if (!name) return null;
   return manual(
     "snap",
     "Snap manages this installation.",
@@ -794,6 +833,8 @@ export async function classifyProviderInstallSource(
       if (result) return result;
     }
   }
+  const uvTool = await uvToolSource(context);
+  if (uvTool) return uvTool;
   const versionManager = versionManagerSource(context);
   if (versionManager) return versionManager;
   if (packageName) {
@@ -804,7 +845,7 @@ export async function classifyProviderInstallSource(
   if (wrapped) return wrapped;
   const homebrew = await homebrewSource(context);
   if (homebrew) return homebrew;
-  const snap = snapSource(context);
+  const snap = await snapSource(context);
   if (snap) return snap;
   if (context.key(context.real).includes("/node_modules/")) {
     return manual("manual", `Inertia could not tell which package manager installed this ${context.definition.label} CLI. Update it the way you installed it.`);

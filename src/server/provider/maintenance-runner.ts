@@ -59,7 +59,10 @@ export interface ProviderMaintenanceRunnerOptions {
   terminateProcessTree?: ProcessTreeTerminator;
   onProgress?: (progress: ProviderMaintenanceRunProgress) => void;
   rawStdout?: boolean;
-  additionalEnvironment?: Readonly<Record<string, string>>;
+  additionalEnvironment?: Readonly<Partial<Record<
+    "HOMEBREW_NO_ANALYTICS" | "HOMEBREW_NO_AUTO_UPDATE",
+    "1"
+  >>>;
 }
 
 const PASSTHROUGH_ENVIRONMENT_KEYS = [

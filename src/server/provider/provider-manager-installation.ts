@@ -1,4 +1,5 @@
-import { statSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 import type { ModelBackendProfile } from "../../shared/model-routing";
 import {
@@ -20,6 +21,7 @@ import {
   type ProviderInstallationVerificationAuthority,
 } from "./installation-lease";
 import type { ProviderMetadataCache } from "./metadata";
+import { MULTIPLEXING_SHIMS } from "../environment";
 
 function providerExecutableFileIdentity(
   executable: string | null,
@@ -37,6 +39,33 @@ function providerExecutableFileIdentity(
     ].join(":");
   } catch {
     return null;
+  }
+}
+
+function multiplexedTargetIdentity(
+  providerId: ProviderId,
+  executableInput: string,
+  canonical: string | null,
+): string | null {
+  if (!canonical) return null;
+  const shim = basename(canonical).replace(/\.exe$/iu, "").toLowerCase();
+  if (!MULTIPLEXING_SHIMS.has(shim)) return null;
+  const link = executableInput.trim();
+  try {
+    if (shim === "volta-shim") {
+      const packageName = providerInstallationPackageIdentity(providerId);
+      if (!packageName) return "volta:unavailable";
+      const image = lstatSync(
+        join(dirname(dirname(link)), "tools", "image", "packages", ...packageName.split("/")),
+        { bigint: true },
+      );
+      return `volta:${[image.dev, image.ino, image.mtimeNs, image.ctimeNs].join(":")}`;
+    }
+    const target = basename(readlinkSync(link));
+    const snap = (target === "snap" ? basename(link) : target).split(".", 1)[0]!;
+    return `snap:${realpathSync.native(join("/snap", snap, "current"))}`;
+  } catch {
+    return `${shim}:unavailable`;
   }
 }
 
@@ -98,7 +127,10 @@ export class ProviderManagerInstallationAuthority {
         : `provider-command:${executableInput.trim()}`,
       packageIdentity: providerInstallationPackageIdentity(providerId),
       version,
-      directFileIdentity: providerExecutableFileIdentity(canonical),
+      directFileIdentity: [
+        providerExecutableFileIdentity(canonical),
+        multiplexedTargetIdentity(providerId, executableInput, canonical),
+      ].filter(Boolean).join("|") || null,
       backendConfigurationIdentity: JSON.stringify([
         backendProfile.protocol,
         backendProfile.configurationRevision,

@@ -47,10 +47,10 @@ describe("native app editing menu", () => {
     const { window, show } = fixture();
     show();
     expect(menu.build).toHaveBeenCalledWith(expect.arrayContaining([
-      { role: "paste", enabled: true },
-      { role: "cut", enabled: false },
-      { role: "copy", enabled: false },
-      { role: "undo", enabled: false },
+      { role: "paste", label: "Paste", enabled: true },
+      { role: "cut", label: "Cut", enabled: false },
+      { role: "copy", label: "Copy", enabled: false },
+      { role: "undo", label: "Undo", enabled: false },
     ]));
     expect(menu.popup).toHaveBeenCalledWith({ window, x: 41, y: 17 });
   });
@@ -67,7 +67,7 @@ describe("native app editing menu", () => {
       canUndo: false, canRedo: false, canCut: false, canCopy: true,
       canPaste: false, canDelete: false, canSelectAll: true, canEditRichly: false,
     } });
-    expect(menu.build).toHaveBeenCalledWith([{ role: "copy", enabled: true }]);
+    expect(menu.build).toHaveBeenCalledWith([{ role: "copy", label: "Copy", enabled: true }]);
   });
 
   it.each([
@@ -81,6 +81,15 @@ describe("native app editing menu", () => {
     expect(menu.build).not.toHaveBeenCalled();
   });
 
+  it("labels every editing item in sentence case", () => {
+    const { show } = fixture();
+    show();
+    expect(template().map((item) => item.label ?? item.type)).toEqual([
+      "Undo", "Redo", "separator", "Cut", "Copy", "Paste", "Paste and match style", "Delete",
+      "separator", "Select all",
+    ]);
+  });
+
   it("offers at most five spelling suggestions that replace the misspelled word", () => {
     const { contents, show } = fixture();
     show({ misspelledWord: "recieve", dictionarySuggestions: ["receive", "relieve", "recite", "revive", "reprieve", "receiver"] });
@@ -88,7 +97,7 @@ describe("native app editing menu", () => {
     expect(items.slice(0, 6).map((item) => item.label ?? item.type)).toEqual([
       "receive", "relieve", "recite", "revive", "reprieve", "separator",
     ]);
-    expect(items).toEqual(expect.arrayContaining([{ role: "paste", enabled: true }]));
+    expect(items).toEqual(expect.arrayContaining([{ role: "paste", label: "Paste", enabled: true }]));
     labelled("relieve")!.click!();
     expect(contents.replaceMisspelling).toHaveBeenCalledExactlyOnceWith("relieve");
   });
@@ -103,11 +112,11 @@ describe("native app editing menu", () => {
     const { show } = fixture();
     show({ isEditable: false, linkURL: "https://example.com/docs?q=1" });
     expect(template().map((item) => item.label ?? item.role ?? item.type)).toEqual([
-      "Copy Link Address", "Open Link",
+      "Copy link address", "Open link",
     ]);
-    labelled("Copy Link Address")!.click!();
+    labelled("Copy link address")!.click!();
     expect(menu.writeText).toHaveBeenCalledExactlyOnceWith("https://example.com/docs?q=1");
-    labelled("Open Link")!.click!();
+    labelled("Open link")!.click!();
     await vi.waitFor(() => expect(menu.openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com/docs?q=1"));
   });
 
@@ -127,8 +136,8 @@ describe("native app editing menu", () => {
   it("copies an image at the clicked point", () => {
     const { contents, show } = fixture();
     show({ isEditable: false, mediaType: "image", hasImageContents: true, x: 120, y: 64 });
-    expect(template().map((item) => item.label)).toEqual(["Copy Image"]);
-    labelled("Copy Image")!.click!();
+    expect(template().map((item) => item.label)).toEqual(["Copy image"]);
+    labelled("Copy image")!.click!();
     expect(contents.copyImageAt).toHaveBeenCalledExactlyOnceWith(120, 64);
   });
 
@@ -143,7 +152,7 @@ describe("native app editing menu", () => {
       },
     });
     expect(template().map((item) => item.label ?? item.role ?? item.type)).toEqual([
-      "Copy Link Address", "Open Link", "separator", "Copy Image", "separator", "copy",
+      "Copy link address", "Open link", "separator", "Copy image", "separator", "Copy",
     ]);
   });
 
@@ -151,7 +160,7 @@ describe("native app editing menu", () => {
     const { contents, show } = fixture();
     show({ isEditable: false, mediaType: "image", hasImageContents: true });
     contents.isDestroyed.mockReturnValue(true);
-    labelled("Copy Image")!.click!();
+    labelled("Copy image")!.click!();
     expect(contents.copyImageAt).not.toHaveBeenCalled();
   });
 

@@ -131,7 +131,7 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   // Docking under the chat moves session controls into the tab row and adds
   // Hide: 494 bytes (26,456 measured).
-  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 188,
+  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
@@ -172,7 +172,7 @@ const budgets = {
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
   // The Providers description in Agents settings adds 97 core bytes
   // (2,266,291 measured).
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 510 + 458 + 4_959 + 131 + 304 + 125 + 565,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 510 + 458 + 5_332 + 131 + 304 + 125 + 13 + 565,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

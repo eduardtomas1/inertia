@@ -445,7 +445,7 @@ export function providerEnvironment(refresh = false): Promise<ProviderEnvironmen
   return environmentPromise;
 }
 
-const MULTIPLEXING_SHIMS = new Set(["mise", "snap", "volta-shim"]);
+export const MULTIPLEXING_SHIMS: ReadonlySet<string> = new Set(["snap", "volta-shim"]);
 
 async function executableFile(path: string, platform: NodeJS.Platform): Promise<string | null> {
   try {

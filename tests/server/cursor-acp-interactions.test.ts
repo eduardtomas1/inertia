@@ -203,3 +203,101 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
   });
 });
+
+describe("Cursor ACP in-band backend errors", { concurrent: false }, () => {
+  const roots: string[] = [];
+  afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  async function cursorTurn(updates: object[]) {
+    const root = portableFixtureRoot("Cursor in-band error");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "cursor-inband-session";
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "2026.09.02-c22c1a3" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    for (const update of ${JSON.stringify(updates)}) send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    const manager = ProviderManager.createForTests(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    const text: string[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "cursor", conversationId: "cursor-inband", cwd: root,
+      prompt: "Hello", interactionMode: "build", access: "supervised",
+    }), { onText: (event) => { text.push(event.text); } });
+    return { result, text: text.join("") };
+  }
+
+  const chunk = (value: string) => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } });
+
+  it("fails a sign-in request through the authentication path that leads to Connect", async () => {
+    const { result, text } = await cursorTurn([chunk("\n\nPlease sign in to continue")]);
+    expect(result).toMatchObject({
+      status: "failed",
+      text: "",
+      cleanupConfirmed: true,
+      failure: {
+        reason: "provider-error",
+        message: "Cursor needs you to sign in. Connect Cursor in provider settings, then try again.",
+        phase: "auth",
+        terminalEvent: "session/prompt:sign-in-required",
+      },
+    });
+    expect(result.failure?.usageLimited).toBeUndefined();
+    expect(text).toBe("");
+  });
+
+  it("fails a plan limit as a usage-limited turn", async () => {
+    const { result, text } = await cursorTurn([chunk("\n\nUpgrade your plan to continue")]);
+    expect(result).toMatchObject({
+      status: "failed",
+      text: "",
+      failure: {
+        reason: "provider-error",
+        message: "Cursor: Upgrade your plan to continue",
+        phase: "turn",
+        terminalEvent: "session/prompt:backend-error",
+        usageLimited: true,
+      },
+    });
+    expect(text).toBe("");
+  });
+
+  it.each([
+    ["\n\nAdd a payment method to continue", "Cursor: Add a payment method to continue"],
+    ["\n\nCheck your settings to continue", "Cursor: Check your settings to continue"],
+    ["\n\nError: The model is overloaded", "Cursor: Error: The model is overloaded"],
+  ])("fails %j with the backend text as the reason", async (value, message) => {
+    const { result, text } = await cursorTurn([chunk(value)]);
+    expect(result).toMatchObject({
+      status: "failed",
+      text: "",
+      failure: { reason: "provider-error", message, phase: "turn", terminalEvent: "session/prompt:backend-error" },
+    });
+    expect(result.failure?.usageLimited).toBeUndefined();
+    expect(text).toBe("");
+  });
+
+  it.each([
+    { name: "a sentence without Cursor's leading blank lines", updates: [chunk("Please sign in to continue")], expected: "Please sign in to continue" },
+    { name: "an ordinary answer that uses the same words", updates: [chunk("\n\nUpgrade your plan to continue using longer contexts.")], expected: "\n\nUpgrade your plan to continue using longer contexts." },
+    { name: "a matching first chunk followed by more answer", updates: [chunk("\n\nUpgrade your plan to continue"), chunk(" if you need more requests.")], expected: "\n\nUpgrade your plan to continue if you need more requests." },
+    { name: "a matching chunk after other turn output", updates: [chunk("Checking."), chunk("\n\nPlease sign in to continue")], expected: "Checking.\n\nPlease sign in to continue" },
+    { name: "a matching chunk after reasoning", updates: [{ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Thinking" } }, chunk("\n\nError: quoted from the log")], expected: "\n\nError: quoted from the log" },
+  ])("completes $name", async ({ updates, expected }) => {
+    const { result, text } = await cursorTurn(updates);
+    expect(result).toMatchObject({ status: "completed", text: expected });
+    expect(result.failure).toBeUndefined();
+    expect(text).toBe(expected);
+  });
+});

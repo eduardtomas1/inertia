@@ -84,6 +84,7 @@ import {
   type PendingCursorApproval,
 } from "./cursor-acp-permissions";
 import { emitCursorMetadata } from "./cursor-acp-metadata";
+import { CursorInbandErrors } from "./cursor-acp-inband-errors";
 import { readBoundedProviderImage } from "./provider-image-read";
 import { configureCursorSession } from "./cursor-acp-session";
 export { findCursorAdvertisedConfigValue } from "./cursor-acp-session";
@@ -212,6 +213,7 @@ function startCursorRun(
   });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const compactions = new AcpCompactionProjection("Cursor", "cursor", emitter);
+  const inbandErrors = new CursorInbandErrors();
   let subagentSequence = 0;
   const toolActivities = new Map<
     string,
@@ -342,7 +344,9 @@ function startCursorRun(
         todoSessions.reset(sessionId);
       }
       handleCursorProviderEvent(() => {
-        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions, secretRedactor);
+        for (const update of inbandErrors.observe(safeParams)) {
+          handleCursorUpdate(update, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions, secretRedactor);
+        }
       }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
@@ -621,11 +625,12 @@ function startCursorRun(
     }));
     if (providerEventError) throw providerEventError;
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter);
-    const compactionFailure = options.input.operation?.kind === "compact"
-      && compactions.completionEvidence() !== "completed"
-      ? unconfirmedAcpCompactionFailure("Cursor")
-      : undefined;
-    if (!cancelRequested && response.stopReason === "end_turn" && !compactionFailure) {
+    const turnFailure = inbandErrors.failure(redactHostMcpPayload, options.input.cwd)
+      ?? (options.input.operation?.kind === "compact"
+        && compactions.completionEvidence() !== "completed"
+        ? unconfirmedAcpCompactionFailure("Cursor")
+        : undefined);
+    if (!cancelRequested && response.stopReason === "end_turn" && !turnFailure) {
       finishOutputStreams();
     } else {
       secretRedactor.discardStreams();
@@ -643,8 +648,8 @@ function startCursorRun(
               terminalEvent: `session/prompt:${response.stopReason}`,
             });
           })()
-        : compactionFailure
-          ? finish("failed", compactionFailure.message, compactionFailure)
+        : turnFailure
+          ? finish("failed", turnFailure.message, turnFailure)
           : finish("completed");
     // Arm owned termination before returning control to connectWith, which may
     // close/reap the ACP transport before the public-result continuation runs.

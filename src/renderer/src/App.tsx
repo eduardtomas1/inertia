@@ -821,6 +821,13 @@ export default function App(): React.JSX.Element {
       openBackendSetup,
       openSettings: () => openSettings(),
       openUsageView: () => navigateToView("usage"),
+      openConversation: (conversationId: string) => {
+        const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
+        if (!target || target.archivedAt !== null) return false;
+        selectConversation(target);
+        setView("workspace");
+        return true;
+      },
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
         if (conversation) {

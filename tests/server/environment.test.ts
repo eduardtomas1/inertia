@@ -660,6 +660,17 @@ describe("provider environment discovery", { concurrent: false }, () => {
     })).not.toHaveProperty("CODEX_HOME");
   });
 
+  it("passes Claude's configuration folder only to Claude, with the home shorthand expanded", () => {
+    expect(providerChildEnvironment("claude", {
+      PATH: process.env.PATH,
+      CLAUDE_CONFIG_DIR: "~/.claude-work",
+    })).toMatchObject({ CLAUDE_CONFIG_DIR: join(homedir(), ".claude-work") });
+    expect(providerChildEnvironment("codex", {
+      PATH: process.env.PATH,
+      CLAUDE_CONFIG_DIR: "~/.claude-work",
+    })).not.toHaveProperty("CLAUDE_CONFIG_DIR");
+  });
+
   it("passes Kimi's documented credentials and proxy without unrelated secrets", () => {
     const source = {
       PATH: process.env.PATH,

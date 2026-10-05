@@ -27,6 +27,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "duration_ms",
   ]],
   [91, "app_state", ["muted_custom_colors"]],
+  [92, "agent_turns", ["origin"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -65,10 +66,15 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [74, ["usage_limit_sources", "usage_reset_attempts"]],
   [81, ["queued_messages"]],
   [87, ["usage_limit_resume_plans", "usage_limited_turns"]],
+  [92, ["cli_conversation_imports"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
   tables: REQUIRED_TABLES_BY_SCHEMA_VERSION,
   columns: REQUIRED_COLUMNS_BY_SCHEMA_VERSION,
-  indexes: [[90, "workspace_runs_conversation_started_idx"]],
+  indexes: [
+    [90, "workspace_runs_conversation_started_idx"],
+    [92, "agent_turns_provider_session_before_idx"],
+    [92, "agent_turns_provider_session_after_idx"],
+  ],
 };

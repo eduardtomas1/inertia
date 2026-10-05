@@ -63,7 +63,7 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 489,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -83,7 +83,7 @@ const budgets = {
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 785,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,
@@ -94,7 +94,8 @@ const budgets = {
   // measured).
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226,
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
+  deferredCliConversationImportJavaScript: 9_797 + 256,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
@@ -172,7 +173,7 @@ const budgets = {
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
   // The Providers description in Agents settings adds 97 core bytes
   // (2,266,291 measured).
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 2_016,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -602,7 +603,7 @@ const diagnosticEntries = ["DiagnosticsSettings", "application-diagnostics"].map
 });
 const deferredDiagnosticsJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[0]}`);
 const deferredDiagnosticCatalogJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[1]}`);
-const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu", "ReviewNoteDialog"].map((prefix) => {
+const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu", "ReviewNoteDialog", "CliConversationImportDialog"].map((prefix) => {
   const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
   if (!entry) throw new Error(`Missing deferred project/thread surface: ${prefix}`);
   if (mainWorkbenchJavaScriptClosure.has(entry) || detachedChatJavaScriptClosure.has(entry)) {
@@ -610,6 +611,7 @@ const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu", "Re
   }
   return entry;
 });
+const deferredCliConversationImportJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[3]}`);
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
 const deferredReviewNoteJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[2]}`);
@@ -684,6 +686,7 @@ const coreJavaScriptBytes =
   - deferredSnapshotSettingsJavaScriptBytes
   - deferredSnapshotControlJavaScriptBytes
   - deferredAttachmentStorageSettingsJavaScriptBytes
+  - deferredCliConversationImportJavaScriptBytes
   - deferredBackgroundTasksJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
@@ -727,6 +730,7 @@ const measurements = {
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
   deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
+  deferredCliConversationImportJavaScript: deferredCliConversationImportJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredProjectCustomizeJavaScript: deferredProjectCustomizeJavaScriptBytes,

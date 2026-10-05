@@ -609,6 +609,7 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     usageAtCompletion: parseAgentTurnUsage(row.usage_completion_json),
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: row.association,
+    ...(row.origin === "cli-import" ? { origin: "cli-import" as const } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

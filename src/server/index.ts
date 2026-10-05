@@ -1,5 +1,6 @@
 import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
+import { createCliConversationCommandHandler } from "./runtime/commands/cli-conversation-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
@@ -688,14 +689,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
-      createDuoCommandHandler({
-        coordinator: duoLaunchCoordinator,
-        broadcastSnapshot: flushSnapshot,
-        send,
-      }),
+      createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,

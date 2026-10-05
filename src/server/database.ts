@@ -1,5 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
+import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
 import Database from "better-sqlite3";
@@ -280,9 +281,6 @@ export class RuntimeStore {
       this.database.pragma("foreign_keys = ON");
       this.database.pragma("busy_timeout = 5000");
       this.database.pragma("journal_mode = WAL");
-      // NORMAL keeps committed transactions crash-consistent in WAL mode
-      // without forcing every streamed update through a full filesystem sync.
-      // A sudden host power loss may still lose the newest OS-buffered commits.
       this.database.pragma("synchronous = NORMAL");
       this.database.pragma("cache_size = -16000");
       this.database.pragma("mmap_size = 268435456");
@@ -419,10 +417,11 @@ export class RuntimeStore {
   markConversationUnread(conversationId: string): void { this.conversationRepository.markUnread(conversationId); }
   regenerateConversationTitle(conversationId: string): void { this.conversationRepository.regenerateTitle(conversationId); }
 
-  createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation {
-    return this.conversationRepository.create(projectId, title, options);
-  }
-
+  createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
+  importedCliConversation(providerId: "codex" | "claude", sessionId: string): string | null { return importedCliConversation(this.database, providerId, sessionId); }
+  importCliConversation(input: CliConversationImportInput): string { return importCliConversation(this.database, this.conversationRepository, this.transcriptRepository, this.turnLedgerRepository, input); }
+  cliConversationImport(conversationId: string): CliConversationImportRecord | null { return cliConversationImport(this.database, conversationId); }
+  cliSessionOwnership(providerId: "codex" | "claude", sessionId: string): CliSessionOwnership { return cliSessionOwnership(this.database, providerId, sessionId); }
   createPairedConversations(
     launchId: string,
     sides: readonly [DuoConversationPlan, DuoConversationPlan],

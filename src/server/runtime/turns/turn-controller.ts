@@ -86,7 +86,7 @@ import {
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
-import { applyFreshSessionFallback, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
+import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
 
 export type {
   QueuedTurn,
@@ -102,11 +102,6 @@ export type {
   TurnTimerScheduler,
 } from "./turn-controller-types";
 
-/**
- * Server-authoritative owner for every live agent-turn lifecycle. Provider
- * transports only emit normalized events; conversation and workspace rows are
- * projections written after the durable turn transition.
- */
 export class TurnController {
   private readonly activeByConversation = new Map<string, ActiveTurn>();
   private readonly activeByTurn = new Map<string, ActiveTurn>();
@@ -352,9 +347,6 @@ export class TurnController {
         || turn.conversationId !== conversationId
       ) return false;
       const request = this.store.message(turn.userMessageId);
-      // Duo source and judge turns are deliberately attachment-free. Refuse
-      // future or malformed launch-owned turns that would require a lost
-      // ActiveTurn's private attachment-release state.
       if (request.turnId !== turnId || request.attachments.length > 0) {
         return false;
       }
@@ -480,11 +472,6 @@ export class TurnController {
     ])];
   }
 
-  /**
-   * Recovery must not open its isolated write transaction until downstream
-   * terminal work has stopped using the authoritative store. The admission
-   * fence prevents new turns while this drains the already tracked snapshot.
-   */
   async drainSettlementTasks(signal?: AbortSignal): Promise<void> {
     while (this.settlementTasks.size > 0) {
       if (signal?.aborted) {
@@ -520,18 +507,10 @@ export class TurnController {
     }
   }
 
-  /**
-   * A fresh renderer cannot replay transient projection events. Persist the
-   * bounded live suffix and drain its projected delta before hydration so the
-   * new renderer receives each character exactly once through its snapshot.
-   */
   flushActiveStreamsForHydration(): void {
     for (const active of this.activeByConversation.values()) {
       if (active.runState.isTerminal()) continue;
       try {
-        // A pending high surrogate is an incomplete provider delta, not text
-        // that can be projected. Keep that single code unit across renderer
-        // hydration so the next delta can complete its astral character.
         active.assistantStream.flush();
         active.reasoningStream.flush();
       } catch (error) {
@@ -546,7 +525,6 @@ export class TurnController {
     }
   }
 
-  /** Synchronous ownership handoff runs after commit and before live adoption. */
   queue(
     request: QueueTurnRequest,
     onPersisted?: () => void,
@@ -813,10 +791,7 @@ export class TurnController {
     };
     active.providerStartAcknowledgement = acknowledge;
     try {
-      const hostTools = resolveTurnHostTools(active, this.hooks);
-      // Persist exact process ownership before run()/harness.start() can create
-      // a child or synchronously invoke a callback. Abrupt worker exits therefore
-      // leave a generation-bound deletion/recovery fence behind.
+      const hostTools = resolveTurnHostTools(active, this.hooks, this.store);
       this.store.providerRunOwnership.record(
         active.turn.id,
         active.conversation.id,
@@ -836,7 +811,6 @@ export class TurnController {
           }
           this.timeouts.activity(active);
           acknowledge(true);
-          // Harness acceptance precedes initialize/thread open and turn/start; wait for protocol `running`.
           if (
             active.turn.harnessId !== "codex-app-server"
             && active.turn.harnessId !== "claude-agent-sdk"
@@ -879,9 +853,6 @@ export class TurnController {
             active.turn.runId,
           );
         }
-        // Cancellation owns an exact stop barrier which releases attachments
-        // only after the provider process has detached. The provider promise
-        // may settle before stopOwned(), so it must not race that barrier.
         if (
           cleanupConfirmed
           && !this.providerRunOwnershipBarriers.has(active.conversation.id)
@@ -1020,7 +991,6 @@ export class TurnController {
     return this.settle(active, "failed", "unsupported-interaction", message);
   }
 
-  /** Runtime shutdown and owned process-crash paths use the same settlement. */
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {
     if (this.closing) return;
     this.closing = true;
@@ -1043,10 +1013,6 @@ export class TurnController {
     }
   }
 
-  /**
-   * Public for focused transport and stale-callback tests. Production provider
-   * events enter through the callback installed by start().
-   */
   handleProviderEvent(event: ProviderEvent): boolean {
     const active = this.activeByConversation.get(event.conversationId);
     if (!active || !providerEventMatchesActiveTurn(this.store, active, event)) {
@@ -1093,8 +1059,6 @@ export class TurnController {
       });
       return;
     }
-    // Join the exact stopOwned receipt: terminal results and missing live owners are not cleanup proof.
-    // The result cannot replace an already terminal root outcome.
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
@@ -1124,7 +1088,7 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      const failure = normalizedProviderRunFailure(active, result);
+      const failure = normalizedProviderRunFailure(active, result, importedSessionUnavailableMessage(this.store, active, result));
       this.settle(active, "failed", providerFailureCause(result), failure.message, failure);
     }
   }
@@ -1162,9 +1126,6 @@ export class TurnController {
     try {
       await this.releaseTurnAttachments(active);
     } catch {
-      // Release hooks are required to be idempotent. One whole-set retry
-      // closes partial multi-path failures without releasing before provider
-      // detachment or silently dropping the failed lease.
       await this.releaseTurnAttachments(active);
     }
   }

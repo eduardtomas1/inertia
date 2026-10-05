@@ -93,6 +93,7 @@ export class UsageDashboardRepository {
         AND completed_at < ?
         AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
         AND association = 'authoritative'
+        AND origin IS NULL
       ORDER BY completed_at ASC, id ASC
     `).all(fromInclusive, toExclusive) as UsageDashboardTurnRow[];
     return projectUsageDashboard(rows.map(usageDashboardTurnFromRow), range);

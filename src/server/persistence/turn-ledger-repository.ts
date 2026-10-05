@@ -27,6 +27,10 @@ import {
   type PersistedTurnExecutionContext,
   type SanitizedTurnExecutionManifest,
 } from "../runtime/turns/request-context";
+import {
+  MAX_RUNTIME_INTERRUPTION_ENTRIES,
+  type RuntimeInterruption,
+} from "../runtime/turns/turn-runtime-interruption-note";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
@@ -328,6 +332,25 @@ export class TurnLedgerRepository {
       }
       return { message, turn };
     })();
+  }
+
+  runtimeInterruption(turnId: string): RuntimeInterruption {
+    const request = this.context.database.prepare(`
+      SELECT substr(message.content, 1, 1000) AS content
+      FROM agent_turns AS turn JOIN messages AS message ON message.id = turn.user_message_id
+      WHERE turn.id = ?
+    `).get(turnId) as { content: string | null } | undefined;
+    const lost = this.context.database.prepare(`
+      SELECT substr(COALESCE(NULLIF(trim(description), ''), provider_name, provider_role, 'delegated task'), 1, 1000) AS label
+      FROM subagent_traces
+      WHERE turn_id = ? AND status = 'lost'
+      ORDER BY created_at ASC, id ASC
+      LIMIT ?
+    `).all(turnId, MAX_RUNTIME_INTERRUPTION_ENTRIES) as Array<{ label: string }>;
+    const { count } = this.context.database.prepare(
+      "SELECT COUNT(*) AS count FROM subagent_traces WHERE turn_id = ? AND status = 'lost'",
+    ).get(turnId) as { count: number };
+    return { request: request?.content ?? null, lostTasks: lost.map(({ label }) => label), lostTaskCount: count };
   }
 
   savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {

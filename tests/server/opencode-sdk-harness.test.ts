@@ -1189,6 +1189,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           content: "Do not admit this follow-up.",
           imagePaths: [],
         }, { runId: event.runId, turnId: event.turnId! });
+        followUp.catch(() => undefined);
       },
     })).resolves.toMatchObject({ status: "completed" });
     await expect(followUp).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError" });

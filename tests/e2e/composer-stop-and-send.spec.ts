@@ -98,8 +98,9 @@ test.afterEach(async () => {
   if (app) await closeElectronAfterTest(() => app.close(), () => test.info(), failure);
 });
 
-test("Stop and send stops a Kimi run and sends the draft as the next turn in the same session", async ({}, testInfo) => {
+test("Stop and send stops a Kimi run and sends the draft as the next turn in the same session", async () => {
   test.setTimeout(90_000);
+  const testInfo = test.info();
   let wirePath = "";
   const additionalEnvironment: Record<string, string> = {};
   const app = activeApp = await createAppFixture({

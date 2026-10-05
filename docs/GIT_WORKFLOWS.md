@@ -67,13 +67,16 @@ reference is published. On a 24,130-file repository a checkpoint takes about
 0.25 s, down from about 5 s.
 
 When a checkpoint cannot be captured, the turn still runs and its request row
-says **No checkpoint for this turn**; hovering it shows the reason.
+says **No checkpoint for this turn**. The reason shows on hover and is part of
+the label's text for screen readers.
 
 **Revert** first saves current edits in a recovery checkpoint, then restores
 the selected one. It refuses when the restore would overwrite or replace an
 ignored file, because ignored files are not in the recovery checkpoint. The
 check lists wholly ignored directories once (for example `node_modules/`) and
-looks inside them only for paths the checkpoint would write.
+looks inside them only for paths the checkpoint would write. When Git matches
+ignore rules without regard to case (`core.ignorecase`, the default on macOS
+and Windows), so does this check.
 
 ## Design reference and architecture
 

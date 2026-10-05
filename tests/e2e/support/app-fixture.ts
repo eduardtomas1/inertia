@@ -13,6 +13,7 @@ import { seedAppConversation } from "../../support/seed-app-conversation";
 import { assertE2eWindowResource } from "../../support/e2e-resource-policy";
 import { serveAgentBrowserCoverageFixture } from "./agent-browser-coverage-pages";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
+import { serveAgentBrowserToolSurfaceFixture } from "./agent-browser-tool-surface-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, FIXTURE_PREPARED_EXIT_TIMEOUT_MS, observeElectronPage,
   observeElectronProcess, quitElectronAppBounded, removeFixtureDirectory,
@@ -100,6 +101,7 @@ async function createPreviewServer(): Promise<{
   const server = createServer((request, response) => {
     if (serveAgentBrowserPrivacyFixture(request.url, response)) return;
     if (serveAgentBrowserCoverageFixture(request, response)) return;
+    if (serveAgentBrowserToolSurfaceFixture(request, response)) return;
     if (
       request.method === "POST"
       && request.url === "/backend-probe/v1/messages"

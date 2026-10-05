@@ -67,12 +67,12 @@ describe("agent browser tool contract", () => {
       schemaRequired(definition),
       definition.readOnly,
     ])).toEqual([
-      ["inertia_browser_navigate", ["url"], false],
+      ["inertia_browser_navigate", [], false],
       ["inertia_browser_snapshot", [], true],
       ["inertia_browser_click", ["ref"], false],
       ["inertia_browser_type", ["ref", "text"], false],
       ["inertia_browser_press", ["key"], false],
-      ["inertia_browser_scroll", ["deltaY"], false],
+      ["inertia_browser_scroll", [], false],
       ["inertia_browser_wait_for", [], true],
       ["inertia_browser_screenshot", [], true],
       ["inertia_browser_tabs", [], true],
@@ -189,11 +189,18 @@ describe("agent browser tool contract", () => {
 
   it.each([
     ["inertia_browser_navigate", { url: "http://localhost:3000" }, { action: "navigate", url: "http://localhost:3000" }],
+    ["inertia_browser_navigate", { url: "localhost:5173" }, { action: "navigate", url: "localhost:5173" }],
+    ["inertia_browser_navigate", { history: "back" }, { action: "history", direction: "back" }],
+    ["inertia_browser_navigate", { history: "reload" }, { action: "history", direction: "reload" }],
     ["inertia_browser_click", { ref: "e1" }, { action: "click", ref: "e1" }],
+    ["inertia_browser_click", { ref: "e1", dialog: "accept" }, { action: "click", ref: "e1", dialog: "accept" }],
+    ["inertia_browser_click", { ref: "e1", dialog: "dismiss" }, { action: "click", ref: "e1" }],
+    ["inertia_browser_press", { key: "Enter", dialog: "accept" }, { action: "press", key: "Enter", dialog: "accept" }],
     ["inertia_browser_type", { ref: "e2", text: "hello" }, { action: "type", ref: "e2", text: "hello", replace: true }],
     ["inertia_browser_type", { ref: "e2", text: "", replace: false }, { action: "type", ref: "e2", text: "", replace: false }],
     ["inertia_browser_press", { key: "Enter" }, { action: "press", key: "Enter" }],
     ["inertia_browser_scroll", { deltaY: -300 }, { action: "scroll", deltaY: -300 }],
+    ["inertia_browser_scroll", { ref: "e5" }, { action: "scroll", ref: "e5" }],
     ["inertia_browser_wait_for", {}, { action: "wait", state: "present", timeoutMs: 10_000 }],
     ["inertia_browser_wait_for", { text: "  Saved  ", state: "absent", timeoutMs: 250 }, { action: "wait", text: "Saved", state: "absent", timeoutMs: 250 }],
     ["inertia_browser_tabs", {}, { action: "tabs" }],
@@ -217,6 +224,8 @@ describe("agent browser tool contract", () => {
   });
 
   it.each([
+    ["inertia_browser_navigate", {}],
+    ["inertia_browser_navigate", { url: "http://localhost:3000", history: "back" }],
     ["inertia_browser_click", {}],
     ["inertia_browser_click", { ref: "e1", extra: true }],
     ["inertia_browser_type", { ref: "e1" }],

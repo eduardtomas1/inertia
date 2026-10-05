@@ -7,6 +7,7 @@ import {
   forwardedKeyboardInput,
   previewAppShortcutKey,
 } from "./preview-keyboard.js";
+import { agentPageInputIsUser } from "./preview-agent-control.js";
 import { hardenDesktopSession } from "./preview-session.js";
 
 export interface PreviewTab {
@@ -27,6 +28,8 @@ interface PreviewTabOptions {
   publish(): void;
   navigated(tab: PreviewTab, url: string, sameDocument: boolean): void;
   consoleError(tab: PreviewTab, message: unknown): void;
+  userInput?(tab: PreviewTab): void;
+  allowUnload?(tab: PreviewTab): boolean;
 }
 
 export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
@@ -78,6 +81,12 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
     const target = options.targetContents();
     if (!target || target.isDestroyed()) return;
     target.sendInputEvent(forwardedKeyboardInput(input));
+  });
+  contents.on("will-prevent-unload", (event) => {
+    if (options.allowUnload?.(tab) === true) event.preventDefault();
+  });
+  contents.on("input-event", (_event, input) => {
+    if (agentPageInputIsUser(contents, input)) options.userInput?.(tab);
   });
   contents.on("before-mouse-event", (event) => {
     if (options.captureLocked.has(contents)) event.preventDefault();

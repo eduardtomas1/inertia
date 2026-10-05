@@ -100,21 +100,48 @@ describe("frontend Browser audit", () => {
         `e${index}`,
         { name: "界".repeat(300), x: index * 2 },
       )),
-      truncated: false,
     }));
 
     expect(Buffer.byteLength(result, "utf8"))
       .toBeLessThanOrEqual(MAX_AGENT_BROWSER_TEXT_BYTES);
     const parsed = JSON.parse(result) as {
-      truncated: boolean;
+      text: string;
       elements: unknown[];
+      omitted: unknown;
+      nextStep: string;
       inertiaAudit: { version: number };
     };
-    expect(parsed).toMatchObject({
-      truncated: true,
-      inertiaAudit: { version: 1 },
-    });
+    expect(parsed).not.toHaveProperty("truncated");
+    expect(parsed).toMatchObject({ inertiaAudit: { version: 1 } });
     expect(parsed.elements.length).toBeLessThan(200);
+    expect(parsed.omitted).toEqual({
+      textChars: 12_000 - parsed.text.length,
+      elements: 200 - parsed.elements.length,
+    });
+    expect(parsed.nextStep).toContain("inertia_browser_scroll");
+  });
+
+  it("audits only the viewport and keeps in-view controls when it must shrink", () => {
+    const offscreen = Array.from({ length: 120 }, (_, index) => ({
+      ...element(`below${index}`, { name: "界".repeat(300), y: 900 + index * 40, width: 10, height: 10 }),
+      offscreen: true,
+    }));
+    const inView = Array.from({ length: 80 }, (_, index) => element(`in${index}`, { name: "界".repeat(300), x: index * 2 }));
+    const result = JSON.parse(withFrontendBrowserAudit(JSON.stringify({
+      viewport: { width: 1_200, height: 800, scrollX: 0, scrollY: 0 },
+      text: "界".repeat(12_000),
+      elements: [...offscreen, ...inView],
+      omitted: { textChars: 0, elements: 3 },
+    }))) as {
+      elements: Array<{ ref: string }>;
+      omitted: { elements: number };
+      inertiaAudit: { checkedElements: number; issues: Array<{ code: string }> };
+    };
+    expect(result.inertiaAudit.checkedElements).toBe(80);
+    expect(result.inertiaAudit.issues.map(({ code }) => code)).not.toContain("small-target");
+    const kept = new Set(result.elements.map(({ ref }) => ref));
+    expect(inView.every(({ ref }) => kept.has(ref)) || offscreen.every(({ ref }) => !kept.has(ref))).toBe(true);
+    expect(result.omitted.elements).toBe(3 + 200 - result.elements.length);
   });
 
   it("uses fractional CSS geometry at exact target and viewport thresholds", () => {

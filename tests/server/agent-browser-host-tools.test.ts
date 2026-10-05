@@ -69,6 +69,22 @@ describe("agent browser host tools", () => {
     expect(request.requestApproval).not.toHaveBeenCalled();
   });
 
+  it("tells the model in a snapshot that the user has been using the page", async () => {
+    const broker = { perform: vi.fn(async () => ({
+      ok: true as const,
+      text: JSON.stringify({ title: "Local app", viewport: {}, text: "", elements: [] }),
+      state: {
+        activeTabId: tabId,
+        tabs: [{ id: tabId, title: "App", url: "http://127.0.0.1:3000", loading: false }],
+        activity: null,
+        controller: "user" as const,
+      },
+    })) };
+    const result = await new AgentBrowserHostTools(broker)
+      .invoke(conversation("full"), call("inertia_browser_snapshot", {}), identity);
+    expect(JSON.parse(result.text)).toMatchObject({ tabId, controller: "user", title: "Local app" });
+  });
+
   it("keeps screenshot bytes local even when a broker result regresses", async () => {
     const image = Buffer.from("png").toString("base64");
     const broker = { perform: vi.fn(async () => ({
@@ -135,6 +151,39 @@ describe("agent browser host tools", () => {
       .resolves.toMatchObject({ success: false });
     expect(request.requestApproval).not.toHaveBeenCalled();
     expect(broker.perform).toHaveBeenLastCalledWith(identity, { action: "discard-approval", token });
+  });
+
+  it.each([
+    [{ code: "invalid" as const, message: "Not accepted." }, false, false],
+    [{ code: "not-found" as const, message: "Stale." }, true, false],
+    [{ code: "sensitive" as const, message: "Withheld." }, false, false],
+    [{ code: "too-large" as const, message: "Too many tabs." }, true, false],
+    [{ code: "unavailable" as const, message: "Refused." }, true, false],
+    [{ code: "timeout" as const, message: "Nothing was sent." }, true, false],
+    [{ code: "timeout" as const, message: "Input may have reached the page.", reachedPage: true }, true, true],
+    [{ code: "cancelled" as const, message: "Cancelled." }, false, false],
+  ])("states whether failure %j can be retried and whether it reached the page", async (failure, retryable, reachedPage) => {
+    const broker = { perform: vi.fn(async () => ({ ok: false as const, ...failure })) };
+    const result = await new AgentBrowserHostTools(broker)
+      .invoke(conversation("full"), call("inertia_browser_click", { ref: "e1" }), identity);
+    expect(JSON.parse(result.text)).toEqual({
+      error: { code: failure.code, message: failure.message, retryable, reachedPage },
+    });
+  });
+
+  it("marks rejected arguments, denials and cancellations as not retryable and not reaching the page", async () => {
+    const broker = { perform: vi.fn(async () => ({
+      ok: true as const, text: JSON.stringify({ token: crypto.randomUUID(), detail: "Browser tab 1" }),
+      state: { activeTabId: tabId, tabs: [], activity: null },
+    })) };
+    const tools = new AgentBrowserHostTools(broker);
+    for (const [request, code] of [
+      [call("inertia_browser_click", {}), "invalid"],
+      [call("inertia_browser_click", { ref: "e1" }, "deny"), "user_denied"],
+    ] as const) {
+      const result = await tools.invoke(conversation("supervised"), request, identity);
+      expect(JSON.parse(result.text)).toMatchObject({ error: { code, retryable: false, reachedPage: false } });
+    }
   });
 
   it.each(["auto-edit", "full"] as const)(

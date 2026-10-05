@@ -1,4 +1,8 @@
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../shared/agent-browser";
+import {
+  agentBrowserSnapshotNextStep,
+  nearestAgentBrowserElements,
+} from "../../shared/agent-browser-snapshot";
 
 const MAX_ELEMENTS = 200;
 const MAX_ISSUE_REFS = 24;
@@ -59,6 +63,7 @@ function safeElement(value: unknown): AuditedElement | null {
   const height = finite(rect?.height);
   if (
     !element
+    || element.offscreen === true
     || typeof element.ref !== "string"
     || !/^[A-Za-z0-9_-]{1,64}$/u.test(element.ref)
     || typeof element.role !== "string"
@@ -125,8 +130,19 @@ function boundedSnapshot(snapshot: Record<string, unknown>): string {
   if (Buffer.byteLength(serialized, "utf8") <= MAX_AGENT_BROWSER_TEXT_BYTES) {
     return serialized;
   }
-  snapshot.truncated = true;
+  const sourceText = typeof snapshot.text === "string" ? snapshot.text : "";
+  const sourceCount = Array.isArray(snapshot.elements) ? snapshot.elements.length : 0;
+  const prior = record(snapshot.omitted);
+  const priorCount = (value: unknown): number => (
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0
+  );
+  const omission = (keptText: number, keptElements: number) => ({
+    textChars: priorCount(prior?.textChars) + sourceText.length - keptText,
+    elements: priorCount(prior?.elements) + sourceCount - keptElements,
+  });
+  if (typeof snapshot.nextStep !== "string") snapshot.nextStep = agentBrowserSnapshotNextStep(false);
   if (typeof snapshot.text === "string") snapshot.text = snapshot.text.slice(0, 4_000);
+  const keptText = typeof snapshot.text === "string" ? snapshot.text.length : 0;
   const audit = record(snapshot.inertiaAudit);
   if (audit) {
     const issues = Array.isArray(audit.issues) ? audit.issues : [];
@@ -140,7 +156,8 @@ function boundedSnapshot(snapshot: Record<string, unknown>): string {
   let high = elements.length;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    snapshot.elements = elements.slice(0, middle);
+    snapshot.elements = nearestAgentBrowserElements(elements, middle, snapshot.viewport);
+    snapshot.omitted = omission(keptText, middle);
     const candidate = JSON.stringify(snapshot);
     if (Buffer.byteLength(candidate, "utf8") <= MAX_AGENT_BROWSER_TEXT_BYTES) {
       low = middle;
@@ -148,12 +165,14 @@ function boundedSnapshot(snapshot: Record<string, unknown>): string {
       high = middle - 1;
     }
   }
-  snapshot.elements = elements.slice(0, low);
+  snapshot.elements = nearestAgentBrowserElements(elements, low, snapshot.viewport);
+  snapshot.omitted = omission(keptText, low);
   serialized = JSON.stringify(snapshot);
   return Buffer.byteLength(serialized, "utf8") <= MAX_AGENT_BROWSER_TEXT_BYTES
     ? serialized
     : JSON.stringify({
-        truncated: true,
+        omitted: omission(0, 0),
+        nextStep: snapshot.nextStep,
         inertiaAudit: snapshot.inertiaAudit,
       });
 }

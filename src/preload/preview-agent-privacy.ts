@@ -7,11 +7,45 @@ import {
   PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT,
   PREVIEW_AGENT_NESTED_BOUNDARY_EVENT,
 } from "../shared/preview-agent-privacy-guard.js";
+import {
+  installPreviewAgentDialogPolicy,
+  installPreviewAgentDialogRecorder,
+  MAX_PREVIEW_AGENT_DIALOG_MESSAGE_CHARS,
+  MAX_PREVIEW_AGENT_DIALOGS,
+  PREVIEW_AGENT_DIALOG_ANSWER_EVENT,
+  PREVIEW_AGENT_DIALOG_EVENT,
+} from "../shared/preview-agent-dialogs.js";
+import {
+  createPreviewAgentPrivacyRuntime,
+  PREVIEW_AGENT_NAME_WORD_SOURCE,
+  PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
+} from "../shared/preview-agent-sensitive-fields.js";
 
-installPreviewAgentPrivacyGuard((refusal) => {
-  ipcRenderer.sendSync(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, refusal);
-});
+installPreviewAgentPrivacyGuard(
+  createPreviewAgentPrivacyRuntime(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE, PREVIEW_AGENT_NAME_WORD_SOURCE),
+  (refusal) => {
+    ipcRenderer.sendSync(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, refusal);
+  },
+);
 contextBridge.executeInMainWorld({
   func: installPreviewAgentShadowBoundarySignal,
-  args: [PREVIEW_AGENT_NESTED_BOUNDARY_EVENT, PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT],
+  args: [
+    PREVIEW_AGENT_NESTED_BOUNDARY_EVENT,
+    PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT,
+    PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
+    PREVIEW_AGENT_NAME_WORD_SOURCE,
+  ],
+});
+installPreviewAgentDialogRecorder(
+  PREVIEW_AGENT_DIALOG_EVENT,
+  MAX_PREVIEW_AGENT_DIALOG_MESSAGE_CHARS,
+  MAX_PREVIEW_AGENT_DIALOGS,
+);
+contextBridge.executeInMainWorld({
+  func: installPreviewAgentDialogPolicy,
+  args: [
+    PREVIEW_AGENT_DIALOG_EVENT,
+    PREVIEW_AGENT_DIALOG_ANSWER_EVENT,
+    MAX_PREVIEW_AGENT_DIALOG_MESSAGE_CHARS,
+  ],
 });

@@ -17,6 +17,12 @@ import {
 } from "../../src/main/preview-agent-page";
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
 import { installPreviewAgentShadowBoundarySignal } from "../../src/shared/preview-agent-privacy-guard";
+import {
+  PREVIEW_AGENT_NAME_WORD_SOURCE,
+  PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
+} from "../../src/shared/preview-agent-sensitive-fields";
+
+const nameSources = `${JSON.stringify(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE)}, ${JSON.stringify(PREVIEW_AGENT_NAME_WORD_SOURCE)}`;
 
 function bodyWithText(text: string): {
   firstChild: { nodeType: number; parentElement: unknown; parentNode: unknown; readonly nodeValue: string; nextSibling: null };
@@ -294,7 +300,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     runInNewContext("new HTMLElement().attachInternals()", context);
@@ -331,7 +337,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     expect(() => runInNewContext("new Element().attachShadow({mode:'invalid'})", context))
@@ -446,7 +452,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     runInNewContext(`
@@ -667,7 +673,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     runInNewContext(`
@@ -744,7 +750,7 @@ describe("agent browser semantic snapshots", () => {
       Event: FakeEvent,
     };
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       bareContext,
     );
     runInNewContext("new Element().innerHTML = '<p>ordinary</p>'", bareContext);
@@ -772,10 +778,10 @@ describe("agent browser semantic snapshots", () => {
       .toBeLessThanOrEqual(MAX_AGENT_BROWSER_TEXT_BYTES);
     expect(() => JSON.parse(serialized)).not.toThrow();
     const parsed = JSON.parse(serialized) as {
-      truncated: boolean;
+      omitted: { elements: number };
       elements: unknown[];
     };
-    expect(parsed.truncated).toBe(true);
+    expect(parsed.omitted.elements).toBe(200 - parsed.elements.length);
     expect(parsed.elements.length).toBeGreaterThan(0);
     expect(parsed.elements.length).toBeLessThan(200);
   });
@@ -790,9 +796,9 @@ describe("agent browser semantic snapshots", () => {
       truncated: false,
     });
 
-    const parsed = JSON.parse(serialized) as { text: string; truncated: boolean };
+    const parsed = JSON.parse(serialized) as { text: string; omitted: unknown };
     expect(parsed.text).toHaveLength(12_000);
-    expect(parsed.truncated).toBe(true);
+    expect(parsed.omitted).toEqual({ textChars: 1, elements: 0 });
   });
 
   it("reports text-only clipping from the semantic page collector", async () => {
@@ -832,11 +838,11 @@ describe("agent browser semantic snapshots", () => {
 
     const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
       text: string;
-      truncated: boolean;
+      omitted: unknown;
       url: string;
     };
     expect(parsed).toMatchObject({
-      truncated: true,
+      omitted: { textChars: 12_000, elements: 0 },
       url: "http://127.0.0.1:3000",
     });
     expect(parsed.text).toHaveLength(12_000);
@@ -1255,9 +1261,9 @@ describe("agent browser semantic snapshots", () => {
 
     const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
       elements: unknown[];
-      truncated: boolean;
+      omitted: unknown;
     };
-    expect(parsed).toMatchObject({ elements: [], truncated: true });
+    expect(parsed).toMatchObject({ elements: [], omitted: { textChars: 0, elements: 0 } });
     expect(nextNodeCalls).toBe(4_001);
     expect(querySelectorAll).not.toHaveBeenCalled();
   });
@@ -1400,6 +1406,107 @@ describe("agent browser semantic snapshots", () => {
       y: 50,
     });
     expect(nextNodeCalls).toBe(4_001);
+  });
+
+  it("keeps interaction labels free of unredactable values and form control content", async () => {
+    const key = `-----BEGIN PRIVATE KEY-----\n${"MIIE".repeat(420)}\n-----END PRIVATE KEY-----`;
+    const textarea: Record<string, unknown> = {
+      tagName: "TEXTAREA", value: key, defaultValue: key, disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: false,
+      getAttribute: (name: string) => name === "placeholder" ? "Private key" : null,
+      getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
+      contains: (candidate: unknown) => candidate === textarea,
+    };
+    textarea.firstChild = { nodeType: 3, nodeValue: key, parentElement: textarea, parentNode: textarea, nextSibling: null };
+    const button: Record<string, unknown> = {
+      tagName: "BUTTON", type: "button", value: "", disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: false, firstChild: null,
+      getAttribute: (name: string) => name === "aria-label" ? "Open unremembered-secret" : null,
+      getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
+      contains: (candidate: unknown) => candidate === button,
+    };
+    let target: Record<string, unknown> = textarea;
+    const state: Record<string, unknown> = {
+      refs: new Map([["e1", textarea], ["e2", button]]),
+      passwordNodes: new WeakSet(),
+      passwordValues: new Set<string>(),
+    };
+    const context = {
+      __inertiaAgentBrowser: state,
+      document: {
+        documentElement: {},
+        createNodeIterator: () => {
+          let done = false;
+          return { nextNode: () => (done ? null : (done = true, target)) };
+        },
+        elementFromPoint: () => target,
+      },
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1")).resolves.toMatchObject({
+      found: true, label: "Private key", sensitive: true,
+    });
+    target = button;
+    state.evidenceWithheld = "redaction-limit";
+    await expect(locateAgentPageRef(contents as never, "e2")).resolves.toMatchObject({
+      found: true, label: "page element",
+    });
+  });
+
+  it.each([
+    ["a token budget number field", { type: "number", name: "max_tokens" }, false],
+    ["a password field", { type: "password" }, true],
+    ["an API key field", { type: "text", name: "api_key" }, true],
+    ["a one-time code field", { type: "text", autocomplete: "one-time-code" }, true],
+    ["an editable region labelled Password", { tagName: "DIV", contenteditable: "true", "aria-label": "Password" }, true],
+    ["a textbox role labelled API key", { tagName: "DIV", role: "textbox", "aria-label": "API key" }, true],
+    ["an editable region labelled Notes", { tagName: "DIV", contenteditable: "true", "aria-label": "Notes" }, false],
+  ])("classifies %s for approvals with the shared sensitive field rules", async (_name, attributes, expected) => {
+    const { type, tagName = "INPUT", ...named } = attributes as Record<string, string>;
+    const input: Record<string, unknown> = {
+      tagName, type, value: "", defaultValue: "", disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: named.contenteditable === "true", firstChild: null,
+      getAttribute: (name: string) => named[name] ?? null,
+      getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
+      contains: (candidate: unknown) => candidate === input,
+    };
+    const context = {
+      __inertiaAgentBrowser: {
+        refs: new Map([["e1", input]]),
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set<string>(),
+      },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => {
+          let done = false;
+          return { nextNode: () => (done ? null : (done = true, input)) };
+        },
+        elementFromPoint: () => input,
+      },
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1")).resolves.toMatchObject({
+      found: true, sensitive: expected,
+    });
   });
 
   it("includes visible descendant text beneath a visibility-hidden ancestor", async () => {
@@ -1554,7 +1661,7 @@ describe("agent browser semantic snapshots", () => {
     expect(parsedFirstSnapshot).toMatchObject({
       title: "[redacted]",
       text: "[redacted]",
-      elements: [{ name: "Password field", value: "[redacted]" }],
+      elements: [{ name: "Sensitive field", value: "[redacted]" }],
     });
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
     const expectedRef = parsedFirstSnapshot.elements[0]!.ref;
@@ -1801,8 +1908,8 @@ describe("agent browser semantic snapshots", () => {
       url: "http://127.0.0.1:3000",
       text: "Sign in [redacted] Keep this account secure",
       elements: [
-        { role: "input", name: "Password field", value: "[redacted]" },
-        { role: "input", name: "Password field", value: "[redacted]" },
+        { role: "input", name: "[redacted]", value: "[redacted]" },
+        { role: "input", name: "[redacted]", value: "[redacted]" },
       ],
     });
 
@@ -1810,21 +1917,21 @@ describe("agent browser semantic snapshots", () => {
       .resolves.toMatchObject({
         found: true,
         editable: true,
-        label: "page element",
+        label: "[redacted]",
         x: 120,
         y: 50,
       });
     expect(focus).toHaveBeenCalledOnce();
     expect(select).toHaveBeenCalledOnce();
     await expect(locateAgentPageRef(contents as never, "e2"))
-      .resolves.toMatchObject({ found: true, label: "page element" });
+      .resolves.toMatchObject({ found: true, label: "[redacted]" });
 
     const changedSecret = "changed-password-after-the-snapshot";
     input.value = changedSecret;
     input.labels[0]!.innerText = changedSecret;
     mirror.innerText = changedSecret;
     await expect(locateAgentPageRef(contents as never, "e2"))
-      .resolves.toMatchObject({ found: true, label: "page element" });
+      .resolves.toMatchObject({ found: true, label: "[redacted]" });
 
     input.value = secret;
     input.labels[0]!.innerText = secret;
@@ -1837,7 +1944,7 @@ describe("agent browser semantic snapshots", () => {
     };
     expect(revealed.elements[0]).toMatchObject({
       role: "input",
-      name: "Password field",
+      name: "[redacted]",
       value: "[redacted]",
     });
 

@@ -42,6 +42,8 @@ describe("agent Browser privacy classification", () => {
     await expect(agentPageEvidencePrivacy(contents as never))
       .resolves.toEqual({ withheld: "password" });
     expect([...(state.passwordValues as Set<string>)]).toEqual(["beyond-the-element-bound"]);
+    await expect(agentPageEvidencePrivacy(contents as never, "semantic"))
+      .resolves.toEqual({ withheld: null });
   });
 
   it("withholds evidence when it cannot enumerate every input", async () => {
@@ -108,6 +110,8 @@ describe("agent Browser privacy classification", () => {
     state.scanLimitReached = true;
     await expect(agentPageEvidencePrivacy(contents as never)).resolves.toEqual({ withheld: null });
     state.evidenceWithheld = "hidden-input";
+    await expect(agentPageEvidencePrivacy(contents as never, "semantic"))
+      .resolves.toEqual({ withheld: "hidden-input" });
     await expect(agentPageEvidencePrivacy(contents as never))
       .resolves.toEqual({ withheld: "hidden-input" });
     state.evidenceWithheld = "credential-signal";
@@ -122,6 +126,9 @@ describe("agent Browser privacy classification", () => {
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
 
     (state.passwordValues as Set<string>).clear();
+    state.evidenceWithheld = "redaction-limit";
+    await expect(agentPageEvidencePrivacy(contents as never, "semantic"))
+      .resolves.toEqual({ withheld: "redaction-limit" });
     state.evidenceWithheld = undefined;
     context.document.createNodeIterator = undefined;
     await expect(agentPageEvidencePrivacy(contents as never))

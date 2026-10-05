@@ -93,6 +93,7 @@ import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
+import { confirmPreviewPageUnload } from "./preview-unload-confirm.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { RuntimeConnectionUnavailableError } from
@@ -186,6 +187,7 @@ const previewBroker = new PreviewBroker({
     appHealthRegistry.registerRenderer(contents)
   ),
   recordOperationFailure: (failure) => runtimeDiagnostics?.record("browser.operation-failure", { ...failure }),
+  confirmPageUnload: confirmPreviewPageUnload,
   partitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary-preview" : "inertia-preview",
 });
 let windowThemePreference: WindowThemePreference = "system";

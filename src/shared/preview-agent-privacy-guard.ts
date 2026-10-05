@@ -1,3 +1,8 @@
+import type {
+  createPreviewAgentPrivacyRuntime,
+  PreviewAgentSensitiveInspection,
+} from "./preview-agent-sensitive-fields.js";
+
 interface AgentBrowserPrivacyState {
   refs: Map<string, Element>;
   nodes: WeakMap<Element, string>;
@@ -24,7 +29,7 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
 
 export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
 export const PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT = "__inertia_agent_credential_signal__";
-export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input" | "document-too-large";
+export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input" | "document-too-large" | "redaction-limit";
 export const PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL = "inertia:preview-agent-input-refusal";
 export type PreviewAgentInputRefusal = "disabled" | "file" | "nested" | "retargeted";
 
@@ -32,22 +37,55 @@ export type PreviewAgentInputRefusal = "disabled" | "file" | "nested" | "retarge
 export function installPreviewAgentShadowBoundarySignal(
   eventName: string,
   credentialEventName: string,
+  nameSource: string,
+  wordSource: string,
 ): void {
+  const apply = Reflect.apply;
   const dispatch = EventTarget.prototype.dispatchEvent;
   const EventConstructor = Event;
+  const CustomEventConstructor = typeof CustomEvent === "function" ? CustomEvent : undefined;
+  const stringify = JSON.stringify;
+  const regExpExec = RegExp.prototype.exec;
+  const hasOwnProperty = Object.prototype.hasOwnProperty;
+  const iteratorSymbol = Symbol.iterator;
+  const arrayValues = Array.prototype[Symbol.iterator];
+  const arrayIteratorPrototype = Object.getPrototypeOf([][Symbol.iterator]()) as object;
+  const arrayIteratorNext = Object.getOwnPropertyDescriptor(arrayIteratorPrototype, "next")?.value as unknown;
   const signalShadowBoundary = (): void => {
-    dispatch.call(document, new EventConstructor(eventName));
+    apply(dispatch, document, [new EventConstructor(eventName)]);
   };
   const signal = (): void => {
-    dispatch.call(document, new EventConstructor(credentialEventName));
+    apply(dispatch, document, [new EventConstructor(credentialEventName)]);
   };
+  const signalValues = (first: string, second?: string): void => {
+    if (!CustomEventConstructor) {
+      signal();
+      return;
+    }
+    const detail = second === undefined
+      ? "[" + stringify(first) + "]"
+      : "[" + stringify(first) + "," + stringify(second) + "]";
+    apply(dispatch, document, [new CustomEventConstructor(
+      credentialEventName,
+      { __proto__: null, detail } as unknown as CustomEventInit,
+    )]);
+  };
+  let sensitiveNamePattern: RegExp | null = null;
+  let nameWordPattern: RegExp | null = null;
+  try {
+    if (typeof nameSource !== "string" || typeof wordSource !== "string") throw new TypeError();
+    sensitiveNamePattern = new RegExp(nameSource, "u");
+    nameWordPattern = new RegExp(wordSource, "gu");
+  } catch {
+    signal();
+  }
   const shadowDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "attachShadow");
   const attachShadow = shadowDescriptor?.value as Element["attachShadow"] | undefined;
   if (shadowDescriptor && typeof attachShadow === "function") {
     Object.defineProperty(Element.prototype, "attachShadow", {
       ...shadowDescriptor,
       value(this: Element, init: ShadowRootInit): ShadowRoot {
-        const root = Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
+        const root = apply(attachShadow, this, [init]) as ShadowRoot;
         signalShadowBoundary();
         return root;
       },
@@ -62,7 +100,7 @@ export function installPreviewAgentShadowBoundarySignal(
     Object.defineProperty(HTMLElement.prototype, "attachInternals", {
       ...internalsDescriptor,
       value(this: HTMLElement): ElementInternals {
-        const internals = Reflect.apply(attachInternals, this, []) as ElementInternals;
+        const internals = apply(attachInternals, this, []) as ElementInternals;
         if (internals.shadowRoot) signalShadowBoundary();
         return internals;
       },
@@ -184,14 +222,51 @@ export function installPreviewAgentShadowBoundarySignal(
   const nativeWeakSetAdd = WeakSet.prototype.add;
   const nativeWeakSetHas = WeakSet.prototype.has;
   const ownValueInputs = new WeakSet<object>();
+  interface MonitoredValue { get: () => unknown; set: (value: unknown) => void; last: unknown }
+  const monitoredValues = new WeakMap<object, MonitoredValue>();
+  const nativeWeakMapGet = WeakMap.prototype.get;
+  const nativeWeakMapSet = WeakMap.prototype.set;
   const inputPrototype = typeof HTMLInputElement === "undefined"
     ? undefined
     : HTMLInputElement.prototype;
   const nativeString = String;
   const nativeLowerCase = String.prototype.toLowerCase;
+  const getAttribute = Element.prototype.getAttribute;
+  const nameAttributes = ["id", "name", "autocomplete", "placeholder", "aria-label"];
+  const sensitiveName = (value: string): boolean => {
+    if (!sensitiveNamePattern || !nameWordPattern) return true;
+    let words = "";
+    nameWordPattern.lastIndex = 0;
+    for (let match = apply(regExpExec, nameWordPattern, [value]) as RegExpExecArray | null; match !== null;
+      match = apply(regExpExec, nameWordPattern, [value]) as RegExpExecArray | null) {
+      if (match[0] === "") break;
+      words = words === "" ? match[0] : words + " " + match[0];
+    }
+    return apply(regExpExec, sensitiveNamePattern, [apply(nativeLowerCase, words, [])]) !== null;
+  };
+  const sensitiveInput = (input: unknown): boolean => {
+    const type = apply(nativeLowerCase, nativeString(apply(inputTypeGetter!, input, [])), []) as string;
+    if (type === "password") return true;
+    if (type !== "text" && type !== "search" && type !== "email" && type !== "url"
+      && type !== "tel" && type !== "number" && type !== "hidden") return false;
+    if (typeof getAttribute !== "function") return false;
+    for (let index = 0; index < nameAttributes.length; index += 1) {
+      const value = apply(getAttribute, input, [nameAttributes[index]]) as unknown;
+      if (typeof value === "string" && (value.length > 1_200 || sensitiveName(value))) return true;
+    }
+    return false;
+  };
+  const signalValue = (input: unknown, value: unknown): void => {
+    if (value === null || value === undefined || !sensitiveInput(input)) return;
+    const kind = typeof value;
+    const text = kind === "string" ? value as string
+      : kind === "number" || kind === "boolean" || kind === "bigint" ? nativeString(value) : null;
+    if (text === null || text.length > 4_096) signal();
+    else if (text) signalValues(text);
+  };
   const isNativeInput = (input: unknown): boolean => {
     try {
-      return Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
+      return apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
     } catch {
       return false;
     }
@@ -200,7 +275,7 @@ export function installPreviewAgentShadowBoundarySignal(
     if (!knownInput && !isNativeInput(input)) return;
     let inputType: string;
     try {
-      inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
+      inputType = nativeString(apply(inputTypeGetter!, input, []));
     } catch {
       if (!knownInput) return;
       // A native write already succeeded. If its resulting type/value cannot
@@ -210,31 +285,96 @@ export function installPreviewAgentShadowBoundarySignal(
       return;
     }
     try {
-      const assignedValue = Reflect.apply(inputValueGetter!, input, []) as string;
-      const defaultValue = Reflect.apply(inputDefaultValueGetter!, input, []) as string;
-      const isPassword = Reflect.apply(nativeLowerCase, inputType, []) === "password";
-      const ownValueShadowed = Reflect.apply(
+      const assignedValue = apply(inputValueGetter!, input, []) as string;
+      const defaultValue = apply(inputDefaultValueGetter!, input, []) as string;
+      const isPassword = apply(nativeLowerCase, inputType, []) === "password" || sensitiveInput(input);
+      const ownValueShadowed = apply(
         nativeWeakSetHas,
         ownValueInputs,
         [input as object],
       ) as boolean;
-      if (isPassword && (ownValueShadowed || assignedValue || defaultValue)) signal();
+      if (!isPassword) return;
+      const monitored = apply(nativeWeakMapGet, monitoredValues, [input as object]) as
+        MonitoredValue | undefined;
+      if (ownValueShadowed && !monitored) signal();
+      else {
+        if (assignedValue || defaultValue) {
+          if (assignedValue.length > 4_096 || defaultValue.length > 4_096) signal();
+          else signalValues(assignedValue, defaultValue);
+        }
+        if (monitored && monitored.last !== "") signalValue(input, monitored.last);
+      }
     } catch {
       signal();
     }
   };
+  const monitor = (
+    pageGet: (this: unknown) => unknown,
+    pageSet: (this: unknown, value: unknown) => void,
+    last: unknown,
+  ): MonitoredValue => {
+    const record: MonitoredValue = {
+      last,
+      get(this: unknown): unknown {
+        const value = apply(pageGet, this, []);
+        try {
+          if (value !== apply(inputValueGetter!, this, [])) {
+            record.last = value;
+            signalValue(this, value);
+          }
+        } catch {
+          signal();
+        }
+        return value;
+      },
+      set(this: unknown, value: unknown): void {
+        try {
+          record.last = value;
+          signalValue(this, value);
+        } catch {
+          signal();
+        }
+        try {
+          apply(pageSet, this, [value]);
+        } finally {
+          signalPasswordValue(this, true);
+        }
+      },
+    };
+    return record;
+  };
   const trackOwnInputValue = (input: unknown): void => {
     if (!isNativeInput(input)) return;
     try {
-      const ownValue = Reflect.apply(
+      const ownValue = apply(
         nativeGetOwnPropertyDescriptor,
         Object,
         [input, "value"],
       ) as PropertyDescriptor | undefined;
       if (!ownValue) return;
-      Reflect.apply(nativeWeakSetAdd, ownValueInputs, [input as object]);
-      const inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
-      if (Reflect.apply(nativeLowerCase, inputType, []) === "password") signal();
+      apply(nativeWeakSetAdd, ownValueInputs, [input as object]);
+      const existing = apply(nativeWeakMapGet, monitoredValues, [input as object]) as
+        MonitoredValue | undefined;
+      const getter = apply(hasOwnProperty, ownValue, ["get"]) ? ownValue.get : undefined;
+      const setter = apply(hasOwnProperty, ownValue, ["set"]) ? ownValue.set : undefined;
+      if (existing && existing.get === getter && existing.set === setter) {
+        signalPasswordValue(input, true);
+        return;
+      }
+      if (ownValue.configurable === true && typeof getter === "function" && typeof setter === "function") {
+        const record = monitor(getter, setter, existing ? existing.last : "");
+        apply(objectDefineProperty!, Object, [input, "value", {
+          __proto__: null,
+          configurable: true,
+          enumerable: ownValue.enumerable === true,
+          get: record.get,
+          set: record.set,
+        }]);
+        apply(nativeWeakMapSet, monitoredValues, [input as object, record]);
+      } else {
+        apply(nativeWeakMapSet, monitoredValues, [input as object, undefined]);
+      }
+      signalPasswordValue(input, true);
     } catch {
       // Once a descriptor mutation has succeeded on a real input, an
       // uninspectable target can hide a page-readable value from every native
@@ -244,7 +384,7 @@ export function installPreviewAgentShadowBoundarySignal(
   };
   const signalAttrOwner = (attr: unknown, knownAttr: boolean): void => {
     try {
-      const ownerElement = Reflect.apply(attrOwnerElement!, attr, []) as Element | null;
+      const ownerElement = apply(attrOwnerElement!, attr, []) as Element | null;
       if (ownerElement) signalPasswordValue(ownerElement, false);
     } catch {
       if (knownAttr) signal();
@@ -272,49 +412,49 @@ export function installPreviewAgentShadowBoundarySignal(
         Object.defineProperty(HTMLInputElement.prototype, "value", {
           ...inputValueDescriptor,
           set(this: HTMLInputElement, value: unknown): void {
-            Reflect.apply(inputValueSetter, this, [value]);
+            apply(inputValueSetter, this, [value]);
             signalPasswordValue(this, true);
           },
         });
         Object.defineProperty(HTMLInputElement.prototype, "type", {
           ...inputTypeDescriptor,
           set(this: HTMLInputElement, value: unknown): void {
-            Reflect.apply(inputTypeSetter, this, [value]);
+            apply(inputTypeSetter, this, [value]);
             signalPasswordValue(this, true);
           },
         });
         Object.defineProperty(HTMLInputElement.prototype, "defaultValue", {
           ...inputDefaultValueDescriptor,
           set(this: HTMLInputElement, value: unknown): void {
-            Reflect.apply(inputDefaultValueSetter, this, [value]);
+            apply(inputDefaultValueSetter, this, [value]);
             signalPasswordValue(this, true);
           },
         });
         Object.defineProperty(HTMLInputElement.prototype, "setRangeText", {
           ...inputSetRangeTextDescriptor,
           value(this: HTMLInputElement, ...args: unknown[]): void {
-            Reflect.apply(inputSetRangeText, this, args);
+            apply(inputSetRangeText, this, args);
             signalPasswordValue(this, true);
           },
         });
         Object.defineProperty(Element.prototype, "setAttribute", {
           ...setAttributeDescriptor,
           value(this: Element, name: string, value: string): void {
-            Reflect.apply(setAttribute, this, [name, value]);
+            apply(setAttribute, this, [name, value]);
             signalPasswordValue(this, false);
           },
         });
         Object.defineProperty(Element.prototype, "setAttributeNS", {
           ...setAttributeNsDescriptor,
           value(this: Element, namespace: string | null, qualifiedName: string, value: string): void {
-            Reflect.apply(setAttributeNs, this, [namespace, qualifiedName, value]);
+            apply(setAttributeNs, this, [namespace, qualifiedName, value]);
             signalPasswordValue(this, false);
           },
         });
         Object.defineProperty(Element.prototype, "setAttributeNode", {
           ...setAttributeNodeDescriptor,
           value(this: Element, attr: Attr): Attr | null {
-            const replaced = Reflect.apply(setAttributeNode, this, [attr]) as Attr | null;
+            const replaced = apply(setAttributeNode, this, [attr]) as Attr | null;
             signalPasswordValue(this, false);
             return replaced;
           },
@@ -322,7 +462,7 @@ export function installPreviewAgentShadowBoundarySignal(
         Object.defineProperty(Element.prototype, "setAttributeNodeNS", {
           ...setAttributeNodeNsDescriptor,
           value(this: Element, attr: Attr): Attr | null {
-            const replaced = Reflect.apply(setAttributeNodeNs, this, [attr]) as Attr | null;
+            const replaced = apply(setAttributeNodeNs, this, [attr]) as Attr | null;
             signalPasswordValue(this, false);
             return replaced;
           },
@@ -330,7 +470,7 @@ export function installPreviewAgentShadowBoundarySignal(
         Object.defineProperty(NamedNodeMap.prototype, "setNamedItem", {
           ...setNamedItemDescriptor,
           value(this: NamedNodeMap, attr: Attr): Attr | null {
-            const replaced = Reflect.apply(setNamedItem, this, [attr]) as Attr | null;
+            const replaced = apply(setNamedItem, this, [attr]) as Attr | null;
             signalAttrOwner(attr, true);
             return replaced;
           },
@@ -338,7 +478,7 @@ export function installPreviewAgentShadowBoundarySignal(
         Object.defineProperty(NamedNodeMap.prototype, "setNamedItemNS", {
           ...setNamedItemNsDescriptor,
           value(this: NamedNodeMap, attr: Attr): Attr | null {
-            const replaced = Reflect.apply(setNamedItemNs, this, [attr]) as Attr | null;
+            const replaced = apply(setNamedItemNs, this, [attr]) as Attr | null;
             signalAttrOwner(attr, true);
             return replaced;
           },
@@ -346,15 +486,15 @@ export function installPreviewAgentShadowBoundarySignal(
         Object.defineProperty(Attr.prototype, "value", {
           ...attrValueDescriptor,
           set(this: Attr, value: string): void {
-            Reflect.apply(attrValueSetter, this, [value]);
+            apply(attrValueSetter, this, [value]);
             signalAttrOwner(this, true);
           },
         });
         Object.defineProperty(Node.prototype, "nodeValue", {
           ...nodeValueDescriptor,
           set(this: Node, value: string | null): void {
-            Reflect.apply(nodeValueSetter, this, [value]);
-            if (Reflect.apply(nativeIsPrototypeOf, Attr.prototype, [this])) {
+            apply(nodeValueSetter, this, [value]);
+            if (apply(nativeIsPrototypeOf, Attr.prototype, [this])) {
               signalAttrOwner(this, true);
             }
           },
@@ -362,8 +502,8 @@ export function installPreviewAgentShadowBoundarySignal(
         Object.defineProperty(Node.prototype, "textContent", {
           ...nodeTextContentDescriptor,
           set(this: Node, value: string | null): void {
-            Reflect.apply(nodeTextContentSetter, this, [value]);
-            if (Reflect.apply(nativeIsPrototypeOf, Attr.prototype, [this])) {
+            apply(nodeTextContentSetter, this, [value]);
+            if (apply(nativeIsPrototypeOf, Attr.prototype, [this])) {
               signalAttrOwner(this, true);
             }
           },
@@ -392,6 +532,10 @@ export function installPreviewAgentShadowBoundarySignal(
   const querySelector = typeof DocumentFragment === "undefined"
     ? undefined
     : DocumentFragment.prototype.querySelector;
+  const sequence = (...items: unknown[]): unknown[] => {
+    apply(objectDefineProperty!, Object, [items, iteratorSymbol, { __proto__: null, value: arrayValues }]);
+    return items;
+  };
   const signalPrivateContent = (value: unknown): void => {
     if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return;
     if (typeof createElement !== "function" || typeof getImplementation !== "function"
@@ -404,26 +548,34 @@ export function installPreviewAgentShadowBoundarySignal(
       // Parse in a fresh in-memory document with no browsing context or page
       // CSP. Its Trusted Types state cannot invoke a page-owned default policy,
       // while Chromium's tokenizer still decides exact start-tag attributes.
-      const implementation = Reflect.apply(getImplementation, document, []) as DOMImplementation;
-      const isolatedDocument = Reflect.apply(createHTMLDocument, implementation, [""]) as Document;
-      const template = Reflect.apply(
+      const implementation = apply(getImplementation, document, []) as DOMImplementation;
+      const isolatedDocument = apply(createHTMLDocument, implementation, [""]) as Document;
+      const template = apply(
         createElement,
         isolatedDocument,
         ["template"],
       ) as HTMLTemplateElement;
-      Reflect.apply(parseSafeHTML, template, [value, {
+      const next = apply(nativeGetOwnPropertyDescriptor, Object, [arrayIteratorPrototype, "next"]) as
+        PropertyDescriptor | undefined;
+      if (!next || !apply(hasOwnProperty, next, ["value"]) || next.value !== arrayIteratorNext) {
+        signal();
+        return;
+      }
+      apply(parseSafeHTML, template, [value, {
+        __proto__: null,
         sanitizer: {
-          elements: [
-            { name: "template", attributes: ["shadowrootmode"] },
-            { name: "input", attributes: ["type", "value"] },
-          ],
+          __proto__: null,
+          elements: sequence(
+            { __proto__: null, name: "template", attributes: sequence("shadowrootmode") },
+            { __proto__: null, name: "input", attributes: sequence("type", "value") },
+          ),
         },
       }]);
-      const content = Reflect.apply(templateContent, template, []) as DocumentFragment;
-      if (Reflect.apply(querySelector, content, [
+      const content = apply(templateContent, template, []) as DocumentFragment;
+      if (apply(querySelector, content, [
         "input[type='password' i][value]:not([value=''])",
       ]) !== null) signal();
-      else if (Reflect.apply(querySelector, content, ["template[shadowrootmode]"]) !== null) {
+      else if (apply(querySelector, content, ["template[shadowrootmode]"]) !== null) {
         signalShadowBoundary();
       }
     } catch {
@@ -440,7 +592,7 @@ export function installPreviewAgentShadowBoundarySignal(
         // These APIs can create private content entirely outside the observed
         // document. Signal before author code can read, log, and remove it.
         signalPrivateContent(args[0]);
-        return Reflect.apply(parser, this, args);
+        return apply(parser, this, args);
       },
     });
   };
@@ -462,7 +614,7 @@ export function installPreviewAgentShadowBoundarySignal(
       ...descriptor,
       set(this: unknown, value: unknown): void {
         signalPrivateContent(value);
-        Reflect.apply(setter, this, [value]);
+        apply(setter, this, [value]);
       },
     });
   };
@@ -474,7 +626,7 @@ export function installPreviewAgentShadowBoundarySignal(
       ...descriptor,
       value(this: unknown, ...args: unknown[]): unknown {
         signalPrivateContent(args[sourceIndex]);
-        return Reflect.apply(parser, this, args);
+        return apply(parser, this, args);
       },
     });
   };
@@ -496,7 +648,8 @@ export function installPreviewAgentShadowBoundarySignal(
       value(this: unknown, ...args: unknown[]): unknown {
         let source = "";
         let inspectable = true;
-        for (const argument of args) {
+        for (let index = 0; index < args.length; index += 1) {
+          const argument = args[index];
           if (typeof argument !== "string"
             || source.length + argument.length > maximumParserSourceCharacters) {
             inspectable = false;
@@ -505,7 +658,7 @@ export function installPreviewAgentShadowBoundarySignal(
           source += argument;
         }
         if (inspectable) signalPrivateContent(source);
-        return Reflect.apply(parser, this, args);
+        return apply(parser, this, args);
       },
     });
   };
@@ -524,10 +677,10 @@ export function installPreviewAgentShadowBoundarySignal(
       signal();
     } else {
       try {
-        Reflect.apply(objectDefineProperty, Object, [Object, "defineProperty", {
+        apply(objectDefineProperty, Object, [Object, "defineProperty", {
           ...objectDefinePropertyDescriptor,
           value(target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor): object {
-            const defined = Reflect.apply(objectDefineProperty, Object, [
+            const defined = apply(objectDefineProperty, Object, [
               target,
               propertyKey,
               attributes,
@@ -536,10 +689,10 @@ export function installPreviewAgentShadowBoundarySignal(
             return defined;
           },
         }]);
-        Reflect.apply(objectDefineProperty, Object, [Object, "defineProperties", {
+        apply(objectDefineProperty, Object, [Object, "defineProperties", {
           ...objectDefinePropertiesDescriptor,
           value(target: object, properties: PropertyDescriptorMap): object {
-            const defined = Reflect.apply(objectDefineProperties, Object, [
+            const defined = apply(objectDefineProperties, Object, [
               target,
               properties,
             ]) as object;
@@ -547,10 +700,10 @@ export function installPreviewAgentShadowBoundarySignal(
             return defined;
           },
         }]);
-        Reflect.apply(objectDefineProperty, Object, [Reflect, "defineProperty", {
+        apply(objectDefineProperty, Object, [Reflect, "defineProperty", {
           ...reflectDefinePropertyDescriptor,
           value(target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor): boolean {
-            const defined = Reflect.apply(reflectDefineProperty, Reflect, [
+            const defined = apply(reflectDefineProperty, Reflect, [
               target,
               propertyKey,
               attributes,
@@ -559,11 +712,11 @@ export function installPreviewAgentShadowBoundarySignal(
             return defined;
           },
         }]);
-        Reflect.apply(objectDefineProperty, Object, [Object, "setPrototypeOf", {
+        apply(objectDefineProperty, Object, [Object, "setPrototypeOf", {
           ...objectSetPrototypeOfDescriptor,
           value(target: object, prototype: object | null): object {
             const input = isNativeInput(target);
-            const updated = Reflect.apply(objectSetPrototypeOf, Object, [
+            const updated = apply(objectSetPrototypeOf, Object, [
               target,
               prototype,
             ]) as object;
@@ -571,11 +724,11 @@ export function installPreviewAgentShadowBoundarySignal(
             return updated;
           },
         }]);
-        Reflect.apply(objectDefineProperty, Object, [Reflect, "setPrototypeOf", {
+        apply(objectDefineProperty, Object, [Reflect, "setPrototypeOf", {
           ...reflectSetPrototypeOfDescriptor,
           value(target: object, prototype: object | null): boolean {
             const input = isNativeInput(target);
-            const updated = Reflect.apply(reflectSetPrototypeOf, Reflect, [
+            const updated = apply(reflectSetPrototypeOf, Reflect, [
               target,
               prototype,
             ]) as boolean;
@@ -583,18 +736,18 @@ export function installPreviewAgentShadowBoundarySignal(
             return updated;
           },
         }]);
-        Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__proto__", {
+        apply(objectDefineProperty, Object, [Object.prototype, "__proto__", {
           ...legacyPrototypeDescriptor,
           set(this: object, prototype: object | null): void {
             const input = isNativeInput(this);
-            Reflect.apply(legacyPrototypeSetter, this, [prototype]);
+            apply(legacyPrototypeSetter, this, [prototype]);
             if (input) signal();
           },
         }]);
-        Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__defineGetter__", {
+        apply(objectDefineProperty, Object, [Object.prototype, "__defineGetter__", {
           ...legacyDefineGetterDescriptor,
           value(this: object, propertyKey: PropertyKey, getter: () => unknown): void {
-            Reflect.apply(legacyDefineGetter, this, [propertyKey, getter]);
+            apply(legacyDefineGetter, this, [propertyKey, getter]);
             trackOwnInputValue(this);
           },
         }]);
@@ -611,6 +764,7 @@ export function installPreviewAgentShadowBoundarySignal(
  * repair for already-created test documents.
  */
 export function installPreviewAgentPrivacyGuard(
+  privacy: ReturnType<typeof createPreviewAgentPrivacyRuntime>,
   reportRefusal?: (refusal: PreviewAgentInputRefusal) => void,
 ): void {
   const owner = globalThis as AgentBrowserPrivacyGlobal;
@@ -628,41 +782,21 @@ export function installPreviewAgentPrivacyGuard(
     owner.__inertiaAgentBrowser = state;
   }
   if (state.privacyGuardInstalled) return;
-  const maximumRememberedValues = 32;
   const maximumScanNodes = 4_000;
-  const maximumValueSourceCharacters = 4_096;
-  const normalize = (value: unknown): string => String(value ?? "")
-    .slice(0, maximumValueSourceCharacters)
-    .replace(/\s+/gu, " ").trim();
   const exactToken = (value: unknown, expected: string, maximum: number): boolean => (
     typeof value === "string" && value.length <= maximum
     && value.trim().toLowerCase() === expected
   );
-  const remember = (value: unknown): void => {
-    const normalized = normalize(value);
-    if (!normalized) return;
-    state.passwordValues.delete(normalized);
-    state.passwordValues.add(normalized);
-    while (state.passwordValues.size > maximumRememberedValues) {
-      const oldest = state.passwordValues.values().next().value as string | undefined;
-      if (oldest === undefined) break;
-      state.passwordValues.delete(oldest);
-    }
-  };
-  const inspect = (input: HTMLInputElement, wasPassword = false): void => {
-    const knownPassword = wasPassword
-      || exactToken(input.type, "password", 20)
-      || state.passwordNodes.has(input);
-    if (!knownPassword && state.passwordValues.size === 0) return;
-    const value = normalize(input.value);
-    if (knownPassword || (value && state.passwordValues.has(value))) {
-      state.passwordNodes.add(input);
-      remember(value);
-    }
+  const inspect = (
+    input: HTMLInputElement,
+    wasPassword = false,
+    inspection: PreviewAgentSensitiveInspection = "observe",
+  ): void => {
+    privacy.inspect(state, input, inspection, wasPassword);
   };
   const inputElement = (node: unknown): HTMLInputElement | null => {
     const candidate = node as Partial<HTMLInputElement> | null;
-    return candidate?.tagName === "INPUT" ? candidate as HTMLInputElement : null;
+    return candidate?.tagName === "INPUT" || candidate?.tagName === "TEXTAREA" ? candidate as HTMLInputElement : null;
   };
   interface ScanBudget { exhausted: boolean; remaining: number }
   const scanBudget = (): ScanBudget => ({ exhausted: false, remaining: maximumScanNodes });
@@ -680,14 +814,17 @@ export function installPreviewAgentPrivacyGuard(
   };
   const inspectInputs = (root: Partial<Pick<Element, "getElementsByTagName">>): boolean => {
     if (typeof root.getElementsByTagName !== "function") return false;
-    const inputs = root.getElementsByTagName("input");
-    let index = 0;
-    for (; index < maximumScanNodes; index += 1) {
-      const input = inputs[index];
-      if (!input) return true;
-      inspect(input);
+    let scanned = 0;
+    for (const tag of ["input", "textarea"]) {
+      const inputs = root.getElementsByTagName(tag);
+      for (let index = 0; index < inputs.length; index += 1) {
+        if (scanned++ >= maximumScanNodes) {
+          withhold("document-too-large");
+          return true;
+        }
+        inspect(inputs[index] as HTMLInputElement);
+      }
     }
-    if (inputs[index]) withhold("document-too-large");
     return true;
   };
   const inspectTree = (node: Node, budget: ScanBudget): void => {
@@ -725,8 +862,25 @@ export function installPreviewAgentPrivacyGuard(
   activationTarget.addEventListener(nestedBoundaryEvent, () => {
     state.shadowRootsObserved = true;
   }, true);
-  activationTarget.addEventListener(credentialSignalEvent, () => {
-    withhold("credential-signal");
+  activationTarget.addEventListener(credentialSignalEvent, (event) => {
+    const detail = (event as CustomEvent<unknown>).detail;
+    let remembered = false;
+    if (typeof detail === "string" && detail.length <= 50_000) {
+      try {
+        const values: unknown = JSON.parse(detail);
+        if (Array.isArray(values) && values.length > 0 && values.length <= 2
+          && values.every((value) => typeof value === "string" && value.length <= 4_096)) {
+          for (const value of values as string[]) {
+            if (!value) continue;
+            privacy.remember(state, value);
+            remembered = true;
+          }
+        }
+      } catch {
+        remembered = false;
+      }
+    }
+    if (!remembered) withhold("credential-signal");
   }, true);
   if (document.documentElement) inspectTree(document.documentElement, scanBudget());
   const inspectInputEvent = (event: Event): void => {
@@ -736,11 +890,12 @@ export function installPreviewAgentPrivacyGuard(
       if (event.isTrusted === true) withhold("hidden-input");
       return;
     }
+    const inspection = event.isTrusted === true ? "type" : "observe";
     for (const node of path) {
       const input = inputElement(node);
       if (input) {
         exposedControl = true;
-        inspect(input);
+        inspect(input, false, inspection);
         continue;
       }
       const candidate = node as Partial<HTMLElement> | null;
@@ -758,6 +913,14 @@ export function installPreviewAgentPrivacyGuard(
   // password before the privacy guard sees its original control and value.
   activationTarget.addEventListener("beforeinput", inspectInputEvent, true);
   activationTarget.addEventListener("input", inspectInputEvent, true);
+  activationTarget.addEventListener("change", (event) => {
+    privacy.settle(state);
+    const path = boundedEventPath(event);
+    for (let index = 0; path && index < path.length; index += 1) {
+      const input = inputElement(path[index]);
+      if (input) inspect(input, false, "settle");
+    }
+  }, true);
   document.addEventListener("click", (event) => {
     if (!state.agentInputActive) return;
     const path = boundedEventPath(event);
@@ -903,7 +1066,7 @@ export function installPreviewAgentPrivacyGuard(
   });
   observer.observe(document, {
     attributes: true,
-    attributeFilter: ["type"],
+    attributeFilter: ["type", "name", "id", "autocomplete", "placeholder", "aria-label", "aria-labelledby"],
     attributeOldValue: true,
     childList: true,
     subtree: true,

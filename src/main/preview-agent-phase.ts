@@ -13,6 +13,8 @@ export const PREVIEW_AGENT_OPERATION_PHASES = [
   "page-hover",
   "input-guard",
   "key-activation",
+  "page-dialogs",
+  "page-scroll",
 ] as const;
 
 export const PREVIEW_AGENT_FAILURE_CATEGORIES = ["timeout", "failed"] as const;
@@ -40,6 +42,8 @@ const PHASE_DESCRIPTIONS: Readonly<Record<PreviewAgentOperationPhase, string>> =
   "page-hover": "hover delivery",
   "input-guard": "input guard setup",
   "key-activation": "key activation",
+  "page-dialogs": "dialog reporting",
+  "page-scroll": "scrolling to an element",
 };
 
 export function isPreviewAgentOperationPhase(value: unknown): value is PreviewAgentOperationPhase {

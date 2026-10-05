@@ -96,13 +96,34 @@ describe("Browser tool surface", () => {
       .resolves.toMatchObject({ ok: false, code: "invalid" });
     expect(history.goForward).not.toHaveBeenCalled();
 
-    const reload = vi.spyOn(contents as unknown as { reload(): void }, "reload").mockImplementationOnce(() => {
-      contents.emit("did-start-loading");
-      contents.emit("did-stop-loading");
-    });
+    const page = contents as unknown as { reload(): void; loadURL(url: string): Promise<void> };
+    const reload = vi.spyOn(page, "reload");
+    const load = vi.spyOn(page, "loadURL");
     await expect(broker.perform(runIdentity, { action: "history", direction: "reload" }))
       .resolves.toMatchObject({ ok: true });
-    expect(reload).toHaveBeenCalledOnce();
+    expect(reload).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledExactlyOnceWith("http://127.0.0.1:3000/first");
+  });
+
+  it("stops and reports a history step that Chromium commits to a non-local entry", async () => {
+    const { broker, contents } = await loadedHarness();
+    const history = contents.navigationHistory;
+    history.getEntryAtIndex.mockImplementation((index: number) => ({
+      title: "", url: ["about:blank", "http://127.0.0.1:3000/first", "http://127.0.0.1:3000/"][index] ?? "",
+    }));
+    history.canGoBack.mockReturnValue(true);
+    history.goBack.mockImplementationOnce(() => {
+      contents.setURL("https://example.com/");
+      contents.emit("did-start-loading");
+      contents.emit("did-navigate", {}, "https://example.com/");
+      contents.emit("did-stop-loading");
+    });
+    await expect(broker.perform(runIdentity, { action: "history", direction: "back" })).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+      message: "The history entry Chromium opened is not a local development page, so Inertia stopped it. Navigate to a local URL instead.",
+    });
+    expect(contents.stop).toHaveBeenCalled();
   });
 
   it("opens schemeless loopback addresses over http", async () => {

@@ -66,9 +66,13 @@ advertises the same arguments the runtime validates:
 A `url` without a scheme that starts with `localhost`, `127.0.0.1` or `[::1]`,
 such as `localhost:5173`, opens over `http://`. History navigation is checked
 against the same loopback policy before it starts: going back or forward is
-refused unless the target history entry is a local page, and reload is
-refused unless the tab shows one. Server redirects during any navigation stay
-under the existing redirect guard.
+refused unless the adjacent history entry is a local page, and reload is
+refused unless the tab shows one. Chromium can skip history entries, so the
+page it actually commits is checked again; a step that lands anywhere other
+than a local page is stopped and reported as `unavailable`. Reload loads the
+current address again with an ordinary GET through the same path as
+navigate, so it never resubmits a form. Server redirects during any
+navigation stay under the existing redirect guard.
 
 `inertia_browser_press` accepts Enter, Tab, Escape, Backspace, Space, the
 arrow keys, Home, End, PageUp, PageDown, Shift+Tab, Shift+Enter, Control+Enter

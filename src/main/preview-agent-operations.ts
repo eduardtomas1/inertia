@@ -366,13 +366,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     validate?.();
     const refusal = agentHistoryRefusal(contents, direction);
     if (refusal) return refusal;
-    scope.inputSent = true;
-    const loaded = await agentHistoryNavigation(
-      contents,
-      direction,
-      scope.signal,
-      Math.max(1_000, scope.remaining() - NAVIGATION_REPORT_RESERVE_MS),
-    );
+    const loaded = direction === "reload"
+      ? await this.#agentLoad(contents, contents.getURL(), scope)
+      : await agentHistoryNavigation(
+        contents,
+        direction,
+        scope,
+        Math.max(1_000, scope.remaining() - NAVIGATION_REPORT_RESERVE_MS),
+      );
     stopForAbort(scope.signal);
     const label = direction === "back" ? "Agent went back a page"
       : direction === "forward" ? "Agent went forward a page" : "Agent reloaded the page";

@@ -8,6 +8,8 @@ import { failedAgentBrowserResult as failure } from "./preview-agent-result.js";
 
 export type AgentHistoryDirection = "back" | "forward" | "reload";
 
+const NOT_LOCAL_HISTORY_MESSAGE = "The history entry Chromium opened is not a local development page, so Inertia stopped it. Navigate to a local URL instead.";
+
 const SCHEMELESS_LOOPBACK = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?#]|$)/iu;
 const CANCELLED_HISTORY_MESSAGE = "The page navigation was cancelled before a page loaded, usually because it redirected to an address outside this machine. The tab still shows its previous page.";
 
@@ -49,10 +51,11 @@ export function agentHistoryRefusal(
 
 export async function agentHistoryNavigation(
   contents: WebContents,
-  direction: AgentHistoryDirection,
-  signal: AbortSignal,
+  direction: "back" | "forward",
+  scope: { signal: AbortSignal; inputSent: boolean },
   waitMs: number,
 ): Promise<boolean> {
+  const { signal } = scope;
   const previousUrl = contents.getURL();
   return await new Promise<boolean>((resolve, reject) => {
     let settled = false;
@@ -69,11 +72,21 @@ export async function agentHistoryNavigation(
       action();
     };
     const onStopped = (): void => finish(() => resolve(true));
-    const onNavigated = (): void => {
+    const refuseRemote = (url: string): boolean => {
+      if (localPage(url)) return false;
+      finish(() => {
+        if (!contents.isDestroyed()) contents.stop();
+        reject(new AgentBrowserRefusal(failure("unavailable", NOT_LOCAL_HISTORY_MESSAGE)));
+      });
+      return true;
+    };
+    const onNavigated = (_event: unknown, url: string): void => {
+      if (refuseRemote(url)) return;
       if (!contents.isLoading()) finish(() => resolve(true));
     };
-    const onInPage = (_event: unknown, _url: string, isMainFrame: boolean): void => {
-      if (isMainFrame) finish(() => resolve(true));
+    const onInPage = (_event: unknown, url: string, isMainFrame: boolean): void => {
+      if (!isMainFrame || refuseRemote(url)) return;
+      finish(() => resolve(true));
     };
     const onFailed = (
       _event: unknown,
@@ -114,9 +127,9 @@ export async function agentHistoryNavigation(
     }
     signal.addEventListener("abort", onAbort, { once: true });
     try {
+      scope.inputSent = true;
       if (direction === "back") contents.navigationHistory.goBack();
-      else if (direction === "forward") contents.navigationHistory.goForward();
-      else contents.reload();
+      else contents.navigationHistory.goForward();
     } catch (error) {
       finish(() => reject(error instanceof Error ? error : new Error("The Browser navigation failed.")));
     }

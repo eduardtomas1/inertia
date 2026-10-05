@@ -142,6 +142,31 @@ describe("Browser sensitive field redaction", () => {
     expect(stale.passwordValues).toEqual(new Set(["admi", "adm"]));
   });
 
+  it("forgets a mirror mark whose typed prefix was collapsed, but not a settled one", () => {
+    const privacy = runtime();
+    const typed = state();
+    const password = field();
+    const username = field("admin", "text");
+    typeInto(privacy, typed, password, "admin");
+    privacy.inspect(typed, username);
+    expect(typed.passwordNodes.has(username)).toBe(true);
+    typeInto(privacy, typed, password, "admin123", 6);
+    privacy.inspect(typed, username);
+    expect(typed.passwordNodes.has(username)).toBe(false);
+    expect([...typed.passwordValues]).toEqual(["admin123"]);
+
+    const settled = state();
+    const other = field();
+    const replacement = field("hunter2", "text");
+    typeInto(privacy, settled, other, "hunter2");
+    privacy.inspect(settled, other, "settle");
+    privacy.inspect(settled, replacement);
+    replacement.value = "hunter3";
+    privacy.inspect(settled, replacement);
+    expect(settled.passwordNodes.has(replacement)).toBe(true);
+    expect(settled.passwordValues).toEqual(new Set(["hunter2", "hunter3"]));
+  });
+
   it("remembers values after clearing and removing a field and redacts literal and URL copies", () => {
     const privacy = runtime();
     const current = state();

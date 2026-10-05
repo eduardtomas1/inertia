@@ -4,6 +4,7 @@ interface SensitivePageState {
   settledValues?: Set<string>;
   evictedValues?: Set<string>;
   fieldValues?: WeakMap<object, string>;
+  mirrorValues?: WeakMap<object, string>;
   evidenceWithheld?: string;
 }
 
@@ -121,13 +122,26 @@ export function createPreviewAgentPrivacyRuntime(nameSource: string, wordSource:
     state: SensitivePageState,
     input: HTMLInputElement,
     inspection: PreviewAgentSensitiveInspection = "observe",
+    wasSensitive = false,
   ): void => {
-    const sensitive = state.passwordNodes.has(input) || isSensitiveField(input);
+    if (wasSensitive || isSensitiveField(input)) {
+      state.passwordNodes.add(input);
+      state.mirrorValues?.delete(input);
+    } else {
+      const basis = state.mirrorValues?.get(input);
+      if (basis !== undefined && !state.passwordValues.has(basis)) {
+        state.passwordNodes.delete(input);
+        state.mirrorValues!.delete(input);
+      }
+    }
+    const sensitive = state.passwordNodes.has(input);
     if (!sensitive && state.passwordValues.size === 0) return;
     const value = input.value;
     const known = typeof value === "string" && value.length <= maximumValueCharacters;
-    if (!sensitive && !(known && value.length >= minimumSubstringCharacters
-      && state.passwordValues.has(value))) return;
+    if (!sensitive) {
+      if (!(known && value.length >= minimumSubstringCharacters && state.passwordValues.has(value))) return;
+      (state.mirrorValues ??= new WeakMap()).set(input, value);
+    }
     state.passwordNodes.add(input);
     if (inspection === "type" && known) collapse(state, input, value);
     remember(state, value, inspection === "settle" ? "settle" : "observe");

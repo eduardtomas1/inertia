@@ -187,6 +187,9 @@ failed on the unfixed code. Findings that did not hold are listed as refuted.
   dropped. Error results now release the follow-ups they answer; while Claude
   reports `queued_turn_count` above zero the run keeps reading so the follow-up
   is answered, and otherwise the failure says the follow-up was not answered.
+  The first error stays visible as a failed system activity with its bounded,
+  redacted detail, and a queued follow-up that never starts settles failed
+  after the existing terminal drain bound.
   `claude-follow-up-settlement.test.ts` was changed deliberately to assert
   that message.
 - The Bash command never appeared in its activity: the streamed block opened it

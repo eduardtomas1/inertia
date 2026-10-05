@@ -661,3 +661,13 @@ describe("work-first chat model", () => {
     expect(nextSidebarNavigationIndex(-1, "ArrowDown", 0)).toBe(-1);
   });
 });
+
+describe("usage-limited work", () => {
+  it("shows a chat stopped by a usage limit as Limited rather than Failed", () => {
+    const failed = conversation({ id: "limited", projectId: "p", status: "failed" });
+    const turn = (usageLimited?: boolean) => ({ ...failed, latestTurn: { id: "turn", status: "failed" as const, ...(usageLimited === undefined ? {} : { usageLimited }) } });
+    expect(sidebarThreadView(turn(true), null)).toMatchObject({ status: "limited", needsAttention: true });
+    expect(sidebarThreadView(turn(), null).status).toBe("failed");
+    expect(sidebarThreadView({ ...turn(true), status: "running" }, null).status).toBe("working");
+  });
+});

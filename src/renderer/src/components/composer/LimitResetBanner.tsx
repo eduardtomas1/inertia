@@ -129,13 +129,20 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const plan = result.plan && !["cancelled", "completed"].includes(result.plan.state)
     && (latestTurnId === null || result.plan.failedTurnId === latestTurnId) ? result.plan : null;
   const offer = result.offer;
-  if (!plan && !offer) return null;
+  if (!plan && !offer) {
+    return result.usageLimited
+      ? <div className="limit-reset" role="group" aria-label="Usage limit" data-state="limited">
+        <Clock3 className="limit-reset-icon" size={14} aria-hidden="true" />
+        <span className="limit-reset-copy"><strong>Usage limit reached</strong></span>
+      </div>
+      : null;
+  }
   const unavailable = disabled || busy;
   const action = "secondary-button limit-reset-action";
   const pending = plan?.state === "waiting" || plan?.state === "dispatching";
   const blocked = plan?.state === "blocked";
   const missed = plan?.state === "missed";
-  const message = error ? diagnosticErrorReference(error).message : missed ? MISSED_MESSAGE : plan?.error ?? null;
+  const message = error ? diagnosticErrorReference(error).message : missed ? plan.error ?? MISSED_MESSAGE : plan?.error ?? null;
   const reason = !plan && offer && !offer.canResume ? offer.unavailableReason : null;
   const resetsAt = plan?.resetsAt ?? offer!.resetsAt;
   const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) >= Date.parse(resetsAt);

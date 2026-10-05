@@ -32,7 +32,7 @@ export function quotaResetLabel(resetsAt: string | null, now: number): string {
   const time = Date.parse(resetsAt ?? "");
   if (!Number.isFinite(time)) return "Reset time unavailable";
   const minutes = Math.ceil((time - now) / 60_000);
-  if (minutes <= 0) return "Reset due · refresh to check";
+  if (minutes <= 0) return "Reset due";
   if (minutes < 60) return `Resets in ${minutes}m`;
   if (minutes < 1440) return `Resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   return `Resets in ${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`;

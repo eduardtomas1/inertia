@@ -100,7 +100,7 @@ describe("header usage meter", () => {
     expect(quotaResetLabel("2026-09-21T14:20:00.000Z", now)).toBe("Resets in 2h 20m");
     expect(quotaResetLabel("2026-09-21T12:30:00.000Z", now)).toBe("Resets in 30m");
     expect(quotaResetLabel("2026-09-25T09:00:00.000Z", now)).toBe("Resets in 3d 21h");
-    expect(quotaResetLabel("2026-09-21T11:00:00.000Z", now)).toBe("Reset due · refresh to check");
+    expect(quotaResetLabel("2026-09-21T11:00:00.000Z", now)).toBe("Reset due");
     expect(quotaResetLabel(null, now)).toBe("Reset time unavailable");
   });
 });

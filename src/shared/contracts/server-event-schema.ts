@@ -186,7 +186,8 @@ function latestTurn(value: unknown): boolean {
     && nullableStringField(value, "terminalReason")
     && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
-    && modelRouteIdentityCoherent(value);
+    && modelRouteIdentityCoherent(value)
+    && optionalBooleanField(value, "usageLimited");
 }
 
 function conversation(value: unknown): value is UnknownRecord {

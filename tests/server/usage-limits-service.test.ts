@@ -60,6 +60,23 @@ describe("privileged usage limits", () => {
     expect(f.read).toHaveBeenLastCalledWith(expect.anything(), "model", "/chat", false);
     expect(f.service.snapshot().accounts[0]).toMatchObject({ status: "ready", windows: shown.windows });
   });
+  it("keeps the last reported windows as stale when a read fails for the same subscription login", async () => {
+    const f = setup();
+    const ready = { ...usageAccount({ id: "native:cursor", providerId: "cursor", identityKey: null }), credentialFingerprint: "c".repeat(64) };
+    const failed = { ...ready, status: "error" as const, windows: [], updatedAt: null, detail: "The provider asked Inertia to wait 5 min before checking quota again." };
+    f.read.mockResolvedValueOnce(ready).mockResolvedValueOnce(failed);
+    await f.service.refresh(true);
+    const kept = (await f.service.refresh(true)).accounts[0]!;
+    expect(kept).toMatchObject({ status: "stale", windows: ready.windows, updatedAt: ready.updatedAt, detail: failed.detail, canReset: false });
+    f.read.mockResolvedValueOnce({ ...failed, credentialFingerprint: "d".repeat(64) });
+    expect((await f.service.refresh(true)).accounts[0]).toMatchObject({ status: "error", windows: [] });
+  });
+  it("does not ask for a manual refresh when an account cannot be read", async () => {
+    const f = setup();
+    f.read.mockRejectedValueOnce(new Error("unreadable"));
+    const account = (await f.service.refresh(true)).accounts[0]!;
+    expect(account).toMatchObject({ status: "error", detail: "Account usage could not be read." });
+  });
   it("keeps a chat's not-ready or failing account read for 15 seconds, and a forced read bypasses it", async () => {
     vi.useFakeTimers({ now: Date.parse("2030-01-01T00:00:00.000Z"), toFake: ["Date"] });
     try {

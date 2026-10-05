@@ -70,6 +70,8 @@ import {
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type ConversationDetailRow = ConversationShellRow & { mixed_provider_history: number };
+type LatestTurnRow = AgentTurnRow & { usage_limited: number };
+const TURN_USAGE_LIMITED_SQL = "EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id)";
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
@@ -150,7 +152,7 @@ export class SnapshotRepository {
     // decoded every turn ever recorded on each coalesced shell snapshot.
     const latestTurns = new Map(
       (this.context.database.prepare(`
-        SELECT agent_turns.*
+        SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited
         FROM conversations
         JOIN agent_turns ON agent_turns.id = (
           SELECT id
@@ -159,9 +161,8 @@ export class SnapshotRepository {
           ORDER BY latest.requested_at DESC, latest.id DESC
           LIMIT 1
         )
-      `).all() as AgentTurnRow[])
-        .map(agentTurnFromRow)
-        .map((turn) => [turn.conversationId, turn] as const),
+      `).all() as LatestTurnRow[])
+        .map((row) => [row.conversation_id, { turn: agentTurnFromRow(row), usageLimited: row.usage_limited === 1 }] as const),
     );
     return {
       projects: (this.context.database.prepare(
@@ -170,8 +171,10 @@ export class SnapshotRepository {
       conversations: (this.context.database.prepare(`
         SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
         FROM conversations ORDER BY updated_at DESC, id ASC
-      `).all() as ConversationShellRow[]).map((row) =>
-        conversationShellFromRow(row, latestTurns.get(row.id) ?? null)),
+      `).all() as ConversationShellRow[]).map((row) => {
+        const latest = latestTurns.get(row.id);
+        return conversationShellFromRow(row, latest?.turn ?? null, latest?.usageLimited);
+      }),
       runs: (this.context.database.prepare(
         "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
@@ -202,14 +205,15 @@ export class SnapshotRepository {
     const row = this.conversationRow(conversationId);
     if (!row) return null;
     const latestTurn = this.context.database.prepare(`
-      SELECT * FROM agent_turns
+      SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
-    `).get(conversationId) as AgentTurnRow | undefined;
+    `).get(conversationId) as LatestTurnRow | undefined;
     return conversationShellFromRow(
       row,
       latestTurn ? agentTurnFromRow(latestTurn) : null,
+      latestTurn?.usage_limited === 1,
     );
   }
 

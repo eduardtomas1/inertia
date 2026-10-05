@@ -26,6 +26,7 @@ import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
+import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -123,7 +124,7 @@ interface InFlightRefresh {
 // Provider docs do not prescribe polling intervals. These are conservative lifecycle policies:
 // catalogs change slowly, while account usage benefits from a shorter refresh window.
 const DEFAULT_MODEL_TTL_MS = 5 * 60 * 1_000;
-const DEFAULT_RATE_LIMIT_TTL_MS = 60 * 1_000;
+const DEFAULT_RATE_LIMIT_TTL_MS = RATE_LIMIT_TTL_MS;
 const MAX_MODELS = 128;
 const MAX_RATE_LIMITS = 16;
 const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi"];

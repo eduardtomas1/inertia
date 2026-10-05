@@ -96,6 +96,7 @@ const statusLabels: Record<SidebarThreadStatus, string> = {
   approval: "Approval",
   input: "Input",
   failed: "Failed",
+  limited: "Limited",
   completed: "Completed",
   idle: "Idle",
 };

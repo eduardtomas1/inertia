@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useReducer, useState } from "react";
 import {
   CheckCircle2,
   CircleX,
+  Clock3,
   MessageCircleQuestion,
   Minus,
   ShieldAlert,
@@ -31,6 +32,7 @@ const SETTLED_CUE_ICONS: Record<SettledCueStatus, LucideIcon> = {
   approval: ShieldAlert,
   input: MessageCircleQuestion,
   failed: CircleX,
+  limited: Clock3,
   completed: CheckCircle2,
 };
 

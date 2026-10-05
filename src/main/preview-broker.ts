@@ -770,6 +770,7 @@ export class PreviewBroker {
       pageNumber: session.nextPageNumber += 1,
       captureLocked: this.#captureLocked,
       registerHealthRenderer: this.options.registerHealthRenderer,
+      ownerWindow: () => this.#window(),
       targetContents: () => this.#window()?.webContents,
       guardNavigation: (event, url) => this.#guardNavigation(event, url),
       publish,

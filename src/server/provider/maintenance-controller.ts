@@ -20,6 +20,10 @@ import {
   type ProviderMaintenanceUpdateAction,
 } from "./maintenance-capabilities";
 import {
+  pinnedManualCommand,
+  pinnedProviderUpdateAction,
+} from "./maintenance-install-source";
+import {
   compareProviderVersions,
   ProviderLatestVersionCache,
 } from "./maintenance-latest";
@@ -44,6 +48,8 @@ import type {
 } from "./maintenance-journal";
 
 const MAX_RETAINED_OPERATIONS = 64;
+const PIN_REFUSED_MESSAGE =
+  "Inertia could not confirm that the latest release is one it supports.";
 
 export class ProviderMaintenanceError extends Error {
   constructor(message: string) {
@@ -437,6 +443,8 @@ export class ProviderMaintenanceController {
             ? "Cursor does not publish a machine-readable latest-version source."
             : null,
         };
+    const pinRefused = capabilities.update !== null
+      && pinnedProviderUpdateAction(capabilities.update, latest.version) === null;
     const resolvedVersionStatus = versionStatus(
       target.installed,
       target.installedVersion,
@@ -450,15 +458,23 @@ export class ProviderMaintenanceController {
       freshness: latest.freshness,
       checkedAt: latest.checkedAt,
       installMethod: capabilities.installMethod,
-      updateAvailability: capabilities.updateAvailability,
-      updateLabel: capabilities.update?.label ?? null,
+      updateAvailability: pinRefused
+        ? "instructions-only"
+        : capabilities.updateAvailability,
+      updateLabel: pinRefused ? null : capabilities.update?.label ?? null,
       instructionsUrl: capabilities.instructionsUrl,
       message: [statusMessage(
         resolvedVersionStatus,
         latest.version,
         latest.freshness === "stale",
         latest.error,
-      ), capabilities.message].filter(Boolean).join(" ") || null,
+      ), capabilities.message, pinRefused ? PIN_REFUSED_MESSAGE : null]
+        .filter(Boolean).join(" ") || null,
+      manualCommand: pinnedManualCommand(
+        capabilities.manualCommand ?? null,
+        capabilities.update,
+        latest.version,
+      ),
     };
     this.statuses.set(providerId, status);
     this.options.onStatus?.(status);
@@ -501,6 +517,13 @@ export class ProviderMaintenanceController {
       }
 
       const advisory = await this.refreshOne(providerId, false);
+      const pinnedAction = pinnedProviderUpdateAction(
+        action,
+        advisory.latestVersion,
+      );
+      if (!pinnedAction) {
+        throw new ProviderMaintenanceError(PIN_REFUSED_MESSAGE);
+      }
       result = await this.coordinator.run(
         action.lockKey,
         active.abort.signal,
@@ -512,7 +535,7 @@ export class ProviderMaintenanceController {
             targetVersion: advisory.latestVersion,
             message: "Updating provider.",
           });
-          return await this.runAction(action, active);
+          return await this.runAction(pinnedAction, active);
         },
       );
       this.cleanupUnconfirmed ||= !result.cleanupConfirmed;

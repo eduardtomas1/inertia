@@ -296,6 +296,15 @@
   line-height: 1.4;
 }
 
+.provider-settings-maintenance .provider-maintenance-command {
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .provider-settings-maintenance .provider-maintenance-actions {
   margin-left: auto;
 }

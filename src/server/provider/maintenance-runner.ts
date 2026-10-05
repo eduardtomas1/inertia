@@ -19,6 +19,7 @@ import {
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { providerProcessInvocation } from "./process";
 import type { ProviderMaintenanceUpdateAction } from "./maintenance-capabilities";
+import { PROVIDER_MAINTENANCE_ENVIRONMENT_KEYS } from "./maintenance-install-source";
 
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -126,6 +127,12 @@ export async function runProviderMaintenanceAction(
     options.environment,
     platform,
   );
+  for (const key of PROVIDER_MAINTENANCE_ENVIRONMENT_KEYS) {
+    const value = action.environment?.[key];
+    if (typeof value === "string" && value.length > 0 && !value.includes("\0")) {
+      environment[key] = value;
+    }
+  }
   if (action.environmentPathPrefix) {
     const currentPath = environmentValue(environment, "PATH", platform);
     const separator = platform === "win32" ? ";" : ":";

@@ -18,6 +18,10 @@ OpenCode keeps admitted approval and question requests open while you decide. It
 
 Open **Settings → Agents**, choose the provider and open **Details** to see which features are ready, need setup, or are checked when a chat starts. The installation status above it shows the version Inertia verified. Some features depend on the selected model; Cursor only offers reasoning choices observed for that model.
 
+## Update an agent's CLI
+
+**Settings → Agents** offers **Update** when Inertia can tell what installed the CLI and your account can write it: the provider's own installer, npm (also through nvm or fnm), pnpm, bun, Yarn, Volta or Homebrew. Otherwise it shows the command to run in a terminal, such as `sudo npm install -g --prefix /usr @openai/codex@latest` for a system npm prefix or `sudo snap refresh <name>` for a snap. OpenCode updates stay on 1.x.
+
 ## I can't open another chat window
 
 Up to eight chats can have their own windows at once. Close one, or bring a chat back into the main window, then try again.

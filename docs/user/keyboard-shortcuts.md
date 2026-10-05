@@ -37,6 +37,13 @@ Turn on Window snapshots in **Settings → Devices & integrations**, and choose 
 | Move between chats in the Work list | ↑ ↓, Home, End |
 | Open a chat's actions | Shift+F10 or the Menu key |
 
+## Right-click menus
+
+| Action | Keys |
+|---|---|
+| Open the menu for a focused message, file or changed file | Shift+F10 or the Menu key |
+| Paste into a terminal | ⌘V on macOS, Ctrl+V on Windows and Linux |
+
 ## Composer
 
 | Action | Keys |

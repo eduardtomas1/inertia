@@ -23,6 +23,8 @@ Choose **Add your first project** on the home screen, or the add-project button 
 
 Open **Settings → Agents** and connect a provider. Inertia uses the accounts you already have: each provider keeps its own authentication, and custom backend credentials are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
 
+The sign-in runs the provider's own login in a terminal. When the provider asks for a code, paste it there with ⌘V (Ctrl+V on Windows and Linux) or right-click and choose **Paste**. After **Copy link** or **Open again**, the terminal keeps focus, so the paste lands in it when you come back from the browser. The pasted code goes only to the provider's login; Inertia does not store it or add it to diagnostics.
+
 For Codex, update the installed CLI from **Settings → Agents** when an update is available, then refresh the provider. Inertia reads models and their reasoning and speed options from that installation. GPT-6.1 Sol (`gpt-6.1-sol`) appears when Codex advertises it for your account; available options depend on your plan and workspace settings. See [OpenAI's model guide](https://learn.chatgpt.com/docs/models) for rollout details.
 
 ## Start a chat

@@ -71,7 +71,11 @@ refused unless the tab shows one. Chromium can skip history entries, so the
 page it actually commits is checked again; a step that lands anywhere other
 than a local page is stopped and reported as `unavailable`. Reload loads the
 current address again with an ordinary GET through the same path as
-navigate, so it never resubmits a form. Server redirects during any
+navigate, so it never resubmits a form. For an address with a fragment, as a
+hash router uses, loading the same address would only move within the page,
+so reload loads the address without its fragment as a new document and then
+restores the fragment as an in-page navigation; both addresses pass the
+loopback check. Server redirects during any
 navigation stay under the existing redirect guard.
 
 `inertia_browser_press` accepts Enter, Tab, Escape, Backspace, Space, the

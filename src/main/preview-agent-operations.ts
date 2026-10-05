@@ -375,7 +375,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     const refusal = agentHistoryRefusal(contents, direction);
     if (refusal) return refusal;
     const loaded = direction === "reload"
-      ? await this.#agentLoad(contents, contents.getURL(), scope)
+      ? await this.#agentReload(contents, scope)
       : await agentHistoryNavigation(
         contents,
         direction,
@@ -387,6 +387,19 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       : direction === "forward" ? "Agent went forward a page" : "Agent reloaded the page";
     this.host.record(session, "navigate", label);
     return this.#navigationResult(session, contents, loaded);
+  }
+
+  async #agentReload(contents: PreviewContents, scope: AgentOperationScope): Promise<boolean> {
+    const current = this.#localTarget(contents.getURL());
+    if (!current) throw new AgentBrowserRefusal(this.#remoteAddressFailure());
+    const target = new URL(current);
+    if (!target.hash) return await this.#agentLoad(contents, current, scope);
+    target.hash = "";
+    const document = this.#localTarget(target.toString());
+    if (!document) throw new AgentBrowserRefusal(this.#remoteAddressFailure());
+    if (!await this.#agentLoad(contents, document, scope)) return false;
+    stopForAbort(scope.signal);
+    return await this.#agentLoad(contents, current, scope);
   }
 
   async openTab(

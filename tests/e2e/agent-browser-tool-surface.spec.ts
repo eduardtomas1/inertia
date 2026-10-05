@@ -134,6 +134,14 @@ test("an agent goes back through history and opens a schemeless loopback address
   expect(parsed(await browser({ action: "snapshot" })).title).toBe("Second page");
 });
 
+test("reload of a hash-routed page loads a fresh document and keeps the fragment", async () => {
+  await navigate("agent-browser-history-first#x");
+  await pageValue("agent-browser-history-first#x", "window.__loadedBefore = true");
+  expect(await browser({ action: "history", direction: "reload" })).toMatchObject({ ok: true });
+  expect(await pageValue<boolean>("agent-browser-history-first#x", "window.__loadedBefore === undefined")).toBe(true);
+  expect(await pageValue<string>("agent-browser-history-first#x", "location.hash")).toBe("#x");
+});
+
 test("reload never resubmits a form", async () => {
   await navigate("agent-browser-post-form");
   const before = agentBrowserToolSurfacePostCount();

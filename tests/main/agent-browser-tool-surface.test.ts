@@ -105,6 +105,19 @@ describe("Browser tool surface", () => {
     expect(load).toHaveBeenCalledExactlyOnceWith("http://127.0.0.1:3000/first");
   });
 
+  it("reloads a hash-routed page as a fresh document and restores its fragment", async () => {
+    const { broker, contents } = await loadedHarness();
+    contents.setURL("http://127.0.0.1:3000/app#/settings");
+    const page = contents as unknown as { loadURL(url: string): Promise<void> };
+    const load = vi.spyOn(page, "loadURL");
+    await expect(broker.perform(runIdentity, { action: "history", direction: "reload" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(load.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:3000/app",
+      "http://127.0.0.1:3000/app#/settings",
+    ]);
+  });
+
   it("stops and reports a history step that Chromium commits to a non-local entry", async () => {
     const { broker, contents } = await loadedHarness();
     const history = contents.navigationHistory;

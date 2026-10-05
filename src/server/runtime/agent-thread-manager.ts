@@ -1134,17 +1134,17 @@ export class AgentThreadManager {
           { childConversationId: target.id },
           this.now(),
         );
-        const message = await this.dependencies.turns.steer(lease, {
+        const steered = await this.dependencies.turns.steer(lease, {
           content: input.content,
           imagePaths: [],
         }, [], () => recordManagedTurn(this.dependencies.store, operationId, {
           id: lease.turnId, runId: lease.runId,
         }, this.now()), signal);
-        if (!message?.turnId) throw new Error("The target provider did not accept the follow-up.");
+        if (steered.kind !== "accepted" || !steered.message.turnId) throw new Error("The target provider did not accept the follow-up.");
         this.dependencies.broadcastSnapshot();
         return json({
           conversationId: target.id,
-          turnId: message.turnId,
+          turnId: steered.message.turnId,
           disposition: "follow-up",
           accepted: true,
         });

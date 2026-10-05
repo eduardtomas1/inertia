@@ -266,7 +266,7 @@ describe("follow-ups and the in-turn restart", () => {
     const runtime = await runningResume();
     try {
       runtime.provider.steerSupported = false;
-      expect(await sendFollowUp(runtime)).toBeNull();
+      expect(await sendFollowUp(runtime)).toEqual({ kind: "refused" });
       expect(runtime.provider.callbacks!.freshSessionFallback!()).not.toBeNull();
     } finally {
       await runtime.controller.dispose();
@@ -277,7 +277,7 @@ describe("follow-ups and the in-turn restart", () => {
   it("switches the restart off once the provider accepted the follow-up", async () => {
     const runtime = await runningResume();
     try {
-      expect(await sendFollowUp(runtime)).not.toBeNull();
+      expect(await sendFollowUp(runtime)).toMatchObject({ kind: "accepted" });
       expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
     } finally {
       await runtime.controller.dispose();
@@ -311,7 +311,7 @@ describe("follow-ups and the in-turn restart", () => {
       await vi.waitFor(() => expect(runtime.provider.steerCalls).toHaveLength(1));
       expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
       answer(false);
-      expect(await pending).toBeNull();
+      expect(await pending).toEqual({ kind: "refused" });
       expect(runtime.provider.callbacks!.freshSessionFallback!()).not.toBeNull();
     } finally {
       await runtime.controller.dispose();

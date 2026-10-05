@@ -341,3 +341,9 @@ export interface FollowUpAdmissionLease {
   /** Idempotent; every acquired lease must be released. */
   release(): void;
 }
+
+export type FollowUpSteerResult =
+  | { kind: "accepted"; message: ChatMessage }
+  | { kind: "turn-ended" }
+  | { kind: "refused" }
+  | { kind: "unavailable" };

@@ -4,7 +4,8 @@ export const COMPACTION_REQUEST_TIMESTAMP = 4242;
 
 type LifecycleScenario =
   | "resume"
-  | "resume-rejected-steer"
+  | "resume-queued-steer"
+  | "resume-queued-steer-without-work"
   | "resume-stuck-steer"
   | "resume-refused-steer"
   | "resume-dropped-steer"
@@ -430,7 +431,7 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", sessionID, role: "user" } } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", parentID: parsed.messageID, sessionID, role: "assistant" } } });
       }, 10);
-      if (["resume", "resume-rejected-steer", "resume-stuck-steer", "resume-refused-steer", "resume-dropped-steer", "resume-admitted-stuck-steer"].includes(scenario)) setTimeout(() => {
+      if (["resume", "resume-queued-steer", "resume-queued-steer-without-work", "resume-stuck-steer", "resume-refused-steer", "resume-dropped-steer", "resume-admitted-stuck-steer"].includes(scenario)) setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", parentID: parsed.messageID, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Resumed OpenCode response" } } });
@@ -501,13 +502,13 @@ const server = http.createServer((req, res) => {
         id: parsed.id,
         sessionID,
         prompt: parsed.prompt,
-        delivery: scenario === "resume-rejected-steer" ? "queue" : parsed.delivery,
+        delivery: scenario.startsWith("resume-queued-steer") ? "queue" : parsed.delivery,
         timeCreated: Date.now(),
       } }), 50);
       if (scenario === "resume") setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 60);
-      if (scenario === "resume") setTimeout(() => {
+      if (scenario === "resume" || scenario === "resume-queued-steer") setTimeout(() => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "follow-up-assistant", parentID: parsed.id, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "follow-up-text", sessionID, messageID: "follow-up-assistant", type: "text", text: "Follow-up OpenCode response" } } });
         sendEvent({ type: "session.idle", properties: { sessionID } });

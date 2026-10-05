@@ -478,6 +478,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         "invalid", "That page element is disabled.",
       ));
       validate?.(finalTarget);
+      if (dialog === "accept") await this.#armDialogs(contents, scope);
       sendAgentPageInput(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 });
       sendAgentPageInput(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 });
     }, scope, ref, dialog);
@@ -600,6 +601,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     const { keyCode, modifiers } = agentPageKeyInput(key);
     const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
       scope.inputSent = true;
+      if (dialog === "accept") await this.#armDialogs(contents, scope);
       if (keyCode === "Enter" || keyCode === "Space") {
         activationBlocked = await deliverAgentPageActivation(
           contents,
@@ -674,6 +676,10 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (!outside) return located;
     await this.rendererOperation(contents, () => scrollAgentPageRefIntoView(contents, ref), { scope, phase: "page-scroll" });
     return await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+  }
+
+  async #armDialogs(contents: PreviewContents, scope: AgentOperationScope): Promise<void> {
+    await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "accept"), { scope, phase: "page-dialogs" });
   }
 
   async #dialogDetail(contents: PreviewContents, scope: AgentOperationScope): Promise<Record<string, unknown>> {
@@ -902,9 +908,6 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         () => setAgentPageInputGuard(contents, true, expectedClickRef),
         { scope, phase: "input-guard" },
       );
-      if (dialog === "accept") {
-        await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "accept"), { scope, phase: "page-dialogs" });
-      }
       beginAgentPageInputRefusalCapture(contents);
       await settleAgentPageInput(contents, dispatch, scope.signal);
       const isolated = await this.rendererOperation(contents, () => agentPageInputRefusal(contents), { scope, phase: "input-guard" });

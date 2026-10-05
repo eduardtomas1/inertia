@@ -4,6 +4,8 @@ import {
   MAX_PREVIEW_AGENT_DIALOG_MESSAGE_CHARS,
   MAX_PREVIEW_AGENT_DIALOGS,
   PREVIEW_AGENT_DIALOG_ANSWER_EVENT,
+  armPreviewAgentDialogAnswer,
+  takePreviewAgentDialogRecords,
   type PreviewAgentDialog,
   type PreviewAgentDialogAnswer,
 } from "../shared/preview-agent-dialogs.js";
@@ -35,54 +37,76 @@ export function recordAgentPageUnloadPrompt(contents: WebContents): void {
   unloadRecords.set(contents, records);
 }
 
+export interface AgentPageDialogReport {
+  dialogs: PreviewAgentDialog[];
+  omitted: number;
+  withheld: boolean;
+}
+
 export async function armAgentPageDialogs(
   contents: WebContents,
   answer: PreviewAgentDialogAnswer,
 ): Promise<void> {
-  await execute(contents, `(() => {
-    dispatchEvent(new CustomEvent(${JSON.stringify(PREVIEW_AGENT_DIALOG_ANSWER_EVENT)}, { detail: ${JSON.stringify(answer)} }));
-    return true;
-  })()`);
+  await execute(contents, `(${armPreviewAgentDialogAnswer.toString()})(${
+    JSON.stringify(PREVIEW_AGENT_DIALOG_ANSWER_EVENT)}, ${JSON.stringify(answer)})`);
 }
 
-export function takeAgentPageUnloadPrompts(contents: WebContents): PreviewAgentDialog[] {
+export function takeAgentPageUnloadPrompts(contents: WebContents): AgentPageDialogReport {
   const unloads = unloadRecords.get(contents) ?? [];
   unloadRecords.delete(contents);
-  return unloads;
+  return { dialogs: unloads, omitted: 0, withheld: false };
 }
 
-export async function takeAgentPageDialogs(contents: WebContents): Promise<PreviewAgentDialog[]> {
-  const unloads = takeAgentPageUnloadPrompts(contents);
+export async function takeAgentPageDialogs(contents: WebContents): Promise<AgentPageDialogReport> {
+  const unloads = takeAgentPageUnloadPrompts(contents).dialogs;
   const value = await execute(contents, `(() => {
-    const dialogs = globalThis.__inertiaAgentDialogs;
+    const taken = (${takePreviewAgentDialogRecords.toString()})(${MAX_PREVIEW_AGENT_DIALOGS});
     const state = globalThis.__inertiaAgentBrowser;
-    if (!dialogs || !Array.isArray(dialogs.records) || dialogs.records.length === 0) return [];
-    const records = dialogs.records.splice(0, ${MAX_PREVIEW_AGENT_DIALOGS});
-    if (state?.privacyGuardInstalled !== true) {
-      return records.map((record) => ({ kind: record.kind, message: "", answer: record.answer }));
+    if (taken.records.length === 0) return { records: [], omitted: taken.omitted, withheld: false };
+    if (state?.privacyGuardInstalled !== true || state.evidenceWithheld) {
+      return {
+        records: taken.records.map((record) => ({ kind: record.kind, message: "", answer: record.answer })),
+        omitted: taken.omitted,
+        withheld: true,
+      };
     }
     const privacy = ${PRIVACY_RUNTIME};
-    return records.map((record) => ({
-      kind: record.kind,
-      message: privacy.redact(state, record.message, ${MAX_PREVIEW_AGENT_DIALOG_MESSAGE_CHARS}, record.truncated === true),
-      answer: record.answer,
-    }));
+    return {
+      records: taken.records.map((record) => ({
+        kind: record.kind,
+        message: privacy.redact(state, record.message, ${MAX_PREVIEW_AGENT_DIALOG_MESSAGE_CHARS}, record.truncated === true),
+        answer: record.answer,
+      })),
+      omitted: taken.omitted,
+      withheld: false,
+    };
   })()`);
-  const page = Array.isArray(value)
-    ? value.slice(0, MAX_PREVIEW_AGENT_DIALOGS).map(dialog).filter((entry): entry is PreviewAgentDialog => entry !== null)
+  const report = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const page = Array.isArray(report.records)
+    ? report.records.slice(0, MAX_PREVIEW_AGENT_DIALOGS).map(dialog).filter((entry): entry is PreviewAgentDialog => entry !== null)
     : [];
-  return [...unloads, ...page].slice(0, MAX_PREVIEW_AGENT_DIALOGS);
+  const omitted = typeof report.omitted === "number" && Number.isSafeInteger(report.omitted) && report.omitted > 0
+    ? report.omitted
+    : 0;
+  const dialogs = [...unloads, ...page];
+  return {
+    dialogs: dialogs.slice(0, MAX_PREVIEW_AGENT_DIALOGS),
+    omitted: omitted + Math.max(0, dialogs.length - MAX_PREVIEW_AGENT_DIALOGS),
+    withheld: report.withheld === true,
+  };
 }
 
-export function agentDialogDetail(dialogs: readonly PreviewAgentDialog[]): Record<string, unknown> {
-  if (dialogs.length === 0) return {};
+export function agentDialogDetail(report: AgentPageDialogReport): Record<string, unknown> {
+  if (report.dialogs.length === 0 && report.omitted === 0) return {};
   const reported: PreviewAgentDialog[] = [];
-  for (const entry of dialogs) {
+  for (const entry of report.dialogs) {
     if (Buffer.byteLength(JSON.stringify([...reported, entry]), "utf8") > MAX_DIALOG_REPORT_BYTES) break;
     reported.push(entry);
   }
+  const omitted = report.omitted + report.dialogs.length - reported.length;
   return {
     dialogs: reported,
-    ...(reported.length < dialogs.length ? { dialogsOmitted: dialogs.length - reported.length } : {}),
+    ...(omitted > 0 ? { dialogsOmitted: omitted } : {}),
+    ...(report.withheld ? { dialogsWithheld: true } : {}),
   };
 }

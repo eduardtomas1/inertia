@@ -80,22 +80,30 @@ listen for, so they never insert a line break.
 Pages cannot open native dialogs. The Browser preload replaces `alert`,
 `confirm` and `prompt` in the page's main world before page scripts run,
 using only built-ins captured at that moment: `alert` returns at once,
-`confirm` returns the answer armed for the current agent action (false unless
-that action asked to accept) and `prompt` returns null. Each call is recorded
-through a DOM event with a primitive detail to the isolated Browser world,
-which keeps at most 20 per document with messages of at most 1,024
-characters. The next snapshot, click, type or press result reports them once
-as `dialogs: [{"kind","message","answer"}]`, with messages passed through the
-same redaction as page text and the report bounded to 8 KiB.
+`confirm` returns false unless Inertia armed an accept for the current agent
+action, and `prompt` returns null. Each call is sent to the isolated Browser
+world as a DOM event with a primitive detail; the isolated world decides the
+reported answer itself from what Inertia armed, never from the event, so a
+page that forges a record cannot claim an accepted confirmation. The next
+snapshot, click, type or press result reports the dialogs once as
+`dialogs: [{"kind","message","answer"}]`: at most 20 per report with
+`dialogsOmitted` counting the rest, messages of at most 1,024 characters
+passed through the same redaction as page text, and the report bounded to 8
+KiB. When the document's evidence is withheld for privacy, or the privacy
+guard is missing, every message is reported empty and the report carries
+`dialogsWithheld: true`. Dialog messages are untrusted page data.
+
 `inertia_browser_click` and `inertia_browser_press` accept
-`dialog: "accept" | "dismiss"` (default `dismiss`); `accept` arms the answer
-only while that action and its settling run, and in a Supervised chat its
-approval says "and accept the page's confirmation dialog". A page that asks
-to stay when it is left (`beforeunload`) is allowed to leave, and the
-navigation result reports it as a `beforeunload` dialog. The `disableDialogs`
-web preference stays on, so a dialog the override cannot reach, for example
-one opened from an embedded frame, is still answered silently and never shown.
-A dialog raised by a page that then navigates away is lost with its document.
+`dialog: "accept" | "dismiss"` (default `dismiss`). `accept` is armed inside
+the action, after the pointer has moved onto the target and immediately
+before the mouse or key press, and it is one-shot: the first `confirm` takes
+it, and anything left is cleared when the action settles. A confirmation
+raised while hovering, a second chained confirmation, or a timer that fires
+later is dismissed. In a Supervised chat the approval says "and accept the
+page's confirmation dialog". The `disableDialogs` web preference stays on,
+so a dialog the override cannot reach, for example one opened from an
+embedded frame, is still answered silently and never shown. A dialog raised
+by a page that then navigates away is lost with its document.
 
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at

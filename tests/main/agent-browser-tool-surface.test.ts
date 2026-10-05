@@ -1,3 +1,5 @@
+import { runInNewContext } from "node:vm";
+
 import { describe, expect, it, vi } from "vitest";
 
 const { electronState, pageTools } = await vi.hoisted(async () => {
@@ -143,48 +145,78 @@ describe("Browser tool surface", () => {
       .not.toHaveProperty("controller");
   });
 
-  it("arms the confirmation answer only around the agent's own click and reports the page's dialogs", async () => {
-    const { broker, contents } = await loadedHarness();
-    const timeline: string[] = [];
+  function dialogPage(contents: object, timeline: string[]) {
+    const context = {
+      __inertiaAgentDialogs: {
+        records: [] as Array<Record<string, unknown>>, omitted: 0, acceptNext: false,
+      },
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true, passwordValues: new Set(), passwordNodes: new WeakSet(),
+      } as Record<string, unknown>,
+      CustomEvent,
+      dispatchEvent: () => true,
+    };
     const page = contents as unknown as {
       executeJavaScriptInIsolatedWorld(world: number, scripts: Array<{ code: string }>): Promise<unknown>;
+      sendInputEvent(input: Record<string, unknown>): void;
     };
     const original = page.executeJavaScriptInIsolatedWorld.bind(page);
     vi.spyOn(page, "executeJavaScriptInIsolatedWorld").mockImplementation(async (world, scripts) => {
       const code = scripts[0]?.code ?? "";
-      const armed = /__inertia_agent_dialog_answer__", \{ detail: "(accept|dismiss)"/u.exec(code)?.[1];
+      const armed = /"__inertia_agent_dialog_answer__", "(accept|dismiss)"/u.exec(code)?.[1];
       if (armed) timeline.push(`arm:${armed}`);
-      if (code.includes("__inertiaAgentDialogs")) {
-        timeline.push("read");
-        return [{ kind: "confirm", message: "Delete [redacted]?", answer: "accept" }];
-      }
-      return await original(world, scripts);
+      else if (code.includes("__inertiaAgentDialogs")) timeline.push("read");
+      else return await original(world, scripts);
+      return runInNewContext(code, context);
     });
-    const sender = contents as unknown as { sendInputEvent(input: Record<string, unknown>): void };
-    const sent = sender.sendInputEvent.bind(sender);
-    vi.spyOn(sender, "sendInputEvent")
-      .mockImplementation((input) => {
-        if (input.type === "mouseDown") timeline.push("mouseDown");
-        sent(input);
-      });
+    const sent = page.sendInputEvent.bind(page);
+    vi.spyOn(page, "sendInputEvent").mockImplementation((input) => {
+      if (input.type === "mouseMove") timeline.push("hover");
+      if (input.type === "mouseDown" || input.type === "keyDown") timeline.push(String(input.type));
+      sent(input);
+    });
+    const seed = (message: string, answer = "accept"): void => {
+      context.__inertiaAgentDialogs.records.push({ kind: "confirm", message, answer, truncated: false });
+    };
+    return { context, seed };
+  }
 
+  it("arms a one-shot confirmation answer just before the agent's own input and reports the page's dialogs", async () => {
+    const { broker, contents } = await loadedHarness();
+    const timeline: string[] = [];
+    const { seed } = dialogPage(contents, timeline);
+    seed("Delete it?");
     const accepted = await broker.perform(runIdentity, { action: "click", ref: "e1", dialog: "accept" });
-    expect(JSON.parse((accepted as { text: string }).text)).toMatchObject({
+    expect(JSON.parse((accepted as unknown as { text: string }).text)).toMatchObject({
       clicked: "e1",
-      dialogs: [{ kind: "confirm", message: "Delete [redacted]?", answer: "accept" }],
+      dialogs: [{ kind: "confirm", message: "Delete it?", answer: "accept" }],
     });
-    expect(timeline).toEqual(["arm:accept", "mouseDown", "arm:dismiss", "read"]);
+    expect(timeline).toEqual(["hover", "arm:accept", "mouseDown", "arm:dismiss", "read"]);
 
     timeline.length = 0;
     await expect(broker.perform(runIdentity, { action: "click", ref: "e1" })).resolves.toMatchObject({ ok: true });
-    expect(timeline).toEqual(["mouseDown", "read"]);
+    expect(timeline).toEqual(["hover", "mouseDown", "read"]);
     timeline.length = 0;
+    seed("Typed?", "dismiss");
     const typed = await broker.perform(runIdentity, { action: "type", ref: "e1", text: "a", replace: true });
-    expect(JSON.parse((typed as { text: string }).text)).toMatchObject({ typed: "e1", dialogs: [{ kind: "confirm" }] });
+    expect(JSON.parse((typed as unknown as { text: string }).text)).toMatchObject({ typed: "e1", dialogs: [{ kind: "confirm" }] });
     timeline.length = 0;
     await expect(broker.perform(runIdentity, { action: "press", key: "Enter", dialog: "accept" }))
       .resolves.toMatchObject({ ok: true });
-    expect(timeline).toEqual(["arm:accept", "arm:dismiss", "read"]);
+    expect(timeline).toEqual(["arm:accept", "keyDown", "arm:dismiss", "read"]);
+  });
+
+  it("never reports a dialog message from a document whose evidence is withheld", async () => {
+    const { broker, contents } = await loadedHarness();
+    const { context, seed } = dialogPage(contents, []);
+    context.__inertiaAgentBrowser.evidenceWithheld = "hidden-input";
+    seed("Invalid code hunter2", "dismiss");
+    const clicked = await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(JSON.stringify(clicked)).not.toContain("hunter2");
+    expect(JSON.parse((clicked as unknown as { text: string }).text)).toMatchObject({
+      dialogs: [{ kind: "confirm", message: "", answer: "dismiss" }],
+      dialogsWithheld: true,
+    });
   });
 
   it("lets a page leave even when its beforeunload handler asks to stay, and reports it", async () => {
@@ -205,7 +237,11 @@ describe("Browser tool surface", () => {
     contents.debugger.sendCommand.mockImplementation(async (method, params) => {
       if (method === "Runtime.evaluate" && String(params?.expression).includes("__inertiaAgentDialogs")) {
         reads += 1;
-        return { result: { value: reads === 1 ? [{ kind: "alert", message: "Saved", answer: "accept" }] : [] } };
+        return { result: { value: {
+          records: reads === 1 ? [{ kind: "alert", message: "Saved", answer: "accept" }] : [],
+          omitted: 0,
+          withheld: false,
+        } } };
       }
       return await send(method, params);
     });

@@ -27,6 +27,12 @@ describe("Browser tool guidance", () => {
     expect(description("inertia_browser_snapshot")).toContain(SECRET_GUIDANCE);
     expect(description("inertia_browser_snapshot")).toContain(UNTRUSTED_GUIDANCE);
     expect(description("inertia_browser_type")).toContain(SECRET_GUIDANCE);
+    for (const name of ["inertia_browser_click", "inertia_browser_press"]) {
+      const schema = AGENT_BROWSER_TOOL_DEFINITIONS.find((definition) => definition.name === name)!.inputSchema as {
+        properties: { dialog: { description: string } };
+      };
+      expect(schema.properties.dialog.description, name).toContain("untrusted page data");
+    }
     const pack = frontendPack();
     expect(pack.text).toContain(SECRET_GUIDANCE);
     expect(pack.text).toContain(UNTRUSTED_GUIDANCE);

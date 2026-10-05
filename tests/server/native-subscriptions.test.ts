@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { NativeSubscriptionReader } from "../../src/server/usage/native-subscriptions";
 import { cursorSubscriptionWindows, kimiSubscriptionWindows, openCodeSubscriptionWindows } from "../../src/server/usage/subscription-parsers";
-import { readSubscriptionFile, subscriptionJson } from "../../src/server/usage/subscription-io";
+import { readSubscriptionFile, subscriptionJson, SubscriptionHttpError } from "../../src/server/usage/subscription-io";
 import { openCodeSubscriptionCredential } from "../../src/server/usage/opencode-subscription";
 import type { Provider } from "@opencode-ai/sdk/v2";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
@@ -122,6 +122,61 @@ describe("native subscription adapters", () => {
     const reader = new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: "secret" }), fetch: fetcher({ planUsage: { totalPercentUsed: "secret" } }) });
     expect((await read(reader)).detail).not.toContain("secret");
     await expect(subscriptionJson(vi.fn(async () => new Response("x".repeat(300_000))), "https://example.test", "secret", new AbortController().signal)).rejects.toThrow("too large");
+  });
+});
+
+describe("throttled and failing quota reads", () => {
+  const throttled = (headers: Record<string, string> = {}) => vi.fn<typeof fetch>(async () => new Response("{}", { status: 429, headers }));
+  const keyed = (request: typeof fetch) => new NativeSubscriptionReader({ environment: async () => ({ CURSOR_AUTH_TOKEN: CURSOR_TOKEN }), fetch: request, accountKey: async () => "per-install-key" });
+
+  it("exposes the HTTP status and Retry-After of a refused quota request", async () => {
+    const signal = new AbortController().signal;
+    await expect(subscriptionJson(throttled({ "Retry-After": "120" }), "https://example.test", "secret", signal))
+      .rejects.toMatchObject({ status: 429, retryAfterMs: 120_000 });
+    vi.useFakeTimers(); vi.setSystemTime(Date.parse("2026-10-05T12:00:00.000Z"));
+    await expect(subscriptionJson(throttled({ "Retry-After": "Mon, 05 Oct 2026 12:03:00 GMT" }), "https://example.test", "secret", signal))
+      .rejects.toMatchObject({ status: 429, retryAfterMs: 180_000 });
+    const refused = await subscriptionJson(vi.fn<typeof fetch>(async () => new Response("", { status: 503 })), "https://example.test", "secret", signal).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(SubscriptionHttpError);
+    expect(refused).toMatchObject({ status: 503, retryAfterMs: null });
+  });
+
+  it("keeps the account fingerprint on a throttled read and waits out Retry-After before asking again", async () => {
+    vi.useFakeTimers();
+    const request = throttled({ "Retry-After": "120" });
+    const reader = keyed(request);
+    const first = await read(reader);
+    expect(first).toMatchObject({ status: "error", windows: [] });
+    expect(resumeAccountIdentity(first)).toMatch(/^[a-f0-9]{64}$/u);
+    expect(first.detail).toBe("The provider asked Inertia to wait 2 min before checking quota again.");
+    vi.setSystemTime(Date.now() + 60_000);
+    const waiting = await read(reader);
+    expect(request).toHaveBeenCalledOnce();
+    expect(waiting).toMatchObject({ status: "error", credentialFingerprint: first.credentialFingerprint, detail: "The provider asked Inertia to wait 1 min before checking quota again." });
+    vi.setSystemTime(Date.now() + 61_000);
+    request.mockImplementation(async () => new Response(JSON.stringify(cursor), { headers: { "Content-Type": "application/json" } }));
+    expect((await read(reader)).status).toBe("ready");
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds a missing or excessive Retry-After", async () => {
+    vi.useFakeTimers();
+    const missing = throttled();
+    expect((await read(keyed(missing))).detail).toContain("wait 5 min");
+    const excessive = throttled({ "Retry-After": "86400" });
+    const reader = keyed(excessive);
+    expect((await read(reader)).detail).toContain("wait 15 min");
+    vi.setSystemTime(Date.now() + 15 * 60_000 + 1);
+    await read(reader);
+    expect(excessive).toHaveBeenCalledTimes(2);
+  });
+
+  it("describes failed quota checks without blaming the sign-in", async () => {
+    const failed = await read(keyed(vi.fn<typeof fetch>(async () => { throw new TypeError("fetch failed"); })));
+    expect(failed).toMatchObject({ status: "error", detail: "The provider did not answer the quota check." });
+    expect(resumeAccountIdentity(failed)).toMatch(/^[a-f0-9]{64}$/u);
+    const refused = await read(keyed(vi.fn<typeof fetch>(async () => new Response("", { status: 401 }))));
+    expect(refused.detail).toBe("The provider refused the quota check for this login.");
   });
 });
 

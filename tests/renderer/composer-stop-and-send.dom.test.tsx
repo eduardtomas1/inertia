@@ -64,6 +64,31 @@ describe("Stop and send for routes without live follow-ups", () => {
     expect(screen.getByRole("button", { name: "Stop agent" })).toBeVisible();
   });
 
+  it("sends one request when Enter is pressed again before the first answer", async () => {
+    const current = conversation("75757575-7575-4575-8575-757575757575");
+    const answered = queueRunner();
+    let answer!: () => void;
+    const run = vi.fn<QueueCommandRunner>((command) => command.type === "message.queue.get"
+      ? answered(command)
+      : new Promise((resolve) => { answer = () => resolve(answered(command)); }));
+    const stopAndSends = () => run.mock.calls.filter(([command]) => command.type === "message.queue.stop-and-send");
+    render(<Composer {...composerProps(current, {
+      running: true, latestTurn: runningTurn("kimi-acp"), onQueueCommand: run,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Only once." } });
+    await screen.findByRole("button", { name: "Stop and send" });
+
+    await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
+    await waitFor(() => expect(stopAndSends()).toHaveLength(1));
+    await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop and send" })); });
+    await act(async () => { answer(); });
+
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(stopAndSends()).toHaveLength(1);
+  });
+
   it("keeps the draft and its error when the runtime refuses", async () => {
     const current = conversation("73737373-7373-4373-8373-737373737373");
     const run = vi.fn<QueueCommandRunner>(async (command) => {

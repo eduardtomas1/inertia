@@ -52,7 +52,7 @@ export function createQueuedMessageRuntime(
     const manual = manualId ?? (retry === first.id && first.state === "waiting" ? retry : undefined);
     if (!manual && first.state !== "waiting") return;
     if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
-      retryAfterCleanup(conversationId, manualId);
+      retryAfterCleanup(conversationId, manual);
       return;
     }
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;

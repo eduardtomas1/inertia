@@ -150,6 +150,7 @@ export const Composer = memo(function Composer({
   shownAttachmentsRef.current = attachments;
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const queueingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
   const { stopping, stopClaimRef, stop } = useComposerStopAction({
     conversationId: conversation.id, running, onStop,
@@ -709,7 +710,12 @@ export const Composer = memo(function Composer({
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
   const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
-  const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => { if (!canQueue || conversationContext.isReferencing()) return;
+  const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
+    if (!canQueue || queueingRef.current || conversationContext.isReferencing()) return;
+    queueingRef.current = true;
+    try { await queueDraft(stopTurnId); } finally { queueingRef.current = false; }
+  };
+  const queueDraft = async (stopTurnId?: string): Promise<void> => {
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;

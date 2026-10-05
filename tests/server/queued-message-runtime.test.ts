@@ -110,6 +110,28 @@ describe("stop and send", () => {
     } finally { await f.close(); }
   });
 
+  it("keeps a repeated Stop and send explicit when provider cleanup outlasts the dispatch wait", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      f.provider.deferOwnedStop("settled");
+      const id = randomUUID();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      await f.stopAndSend(id, initial.turn.id);
+      await f.stopAndSend(id, initial.turn.id);
+      await vi.advanceTimersByTimeAsync(31_000);
+      vi.useRealTimers();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      expect(f.provider.runCount).toBe(1);
+      f.provider.resolve({ status: "cancelled" });
+      f.provider.resolveOwnedStop();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+      expect(f.provider.runCount).toBe(2);
+    } finally { vi.useRealTimers(); f.provider.resolveOwnedStop(); await f.close(); }
+  });
+
   it("keeps the message queued and leaves a different running turn alone", async () => {
     const f = await fixture();
     try {

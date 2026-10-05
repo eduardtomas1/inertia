@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../src/server/database";
+import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
 import type { AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";
@@ -32,6 +33,28 @@ function openStore(): RuntimeStore {
 function seedUsageLimitedChat(branch: string): string {
   const store = openStore();
   try {
+    const cachedAt = new Date().toISOString();
+    store.saveProviderMetadata({
+      scope: providerNativeMetadataScope("claude"),
+      models: [{
+        id: "claude-fixture-sonnet",
+        label: "Fixture Sonnet",
+        description: "Claude model in the E2E native catalog.",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [{ value: "high", label: "High", description: "Thorough reasoning." }],
+        defaultReasoningEffort: "high",
+      }],
+      modelsUpdatedAt: cachedAt,
+      modelsLastAttemptedAt: cachedAt,
+      modelsProvenance: "provider",
+      modelsStale: false,
+      rateLimits: [],
+      rateLimitsUpdatedAt: null,
+      rateLimitsLastAttemptedAt: null,
+      rateLimitsProvenance: null,
+      rateLimitsStale: false,
+    });
     const source = store.snapshot().conversations[0]!;
     store.updateConversation(source.id, { title: TITLE, branch });
     const requestedAt = new Date(Date.now() - 60_000).toISOString();
@@ -90,20 +113,27 @@ test("continues a usage-limited chat with another model on the same checkout wit
   await expect(continueElsewhere).toBeEnabled();
   await capture(info, "continuation-limited-row");
 
-  await continueElsewhere.focus();
-  await page.keyboard.press("Enter");
   const chooser = page.getByRole("dialog", { name: "Choose model" });
-  const search = chooser.getByRole("combobox", { name: "Search models" });
-  await expect(search).toBeFocused();
-  await search.fill("Kimi K3");
-  const kimi = chooser.getByRole("grid", { name: "Model results" }).locator(".model-chooser-row-option")
-    .filter({ hasText: /K3/u }).filter({ hasText: /Kimi/u, hasNotText: /256K/u });
-  await expect(kimi).toBeEnabled();
-  await kimi.click();
-
-  const offer = page.getByRole("alertdialog", { name: /^Continue in a new chat with .*K3.*\?$/u });
-  await expect(offer).toContainText("Start a new chat to use a different provider.");
-  await expect(offer.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+  const offer = page.getByRole("alertdialog", { name: /^Continue in a new chat with .*Fixture Sonnet\?$/u });
+  const chooseClaude = async (): Promise<void> => {
+    await continueElsewhere.focus();
+    await page.keyboard.press("Enter");
+    const search = chooser.getByRole("combobox", { name: "Search models" });
+    await expect(search).toBeFocused();
+    await search.fill("Fixture Sonnet");
+    const sonnet = chooser.getByRole("grid", { name: "Model results" }).locator(".model-chooser-row-option")
+      .filter({ hasText: /Fixture Sonnet/u });
+    await expect(sonnet).toBeEnabled();
+    await sonnet.click();
+    await expect(offer).toContainText("The new chat uses the same checkout and gets this chat as context.");
+    await expect(offer.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+  };
+  await chooseClaude();
+  await expect(continueElsewhere).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Enter");
+  await expect(offer).toBeHidden();
+  await expect(continueElsewhere).toBeFocused();
+  await chooseClaude();
   await capture(info, "continuation-offer");
   await offer.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(offer).toBeHidden();
@@ -145,6 +175,7 @@ test("continues a usage-limited chat with another model on the same checkout wit
   const preview = page.getByRole("region", { name: "Shared chat context" });
   await expect(preview).toContainText(REQUEST);
   await expect(preview).toContainText(ANSWER);
+  await expect(page.getByText(/could not start/u)).toHaveCount(0);
   await capture(info, "continuation-new-chat");
   expect(app.rendererErrors).toEqual([]);
 });

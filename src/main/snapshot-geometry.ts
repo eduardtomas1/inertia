@@ -3,12 +3,14 @@ import type { SnapshotRect } from "../shared/snapshots.js";
 export interface SnapshotImageScale { x: number; y: number }
 
 export function snapshotImageScale(
-  frame: SnapshotRect, image: { width: number; height: number }, tolerance = Infinity,
+  frame: SnapshotRect, image: { width: number; height: number }, pixelTolerance = Infinity,
 ): SnapshotImageScale | null {
   const x = image.width / frame.width;
   const y = image.height / frame.height;
   if (![x, y].every((value) => Number.isFinite(value) && value > 0)) return null;
-  return Math.abs(x - y) <= tolerance * Math.max(x, y) ? { x, y } : null;
+  const fits = (scale: number): boolean => Math.abs(frame.width * scale - image.width) <= pixelTolerance
+    && Math.abs(frame.height * scale - image.height) <= pixelTolerance;
+  return fits(x) || fits(y) ? { x, y } : null;
 }
 
 export function snapshotMaskRect(rect: SnapshotRect, frame: SnapshotRect, scale: SnapshotImageScale): SnapshotRect {

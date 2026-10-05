@@ -4,7 +4,7 @@ import { snapshotImageScale, snapshotMaskRect } from "../../src/main/snapshot-ge
 describe("snapshot mask geometry", () => {
   it("maps point masks onto a Retina image of the window", () => {
     const frame = { x: 100, y: 40, width: 800, height: 600 };
-    const scale = snapshotImageScale(frame, { width: 1600, height: 1200 }, 0.02)!;
+    const scale = snapshotImageScale(frame, { width: 1600, height: 1200 }, 1)!;
     expect(scale).toEqual({ x: 2, y: 2 });
     expect(snapshotMaskRect({ x: 110, y: 50, width: 30, height: 12 }, frame, scale)).toEqual({ x: 18, y: 18, width: 64, height: 28 });
   });
@@ -25,12 +25,17 @@ describe("snapshot mask geometry", () => {
     expect(mask.y + mask.height).toBeGreaterThanOrEqual(Math.ceil(24 * 1.5) + 2);
   });
 
+  it("refuses a Retina image ten pixels short of the window's shared scale", () => {
+    expect(snapshotImageScale({ x: 0, y: 0, width: 800, height: 600 }, { width: 1600, height: 1190 }, 1)).toBeNull();
+  });
+
   it("accepts a window image rounded to whole pixels", () => {
-    expect(snapshotImageScale({ x: 0, y: 0, width: 333, height: 201 }, { width: 666, height: 403 }, 0.02)).not.toBeNull();
+    expect(snapshotImageScale({ x: 0, y: 0, width: 333, height: 201 }, { width: 666, height: 403 }, 1)).not.toBeNull();
   });
 
   it.each([
-    [{ width: 200, height: 150 }, 0.02],
+    [{ width: 200, height: 150 }, 1],
+    [{ width: 201, height: 198 }, 1],
     [{ width: 0, height: 200 }, Infinity],
     [{ width: 200, height: Number.NaN }, Infinity],
   ])("reports no usable scale for %o", (image, tolerance) => {

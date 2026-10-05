@@ -89,7 +89,7 @@ async function captureOnce(progress: { phase: SnapshotCapturePhase }, pixels?: S
   progress.phase = "screenshot";
   const shot = located ? await windowImage(await pixels!.capture(located.id)) : await screenshot(region ? { region } : { element: window });
   if (shot.width * shot.height > 32_000_000 || shot.width <= 0 || shot.height <= 0) throw new SnapshotCaptureFailure("native-failure");
-  const imageScale = snapshotImageScale(bounds, shot, located ? 0.02 : Infinity);
+  const imageScale = snapshotImageScale(bounds, shot, located ? 1 : Infinity);
   if (!imageScale) throw new SnapshotCaptureFailure("native-failure");
   progress.phase = "verification";
   const after = await foreground(progress.phase, pixels);

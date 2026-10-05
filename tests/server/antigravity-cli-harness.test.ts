@@ -39,6 +39,7 @@ import { executableProcessExists } from "../helpers/executable-process";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const CONVERSATION = "4f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a11";
+const SUBAGENT_CONVERSATION = "6a7d9e10-2b3c-4d5e-8f90-1a2b3c4d5e6f";
 const PROMPT_FLAGS = new Set(["-p", "--print", "--prompt", "--prompt-interactive", "-i"]);
 
 const CLOSE_STDOUT_SOURCE = `
@@ -362,6 +363,31 @@ describe("Antigravity stream parsing", () => {
     }
   });
 
+  it("keeps a subagent step in the parent conversation", () => {
+    expect(parseAntigravityLine(JSON.stringify({
+      event: "step_update",
+      step_update: {
+        conversation_id: CONVERSATION,
+        step_index: 3,
+        state: "DONE",
+        step_type: "tool",
+        tool_name: "invoke_subagent",
+        subagent_info: {
+          subagents: [{
+            type_name: "image-generator",
+            role: "Generate the requested image",
+            conversation_id: SUBAGENT_CONVERSATION,
+            log_uri: `file:///home/me/.gemini/antigravity-cli/brain/${SUBAGENT_CONVERSATION}/.system_generated/logs/transcript_full.jsonl`,
+            workspace_uris: ["file:///workspace"],
+          }],
+        },
+      },
+    }))).toEqual([
+      { kind: "session", conversationId: CONVERSATION },
+      { kind: "tool", id: "3", label: "invoke_subagent", phase: "completed" },
+    ]);
+  });
+
   it("rejects malformed lines", () => {
     for (const line of ["not json", "[]", "{}", JSON.stringify({ event: 3 })]) {
       expect(parseAntigravityLine(line)).toBeNull();
@@ -409,7 +435,8 @@ emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { 
 emit({ event: "step_update", step_update: { conversation_id: ${JSON.stringify(CONVERSATION)}, step_index: 0, state: "ACTIVE", text_delta: "Hello " } });
 emit({ event: "step_update", step_update: { step_index: 1, state: "ACTIVE", tool_name: "view_file" } });
 emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "view_file" } });
-emit({ event: "step_update", step_update: { step_index: 2, state: "DONE", text_delta: "world" } });
+emit({ event: "step_update", step_update: { conversation_id: ${JSON.stringify(CONVERSATION)}, step_index: 2, state: "DONE", step_type: "tool", tool_name: "invoke_subagent", subagent_info: { subagents: [{ type_name: "image-generator", role: "Generate the requested image", conversation_id: ${JSON.stringify(SUBAGENT_CONVERSATION)}, log_uri: "file:///brain/${SUBAGENT_CONVERSATION}/transcript_full.jsonl", workspace_uris: [] }] } } });
+emit({ event: "step_update", step_update: { step_index: 3, state: "DONE", text_delta: "world" } });
 emit({ event: "result", result: { conversation_id: ${JSON.stringify(CONVERSATION)}, status: "SUCCESS", response: "Hello world", error: "", duration_seconds: 1, num_turns: 1, usage: ${JSON.stringify(SUCCESS_USAGE)} } });
 process.exit(0);
 `);
@@ -439,9 +466,9 @@ process.exit(0);
     expect(activities.filter((event) => event.kind === "tool").map((event) => [
       event.phase,
       event.label,
-    ])).toEqual([["started", "view_file"], ["completed", "view_file"]]);
+    ])).toEqual([["started", "view_file"], ["completed", "view_file"], ["completed", "invoke_subagent"]]);
     expect(new Set(activities.filter((event) => event.kind === "tool")
-      .map((event) => event.activityId)).size).toBe(1);
+      .map((event) => event.activityId)).size).toBe(2);
     expect(usage).toHaveLength(1);
     expect(usage[0]!.usage).toMatchObject({ inputTokens: 120, outputTokens: 30 });
     const capture = captured(capturePath);

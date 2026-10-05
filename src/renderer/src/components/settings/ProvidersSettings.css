@@ -456,5 +456,6 @@
 @media (forced-colors: active) {
   .provider-settings-list-row.is-selected {
     outline: 1px solid CanvasText;
+    outline-offset: -2px;
   }
 }

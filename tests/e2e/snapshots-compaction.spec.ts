@@ -144,14 +144,15 @@ for (const theme of ["dark", "light"] as const) test(`opens the chat for a pendi
     await deliver({ pending: true });
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
     await expect(page.getByRole("main", { name: "Settings", exact: true })).toHaveCount(0);
+    const save = async (name: string) => { const path = testInfo.outputPath(`${name}-${theme}.png`); await page.screenshot({ path, animations: "disabled" }); await testInfo.attach(name, { path, contentType: "image/png" }); };
+    await save("snapshot-outcome-pending");
     const message = "A snapshot is already being captured. Try again when it finishes.";
     await deliver({ notice: message });
     const notice = page.getByRole("alert").filter({ hasText: message });
     await expect(notice).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await app.expectNoViewportOverflow();
-    const path = testInfo.outputPath(`snapshot-outcome-notice-${theme}.png`);
-    await page.screenshot({ path, animations: "disabled" }); await testInfo.attach("snapshot-outcome-notice", { path, contentType: "image/png" });
+    await save("snapshot-outcome-notice");
     await notice.getByRole("button", { name: "Dismiss error" }).click();
     await expect(notice).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);

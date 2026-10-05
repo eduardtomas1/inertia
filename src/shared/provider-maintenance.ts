@@ -29,6 +29,7 @@ export type ProviderMaintenanceInstallMethod =
   | "bun-global"
   | "yarn-global"
   | "volta"
+  | "uv-tool"
   | "homebrew"
   | "snap"
   | "version-manager"

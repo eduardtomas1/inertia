@@ -39,6 +39,7 @@
   display: grid;
   min-width: 0;
   align-content: start;
+  margin-bottom: -1px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 55%, var(--surface-strong));
 }
@@ -409,8 +410,13 @@
   }
 
   .provider-settings-rail {
+    margin-bottom: 0;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .provider-settings-rail:empty {
+    border-bottom: 0;
   }
 
   .provider-settings-list-row {

@@ -114,6 +114,21 @@ async function expectHoverQuieterThanSelection(rail: Locator): Promise<void> {
   await page.mouse.move(0, 0);
 }
 
+async function expectNoHairlineOnFrameBottom(frame: Locator, rows: Locator): Promise<void> {
+  const [frameBox, lastBox] = await Promise.all([frame.boundingBox(), rows.last().boundingBox()]);
+  const innerBottom = frameBox!.y + frameBox!.height - 1;
+  expect(Math.abs(lastBox!.y + lastBox!.height - innerBottom)).toBeGreaterThan(0.5);
+}
+
+async function expectBackendRowsMatchProviderRows(): Promise<void> {
+  const heights = async (selector: string): Promise<number[]> =>
+    page.locator(selector).evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  const providerRows = await heights(".provider-settings-list-row");
+  const backendRows = await heights(".backend-profile-rail-item");
+  expect(backendRows.length).toBeGreaterThan(0);
+  expect(Math.min(...backendRows)).toBeGreaterThanOrEqual(Math.min(...providerRows));
+}
+
 async function selectedLabel(control: Locator): Promise<string> {
   return control.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.textContent ?? "");
 }
@@ -144,6 +159,8 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await expect(page.getByText("GPT-5.3 Codex", { exact: true })).toBeVisible();
   await expect(page.getByText("GPT-5.2 Codex Mini", { exact: true })).toBeVisible();
   await capture(testInfo, "provider-settings-models-light-wide");
+  await expectNoHairlineOnFrameBottom(shell, rail.locator(".provider-settings-list-row"));
+  await expectBackendRowsMatchProviderRows();
   await page.getByRole("tab", { name: "Configuration" }).click();
 
   await page.getByRole("button", { name: "Chats", exact: true }).click();
@@ -178,6 +195,8 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   const narrowGeometry = await Promise.all([rail.boundingBox(), editor.boundingBox()]);
   expect(narrowGeometry[0]?.y ?? 0).toBeLessThan(narrowGeometry[1]?.y ?? 0);
   await app.expectNoViewportOverflow();
+  await expectNoHairlineOnFrameBottom(shell, rail.locator(".provider-settings-list-row"));
+  await expectBackendRowsMatchProviderRows();
   await capture(testInfo, "provider-settings-configuration-dark-narrow");
   await page.getByRole("button", { name: "Chats", exact: true }).click();
   const access = page.getByRole("combobox", { name: "Access", exact: true });

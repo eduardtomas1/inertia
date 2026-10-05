@@ -50,7 +50,7 @@ advertises the same arguments the runtime validates:
 
 | Tool | Arguments | Purpose |
 | --- | --- | --- |
-| `inertia_browser_navigate` | `url` | Open a local development URL and wait for it to load. |
+| `inertia_browser_navigate` | exactly one of `url` or `history` | Open a local development URL, or go `back`, `forward` or `reload`, and wait for the page to load. |
 | `inertia_browser_snapshot` | none | Read the active page and get element refs. |
 | `inertia_browser_click` | `ref` | Click one element from the latest snapshot. |
 | `inertia_browser_type` | `ref`, `text`, optional `replace` | Type into one editable element. |
@@ -62,6 +62,13 @@ advertises the same arguments the runtime validates:
 | `inertia_browser_open_tab` | optional `url` | Open and activate a new page. |
 | `inertia_browser_select_tab` | `tabId` | Activate a page. |
 | `inertia_browser_close_tab` | `tabId` | Close a page. |
+
+A `url` without a scheme that starts with `localhost`, `127.0.0.1` or `[::1]`,
+such as `localhost:5173`, opens over `http://`. History navigation is checked
+against the same loopback policy before it starts: going back or forward is
+refused unless the target history entry is a local page, and reload is
+refused unless the tab shows one. Server redirects during any navigation stay
+under the existing redirect guard.
 
 `inertia_browser_press` accepts Enter, Tab, Escape, Backspace, Space, the
 arrow keys, Home, End, PageUp, PageDown, Shift+Tab, Shift+Enter, Control+Enter

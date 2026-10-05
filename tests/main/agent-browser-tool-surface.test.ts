@@ -61,4 +61,57 @@ describe("Browser tool surface", () => {
     ]);
     expect(pageTools.agentPageActivationBlocked).toHaveBeenCalled();
   });
+
+  it("goes back, forward and reloads only to local pages and waits for the load", async () => {
+    const { broker, contents } = await loadedHarness();
+    const history = contents.navigationHistory as typeof contents.navigationHistory & {
+      canGoForward: ReturnType<typeof vi.fn>;
+      goForward: ReturnType<typeof vi.fn>;
+    };
+    const entries = ["about:blank", "http://127.0.0.1:3000/first", "http://127.0.0.1:3000/"];
+    history.getEntryAtIndex.mockImplementation((index: number) => ({ title: "", url: entries[index] ?? "" }));
+    history.canGoBack.mockReturnValue(true);
+    history.goBack.mockImplementationOnce(() => {
+      contents.setURL(entries[1]!);
+      contents.emit("did-start-loading");
+      contents.emit("did-stop-loading");
+    });
+    await expect(broker.perform(runIdentity, { action: "history", direction: "back" }))
+      .resolves.toMatchObject({ ok: true, state: { activity: { action: "navigate" } } });
+    expect(history.goBack).toHaveBeenCalledOnce();
+
+    history.getActiveIndex.mockReturnValue(1);
+    await expect(broker.perform(runIdentity, { action: "history", direction: "back" })).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+      message: "There is no earlier local page in this tab's history. Navigate to a URL instead.",
+    });
+    expect(history.goBack).toHaveBeenCalledOnce();
+
+    history.canGoForward.mockReturnValue(true);
+    entries[2] = "https://example.com/";
+    await expect(broker.perform(runIdentity, { action: "history", direction: "forward" }))
+      .resolves.toMatchObject({ ok: false, code: "invalid" });
+    expect(history.goForward).not.toHaveBeenCalled();
+
+    const reload = vi.spyOn(contents as unknown as { reload(): void }, "reload").mockImplementationOnce(() => {
+      contents.emit("did-start-loading");
+      contents.emit("did-stop-loading");
+    });
+    await expect(broker.perform(runIdentity, { action: "history", direction: "reload" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("opens schemeless loopback addresses over http", async () => {
+    const { broker, contents } = await loadedHarness();
+    await expect(broker.perform(runIdentity, { action: "navigate", url: "localhost:5173/settings" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(contents.getURL()).toBe("http://localhost:5173/settings");
+    await expect(broker.perform(runIdentity, { action: "tab-open", url: "127.0.0.1:3000" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(electronState.contents.at(-1)!.getURL()).toBe("http://127.0.0.1:3000/");
+    await expect(broker.perform(runIdentity, { action: "navigate", url: "example.com:5173" }))
+      .resolves.toMatchObject({ ok: false, code: "invalid" });
+  });
 });

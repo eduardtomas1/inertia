@@ -75,6 +75,7 @@ export class AgentOperationScope {
 export function agentOperationBudget(command: AgentBrowserCommand): number {
   switch (command.action) {
     case "navigate":
+    case "history":
     case "tab-open":
       return AGENT_BROWSER_NAVIGATION_BUDGET_MS;
     case "click":

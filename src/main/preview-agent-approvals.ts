@@ -50,6 +50,8 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
       return `${page}\n${command.replace ? "Replace text in" : "Append text to"} ${control}\n${extent}: ${JSON.stringify(preview)}`;
     }
     case "navigate": return `${page}\nNavigate: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}`;
+    case "history": return `${page}\n${command.direction === "back" ? "Go back to the previous page"
+      : command.direction === "forward" ? "Go forward to the next page" : "Reload the page"}`;
     case "press": return `${page}\nPress: ${command.key}`;
     case "scroll": return `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;

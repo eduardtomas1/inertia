@@ -37,6 +37,12 @@ describe("agent browser boundary", () => {
       expect(parseAgentBrowserCommand({ action: "press", key })).toEqual({ action: "press", key });
     }
     expect(parseAgentBrowserCommand({ action: "press", key: "Control+Tab" })).toBeNull();
+    for (const direction of ["back", "forward", "reload"]) {
+      expect(parseAgentBrowserCommand({ action: "history", direction })).toEqual({ action: "history", direction });
+    }
+    expect(parseAgentBrowserCommand({ action: "history", direction: "home" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "history", direction: "back", url: "http://localhost:3000" }))
+      .toBeNull();
     expect(parseAgentBrowserCommand({ action: "scroll", deltaY: 2_001 }))
       .toBeNull();
   });

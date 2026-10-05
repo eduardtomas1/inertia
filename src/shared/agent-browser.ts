@@ -61,6 +61,7 @@ export type AgentBrowserCommand =
   | { action: "snapshot" }
   | { action: "screenshot" }
   | { action: "navigate"; url: string }
+  | { action: "history"; direction: "back" | "forward" | "reload" }
   | { action: "click"; ref: string }
   | { action: "type"; ref: string; text: string; replace: boolean }
   | { action: "press"; key: AgentBrowserKey }
@@ -191,6 +192,11 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
     case "navigate":
       return exactKeys(value, ["action", "url"]) && safeUrl(value.url)
         ? { action: "navigate", url: value.url }
+        : null;
+    case "history":
+      return exactKeys(value, ["action", "direction"])
+        && (value.direction === "back" || value.direction === "forward" || value.direction === "reload")
+        ? { action: "history", direction: value.direction }
         : null;
     case "click":
       return exactKeys(value, ["action", "ref"])

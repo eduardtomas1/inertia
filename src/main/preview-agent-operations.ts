@@ -23,6 +23,7 @@ import {
 import { navigationFailureMessage, withheldEvidenceMessage } from "./preview-agent-messages.js";
 import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, type PreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
+import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
@@ -84,7 +85,7 @@ export function blankTabRefusal(
   contents: PreviewContents,
   command: AgentBrowserCommand,
 ): AgentBrowserResult | null {
-  return ["click", "type", "press", "scroll"].includes(command.action) && blankTab(contents)
+  return ["click", "type", "press", "scroll", "history"].includes(command.action) && blankTab(contents)
     ? failure("not-found", BLANK_TAB_NEXT_STEP)
     : null;
 }
@@ -339,6 +340,32 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     const loaded = await this.#agentLoad(contents, target, scope, validate);
     stopForAbort(scope.signal);
     this.host.record(session, "navigate", "Agent navigated the page");
+    return this.#stateResult(session, this.#loadNote(contents, loaded));
+  }
+
+  async history(
+    session: Session,
+    direction: AgentHistoryDirection,
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+  ): Promise<AgentBrowserResult> {
+    const contents = this.host.active(session).view.webContents;
+    await this.#ensureSecurityDebugger(contents, scope);
+    stopForAbort(scope.signal);
+    validate?.();
+    const refusal = agentHistoryRefusal(contents, direction);
+    if (refusal) return refusal;
+    scope.inputSent = true;
+    const loaded = await agentHistoryNavigation(
+      contents,
+      direction,
+      scope.signal,
+      Math.max(1_000, scope.remaining() - NAVIGATION_REPORT_RESERVE_MS),
+    );
+    stopForAbort(scope.signal);
+    const label = direction === "back" ? "Agent went back a page"
+      : direction === "forward" ? "Agent went forward a page" : "Agent reloaded the page";
+    this.host.record(session, "navigate", label);
     return this.#stateResult(session, this.#loadNote(contents, loaded));
   }
 
@@ -613,7 +640,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
 
   #localTarget(url: string): string | null {
     try {
-      const target = previewNavigationTarget(url);
+      const target = previewNavigationTarget(withLoopbackScheme(url));
       return target.kind === "embed" ? target.url.toString() : null;
     } catch {
       return null;

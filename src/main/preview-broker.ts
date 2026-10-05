@@ -291,6 +291,8 @@ export class PreviewBroker {
                 return await this.#operations.wait(session, command, operation);
               case "navigate":
                 return await this.#operations.navigate(session, command.url, operation, validate);
+              case "history":
+                return await this.#operations.history(session, command.direction, operation, validate);
               case "click":
                 return await this.#operations.click(session, command.ref, operation, validate);
               case "type":

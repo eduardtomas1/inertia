@@ -42,7 +42,13 @@ const textSchema = boundedText(MAX_AGENT_BROWSER_TYPE_CHARS).regex(new RegExp(NU
 const keySchema = z.enum(AGENT_BROWSER_KEYS);
 const deltaSchema = z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0);
 const emptySchema = z.object({}).strict();
-const navigateSchema = z.object({ url: urlSchema }).strict();
+const navigateSchema = z.object({
+  url: urlSchema.optional(),
+  history: z.enum(["back", "forward", "reload"]).optional(),
+}).strict().refine(
+  (value) => (value.url === undefined) !== (value.history === undefined),
+  "Provide exactly one of url or history.",
+);
 const clickSchema = z.object({ ref: refSchema }).strict();
 const typeSchema = z.object({
   ref: refSchema,
@@ -96,8 +102,15 @@ export const AGENT_BROWSER_TOOL_DEFINITIONS:
 readonly ProviderHostToolDefinition[] = [
   {
     name: "inertia_browser_navigate",
-    description: "Open a local development URL in this chat's Inertia Browser. Call this first: a new tab is blank until you navigate. Waits for the page to load and returns the tab state. Only loopback addresses such as http://localhost:3000 or http://127.0.0.1:5173 can be opened. The Browser works even when its panel is not showing.",
-    inputSchema: objectSchema({ url: urlProperty }, ["url"]),
+    description: "Open a local development URL in this chat's Inertia Browser, or go back, forward or reload with history. Call this first: a new tab is blank until you navigate. Waits for the page to load and returns the tab state. Only loopback addresses such as localhost:3000 or http://127.0.0.1:5173 can be opened. The Browser works even when its panel is not showing.",
+    inputSchema: {
+      ...objectSchema({
+        url: urlProperty,
+        history: { type: "string", enum: ["back", "forward", "reload"], description: "Go back, go forward, or reload the active tab instead of opening a URL." },
+      }),
+      minProperties: 1,
+      maxProperties: 1,
+    },
     inputValidator: navigateSchema,
     readOnly: false,
   },
@@ -242,7 +255,9 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
       return { action: "screenshot" };
     case "inertia_browser_navigate": {
       const args = navigateSchema.parse(call.arguments);
-      return { action: "navigate", url: args.url };
+      return args.history
+        ? { action: "history", direction: args.history }
+        : { action: "navigate", url: args.url! };
     }
     case "inertia_browser_click": {
       const args = clickSchema.parse(call.arguments);

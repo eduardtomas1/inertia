@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import type { AppShortcutAction } from "@shared/keybindings";
+import type { Project } from "@shared/contracts";
 
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -12,12 +13,16 @@ import type { HelpCommand } from "./welcome-guide/helpTopics";
 export function HelpGuideHost({
   shortcutLabel,
   commands,
+  projects,
+  currentProjectId,
   onOpenSettings,
   onLeave,
   onLoadError,
 }: {
   shortcutLabel: (action: AppShortcutAction) => string;
   commands: Record<HelpCommand, () => void>;
+  projects: readonly Pick<Project, "id" | "workspaceKind">[];
+  currentProjectId: string | null;
   onOpenSettings: (target: SettingsTarget) => void;
   onLeave: () => void;
   onLoadError: (message: string) => void;
@@ -55,6 +60,8 @@ export function HelpGuideHost({
         <HelpGuide
           key={session.id}
           shortcutLabel={shortcutLabel}
+          projects={projects}
+          currentProjectId={currentProjectId}
           onClose={closeHelpGuide}
           onCommand={(command) => {
             onLeave();

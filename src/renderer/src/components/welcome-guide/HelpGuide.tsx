@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import type { AppShortcutAction } from "@shared/keybindings";
+import type { Project } from "@shared/contracts";
 
 import type { SettingsTarget } from "../../lib/settingsTarget";
 import {
@@ -14,6 +15,7 @@ import {
 import { searchHelp, type HelpSearchHit, type HelpSearchResult } from "./helpSearch";
 import { HelpJumpButtons, HelpSearchResults, helpResultId } from "./HelpSearchResults";
 import { HELP_TOPICS, type HelpCommand, type HelpJump } from "./helpTopics";
+import { withRowProject } from "../settings/projectRowTarget";
 import "./WelcomeGuide.css";
 import "./HelpGuide.css";
 
@@ -27,11 +29,15 @@ function resultStatus({ hits, total }: HelpSearchResult): string {
 
 export function HelpGuide({
   shortcutLabel,
+  projects = [],
+  currentProjectId = null,
   onClose,
   onCommand,
   onOpenSettings,
 }: {
   shortcutLabel: (action: AppShortcutAction) => string;
+  projects?: readonly Pick<Project, "id" | "workspaceKind">[];
+  currentProjectId?: string | null;
   onClose: () => void;
   onCommand: (command: HelpCommand) => void;
   onOpenSettings: (target: SettingsTarget) => void;
@@ -89,7 +95,7 @@ export function HelpGuide({
   const jump = (target: HelpJump, anchor?: string): void => {
     close();
     if ("command" in target) onCommand(target.command);
-    else onOpenSettings(anchor ? { section: target.settings, anchor } : { section: target.settings });
+    else onOpenSettings(anchor ? withRowProject({ section: target.settings, anchor }, projects, currentProjectId) : { section: target.settings });
   };
   const open = ({ topic: owner, entry }: HelpSearchHit): void => {
     const target = owner.jumps.find(({ label }) => label === entry.jump);

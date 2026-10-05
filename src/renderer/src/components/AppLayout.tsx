@@ -962,6 +962,8 @@ export const AppLayout = memo(function AppLayout({
           "daily-work": () => setDailyWorkOpen(true),
           "welcome-guide": openWelcomeGuide,
         }}
+        projects={connection.snapshot?.projects ?? []}
+        currentProjectId={paletteCurrentProjectId(connection.snapshot, projectScopeId)}
         onOpenSettings={actions.openSettings}
         onLeave={() => setSidebarOpen(false)}
         onLoadError={setActionError}

@@ -123,6 +123,7 @@ export interface AgentTurnRow {
   usage_completion_json: string | null;
   configuration_revision: number;
   association: AgentTurnAssociation;
+  origin?: string | null;
   created_at: string;
   updated_at: string;
 }

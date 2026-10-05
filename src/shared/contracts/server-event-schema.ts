@@ -1,3 +1,4 @@
+import { cliConversationPreviewSchema, cliConversationScanSchema } from "../cli-conversations";
 import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
@@ -92,7 +93,6 @@ function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
     .safeParse(value).success;
 }
-
 function backendDefault(value: unknown): boolean {
   return modelBackendDefaultSchema.safeParse(value).success;
 }
@@ -909,7 +909,7 @@ function agentTurn(value: unknown): boolean {
     && (value.usageAtStart === null || turnUsage(value.usageAtStart))
     && (value.usageAtCompletion === null || turnUsage(value.usageAtCompletion))
     && integerField(value, "configurationRevision")
-    && oneOf(value, "association", ["authoritative", "inferred"]);
+    && oneOf(value, "association", ["authoritative", "inferred"]) && (!("origin" in value) || value.origin === "cli-import");
 }
 
 function turnGitArtifactFile(value: unknown): boolean {
@@ -1103,11 +1103,11 @@ const REQUEST_RESULT_VALIDATORS = {
   "backend.default": (value) => value.value === null || backendDefault(value.value),
   "provider.maintenance": (value) => arrayOf(value.providers, providerMaintenanceStatus)
     && uniqueRecordField(value.providers as unknown[], "providerId"),
-  "provider.maintenance.operation": (value) =>
-    providerMaintenanceOperation(value.operation),
+  "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
+  "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),
   "conversation.context.source": (value) =>

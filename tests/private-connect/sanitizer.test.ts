@@ -49,6 +49,12 @@ describe("Private Connect safe text projection", () => {
     expect(projected).toContain("[Code omitted on Private Connect]");
   });
 
+  it.each(["Bearer", "Basic"])("redacts the credential after an Authorization: %s header", (scheme) => {
+    const projected = sanitizePrivateConnectContent(`Send Authorization: ${scheme} private-connect-header-credential to the API`);
+    expect(projected).not.toContain("private-connect-header-credential");
+    expect(projected).toContain("to the API");
+  });
+
   it("redacts code inside blockquote and list containers", () => {
     const omitted = "[Code omitted on Private Connect]";
     const cases: Array<[string, string]> = [

@@ -151,6 +151,10 @@ describe("notification preference recovery", () => {
     store.close();
     const legacy = new Database(join(databaseRecoveryPaths(databasePath).backupsDirectory, backup.filename));
     legacy.exec(`
+      DROP TABLE cli_conversation_imports;
+      DROP INDEX agent_turns_provider_session_before_idx;
+      DROP INDEX agent_turns_provider_session_after_idx;
+      ALTER TABLE agent_turns DROP COLUMN origin;
       ALTER TABLE app_state DROP COLUMN quota_warnings_enabled;
       ALTER TABLE app_state DROP COLUMN quota_warning_threshold;
       ALTER TABLE app_state DROP COLUMN notify_only_in_background;

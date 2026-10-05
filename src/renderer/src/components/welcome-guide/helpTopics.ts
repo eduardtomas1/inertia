@@ -60,6 +60,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         detail: "Choose No project from the composer's Project button, or Start without a project in the command palette. The chat works in its own chat folder, appears under No project in the sidebar and keeps that folder when it is deleted.",
       },
       {
+        name: "Import CLI conversations",
+        detail: "Choose a project in Settings → Projects, then Import conversations… to bring in its Codex or Claude Code history. The chat continues the original CLI session, so close that session in your terminal first. Archived Codex sessions continue in a new session with the imported messages as context.",
+        jump: "Open Settings → Projects",
+        anchor: "project-cli-import",
+      },
+      {
         name: "Access modes",
         detail: "Supervised keeps provider approvals, Auto-accept edits allows supported file edits, and Full access lets the agent act without asking. Choose Full access only for a workspace and task you trust.",
       },
@@ -72,6 +78,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     jumps: [
       { label: "Add a project", command: "add-project" },
       { label: "Open Settings → Agents", settings: "agents" },
+      { label: "Open Settings → Projects", settings: "projects" },
       { label: "Show welcome guide", command: "welcome-guide" },
     ],
   },

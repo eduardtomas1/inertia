@@ -13,6 +13,7 @@ import {
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
+import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type {
@@ -57,14 +58,10 @@ export interface PreparedTurnRequest {
 
 export interface ResolvedTurnRequest {
   input: BeginAgentTurnInput;
+  importNote: string | null;
   adopt(queued: QueuedTurn): PreparedTurnRequest;
 }
 
-/**
- * Resolves a route and atomically persists the immutable request/turn pair.
- * Live stream resources are intentionally attached by the controller only
- * after this durable preparation succeeds.
- */
 export function prepareTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -74,6 +71,10 @@ export function prepareTurnRequest(
   const resolved = resolveTurnRequest(dependencies, request);
   const queued = dependencies.store.beginAgentTurn(resolved.input);
   try {
+    if (resolved.importNote) {
+      const message = dependencies.store.createMessage(queued.turn.conversationId, resolved.importNote, "system", [], queued.turn.id, undefined, { activateConversation: false });
+      dependencies.hooks.broadcast({ type: "conversation.message.persisted", message });
+    }
     onPersisted?.();
     return resolved.adopt(queued);
   } catch (error) {
@@ -82,11 +83,6 @@ export function prepareTurnRequest(
   }
 }
 
-/**
- * Resolves every mutable route and request input without writing persistence.
- * Batch workflows can resolve both sides first, persist both in one database
- * transaction, and only then adopt live in-memory ownership.
- */
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -172,9 +168,6 @@ export function resolveTurnRequest(
   const latestTurnOwnsProviderSession = latestTurn !== null
     && conversation.providerSessionId !== null
     && latestTurn.providerSessionAfter === conversation.providerSessionId;
-  // A turn-level compatibility token is authoritative only for the exact
-  // provider session it produced. If a latest turn and the conversation shell
-  // disagree, neither projection may lend authority to the other's session.
   const previousContinuationIdentity = latestTurn
     ? latestTurnOwnsProviderSession
       ? latestTurn.continuationIdentity
@@ -205,12 +198,15 @@ export function resolveTurnRequest(
   }
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
+    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) === null
     && dependencies.store.turnLedgerRepository.savedSessionKeepsFailing(
       conversation.id,
       conversation.providerSessionId!,
     )
     ? staleProviderSessionDecision()
     : resolvedContinuation;
+  const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
+    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
@@ -230,7 +226,7 @@ export function resolveTurnRequest(
     documentContexts: request.documentContexts,
     context: request.context,
     internalInstructions: [
-      ...capabilityInstructions,
+      ...(resumesImportedCodex ? [] : capabilityInstructions),
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;
@@ -277,6 +273,9 @@ export function resolveTurnRequest(
     };
   };
   const canResume = continuation.action === "resume-session";
+  const importNote = latestTurn?.origin === "cli-import"
+    ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
+    : null;
   const startsFreshInEstablishedChat = !canResume
     && continuation.reasonCode !== "first-turn"
     && request.goalStart === undefined;
@@ -291,9 +290,6 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
-  // The project's optional spend limit maps to the Claude Agent SDK's
-  // maxBudgetUsd, so it is forwarded only on the native Anthropic route.
-  // Other providers and Claude-compatible backends have no such control.
   const maxBudgetUsd = route.providerId === "claude"
     && route.harnessId === "claude-agent-sdk"
     && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
@@ -310,7 +306,9 @@ export function resolveTurnRequest(
     conversationId: conversation.id,
     runId,
     turnId,
-    cwd: dependencies.store.conversationPath(conversation.id),
+    cwd: canResume
+      ? importedResumeCwd(dependencies.store, conversation.id, conversation.providerSessionId, dependencies.store.conversationPath(conversation.id))
+      : dependencies.store.conversationPath(conversation.id),
     prompt: assembled.executionPrompt,
     model: routeSelection.modelId === "provider-default"
       ? undefined
@@ -393,6 +391,7 @@ export function resolveTurnRequest(
   };
   return {
     input,
+    importNote,
     adopt: (queued) => {
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();

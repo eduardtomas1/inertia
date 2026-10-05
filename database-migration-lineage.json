@@ -712,6 +712,11 @@
       "version": 91,
       "name": "PersistMutedCustomColors",
       "digest": "953d3c401e62c801ef1a2c726e2a82b55adceb03ea12691c2907308deb2fec94"
+    },
+    {
+      "version": 92,
+      "name": "CliConversationImports",
+      "digest": "e9ad5cbbf02ece421497df3809b900bacd540f661dabf857e54d15e013ad8006"
     }
   ]
 }

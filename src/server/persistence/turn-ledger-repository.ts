@@ -27,6 +27,7 @@ import {
   type PersistedTurnExecutionContext,
   type SanitizedTurnExecutionManifest,
 } from "../runtime/turns/request-context";
+import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import {
@@ -341,12 +342,13 @@ export class TurnLedgerRepository {
           WHERE activities.conversation_id = turn.conversation_id
             AND activities.turn_id = turn.id
             AND activities.kind <> 'error'
+            AND NOT (activities.kind = 'status' AND activities.title = ?)
         ) AS progressed
       FROM agent_turns AS turn
       WHERE turn.conversation_id = ?
       ORDER BY turn.requested_at DESC, turn.id DESC
       LIMIT 2
-    `).all(conversationId) as Array<{
+    `).all(TURN_CHECKPOINT_UNAVAILABLE_TITLE, conversationId) as Array<{
       status: string;
       terminal_reason: string | null;
       provider_session_before: string | null;
@@ -422,8 +424,13 @@ export class TurnLedgerRepository {
       SELECT EXISTS(
         SELECT 1 FROM activities
         WHERE conversation_id = ? AND turn_id = ? AND kind <> 'error'
+          AND NOT (kind = 'status' AND title = ?)
       ) AS progressed
-    `).get(conversationId, turnId) as { progressed: 0 | 1 };
+    `).get(
+      conversationId,
+      turnId,
+      TURN_CHECKPOINT_UNAVAILABLE_TITLE,
+    ) as { progressed: 0 | 1 };
     return row.progressed === 1;
   }
 

@@ -411,6 +411,7 @@ describe("a saved session that keeps failing to open", () => {
       activityKind?: "status" | "error";
       answered?: boolean;
       rejected?: boolean;
+      checkpointNotice?: boolean;
     } = {},
   ) {
     const f = await fixture("codex");
@@ -429,6 +430,17 @@ describe("a saved session that keeps failing to open", () => {
         detail: null,
         status: "failed",
       });
+      if (outcome.checkpointNotice) {
+        f.store.addActivity({
+          conversationId: f.conversation.id,
+          runId: queued.turn.runId,
+          turnId: queued.turn.id,
+          kind: "status",
+          title: "No checkpoint for this turn",
+          detail: "Checkpoint operation timed out.",
+          status: "completed",
+        });
+      }
       const answer = outcome.answered
         ? f.store.createMessage(f.conversation.id, "Partial answer", "assistant", [], queued.turn.id)
         : null;
@@ -461,6 +473,13 @@ describe("a saved session that keeps failing to open", () => {
       sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
     });
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
+  });
+
+  it("starts fresh after two failed resumes that each recorded a missing checkpoint", async () => {
+    const f = await failedResumes(2, { checkpointNotice: true });
+    expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
+    const latest = f.store.latestAgentTurnForConversation(f.conversation.id)!;
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id)).toBe(false);
   });
 
   it.each([

@@ -214,6 +214,38 @@ describe("ProviderMaintenanceController", () => {
     });
   });
 
+  it("shows the manual command instead of Update when the capability gate would refuse it", async () => {
+    let allowed = false;
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: new ProviderLatestVersionCache({
+        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+      }),
+      resolveCapabilities: async ({ providerId }) => ({
+        ...capabilities(providerId, "native:claude", "@anthropic-ai/claude-code"),
+        manualCommand: "claude update",
+      }),
+      capabilityAvailable: () => allowed,
+    });
+
+    const [refused] = await controller.refresh(["claude"]);
+    expect(refused).toMatchObject({
+      updateAvailability: "instructions-only",
+      updateLabel: null,
+      manualCommand: "claude update",
+      message: "Version 2.0.0 is available. Inertia has not verified this installation, so it will not run the update.",
+    });
+    allowed = true;
+    const [admitted] = await controller.refresh(["claude"]);
+    expect(admitted).toMatchObject({
+      updateAvailability: "available",
+      updateLabel: "Update claude",
+      message: "Version 2.0.0 is available.",
+    });
+  });
+
   it("rejects an update outside the active capability attestation", async () => {
     const runAction = vi.fn(async () => success());
     const controller = new ProviderMaintenanceController({

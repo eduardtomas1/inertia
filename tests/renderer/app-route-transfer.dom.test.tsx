@@ -117,7 +117,9 @@ function result(requestId: string, value: unknown): ServerEvent {
   return { type: "request.result", requestId, result: value } as unknown as ServerEvent;
 }
 
+const sentCommands: Parameters<InertiaConnection["sendCommand"]>[0][] = [];
 const sendCommand: InertiaConnection["sendCommand"] = async (command) => {
+  sentCommands.push(command);
   if (command.type === "conversation.detail.load") {
     const owner = command.payload.conversationId === targetId ? target : source;
     return result(command.requestId, {
@@ -127,7 +129,7 @@ const sendCommand: InertiaConnection["sendCommand"] = async (command) => {
       detail: detail(owner),
     });
   }
-  if (command.type === "conversation.create") {
+  if (command.type === "conversation.create" || command.type === "conversation.continue") {
     act(() => publish({ ...snapshot, conversations: [target, source] }));
     return result(command.requestId, { kind: "conversation.created", conversationId: targetId });
   }
@@ -156,6 +158,7 @@ function connection(next: AppSnapshot): InertiaConnection {
 
 beforeEach(() => {
   store.listeners.clear();
+  sentCommands.length = 0;
   publish({
     projects: [project],
     conversations: [source],
@@ -232,6 +235,28 @@ describe("main window route transfer", () => {
 
     await waitFor(() => expect(snapshot.activeConversationId).toBe(targetId));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+  });
+
+  it("continues a chat with history in a new chat on its checkout with its context", async () => {
+    publish({ ...snapshot, conversations: [{ ...source, hasHistory: true }] });
+    const { default: App } = await import("../../src/renderer/src/App");
+    render(<App />);
+    await screen.findByRole("textbox", { name: "Message" }, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click((await screen.findByTitle("Routed Agent")).closest("button")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(snapshot.activeConversationId).toBe(targetId));
+    expect(sentCommands.filter(({ type }) => type === "conversation.create")).toEqual([]);
+    expect(sentCommands.find(({ type }) => type === "conversation.continue")).toMatchObject({
+      payload: {
+        sourceConversationId: sourceId,
+        modelSelection: { modelId: "agent" },
+        accessMode: source.accessMode,
+        interactionMode: source.interactionMode,
+      },
+    });
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
   });
 });

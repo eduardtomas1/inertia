@@ -110,6 +110,7 @@ export function createConversationCommandHandler(
   return defineRuntimeCommandHandler([
     "project.ensure-scratch",
     "conversation.create",
+    "conversation.continue",
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
@@ -153,6 +154,22 @@ export function createConversationCommandHandler(
           command.requestId,
         );
         if (command.payload.activate !== false) return "mutation";
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "conversation.created",
+            conversationId: conversation.id,
+          },
+        });
+        return "handled";
+      }
+      case "conversation.continue": {
+        const conversation = await creation.continueFrom(
+          command.payload,
+          command.requestId,
+        );
         dependencies.broadcastSnapshot();
         dependencies.send(socket, {
           type: "request.result",

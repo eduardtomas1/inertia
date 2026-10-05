@@ -49,6 +49,7 @@ export function useComposerRouteConversation(): (
       selection: pendingRoute.selection,
       configuration: pendingRoute.configuration,
       ...(prefillText ? { prefillText } : {}),
+      ...(pendingRoute.carriesContext ? { sourceConversationId: pendingRoute.sourceConversationId } : {}),
       onCreated: (createdId) => { createdConversationId = createdId; },
     }).then(
       () => {

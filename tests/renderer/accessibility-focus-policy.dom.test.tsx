@@ -228,7 +228,7 @@ describe("route-change confirmation focus", () => {
     const claudeRoute = screen.getByTitle("Claude Route").closest("button");
     if (!claudeRoute) throw new Error("Expected the Claude route action.");
     fireEvent.click(claudeRoute);
-    return await screen.findByRole("alertdialog", { name: /Open a new chat for .*Claude Route\?/u });
+    return await screen.findByRole("alertdialog", { name: /Continue in a new chat with .*Claude Route\?/u });
   }
 
   it("focuses Cancel, leaves ordinary controls reachable, and restores the model chip on Escape", async () => {
@@ -255,7 +255,7 @@ describe("route-change confirmation focus", () => {
     const create = renderRouteComposer(vi.fn(() => creation.promise));
     const confirmation = await chooseClaudeRoute();
 
-    fireEvent.click(within(confirmation).getByRole("button", { name: "New chat" }));
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Continue" }));
 
     expect(create).toHaveBeenCalledTimes(1);
     expect(confirmation).toHaveAttribute("aria-busy", "true");

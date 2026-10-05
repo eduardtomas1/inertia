@@ -393,6 +393,7 @@ describe("trusted overlay native preview suspension", () => {
           configuration: { accessMode: "supervised", interactionMode: "build" },
           label: "GPT-5.6",
           reason: "The active session cannot switch models.",
+          carriesContext: false,
           sourceConversationId: "conversation-1",
           sourceProjectId: "project-1",
           sourceSelectionKey: "source-selection",

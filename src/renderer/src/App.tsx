@@ -54,7 +54,7 @@ import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWork
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
-import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationPayload } from "./lib/newConversation";
+import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationCommand } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
@@ -696,15 +696,13 @@ export default function App(): React.JSX.Element {
     setSidebarOpen,
   });
   const createConversationForSelection = async (request: ReplacementChatRequest): Promise<void> => {
-    if (draftConversation.chooseModel(request.selection, request.configuration)) return;
+    if (!request.sourceConversationId && draftConversation.chooseModel(request.selection, request.configuration)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
     const selectionGeneration =
       conversationSelectionGenerationRef.current + 1;
     conversationSelectionGenerationRef.current = selectionGeneration;
-    const event = await run("conversation.create", {
-      type: "conversation.create",
-      payload: replacementConversationPayload(project, settings, request),
-    });
+    const command = replacementConversationCommand(project, settings, request);
+    const event = await run(command.type, command);
     if (
       event.type !== "request.result"
       || event.result.kind !== "conversation.created"

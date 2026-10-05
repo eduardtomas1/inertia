@@ -40,13 +40,14 @@ function refreshDelay(result: LimitResetResult, now: number): number | null {
   return remaining > 0 ? Math.min(remaining + 1_000, MAX_TIMER_MS) : PENDING_POLL_MS;
 }
 
-export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, providerState, onCommand }: {
+export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, providerState, onCommand, onContinueElsewhere }: {
   conversationId: string;
   latestTurnId: string | null;
   snoozedUntil: string | null;
   disabled: boolean;
   providerState: string;
   onCommand: LimitResetCommandRunner;
+  onContinueElsewhere?: () => void;
 }): React.JSX.Element | null {
   const [result, setResult] = useState<LimitResetResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -126,6 +127,10 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     if (reload) refresh();
   };
   if (result?.conversationId !== conversationId) return null;
+  const unavailable = disabled || busy;
+  const action = "secondary-button limit-reset-action";
+  const continueElsewhere = onContinueElsewhere && <button type="button" className={action}
+    aria-disabled={unavailable || undefined} onClick={() => { if (!unavailable) onContinueElsewhere(); }}>Continue with another model</button>;
   const plan = result.plan && !["cancelled", "completed"].includes(result.plan.state)
     && (latestTurnId === null || result.plan.failedTurnId === latestTurnId) ? result.plan : null;
   const offer = result.offer;
@@ -134,11 +139,10 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
       ? <div className="limit-reset" role="group" aria-label="Usage limit" data-state="limited">
         <Clock3 className="limit-reset-icon" size={14} aria-hidden="true" />
         <span className="limit-reset-copy"><strong>Usage limit reached</strong></span>
+        {continueElsewhere && <span className="limit-reset-actions">{continueElsewhere}</span>}
       </div>
       : null;
   }
-  const unavailable = disabled || busy;
-  const action = "secondary-button limit-reset-action";
   const pending = plan?.state === "waiting" || plan?.state === "dispatching";
   const blocked = plan?.state === "blocked";
   const missed = plan?.state === "missed";
@@ -177,6 +181,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
           aria-describedby={reason ? reasonId : undefined} onClick={schedule}>Resume at reset</button>}
       {offer && <button type="button" className={action} aria-disabled={unavailable || snoozed || undefined}
         onClick={snooze}>{snoozed ? "Snoozed until reset" : "Snooze until reset"}</button>}
+      {!pending && continueElsewhere}
     </span>
     {message && <p className="limit-reset-message" role={error ? "alert" : "status"}>{message}</p>}
     {reason && !error && <p className="limit-reset-message" id={reasonId}>{reason}</p>}

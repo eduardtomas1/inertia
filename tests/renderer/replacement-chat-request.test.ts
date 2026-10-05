@@ -6,6 +6,7 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { replacementChatStarter } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
   buildNewConversationPayload,
+  replacementConversationCommand,
   replacementConversationPayload,
   withNewConversationModelSelection,
 } from "../../src/renderer/src/lib/newConversation";
@@ -63,6 +64,27 @@ describe("replacement chat request", () => {
     expect(replacementConversationPayload(project, broadDefaults, replacementChatRequest(defaultChat, { selection: claude }))).toEqual({
       ...withNewConversationModelSelection(buildNewConversationPayload(project, broadDefaults), claude),
       activate: false,
+    });
+  });
+
+  it("continues from the replaced chat only when the request names it", () => {
+    const request = replacementChatRequest(planChat, { selection: claude });
+    expect(replacementConversationCommand(project, broadDefaults, request)).toEqual({
+      type: "conversation.create",
+      payload: replacementConversationPayload(project, broadDefaults, request),
+    });
+    expect(replacementConversationCommand(project, broadDefaults, replacementChatRequest(planChat, {
+      selection: claude,
+      prefillText: "Keep going.",
+      sourceConversationId: planChat.id,
+    }))).toEqual({
+      type: "conversation.continue",
+      payload: {
+        sourceConversationId: planChat.id,
+        modelSelection: claude,
+        accessMode: "supervised",
+        interactionMode: "plan",
+      },
     });
   });
 

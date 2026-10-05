@@ -290,12 +290,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Limits",
-        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. Refresh limits asks the providers again; a countdown reaching zero does not refill a bar.",
+        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. A window shows Reset due until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset. Refresh limits asks the providers right away.",
         jump: "Open Usage",
       },
       {
         name: "Resume at reset",
-        detail: "When a chat stops at a subscription limit, the composer offers Resume at reset and Snooze until reset. Inertia must be running to resume, and a resume missed by more than an hour waits for you to choose Resume now.",
+        detail: "When a chat stops at a subscription limit, the sidebar shows it as Limited and the composer offers Resume at reset and Snooze until reset. Inertia must be running to resume. If the provider has not reported new quota within an hour of the reset, or Inertia was closed at the time, nothing is sent and Resume now waits for you.",
       },
       {
         name: "In the composer",

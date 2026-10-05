@@ -26,6 +26,12 @@ const report = (message: string, conversationId = focused?.conversationId): void
   window.dispatchEvent(new CustomEvent("inertia:snapshot-error", { detail: { message, conversationId } }));
 };
 
+export function activateSnapshotComposer(): boolean {
+  const registration = focused ?? composers.values().next().value;
+  registration?.activate();
+  return Boolean(registration);
+}
+
 // A window has one delivery subscriber even when two composers are mounted.
 function receive(bridge: DesktopBridge, event: SnapshotDelivery): void {
   if (event.review) {

@@ -118,10 +118,13 @@ by a page that then navigates away is lost with its document.
 A page that asks to stay when it is left (`beforeunload`) is handled by who
 is leaving it. While an agent action is running on that tab, the page is
 allowed to leave and the next navigation, history, click, type or press
-result reports a `beforeunload` dialog answered `accept`. Otherwise the user
-is leaving it, and Inertia asks with its own native confirmation, "Leave this
-page?", whose default is Stay and which shows no page text; the page leaves
-only if the user chooses Leave.
+result reports a `beforeunload` dialog answered `accept`. Otherwise, for the tab on
+screen, the user is leaving it, and Inertia asks with its own native
+confirmation titled "Browser tab N" and "Leave this page?", whose default is
+Stay and which shows no page text; the page leaves only if the user chooses
+Leave. A tab that is not on screen stays without asking, and after the user
+chooses Stay the same tab stays without asking for five seconds, so a page
+that keeps trying to reload cannot reopen the box.
 
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at

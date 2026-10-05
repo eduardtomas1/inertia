@@ -57,6 +57,7 @@ interface PreviewSession extends AgentOperationSession {
   busy: number;
   controller: "agent" | "user";
   operation: AgentOperationScope | null;
+  unloadStayUntil: Map<string, number>;
 }
 
 interface PreviewBrokerOptions {
@@ -65,13 +66,14 @@ interface PreviewBrokerOptions {
   stateChannel: string;
   registerHealthRenderer?(contents: WebContents): () => void;
   recordOperationFailure?(failure: PreviewAgentOperationFailure): void;
-  confirmPageUnload?(window: BrowserWindow): boolean;
+  confirmPageUnload?(window: BrowserWindow, pageNumber: number): boolean;
   partitionPrefix?: string;
   now?(): number;
 }
 const MAX_BROWSER_TABS = 8;
 const MAX_PARKED_SESSIONS = 4;
 const PARKED_SESSION_IDLE_MS = 30 * 60_000;
+const UNLOAD_STAY_QUIET_MS = 5_000;
 
 function budgetFor(request: AgentBrowserRequest): number {
   if (request.action === "perform-approved") return AGENT_BROWSER_NAVIGATION_BUDGET_MS;
@@ -733,6 +735,7 @@ export class PreviewBroker {
       busy: 0,
       controller: "agent",
       operation: null,
+      unloadStayUntil: new Map(),
     };
     const tab = this.#openTab(session);
     session.activeTabId = tab.id;
@@ -779,14 +782,7 @@ export class PreviewBroker {
           this.#evidenceAuthority(session, currentTab.id),
         );
       },
-      allowUnload: (currentTab) => {
-        if (session.operation && session.activeTabId === currentTab.id) {
-          recordAgentPageUnloadPrompt(currentTab.view.webContents);
-          return true;
-        }
-        const window = this.#window();
-        return window ? this.options.confirmPageUnload?.(window) === true : false;
-      },
+      allowUnload: (currentTab) => this.#allowUnload(session, currentTab),
       userInput: () => {
         if (this.#sessions.get(session.contextId) !== session) return;
         session.controller = "user";
@@ -802,6 +798,21 @@ export class PreviewBroker {
     });
     session.tabs.set(tab.id, tab);
     return tab;
+  }
+
+  #allowUnload(session: PreviewSession, tab: PreviewTab): boolean {
+    if (session.activeTabId !== tab.id) return false;
+    if (session.operation) {
+      recordAgentPageUnloadPrompt(tab.view.webContents);
+      return true;
+    }
+    const now = this.#now();
+    if ((session.unloadStayUntil.get(tab.id) ?? 0) > now) return false;
+    const window = this.#window();
+    const leave = window ? this.options.confirmPageUnload?.(window, tab.pageNumber) === true : false;
+    if (leave) session.unloadStayUntil.delete(tab.id);
+    else session.unloadStayUntil.set(tab.id, now + UNLOAD_STAY_QUIET_MS);
+    return leave;
   }
 
   #evidencePage(tab: PreviewTab): BrowserEvidencePage {
@@ -842,6 +853,7 @@ export class PreviewBroker {
     session.evidenceInspectors.close();
     const wasActive = session.activeTabId === tabId;
     session.tabs.delete(tabId);
+    session.unloadStayUntil.delete(tabId);
     this.#destroyTab(tab);
     if (session.tabs.size === 0) {
       const replacement = this.#openTab(session);

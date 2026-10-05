@@ -368,7 +368,7 @@ export function createPreviewBrokerHarness(
     getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
   };
   const recordOperationFailure = vi.fn();
-  const confirmPageUnload = vi.fn((_window: unknown) => false);
+  const confirmPageUnload = vi.fn((_window: unknown, _pageNumber: number) => false);
   const getWindow = vi.fn(() => window as typeof window | null);
   const unregisterHealth: Array<ReturnType<typeof vi.fn>> = [];
   const broker = new PreviewBroker({

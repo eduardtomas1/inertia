@@ -139,6 +139,33 @@ describe("Browser tool surface", () => {
     expect(contents.stop).toHaveBeenCalled();
   });
 
+  it("asks once per five seconds, only for the tab on screen, and names the tab", async () => {
+    const { broker, contents, confirmPageUnload, window } = await loadedHarness();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const leave = () => {
+        const event = { preventDefault: vi.fn() };
+        contents.emit("will-prevent-unload", event);
+        return event.preventDefault.mock.calls.length > 0;
+      };
+      expect(leave()).toBe(false);
+      expect(confirmPageUnload).toHaveBeenCalledExactlyOnceWith(window, 1);
+      expect(leave()).toBe(false);
+      expect(confirmPageUnload).toHaveBeenCalledOnce();
+      vi.setSystemTime(Date.now() + 5_001);
+      confirmPageUnload.mockReturnValueOnce(true);
+      expect(leave()).toBe(true);
+      expect(confirmPageUnload).toHaveBeenCalledTimes(2);
+
+      await expect(broker.perform(runIdentity, { action: "tab-open" })).resolves.toMatchObject({ ok: true });
+      vi.setSystemTime(Date.now() + 5_001);
+      expect(leave()).toBe(false);
+      expect(confirmPageUnload).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns from navigate only once Chromium stops loading, so an approval can follow at once", async () => {
     const { broker, contents } = await loadedHarness();
     const page = contents as unknown as { loadURL(url: string): Promise<void>; loading: boolean };
@@ -312,7 +339,10 @@ describe("Browser tool surface", () => {
     expect(confirmPageUnload).toHaveBeenCalledOnce();
     expect(userLeave.preventDefault).not.toHaveBeenCalled();
     confirmPageUnload.mockReturnValueOnce(true);
+    const stayedAt = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(stayedAt + 5_001);
     contents.emit("will-prevent-unload", userLeave);
+    vi.mocked(Date.now).mockRestore();
     expect(userLeave.preventDefault).toHaveBeenCalledOnce();
     const quiet = await broker.perform(runIdentity, { action: "click", ref: "e1" });
     expect(JSON.parse((quiet as unknown as { text: string }).text)).not.toHaveProperty("dialogs");

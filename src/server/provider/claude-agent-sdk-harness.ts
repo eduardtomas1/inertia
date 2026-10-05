@@ -2,8 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import {
   query as claudeQuery,
-  type CanUseTool,
-  type PermissionResult,
   type Query,
   type SDKMessage,
   type SDKStartupFailureReason,
@@ -18,13 +16,11 @@ import {
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   sanitizeProviderFailureDetail,
 } from "./activity-detail";
-import { isSafeApprovalDisplayText } from "./approval-display";
 import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,
 } from "./claude-owned-query";
 import { emitClaudeModelMetadata } from "./claude-agent-sdk-metadata";
-import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ClaudeRunEventBudget } from "./claude-event-budget";
 import {
@@ -39,14 +35,13 @@ import {
   type ProviderRunFailure,
   type ProviderRunResult,
 } from "./contracts";
-import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { CLAUDE_MESSAGE_DRAIN_TIMEOUT, nextClaudeMessage, claudeFastModeFailure } from "./claude-sdk-lifecycle-support";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
 import { claudeCommandLifecycleMessage } from "./claude-message-projector-support";
-import { claudeQuestions } from "./claude-questions";
+import { ClaudePermissionBroker } from "./claude-permission-broker";
 import {
   claudePrompt,
   claudePromptReservationBytes,
@@ -77,7 +72,6 @@ const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
-const MAX_PENDING_INTERACTIONS = 64;
 const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
@@ -157,16 +151,6 @@ function claudeTerminalSubagentDrainTimeout(
   );
 }
 
-interface PendingApproval {
-  resolve: (decision: AgentApprovalDecision) => void;
-  settled: boolean;
-}
-
-interface PendingInput {
-  resolve: (answers: Record<string, string[]>) => void;
-  settled: boolean;
-}
-
 export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOptions = {}): AgentHarness {
   const stopTaskTimeoutMs = claudeStopTaskTimeout(
     options.stopTaskTimeoutMs,
@@ -216,8 +200,6 @@ function startClaudeRun(
       MAX_RUN_EVENT_BYTES,
     ),
   );
-  const approvals = new Map<string, PendingApproval>();
-  const inputs = new Map<string, PendingInput>();
   const abortController = new AbortController();
   const preparationAbortController = new AbortController();
   const delegateLifecycle = new ClaudeDelegateLifecycle();
@@ -282,142 +264,13 @@ function startClaudeRun(
       });
   };
 
-  const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
-    const pending = approvals.get(requestId);
-    if (!pending || pending.settled) return false;
-    pending.settled = true;
-    approvals.delete(requestId);
-    emitter.rich({ type: "approval-resolved", requestId, decision });
-    pending.resolve(decision);
-    return true;
-  };
-  const settleInput = (requestId: string, answers: Record<string, string[]>): boolean => {
-    const pending = inputs.get(requestId);
-    if (!pending || pending.settled) return false;
-    pending.settled = true;
-    inputs.delete(requestId);
-    emitter.rich({ type: "input-resolved", requestId });
-    pending.resolve(answers);
-    return true;
-  };
-  const cancelPending = (): void => {
-    for (const requestId of approvals.keys()) settleApproval(requestId, "cancel");
-    for (const [requestId, pending] of inputs) {
-      pending.settled = true;
-      inputs.delete(requestId);
-      emitter.rich({ type: "input-resolved", requestId });
-      pending.resolve({});
-    }
-  };
-
-  const canUseTool: CanUseTool = async (toolName, toolInput, callbackOptions) => {
-    if (callbackOptions.signal.aborted || cancelRequested) return deny("User cancelled the request.", true);
-    if (claudeHostTools?.providerToolNames.has(toolName)) {
-      return { behavior: "allow", updatedInput: toolInput };
-    }
-    if (!options.providerNativeToolsAvailable) {
-      return deny(
-        "Provider-native tools are unavailable for this exact backend and model.",
-      );
-    }
-    if (toolName === "AskUserQuestion") {
-      if (inputs.size >= MAX_PENDING_INTERACTIONS) {
-        return deny("Claude exceeded the bounded question budget.", true);
-      }
-      const requestId = randomUUID();
-      const request = claudeQuestions(requestId, callbackOptions.toolUseID, toolInput);
-      if (request.questions.length === 0) return deny("Claude sent an invalid question request.");
-      const answers = await new Promise<Record<string, string[]>>((resolve) => {
-        inputs.set(requestId, { resolve, settled: false });
-        callbackOptions.signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
-        emitter.rich({ type: "input", request });
-      });
-      if (callbackOptions.signal.aborted || cancelRequested) return deny("User cancelled the request.", true);
-      const sdkAnswers: Record<string, string> = {};
-      for (const question of request.questions) {
-        const labelsById = new Map(question.options.map((option) => [option.id, option.label]));
-        const values = (answers[question.id] ?? []).map((value) => labelsById.get(value) ?? value);
-        sdkAnswers[question.question] = values.join(", ");
-      }
-      return { behavior: "allow", updatedInput: { questions: toolInput.questions, answers: sdkAnswers } };
-    }
-
-    if (toolName === "ExitPlanMode") {
-      const plan = stringValue(toolInput.plan) ?? stringValue(toolInput.content);
-      if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan) });
-      return deny("The proposed plan was returned to the user for review.");
-    }
-
-    if (
-      (options.input.access === "full" && options.input.interactionMode !== "plan")
-      || claudeAttachmentReadAllowed(toolName, toolInput, callbackOptions.blockedPath, options.input.attachmentReadRoots)
-    ) return { behavior: "allow", updatedInput: toolInput };
-    const approvalTitle = callbackOptions.title
-      ?? `Claude wants to use ${toolName}`;
-    const approvalDetail = callbackOptions.description
-      ?? summarizeInput(toolInput);
-    const approvalCommand = toolName === "Bash"
-      && typeof toolInput.command === "string"
-      ? toolInput.command
-      : undefined;
-    const approvalReason = callbackOptions.decisionReason;
-    const approvalBlockedPath = callbackOptions.blockedPath;
-    if (
-      !isSafeApprovalDisplayText(approvalTitle)
-      || !isSafeApprovalDisplayText(approvalDetail, true)
-      || (
-        approvalCommand !== undefined
-        && !isSafeApprovalDisplayText(approvalCommand, true)
-      )
-      || (
-        approvalReason !== undefined
-        && !isSafeApprovalDisplayText(approvalReason, true)
-      )
-      || (
-        approvalBlockedPath !== undefined
-        && !isSafeApprovalDisplayText(approvalBlockedPath)
-      )
-    ) {
-      return deny("Claude sent unsafe permission display text.");
-    }
-
-    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
-      return deny("Claude exceeded the bounded approval budget.", true);
-    }
-    const requestId = randomUUID();
-    const decision = await new Promise<AgentApprovalDecision>((resolve) => {
-      approvals.set(requestId, { resolve, settled: false });
-      callbackOptions.signal.addEventListener("abort", () => settleApproval(requestId, "cancel"), { once: true });
-      emitter.rich({
-        type: "approval",
-        request: {
-          requestId,
-          kind: toolName === "Bash" ? "command" : /edit|write|notebook/iu.test(toolName) ? "file-change" : "permissions",
-          title: bounded(approvalTitle),
-          detail: bounded(approvalDetail),
-          ...(approvalCommand !== undefined
-            ? { command: bounded(approvalCommand) }
-            : {}),
-          cwd: options.input.cwd,
-          ...(approvalReason ? { reason: bounded(approvalReason) } : {}),
-          permissionRoots: approvalBlockedPath
-            ? [{ path: bounded(approvalBlockedPath), access: claudePermissionAccess(toolName) }]
-            : [],
-          availableDecisions: ["approve", "deny", "cancel"],
-        },
-      });
-    });
-    if (callbackOptions.signal.aborted || cancelRequested) {
-      return deny("User cancelled the request.", true);
-    }
-    if (decision === "approve") {
-      return {
-        behavior: "allow",
-        updatedInput: toolInput,
-      } satisfies PermissionResult;
-    }
-    return deny(decision === "cancel" ? "User cancelled tool execution." : "User declined tool execution.", decision === "cancel");
-  };
+  const permissions = new ClaudePermissionBroker({
+    input: options.input,
+    emitter,
+    providerNativeToolsAvailable: options.providerNativeToolsAvailable,
+    hostToolNames: claudeHostTools?.providerToolNames,
+    cancelled: () => cancelRequested,
+  });
 
   emitter.status("starting");
   const usesNativeAnthropic = options.input.backendProfile.id
@@ -534,7 +387,7 @@ function startClaudeRun(
                 ? "acceptEdits"
                 : "default",
           allowDangerouslySkipPermissions: options.input.access === "full",
-          canUseTool,
+          canUseTool: permissions.canUseTool,
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
           ...(claudeHostTools
             ? {
@@ -892,7 +745,7 @@ function startClaudeRun(
       // No consumer survives terminal query cleanup. Discard any admitted
       // input so retained base64 media and its reservations are released.
       promptChannel.cancel();
-      cancelPending();
+      permissions.cancelPending();
       delegateLifecycle.dispose();
       try { query?.close(); } catch { /* The SDK process may already be closed. */ }
       if (messageIterator?.return) {
@@ -1000,7 +853,7 @@ function startClaudeRun(
     acceptingFollowUps = false;
     promptChannel.cancel();
     emitter.status("cancelling");
-    cancelPending();
+    permissions.cancelPending();
     if (force) {
       ownedProcess.requestTermination(true);
       abortController.abort();
@@ -1032,8 +885,8 @@ function startClaudeRun(
       kind: "claude-agent-sdk",
       respondToApproval: (requestId, decision) =>
         hostToolRuntime?.respondToApproval(requestId, decision)
-        || settleApproval(requestId, decision),
-      respondToInput: settleInput,
+        || permissions.settleApproval(requestId, decision),
+      respondToInput: (requestId, answers) => permissions.settleInput(requestId, answers),
       steer: async (input) => {
         const text = normalizedClaudeFollowUp(input.content);
         if (!text || !acceptingFollowUps || cancelRequested) return false;
@@ -1087,11 +940,6 @@ function startClaudeRun(
       },
     },
   };
-}
-
-function planSteps(markdown: string): AgentPlanStep[] {
-  const steps = markdown.split("\n").map((line) => line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/u)?.[1]?.trim()).filter((value): value is string => Boolean(value));
-  return (steps.length > 0 ? steps : [markdown]).slice(0, 100).map((step) => ({ step: bounded(step), status: "pending" }));
 }
 
 function claudeLifecycleFailure(
@@ -1209,16 +1057,8 @@ function claudeRunEnvironment(
   return { ...CLAUDE_SUBAGENT_LIMITS, ...CLAUDE_STARTUP_FAILURE_RESULTS, ...(environment ?? process.env) };
 }
 
-function summarizeInput(input: Record<string, unknown>): string {
-  try { return bounded(JSON.stringify(input)); } catch { return "Claude requested permission to use a tool."; }
-}
-
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function deny(message: string, interrupt = false): PermissionResult {
-  return { behavior: "deny", message, ...(interrupt ? { interrupt: true } : {}) };
 }
 
 function safeError(error: unknown, fallback: string): string {

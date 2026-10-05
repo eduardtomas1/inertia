@@ -30,6 +30,7 @@ export const DESKTOP_IPC = {
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
+  showContextMenu: "inertia:show-context-menu",
   showThreadNotification: "inertia:show-thread-notification",
   threadNotificationActivated: "inertia:thread-notification-activated",
   getAppHealth: "inertia:get-app-health",

@@ -29,6 +29,7 @@ vi.mock("@xterm/xterm", () => ({
     options = { fontSize: 13, theme: {} };
 
     loadAddon(): void {}
+    attachCustomKeyEventHandler(): void {}
     open(container: HTMLElement): void {
       const textarea = document.createElement("textarea");
       textarea.setAttribute("aria-label", "Terminal input");

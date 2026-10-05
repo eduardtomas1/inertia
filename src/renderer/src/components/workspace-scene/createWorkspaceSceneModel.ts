@@ -936,6 +936,7 @@ export function createWorkspaceSceneModel({
       changes: {
         projectName: project.name,
         agentRevisionUnavailable: continuationRefusal !== null,
+        projectRoot: conversation?.worktreePath ?? project.normalizedPath,
         projectId: project.id,
         conversationId: persistedConversation?.id,
         busyAction,

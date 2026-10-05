@@ -588,7 +588,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     enabled: enableProviders,
     signal: runtimeLifetimeAbort.signal,
     isClosed: () => closed,
-    cachedState: (providerId) => providers.cachedMetadata(providerId).metadataState,
+    cachedState: (providerId) => providers.cachedMetadata(providerId),
     read: (providerId, fields) => providers.metadata(providerId, options.defaultWorkspacePath, { fields, force: true, signal: runtimeLifetimeAbort.signal }),
     apply: applyProviderMetadata,
     broadcastSnapshot,

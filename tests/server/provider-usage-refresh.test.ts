@@ -54,8 +54,18 @@ type State = ReturnType<ProviderUsageRefreshDependencies<string>["cachedState"]>
 function fixture(overrides: Partial<ProviderUsageRefreshDependencies<string>> = {}) {
   const states = new Map<ProviderId, State>();
   const stale = (updatedAt: string | null = "2030-01-01T00:00:00.000Z"): State => ({
-    models: { freshness: "stale", updatedAt },
-    rateLimits: { freshness: updatedAt ? "stale" : "unavailable", updatedAt },
+    metadataState: {
+      models: { freshness: "stale", updatedAt },
+      rateLimits: { freshness: updatedAt ? "stale" : "unavailable", updatedAt },
+    },
+    rateLimits: [],
+  });
+  const fresh = (resetsAt: Array<string | null>, updatedAt = new Date().toISOString()): State => ({
+    metadataState: {
+      models: { freshness: "fresh", updatedAt },
+      rateLimits: { freshness: "fresh", updatedAt },
+    },
+    rateLimits: resetsAt.map((value) => ({ resetsAt: value })),
   });
   const reads: Array<[ProviderId, string[]]> = [];
   const applied: string[] = [];
@@ -82,6 +92,7 @@ function fixture(overrides: Partial<ProviderUsageRefreshDependencies<string>> = 
     dependencies,
     states,
     stale,
+    fresh,
     reads,
     applied,
     abort,
@@ -122,10 +133,7 @@ describe("provider usage refresh after a turn", () => {
     expect(disabled.reads).toEqual([]);
 
     const current = fixture();
-    current.states.set("claude", {
-      models: { freshness: "fresh", updatedAt: "2030-01-03T00:00:00.000Z" },
-      rateLimits: { freshness: "fresh", updatedAt: "2030-01-03T00:00:00.000Z" },
-    });
+    current.states.set("claude", current.fresh([], "2030-01-03T00:00:00.000Z"));
     await createTurnUsageRefresh(current.dependencies)(turn("claude", "completed"));
     expect(current.reads).toEqual([]);
   });
@@ -171,5 +179,66 @@ describe("idle rate-limit refresh", () => {
     value.abort.abort();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(failures).toBe(2);
+  });
+});
+
+describe("quota read after a reported reset", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  const hour = 60 * 60 * 1_000;
+
+  it("reads once about five seconds after the earliest cached reset", async () => {
+    const value = fixture({ now: () => Date.now() });
+    value.states.set("codex", value.fresh([
+      new Date(Date.now() + 60_000).toISOString(),
+      new Date(Date.now() + 10_000).toISOString(),
+    ]));
+    value.states.set("claude", value.fresh([new Date(Date.now() + 3 * hour).toISOString()]));
+    startIdleRateLimitRefresh(value.dependencies, hour);
+    await vi.advanceTimersByTimeAsync(14_900);
+    expect(value.reads).toEqual([]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
+    expect(value.broadcasts()).toBe(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]], ["codex", ["rateLimits"]]]);
+    await vi.advanceTimersByTimeAsync(50 * 60 * 1_000);
+    expect(value.reads).toHaveLength(2);
+    value.abort.abort();
+    await vi.advanceTimersByTimeAsync(3 * hour);
+    expect(value.reads).toHaveLength(2);
+  });
+
+  it("follows a reset reported by the read and skips busy or unrunnable providers", async () => {
+    const busy = new Set<ProviderId>(["claude"]);
+    const value = fixture({
+      now: () => Date.now(),
+      canRun: (providerId) => providerId !== "cursor",
+      activeProviderIds: () => busy,
+      apply: (providerId) => {
+        value.states.set(providerId as ProviderId, value.fresh([new Date(Date.now() + 20_000).toISOString()]));
+      },
+    });
+    const soon = new Date(Date.now() + 1_000).toISOString();
+    value.states.set("codex", value.fresh([soon]));
+    value.states.set("claude", value.fresh([soon]));
+    startIdleRateLimitRefresh(value.dependencies, hour);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
+    busy.clear();
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]], ["codex", ["rateLimits"]]]);
+    value.abort.abort();
+  });
+
+  it("leaves resets that passed before it started to the regular refresh", async () => {
+    const value = fixture({ now: () => Date.now() });
+    value.states.set("codex", value.fresh([new Date(Date.now() - 60_000).toISOString()]));
+    startIdleRateLimitRefresh(value.dependencies, hour);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1_000);
+    expect(value.reads).toEqual([]);
+    value.abort.abort();
   });
 });

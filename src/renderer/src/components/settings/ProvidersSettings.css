@@ -8,6 +8,12 @@
 
 .provider-settings-heading {
   align-items: center;
+  margin-bottom: 12px;
+}
+
+.provider-settings-heading > span {
+  min-width: 0;
+  flex: 1;
 }
 
 .provider-settings-heading > .icon-button {
@@ -18,25 +24,34 @@
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
-  align-items: start;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-content);
+  background: var(--surface-strong);
+}
+
+.settings-card > .provider-settings-heading + .provider-settings-shell {
+  border-top: 1px solid var(--border);
 }
 
 .provider-settings-rail {
   display: grid;
   min-width: 0;
-  gap: 2px;
-  padding-right: 12px;
+  align-content: start;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 55%, var(--surface-strong));
 }
 
 .provider-settings-list-row {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 52px;
+  min-height: 64px;
   align-items: flex-start;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-medium);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
   color: var(--text);
   background: transparent;
   text-align: left;
@@ -48,7 +63,6 @@
 
 .provider-settings-list-row.is-selected {
   background: var(--selected-surface);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .provider-settings-list-row:focus-visible {
@@ -116,8 +130,6 @@
 
 .provider-settings-editor {
   min-width: 0;
-  padding-left: 20px;
-  border-left: 1px solid var(--border);
 }
 
 .provider-settings-editor-header {
@@ -126,7 +138,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px 10px;
-  padding: 8px 0 12px;
+  padding: 14px 16px 12px;
 }
 
 .provider-settings-editor-header > :first-child {
@@ -161,6 +173,7 @@
   display: flex;
   min-width: 0;
   gap: 2px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -205,6 +218,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
+  padding: 0 16px 14px;
 }
 
 .provider-settings-editor-body > * + * {
@@ -380,9 +394,13 @@
 
 .provider-settings-empty {
   margin: 0;
-  padding: 16px 0;
+  padding: 16px;
   color: var(--text-muted);
   font-size: var(--ui-font-secondary);
+}
+
+.provider-settings-editor-body > .provider-settings-empty {
+  padding: 16px 0;
 }
 
 @container providers (max-width: 760px) {
@@ -391,13 +409,18 @@
   }
 
   .provider-settings-rail {
-    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 
   .provider-settings-list-row {
     min-height: 40px;
     align-items: center;
-    padding: 6px 10px;
+    padding: 8px 14px;
+  }
+
+  .provider-settings-list-row:last-child {
+    border-bottom: 0;
   }
 
   .provider-settings-list-row > :first-child {
@@ -412,13 +435,6 @@
     gap: 2px 8px;
   }
 
-  .provider-settings-editor {
-    margin-top: 8px;
-    padding-top: 4px;
-    padding-left: 0;
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
 }
 
 @container providers (max-width: 520px) {

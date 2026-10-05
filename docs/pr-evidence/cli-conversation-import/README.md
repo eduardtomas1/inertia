@@ -1,7 +1,7 @@
 # Import CLI conversations
 
 Real screenshots of the built Electron app on macOS 27.0.1 (arm64, device
-scale 2), captured by `tests/e2e/cli-conversation-import.spec.ts` with
+scale 2; sizes below are the page viewport), captured by `tests/e2e/cli-conversation-import.spec.ts` with
 `animations: "disabled"`. The spec writes synthetic Codex and Claude Code
 transcripts into temporary `CODEX_HOME` and `CLAUDE_CONFIG_DIR` folders and
 renames the fixture project through `RuntimeStore`. No live profile,
@@ -60,6 +60,23 @@ Checkout card into the new Projects section; the dialog is unchanged. All
 | --- | --- |
 | ![Before the merge: settings](before-merge-settings-row-light-wide.png) | ![After the merge: settings](settings-row-light-wide.png) |
 
+## Long sessions and unreadable files
+
+Transcripts are read line by line, so a session of any size can be imported.
+Records over 16 MiB are skipped and counted, and a read that takes longer than
+60 seconds stops with a message instead of hanging. The import keeps the
+opening exchange and the newest messages that fit the 200-message, 256 KiB
+budget. The preview, the imported chat and the gallery card for an imported
+session say how many earlier messages were left out. A file whose session
+header belongs to this checkout but whose records cannot be read is counted
+in one muted line under the gallery.
+
+| Large rollout preview, 1440 × 868 light | Imported chat, 1440 × 868 light |
+| --- | --- |
+| ![Large rollout preview](dialog-large-preview-light-wide.png) | ![Imported chat with the omission note](chat-large-note-light-wide.png) |
+
+![One unreadable conversation, 1440 × 868 light](dialog-unreadable-light-wide.png)
+
 ## Before and after
 
 Before is `0609e195` (the PR head before this polish).
@@ -67,30 +84,30 @@ Before is `0609e195` (the PR head before this polish).
 | Before | After |
 | --- | --- |
 | ![Before: settings](before-settings-row-light-wide.png) | ![After: settings](settings-row-light-wide.png) |
-| Settings, 1440 × 920 light | Settings, 1440 × 920 light |
+| Settings, 1440 × 868 light | Settings, 1440 × 868 light |
 | ![Before: idle](before-dialog-idle-light-wide.png) | ![After: idle](dialog-idle-light-wide.png) |
-| Nothing selected, 1440 × 920 light | Nothing selected, 1440 × 920 light |
+| Nothing selected, 1440 × 868 light | Nothing selected, 1440 × 868 light |
 | ![Before: preview](before-dialog-preview-dark-wide.png) | ![After: preview](dialog-preview-dark-wide.png) |
-| Preview, 1440 × 920 dark | Preview, 1440 × 920 dark |
+| Preview, 1440 × 868 dark | Preview, 1440 × 868 dark |
 | ![Before: tight](before-dialog-preview-dark-760x600.png) | ![After: tight](dialog-preview-dark-760x600.png) |
 | Preview, 760 × 600 dark | Preview, 760 × 600 dark |
 | ![Before: long title](before-dialog-long-title-light-narrow.png) | ![After: long title](dialog-long-title-light-narrow.png) |
 | 128-character title, 1000 × 800 light (clipped to two lines) | 128-character title, 1000 × 800 light |
 | ![Before: error](before-dialog-error-light-wide.png) | ![After: error](dialog-error-light-wide.png) |
-| Unreadable file and failed preview, 1440 × 920 light | Unreadable file and failed preview, 1440 × 920 light |
+| Unreadable file and failed preview, 1440 × 868 light | Failed preview, 1440 × 868 light |
 | ![Before: empty](before-dialog-empty-dark-wide.png) | ![After: empty](dialog-empty-dark-wide.png) |
-| No history, 1440 × 920 dark | No history, 1440 × 920 dark |
+| No history, 1440 × 868 dark | No history, 1440 × 868 dark |
 
 ## Other after captures
 
 | Light | Dark |
 | --- | --- |
 | ![Preview, narrow light](dialog-preview-light-narrow.png) | ![Preview, narrow dark](dialog-preview-dark-narrow.png) |
-| ![Preview at 1280 × 920, light](preview-light.png) | ![Already imported at 1280 × 920, dark](imported-dark.png) |
+| ![Preview at 1280 × 868, light](preview-light.png) | ![Open chat for an earlier import at 1280 × 868, dark](imported-dark.png) |
 | ![Error, light](dialog-error-light-wide.png) | ![Error, dark](dialog-error-dark-wide.png) |
 | ![Settings, light](settings-row-light-wide.png) | ![Settings, dark](settings-row-dark-wide.png) |
 
-`preview-light.png` (1280 × 920), `imported-dark.png` (1280 × 920) and
+`preview-light.png` (1280 × 868), `imported-dark.png` (1280 × 868) and
 `compact-dark.png` (900 × 700) come from the first test, which imports both
 histories, restarts the app and resumes the original Codex session.
 `dialog-empty-dark-760x600.png` shows the empty state at the tight size.

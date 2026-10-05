@@ -8,9 +8,13 @@ import { strictCodexProviderIdentifier } from "./app-server-subagents";
 import { codexHookActivityPhase, codexItemActivityPhase } from "./app-server-status";
 import { boundedText, objectValue, stringValue, type JsonObject } from "./protocol";
 import { completedReasoningSummary } from "./reasoning";
-import { providerActivityDetailSections } from "../provider/activity-detail";
+import {
+  officialToolResultText,
+  providerActivityDetailSections,
+} from "../provider/activity-detail";
 import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type { CodexAppServerOptions } from "./types";
+import type { CodexCommandOutput } from "./app-server-command-output";
 
 export type CodexItemActivity = {
   kind: "command" | "tool" | "system";
@@ -21,6 +25,7 @@ export type CodexItemActivity = {
 export interface CodexItemProjectionState {
   deltaItems: Set<string>;
   outputItems: Set<string>;
+  commandOutput: CodexCommandOutput;
   reasoningDeltaItems: Set<string>;
   itemActivities: Map<string, CodexItemActivity>;
   completedPlanItemIds: Set<string>;
@@ -108,10 +113,18 @@ export function handleCodexItem(
       ?? [item.stdout, item.stderr];
     const label = commandExecutionLabel(item);
     const started = activityId ? state.itemActivities.get(activityId) : undefined;
-    const streamed = activityId ? state.outputItems.has(activityId) : false;
+    const repeatOutput = completeStreamedOutput(
+      host,
+      state,
+      method,
+      activityId,
+      "command",
+      label,
+      officialToolResultText(output),
+    );
     const detail = providerActivityDetailSections({
       ...(started?.commandShown ? {} : { command }),
-      ...(method === "item/completed" && !streamed ? { output } : {}),
+      ...(method === "item/completed" && repeatOutput ? { output } : {}),
     });
     if (method === "item/started") {
       rememberItemActivity(state, activityId, {
@@ -123,6 +136,7 @@ export function handleCodexItem(
     emitItemActivity(host, "command", phase, label, activityId, detail);
     deleteCompletedActivity(state, method, activityId);
   } else if (itemType === "fileChange") {
+    completeStreamedOutput(host, state, method, activityId, "tool", "File change", null);
     if (method === "item/started") {
       rememberItemActivity(state, activityId, {
         kind: "tool",
@@ -232,6 +246,29 @@ function rememberItemActivity(
   if (!activityId || state.itemActivities.has(activityId)) return;
   if (state.itemActivities.size >= state.maxTrackedActivities) return;
   state.itemActivities.set(activityId, activity);
+}
+
+function completeStreamedOutput(
+  host: Pick<CodexItemProjectionHost, "options">,
+  state: CodexItemProjectionState,
+  method: "item/started" | "item/completed",
+  activityId: string | null | undefined,
+  kind: CodexItemActivity["kind"],
+  label: string,
+  output: string | null,
+): boolean {
+  if (method !== "item/completed") return false;
+  const completed = activityId
+    ? state.commandOutput.complete(activityId, output)
+    : null;
+  if (!completed) return true;
+  if (completed.delta) {
+    host.options.onActivity?.(kind, "started", label, {
+      activityId: activityId!,
+      outputDelta: completed.delta,
+    });
+  }
+  return completed.repeatOutput;
 }
 
 function deleteCompletedActivity(

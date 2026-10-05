@@ -216,25 +216,25 @@ export class TurnActivityProjection {
     previous: string | null,
     event: ProviderActivityEvent,
   ): string | null {
-    const continuing = activityId !== null
-      && !event.detail
-      && active.providerOutputActivityIds.has(activityId);
-    const detail = this.detail(active, previous, event.detail ?? null);
-    if (!event.outputDelta) {
-      if (activityId && event.detail) {
-        active.providerOutputActivityIds.delete(activityId);
-      }
-      return detail;
+    let detail = previous;
+    if (event.outputDelta) {
+      const merged = mergeProviderActivityOutputWithinTurnBudget(
+        previous,
+        event.outputDelta,
+        activityId !== null && active.providerOutputActivityIds.has(activityId),
+        active.providerActivityDetailChars,
+      );
+      active.providerActivityDetailChars = merged.totalChars;
+      detail = merged.detail;
+      if (activityId) active.providerOutputActivityIds.add(activityId);
     }
-    const merged = mergeProviderActivityOutputWithinTurnBudget(
-      detail,
-      event.outputDelta,
-      continuing,
-      active.providerActivityDetailChars,
-    );
-    active.providerActivityDetailChars = merged.totalChars;
-    if (activityId) active.providerOutputActivityIds.add(activityId);
-    return merged.detail;
+    if (!event.outputDelta || event.detail) {
+      detail = this.detail(active, detail, event.detail ?? null);
+    }
+    if (activityId && event.detail) {
+      active.providerOutputActivityIds.delete(activityId);
+    }
+    return detail;
   }
 
   private detail(

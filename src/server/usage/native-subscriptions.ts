@@ -161,7 +161,8 @@ export class NativeSubscriptionReader {
       const failed = { ...base, ...identity, windows: [], status: "error" as const };
       if (!(error instanceof SubscriptionHttpError)) return { ...failed, detail: FAILED_DETAIL };
       if (error.status === 401 || error.status === 403) return { ...failed, detail: REFUSED_DETAIL };
-      if (error.status !== 429) return { ...failed, detail: FAILED_DETAIL };
+      const throttled = error.status === 429 || (error.status === 503 && error.retryAfterMs !== null);
+      if (!throttled) return { ...failed, detail: FAILED_DETAIL };
       const until = Date.now() + Math.min(MAX_COOLDOWN_MS, error.retryAfterMs || DEFAULT_COOLDOWN_MS);
       if (identity.credentialFingerprint) this.coolDown(identity.credentialFingerprint, until);
       return { ...failed, detail: waitDetail(until) };

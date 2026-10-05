@@ -213,6 +213,8 @@ export interface QueueTurnRequest {
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
+  /** Safe reason the pre-turn checkpoint could not be captured. */
+  checkpointFailure?: string | null;
   /** Privileged provider-native skill references resolved from opaque IDs. */
   skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
@@ -281,6 +283,7 @@ export interface ActiveTurn {
   attachmentIds: readonly string[];
   generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;
+  checkpointFailure: string | null;
   rendererOwnerId: string | null;
   structuredContext: unknown;
   gitBeforeCapture: Promise<void> | null;

@@ -3,6 +3,7 @@ import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
+import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
@@ -116,6 +117,7 @@ export function UserRequestLayer({
         <MessageOrigin message={turn.userMessage} />
         {props.showTimestamps && <time dateTime={turn.userMessage.createdAt} title={formatFullDateTime(turn.userMessage.createdAt)}>{formatMessageTime(turn.userMessage.createdAt)}</time>}
         {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
+        {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}</span>}
       </div>
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}

@@ -16,12 +16,11 @@ import {
   type TurnRequestContext,
 } from "../../../shared/contracts";
 import {
-  CheckpointError,
   createCheckpoint,
   deleteCheckpoint,
 } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
-import { getRepositoryStatus, GitError } from "../../git";
+import { getRepositoryStatus } from "../../git";
 import {
   MESSAGE_ADMISSION_UNAVAILABLE,
   publicRuntimeError,
@@ -36,6 +35,10 @@ import type { PrivateGeneratedAttachmentStore } from "../attachments/private-gen
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
+import {
+  checkpointFailureReason,
+  isExpectedCheckpointAbsence,
+} from "../turns/turn-checkpoint-notice";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
@@ -662,6 +665,7 @@ export function createTurnInteractionCommandHandler(
         }
         messageSendStage = "checkpoint";
         let checkpointId: string | null = null;
+        let checkpointFailure: string | null = null;
         let capturedCheckpoint: {
           repositoryPath: string;
           ref: string;
@@ -712,17 +716,8 @@ export function createTurnInteractionCommandHandler(
                 conversation.id,
               ).catch(() => undefined);
             }
-            if (
-              !(
-                error instanceof CheckpointError
-                && error.message === "not-repository"
-              )
-              && !(
-                error instanceof GitError
-                && error.code === "not-repository"
-              )
-            ) {
-              // A checkpoint is protective but not a reason to block a run.
+            if (!isExpectedCheckpointAbsence(error)) {
+              checkpointFailure = checkpointFailureReason(error);
             }
             if (messageSendPreparationExpired(preparationDeadlineAt)) {
               if (providerTransitionReserved) {
@@ -828,6 +823,7 @@ export function createTurnInteractionCommandHandler(
                 context: resolvedTurnContext,
                 contextRequestId: command.requestId,
                 checkpointId,
+                checkpointFailure,
                 skills: resolvedSkills.inputs,
               }, () => {
                 durableTurnPersisted = true;

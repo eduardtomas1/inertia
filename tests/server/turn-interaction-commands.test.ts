@@ -1993,6 +1993,52 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
+  it("passes the checkpoint failure reason to the turn when capture fails", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-failure-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await execFileAsync("git", ["init", "--quiet", join(repository, "nested")]);
+      const queue = vi.fn(() => queuedTurn());
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: repository,
+      });
+
+      await createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        messageCommand(),
+      );
+
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+      expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+        checkpointId: null,
+        checkpointFailure: "Git could not create the checkpoint.",
+      }), expect.any(Function), expect.anything());
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
+  it("does not report a checkpoint failure outside a Git repository", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-checkpoint-absent-"));
+    try {
+      const queue = vi.fn(() => queuedTurn());
+      await createTurnInteractionCommandHandler(dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: directory,
+      }))({} as never, messageCommand());
+
+      expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+        checkpointId: null,
+        checkpointFailure: null,
+      }), expect.any(Function), expect.anything());
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not release after an authoritative turn accepts ownership", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn(() => queuedTurn());

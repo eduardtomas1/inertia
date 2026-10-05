@@ -58,6 +58,7 @@ import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { trackTurnSettlementTask } from "./turn-settlement-tasks";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
+import { recordTurnCheckpointUnavailable } from "./turn-checkpoint-notice";
 import { stopActiveSubagent } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
@@ -762,6 +763,7 @@ export class TurnController {
       runId: active.turn.runId,
       turnId: active.turn.id,
     });
+    recordTurnCheckpointUnavailable(this.store, this.hooks, active);
     broadcastTurnConversationShell(this.hooks, active);
     this.timeouts.start(active);
   }

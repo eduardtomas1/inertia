@@ -13,7 +13,7 @@ import {
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
-import { importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
+import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type {
@@ -58,6 +58,7 @@ export interface PreparedTurnRequest {
 
 export interface ResolvedTurnRequest {
   input: BeginAgentTurnInput;
+  importNote: string | null;
   adopt(queued: QueuedTurn): PreparedTurnRequest;
 }
 
@@ -70,6 +71,10 @@ export function prepareTurnRequest(
   const resolved = resolveTurnRequest(dependencies, request);
   const queued = dependencies.store.beginAgentTurn(resolved.input);
   try {
+    if (resolved.importNote) {
+      const message = dependencies.store.createMessage(queued.turn.conversationId, resolved.importNote, "system", [], queued.turn.id, undefined, { activateConversation: false });
+      dependencies.hooks.broadcast({ type: "conversation.message.persisted", message });
+    }
     onPersisted?.();
     return resolved.adopt(queued);
   } catch (error) {
@@ -268,6 +273,9 @@ export function resolveTurnRequest(
     };
   };
   const canResume = continuation.action === "resume-session";
+  const importNote = latestTurn?.origin === "cli-import"
+    ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
+    : null;
   const startsFreshInEstablishedChat = !canResume
     && continuation.reasonCode !== "first-turn"
     && request.goalStart === undefined;
@@ -383,6 +391,7 @@ export function resolveTurnRequest(
   };
   return {
     input,
+    importNote,
     adopt: (queued) => {
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();

@@ -8,8 +8,8 @@ import { deferred } from "./composer-fixtures";
 
 const project = { id: "11111111-1111-4111-8111-111111111111", name: "Studio" };
 const candidates: CliConversationCandidate[] = [
-  { id: "22222222-2222-4222-8222-222222222222", providerId: "codex", title: "Build the sidebar", updatedAt: "2026-09-25T10:00:00.000Z", importedConversationId: null, importedOmission: null, opening: { user: "Sidebar request", assistant: "Sidebar answer" } },
-  { id: "33333333-3333-4333-8333-333333333333", providerId: "claude", title: "Review accessibility", updatedAt: "2026-09-24T16:30:00.000Z", importedConversationId: null, importedOmission: null, opening: { user: "Accessibility request", assistant: null } },
+  { id: "22222222-2222-4222-8222-222222222222", providerId: "codex", title: "Build the sidebar", updatedAt: "2026-09-25T10:00:00.000Z", importedConversationId: null, importedOmission: null, continuation: "native", opening: { user: "Sidebar request", assistant: "Sidebar answer" } },
+  { id: "33333333-3333-4333-8333-333333333333", providerId: "claude", title: "Review accessibility", updatedAt: "2026-09-24T16:30:00.000Z", importedConversationId: null, importedOmission: null, continuation: "native", opening: { user: "Accessibility request", assistant: null } },
 ];
 const importedId = "44444444-4444-4444-8444-444444444444";
 const result = (value: Extract<ServerEvent, { type: "request.result" }>["result"]): ServerEvent => ({ type: "request.result", requestId: "test", result: value });
@@ -351,5 +351,16 @@ describe("CLI import dialog", () => {
     expect(card(/Review accessibility/u).querySelector(".cli-import-card-omission")).toBeNull();
     fireEvent.click(card(/Review accessibility/u));
     expect(await screen.findByText("Earlier messages will not be imported: 3 of 4")).toBeInTheDocument();
+  });
+  it("says on each card and in the preview whether the chat continues the original session or a new one", async () => {
+    const archived = { ...candidates[1]!, continuation: "context" as const };
+    render(<CliConversationImportDialog project={project} onClose={vi.fn()}
+      request={requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(scanOf([candidates[0]!, archived]))
+        : command.type === "conversation.cli.preview" && command.payload.candidateId === archived.id ? Promise.resolve(previewOf(archived, "Accessibility request")) : undefined)} />);
+    expect((await findCard(/Build the sidebar/u)).querySelector(".cli-import-card-continuation")).toHaveTextContent(/^Continues the original session$/u);
+    expect(card(/Review accessibility/u).querySelector(".cli-import-card-continuation")).toHaveTextContent(/^Continues in a new session$/u);
+    fireEvent.click(card(/Review accessibility/u));
+    await screen.findByRole("group", { name: "Review accessibility" });
+    expect(document.querySelector(".cli-import-continuation")).toHaveTextContent(/^Continues in a new session$/u);
   });
 });

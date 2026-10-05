@@ -258,6 +258,7 @@
   margin-left: auto;
 }
 
+.cli-import-card-continuation,
 .cli-import-card-omission {
   position: relative;
   overflow: hidden;
@@ -361,6 +362,7 @@
   border-top: 1px solid var(--border);
 }
 
+.cli-import-continuation,
 .cli-import-status {
   min-width: 0;
   flex: 1;

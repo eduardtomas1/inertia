@@ -4,7 +4,7 @@ import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
-import { CLI_TRANSCRIPT_READ_DEADLINE_MS, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan, type CliProvider } from "../../shared/cli-conversations";
+import { CLI_TRANSCRIPT_READ_DEADLINE_MS, type CliConversationCandidate, type CliConversationContinuation, type CliConversationPreview, type CliConversationScan, type CliProvider } from "../../shared/cli-conversations";
 import { environmentValue, expandHomePath } from "../environment";
 import { acpEnvironmentSecretValues } from "../provider/acp-redaction";
 import type { CliSessionOwnership } from "../persistence/cli-conversation-import";
@@ -25,10 +25,12 @@ const DEFAULT_SCAN_LIMITS: CliScanLimits = {
   entries: 3_000, reads: 1_000, headerBytes: 32 * 1024 * 1024, bytes: 64 * 1024 * 1024, milliseconds: 5_000,
   fullReadBytes: CLI_SCAN_FULL_READ_BYTES, prefixBytes: SCAN_PREFIX_BYTES, recordBytes: CLI_RECORD_MAX_BYTES, readMilliseconds: CLI_TRANSCRIPT_READ_DEADLINE_MS,
 };
-interface Root { providerId: CliProvider; path: string }
-interface Grant { projectId: string; workspace: string; root: string; path: string; providerId: CliProvider; expiresAt: number }
+interface Root { providerId: CliProvider; path: string; continuation?: CliConversationContinuation }
+interface Grant { projectId: string; workspace: string; root: string; path: string; providerId: CliProvider; continuation: CliConversationContinuation; expiresAt: number }
 interface Found { grant: Grant; candidate: Omit<CliConversationCandidate, "id"> }
-export interface ReadCliConversation { transcript: ParsedCliTranscript; revision: string; sourceKey: string; providerId: CliProvider; droppedRecords: number }
+export interface ReadCliConversation {
+  transcript: ParsedCliTranscript; revision: string; sourceKey: string; providerId: CliProvider; droppedRecords: number; continuation: CliConversationContinuation;
+}
 interface StreamOptions { secrets: readonly string[]; recordBytes: number; deadline: number; signal?: AbortSignal; limit?: number }
 
 export function cliConversationRoots(environment: NodeJS.ProcessEnv = process.env): Root[] {
@@ -37,9 +39,9 @@ export function cliConversationRoots(environment: NodeJS.ProcessEnv = process.en
     return value ? resolve(expandHomePath(value)) : join(homedir(), fallback);
   };
   return [
-    { providerId: "codex", path: join(root("CODEX_HOME", ".codex"), "sessions") },
-    { providerId: "codex", path: join(root("CODEX_HOME", ".codex"), "archived_sessions") },
-    { providerId: "claude", path: join(root("CLAUDE_CONFIG_DIR", ".claude"), "projects") },
+    { providerId: "codex", path: join(root("CODEX_HOME", ".codex"), "sessions"), continuation: "native" },
+    { providerId: "codex", path: join(root("CODEX_HOME", ".codex"), "archived_sessions"), continuation: "context" },
+    { providerId: "claude", path: join(root("CLAUDE_CONFIG_DIR", ".claude"), "projects"), continuation: "native" },
   ];
 }
 
@@ -187,7 +189,7 @@ export class CliConversationDiscovery {
       return true;
     };
     const codex = providerId === "codex";
-    const files: Array<{ root: string; path: string; mtime: number; size: number }> = [];
+    const files: Array<{ root: string; path: string; mtime: number; size: number; continuation: CliConversationContinuation }> = [];
     for (const source of sources) {
       let root: string;
       try { root = await realpath(source.path); } catch { continue; }
@@ -205,7 +207,7 @@ export class CliConversationDiscovery {
             if (entry.isDirectory() && directory.depth < (codex ? 3 : 1)) pending.push({ path, depth: directory.depth + 1, mtime: codex ? 0 : (await lstat(path)).mtimeMs });
             else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
               const info = await lstat(path);
-              files.push({ root, path, mtime: info.mtimeMs, size: info.size });
+              files.push({ root, path, mtime: info.mtimeMs, size: info.size, continuation: source.continuation ?? "native" });
             }
           }
         } catch { continue; }
@@ -233,8 +235,11 @@ export class CliConversationDiscovery {
         const ownership = imported(providerId, transcript.sessionId);
         if (ownership.owned) continue;
         found.push({
-          grant: { projectId, workspace, root: file.root, path: file.path, providerId, expiresAt: Date.now() + GRANT_LIFETIME_MS },
-          candidate: { providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, opening: transcript.opening },
+          grant: { projectId, workspace, root: file.root, path: file.path, providerId, continuation: file.continuation, expiresAt: Date.now() + GRANT_LIFETIME_MS },
+          candidate: {
+            providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId,
+            importedOmission: ownership.omission, continuation: file.continuation, opening: transcript.opening,
+          },
         });
       } catch (error) {
         this.signal?.throwIfAborted();
@@ -257,7 +262,7 @@ export class CliConversationDiscovery {
       if (!localAbsolutePath(transcript.cwd) || relative(workspace, await realpath(transcript.cwd)) !== "") throw new Error("Workspace changed.");
       this.signal?.throwIfAborted();
       return {
-        transcript, revision: read.revision, providerId: grant.providerId, droppedRecords: read.droppedRecords,
+        transcript, revision: read.revision, providerId: grant.providerId, droppedRecords: read.droppedRecords, continuation: grant.continuation,
         sourceKey: createHash("sha256").update(`${grant.providerId}\0${grant.root}\0${transcript.sessionId}`).digest("hex"),
       };
     } catch (error) {
@@ -287,7 +292,7 @@ export class CliConversationDiscovery {
     return {
       candidate: {
         id: candidateId, providerId: value.providerId, title: value.transcript.title, updatedAt: value.transcript.updatedAt,
-        importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, opening: value.transcript.opening,
+        importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, continuation: value.continuation, opening: value.transcript.opening,
       },
       revision: value.revision, messages: value.transcript.messages, omittedMessages: value.transcript.omittedMessages,
     };

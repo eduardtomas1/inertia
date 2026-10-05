@@ -224,6 +224,7 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await launcher.click();
   await expect(dialog.getByRole("button", { name: new RegExp(codexTitle, "u") })).toBeVisible();
   await expect(dialog.locator(".cli-import-mini-reply")).toHaveCount(3);
+  await expect(dialog.getByRole("button", { name: new RegExp(codexTitle, "u") }).locator(".cli-import-card-continuation")).toHaveText("Continues the original session");
   await expectDialogLayout(dialog);
   await captureState(info, "dialog-idle-dark-wide");
   await setAppearanceInPlace(app, "light");
@@ -287,11 +288,11 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("imports a rollout larger than the old 16 MiB limit with its opening and newest messages", async ({ browserName: _browserName }, info) => {
+test("imports an archived rollout larger than the old 16 MiB limit with its opening and newest messages", async ({ browserName: _browserName }, info) => {
   test.setTimeout(150_000);
   historyRoot = await mkdtemp(join(tmpdir(), "inertia-cli-history-"));
   const codexRoot = join(historyRoot, "codex"); const claudeRoot = join(historyRoot, "claude");
-  const codexDirectory = join(codexRoot, "sessions", "2026", "09", "26");
+  const codexDirectory = join(codexRoot, "archived_sessions");
   const largeTitle = "Port the release scripts to the new packaging pipeline";
   app = await createAppFixture({ name: "cli-conversation-import-large", initialState: "conversation", codexAppServerSource: providerSource,
     additionalEnvironment: { CODEX_HOME: codexRoot, CLAUDE_CONFIG_DIR: claudeRoot },
@@ -312,9 +313,12 @@ test("imports a rollout larger than the old 16 MiB limit with its opening and ne
   await openImporter(app.page);
   const dialog = app.page.getByRole("dialog", { name: "Import CLI conversations" });
   await expect(dialog.locator(".cli-import-note")).toHaveCount(0);
-  await dialog.getByRole("button", { name: new RegExp(largeTitle, "u") }).click();
+  const largeCard = dialog.getByRole("button", { name: new RegExp(largeTitle, "u") });
+  await expect(largeCard.locator(".cli-import-card-continuation")).toHaveText("Continues in a new session");
+  await largeCard.click();
   await expect(dialog.getByRole("group", { name: largeTitle })).toBeVisible();
   await expect(dialog.getByText("Earlier messages will not be imported: 762 of 962", { exact: true })).toBeVisible();
+  await expect(dialog.locator(".cli-import-continuation")).toHaveText("Continues in a new session");
   await captureState(info, "dialog-large-preview-light-wide");
   await dialog.getByRole("button", { name: "Import conversation", exact: true }).click();
   await dialog.getByRole("button", { name: "Open chat", exact: true }).click();

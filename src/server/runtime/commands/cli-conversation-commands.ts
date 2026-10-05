@@ -37,7 +37,7 @@ export function createCliConversationCommandHandler(deps: {
         const conversationId = deps.store.importCliConversation({
           projectId, sourceKey: value.sourceKey, providerId: value.providerId, sessionId: value.transcript.sessionId, cwd: value.transcript.cwd,
           title: value.transcript.title, messages: value.transcript.messages,
-          omittedMessages: value.transcript.omittedMessages, omittedBytes: value.transcript.omittedBytes, droppedRecords: value.droppedRecords,
+          omittedMessages: value.transcript.omittedMessages, omittedBytes: value.transcript.omittedBytes, droppedRecords: value.droppedRecords, continuation: value.continuation,
           selection, continuationIdentity: route.continuationIdentity,
         });
         deps.broadcastSnapshot();

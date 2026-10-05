@@ -5,6 +5,10 @@ export const CLI_IMPORT_MAX_TEXT = 256 * 1024;
 export { CLI_TRANSCRIPT_READ_DEADLINE_MS } from "./runtime-command-timeouts";
 export const cliProviderSchema = z.enum(["codex", "claude"]);
 export type CliProvider = z.infer<typeof cliProviderSchema>;
+export const cliConversationContinuationSchema = z.enum(["native", "context"]);
+export type CliConversationContinuation = z.infer<typeof cliConversationContinuationSchema>;
+export const cliContinuationText = (continuation: CliConversationContinuation): string =>
+  continuation === "context" ? "Continues in a new session" : "Continues the original session";
 export const cliProviderLabel = (provider: CliProvider): string => provider === "codex" ? "Codex" : "Claude Code";
 export const cliMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -32,6 +36,7 @@ export const cliConversationCandidateSchema = z.object({
   updatedAt: z.string().datetime(),
   importedConversationId: z.string().uuid().nullable(),
   importedOmission: cliConversationOmissionSchema.nullable(),
+  continuation: cliConversationContinuationSchema,
   opening: cliConversationOpeningSchema,
 }).strict();
 export type CliConversationCandidate = z.infer<typeof cliConversationCandidateSchema>;

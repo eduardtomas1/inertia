@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { cliOmissionText, type CliConversationOmission, type CliMessage, type CliProvider } from "../../shared/cli-conversations";
+import { cliOmissionText, type CliConversationContinuation, type CliConversationOmission, type CliMessage, type CliProvider } from "../../shared/cli-conversations";
 import type { Conversation, ContinuationIdentity, ModelSelection } from "../../shared/contracts";
 import type { ConversationRepository } from "./conversation-repository";
 import type { TranscriptRepository } from "./transcript-repository";
@@ -17,6 +17,7 @@ export interface CliConversationImportInput {
   omittedMessages: number;
   omittedBytes: number;
   droppedRecords: number;
+  continuation: CliConversationContinuation;
   selection: ModelSelection;
   continuationIdentity: ContinuationIdentity;
 }
@@ -45,12 +46,12 @@ export function cliSessionOwnership(database: Database.Database, providerId: Cli
   return { importedConversationId: null, omission: null, owned: owned !== undefined };
 }
 
-export interface CliConversationImportRecord { providerId: CliProvider; cwd: string; sessionId: string }
+export interface CliConversationImportRecord { providerId: CliProvider; cwd: string; sessionId: string; continuation: CliConversationContinuation }
 
 export function cliConversationImport(database: Database.Database, conversationId: string): CliConversationImportRecord | null {
-  const imported = database.prepare("SELECT provider_id, cwd, session_id FROM cli_conversation_imports WHERE conversation_id = ?")
-    .get(conversationId) as { provider_id: CliProvider; cwd: string; session_id: string } | undefined;
-  return imported ? { providerId: imported.provider_id, cwd: imported.cwd, sessionId: imported.session_id } : null;
+  const imported = database.prepare("SELECT provider_id, cwd, session_id, continuation FROM cli_conversation_imports WHERE conversation_id = ?")
+    .get(conversationId) as { provider_id: CliProvider; cwd: string; session_id: string; continuation: CliConversationContinuation } | undefined;
+  return imported ? { providerId: imported.provider_id, cwd: imported.cwd, sessionId: imported.session_id, continuation: imported.continuation } : null;
 }
 
 function importTurns(
@@ -119,12 +120,12 @@ export function importCliConversation(
       message.createdAt = new Date(before).toISOString();
     }
     importTurns(database, transcripts, turns, conversation.id, input, ordered);
-    conversations.update(conversation.id, { providerSessionId: input.sessionId, continuationIdentity: input.continuationIdentity });
+    conversations.update(conversation.id, { providerSessionId: input.continuation === "native" ? input.sessionId : null, continuationIdentity: input.continuationIdentity });
     database.prepare(`INSERT INTO cli_conversation_imports
-      (source_key, provider_id, session_id, cwd, conversation_id, imported_at, source_messages, omitted_messages, omitted_bytes, dropped_records)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (source_key, provider_id, session_id, cwd, conversation_id, imported_at, source_messages, omitted_messages, omitted_bytes, dropped_records, continuation)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(input.sourceKey, input.providerId, input.sessionId, input.cwd, conversation.id, importedAt,
-        input.messages.length + input.omittedMessages, input.omittedMessages, input.omittedBytes, input.droppedRecords);
+        input.messages.length + input.omittedMessages, input.omittedMessages, input.omittedBytes, input.droppedRecords, input.continuation);
     return conversation.id;
   })();
 }

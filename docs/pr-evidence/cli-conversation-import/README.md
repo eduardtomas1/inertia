@@ -71,6 +71,14 @@ session say how many earlier messages were left out. A file whose session
 header belongs to this checkout but whose records cannot be read is counted
 in one muted line under the gallery.
 
+Sessions from Codex's `archived_sessions` continue in a new session: Inertia
+never resumes or unarchives them, and the first follow-up starts a fresh
+session with the imported messages restored as earlier context. Other
+sessions continue the original session. Each card and the preview say which
+("Continues the original session" or "Continues in a new session"), and the
+first follow-up of an imported chat carries one note saying so. For a Codex
+session it also says Inertia's Browser and other host tools are not available.
+
 | Large rollout preview, 1440 × 868 light | Imported chat, 1440 × 868 light |
 | --- | --- |
 | ![Large rollout preview](dialog-large-preview-light-wide.png) | ![Imported chat with the omission note](chat-large-note-light-wide.png) |

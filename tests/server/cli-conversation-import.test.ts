@@ -99,7 +99,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId });
     const identity = continuationIdentityForSelection(selection, "native-fixture");
-    const input = { projectId: project.id, sourceKey: "a".repeat(64), providerId, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages: [{ role: "user" as const, content: "Earlier work", createdAt: "2099-09-25T10:00:00.000Z" }, { role: "assistant" as const, content: "Preserved order", createdAt: "2026-09-25T10:00:00.000Z" }, { role: "user" as const, content: "Same timestamp", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity: identity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 };
+    const input = { projectId: project.id, sourceKey: "a".repeat(64), providerId, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages: [{ role: "user" as const, content: "Earlier work", createdAt: "2099-09-25T10:00:00.000Z" }, { role: "assistant" as const, content: "Preserved order", createdAt: "2026-09-25T10:00:00.000Z" }, { role: "user" as const, content: "Same timestamp", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity: identity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const };
     const previous = store.shellSnapshot().activeConversationId;
     const conversationId = store.importCliConversation(input);
     expect(store.conversation(conversationId)).toMatchObject({ projectId: project.id, providerId, providerSessionId: f.sessionId, continuationIdentity: identity, accessMode: "supervised", interactionMode: "build" });
@@ -227,7 +227,7 @@ describe("CLI conversation import authority and persistence", () => {
     const f = await fixture();
     const configDirectory = join(f.root, "claude");
     const roots = cliConversationRoots({ CLAUDE_CONFIG_DIR: configDirectory }).filter(({ providerId }) => providerId === "claude");
-    expect(roots).toEqual([{ providerId: "claude", path: f.claudeRoot }]);
+    expect(roots).toEqual([{ providerId: "claude", path: f.claudeRoot, continuation: "native" }]);
     await f.claude("project", f.workspace, CLAUDE_PROTOCOL_SESSION_ID);
     const discovery = new CliConversationDiscovery(roots, []);
     const candidate = (await discovery.scan("project", f.workspace, unowned)).candidates[0]!;
@@ -255,7 +255,7 @@ describe("CLI conversation import authority and persistence", () => {
       const sessionId = randomUUID();
       const selection = providerNativeModelSelection({ providerId });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
-      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
       const unavailable = { reason: "provider-error", message: "The saved provider session is no longer available.", sessionUnavailable: true } as const;
       const label = providerId === "codex" ? "Codex" : "Claude Code";
       for (const content of ["Continue.", "Try again."]) {
@@ -284,7 +284,7 @@ describe("CLI conversation import authority and persistence", () => {
       const original = randomUUID(); const later = randomUUID();
       const selection = providerNativeModelSelection({ providerId: "claude" });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
-      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "8".repeat(64), providerId: "claude", sessionId: original, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "8".repeat(64), providerId: "claude", sessionId: original, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
       const moved = runtime.controller.queue({ conversationId, content: "Switch." });
       runtime.controller.start(moved.turn.id);
       expect(runtime.provider.input?.sessionId).toBe(original);
@@ -314,7 +314,7 @@ describe("CLI conversation import authority and persistence", () => {
       const selection = providerNativeModelSelection({ providerId: "codex" });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
       const importedSessionId = randomUUID();
-      const imported = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "7".repeat(64), providerId: "codex", sessionId: importedSessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
+      const imported = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "7".repeat(64), providerId: "codex", sessionId: importedSessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
       const observed: Array<{ instructions: number; hostTools: unknown }> = [];
       for (const conversationId of [runtime.conversationId, imported]) {
         const queued = runtime.controller.queue({ conversationId, content: "Continue." });
@@ -348,7 +348,7 @@ describe("CLI conversation import authority and persistence", () => {
     if (preview.kind !== "conversation.cli.preview") throw new Error("Missing preview");
     const imported = await call({ type: "conversation.cli.import", requestId: "import", payload: { projectId: project.id, candidateId: scan.scan.candidates[0]!.id, revision: preview.preview.revision } });
     if (imported.kind !== "conversation.cli.imported") throw new Error("Missing import");
-    expect(store.cliConversationImport(imported.conversationId)).toEqual({ providerId: "codex", cwd: f.workspace, sessionId: expect.any(String) });
+    expect(store.cliConversationImport(imported.conversationId)).toEqual({ providerId: "codex", cwd: f.workspace, sessionId: expect.any(String), continuation: "native" });
     const rescan = await call({ type: "conversation.cli.scan", requestId: "rescan", payload: { projectId: project.id } });
     if (rescan.kind !== "conversation.cli.scan") throw new Error("Missing scan");
     expect(rescan.scan.candidates.map(({ importedConversationId }) => importedConversationId)).toEqual([imported.conversationId]);
@@ -362,7 +362,7 @@ describe("CLI conversation import authority and persistence", () => {
     const selection = providerNativeModelSelection({ providerId: "codex" });
     const replaced = randomUUID();
     const chat = store.importCliConversation({ projectId: project.id, sourceKey: "9".repeat(64), providerId: "codex", sessionId: randomUUID(), cwd: f.workspace, title: "Native chat",
-      messages: [{ role: "user", content: "Native work", createdAt: "2026-09-25T09:00:00.000Z" }], omittedMessages: 0, omittedBytes: 0, droppedRecords: 0,
+      messages: [{ role: "user", content: "Native work", createdAt: "2026-09-25T09:00:00.000Z" }], omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const,
       selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture") });
     const database = Reflect.get(store, "database") as Database.Database;
     database.prepare("DELETE FROM cli_conversation_imports WHERE conversation_id = ?").run(chat);
@@ -411,7 +411,7 @@ describe("CLI conversation import authority and persistence", () => {
       const selection = providerNativeModelSelection({ providerId: "claude" });
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
       const projectId = runtime.store.conversation(runtime.conversationId).projectId;
-      const importChat = (cwd: string) => runtime.store.importCliConversation({ projectId, sourceKey: randomUUID().replaceAll("-", "").padEnd(64, "0"), providerId: "claude", sessionId: randomUUID(), cwd, title: "Imported", messages: [{ role: "user", content: "Earlier", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
+      const importChat = (cwd: string) => runtime.store.importCliConversation({ projectId, sourceKey: randomUUID().replaceAll("-", "").padEnd(64, "0"), providerId: "claude", sessionId: randomUUID(), cwd, title: "Imported", messages: [{ role: "user", content: "Earlier", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
       const cwdFor = async (conversationId: string) => {
         const queued = runtime.controller.queue({ conversationId, content: "Continue." });
         runtime.controller.start(queued.turn.id);
@@ -450,7 +450,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId: "codex" });
     const messages = Array.from({ length: 30 }, (_, index) => ({ role: index % 2 === 0 ? "user" as const : "assistant" as const, content: `Message ${index}`, createdAt: new Date(Date.parse("2026-06-10T10:00:00.000Z") + index * 60_000).toISOString() }));
-    const input = { projectId: project.id, sourceKey: "c".repeat(64), providerId: "codex" as const, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 };
+    const input = { projectId: project.id, sourceKey: "c".repeat(64), providerId: "codex" as const, sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const };
     const dailyRange = { date: "2026-06-10", fromInclusive: "2026-06-10T00:00:00.000Z", toExclusive: "2026-06-11T00:00:00.000Z", timeZone: "UTC" };
     const usageRange = { days: 30 as const, fromInclusive: "2026-06-01T00:00:00.000Z", toExclusive: "2026-07-01T00:00:00.000Z", endDate: "2026-06-30", timeZone: "UTC" };
     const dashboards = () => JSON.parse(JSON.stringify({ daily: store.dailyWork(dailyRange), usage: store.usageDashboard(usageRange) }).replace(/"generatedAt":"[^"]+"/gu, '"generatedAt":""')) as unknown;
@@ -484,7 +484,7 @@ describe("CLI conversation import authority and persistence", () => {
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId: "claude" });
     const messages = [{ role: "user" as const, content: "Question", createdAt: "2026-06-10T10:00:00.000Z" }, { role: "assistant" as const, content: "Answer", createdAt: "2026-06-10T10:01:00.000Z" }];
-    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "invalid", providerId: "claude", sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 })).toThrow();
+    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "invalid", providerId: "claude", sessionId: f.sessionId, cwd: f.workspace, title: "CLI session", messages, selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const })).toThrow();
     const raw = new Database(dbPath, { readonly: true });
     try {
       expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });
@@ -504,7 +504,7 @@ describe("CLI conversation import authority and persistence", () => {
     const store = new RuntimeStore(dbPath, f.workspace); stores.push(store);
     const project = store.createProject("Studio", f.workspace);
     const selection = providerNativeModelSelection({ providerId: "codex" });
-    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "e".repeat(64), providerId: "codex", sessionId: id, cwd: f.workspace, title: "Assistant only", messages: ["One", "Two", "Three"].map((content, index) => ({ role: "assistant" as const, content, createdAt: `2026-06-10T10:0${index}:00.000Z` })), selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 })).toThrow("This CLI conversation has no user message to import.");
+    expect(() => store.importCliConversation({ projectId: project.id, sourceKey: "e".repeat(64), providerId: "codex", sessionId: id, cwd: f.workspace, title: "Assistant only", messages: ["One", "Two", "Three"].map((content, index) => ({ role: "assistant" as const, content, createdAt: `2026-06-10T10:0${index}:00.000Z` })), selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"), omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const })).toThrow("This CLI conversation has no user message to import.");
     const raw = new Database(dbPath, { readonly: true });
     try {
       expect(raw.prepare("SELECT (SELECT count(*) FROM agent_turns) AS turns, (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM cli_conversation_imports) AS receipts, (SELECT count(*) FROM conversations) AS conversations").get()).toEqual({ turns: 0, messages: 0, receipts: 0, conversations: 0 });

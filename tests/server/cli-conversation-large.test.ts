@@ -130,7 +130,7 @@ describe("CLI transcripts larger than the old 16 MiB file bound", () => {
       const selection = providerNativeModelSelection({ providerId: "codex" });
       const conversationId = store.importCliConversation({
         projectId: project.id, sourceKey: "f".repeat(64), providerId: "codex", sessionId: read.transcript.sessionId, cwd: read.transcript.cwd, title: read.transcript.title,
-        messages: read.transcript.messages, omittedMessages: read.transcript.omittedMessages, omittedBytes: read.transcript.omittedBytes, droppedRecords: read.droppedRecords,
+        messages: read.transcript.messages, omittedMessages: read.transcript.omittedMessages, omittedBytes: read.transcript.omittedBytes, droppedRecords: read.droppedRecords, continuation: "native",
         selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"),
       });
       expect(store.cliSessionOwnership("codex", read.transcript.sessionId)).toEqual({ importedConversationId: conversationId, omission: { omitted: 1002, total: 1202 }, owned: false });

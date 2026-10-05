@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from "react-dom";
 import { ArrowLeft, ArrowRight, Check, Download, RefreshCw, Search, X } from "lucide-react";
 import type { Project, ServerEvent } from "@shared/contracts";
-import { cliOmissionText, cliProviderLabel, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan } from "@shared/cli-conversations";
+import { cliContinuationText, cliOmissionText, cliProviderLabel, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan } from "@shared/cli-conversations";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { diagnosticErrorReference } from "../utils/diagnosticNavigation";
@@ -214,6 +214,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
                 </div>}
             </div>
             <div className="cli-import-actions">
+              {preview && !status && <p className="cli-import-continuation">{cliContinuationText(preview.candidate.continuation)}</p>}
               {status && <p className="cli-import-status" role={error ? "alert" : "status"}>{status}</p>}
               {preview && <button type="button" className={openedId || !alreadyImported ? "primary-button" : "secondary-button"}
                 aria-disabled={openedId ? false : importUnavailable} aria-keyshortcuts={importShortcut} onClick={runAction}>
@@ -239,6 +240,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
                         <time dateTime={item.updatedAt}>{cardLabel(new Date(item.updatedAt))}</time>
                         {item.importedConversationId && <span>Imported</span>}
                       </span>
+                      <span className="cli-import-card-continuation">{cliContinuationText(item.continuation)}</span>
                       {item.importedOmission && <span className="cli-import-card-omission">{cliOmissionText(item.importedOmission, true)}</span>}
                     </button>
                   </div>;

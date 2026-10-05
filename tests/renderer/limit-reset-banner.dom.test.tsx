@@ -80,6 +80,14 @@ describe("quota reset banner", () => {
     await screen.findByText("Resume scheduled");
     expect(run.mock.calls[1]![0]).toEqual({ type: "conversation.limit-reset.resume", payload: { conversationId, id } });
   });
+  it("explains a missed resume with the scheduler's reason when it gives one", async () => {
+    const missed = pending(); missed.offer = null;
+    missed.plan = { ...missed.plan!, state: "missed", error: "The provider did not report new quota within an hour of the reset, so nothing was sent." };
+    render(banner(vi.fn<LimitResetCommandRunner>().mockResolvedValue(missed)));
+    await screen.findByText("Resume missed");
+    expect(screen.getByRole("status")).toHaveTextContent("did not report new quota within an hour of the reset");
+    expect(screen.getByRole("button", { name: "Resume now" })).toBeVisible();
+  });
   it("does not let an older turn's plan hide the offer for the latest failed turn", async () => {
     const newer = "55555555-5555-4555-8555-555555555555";
     const stale = pending(); stale.plan!.state = "blocked"; stale.plan!.error = "The chat changed.";

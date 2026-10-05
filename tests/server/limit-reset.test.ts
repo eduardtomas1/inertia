@@ -306,11 +306,30 @@ describe("quota reset actions", () => {
     expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 
-  it("bounds retries when the provider keeps reporting an expired exhausted window", async () => {
+  it("keeps checking with a capped backoff while the provider still reports the expired window, then offers Resume now", async () => {
     await schedule();
-    for (let attempt = 0; attempt < 3; attempt += 1) { vi.setSystemTime(instant + 61_000 + attempt * 31_000); await scheduler.tick(); }
-    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "blocked", attempts: 3 });
+    vi.setSystemTime(Date.parse(reset) + 1_000);
+    const checks: number[] = [];
+    while (store.limitResets.get(conversationId)?.state === "waiting") {
+      const due = Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt);
+      if (due > Date.now()) vi.setSystemTime(due);
+      checks.push(Date.now() - Date.parse(reset));
+      await scheduler.tick();
+      expect(checks.length).toBeLessThan(30);
+    }
+    const gaps = checks.slice(1).map((at, index) => at - checks[index]!);
+    expect(gaps.slice(0, 5)).toEqual([30_000, 60_000, 120_000, 240_000, 300_000]);
+    expect(Math.max(...gaps)).toBe(300_000);
+    expect(checks.at(-1)).toBeLessThanOrEqual(60 * 60_000);
+    const missed = store.limitResets.get(conversationId)!;
+    expect(missed).toMatchObject({ state: "missed", error: expect.stringContaining("nothing was sent") });
+    expect(missed.error).not.toMatch(/refresh/i);
     expect(dependencies.dispatch).not.toHaveBeenCalled();
+    account.windows[0]!.remainingPercent = 100;
+    expect((await scheduler.resume({ conversationId, id: missed.id })).plan).toMatchObject({ state: "waiting", error: null });
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
   });
 
   it("does not persist an unexpected dispatch error as public provider output", async () => {

@@ -135,7 +135,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const pending = plan?.state === "waiting" || plan?.state === "dispatching";
   const blocked = plan?.state === "blocked";
   const missed = plan?.state === "missed";
-  const message = error ? diagnosticErrorReference(error).message : missed ? MISSED_MESSAGE : plan?.error ?? null;
+  const message = error ? diagnosticErrorReference(error).message : missed ? plan.error ?? MISSED_MESSAGE : plan?.error ?? null;
   const reason = !plan && offer && !offer.canResume ? offer.unavailableReason : null;
   const resetsAt = plan?.resetsAt ?? offer!.resetsAt;
   const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) >= Date.parse(resetsAt);

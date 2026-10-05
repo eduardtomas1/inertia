@@ -132,7 +132,6 @@ export async function expectStructuralCoverage(
     notInspected: string[];
     present?: string;
     absent: string[];
-    truncated?: boolean;
   },
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(
@@ -179,10 +178,8 @@ export async function expectStructuralCoverage(
   const page = JSON.parse(evidence.snapshot?.text ?? "{}") as {
     notInspected?: string[];
     text?: string;
-    truncated?: boolean;
   };
   expect(page.notInspected ?? [], url).toEqual(expected.notInspected);
-  if (expected.truncated !== undefined) expect(page.truncated, url).toBe(expected.truncated);
   if (expected.present) expect(page.text, url).toContain(expected.present);
   for (const absent of expected.absent) {
     expect(JSON.stringify(evidence), url).not.toContain(absent);

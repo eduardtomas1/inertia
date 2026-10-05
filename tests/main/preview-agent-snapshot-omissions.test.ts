@@ -118,4 +118,11 @@ describe("snapshot omissions the agent can act on", () => {
     expect(parsed.elements.slice(1).every((element) => element.offscreen === true && Boolean(element.ref))).toBe(true);
     expect(parsed.omitted).toEqual({ textChars: 0, elements: 206 - parsed.elements.length });
   });
+
+  it("lists controls in the viewport first, then off-screen ones nearest first", async () => {
+    const parsed = await pageSnapshot([
+      button("Far above", -3_000), button("Near below", 900), button("Visible", 100), button("Far below", 5_000),
+    ]);
+    expect(parsed.elements.map(({ name }) => name)).toEqual(["Visible", "Near below", "Far above", "Far below"]);
+  });
 });

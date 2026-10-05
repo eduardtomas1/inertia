@@ -280,7 +280,9 @@ export class PreviewBroker {
               request,
               identity,
               session,
-              async (tab, ref) => await this.#operations.locate(tab, ref, operation.signal),
+              async (tab, ref, purpose) => purpose === "scroll"
+                ? await this.#operations.describe(tab, ref, operation.signal)
+                : await this.#operations.locate(tab, ref, operation.signal),
               operation.signal,
             );
             if (typeof resolved === "string") return this.#success(session, resolved);

@@ -28,7 +28,7 @@ import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, typ
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
-import { agentPageRefOutsideViewport, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
+import { agentPageRefOutsideViewport, describeAgentPageRef, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
 import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
 
@@ -226,6 +226,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       { signal, phase: "page-scroll" },
     )) throw new AgentBrowserRefusal(failure("not-found", OUTSIDE_VIEWPORT_MESSAGE));
     return located;
+  }
+
+  async describe(tab: PreviewTab, ref: string, signal?: AbortSignal): Promise<PreviewAgentTarget> {
+    const contents = tab.view.webContents;
+    if (blankTab(contents)) throw new AgentBrowserRefusal(failure("not-found", BLANK_TAB_NEXT_STEP));
+    await this.#ensureSecurityDebugger(contents, undefined, signal);
+    await this.rendererOperation(contents, () => installAgentPagePrivacyGuard(contents), { signal, phase: "privacy-guard" });
+    return await this.rendererOperation(contents, () => describeAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
   }
 
   async sensitiveDocument(contents: PreviewContents): Promise<boolean> {

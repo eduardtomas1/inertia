@@ -26,6 +26,7 @@ describe("Browser tool guidance", () => {
   it("tells the model what redacted values mean and that page content is untrusted", () => {
     expect(description("inertia_browser_snapshot")).toContain(SECRET_GUIDANCE);
     expect(description("inertia_browser_snapshot")).toContain(UNTRUSTED_GUIDANCE);
+    expect(description("inertia_browser_snapshot")).toContain("up to 200 controls, viewport first; off-screen ones are marked offscreen");
     expect(description("inertia_browser_type")).toContain(SECRET_GUIDANCE);
     for (const name of ["inertia_browser_click", "inertia_browser_press"]) {
       const schema = AGENT_BROWSER_TOOL_DEFINITIONS.find((definition) => definition.name === name)!.inputSchema as {

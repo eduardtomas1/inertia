@@ -11,7 +11,13 @@ afterEach(() => vi.useRealTimers());
 function fixture() {
   const tab = { id: crypto.randomUUID(), documentSequence: 1, pageNumber: 1,
     view: { webContents: { getTitle: () => "Checkout", getURL: () => "http://localhost:3000/",
-      isDestroyed: () => false, isLoadingMainFrame: () => false } },
+      isDestroyed: () => false, isLoadingMainFrame: () => false,
+      navigationHistory: {
+        getActiveIndex: () => 1,
+        getEntryAtIndex: (index: number) => ({
+          url: ["http://localhost:3001/previous?token=secret#part", "http://localhost:3000/", "http://localhost:3002/next"][index],
+        }),
+      } } },
   } as unknown as PreviewTab;
   const scope = { activeTabId: tab.id, tabs: new Map([[tab.id, tab]]) };
   const identity = { conversationId: crypto.randomUUID(), runId: crypto.randomUUID(), turnId: crypto.randomUUID() };
@@ -47,8 +53,10 @@ describe("Browser approval authority", () => {
     [{ action: "click", ref: "e1", dialog: "accept" }, "Click textbox: Message and accept the page's confirmation dialog"],
     [{ action: "press", key: "Meta+Enter", dialog: "accept" }, "Press: Meta+Enter and accept the page's confirmation dialog"],
     [{ action: "click", ref: "e1" }, "Click textbox: Message"],
-    [{ action: "history", direction: "back" }, "Go back to the previous page"],
-    [{ action: "history", direction: "reload" }, "Reload the page"],
+    [{ action: "history", direction: "back" }, "Go back to [private address hidden]"],
+    [{ action: "history", direction: "forward" }, "Go forward to http://localhost:3002"],
+    [{ action: "history", direction: "reload" }, "Reload http://localhost:3000"],
+    [{ action: "scroll", ref: "e1" }, "Scroll textbox: Message into view"],
   ] as const)("names what %j will do in its approval", async (command, detail) => {
     const f = fixture();
     f.setTarget({ found: true, role: "textbox", label: "Message", editable: true, sensitive: false });

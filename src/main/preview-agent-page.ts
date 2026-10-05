@@ -510,18 +510,13 @@ async function readSemanticPage(
       if (!rendered(element, rect)) continue;
       candidates.push({ element, rect, frame: false, distance: viewportDistance(rect) });
     }
-    const selectedCandidates = new Set(candidates.slice()
-      .sort((left, right) => left.distance - right.distance)
-      .slice(0, ${MAX_SEMANTIC_ELEMENTS}));
+    const orderedCandidates = candidates.slice().sort((left, right) => left.distance - right.distance);
     const inViewCandidates = candidates.filter((candidate) => candidate.distance === 0).length;
     const elements = [];
-    let omittedElements = 0;
-    for (const candidate of candidates) {
+    const omittedElements = orderedCandidates.slice(${MAX_SEMANTIC_ELEMENTS})
+      .filter((candidate) => !candidate.frame).length;
+    for (const candidate of orderedCandidates.slice(0, ${MAX_SEMANTIC_ELEMENTS})) {
       const { element, rect, frame, distance } = candidate;
-      if (!selectedCandidates.has(candidate)) {
-        if (!frame) omittedElements += 1;
-        continue;
-      }
       if (frame) {
         const frameRect = rect;
         elements.push({

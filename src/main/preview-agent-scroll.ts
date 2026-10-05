@@ -1,7 +1,7 @@
 import type { WebContents } from "electron";
 
 import { agentPageIsFrozen, evaluateInFrozenAgentPage } from "./preview-agent-boundary.js";
-import { AGENT_BROWSER_WORLD_ID } from "./preview-agent-page.js";
+import { AGENT_BROWSER_WORLD_ID, PRIVACY_RUNTIME, type PreviewAgentTarget } from "./preview-agent-page.js";
 
 export interface AgentPageScroll {
   found: boolean;
@@ -19,6 +19,40 @@ function viewport(value: unknown): Record<string, number> {
     const candidate = (value as Record<string, unknown>)[key];
     return typeof candidate === "number" && Number.isFinite(candidate) ? [[key, candidate]] : [];
   }));
+}
+
+export async function describeAgentPageRef(contents: WebContents, ref: string): Promise<PreviewAgentTarget> {
+  const value = await execute(contents, `(() => {
+    const state = globalThis.__inertiaAgentBrowser;
+    const element = state?.refs?.get(${JSON.stringify(ref)});
+    if (!element || !element.isConnected || state.privacyGuardInstalled !== true) return { found: false };
+    const privacy = ${PRIVACY_RUNTIME};
+    const attribute = (name) => {
+      const value = element.getAttribute?.(name);
+      return typeof value === "string" ? value.slice(0, 600) : "";
+    };
+    const sensitive = Boolean(state.evidenceWithheld) || state.passwordNodes?.has(element) === true
+      || privacy.isSensitiveField(element);
+    const text = String(element.textContent ?? "").slice(0, 600);
+    const role = attribute("role").trim().toLowerCase().slice(0, 50)
+      || ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
+      || String(element.tagName).toLowerCase().slice(0, 50);
+    const label = sensitive
+      ? "Sensitive field"
+      : privacy.redact(state, attribute("aria-label") || text || attribute("title") || attribute("placeholder") || "page control", 300);
+    return { found: true, role, label, sensitive };
+  })()`);
+  if (typeof value !== "object" || value === null || (value as { found?: unknown }).found !== true) return { found: false };
+  const target = value as Record<string, unknown>;
+  return {
+    found: true,
+    blocked: false,
+    disabled: false,
+    editable: false,
+    sensitive: target.sensitive === true,
+    role: typeof target.role === "string" ? target.role.slice(0, 50) : "",
+    label: typeof target.label === "string" ? target.label.slice(0, 300) : "page control",
+  };
 }
 
 export async function agentPageRefOutsideViewport(contents: WebContents, ref: string): Promise<boolean> {

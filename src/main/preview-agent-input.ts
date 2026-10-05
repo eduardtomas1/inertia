@@ -103,15 +103,6 @@ async function dispatchAgentPageHover(
   });
 }
 
-/**
- * Input injection is asynchronous: `sendInputEvent` returning only confirms
- * that main queued it, not that the renderer ran page key handlers. Electron's
- * `input-event` is not a reliable acknowledgement for synthetic delivery on
- * every supported platform, so cross a renderer animation-frame boundary
- * before deciding whether it is safe to send
- * char/keyup. That makes the phase boundary authoritative in main rather than
- * depending on listener ordering between the page and isolated worlds.
- */
 export type AgentPageKeyModifier = "shift" | "control" | "meta";
 
 function keyModifiers(modifiers: readonly AgentPageKeyModifier[]): { modifiers?: AgentPageKeyModifier[] } {
@@ -127,6 +118,15 @@ export function agentPageKeyInput(key: string): { keyCode: string; modifiers: Ag
   };
 }
 
+/**
+ * Input injection is asynchronous: `sendInputEvent` returning only confirms
+ * that main queued it, not that the renderer ran page key handlers. Electron's
+ * `input-event` is not a reliable acknowledgement for synthetic delivery on
+ * every supported platform, so cross a renderer animation-frame boundary
+ * before deciding whether it is safe to send
+ * char/keyup. That makes the phase boundary authoritative in main rather than
+ * depending on listener ordering between the page and isolated worlds.
+ */
 export async function dispatchAgentPageKeyDownAndSettle(
   contents: WebContents,
   keyCode: string,

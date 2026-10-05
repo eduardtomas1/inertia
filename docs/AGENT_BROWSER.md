@@ -151,7 +151,9 @@ may already have changed the page. The codes are:
 | `user_denied`, `call_cancelled`, `unknown_tool`, `invalid_owner` | The runtime refused the call before it reached the Browser. | false | false |
 
 When the runtime itself stops waiting for the Browser, the result is
-`timeout` with `reachedPage: true`, because the outcome is unknown.
+`timeout` with `reachedPage: true`, because the outcome is unknown. A navigation that fails with a connection error, such as a refused
+connection, reports `reachedPage: false` even though the tab now shows
+Chromium's error page, because no application code ran.
 
 A new tab is blank. A snapshot of a blank tab is not an error: it returns
 `{"blank":true,"nextStep":...}` so the agent navigates first. After a failed
@@ -167,9 +169,9 @@ instructions.
 
 Semantic snapshots include at most 200 rendered interactive elements, 12,000
 characters of normalized visible text, current viewport data, and a total 32
-KiB UTF-8 process-boundary limit. Controls inside the viewport come first;
-the remaining places go to the controls nearest the viewport, which carry
-`offscreen: true` and a ref like any other, so the agent can scroll to them
+KiB UTF-8 process-boundary limit. Controls inside the viewport come first, in
+page order; the remaining places go to the controls nearest the viewport,
+listed nearest first, which carry `offscreen: true` and a ref like any other, so the agent can scroll to them
 or click and type into them directly. Oversized snapshots are structurally
 reduced, dropping the controls farthest from the viewport first, and remain
 valid JSON. Element references are generated in an isolated JavaScript world
@@ -182,7 +184,11 @@ approval binding to the inspected document and ref is unchanged. In a
 Supervised chat the approval for such a click or type is not prepared,
 because preparing it would scroll the page before the user approves anything:
 the agent is told to scroll the control into view with `inertia_browser_scroll`
-and its ref, which is itself an approved action, and to try again.
+and its ref, which is itself an approved action, and to try again. Approval cards name what each new action targets: a scroll to a ref names
+the control's role and label (a sensitive field is shown as "Sensitive
+field"), and back, forward and reload name the address of the page they will
+open, reduced by the same sanitizer as the navigate card, which keeps only
+the origin and hides an address that looks secret.
 
 When a snapshot leaves anything out, it says so in a form the agent can act
 on instead of a bare flag: `omitted: {"textChars": n, "elements": n}` counts

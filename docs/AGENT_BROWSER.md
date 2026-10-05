@@ -235,11 +235,14 @@ code, an authentication, authenticator, verification, security, MFA, 2FA,
 recovery or backup code, OTP, TOTP, CVV, CVC, card number or PIN. "Token"
 counts only as an API, auth, access, secret, bearer, session or CSRF token, or
 as the whole name. Names are compared as words split at spaces, `_`, `-`, `.`,
-`:`, `/` and camelCase boundaries, so `api_key`, `authToken`, `password2` and
-`x-api-key` are sensitive while `max_tokens`, `token_type` and "Search design
-tokens" are not. Checkboxes, radio buttons, buttons and selects are never
-sensitive by name. Labels in other languages are not recognized; password
-fields and the standard autocomplete tokens still are.
+`:`, `/` and camelCase boundaries. Longer words also match inside a joined
+name, so `api_key`, `authToken`, `password2`, `x-api-key`, `newpassword`,
+`clientsecret` and `otpcode` are sensitive, while the short words OTP, TOTP,
+CVV, CVC, PIN and token must stand alone, so `spinner`, `max_tokens`,
+`token_type`, "secretary" and "Search design tokens" are not. Checkboxes,
+radio buttons, buttons and selects are never sensitive by name. Labels in
+other languages are not recognized; password fields and the standard
+autocomplete tokens still are.
 
 The guard remembers the value and default value of every sensitive field,
 values that page scripts assign to one, and treats any other field holding a
@@ -254,27 +257,31 @@ field keeps its own label as its name, or "Sensitive field" when it has none,
 and always reports the value `[redacted]`. Every remembered value is replaced
 with `[redacted]` wherever else it appears: page text, the title, control
 names and values, and the labels of approval requests. Matching ignores case,
-compatibility forms such as fullwidth letters, whitespace and invisible
-formatting characters (soft hyphen, zero-width spaces, word joiner and byte
-order mark), so a value split across markup or restyled in capitals is still
-found. Its URL-encoded, form-encoded, hexadecimal UTF-8 and JSON-escaped
-copies are found the same way, and overlapping matches are merged into one
-`[redacted]`. Text is redacted before it is clipped to its output limit, and
-when a source itself had to be cut, the end that could hold part of a value is
-dropped.
+compatibility forms such as fullwidth letters, whitespace and every
+default-ignorable character (soft hyphens, zero-width and directional marks,
+joiners, invisible operators and variation selectors), so a value split across
+markup or restyled in capitals is still found. For values of up to 1,024
+characters, URL-encoded, form-encoded, hexadecimal UTF-8 and JSON-escaped
+copies are found the same way. Overlapping matches are merged into one
+`[redacted]`. Page text is redacted over its whole bounded source before it is
+clipped to its output limit, and when a source itself had to be cut, only the
+end that could begin a remembered value is dropped.
 
 Values of four or more characters are hidden wherever they occur, even inside
 words, so a trivial password such as "test" also hides that word in ordinary
-text. Shorter values are hidden only as whole words, unless a snapshot or an
-interaction already saw them in a field, in which case they are hidden
-everywhere.
+text. Values of one or two characters are hidden only as whole words. A
+three-character value is hidden only as a whole word too, unless a snapshot or
+an interaction already saw it in a field, in which case it is hidden
+everywhere, such as a card security code next to its label.
 
-Typing one key at a time produces every prefix of a value. When trusted
-typing extends a sensitive field's previous value, the previous one is
-forgotten unless a snapshot, an interaction or a `change` event already saw
-it; deleting characters keeps both values. A signed-in page that shows the
-username is therefore not mangled by the prefixes of a password that starts
-with it.
+Typing one key at a time produces every prefix of a value. Each prefix stays
+remembered until the next snapshot, interaction lookup or `change` event. At
+that point a prefix is forgotten only if trusted typing extended it in the same
+field, that field is still in the document and its current value still extends
+the prefix, and nothing earlier had already seen the prefix in a field.
+Deleting characters, clearing the field or removing it keeps every value. A
+signed-in page that shows the username is therefore not mangled by the
+prefixes of a password that starts with it.
 
 A snapshot is withheld, with the `sensitive` code until the document is
 replaced by a navigation, only when the guard cannot enumerate or redact
@@ -291,13 +298,18 @@ safely:
   document.
 
 React and similar frameworks install their own value accessor on every input.
-The guard watches that accessor instead of refusing the page, and treats it as
-a sensitive value only when it reports something other than the field's real
-value.
+The guard watches that accessor instead of refusing the page. On a sensitive
+field it remembers every value assigned through the accessor, and a value the
+accessor reads back only when it differs from the field's real value.
 
 Approval requests name the target control by its label. When the scan was cut
 short or the document's evidence is withheld for any reason, the label is
-"page element", and a form control's own content is never used as its label.
+"page element". The text inside a text area or select is never used as its
+label; an ordinary input without a label may be named by its own value, with
+remembered values redacted. Typed text is hidden from an approval request when
+the target is a sensitive field, an editable region or textbox whose name
+words name a credential, or any control while the document holds a remembered
+value or could not be scanned completely.
 
 ### Screenshots and local capture
 
@@ -310,6 +322,14 @@ starts a new document.
 
 - A page that records the intermediate keystrokes of a value typed by hand can
   show the forgotten prefixes.
+- A hostile page can extend a typed value with one more trusted character of
+  its own (for example through `document.execCommand("insertText")`) and leave
+  it there, so the next snapshot forgets the shorter value it extended.
+- When a field is removed before any snapshot, its typed one- to
+  three-character prefixes stay remembered but are hidden only as whole words.
+- Values that reach the guard only through page scripts assigning them are
+  never collapsed, so an input that rewrites its own value on every key keeps
+  every intermediate form hidden.
 - Reversed, base64-encoded or otherwise transformed copies of a value are not
   recognized.
 - Values that exist only inside frames or parser-created shadow roots are

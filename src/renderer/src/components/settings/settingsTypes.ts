@@ -58,6 +58,7 @@ export interface SettingsViewProps {
   onInstallAppUpdate: () => Promise<void>;
   onOpenAppRelease: () => Promise<void>;
   onUnarchive: (conversation: Conversation) => void;
+  onOpenConversation?: (conversationId: string) => boolean;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
   onCreateBackendProfile: (draft: ModelBackendProfileDraft) => Promise<ModelBackendProfileDetail>;
   onUpdateBackendProfile: (profileId: string, update: Partial<ModelBackendProfileDraft> & { enabled?: boolean }) => Promise<ModelBackendProfileDetail>;

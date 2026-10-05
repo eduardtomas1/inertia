@@ -43,7 +43,9 @@ export function RouteChangeConfirmation({
       <ShieldCheck size={16} aria-hidden="true" />
       <span>
         <strong id="route-confirmation-title">
-          Open a new chat for {pendingRoute.label}?
+          {pendingRoute.carriesContext
+            ? `Continue in a new chat with ${pendingRoute.label}?`
+            : `Open a new chat for ${pendingRoute.label}?`}
         </strong>
         <small id="route-confirmation-reason">
           {pendingRoute.reason} New chat settings: {accessLabels[pendingRoute.configuration.accessMode]}
@@ -67,7 +69,7 @@ export function RouteChangeConfirmation({
         aria-disabled={creating || undefined}
         onClick={() => { if (!creating) onCreate(); }}
       >
-        {creating ? "Creating…" : "New chat"}
+        {creating ? "Creating…" : pendingRoute.carriesContext ? "Continue" : "New chat"}
       </button>
     </div>
   );

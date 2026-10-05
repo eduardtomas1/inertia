@@ -2,6 +2,7 @@ import type { ClientCommand } from "@shared/contracts";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
+  CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
   CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS,
   DUO_CANCEL_REQUEST_TIMEOUT_MS,
@@ -73,6 +74,9 @@ const duoCancellation = {
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "conversation.cli.scan": shortRetrySafe,
+  "conversation.cli.preview": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "conversation.cli.import": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "conversation.limit-reset.get": { timeoutMs: 60000, timeoutDelivery: "rejected" },
   "conversation.limit-reset.schedule": longMutation,
   "conversation.limit-reset.cancel": shortMutation,
@@ -121,6 +125,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "conversation.create": gitMutation,
+  "conversation.continue": gitMutation,
   "conversation.context.create": shortMutation,
   "conversation.context.agent.respond": shortMutation,
   "conversation.background-tasks.get": shortRetrySafe,

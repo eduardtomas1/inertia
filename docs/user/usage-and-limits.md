@@ -19,7 +19,7 @@ Subscription quota across your accounts:
 
 An unavailable measurement is never shown as zero, and a countdown reaching zero doesn't refill a bar. The window shows **Reset due** until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset.
 
-A chat that stopped at a usage limit shows **Limited** in the sidebar, and its notification says **Usage limit reached**. Above the composer it says **Usage limit reached**, with **Resume at reset** and **Snooze until reset** once the provider reports when the limit resets.
+A chat that stopped at a usage limit shows **Limited** in the sidebar, and its notification says **Usage limit reached**. Above the composer it says **Usage limit reached**, with **Resume at reset** and **Snooze until reset** once the provider reports when the limit resets. **Continue with another model** opens the model chooser; pick a model from another provider and choose **Continue** to carry on in a new chat on the same checkout and branch, with the limited chat attached as context. Preview or remove that context above the composer before you send.
 
 ## Quota warnings
 

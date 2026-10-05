@@ -2149,6 +2149,7 @@ describe("runtime migration catalog", () => {
       { version: 89 },
       { version: 90 },
       { version: 91 },
+      { version: 92 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

@@ -182,6 +182,7 @@ export interface AgentTurn {
   usageAtCompletion: AgentTurnUsageSnapshot | null;
   configurationRevision: number;
   association: AgentTurnAssociation;
+  origin?: "cli-import";
   createdAt: string;
   updatedAt: string;
   usageLimited?: true;

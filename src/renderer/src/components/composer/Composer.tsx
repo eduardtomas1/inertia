@@ -195,6 +195,7 @@ export const Composer = memo(function Composer({
     blockedReason: attachments.length > 0 || Boolean(promptContext) || previewContextSelected || fileReferences.length > 0 || contextPacketIds.length > 0
       ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
       : null,
+    scratchWorkspace,
     updateMessage: (next) => updateMessage(next),
   });
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
@@ -954,11 +955,15 @@ export const Composer = memo(function Composer({
     });
   };
   const conversationProvider = providers.find(({ id }) => id === conversation.providerId);
+  const openModelChooser = (): void => {
+    const chip = composerRef.current?.querySelector<HTMLButtonElement>(".selected-model-chip");
+    if (chip?.getAttribute("aria-expanded") !== "true") chip?.click();
+  };
   const limitResetRow = onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
       providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}
-      onCommand={onLimitResetCommand} />
+      onCommand={onLimitResetCommand} onContinueElsewhere={onCreateConversationForSelection ? openModelChooser : undefined} />
   </Suspense>;
   return (
     <div className="composer-shell">

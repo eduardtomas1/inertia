@@ -437,6 +437,21 @@ export class ConversationContextPacketRepository {
     return this.insert(input, null);
   }
 
+  createTargetWithPacket<Target extends { id: string }>(
+    sourceConversationId: string,
+    createTarget: () => Target,
+  ): Target {
+    return this.context.database.transaction(() => {
+      const target = createTarget();
+      this.insert({
+        sourceConversationId,
+        targetConversationId: target.id,
+        acknowledgedWorkspaceDifference: false,
+      }, null);
+      return target;
+    })();
+  }
+
   createUserMessageWithPackets(input: {
     conversationId: string;
     content: string;

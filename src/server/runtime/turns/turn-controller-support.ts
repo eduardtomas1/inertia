@@ -22,9 +22,7 @@ import type {
 
 export const MAX_ASSISTANT_TEXT = 4 * 1024 * 1024;
 export const MAX_REASONING_TEXT = 512 * 1024;
-/** Maximum provider silence, not an absolute turn lifetime. */
 export const DEFAULT_TURN_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
-/** Fail-safe ceiling for one owned provider process, even if it stays noisy. */
 export const DEFAULT_TURN_MAX_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 
 export function defaultTurnScheduler(): TurnTimerScheduler {
@@ -121,9 +119,6 @@ export function previousTurnBoundaryUsage(
   > | null,
   providerSessionId: string,
 ): AgentTurnUsageSnapshot | null {
-  // The conversation-level usage projection may belong to an older turn.
-  // Only the preceding turn's immutable completion, captured while bound to
-  // the exact resumed provider session, is a safe cumulative base.
   if (
     !previousTurn
     || previousTurn.association !== "authoritative"
@@ -175,15 +170,10 @@ export function providerPromiseFailure(
   };
 }
 
-/**
- * Converts every failed harness result into the same safe, durable envelope.
- * Existing harness errors keep their user-visible value only after the same
- * path/credential/content-key scrubber used by persisted provider activity.
- * Typed ProviderRunFailure context remains the richer diagnostic source.
- */
 export function normalizedProviderRunFailure(
   active: ActiveTurn,
   result: ProviderRunResult,
+  sessionUnavailableMessage: string | null = null,
 ): ProviderRunFailure {
   const reported = result.failure;
   const reason = reported?.reason
@@ -194,7 +184,7 @@ export function normalizedProviderRunFailure(
         : "provider-error");
   const fallback = `${providerLabel(result.providerId)} could not complete the request.`;
   const message = reported?.sessionUnavailable === true
-    ? staleProviderSessionDecision().reason
+    ? sessionUnavailableMessage ?? staleProviderSessionDecision().reason
     : sanitizeProviderFailureSummary(
         result.error ?? reported?.message,
         fallback,

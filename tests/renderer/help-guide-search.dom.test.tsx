@@ -34,7 +34,7 @@ async function openHelp(props = hostProps()) {
   render(
     <>
       <SidebarHelpButton />
-      <HelpGuideHost {...props} />
+      <HelpGuideHost projects={[]} currentProjectId={null} {...props} />
     </>,
   );
   const opener = screen.getByRole("button", { name: "Help" });
@@ -89,13 +89,13 @@ describe("Help search", () => {
 
     expect(within(dialog).queryByRole("tablist")).toBeNull();
     const results = within(dialog).getByRole("region", { name: "Search results" });
-    expect(resultNames(dialog)).toEqual(["Archive", "Organize chats"]);
+    expect(resultNames(dialog)).toEqual(["Archive", "Import CLI conversations", "Organize chats"]);
     expect(within(results).getAllByRole("group").map((group) => group.querySelector("h3")!.textContent))
-      .toEqual(["Search and history", "Following work"]);
+      .toEqual(["Search and history", "Getting started", "Following work"]);
     expect(within(results).getByRole("group", { name: "Search and history" })).toBeVisible();
     expect([...results.querySelectorAll("mark")].map((mark) => mark.textContent))
-      .toEqual(["Archive", "Archive", "archive"]);
-    expect(within(dialog).getByRole("status")).toHaveTextContent("2 results");
+      .toEqual(["Archive", "Archive", "Archived", "archive"]);
+    expect(within(dialog).getByRole("status")).toHaveTextContent("3 results");
     const group = within(results).getByRole("group", { name: "Search and history" });
     expect(within(group).getByRole("button", { name: "Open Settings → Data" })).toBeVisible();
     expect(within(results).getByRole("button", { name: "Open Daily work" })).toBeVisible();

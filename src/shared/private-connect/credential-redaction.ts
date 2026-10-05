@@ -1,4 +1,14 @@
-/** Redact URL user-info with a monotonic scan rather than retrying long schemes. */
+export const SECRET_PATTERNS = [
+  /\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu,
+  /\b(?:gh[opusr]|github_pat|glpat|npm|pypi|hf|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu,
+  /\bAIza[A-Za-z0-9_-]{20,}\b/gu,
+  /(?<![A-Za-z0-9])(?:api[-_ ]?key|access[-_ ]?key|password|passwd|pwd|secret|token|authorization)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|["']?(?:Bearer|Basic)\s+[^\s,;]+|[^\s,;]+)/giu,
+  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|$)/gu,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu,
+  /\b(Bearer|Basic)\s+\S+/giu,
+] as const;
+
 export function redactCredentialUrls(value: string): string {
   let copied = 0;
   let cursor = 0;
@@ -23,7 +33,6 @@ export function redactCredentialUrls(value: string): string {
   return output + value.slice(copied);
 }
 
-/** Remove a credential prefix exposed by truncation, scanning only its final token. */
 export function removeTrailingSecretFragment(value: string): string {
   let tokenStart = value.length;
   while (tokenStart > 0 && !/\s/u.test(value[tokenStart - 1])) tokenStart -= 1;

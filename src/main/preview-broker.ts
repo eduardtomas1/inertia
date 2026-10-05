@@ -18,11 +18,10 @@ import {
 } from "../shared/browser-evidence.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
+import { recordAgentPageUnloadPrompt } from "./preview-agent-dialogs.js";
 import { captureAgentPageInputRefusal } from "./preview-agent-input.js";
+import { agentOperationBudget, agentOperationFailure, AgentOperationScope } from "./preview-agent-scope.js";
 import {
-  agentOperationBudget,
-  agentOperationFailure,
-  AgentOperationScope,
   blankTabRefusal,
   PARKED_PREVIEW_BOUNDS,
   PreviewAgentOperations,
@@ -56,6 +55,9 @@ interface PreviewSession extends AgentOperationSession {
   nextPageNumber: number;
   lastUsedAt: number;
   busy: number;
+  controller: "agent" | "user";
+  operation: AgentOperationScope | null;
+  unloadStayUntil: Map<string, number>;
 }
 
 interface PreviewBrokerOptions {
@@ -64,12 +66,14 @@ interface PreviewBrokerOptions {
   stateChannel: string;
   registerHealthRenderer?(contents: WebContents): () => void;
   recordOperationFailure?(failure: PreviewAgentOperationFailure): void;
+  confirmPageUnload?(window: BrowserWindow, pageNumber: number): boolean;
   partitionPrefix?: string;
   now?(): number;
 }
 const MAX_BROWSER_TABS = 8;
 const MAX_PARKED_SESSIONS = 4;
 const PARKED_SESSION_IDLE_MS = 30 * 60_000;
+const UNLOAD_STAY_QUIET_MS = 5_000;
 
 function budgetFor(request: AgentBrowserRequest): number {
   if (request.action === "perform-approved") return AGENT_BROWSER_NAVIGATION_BUDGET_MS;
@@ -267,6 +271,7 @@ export class PreviewBroker {
           session.activeIdentity = identity;
           session.lastUsedAt = this.#now();
           const operation = scope = new AgentOperationScope(budgetFor(request), signal);
+          session.operation = operation;
           operation.keepAwake(this.#active(session).view.webContents);
           if (request.action === "prepare-approval") {
             const refusal = blankTabRefusal(this.#active(session).view.webContents, request.command);
@@ -277,7 +282,9 @@ export class PreviewBroker {
               request,
               identity,
               session,
-              async (tab, ref) => await this.#operations.locate(tab, ref, operation.signal),
+              async (tab, ref, purpose) => purpose === "scroll"
+                ? await this.#operations.describe(tab, ref, operation.signal)
+                : await this.#operations.locate(tab, ref, operation.signal),
               operation.signal,
             );
             if (typeof resolved === "string") return this.#success(session, resolved);
@@ -293,14 +300,16 @@ export class PreviewBroker {
                 return await this.#operations.wait(session, command, operation);
               case "navigate":
                 return await this.#operations.navigate(session, command.url, operation, validate);
+              case "history":
+                return await this.#operations.history(session, command.direction, operation, validate);
               case "click":
-                return await this.#operations.click(session, command.ref, operation, validate);
+                return await this.#operations.click(session, command.ref, operation, validate, command.dialog);
               case "type":
                 return await this.#operations.type(session, command.ref, command.text, command.replace, operation, validate);
               case "press":
-                return await this.#operations.press(session, command.key, operation, validate);
+                return await this.#operations.press(session, command.key, operation, validate, command.dialog);
               case "scroll":
-                return await this.#operations.scroll(session, command.deltaY, operation, validate);
+                return await this.#operations.scroll(session, command, operation, validate);
               case "tabs":
                 return this.#success(session, boundedAgentStateText(this.#agentState(session)));
               case "tab-open":
@@ -331,8 +340,15 @@ export class PreviewBroker {
             }
           } finally {
             if (session.activeIdentity === identity) session.activeIdentity = null;
+            if (session.operation === operation) session.operation = null;
           }
-        }, AGENT_BROWSER_QUEUE_WAIT_MS);
+        }, AGENT_BROWSER_QUEUE_WAIT_MS).then((result) => {
+          if (result?.ok && !scope?.interrupted && request.action !== "tabs"
+            && request.action !== "prepare-approval" && request.action !== "discard-approval") {
+            session.controller = "agent";
+          }
+          return result;
+        });
         return entered ?? failure(
           "timeout",
           "Inertia Browser is still busy with an earlier action in this chat. Nothing was sent to the page for this call; try again shortly.",
@@ -561,6 +577,7 @@ export class PreviewBroker {
       activeTabId: session.activeTabId,
       tabs: [...session.tabs.values()].map((tab) => this.#agentTab(tab)),
       activity: session.activity,
+      ...(session.controller === "user" ? { controller: "user" as const } : {}),
     };
   }
   #publish(session: PreviewSession): void {
@@ -716,6 +733,9 @@ export class PreviewBroker {
       nextPageNumber: 0,
       lastUsedAt: this.#now(),
       busy: 0,
+      controller: "agent",
+      operation: null,
+      unloadStayUntil: new Map(),
     };
     const tab = this.#openTab(session);
     session.activeTabId = tab.id;
@@ -762,6 +782,12 @@ export class PreviewBroker {
           this.#evidenceAuthority(session, currentTab.id),
         );
       },
+      allowUnload: (currentTab) => this.#allowUnload(session, currentTab),
+      userInput: () => {
+        if (this.#sessions.get(session.contextId) !== session) return;
+        session.controller = "user";
+        session.operation?.interrupt();
+      },
       consoleError: (currentTab, message) => {
         session.evidence.recordConsoleError(
           this.#evidencePage(currentTab),
@@ -772,6 +798,21 @@ export class PreviewBroker {
     });
     session.tabs.set(tab.id, tab);
     return tab;
+  }
+
+  #allowUnload(session: PreviewSession, tab: PreviewTab): boolean {
+    if (session.activeTabId !== tab.id) return false;
+    if (session.operation) {
+      recordAgentPageUnloadPrompt(tab.view.webContents);
+      return true;
+    }
+    const now = this.#now();
+    if ((session.unloadStayUntil.get(tab.id) ?? 0) > now) return false;
+    const window = this.#window();
+    const leave = window ? this.options.confirmPageUnload?.(window, tab.pageNumber) === true : false;
+    if (leave) session.unloadStayUntil.delete(tab.id);
+    else session.unloadStayUntil.set(tab.id, now + UNLOAD_STAY_QUIET_MS);
+    return leave;
   }
 
   #evidencePage(tab: PreviewTab): BrowserEvidencePage {
@@ -812,6 +853,7 @@ export class PreviewBroker {
     session.evidenceInspectors.close();
     const wasActive = session.activeTabId === tabId;
     session.tabs.delete(tabId);
+    session.unloadStayUntil.delete(tabId);
     this.#destroyTab(tab);
     if (session.tabs.size === 0) {
       const replacement = this.#openTab(session);

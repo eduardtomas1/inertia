@@ -252,6 +252,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     loading = false;
     crashed = false;
     isLoading(): boolean { return this.loading; }
+    isLoadingMainFrame(): boolean { return this.loading; }
     isCrashed(): boolean { return this.crashed; }
     isDestroyed(): boolean { return this.destroyed; }
     reload(): void {}
@@ -260,7 +261,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     sendInputEvent(input: Record<string, unknown>): void {
       this.sentInputs.push(input);
       electronState.interactionTimeline.push(String(input.type));
-      this.emit("input-event", {}, input);
+      this.emit("input-event", {}, typeof input.keyCode === "string" ? { ...input, key: input.keyCode } : input);
     }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
     readonly throttling: boolean[] = [];
@@ -302,6 +303,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
 export function createPreviewBrokerPageTools() {
   return {
     AGENT_BROWSER_WORLD_ID: 999,
+    PRIVACY_RUNTIME: "({ redact: (_state, value) => value })",
     agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
     agentPageActivationTargetStillFocused: vi.fn<() => Promise<boolean>>(async () => true),
     agentPageEvidencePrivacy: vi.fn<() => Promise<{
@@ -366,6 +368,7 @@ export function createPreviewBrokerHarness(
     getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
   };
   const recordOperationFailure = vi.fn();
+  const confirmPageUnload = vi.fn((_window: unknown, _pageNumber: number) => false);
   const getWindow = vi.fn(() => window as typeof window | null);
   const unregisterHealth: Array<ReturnType<typeof vi.fn>> = [];
   const broker = new PreviewBroker({
@@ -373,11 +376,12 @@ export function createPreviewBrokerHarness(
     openExternal: vi.fn(async () => undefined),
     stateChannel: "preview-state",
     recordOperationFailure,
+    confirmPageUnload,
     registerHealthRenderer: () => {
       const unregister = vi.fn();
       unregisterHealth.push(unregister);
       return unregister;
     },
   });
-  return { broker, children, recordOperationFailure, window, getWindow, unregisterHealth };
+  return { broker, children, recordOperationFailure, confirmPageUnload, window, getWindow, unregisterHealth };
 }

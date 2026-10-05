@@ -415,6 +415,7 @@ export interface ProviderHostToolDefinition {
   /** Process-local validator used by in-process provider tool transports. */
   inputValidator?: ZodType<Record<string, unknown>>;
   readOnly: boolean;
+  destructive?: boolean;
 }
 
 export interface ProviderHostToolApprovalRequest {

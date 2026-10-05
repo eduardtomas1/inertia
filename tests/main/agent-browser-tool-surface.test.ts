@@ -1,0 +1,498 @@
+import { runInNewContext } from "node:vm";
+
+import { describe, expect, it, vi } from "vitest";
+
+const { electronState, pageTools } = await vi.hoisted(async () => {
+  const support = await import("./support/preview-broker-harness");
+  return {
+    electronState: support.createPreviewBrokerElectronState(),
+    pageTools: support.createPreviewBrokerPageTools(),
+  };
+});
+
+vi.mock("electron", async () => (
+  (await import("./support/preview-broker-harness")).createPreviewBrokerElectronMock(electronState)
+));
+vi.mock("../../src/main/preview-agent-page", () => pageTools);
+
+import { PreviewBroker } from "../../src/main/preview-broker";
+import {
+  conversationId,
+  createPreviewBrokerHarness,
+  runIdentity,
+} from "./support/preview-broker-harness";
+
+async function loadedHarness() {
+  const contentsOffset = electronState.contents.length;
+  const created = createPreviewBrokerHarness(PreviewBroker);
+  await created.broker.navigate({
+    ownerId: "primary",
+    contextId: conversationId,
+    url: "http://127.0.0.1:3000/",
+  });
+  return { ...created, contents: electronState.contents[contentsOffset]! };
+}
+
+describe("Browser tool surface", () => {
+  it("tells the agent to take a new snapshot when a ref is stale", async () => {
+    const { broker } = await loadedHarness();
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e9" })).resolves.toEqual({
+      ok: false,
+      code: "not-found",
+      message: "That page element is stale. Take a new inertia_browser_snapshot for current refs.",
+    });
+  });
+
+  it("presses modifier keys with trusted input and keeps modified Enter on the guarded activation path", async () => {
+    const { broker, contents } = await loadedHarness();
+    for (const key of ["Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter"] as const) {
+      await expect(broker.perform(runIdentity, { action: "press", key }))
+        .resolves.toMatchObject({ ok: true });
+    }
+    expect(contents.sentInputs).toEqual([
+      { type: "keyDown", keyCode: "Tab", modifiers: ["shift"] },
+      { type: "keyUp", keyCode: "Tab", modifiers: ["shift"] },
+      { type: "keyDown", keyCode: "Enter", modifiers: ["shift"] },
+      { type: "char", keyCode: "\r", modifiers: ["shift"] },
+      { type: "keyUp", keyCode: "Enter", modifiers: ["shift"] },
+      { type: "keyDown", keyCode: "Enter", modifiers: ["control"] },
+      { type: "keyUp", keyCode: "Enter", modifiers: ["control"] },
+      { type: "keyDown", keyCode: "Enter", modifiers: ["meta"] },
+      { type: "keyUp", keyCode: "Enter", modifiers: ["meta"] },
+    ]);
+    expect(pageTools.agentPageActivationBlocked).toHaveBeenCalled();
+  });
+
+  it("goes back, forward and reloads only to local pages and waits for the load", async () => {
+    const { broker, contents } = await loadedHarness();
+    const history = contents.navigationHistory as typeof contents.navigationHistory & {
+      canGoForward: ReturnType<typeof vi.fn>;
+      goForward: ReturnType<typeof vi.fn>;
+    };
+    const entries = ["about:blank", "http://127.0.0.1:3000/first", "http://127.0.0.1:3000/"];
+    history.getEntryAtIndex.mockImplementation((index: number) => ({ title: "", url: entries[index] ?? "" }));
+    history.canGoBack.mockReturnValue(true);
+    history.goBack.mockImplementationOnce(() => {
+      contents.setURL(entries[1]!);
+      contents.emit("did-start-loading");
+      contents.emit("did-stop-loading");
+    });
+    await expect(broker.perform(runIdentity, { action: "history", direction: "back" }))
+      .resolves.toMatchObject({ ok: true, state: { activity: { action: "navigate" } } });
+    expect(history.goBack).toHaveBeenCalledOnce();
+
+    history.getActiveIndex.mockReturnValue(1);
+    await expect(broker.perform(runIdentity, { action: "history", direction: "back" })).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+      message: "There is no earlier local page in this tab's history. Navigate to a URL instead.",
+    });
+    expect(history.goBack).toHaveBeenCalledOnce();
+
+    history.canGoForward.mockReturnValue(true);
+    entries[2] = "https://example.com/";
+    await expect(broker.perform(runIdentity, { action: "history", direction: "forward" }))
+      .resolves.toMatchObject({ ok: false, code: "invalid" });
+    expect(history.goForward).not.toHaveBeenCalled();
+
+    const page = contents as unknown as { reload(): void; loadURL(url: string): Promise<void> };
+    const reload = vi.spyOn(page, "reload");
+    const load = vi.spyOn(page, "loadURL");
+    await expect(broker.perform(runIdentity, { action: "history", direction: "reload" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(reload).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledExactlyOnceWith("http://127.0.0.1:3000/first");
+  });
+
+  it("reloads a hash-routed page as a fresh document and restores its fragment", async () => {
+    const { broker, contents } = await loadedHarness();
+    contents.setURL("http://127.0.0.1:3000/app#/settings");
+    const page = contents as unknown as { loadURL(url: string): Promise<void> };
+    const load = vi.spyOn(page, "loadURL");
+    await expect(broker.perform(runIdentity, { action: "history", direction: "reload" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(load.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:3000/app",
+      "http://127.0.0.1:3000/app#/settings",
+    ]);
+  });
+
+  it("stops and reports a history step that Chromium commits to a non-local entry", async () => {
+    const { broker, contents } = await loadedHarness();
+    const history = contents.navigationHistory;
+    history.getEntryAtIndex.mockImplementation((index: number) => ({
+      title: "", url: ["about:blank", "http://127.0.0.1:3000/first", "http://127.0.0.1:3000/"][index] ?? "",
+    }));
+    history.canGoBack.mockReturnValue(true);
+    history.goBack.mockImplementationOnce(() => {
+      contents.setURL("https://example.com/");
+      contents.emit("did-start-loading");
+      contents.emit("did-navigate", {}, "https://example.com/");
+      contents.emit("did-stop-loading");
+    });
+    await expect(broker.perform(runIdentity, { action: "history", direction: "back" })).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+      message: "The history entry Chromium opened is not a local development page, so Inertia stopped it. Navigate to a local URL instead.",
+    });
+    expect(contents.stop).toHaveBeenCalled();
+    expect(contents.getURL()).toBe("about:blank");
+  });
+
+  it("leaves the user's own history navigation alone when they take over after it commits", async () => {
+    const { broker, contents } = await loadedHarness();
+    const history = contents.navigationHistory;
+    history.getEntryAtIndex.mockImplementation((index: number) => ({
+      title: "", url: ["about:blank", "http://127.0.0.1:3000/first", "http://127.0.0.1:3000/"][index] ?? "",
+    }));
+    history.canGoBack.mockReturnValue(true);
+    history.goBack.mockImplementationOnce(() => {
+      contents.setURL("http://127.0.0.1:3000/first");
+      contents.emit("did-navigate", {}, "http://127.0.0.1:3000/first");
+    });
+    const page = contents as unknown as { loading: boolean };
+    page.loading = true;
+    contents.stop.mockClear();
+    const going = broker.perform(runIdentity, { action: "history", direction: "back" });
+    await vi.waitFor(() => expect(history.goBack).toHaveBeenCalled());
+    contents.emit("input-event", {}, { type: "mouseDown", x: 3, y: 3 });
+    await expect(going).resolves.toMatchObject({ ok: false, code: "interrupted" });
+    expect(contents.stop).not.toHaveBeenCalled();
+    page.loading = false;
+  });
+
+  it("asks once per five seconds, only for the tab on screen, and names the tab", async () => {
+    const { broker, contents, confirmPageUnload, window } = await loadedHarness();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const leave = () => {
+        const event = { preventDefault: vi.fn() };
+        contents.emit("will-prevent-unload", event);
+        return event.preventDefault.mock.calls.length > 0;
+      };
+      expect(leave()).toBe(false);
+      expect(confirmPageUnload).toHaveBeenCalledExactlyOnceWith(window, 1);
+      expect(leave()).toBe(false);
+      expect(confirmPageUnload).toHaveBeenCalledOnce();
+      vi.setSystemTime(Date.now() + 5_001);
+      confirmPageUnload.mockReturnValueOnce(true);
+      expect(leave()).toBe(true);
+      expect(confirmPageUnload).toHaveBeenCalledTimes(2);
+
+      await expect(broker.perform(runIdentity, { action: "tab-open" })).resolves.toMatchObject({ ok: true });
+      vi.setSystemTime(Date.now() + 5_001);
+      expect(leave()).toBe(false);
+      expect(confirmPageUnload).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the user's own navigation alone when they take over after the page has committed", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = contents as unknown as { loadURL(url: string): Promise<void>; loading: boolean };
+    const load = page.loadURL.bind(page);
+    vi.spyOn(page, "loadURL").mockImplementationOnce(async (url) => {
+      await load(url);
+      page.loading = true;
+    });
+    contents.stop.mockClear();
+    const navigating = broker.perform(runIdentity, { action: "navigate", url: "http://127.0.0.1:3000/next" });
+    await vi.waitFor(() => expect(contents.getURL()).toBe("http://127.0.0.1:3000/next"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    contents.emit("input-event", {}, { type: "mouseDown", x: 3, y: 3 });
+    await expect(navigating).resolves.toMatchObject({ ok: false, code: "interrupted" });
+    expect(contents.stop).not.toHaveBeenCalled();
+    page.loading = false;
+  });
+
+  it("returns from navigate only once Chromium stops loading, so an approval can follow at once", async () => {
+    const { broker, contents } = await loadedHarness();
+    const page = contents as unknown as { loadURL(url: string): Promise<void>; loading: boolean };
+    const load = page.loadURL.bind(page);
+    vi.spyOn(page, "loadURL").mockImplementation(async (url) => {
+      await load(url);
+      page.loading = true;
+      setTimeout(() => {
+        page.loading = false;
+        contents.emit("did-stop-loading");
+      }, 30);
+    });
+    const history = contents.navigationHistory;
+    history.canGoBack.mockReturnValue(true);
+    history.getEntryAtIndex.mockImplementation((index: number) => ({
+      title: "", url: ["about:blank", "http://127.0.0.1:3000/", "http://127.0.0.1:3000/next"][index] ?? "",
+    }));
+    for (const command of [
+      { action: "history", direction: "reload" },
+      { action: "history", direction: "back" },
+    ] as const) {
+      const navigated = await broker.perform(runIdentity, { action: "navigate", url: "http://127.0.0.1:3000/next" });
+      expect(navigated).toMatchObject({ ok: true, state: { tabs: [{ loading: false }] } });
+      const prepared = await broker.perform(runIdentity, { action: "prepare-approval", command });
+      expect(prepared, JSON.stringify(command)).toMatchObject({ ok: true });
+      await broker.perform(runIdentity, {
+        action: "discard-approval",
+        token: (JSON.parse((prepared as unknown as { text: string }).text) as { token: string }).token,
+      });
+    }
+  });
+
+  it("opens schemeless loopback addresses over http", async () => {
+    const { broker, contents } = await loadedHarness();
+    await expect(broker.perform(runIdentity, { action: "navigate", url: "localhost:5173/settings" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(contents.getURL()).toBe("http://localhost:5173/settings");
+    await expect(broker.perform(runIdentity, { action: "tab-open", url: "127.0.0.1:3000" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(electronState.contents.at(-1)!.getURL()).toBe("http://127.0.0.1:3000/");
+    await expect(broker.perform(runIdentity, { action: "navigate", url: "example.com:5173" }))
+      .resolves.toMatchObject({ ok: false, code: "invalid" });
+  });
+
+  it("stops an agent command when the user clicks or types in the page and reports the user in control", async () => {
+    const { broker, contents } = await loadedHarness();
+    const waiting = broker.perform(runIdentity, {
+      action: "wait", text: "never shown", state: "present", timeoutMs: 10_000,
+    });
+    await vi.waitFor(() => expect(pageTools.semanticPageSnapshot).toHaveBeenCalled());
+    contents.emit("input-event", {}, { type: "mouseMove", x: 5, y: 5 });
+    contents.emit("input-event", {}, { type: "mouseDown", x: 5, y: 5 });
+    await expect(waiting).resolves.toEqual({
+      ok: false,
+      code: "interrupted",
+      message: "The user is using this page; take a new snapshot before continuing.",
+    });
+    const tabs = await broker.perform(runIdentity, { action: "tabs" });
+    expect(tabs).toMatchObject({ ok: true, state: { controller: "user" } });
+    expect(JSON.parse((tabs as unknown as { text: string }).text)).toMatchObject({ controller: "user" });
+    await expect(broker.perform(runIdentity, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true, state: { controller: "user" } });
+    const after = await broker.perform(runIdentity, { action: "tabs" });
+    expect(after).toMatchObject({ ok: true });
+    expect((after as unknown as { state: Record<string, unknown> }).state).not.toHaveProperty("controller");
+
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e1" }))
+      .resolves.toMatchObject({ ok: true });
+    expect((await broker.perform(runIdentity, { action: "tabs" }) as unknown as { state: Record<string, unknown> }).state)
+      .not.toHaveProperty("controller");
+  });
+
+  function dialogPage(contents: object, timeline: string[]) {
+    const context = {
+      __inertiaAgentDialogs: {
+        records: [] as Array<Record<string, unknown>>, omitted: 0, acceptNext: false,
+      },
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true, passwordValues: new Set(), passwordNodes: new WeakSet(),
+      } as Record<string, unknown>,
+      CustomEvent,
+      dispatchEvent: () => true,
+    };
+    const page = contents as unknown as {
+      executeJavaScriptInIsolatedWorld(world: number, scripts: Array<{ code: string }>): Promise<unknown>;
+      sendInputEvent(input: Record<string, unknown>): void;
+    };
+    const original = page.executeJavaScriptInIsolatedWorld.bind(page);
+    vi.spyOn(page, "executeJavaScriptInIsolatedWorld").mockImplementation(async (world, scripts) => {
+      const code = scripts[0]?.code ?? "";
+      const armed = /"__inertia_agent_dialog_answer__", "(accept|dismiss)"/u.exec(code)?.[1];
+      if (armed) timeline.push(`arm:${armed}`);
+      else if (code.includes("__inertiaAgentDialogs")) timeline.push("read");
+      else return await original(world, scripts);
+      return runInNewContext(code, context);
+    });
+    const sent = page.sendInputEvent.bind(page);
+    vi.spyOn(page, "sendInputEvent").mockImplementation((input) => {
+      if (input.type === "mouseMove") timeline.push("hover");
+      if (input.type === "mouseDown" || input.type === "keyDown") timeline.push(String(input.type));
+      sent(input);
+    });
+    const seed = (message: string, answer = "accept"): void => {
+      context.__inertiaAgentDialogs.records.push({ kind: "confirm", message, answer, truncated: false });
+    };
+    return { context, seed };
+  }
+
+  it("arms a one-shot confirmation answer just before the agent's own input and reports the page's dialogs", async () => {
+    const { broker, contents } = await loadedHarness();
+    const timeline: string[] = [];
+    const { seed } = dialogPage(contents, timeline);
+    seed("Delete it?");
+    const accepted = await broker.perform(runIdentity, { action: "click", ref: "e1", dialog: "accept" });
+    expect(JSON.parse((accepted as unknown as { text: string }).text)).toMatchObject({
+      clicked: "e1",
+      dialogs: [{ kind: "confirm", message: "Delete it?", answer: "accept" }],
+    });
+    expect(timeline).toEqual(["hover", "arm:accept", "mouseDown", "arm:dismiss", "read"]);
+
+    timeline.length = 0;
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e1" })).resolves.toMatchObject({ ok: true });
+    expect(timeline).toEqual(["hover", "mouseDown", "read"]);
+    timeline.length = 0;
+    seed("Typed?", "dismiss");
+    const typed = await broker.perform(runIdentity, { action: "type", ref: "e1", text: "a", replace: true });
+    expect(JSON.parse((typed as unknown as { text: string }).text)).toMatchObject({ typed: "e1", dialogs: [{ kind: "confirm" }] });
+    timeline.length = 0;
+    await expect(broker.perform(runIdentity, { action: "press", key: "Enter", dialog: "accept" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(timeline).toEqual(["arm:accept", "keyDown", "arm:dismiss", "read"]);
+  });
+
+  it("never reports a dialog message from a document whose evidence is withheld", async () => {
+    const { broker, contents } = await loadedHarness();
+    const { context, seed } = dialogPage(contents, []);
+    context.__inertiaAgentBrowser.evidenceWithheld = "hidden-input";
+    seed("Invalid code hunter2", "dismiss");
+    const clicked = await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(JSON.stringify(clicked)).not.toContain("hunter2");
+    expect(JSON.parse((clicked as unknown as { text: string }).text)).toMatchObject({
+      dialogs: [{ kind: "confirm", message: "", answer: "dismiss" }],
+      dialogsWithheld: true,
+    });
+  });
+
+  it("scans a page's inputs before reporting its dialogs, even on a press with no snapshot", async () => {
+    const { broker, contents } = await loadedHarness();
+    const { context, seed } = dialogPage(contents, []);
+    seed("Code hunter2 rejected", "dismiss");
+    pageTools.agentPageEvidencePrivacy.mockImplementation(async (_contents?: unknown, purpose?: unknown) => {
+      if (purpose === "semantic") context.__inertiaAgentBrowser.evidenceWithheld = "document-too-large";
+      return { withheld: purpose === "semantic" ? "document-too-large" : null };
+    });
+    try {
+      const pressed = await broker.perform(runIdentity, { action: "press", key: "Escape" });
+      expect(JSON.stringify(pressed)).not.toContain("hunter2");
+      expect(JSON.parse((pressed as unknown as { text: string }).text)).toMatchObject({
+        dialogs: [{ kind: "confirm", message: "", answer: "dismiss" }],
+        dialogsWithheld: true,
+      });
+    } finally {
+      pageTools.agentPageEvidencePrivacy.mockImplementation(async () => ({ withheld: null }));
+    }
+  });
+
+  it("asks the user before a page they are using is left, and lets an agent action leave and report it", async () => {
+    const { broker, contents, confirmPageUnload } = await loadedHarness();
+    const userLeave = { preventDefault: vi.fn() };
+    contents.emit("will-prevent-unload", userLeave);
+    expect(confirmPageUnload).toHaveBeenCalledOnce();
+    expect(userLeave.preventDefault).not.toHaveBeenCalled();
+    confirmPageUnload.mockReturnValueOnce(true);
+    const stayedAt = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(stayedAt + 5_001);
+    contents.emit("will-prevent-unload", userLeave);
+    vi.mocked(Date.now).mockRestore();
+    expect(userLeave.preventDefault).toHaveBeenCalledOnce();
+    const quiet = await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(JSON.parse((quiet as unknown as { text: string }).text)).not.toHaveProperty("dialogs");
+
+    const waiting = broker.perform(runIdentity, { action: "wait", text: "never", state: "present", timeoutMs: 1_000 });
+    await vi.waitFor(() => expect(pageTools.semanticPageSnapshot).toHaveBeenCalled());
+    const agentLeave = { preventDefault: vi.fn() };
+    contents.emit("will-prevent-unload", agentLeave);
+    expect(agentLeave.preventDefault).toHaveBeenCalledOnce();
+    expect(confirmPageUnload).toHaveBeenCalledTimes(2);
+    await waiting;
+    const clicked = await broker.perform(runIdentity, { action: "click", ref: "e1" });
+    expect(JSON.parse((clicked as unknown as { text: string }).text)).toMatchObject({
+      dialogs: [{ kind: "beforeunload", message: "", answer: "accept" }],
+    });
+  });
+
+  it("reports the page's dialogs once in the next snapshot", async () => {
+    const { broker, contents } = await loadedHarness();
+    const send = contents.debugger.sendCommand.getMockImplementation()!;
+    let reads = 0;
+    contents.debugger.sendCommand.mockImplementation(async (method, params) => {
+      if (method === "Runtime.evaluate" && String(params?.expression).includes("__inertiaAgentDialogs")) {
+        reads += 1;
+        return { result: { value: {
+          records: reads === 1 ? [{ kind: "alert", message: "Saved", answer: "accept" }] : [],
+          omitted: 0,
+          withheld: false,
+        } } };
+      }
+      return await send(method, params);
+    });
+    await expect(broker.perform(runIdentity, { action: "snapshot" })).resolves.toMatchObject({ ok: true });
+    expect(pageTools.semanticPageSnapshot).toHaveBeenLastCalledWith(contents, [], {
+      dialogs: [{ kind: "alert", message: "Saved", answer: "accept" }],
+    });
+    await expect(broker.perform(runIdentity, { action: "snapshot" })).resolves.toMatchObject({ ok: true });
+    expect(pageTools.semanticPageSnapshot).toHaveBeenLastCalledWith(contents, []);
+    contents.debugger.sendCommand.mockImplementation(send);
+  });
+
+  function isolatedScripts(contents: object, offscreen: () => boolean) {
+    const page = contents as unknown as {
+      executeJavaScriptInIsolatedWorld(world: number, scripts: Array<{ code: string }>): Promise<unknown>;
+    };
+    const codes: string[] = [];
+    const original = page.executeJavaScriptInIsolatedWorld.bind(page);
+    vi.spyOn(page, "executeJavaScriptInIsolatedWorld").mockImplementation(async (world, scripts) => {
+      const code = scripts[0]?.code ?? "";
+      if (code.includes("scrollIntoView")) {
+        codes.push("scroll");
+        return { found: true, viewport: { width: 1_280, height: 800, scrollX: 0, scrollY: 1_400 } };
+      }
+      if (code.includes("getBoundingClientRect")) {
+        codes.push("outside");
+        return offscreen();
+      }
+      return await original(world, scripts);
+    });
+    return codes;
+  }
+
+  it("scrolls an element into view by ref and returns the viewport", async () => {
+    const { broker, contents } = await loadedHarness();
+    const codes = isolatedScripts(contents, () => true);
+    const result = await broker.perform(runIdentity, { action: "scroll", ref: "e7" });
+    expect(JSON.parse((result as { text: string }).text)).toMatchObject({
+      scrolled: "e7",
+      viewport: { width: 1_280, height: 800, scrollX: 0, scrollY: 1_400 },
+    });
+    expect(codes).toEqual(["scroll"]);
+    expect(contents.sentInputs).toEqual([]);
+  });
+
+  it("scrolls an off-screen ref into view before clicking or typing, then hit-tests it as usual", async () => {
+    const { broker, contents } = await loadedHarness();
+    let outside = true;
+    const codes = isolatedScripts(contents, () => outside);
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e9" })).resolves.toMatchObject({ ok: true });
+    expect(codes).toEqual(["outside", "scroll"]);
+    expect(contents.sentInputs).toEqual(expect.arrayContaining([expect.objectContaining({ type: "mouseDown" })]));
+
+    codes.length = 0;
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "type", ref: "e9", text: "a", replace: true }))
+      .resolves.toMatchObject({ ok: true });
+    expect(codes).toEqual(["outside", "scroll"]);
+
+    codes.length = 0;
+    outside = false;
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e9" })).resolves.toMatchObject({
+      ok: false, code: "not-found",
+    });
+    expect(codes).toEqual(["outside"]);
+  });
+
+  it("asks a supervised agent to scroll before it approves a click on an off-screen control", async () => {
+    const { broker, contents } = await loadedHarness();
+    const codes = isolatedScripts(contents, () => true);
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, {
+      action: "prepare-approval", command: { action: "click", ref: "e9" },
+    })).resolves.toEqual({
+      ok: false,
+      code: "not-found",
+      message: "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.",
+    });
+    expect(codes).toEqual(["outside"]);
+  });
+});

@@ -33,13 +33,35 @@ function safeLabel(value: string): string {
   return sanitizeBrowserEvidenceText(value, "page control", 300).text;
 }
 
+function acceptsDialog(command: { dialog?: "accept" }): string {
+  return command.dialog === "accept" ? " and accept the page's confirmation dialog" : "";
+}
+
+function historyTarget(tab: PreviewTab, direction: "back" | "forward" | "reload"): string {
+  const contents = tab.view.webContents;
+  const history = contents.navigationHistory;
+  const url = direction === "reload"
+    ? contents.getURL()
+    : history.getEntryAtIndex(history.getActiveIndex() + (direction === "back" ? -1 : 1))?.url ?? "";
+  return sanitizeBrowserEvidenceText(url, "[private address hidden]", 600).text;
+}
+
+function inspectedTarget(
+  command: AgentBrowserCommand,
+  tab: PreviewTab,
+  inspect: (tab: PreviewTab, ref: string, purpose?: "scroll") => Promise<PreviewAgentTarget>,
+): Promise<PreviewAgentTarget> | null {
+  if (command.action === "click" || command.action === "type") return inspect(tab, command.ref);
+  return command.action === "scroll" && "ref" in command ? inspect(tab, command.ref, "scroll") : null;
+}
+
 function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: PreviewAgentTarget | null): string {
   // Page titles can echo arbitrary passwords. A stable tab number identifies
   // the inspected page without copying its untrusted title into an approval.
   const page = `Browser tab ${tab.pageNumber}`;
   const control = `${safeLabel(target?.role || "control")}: ${safeLabel(target?.label ?? "page control")}`;
   switch (command.action) {
-    case "click": return `${page}\nClick ${control}`;
+    case "click": return `${page}\nClick ${control}${acceptsDialog(command)}`;
     case "type": {
       // The evidence sanitizer is deliberately bounded. Show an explicitly
       // labelled preview; never silently claim an excerpt is the complete text.
@@ -50,8 +72,12 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
       return `${page}\n${command.replace ? "Replace text in" : "Append text to"} ${control}\n${extent}: ${JSON.stringify(preview)}`;
     }
     case "navigate": return `${page}\nNavigate: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}`;
-    case "press": return `${page}\nPress: ${command.key}`;
-    case "scroll": return `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
+    case "history": return `${page}\n${command.direction === "back" ? "Go back to"
+      : command.direction === "forward" ? "Go forward to" : "Reload"} ${historyTarget(tab, command.direction)}`;
+    case "press": return `${page}\nPress: ${command.key}${acceptsDialog(command)}`;
+    case "scroll": return "ref" in command
+      ? `${page}\nScroll ${control} into view`
+      : `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;
     case "tab-close": return `${page}\nClose this tab`;
     case "tab-activate": return `${page}\nSwitch to this tab`;
@@ -73,7 +99,7 @@ export class PreviewAgentApprovalRegistry {
     request: AgentBrowserRequest,
     identity: AgentBrowserRunIdentity | null,
     scope: ApprovalScope,
-    inspect: (tab: PreviewTab, ref: string) => Promise<PreviewAgentTarget>,
+    inspect: (tab: PreviewTab, ref: string, purpose?: "scroll") => Promise<PreviewAgentTarget>,
     signal?: AbortSignal,
   ): Promise<AgentBrowserCommand | ApprovedAction | string> {
     if (request.action !== "prepare-approval" && request.action !== "perform-approved"
@@ -88,8 +114,7 @@ export class PreviewAgentApprovalRegistry {
       const activeTabId = scope.activeTabId;
       const documentSequence = tab.documentSequence;
       const url = tab.view.webContents.getURL();
-      const target = command.action === "click" || command.action === "type"
-        ? await inspect(tab, command.ref) : null;
+      const target = await inspectedTarget(command, tab, inspect);
       if (target && (!target.found || target.blocked || target.disabled
         || (command.action === "type" && !target.editable))) throw stale();
       if (signal?.aborted || scope.activeTabId !== activeTabId
@@ -120,8 +145,7 @@ export class PreviewAgentApprovalRegistry {
       && !tab.view.webContents.isDestroyed() && !tab.view.webContents.isLoadingMainFrame()
       && tab.view.webContents.getURL() === prepared.url;
     if (!current()) throw stale();
-    const target = command.action === "click" || command.action === "type"
-      ? await inspect(tab, command.ref) : null;
+    const target = await inspectedTarget(command, tab, inspect);
     if (!current() || !sameTarget(prepared.target, target)) throw stale();
     return { command, validate: (deliveredTarget) => {
       if (!current() || (deliveredTarget && !sameTarget(prepared.target, deliveredTarget))) throw stale();

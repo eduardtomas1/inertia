@@ -58,8 +58,10 @@ beforeEach(() => {
   native.queue.items = [];
   native.saved = { enabled: true, shortcut: "accelerator" };
 });
-async function fixture() {
+async function fixture(initiallyOpen = true) {
+  let mainOpen = initiallyOpen;
   const main = snapshotWindow();
+  const focusMainWindow = vi.fn();
   const chat = snapshotWindow();
   native.document.mockImplementation((event: { window?: typeof chat }) => {
     const destination = event.window ?? chat;
@@ -69,10 +71,10 @@ async function fixture() {
     values.map(({ name }, index) => ({ id: `image-${importImage.mock.calls.length}-${index}`, name, path: "image", mimeType: "image/png", size: 10 })));
   const registry = { import: importImage, setSnapshotSource: vi.fn((id: string, snapshot: SnapshotSource) => ({ id, snapshot })) };
   const imports = { begin: vi.fn(() => "queue-batch"), importSelection: vi.fn(async (_owner, _id, run) => await run(new AbortController().signal)), cancel: vi.fn(async () => undefined) };
-  const service = registerSnapshotIpc({ owner: ((event: { window?: typeof chat }) => event.window ?? chat) as never, mainWindow: () => main as never, registry: (() => registry) as never, imports: imports as never });
+  const service = registerSnapshotIpc({ owner: ((event: { window?: typeof chat }) => event.window ?? chat) as never, mainWindow: () => (mainOpen ? main : null) as never, focusMainWindow, registry: (() => registry) as never, imports: imports as never });
   const handler = native.handle.mock.calls[0]![1] as (event: unknown, input: unknown) => Promise<SnapshotState>;
   await handler({}, { type: "state" });
-  return { handler, main, chat, imports, importImage, registry, service };
+  return { handler, main, chat, imports, importImage, registry, service, focusMainWindow, reopen: () => { mainOpen = true; } };
 }
 
 describe("shortcut outcomes", () => {
@@ -109,6 +111,37 @@ describe("shortcut outcomes", () => {
     await native.trigger!();
     expect(native.queue.items).toHaveLength(1);
     expect(main.webContents.send).toHaveBeenCalledWith("inertia:snapshot-ready", { pending: true });
+  });
+
+  it("opens the main window for a queued capture after the macOS window was closed", async () => {
+    const { focusMainWindow } = await fixture(false);
+    native.capture.mockResolvedValueOnce(captured());
+    await native.trigger!();
+    expect(native.queue.items).toHaveLength(1);
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+  });
+
+  it("shows a failure from while the macOS window was closed once the reopened window binds a chat", async () => {
+    const { handler, main, focusMainWindow, reopen } = await fixture(false);
+    native.capture.mockRejectedValueOnce(new SnapshotError("The foreground window changed. Try the snapshot again."));
+    await native.trigger!();
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+    reopen();
+    await handler({ window: main }, { type: "bind", conversationId });
+    expect(main.webContents.send).toHaveBeenCalledExactlyOnceWith("inertia:snapshot-ready", { notice: "The foreground window changed. Try the snapshot again." });
+    await handler({ window: main }, { type: "bind", conversationId });
+    expect(main.webContents.send).toHaveBeenCalledOnce();
+  });
+
+  it("does not open a closed main window for a busy press", async () => {
+    const { handler, focusMainWindow } = await fixture(false);
+    await handler({}, { type: "bind", conversationId });
+    let finish!: (value: unknown) => void;
+    native.capture.mockImplementationOnce(async () => await new Promise((resolve) => { finish = resolve; }));
+    const running = native.trigger!();
+    await native.trigger!();
+    expect(focusMainWindow).not.toHaveBeenCalled();
+    finish(captured()); await running;
   });
 
   it("explains a capture failure in the main window when no chat is open", async () => {

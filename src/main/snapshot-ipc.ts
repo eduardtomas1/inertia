@@ -33,6 +33,7 @@ type DeliveryOutcome = "delivered" | "failed" | "cancelled";
 export function registerSnapshotIpc(options: {
   owner(event: IpcMainInvokeEvent, count: number): BrowserWindow;
   mainWindow?(): BrowserWindow | null;
+  focusMainWindow?(): void;
   registry(): AttachmentRegistry;
   imports: RendererAttachmentImportCoordinator;
   onFailure?: (diagnostic: SnapshotFailureDiagnostic) => void;
@@ -56,9 +57,15 @@ export function registerSnapshotIpc(options: {
   };
   const failureMessage = (failure: unknown): string =>
     failure instanceof SnapshotError ? failure.message : privacySafeAttachmentImportError(failure).message;
+  let heldNotice: string | null = null;
   const notify = (delivery: SnapshotDelivery, focus: boolean): void => {
     const window = options.mainWindow?.();
-    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      if (!focus) return;
+      if (delivery.notice) heldNotice = delivery.notice;
+      options.focusMainWindow?.();
+      return;
+    }
     if (focus) { window.show(); window.focus(); }
     window.webContents.send(DESKTOP_IPC.snapshotReady, delivery);
   };
@@ -273,6 +280,10 @@ export function registerSnapshotIpc(options: {
             target = { document, window, conversationId: request.conversationId };
             await cancelled;
           }
+        }
+        if (heldNotice && window === options.mainWindow?.()) {
+          window.webContents.send(DESKTOP_IPC.snapshotReady, { notice: heldNotice });
+          heldNotice = null;
         }
         void drain();
         return service.state();

@@ -1,15 +1,30 @@
 // @inertia-test-suite portable
-import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage, SDKResultMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
+  claudeErrorResult,
   claudeSuccessResult,
   fixtureClaudeQuery,
 } from "../helpers/claude-agent-sdk-protocol";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+
+function claudeTurnError(
+  kind: "success-error" | "error_max_turns",
+  userMessageUuid: string | undefined,
+  queuedTurnCount?: number,
+): SDKResultMessage {
+  const correlation = {
+    user_message_uuid: userMessageUuid,
+    ...(queuedTurnCount === undefined ? {} : { queued_turn_count: queuedTurnCount }),
+  };
+  return kind === "success-error"
+    ? { ...claudeSuccessResult("API Error: 529 overloaded"), is_error: true, terminal_reason: "api_error", ...correlation }
+    : { ...claudeErrorResult(kind, ["Maximum turns exceeded"]), ...correlation };
+}
 
 describe("Claude accepted follow-up settlement", () => {
   const roots: string[] = [];
@@ -221,14 +236,7 @@ describe("Claude accepted follow-up settlement", () => {
           const initial = (await iterator.next()).value!;
           ready();
           await iterator.next();
-          yield {
-            ...claudeSuccessResult("Provider could not finish"),
-            is_error: true,
-            user_message_uuid: initial.uuid,
-            ...(kind === "success-error"
-              ? { terminal_reason: "api_error" }
-              : { subtype: kind, errors: ["Maximum turns exceeded"] }),
-          } as SDKMessage;
+          yield claudeTurnError(kind, initial.uuid);
           readPastTerminal();
           await released;
         })(), { close }),
@@ -275,17 +283,9 @@ describe("Claude accepted follow-up settlement", () => {
           const initial = (await iterator.next()).value!;
           ready();
           const followUp = (await iterator.next()).value!;
-          yield {
-            ...claudeSuccessResult("API Error: 529 overloaded"),
-            is_error: true,
-            queued_turn_count: 1,
-            user_message_uuid: initial.uuid,
-            ...(kind === "success-error"
-              ? { terminal_reason: "api_error" }
-              : { subtype: kind, errors: ["Maximum turns exceeded"] }),
-          } as SDKMessage;
+          yield claudeTurnError(kind, initial.uuid, 1);
           yield { ...claudeSuccessResult("Follow-up answered", "completed"),
-            queued_turn_count: 0, user_message_uuid: followUp.uuid } as SDKMessage;
+            queued_turn_count: 0, user_message_uuid: followUp.uuid };
         })(), { close }),
       });
       const run = harness.start({

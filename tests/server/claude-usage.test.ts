@@ -5,6 +5,12 @@ import {
   parseClaudeUsage,
 } from "../../src/server/provider/claude-usage";
 import { parseClaudeRateLimits } from "../../src/server/provider/claude-agent-sdk-metadata";
+import {
+  claudeIterationUsage,
+  claudeModelUsage,
+  claudeSuccessResult,
+  claudeUsage,
+} from "../helpers/claude-agent-sdk-protocol";
 
 describe("Claude Agent SDK usage accounting", () => {
   it("separates aggregate run processing from the last active iteration", () => {
@@ -227,45 +233,47 @@ describe("Claude Agent SDK usage accounting", () => {
     ["compaction", 173_000],
     ["advisor_message", 173_000],
     ["fallback_message", 3_500],
-    [undefined, 3_500],
-  ])("derives context occupancy from the last message iteration when a %s entry trails it", (type, usedTokens) => {
+  ] as const)("derives context occupancy from the last message iteration when a %s entry trails it", (type, usedTokens) => {
+    expect(parseClaudeUsage({
+      ...claudeSuccessResult("Done"),
+      num_turns: 4,
+      usage: claudeUsage({
+        input_tokens: 10_000,
+        output_tokens: 500,
+        iterations: [
+          claudeIterationUsage("message", 150_000, 3_000, 20_000),
+          claudeIterationUsage(type, 2_000, 1_500),
+        ],
+      }),
+      modelUsage: { "claude-test": claudeModelUsage({ contextWindow: 200_000 }) },
+    }, { selectedModelId: "claude-test" })?.usedTokens).toBe(usedTokens);
+  });
+
+  it("derives context occupancy from a trailing iteration without a type from older producers", () => {
     expect(parseClaudeUsage({
       num_turns: 4,
       usage: {
         input_tokens: 10_000,
-        cache_read_input_tokens: 0,
-        cache_creation_input_tokens: 0,
         output_tokens: 500,
         iterations: [
-          {
-            type: "message",
-            input_tokens: 150_000,
-            cache_read_input_tokens: 20_000,
-            cache_creation_input_tokens: 0,
-            output_tokens: 3_000,
-          },
-          {
-            ...(type ? { type } : {}),
-            input_tokens: 2_000,
-            cache_read_input_tokens: 0,
-            cache_creation_input_tokens: 0,
-            output_tokens: 1_500,
-          },
+          { type: "message", input_tokens: 150_000, output_tokens: 3_000 },
+          { input_tokens: 2_000, output_tokens: 1_500 },
         ],
       },
       modelUsage: { "claude-test": { contextWindow: 200_000 } },
-    }, { selectedModelId: "claude-test" })?.usedTokens).toBe(usedTokens);
+    }, { selectedModelId: "claude-test" })?.usedTokens).toBe(3_500);
   });
 
   it("keeps context occupancy unknown when the only iteration is a compaction", () => {
     expect(parseClaudeUsage({
+      ...claudeSuccessResult("Done"),
       num_turns: 3,
-      usage: {
+      usage: claudeUsage({
         input_tokens: 10_000,
         output_tokens: 500,
-        iterations: [{ type: "compaction", input_tokens: 2_000, output_tokens: 1_500 }],
-      },
-      modelUsage: { "claude-test": { contextWindow: 200_000 } },
+        iterations: [claudeIterationUsage("compaction", 2_000, 1_500)],
+      }),
+      modelUsage: { "claude-test": claudeModelUsage({ contextWindow: 200_000 }) },
     }, { selectedModelId: "claude-test" })?.usedTokens).toBeNull();
   });
 

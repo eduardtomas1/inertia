@@ -18,6 +18,7 @@ import type {
   PermissionResult,
   Query,
   SDKMessage,
+  SDKResultSuccess,
   SDKUserMessage,
   SpawnedProcess,
   SpawnOptions,
@@ -52,9 +53,12 @@ import {
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import {
   claudeBackgroundTasks,
+  claudeModelUsage,
+  claudeRateLimitEvent,
   claudeSessionState,
   claudeSuccessResult,
   claudeSystem,
+  claudeUsage,
   fixtureClaudeQuery,
 } from "../helpers/claude-agent-sdk-protocol";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -317,24 +321,25 @@ describe("Claude Agent SDK harness", () => {
           // making terminal result handling wait for it.
           await new Promise<void>((resolve) => setImmediate(resolve));
           yield {
-            type: "rate_limit_event",
-            session_id: "33333333-3333-4333-8333-333333333333",
-            rate_limit_info: {
+            ...claudeRateLimitEvent({
               status: "allowed",
               rateLimitType: "five_hour",
               utilization: 0.3,
               resetsAt: 1_893_456_000,
-            },
-          } as unknown as SDKMessage;
-          yield {
-            type: "result",
-            subtype: "success",
+            }),
             session_id: "33333333-3333-4333-8333-333333333333",
-            result: "Claude response",
-            num_turns: 1,
-            usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 },
-            modelUsage: { sonnet: { contextWindow: 200_000 } },
-          } as unknown as SDKMessage;
+          };
+          yield {
+            ...claudeSuccessResult("Claude response"),
+            session_id: "33333333-3333-4333-8333-333333333333",
+            usage: claudeUsage({
+              input_tokens: 120,
+              output_tokens: 30,
+              cache_read_input_tokens: 10,
+              cache_creation_input_tokens: 5,
+            }),
+            modelUsage: { sonnet: claudeModelUsage({ contextWindow: 200_000 }) },
+          } satisfies SDKResultSuccess;
         })();
         return Object.assign(stream, {
           interrupt: async () => undefined,
@@ -1244,14 +1249,11 @@ describe("Claude Agent SDK harness", () => {
             },
           } as unknown as SDKMessage;
           yield {
-            type: "result",
-            subtype: "success",
+            ...claudeSuccessResult("Kimi response"),
             session_id: "77777777-7777-4777-8777-777777777777",
-            result: "Kimi response",
-            num_turns: 1,
-            usage: { input_tokens: 50, output_tokens: 10 },
-            modelUsage: { k3: { contextWindow: 1_048_576 } },
-          } as unknown as SDKMessage;
+            usage: claudeUsage({ input_tokens: 50, output_tokens: 10 }),
+            modelUsage: { k3: claudeModelUsage({ contextWindow: 1_048_576 }) },
+          } satisfies SDKResultSuccess;
         })();
         return Object.assign(stream, {
           supportedModels: async () => {
@@ -2334,12 +2336,9 @@ describe("Claude Agent SDK harness", () => {
         const stream = (async function* (): AsyncGenerator<SDKMessage> {
           await interrupted;
           yield {
-            type: "result",
-            subtype: "success",
+            ...claudeSuccessResult("late result"),
             session_id: "66666666-6666-4666-8666-666666666666",
-            result: "late result",
-            usage: { input_tokens: 1, output_tokens: 1 },
-          } as unknown as SDKMessage;
+          } satisfies SDKResultSuccess;
         })();
         return Object.assign(stream, {
           supportedModels: async () => [],

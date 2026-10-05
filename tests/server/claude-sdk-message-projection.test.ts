@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type {
   SDKMessage,
+  SDKRateLimitInfo,
+  SDKResultSuccess,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
@@ -21,6 +23,7 @@ import { CappedProviderBuffer } from "../../src/server/provider/io";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
   claudeBackgroundTasks,
+  claudeRateLimitEvent,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -580,16 +583,14 @@ describe("Claude Agent SDK message projection", () => {
   });
 
   it("keeps a subagent's denied tool out of the parent activities", async () => {
-    const { events, result } = await run([
-      sdkMessage({
-        ...claudeSuccessResult("Parent response", "completed"),
-        permission_denials: [{
-          tool_name: "Bash",
-          tool_use_id: "child-denied-tool",
-          tool_input: { command: "rm -rf build" },
-        }],
-      }),
-    ]);
+    const { events, result } = await run([{
+      ...claudeSuccessResult("Parent response", "completed"),
+      permission_denials: [{
+        tool_name: "Bash",
+        tool_use_id: "child-denied-tool",
+        tool_input: { command: "rm -rf build" },
+      }],
+    } satisfies SDKResultSuccess]);
 
     expect(result).toMatchObject({ status: "completed", text: "Parent response" });
     expect(events.some((event) =>
@@ -608,13 +609,13 @@ describe("Claude Agent SDK message projection", () => {
       index: 0,
       content_block: { type: "tool_use", id: "bash-tool", name: "Bash", input: {} },
     }), false);
-    const snapshot = assistantMessage({
-      uuid: "bash-assistant",
-      apiMessageId: "bash-api",
-      content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "rm -rf build" } }],
-    });
-    projector.observe(snapshot, false);
-    projector.observe({ ...snapshot, uuid: "bash-assistant-repeat" } as SDKMessage, false);
+    for (const uuid of ["bash-assistant", "bash-assistant-repeat"]) {
+      projector.observe(assistantMessage({
+        uuid,
+        apiMessageId: "bash-api",
+        content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "rm -rf build" } }],
+      }), false);
+    }
 
     const bashActivities = events.flatMap((event) =>
       event.type === "activity" && event.activityId === "bash-tool" ? [event] : []);
@@ -896,33 +897,26 @@ describe("Claude Agent SDK message projection", () => {
       { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.8 },
     ], true],
     ["only a warning", [{ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9 }], undefined],
-  ])("marks a failed turn usage-limited after %s", async (_label, limits, usageLimited) => {
-    const { result } = await run([
-      ...limits.map((rate_limit_info, index) => sdkMessage({
-        type: "rate_limit_event",
-        uuid: `rate-limit-${index}`,
-        session_id: CLAUDE_PROTOCOL_SESSION_ID,
-        rate_limit_info,
-      })),
-      sdkMessage({
-        ...claudeSuccessResult("API Error: 429"),
-        is_error: true,
-        terminal_reason: "api_error",
-      }),
-    ]);
+  ] satisfies Array<[string, SDKRateLimitInfo[], true | undefined]>)(
+    "marks a failed turn usage-limited after %s",
+    async (_label, limits, usageLimited) => {
+      const { result } = await run([
+        ...limits.map(claudeRateLimitEvent),
+        {
+          ...claudeSuccessResult("API Error: 429"),
+          is_error: true,
+          terminal_reason: "api_error",
+        } satisfies SDKResultSuccess,
+      ]);
 
-    expect(result).toMatchObject({ status: "failed", failure: { terminalEvent: "result/api_error" } });
-    expect(result.failure?.usageLimited).toBe(usageLimited);
-  });
+      expect(result).toMatchObject({ status: "failed", failure: { terminalEvent: "result/api_error" } });
+      expect(result.failure?.usageLimited).toBe(usageLimited);
+    },
+  );
 
   it("keeps a turn that succeeds after a rejected limit completed", async () => {
     const { result } = await run([
-      sdkMessage({
-        type: "rate_limit_event",
-        uuid: "rate-limit-wait",
-        session_id: CLAUDE_PROTOCOL_SESSION_ID,
-        rate_limit_info: { status: "rejected", rateLimitType: "five_hour", resetsAt: 1_893_456_000 },
-      }),
+      claudeRateLimitEvent({ status: "rejected", rateLimitType: "five_hour", resetsAt: 1_893_456_000 }),
       claudeSuccessResult("Finished after the wait", "completed"),
     ]);
 

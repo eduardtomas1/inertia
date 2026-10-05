@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -30,7 +30,17 @@ import type {
 import { providerMaintenanceJournalTestDouble } from "../support/provider-maintenance-journal";
 
 const nodeBin = dirname(process.execPath);
-const npmCli = join(dirname(nodeBin), "lib/node_modules/npm/bin/npm-cli.js");
+const npmCli = [
+  process.env.npm_execpath,
+  join(dirname(nodeBin), "lib/node_modules/npm/bin/npm-cli.js"),
+  ...(process.env.PATH ?? "").split(":").filter(Boolean).map((entry) => join(entry, "npm")),
+].flatMap((candidate) => {
+  if (!candidate || !existsSync(candidate)) return [];
+  const resolved = realpathSync(candidate);
+  return resolved.endsWith("/npm/bin/npm-cli.js") ? [resolved] : [];
+})[0] ?? null;
+const npmBin = npmCli ? join(dirname(dirname(dirname(dirname(dirname(npmCli))))), "bin") : null;
+const npmRequired = process.platform === "linux" && Boolean(process.env.CI);
 const posixIt = it.skipIf(process.platform === "win32");
 const roots: string[] = [];
 
@@ -62,7 +72,7 @@ async function fakeManager(path: string, record: string, effect: string): Promis
   return await file(path, [
     `#!${process.execPath}`,
     "const fs = require(\"node:fs\");",
-    "const pick = [\"PNPM_HOME\", \"BUN_INSTALL\", \"VOLTA_HOME\", \"CODEX_HOME\", \"OPENAI_API_KEY\", \"CI\"];",
+    "const pick = [\"PNPM_HOME\", \"BUN_INSTALL\", \"VOLTA_HOME\", \"CODEX_HOME\", \"OPENAI_API_KEY\", \"CI\", \"HOMEBREW_NO_AUTO_UPDATE\"];",
     "const env = Object.fromEntries(pick.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));",
     `fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env }) + "\\n");`,
     effect,
@@ -144,12 +154,17 @@ async function runUpdate(scenario: UpdateScenario) {
         ? { replacementBoundaryIdentity: scenario.replacementBoundary }
         : {}),
     }),
-    runAction: async (action, options) => await runProviderMaintenanceAction(action, {
-      environment: environment.env,
-      cwd: scenario.home,
-      signal: options.signal,
-      onProgress: options.onProgress,
-    }),
+    runAction: async (action, options) => {
+      if (scenario.packageSpec && action.args.at(-1) !== scenario.packageSpec) {
+        throw new Error("The update would not install the local stub package.");
+      }
+      return await runProviderMaintenanceAction(action, {
+        environment: environment.env,
+        cwd: scenario.home,
+        signal: options.signal,
+        onProgress: options.onProgress,
+      });
+    },
     onOperation: (operation) => operations.push(operation),
   });
   const [status] = await controller.refresh([scenario.providerId]);
@@ -167,10 +182,12 @@ async function runUpdate(scenario: UpdateScenario) {
 }
 
 describe("provider maintenance on real installation layouts", () => {
-  it.skipIf(process.platform === "win32" || !existsSync(npmCli))(
+  it.skipIf(process.platform === "win32" || (!npmCli && !npmRequired))(
     "updates a stub package installed by npm into a temporary prefix",
     { timeout: 120_000 },
     async () => {
+      expect(npmCli, "npm's CLI must be found on a Linux CI lane").not.toBeNull();
+      const npm = npmCli!;
       const { root, home } = await layout();
       const tarballs = join(root, "tarballs");
       await mkdir(tarballs);
@@ -182,14 +199,14 @@ describe("provider maintenance on real installation layouts", () => {
           bin: { codex: "bin/codex.js" },
         }));
         await file(join(source, "bin/codex.js"), `#!/usr/bin/env node\nconsole.log("codex-cli ${version}");\n`);
-        execFileSync(process.execPath, [npmCli, "pack", source, "--pack-destination", tarballs], {
+        execFileSync(process.execPath, [npm, "pack", source, "--pack-destination", tarballs], {
           env: { PATH: `${nodeBin}:/usr/bin:/bin`, HOME: home },
           stdio: "ignore",
         });
       }
       const prefix = join(home, ".npm-global");
       execFileSync(process.execPath, [
-        npmCli, "install", "-g", "--prefix", prefix, "--offline", "--no-audit", "--no-fund",
+        npm, "install", "-g", "--prefix", prefix, "--offline", "--no-audit", "--no-fund",
         join(tarballs, "openai-codex-1.0.0.tgz"),
       ], { env: { PATH: `${nodeBin}:/usr/bin:/bin`, HOME: home }, stdio: "ignore" });
       const manifest = join(prefix, "lib/node_modules/@openai/codex/package.json");
@@ -197,7 +214,7 @@ describe("provider maintenance on real installation layouts", () => {
       const { status, terminal, controller } = await runUpdate({
         providerId: "codex",
         home,
-        pathEntries: [join(prefix, "bin")],
+        pathEntries: [join(prefix, "bin"), npmBin!],
         executable: async () => await realpath(join(prefix, "bin/codex")),
         version: async () => await versionOf(manifest),
         packageSpec: join(tarballs, "openai-codex-1.0.1.tgz"),
@@ -253,9 +270,28 @@ describe("provider maintenance on real installation layouts", () => {
     });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
     expect(await records(record)).toEqual([{
-      argv: ["add", "-g", "@moonshot-ai/kimi-code@latest"],
+      argv: ["add", "-g", "--trust", "@moonshot-ai/kimi-code@latest"],
       env: { BUN_INSTALL: bunHome, CI: "1" },
     }]);
+  });
+
+  posixIt("upgrades Kimi installed as a uv tool with uv from PATH", async () => {
+    const { root, home, record } = await layout();
+    const tool = join(home, ".local/share/uv/tools/kimi-cli");
+    const manifest = join(tool, "version.json");
+    await packageJson(manifest, "kimi-cli", "1.0.0");
+    const kimi = await file(join(tool, "bin/kimi"), "#!/bin/sh\n");
+    await link(kimi, join(home, ".local/bin/kimi"));
+    await fakeManager(join(root, "tools/uv"), record, bump(manifest));
+    const { terminal } = await runUpdate({
+      providerId: "kimi",
+      home,
+      pathEntries: [join(home, ".local/bin"), join(root, "tools")],
+      executable: async () => kimi,
+      version: async () => await versionOf(manifest),
+    });
+    expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
+    expect(await records(record)).toEqual([{ argv: ["tool", "upgrade", "kimi-cli"], env: { CI: "1" } }]);
   });
 
   posixIt("updates a Volta package and keeps OpenCode on 1.x", async () => {
@@ -305,17 +341,29 @@ describe("provider maintenance on real installation layouts", () => {
     await packageJson(manifest, "claude-code", "1.0.0");
     const executable = await file(join(prefix, "Caskroom/claude-code/1.0.0/claude"), "#!/bin/sh\n");
     await link(executable, join(prefix, "bin/claude"));
-    const brew = await fakeManager(join(prefix, "Homebrew/bin/brew"), record, bump(manifest));
+    const brew = await fakeManager(join(prefix, "Homebrew/bin/brew"), record, [
+      "if (process.argv[2] === \"info\") {",
+      "  process.stdout.write(JSON.stringify({ formulae: [], casks: [{ version: \"1.0.1,42\" }] }));",
+      "  process.exit(0);",
+      "}",
+      bump(manifest),
+    ].join("\n"));
     await link(brew, join(prefix, "bin/brew"));
-    const { terminal } = await runUpdate({
+    const { status, terminal } = await runUpdate({
       providerId: "claude",
       home,
       pathEntries: [join(prefix, "bin")],
       executable: async () => executable,
       version: async () => await versionOf(manifest),
     });
+    expect(status).toMatchObject({ latestVersion: "1.0.1", versionStatus: "update-available" });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
-    expect(await records(record)).toEqual([{ argv: ["upgrade", "--cask", "claude-code"], env: { CI: "1" } }]);
+    const info = { argv: ["info", "--json=v2", "--cask", "claude-code"], env: { CI: "1", HOMEBREW_NO_AUTO_UPDATE: "1" } };
+    expect(await records(record)).toEqual([
+      info,
+      { argv: ["upgrade", "--cask", "claude-code"], env: { CI: "1" } },
+      info,
+    ]);
   });
 
   posixIt.each([

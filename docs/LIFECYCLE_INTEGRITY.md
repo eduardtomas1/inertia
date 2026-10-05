@@ -192,33 +192,46 @@ package directories, a pnpm shim of at most 16 KiB). In order, it accepts:
 | Owner | Proof | Command | Lock |
 | --- | --- | --- | --- |
 | Codex standalone | real path under `$CODEX_HOME/packages/standalone/` (default `~/.codex`) | `codex update`, with `CODEX_HOME` when set | `native:codex` |
-| Claude installer | real path under `~/.local/share/claude/` or `~/.claude/local/` | `claude update` | `native:claude` |
+| Claude installer | real path under `~/.local/share/claude/` or `~/.claude/local/` (on Windows also `%USERPROFILE%\.local\bin\claude.exe`) | `claude update` | `native:claude` |
 | Cursor installer | real path under `~/.local/share/cursor-agent/versions/` | `cursor-agent update` | `native:cursor` |
 | OpenCode installer | `~/.opencode/bin/opencode` | `opencode upgrade <latest 1.x> --method curl` | `native:opencode` |
 | Antigravity installer | `~/.local/bin/agy` (`%LOCALAPPDATA%\agy\bin\agy.exe` on Windows) | `agy update` | `native:antigravity` |
-| bun | real path under `$BUN_INSTALL/install/global/node_modules/<package>/` and `$BUN_INSTALL/bin/bun` exists | `bun add -g <package>` (`--trust` for Claude) | `bun-global:<home>` |
-| pnpm | the PATH hit is a shim in `$PNPM_HOME` naming `global/<n>/node_modules/<package>/`, which exists | `pnpm add -g <package>` (`--allow-build=` for Claude) | `pnpm-global:<home>` |
+| bun | real path under `$BUN_INSTALL/install/global/node_modules/<package>/` and `$BUN_INSTALL/bin/bun` exists | `bun add -g <package>` (`--trust` for Claude, Kimi and OpenCode) | `bun-global:<home>` |
+| pnpm | the PATH hit is a shim in `$PNPM_HOME` naming `global/<n>/node_modules/<package>/`, which exists | `pnpm add -g <package>` (`--allow-build=` for each package with an install script) | `pnpm-global:<home>` |
 | Yarn classic | real path under the Yarn global `node_modules/<package>/` | `yarn global add <package>` | `yarn-global:<dir>` |
+| uv (Kimi) | real path under `$UV_TOOL_DIR/kimi-cli/` (default `~/.local/share/uv/tools`) | `uv tool upgrade kimi-cli`, with `UV_TOOL_DIR` when set | `uv-tool:<dir>` |
 | Volta | the PATH hit in `$VOLTA_HOME/bin` resolves to `volta-shim` and `tools/image/packages/<package>` exists | `volta install <package>` | `volta:<home>` |
-| npm (also nvm, fnm, mise Node) | real path is `<prefix>/lib/node_modules/<package>/`, the prefix is not inside another `node_modules`, `<prefix>/bin/<command>` links to it, and no directory is redirected | that prefix's own Node and `npm-cli.js` with `install -g --prefix <prefix>` (`--allow-scripts=` for Claude) | `npm-global:<prefix>` |
+| npm (also nvm, fnm, mise Node) | real path is `<prefix>/lib/node_modules/<package>/`, the prefix is not inside another `node_modules`, `<prefix>/bin/<command>` links to it, and no directory is redirected | that prefix's own Node and `npm-cli.js` with `install -g --prefix <prefix>` (`--allow-scripts=` for each package with an install script) | `npm-global:<prefix>` |
 | Homebrew | real path is `<prefix>/Cellar` or `Caskroom/<name>/<version>/` for a known name (`codex`, `claude-code`, `opencode`), `<prefix>/bin/brew` resolves inside that prefix and the keg is writable | `<prefix>/bin/brew upgrade [--cask] <name>` | `homebrew:<prefix>` |
 
 Packages are `@openai/codex`, `@anthropic-ai/claude-code`,
-`@moonshot-ai/kimi-code` and `opencode-ai`. Every package manager installs
-`<package>@latest`, except OpenCode, which installs `opencode-ai@1`; the
-OpenCode installer and Homebrew paths run only when the latest known release is
-1.x. Everything else fails closed with one sentence and, where the command can
-be written from fixed words, system prefixes and home-relative paths, the exact
-command for a terminal: a prefix the account cannot write (`sudo npm install -g
---prefix /usr <package>@latest` for a system prefix), a snap (`sudo snap refresh
-<name>`), a mise npm tool (`mise upgrade npm:<package>`), other mise or asdf
-installs, distribution and Nix packages, project-local `node_modules`, and any
-binary whose installer cannot be identified. A native updater never runs for an
-unproven path. Discovery keeps the command name of a multiplexing shim (`snap`,
-`mise`, `volta-shim`), because those programs pick the tool from the name they
-were started with. The updater receives only the package-manager home it needs
-(`PNPM_HOME`, `BUN_INSTALL`, `VOLTA_HOME`, `CODEX_HOME`, `HOMEBREW_PREFIX`) on
-top of the existing allowlist.
+`@moonshot-ai/kimi-code` and `opencode-ai`. Install scripts are allowed for
+`@anthropic-ai/claude-code`, `opencode-ai`, and `@moonshot-ai/kimi-code` with
+its optional `node-pty`. Every package manager installs `<package>@latest`,
+except OpenCode, which installs `opencode-ai@1`; every OpenCode update, whatever
+its owner, runs only when the latest known release is 1.x, and otherwise
+Settings offers neither Update nor a command. Everything else fails closed with
+one sentence and, where the command can be written from fixed words, system
+prefixes and home-relative paths, the exact command for a terminal: an npm
+prefix the account cannot write (`sudo npm install -g --prefix <prefix>
+<package>@latest` only for `/usr`, `/usr/local` and `/opt/local`; a Homebrew
+prefix gets the sentence alone, so no root-owned files land inside Homebrew),
+a snap (`sudo snap refresh <name>`, the name read through one link hop of a
+snap alias), a mise npm tool (`mise upgrade npm:<package>`), other mise or
+asdf installs, distribution and Nix packages, project-local `node_modules`, and
+any binary whose installer cannot be identified. When the `yarn` on PATH is
+Yarn 2 or later (for example through Corepack), `yarn global add` does not
+exist, so the update fails with Yarn's own error and the installation is
+reverified as unchanged. A native updater never runs for an unproven
+path. Discovery keeps the command name of a multiplexing shim (`snap`,
+`volta-shim`), because those programs pick the tool from the name they were
+started with, and the installation fingerprint then also covers what the shim
+dispatches to (the Volta package image directory, or the real path of
+`/snap/<name>/current`), so an outside `volta install` or `snap refresh` marks
+the installation changed. mise shims are not kept: mise picks the version per
+working directory, so there is no single target to fingerprint. The updater
+receives only the package-manager home it needs (`PNPM_HOME`, `BUN_INSTALL`,
+`VOLTA_HOME`, `CODEX_HOME`, `UV_TOOL_DIR`) on top of the existing allowlist.
 
 An installation too old for its protocol check can still update. Discovery
 returns the executable and version of an identified CLI that answered
@@ -229,8 +242,21 @@ capability authority records such an installation as identified (version
 probe completed, cleanup confirmed, executable and file fingerprint bound) and
 admits `maintenance-update` for it when the manifest does not declare the
 operation unavailable. Every manifest now declares it negotiated, Kimi and
-Antigravity included. Settings applies the same gate, so it shows **Update**
+Antigravity included. This changes their manifest digest and therefore the
+compatibility token, but a native route resumes its saved session across a
+token change (see Session-continuation compatibility), and these harnesses
+have no custom-backend routes, so no existing chat starts a fresh session. Settings applies the same gate, so it shows **Update**
 only when the update would be admitted, and otherwise the command to run.
+
+The latest version comes from what the owner can install. A Homebrew keg is
+compared with `<prefix>/bin/brew info --json=v2 --cask|--formula <name>` (the
+stable formula version, or the cask version before any comma), run like an
+update without a shell, with `HOMEBREW_NO_AUTO_UPDATE=1` and
+`HOMEBREW_NO_ANALYTICS=1`, a 10 s deadline, process-tree cleanup and 64 KiB of
+stdout; a failed or oversized read leaves the version unknown. The npm-family
+owners use the npm registry entry of their package. Cursor and Antigravity
+publish no latest-version source, so their installer update stays **Check &
+update**. Results are cached for an hour (five minutes after a failure).
 
 The former direct CLI harness is retained only as the explicitly named
 `createLegacyCliAgentHarnessForTests` fixture for lifecycle tests and

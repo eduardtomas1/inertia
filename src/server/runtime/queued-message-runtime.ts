@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
-import type { MessageQueueResult } from "../../shared/queued-messages";
+import { MAX_QUEUED_MESSAGES, type MessageQueueResult } from "../../shared/queued-messages";
 import { queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
 import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
@@ -173,12 +173,48 @@ export function createQueuedMessageRuntime(
     try { await operation; } finally { enqueueing.delete(input.id); }
   }
 
+  const assertRoomForUndelivered = (conversationId: string): void => {
+    if (store.queuedMessages.list(conversationId).length < MAX_QUEUED_MESSAGES) return;
+    throw new RuntimeRequestError("This follow-up did not reach the agent, and this chat already has three queued messages. Remove one and send it again.");
+  };
+  const undeliveredFollowUps: NonNullable<TurnInteractionCommandDependencies["undeliveredFollowUps"]> = {
+    async enqueue(input, handoffId) {
+      assertRoomForUndelivered(input.conversationId);
+      await enqueue(input, handoffId);
+      void schedule(input.conversationId).catch(() => undefined);
+      return result(input.conversationId, input.id);
+    },
+    adopt(input) {
+      const conversation = requireConversation(input.conversationId);
+      assertRoomForUndelivered(conversation.id);
+      store.queuedMessages.add({ ...input, conversation, digest: queuedIntentDigest(input.content, input.attachments) });
+      changed(conversation.id);
+      void schedule(conversation.id).catch(() => undefined);
+      return result(conversation.id, input.id);
+    },
+  };
+
+  async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
+    const { conversationId, id, turnId } = input;
+    requireConversation(conversationId);
+    if (store.queuedMessages.list(conversationId).some((entry) => entry.id !== id)) {
+      throw new RuntimeRequestError("Send or remove the queued message first.");
+    }
+    await enqueue({ conversationId, id, content: input.content, attachments: input.attachments }, handoffId);
+    const owner = turns.activeIdentity(conversationId);
+    if (owner && !(owner.turnId === turnId && turns.cancelOwned(conversationId, owner))) {
+      void schedule(conversationId).catch(() => undefined);
+      return;
+    }
+    retryAfterCleanup(conversationId, id);
+  }
+
   const handler = defineRuntimeCommandHandler([
-    "message.queue.get", "message.queue.enqueue", "message.queue.remove", "message.queue.send",
+    "message.queue.get", "message.queue.enqueue", "message.queue.remove", "message.queue.send", "message.queue.stop-and-send",
   ], async (socket, command) => {
     if (!command.type.startsWith("message.queue.")) return "not-handled";
-    if (command.type !== "message.queue.get" && command.type !== "message.queue.enqueue"
-      && command.type !== "message.queue.remove" && command.type !== "message.queue.send") return "not-handled";
+    if (command.type !== "message.queue.get" && command.type !== "message.queue.enqueue" && command.type !== "message.queue.remove"
+      && command.type !== "message.queue.send" && command.type !== "message.queue.stop-and-send") return "not-handled";
     const { conversationId } = command.payload;
     store.conversation(conversationId);
     if (command.type === "message.queue.enqueue") {
@@ -197,6 +233,8 @@ export function createQueuedMessageRuntime(
       requireConversation(conversationId);
       await running.get(conversationId);
       await dispatch(conversationId, command.payload.id);
+    } else if (command.type === "message.queue.stop-and-send") {
+      await stopAndSend(command.payload, command.requestId);
     }
     const event: ServerEvent = { type: "request.result", requestId: command.requestId,
       result: result(conversationId, command.payload.id) };
@@ -205,6 +243,7 @@ export function createQueuedMessageRuntime(
   });
   return {
     handler,
+    turnInteractionHandler: createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps }),
     onTurnSettled(turn: AgentTurn): void { if (turn.status === "completed") void schedule(turn.conversationId).catch(() => undefined); },
     start(): void {
       store.queuedMessages.reconcile();

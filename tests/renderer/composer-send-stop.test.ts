@@ -60,6 +60,24 @@ describe("composer Send and Stop", () => {
       textOnly: true,
       submitting: false,
       sending: false,
+    })).toBe("stop-and-send");
+    expect(composerFollowUpState({
+      running: true,
+      stopping: false,
+      harnessId: "kimi-acp",
+      hasDraft: true,
+      textOnly: true,
+      submitting: false,
+      sending: true,
+    })).toBe("unavailable");
+    expect(composerFollowUpState({
+      running: true,
+      stopping: false,
+      harnessId: "cursor-acp",
+      hasDraft: true,
+      textOnly: false,
+      submitting: false,
+      sending: false,
     })).toBe("unavailable");
     expect(composerFollowUpState({
       running: true,

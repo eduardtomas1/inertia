@@ -131,7 +131,7 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
     steer: async (lease: { turnId: string }, _input: unknown, _attachments: unknown, acknowledged?: () => void) => {
       followUps += 1;
       acknowledged?.();
-      return { id: `follow-up-${followUps}`, turnId: lease.turnId };
+      return { kind: "accepted", message: { id: `follow-up-${followUps}`, turnId: lease.turnId } };
     },
   };
   const creation = options.scratch ? new ConversationCreationService({

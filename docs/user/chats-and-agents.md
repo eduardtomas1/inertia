@@ -31,6 +31,18 @@ Right-click a chat in the sidebar, or focus it and press Shift+F10 or the Menu k
 - **Archive** it with **Archive thread**.
 - **Open it in a new window** or **add it to split view**. See [Working side by side](working-side-by-side.md).
 
+## Right-click menus
+
+Right-click inside Inertia, or focus an item and press Shift+F10 or the Menu key, for the actions that fit where you are:
+
+- **Messages:** **Copy** when text is selected, **Copy message** as plain text, and **Copy as Markdown** for agent answers.
+- **Code blocks:** **Copy code**.
+- **File links in answers, files in Files and changed files in Changes:** **Open**, **Reveal in Finder** (File Explorer on Windows, your file manager on Linux), **Copy path** and **Copy relative path**. Folders leave out **Open**.
+- **Web links:** **Copy link address** and **Open link**. Images offer **Copy image**.
+- **Text fields:** the usual editing actions, with up to five spelling suggestions for a misspelled word.
+- **Terminal:** **Copy** the selection, **Paste**, **Select all** and **Clear**. On Windows, Ctrl+V also pastes into the terminal; on Linux, Ctrl+V still reaches terminal programs, so paste with Ctrl+Shift+V.
+- **Browser pane:** the page's editing actions, **Copy link address**, **Back**, **Forward** and **Reload**. Pages that show their own menu keep it. A right-click the agent sends opens nothing, and **Back**, **Forward** and **Reload** are unavailable while an agent Browser command runs.
+
 ## Find anything
 
 Press ⌘K (Ctrl+K elsewhere) to find commands, projects, chats and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a result to jump to its turn, including in a separate chat window. Search matches literal phrases, ignores case and shows up to 20 of the newest matches.

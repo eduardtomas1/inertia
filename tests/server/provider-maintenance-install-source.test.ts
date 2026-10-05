@@ -94,8 +94,8 @@ async function npmPackage(
 const NPM_PACKAGES = [
   ["codex", "@openai/codex", "codex", ["@openai/codex@latest"]],
   ["claude", "@anthropic-ai/claude-code", "claude", ["--allow-scripts=@anthropic-ai/claude-code", "@anthropic-ai/claude-code@latest"]],
-  ["kimi", "@moonshot-ai/kimi-code", "kimi", ["@moonshot-ai/kimi-code@latest"]],
-  ["opencode", "opencode-ai", "opencode", ["opencode-ai@1"]],
+  ["kimi", "@moonshot-ai/kimi-code", "kimi", ["--allow-scripts=@moonshot-ai/kimi-code", "--allow-scripts=node-pty", "@moonshot-ai/kimi-code@latest"]],
+  ["opencode", "opencode-ai", "opencode", ["--allow-scripts=opencode-ai", "opencode-ai@1"]],
 ] as const;
 
 describe("provider install source classification", () => {
@@ -124,6 +124,9 @@ describe("provider install source classification", () => {
         lockKey: `npm-global:${prefix}`,
         installMethod: "npm-global",
         label: expect.stringMatching(/ with npm$/u),
+        ...(providerId === "opencode"
+          ? { versionPin: { major: 1, argumentIndex: null, command: null } }
+          : {}),
       });
     },
   );
@@ -167,18 +170,25 @@ describe("provider install source classification", () => {
     },
   );
 
-  it("offers sudo for a root-owned system npm prefix", async () => {
-    const executable = "/usr/lib/node_modules/@openai/codex/bin/codex.js";
-    const capabilities = await classify("codex", executable, "/home/ada", environment(["/usr/bin"]), {
+  it.each([
+    ["/usr", "sudo npm install -g --prefix /usr @openai/codex@latest"],
+    ["/usr/local", "sudo npm install -g --prefix /usr/local @openai/codex@latest"],
+    ["/opt/local", "sudo npm install -g --prefix /opt/local @openai/codex@latest"],
+    ["/opt/homebrew", null],
+    ["/home/linuxbrew/.linuxbrew", null],
+  ] as const)("offers sudo only for a root-owned system npm prefix such as %s", async (prefix, manualCommand) => {
+    const executable = `${prefix}/lib/node_modules/@openai/codex/bin/codex.js`;
+    const capabilities = await classify("codex", executable, "/home/ada", environment([`${prefix}/bin`]), {
       platform: "linux",
       lstat: async () => { throw new Error("not used"); },
-      realpath: async (path) => path === "/usr/bin/codex" ? executable : path,
+      realpath: async (path) => path === `${prefix}/bin/codex` ? executable : path,
       access: async () => { throw new Error("EACCES"); },
     });
     expect(capabilities).toMatchObject({
       installMethod: "npm-global",
       update: null,
-      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@latest",
+      message: "Your account cannot write this installation.",
+      manualCommand,
     });
   });
 
@@ -297,6 +307,11 @@ describe("provider install source classification", () => {
       installMethod: "homebrew",
       manualCommand: ["brew", ...args].join(" "),
     });
+    expect(capabilities.homebrew).toEqual({
+      brew: join(prefix, "bin/brew"),
+      name: args[args.length - 1],
+      cask: (args as readonly string[]).includes("--cask"),
+    });
     expect(capabilities.update).toEqual({
       executable: join(prefix, "bin/brew"),
       args,
@@ -365,6 +380,42 @@ describe("provider install source classification", () => {
     });
   });
 
+  it("names the snap behind a snap alias", async () => {
+    const capabilities = await classify("codex", "/snap/bin/codex", "/home/ada", environment(["/snap/bin"]), {
+      platform: "linux",
+      realpath: async (path) => path === "/snap/bin/codex" ? "/usr/bin/snap" : path,
+      readlink: async (path) => path === "/snap/bin/codex" ? "openai-codex.codex" : "/usr/bin/snap",
+    });
+    expect(capabilities).toMatchObject({ installMethod: "snap", manualCommand: "sudo snap refresh openai-codex" });
+  });
+
+  posixIt("upgrades Kimi installed as a uv tool with uv", async () => {
+    const { root, home } = await layout();
+    const toolDirectory = join(home, ".local/share/uv/tools");
+    const executable = await file(join(toolDirectory, "kimi-cli/bin/kimi"));
+    await link(executable, join(home, ".local/bin/kimi"));
+    const uv = await file(join(root, "tools/uv"));
+    const capabilities = await classify("kimi", executable, home, environment([join(home, ".local/bin"), join(root, "tools")]));
+    expect(capabilities).toMatchObject({
+      installMethod: "uv-tool",
+      manualCommand: "uv tool upgrade kimi-cli",
+      update: {
+        executable: uv,
+        args: ["tool", "upgrade", "kimi-cli"],
+        lockKey: `uv-tool:${toolDirectory}`,
+      },
+    });
+  });
+
+  it("runs the Claude installer's updater for its Windows binary", async () => {
+    const executable = "C:\\Users\\Ada\\.local\\bin\\claude.exe";
+    const capabilities = await classify("claude", executable, "C:\\Users\\Ada", { env: {}, pathEntries: [] }, {
+      platform: "win32",
+      realpath: async (path) => path,
+    });
+    expect(capabilities.update).toMatchObject({ args: ["update"], lockKey: "native:claude" });
+  });
+
   it("names the snap to refresh for a snap command", async () => {
     const capabilities = await classify("codex", "/snap/bin/codex", "/home/ada", environment(["/snap/bin"]), {
       platform: "linux",
@@ -398,6 +449,7 @@ describe("provider install source classification", () => {
 
   posixIt.each([
     ["claude", "bin/claude"],
+    ["claude", ".local/bin/claude"],
     ["codex", "bin/codex"],
     ["cursor", "Applications/Cursor.app/Contents/Resources/app/bin/cursor"],
     ["codex", "project/node_modules/@openai/codex/bin/codex.js"],

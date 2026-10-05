@@ -1048,10 +1048,9 @@ function startOpenCodeRun(
               hasAdmittedV2Work = true;
               ownership.acceptPrompt(id);
               armEventInactivityDeadline();
-            } else {
-              ownership.rejectFollowUp(id);
+              return true;
             }
-            return accepted;
+            ownership.rejectFollowUp(id);
           } catch (error) {
             if (openCodeRequestRefused(error)) {
               ownership.rejectFollowUp(id);
@@ -1059,10 +1058,10 @@ function startOpenCodeRun(
             }
             hasAdmittedV2Work = true;
             ownership.rejectPromptAdmission(id);
-            throw new ProviderSteerDeliveryUnknownError();
           } finally {
             activeV2Operations -= 1;
           }
+          throw new ProviderSteerDeliveryUnknownError();
         })();
         pendingFollowUps.add(followUp);
         try {

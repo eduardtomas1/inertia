@@ -19,6 +19,7 @@ import { buildComposerTurnRequest } from "../../utils/requestContext";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,
+  supportsActiveParentFollowUp,
   composerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
 import { composerHarnessLabel } from "./config";
@@ -478,6 +479,10 @@ export const Composer = memo(function Composer({
       startNewChat();
       return;
     }
+    if (stopAndSendTurnId) {
+      await queueCurrentMessage(stopAndSendTurnId);
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -701,14 +706,16 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
-  const queueCurrentMessage = async (): Promise<void> => { if (!canQueue || conversationContext.isReferencing()) return;
+  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand ? latestKnownTurn?.id ?? null : null;
+  const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
+  const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => { if (!canQueue || conversationContext.isReferencing()) return;
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;
     const isCurrent = () => conversationIdRef.current === queuedConversationId && draftValueRef.current === queuedMessage && attachmentsRef.current === queuedAttachments;
     const { queueComposerDraft } = await import("./ComposerQueuedActions");
     if (!await queueComposerDraft(onQueueCommand, queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments, isCurrent,
-      (error) => { if (conversationIdRef.current === queuedConversationId) setAttachmentError(error); }) || !isCurrent()) return;
+      (error) => { if (conversationIdRef.current === queuedConversationId) setAttachmentError(error); }, stopTurnId) || !isCurrent()) return;
     attachmentsRef.current = []; setAttachments([]);
     setAttachmentError(null);
     pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
@@ -1033,6 +1040,7 @@ export const Composer = memo(function Composer({
           canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
           running={running} imageInputUnavailable={imageInputUnavailableReason !== null}
+          stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
@@ -1144,7 +1152,7 @@ export const Composer = memo(function Composer({
           usageDisplayMode={usageDisplayMode}
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
-          primaryAction={primaryAction}
+          primaryAction={visiblePrimaryAction}
           canSendQueuedNow={!continuationRefusal && !disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
           queuedTurnId={latestKnownTurn?.id ?? null}
           queuedTurnStatus={latestKnownTurn?.status ?? null}

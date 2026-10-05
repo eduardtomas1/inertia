@@ -124,6 +124,7 @@ async function recordMenus(app: Awaited<ReturnType<typeof createAppFixture>>): P
       (Reflect.get(globalThis, "surfaceMenus") as Electron.Menu[]).push(this);
       Reflect.set(globalThis, "surfaceMenuWindow", options?.window);
       Reflect.set(globalThis, "surfaceMenuPosition", { x: options?.x, y: options?.y });
+      Reflect.set(globalThis, "surfaceMenuClosed", options?.callback);
     };
   });
 }
@@ -161,11 +162,12 @@ async function chooseSurfaceItem(
     if (!item?.enabled) throw new Error("The context menu item is unavailable.");
     if (selected.role === "paste" && process.platform === "darwin") window.webContents.paste();
     else item.click({} as Electron.KeyboardEvent, window, window.webContents);
+    (Reflect.get(globalThis, "surfaceMenuClosed") as (() => void) | undefined)?.();
   }, name);
 }
 
 const visibleLabels = (items: RecordedMenuItem[]) => items
-  .filter((item) => !item.separator && item.label !== "Inspect Element")
+  .filter((item) => !item.separator && item.label !== "Inspect element")
   .map((item) => item.role ? `role:${item.role}` : item.enabled ? item.label : `${item.label} (disabled)`);
 
 for (const detached of [false, true]) test(`copies transcript content from the surface menu in the ${detached ? "detached chat" : "main"} window`, async () => {
@@ -190,7 +192,7 @@ for (const detached of [false, true]) test(`copies transcript content from the s
     const answer = page.locator("article.message.is-assistant");
     const heading = answer.getByRole("heading", { name: "Settings fixture" });
     const items = await openSurfaceMenu(app, heading);
-    expect(visibleLabels(items)).toEqual(["Copy Message", "Copy as Markdown"]);
+    expect(visibleLabels(items)).toEqual(["Copy message", "Copy as Markdown"]);
     const box = (await heading.boundingBox())!;
     const position = await app.electronApp.evaluate(() =>
       Reflect.get(globalThis, "surfaceMenuPosition") as { x: number; y: number });
@@ -198,12 +200,12 @@ for (const detached of [false, true]) test(`copies transcript content from the s
     expect(position.x).toBeLessThanOrEqual(Math.ceil(box.x + box.width));
     expect(position.y).toBeGreaterThanOrEqual(Math.floor(box.y));
     expect(position.y).toBeLessThanOrEqual(Math.ceil(box.y + box.height));
-    await chooseSurfaceItem(app, { label: "Copy Message" });
+    await chooseSurfaceItem(app, { label: "Copy message" });
     await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe("Settings fixture\n\nconst ready: boolean = true;");
 
-    expect(visibleLabels(await openSurfaceMenu(app, answer.locator("pre")))).toEqual(["Copy Code"]);
-    await chooseSurfaceItem(app, { label: "Copy Code" });
+    expect(visibleLabels(await openSurfaceMenu(app, answer.locator("pre")))).toEqual(["Copy code"]);
+    await chooseSurfaceItem(app, { label: "Copy code" });
     await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe("const ready: boolean = true;");
     expect(app.rendererErrors).toEqual([]);
@@ -229,7 +231,7 @@ test("pastes into the workspace shell from the terminal menu", async () => {
       `printf 'pasted-through-menu' > '${path}'`,
     ), output);
     const items = await openSurfaceMenu(app, dock.locator(".terminal-mount"));
-    expect(visibleLabels(items)).toEqual(["Copy (disabled)", "role:paste", "Select All", "Clear"]);
+    expect(visibleLabels(items)).toEqual(["Copy (disabled)", "role:paste", "Select all", "Clear"]);
     await chooseSurfaceItem(app, { role: "paste" });
     await expect(dock.locator(".xterm-helper-textarea")).toBeFocused();
     await page.keyboard.press("Enter");
@@ -273,9 +275,9 @@ test("offers link and navigation actions for a user's right-click in the Browser
     });
     expect(items).toEqual([
       ...process.platform === "darwin" ? ["Copy", "-"] : [],
-      "Copy Link Address", "-", "Back (disabled)", "Forward (disabled)", "Reload",
+      "Copy link address", "-", "Back (disabled)", "Forward (disabled)", "Reload",
     ]);
-    await chooseSurfaceItem(app, { label: "Copy Link Address" });
+    await chooseSurfaceItem(app, { label: "Copy link address" });
     await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(new URL("/agent-browser-destination", app.previewUrl).toString());
     expect(app.rendererErrors).toEqual([]);

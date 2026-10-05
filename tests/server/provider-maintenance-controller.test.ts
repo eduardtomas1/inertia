@@ -4,10 +4,11 @@ import type {
   ProviderMaintenanceOperation,
   ProviderMaintenanceProviderId,
 } from "../../src/shared/provider-maintenance";
-import type {
-  ProviderMaintenanceCapabilities,
-  ProviderMaintenanceTarget,
-  ProviderMaintenanceUpdateAction,
+import {
+  resolveProviderMaintenanceCapabilities,
+  type ProviderMaintenanceCapabilities,
+  type ProviderMaintenanceTarget,
+  type ProviderMaintenanceUpdateAction,
 } from "../../src/server/provider/maintenance-capabilities";
 import {
   ProviderMaintenanceController,
@@ -189,6 +190,45 @@ describe("ProviderMaintenanceController", () => {
     expect(controller.hasBlockingAuthority("opencode")).toBe(false);
   });
 
+  it("does not offer an npm OpenCode update when the registry's latest release is 2.x", async () => {
+    const runAction = vi.fn(async () => success());
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId, "1.4.0"),
+      refreshTarget: async (providerId) => target(providerId, "1.4.0"),
+      latestVersions: new ProviderLatestVersionCache({
+        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+      }),
+      resolveCapabilities: async () => await resolveProviderMaintenanceCapabilities(
+        target("opencode", "1.4.0", "/home/ada/.npm-global/lib/node_modules/opencode-ai/bin/opencode"),
+        {
+          platform: "linux",
+          home: "/home/ada",
+          environment: async () => ({ env: {}, pathEntries: [] }),
+          realpath: async (path) => path === "/home/ada/.npm-global/bin/opencode"
+            ? "/home/ada/.npm-global/lib/node_modules/opencode-ai/bin/opencode"
+            : path,
+          access: async () => undefined,
+          executableCandidates: async (command) => command === "/home/ada/.npm-global/bin/npm"
+            ? ["/home/ada/.npm-global/lib/node_modules/npm/bin/npm-cli.js"]
+            : command === "/home/ada/.npm-global/bin/node" ? [command] : [],
+        },
+      ),
+      runAction,
+    });
+
+    const [status] = await controller.refresh(["opencode"]);
+    expect(status).toMatchObject({
+      installMethod: "npm-global",
+      updateAvailability: "instructions-only",
+      updateLabel: null,
+      manualCommand: null,
+    });
+    await expect(controller.startUpdate("opencode")).resolves.toMatchObject({ status: "queued" });
+    await vi.waitFor(() => expect(controller.hasBlockingAuthority("opencode")).toBe(false));
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
   it("projects the manual command of a manager Inertia cannot run", async () => {
     const controller = new ProviderMaintenanceController({
       maintenanceJournal: providerMaintenanceJournalTestDouble(),
@@ -244,6 +284,25 @@ describe("ProviderMaintenanceController", () => {
       updateLabel: "Update claude",
       message: "Version 2.0.0 is available.",
     });
+  });
+
+  it("compares a Homebrew installation with what Homebrew can install instead of npm", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ version: "9.9.9" })));
+    const homebrewInfo = vi.fn(async () => JSON.stringify({ casks: [{ version: "1.1.0" }] }));
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: new ProviderLatestVersionCache({ fetch, homebrewInfo }),
+      resolveCapabilities: async () => ({
+        ...capabilities("codex", "homebrew:/opt/homebrew", "@openai/codex"),
+        installMethod: "homebrew",
+        homebrew: { brew: "/opt/homebrew/bin/brew", name: "codex", cask: true },
+      }),
+    });
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({ latestVersion: "1.1.0", versionStatus: "update-available" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects an update outside the active capability attestation", async () => {

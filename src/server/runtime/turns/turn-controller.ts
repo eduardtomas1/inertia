@@ -11,7 +11,6 @@ import {
   type AgentTurn,
   type AgentTurnTerminalStatus,
   type ChatAttachment,
-  type ChatMessage,
   type SubagentTrace,
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
@@ -28,6 +27,7 @@ import {
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
+  FollowUpSteerResult,
   ProviderStartAttempt,
   QueuedTurn,
   QueueTurnRequest,
@@ -942,6 +942,10 @@ export class TurnController {
     return this.followUps.acquire(this.activeByConversation.get(conversationId));
   }
 
+  followUpArrivedAfterTurn(conversationId: string): boolean {
+    return this.activeByConversation.get(conversationId)?.runState.acceptsProviderEvents() !== true;
+  }
+
   deferFollowUpAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {
     this.followUps.deferAttachmentCleanup(lease, cleanup);
   }
@@ -952,7 +956,7 @@ export class TurnController {
     attachments: readonly ChatAttachment[] = [],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
-  ): Promise<ChatMessage | null> {
+  ): Promise<FollowUpSteerResult> {
     return this.followUps.steer(
       lease,
       input,

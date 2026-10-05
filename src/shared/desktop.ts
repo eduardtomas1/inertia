@@ -14,6 +14,7 @@ import type {
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./application-diagnostics";
 import type { CompletionSoundImport } from "./completion-sound";
+import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -428,9 +429,9 @@ export function parseDetachedChatDraftAcknowledgement(
   };
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-function isProjectRelativePath(value: unknown): value is string {
+export function isProjectRelativePath(value: unknown): value is string {
   if (
     typeof value !== "string"
     || value.length === 0
@@ -688,6 +689,7 @@ export interface DesktopBridge {
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   openExternal: (url: string) => Promise<void>;
+  showContextMenu: (request: ContextMenuRequest) => Promise<ContextMenuAction | null>;
   /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */
   showThreadNotification: (request: DesktopNotificationRequest) => Promise<boolean>;
   importCompletionSound: (keep: readonly string[]) => Promise<CompletionSoundImport>;

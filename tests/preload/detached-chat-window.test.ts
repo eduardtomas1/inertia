@@ -65,6 +65,7 @@ describe("detached chat preload", () => {
       "retargetDetachedChat",
       "selectAttachments",
       "setDetachedChatAlwaysOnTop",
+      "showContextMenu",
       "snapshot",
     ]);
 
@@ -130,6 +131,11 @@ describe("detached chat preload", () => {
     await bridge.openAttachmentExternally(handoff.attachmentIds[0]!);
     await bridge.openProjectPath(projectPath);
     await bridge.openExternal("https://example.com/");
+    const menu = {
+      kind: "message" as const, conversationId,
+      role: "user" as const, hasSelection: false, anchor: { x: 1, y: 2 },
+    };
+    await bridge.showContextMenu(menu);
 
     expect(electron.invoke.mock.calls).toEqual([
       [DETACHED_CHAT_IPC.getWindowContext],
@@ -150,6 +156,7 @@ describe("detached chat preload", () => {
       ["inertia:open-attachment-externally", handoff.attachmentIds[0]],
       ["inertia:open-project-path", projectPath],
       ["inertia:open-external", "https://example.com/"],
+      ["inertia:show-context-menu", menu],
     ]);
     expect(electron.sendSync).toHaveBeenCalledWith(
       DETACHED_CHAT_IPC.persistDraft,

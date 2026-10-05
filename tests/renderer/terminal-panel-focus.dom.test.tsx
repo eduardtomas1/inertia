@@ -32,6 +32,7 @@ vi.mock("@xterm/xterm", () => ({
     };
 
     loadAddon(): void {}
+    attachCustomKeyEventHandler(): void {}
 
     open(container: HTMLElement): void {
       const textarea = document.createElement("textarea");

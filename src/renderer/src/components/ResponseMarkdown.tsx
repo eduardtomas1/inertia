@@ -34,6 +34,13 @@ import {
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
 import { useCopiedState } from "../hooks/useCopiedState";
+import {
+  contextMenuHandlers,
+  hasNativeMenuTarget,
+  isContextMenuId,
+  projectPathContextMenu,
+  selectionInside,
+} from "../utils/contextMenu";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
@@ -502,7 +509,7 @@ function CodeBlock({
     headingId?: string,
   ) => void;
 }): React.JSX.Element {
-  const { announceCopyFeedback } = useMarkdownRenderContext();
+  const { announceCopyFeedback, conversationId } = useMarkdownRenderContext();
   const child = Children.toArray(children)[0];
   const element = isValidElement<{
     className?: string;
@@ -545,6 +552,16 @@ function CodeBlock({
   const clipboard = useCopiedState();
   useEffect(() => setWrap(defaultWrap), [defaultWrap]);
   const HeaderIcon = meta.file ? FileCode2 : Code2;
+  const codeMenu = contextMenuHandlers<HTMLDivElement>(
+    (target, surface) => hasNativeMenuTarget(target, surface) ? null : {
+      kind: "code",
+      ...(isContextMenuId(conversationId) ? { conversationId } : {}),
+      hasSelection: selectionInside(surface),
+    },
+    (action) => {
+      if (action === "copy-code") void clipboard.copy(code);
+    },
+  );
   const fileLabel = (
     <>
       <HeaderIcon size={13} />
@@ -555,6 +572,7 @@ function CodeBlock({
     <div
       className="response-code-block"
       data-language-family={sourceLanguage.family}
+      onContextMenu={codeMenu.onContextMenu}
     >
       <header>
         {fileTarget?.kind === "local"
@@ -732,6 +750,42 @@ function MarkdownLink({
       .filter(Boolean)
       .join(" ");
     const FileIcon = language.id === "sql" ? Table2 : FileCode2;
+    const openLink = (): void => {
+      if (onOpenProjectFile) {
+        if (target.headingId) {
+          onOpenProjectFile(
+            target.relativePath,
+            target.location,
+            target.literalPath,
+            target.headingId,
+          );
+        } else if (target.literalPath) {
+          onOpenProjectFile(
+            target.relativePath,
+            target.location ?? undefined,
+            true,
+          );
+        } else if (target.location) {
+          onOpenProjectFile(target.relativePath, target.location);
+        } else {
+          onOpenProjectFile(target.relativePath);
+        }
+        return;
+      }
+      void window.inertia.openProjectPath({
+        projectId,
+        ...(conversationId ? { conversationId } : {}),
+        relativePath: target.relativePath,
+        action: target.action,
+      }).catch(() => undefined);
+    };
+    const linkMenu = projectPathContextMenu<HTMLAnchorElement>("project-link", {
+      projectId,
+      conversationId,
+      projectRoot,
+      relativePath: target.relativePath,
+      open: openLink,
+    });
     return (
       <a
         {...props}
@@ -740,34 +794,10 @@ function MarkdownLink({
         href={href}
         onClick={(event) => {
           event.preventDefault();
-          if (onOpenProjectFile) {
-            if (target.headingId) {
-              onOpenProjectFile(
-                target.relativePath,
-                target.location,
-                target.literalPath,
-                target.headingId,
-              );
-            } else if (target.literalPath) {
-              onOpenProjectFile(
-                target.relativePath,
-                target.location ?? undefined,
-                true,
-              );
-            } else if (target.location) {
-              onOpenProjectFile(target.relativePath, target.location);
-            } else {
-              onOpenProjectFile(target.relativePath);
-            }
-            return;
-          }
-          void window.inertia.openProjectPath({
-            projectId,
-            ...(conversationId ? { conversationId } : {}),
-            relativePath: target.relativePath,
-            action: target.action,
-          }).catch(() => undefined);
+          openLink();
         }}
+        onContextMenu={linkMenu?.onContextMenu}
+        onKeyDown={linkMenu?.onKeyDown}
       >
         <FileIcon
           className="response-project-file-icon"

@@ -63,6 +63,7 @@ import {
   resolveOrbMotion,
   usesActivityOrbs,
 } from "../working-indicator/orbMotion";
+import { messageContextMenu } from "./messageContextMenu";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
@@ -426,6 +427,7 @@ const CommentaryRow = memo(function CommentaryRow({
       className={clsx("turn-commentary-row", entry.streaming && "is-streaming")}
       aria-label={entry.streaming ? "Live agent update" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
+      {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content) : undefined)}
     >
       {entry.streaming
         ? (
@@ -463,6 +465,7 @@ export function FollowUpRow({
       aria-label="Your follow-up"
       data-follow-up-message-id={entry.message.id}
       tabIndex={-1}
+      {...messageContextMenu(entry.message, entry.message.content)}
     >
       <span>You</span>
       <p>{entry.message.content}</p>

@@ -15,6 +15,7 @@ vi.mock("@xterm/xterm", () => ({
     rows = 24;
     options = { fontSize: 13, theme: {} };
     loadAddon(): void {}
+    attachCustomKeyEventHandler(): void {}
     open(container: HTMLElement): void {
       container.append(document.createElement("textarea"));
     }

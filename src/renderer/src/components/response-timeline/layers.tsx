@@ -21,6 +21,7 @@ import {
   type ResponseTurn,
 } from "../../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
+import { messageContextMenu } from "./messageContextMenu";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { AgentPixelGrid } from "../AgentPixelGrid";
@@ -110,6 +111,7 @@ export function UserRequestLayer({
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
+      {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
       <div className="message-meta">
         <span>You</span>
@@ -389,6 +391,7 @@ export function FinalAnswerDocument({
       data-turn-jump-target="final"
       data-turn-layer="final-answer"
       tabIndex={-1}
+      {...messageContextMenu(presentation.terminalAnswer, presentation.content)}
     >
       <header
         className="final-answer-identity"

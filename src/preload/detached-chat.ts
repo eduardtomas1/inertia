@@ -21,6 +21,7 @@ const IPC = {
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
+  showContextMenu: "inertia:show-context-menu",
   snapshot: "inertia:snapshot",
   snapshotReady: "inertia:snapshot-ready",
 } as const;
@@ -150,6 +151,12 @@ const bridge = Object.freeze({
       IPC.openExternal,
       url,
     ) as ReturnType<DesktopBridge["openExternal"]>,
+  showContextMenu: (
+    request: Parameters<DesktopBridge["showContextMenu"]>[0],
+  ) => ipcRenderer.invoke(
+    IPC.showContextMenu,
+    request,
+  ) as ReturnType<DesktopBridge["showContextMenu"]>,
   getPlatform: () => process.platform,
 } satisfies DetachedChatBridge);
 

@@ -93,7 +93,9 @@ snapshot, click, type or press result reports the dialogs once as
 `dialogs: [{"kind","message","answer"}]`: at most 20 per report with
 `dialogsOmitted` counting the rest, messages of at most 1,024 characters
 passed through the same redaction as page text, and the report bounded to 8
-KiB. When the document's evidence is withheld for privacy, or the privacy
+KiB. Before dialogs are taken, the document's inputs are scanned as for a
+snapshot, so a press made straight after navigating sees the same privacy
+state. When the document's evidence is withheld for privacy, or the privacy
 guard is missing, every message is reported empty and the report carries
 `dialogsWithheld: true`. Dialog messages are untrusted page data.
 

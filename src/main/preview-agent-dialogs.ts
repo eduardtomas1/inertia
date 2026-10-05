@@ -57,13 +57,13 @@ export function takeAgentPageUnloadPrompts(contents: WebContents): AgentPageDial
   return { dialogs: unloads, omitted: 0, withheld: false };
 }
 
-export async function takeAgentPageDialogs(contents: WebContents): Promise<AgentPageDialogReport> {
+export async function takeAgentPageDialogs(contents: WebContents, withheld: boolean): Promise<AgentPageDialogReport> {
   const unloads = takeAgentPageUnloadPrompts(contents).dialogs;
   const value = await execute(contents, `(() => {
     const taken = (${takePreviewAgentDialogRecords.toString()})(${MAX_PREVIEW_AGENT_DIALOGS});
     const state = globalThis.__inertiaAgentBrowser;
     if (taken.records.length === 0) return { records: [], omitted: taken.omitted, withheld: false };
-    if (state?.privacyGuardInstalled !== true || state.evidenceWithheld) {
+    if (${withheld ? "true" : "false"} || state?.privacyGuardInstalled !== true || state.evidenceWithheld) {
       return {
         records: taken.records.map((record) => ({ kind: record.kind, message: "", answer: record.answer })),
         omitted: taken.omitted,

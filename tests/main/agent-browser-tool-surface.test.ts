@@ -272,6 +272,26 @@ describe("Browser tool surface", () => {
     });
   });
 
+  it("scans a page's inputs before reporting its dialogs, even on a press with no snapshot", async () => {
+    const { broker, contents } = await loadedHarness();
+    const { context, seed } = dialogPage(contents, []);
+    seed("Code hunter2 rejected", "dismiss");
+    pageTools.agentPageEvidencePrivacy.mockImplementation(async (_contents?: unknown, purpose?: unknown) => {
+      if (purpose === "semantic") context.__inertiaAgentBrowser.evidenceWithheld = "document-too-large";
+      return { withheld: purpose === "semantic" ? "document-too-large" : null };
+    });
+    try {
+      const pressed = await broker.perform(runIdentity, { action: "press", key: "Escape" });
+      expect(JSON.stringify(pressed)).not.toContain("hunter2");
+      expect(JSON.parse((pressed as unknown as { text: string }).text)).toMatchObject({
+        dialogs: [{ kind: "confirm", message: "", answer: "dismiss" }],
+        dialogsWithheld: true,
+      });
+    } finally {
+      pageTools.agentPageEvidencePrivacy.mockImplementation(async () => ({ withheld: null }));
+    }
+  });
+
   it("asks the user before a page they are using is left, and lets an agent action leave and report it", async () => {
     const { broker, contents, confirmPageUnload } = await loadedHarness();
     const userLeave = { preventDefault: vi.fn() };

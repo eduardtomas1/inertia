@@ -19,7 +19,7 @@ import {
   agentPageEvidencePrivacy, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
-  type AgentPageNotInspected, type PreviewAgentTarget,
+  type AgentPageEvidencePrivacy, type AgentPageNotInspected, type PreviewAgentTarget,
 } from "./preview-agent-page.js";
 import { sendAgentPageInput } from "./preview-agent-control.js";
 import { agentDialogDetail, armAgentPageDialogs, takeAgentPageDialogs, takeAgentPageUnloadPrompts } from "./preview-agent-dialogs.js";
@@ -691,10 +691,19 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "accept"), { scope, phase: "page-dialogs" });
   }
 
-  async #dialogDetail(contents: PreviewContents, scope: AgentOperationScope): Promise<Record<string, unknown>> {
+  async #dialogDetail(
+    contents: PreviewContents,
+    scope: AgentOperationScope,
+    scanned?: AgentPageEvidencePrivacy,
+  ): Promise<Record<string, unknown>> {
+    const privacy = scanned ?? await this.rendererOperation(
+      contents,
+      () => agentPageEvidencePrivacy(contents, "semantic"),
+      { scope, phase: "privacy-check" },
+    );
     return agentDialogDetail(await this.rendererOperation(
       contents,
-      () => takeAgentPageDialogs(contents),
+      () => takeAgentPageDialogs(contents, privacy.withheld !== null),
       { scope, phase: "page-dialogs" },
     ));
   }
@@ -765,7 +774,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         ...(gaps.frames ? ["frames" as const] : []),
         ...(gaps.shadowRoots ? ["shadow-roots" as const] : []),
       ];
-      const dialogs = capture ? await this.#dialogDetail(contents, scope) : {};
+      const dialogs = capture ? await this.#dialogDetail(contents, scope, before) : {};
       const text = await this.rendererOperation(contents, () => (Object.keys(dialogs).length > 0
         ? semanticPageSnapshot(contents, observed, dialogs)
         : semanticPageSnapshot(contents, observed)), {

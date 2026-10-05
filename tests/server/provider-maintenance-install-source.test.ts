@@ -297,6 +297,11 @@ describe("provider install source classification", () => {
       installMethod: "homebrew",
       manualCommand: ["brew", ...args].join(" "),
     });
+    expect(capabilities.homebrew).toEqual({
+      brew: join(prefix, "bin/brew"),
+      name: args[args.length - 1],
+      cask: (args as readonly string[]).includes("--cask"),
+    });
     expect(capabilities.update).toEqual({
       executable: join(prefix, "bin/brew"),
       args,

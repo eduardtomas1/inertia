@@ -18,8 +18,10 @@ import {
 } from "../process-lifecycle";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { providerProcessInvocation } from "./process";
-import type { ProviderMaintenanceUpdateAction } from "./maintenance-capabilities";
-import { PROVIDER_MAINTENANCE_ENVIRONMENT_KEYS } from "./maintenance-install-source";
+import {
+  PROVIDER_MAINTENANCE_ENVIRONMENT_KEYS,
+  type ProviderInstallUpdateAction as ProviderMaintenanceUpdateAction,
+} from "./maintenance-install-source";
 
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -56,6 +58,8 @@ export interface ProviderMaintenanceRunnerOptions {
   /** Test seam for the owned updater process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
   onProgress?: (progress: ProviderMaintenanceRunProgress) => void;
+  rawStdout?: boolean;
+  additionalEnvironment?: Readonly<Record<string, string>>;
 }
 
 const PASSTHROUGH_ENVIRONMENT_KEYS = [
@@ -133,6 +137,7 @@ export async function runProviderMaintenanceAction(
       environment[key] = value;
     }
   }
+  Object.assign(environment, options.additionalEnvironment);
   if (action.environmentPathPrefix) {
     const currentPath = environmentValue(environment, "PATH", platform);
     const separator = platform === "win32" ? ";" : ":";
@@ -186,7 +191,11 @@ export async function runProviderMaintenanceAction(
     let terminateOwnedProcessTree:
       ReturnType<typeof createOwnedProcessTreeTermination> | undefined;
 
+    const reported = (): string | null => options.rawStdout
+      ? output
+      : publicOutput(output);
     const progress = (): void => {
+      if (options.rawStdout) return;
       options.onProgress?.({
         output: publicOutput(output),
         outputTruncated,
@@ -224,7 +233,7 @@ export async function runProviderMaintenanceAction(
           signal,
           message,
           cleanupConfirmed,
-          output: publicOutput(output),
+          output: reported(),
           outputTruncated,
         });
       })();
@@ -299,7 +308,7 @@ export async function runProviderMaintenanceAction(
       progress();
     };
     child.stdout.on("data", append);
-    child.stderr.on("data", append);
+    child.stderr.on("data", options.rawStdout ? () => undefined : append);
     child.once("error", () => {
       terminate();
       finish(

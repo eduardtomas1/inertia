@@ -1,6 +1,13 @@
 import type {
   ProviderMaintenanceFreshness,
 } from "../../shared/provider-maintenance";
+import {
+  homebrewInfoArgs,
+  homebrewLatestVersion,
+  readHomebrewInfo,
+  type HomebrewInfoReader,
+} from "./maintenance-homebrew-latest";
+import type { HomebrewLatestSource } from "./maintenance-install-source";
 
 const DEFAULT_SUCCESS_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_FAILURE_TTL_MS = 5 * 60 * 1_000;
@@ -24,6 +31,7 @@ export interface LatestVersionResult {
 
 export interface ProviderLatestVersionCacheOptions {
   fetch?: typeof fetch;
+  homebrewInfo?: HomebrewInfoReader;
   now?: () => number;
   successTtlMs?: number;
   failureTtlMs?: number;
@@ -49,6 +57,7 @@ export class ProviderLatestVersionCache {
   private readonly entries = new Map<string, LatestVersionCacheEntry>();
   private readonly requests = new Map<string, Promise<LatestVersionResult>>();
   private readonly fetchImplementation: typeof fetch;
+  private readonly homebrewInfo: HomebrewInfoReader;
   private readonly now: () => number;
   private readonly successTtlMs: number;
   private readonly failureTtlMs: number;
@@ -56,6 +65,7 @@ export class ProviderLatestVersionCache {
 
   constructor(options: ProviderLatestVersionCacheOptions = {}) {
     this.fetchImplementation = options.fetch ?? fetch;
+    this.homebrewInfo = options.homebrewInfo ?? readHomebrewInfo;
     this.now = options.now ?? Date.now;
     this.successTtlMs = Math.max(
       60_000,
@@ -72,23 +82,81 @@ export class ProviderLatestVersionCache {
   }
 
   async latest(packageName: string, force = false): Promise<LatestVersionResult> {
+    return await this.cached(
+      packageName,
+      force,
+      async () => await this.fetchLatest(packageName),
+    );
+  }
+
+  async homebrew(
+    source: HomebrewLatestSource,
+    force = false,
+  ): Promise<LatestVersionResult> {
+    return await this.cached(
+      `homebrew\0${source.brew}\0${source.cask ? "cask" : "formula"}\0${source.name}`,
+      force,
+      async () => {
+        const json = await this.homebrewInfo(source.brew, homebrewInfoArgs(source));
+        if (json === null) throw new Error("Homebrew did not report the release");
+        const version = normalizedVersion(homebrewLatestVersion(json, source.cask));
+        if (!version) throw new Error("Homebrew did not report a version");
+        return version;
+      },
+    );
+  }
+
+  private async cached(
+    key: string,
+    force: boolean,
+    read: () => Promise<string>,
+  ): Promise<LatestVersionResult> {
     const now = this.now();
-    const cached = this.entries.get(packageName);
+    const cached = this.entries.get(key);
     if (!force && cached && cached.expiresAt > now) {
       return this.result(cached, cached.lastError ? "stale" : "fresh");
     }
-    const active = this.requests.get(packageName);
+    const active = this.requests.get(key);
     if (active) return await active;
-    const request = this.fetchLatest(packageName, cached)
-      .finally(() => this.requests.delete(packageName));
-    this.requests.set(packageName, request);
+    const request = this.resolve(key, cached, read)
+      .finally(() => this.requests.delete(key));
+    this.requests.set(key, request);
     return await request;
   }
 
-  private async fetchLatest(
-    packageName: string,
+  private async resolve(
+    key: string,
     previous: LatestVersionCacheEntry | undefined,
+    read: () => Promise<string>,
   ): Promise<LatestVersionResult> {
+    try {
+      const version = await read();
+      const checkedAt = this.now();
+      const entry: LatestVersionCacheEntry = {
+        version,
+        checkedAt,
+        expiresAt: checkedAt + this.successTtlMs,
+        lastError: null,
+      };
+      this.remember(key, entry);
+      return this.result(entry, "fresh");
+    } catch (error) {
+      const checkedAt = this.now();
+      const entry: LatestVersionCacheEntry = {
+        version: previous?.version ?? null,
+        checkedAt: previous?.checkedAt ?? checkedAt,
+        expiresAt: checkedAt + this.failureTtlMs,
+        lastError: publicFailure(error),
+      };
+      this.remember(key, entry);
+      return this.result(
+        entry,
+        entry.version ? "stale" : "unavailable",
+      );
+    }
+  }
+
+  private async fetchLatest(packageName: string): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     timer.unref();
@@ -109,28 +177,7 @@ export class ProviderLatestVersionCache {
       const parsed = JSON.parse(text) as { version?: unknown };
       const version = normalizedVersion(parsed.version);
       if (!version) throw new Error("registry response did not include a version");
-      const checkedAt = this.now();
-      const entry: LatestVersionCacheEntry = {
-        version,
-        checkedAt,
-        expiresAt: checkedAt + this.successTtlMs,
-        lastError: null,
-      };
-      this.remember(packageName, entry);
-      return this.result(entry, "fresh");
-    } catch (error) {
-      const checkedAt = this.now();
-      const entry: LatestVersionCacheEntry = {
-        version: previous?.version ?? null,
-        checkedAt: previous?.checkedAt ?? checkedAt,
-        expiresAt: checkedAt + this.failureTtlMs,
-        lastError: publicFailure(error),
-      };
-      this.remember(packageName, entry);
-      return this.result(
-        entry,
-        entry.version ? "stale" : "unavailable",
-      );
+      return version;
     } finally {
       clearTimeout(timer);
     }

@@ -246,6 +246,25 @@ describe("ProviderMaintenanceController", () => {
     });
   });
 
+  it("compares a Homebrew installation with what Homebrew can install instead of npm", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ version: "9.9.9" })));
+    const homebrewInfo = vi.fn(async () => JSON.stringify({ casks: [{ version: "1.1.0" }] }));
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: new ProviderLatestVersionCache({ fetch, homebrewInfo }),
+      resolveCapabilities: async () => ({
+        ...capabilities("codex", "homebrew:/opt/homebrew", "@openai/codex"),
+        installMethod: "homebrew",
+        homebrew: { brew: "/opt/homebrew/bin/brew", name: "codex", cask: true },
+      }),
+    });
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({ latestVersion: "1.1.0", versionStatus: "update-available" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects an update outside the active capability attestation", async () => {
     const runAction = vi.fn(async () => success());
     const controller = new ProviderMaintenanceController({

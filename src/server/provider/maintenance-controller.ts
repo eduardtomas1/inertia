@@ -435,7 +435,9 @@ export class ProviderMaintenanceController {
   ): Promise<ProviderMaintenanceStatus> {
     const target = this.options.target(providerId);
     const capabilities = await this.capabilities(target);
-    const latest = capabilities.packageName && target.installed
+    const latest = capabilities.homebrew && target.installed
+      ? await this.latestVersions.homebrew(capabilities.homebrew, force)
+      : capabilities.packageName && target.installed
       ? await this.latestVersions.latest(capabilities.packageName, force)
       : {
           version: null,

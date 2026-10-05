@@ -232,6 +232,16 @@ operation unavailable. Every manifest now declares it negotiated, Kimi and
 Antigravity included. Settings applies the same gate, so it shows **Update**
 only when the update would be admitted, and otherwise the command to run.
 
+The latest version comes from what the owner can install. A Homebrew keg is
+compared with `<prefix>/bin/brew info --json=v2 --cask|--formula <name>` (the
+stable formula version, or the cask version before any comma), run like an
+update without a shell, with `HOMEBREW_NO_AUTO_UPDATE=1` and
+`HOMEBREW_NO_ANALYTICS=1`, a 10 s deadline, process-tree cleanup and 64 KiB of
+stdout; a failed or oversized read leaves the version unknown. The npm-family
+owners use the npm registry entry of their package. Cursor and Antigravity
+publish no latest-version source, so their installer update stays **Check &
+update**. Results are cached for an hour (five minutes after a failure).
+
 The former direct CLI harness is retained only as the explicitly named
 `createLegacyCliAgentHarnessForTests` fixture for lifecycle tests and
 benchmarks. The production registry and capability manifests exclude every

@@ -11,6 +11,7 @@ import type {
 import {
   classifyProviderInstallSource,
   providerInstallPackageName,
+  type HomebrewLatestSource,
   type ProviderInstallSourceDependencies,
   type ProviderInstallUpdateAction,
 } from "./maintenance-install-source";
@@ -33,6 +34,7 @@ export interface ProviderMaintenanceCapabilities {
   instructionsUrl: string;
   message?: string;
   manualCommand?: string | null;
+  homebrew?: HomebrewLatestSource;
 }
 
 export interface ProviderMaintenanceCapabilityDependencies
@@ -85,5 +87,6 @@ export async function resolveProviderMaintenanceCapabilities(
     update: source.update,
     manualCommand: source.manualCommand,
     ...(source.message ? { message: source.message } : {}),
+    ...(source.homebrew ? { homebrew: source.homebrew } : {}),
   };
 }

@@ -48,11 +48,18 @@ export interface ProviderInstallUpdateAction {
   versionPin?: ProviderMaintenanceVersionPin;
 }
 
+export interface HomebrewLatestSource {
+  brew: string;
+  name: string;
+  cask: boolean;
+}
+
 export interface ProviderInstallSource {
   installMethod: ProviderMaintenanceInstallMethod;
   update: ProviderInstallUpdateAction | null;
   manualCommand: string | null;
   message: string | null;
+  homebrew?: HomebrewLatestSource;
 }
 
 export interface ProviderInstallSourceInput {
@@ -732,17 +739,24 @@ async function homebrewSource(context: InstallSourceContext): Promise<ProviderIn
   ) {
     return manual("homebrew", "Inertia could not find the Homebrew that owns this installation.", manualCommand);
   }
+  const homebrew = { brew, name: known.name, cask: kind === "cask" };
   if (!await context.writable([posix.join(prefix, match[2]!, known.name)])) {
-    return manual("homebrew", "Your account cannot write this Homebrew installation.", manualCommand);
+    return {
+      ...manual("homebrew", "Your account cannot write this Homebrew installation.", manualCommand),
+      homebrew,
+    };
   }
-  return update(context, "homebrew", {
-    executable: brew,
-    args,
-    lockKey: `homebrew:${prefix}`,
-    ...(context.input.providerId === "opencode"
-      ? { versionPin: { major: 1, argumentIndex: null, command: null } }
-      : {}),
-  }, "Homebrew", manualCommand);
+  return {
+    ...update(context, "homebrew", {
+      executable: brew,
+      args,
+      lockKey: `homebrew:${prefix}`,
+      ...(context.input.providerId === "opencode"
+        ? { versionPin: { major: 1, argumentIndex: null, command: null } }
+        : {}),
+    }, "Homebrew", manualCommand),
+    homebrew,
+  };
 }
 
 function snapSource(context: InstallSourceContext): ProviderInstallSource | null {

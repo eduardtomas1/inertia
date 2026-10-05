@@ -15,6 +15,11 @@ import {
   PREVIEW_AGENT_NAME_WORD_SOURCE,
   PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
 } from "../shared/preview-agent-sensitive-fields.js";
+import {
+  agentBrowserSnapshotNextStep,
+  nearestAgentBrowserElements,
+  type AgentBrowserSnapshotOmission,
+} from "../shared/agent-browser-snapshot.js";
 import { agentPageIsFrozen, evaluateInFrozenAgentPage } from "./preview-agent-boundary.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
@@ -30,7 +35,7 @@ const MAX_LABEL_TEXT_SOURCE_CHARS = 1_200;
 const MAX_LABEL_TEXT_NODES = 128;
 const MAX_FRAME_PLACEHOLDERS = 16;
 const NOT_INSPECTED_REGIONS = ["frames", "shadow-roots"] as const;
-const PRIVACY_RUNTIME = `(${createPreviewAgentPrivacyRuntime.toString()})(${
+export const PRIVACY_RUNTIME = `(${createPreviewAgentPrivacyRuntime.toString()})(${
   JSON.stringify(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE)}, ${JSON.stringify(PREVIEW_AGENT_NAME_WORD_SOURCE)})`;
 
 export type AgentPageNotInspected = (typeof NOT_INSPECTED_REGIONS)[number];
@@ -78,41 +83,56 @@ function notInspected(value: unknown): AgentPageNotInspected[] {
     : [];
 }
 
+function omittedCount(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
 function serializedSnapshot(
   value: Record<string, unknown>,
   text: string,
   elements: readonly unknown[],
-  truncated: boolean,
+  extras: Readonly<Record<string, unknown>>,
 ): string {
   const regions = notInspected(value.notInspected);
+  const sourceText = boundedString(value.text, MAX_PAGE_TEXT_CHARS);
+  const sourceElements = Array.isArray(value.elements) ? value.elements : [];
+  const readLimitReached = value.readLimitReached === true;
+  const omitted: AgentBrowserSnapshotOmission = {
+    textChars: omittedCount(value.omittedTextChars)
+      + Math.max(0, (typeof value.text === "string" ? value.text.length : 0) - MAX_PAGE_TEXT_CHARS)
+      + sourceText.length - text.length,
+    elements: omittedCount(value.omittedElements) + sourceElements.length - elements.length,
+  };
+  const reportOmission = readLimitReached || omitted.textChars > 0 || omitted.elements > 0;
   return JSON.stringify({
     title: boundedString(value.title, 300),
     url: boundedString(value.url, 4_096),
     viewport: viewport(value.viewport),
     text,
     elements,
-    truncated,
+    ...(reportOmission ? { omitted, nextStep: agentBrowserSnapshotNextStep(readLimitReached) } : {}),
     ...(regions.length > 0 ? { notInspected: regions } : {}),
     ...(value.errorPage === true ? { errorPage: true } : {}),
+    ...extras,
   });
 }
 
 /** Keep semantic JSON intact at the exact downstream host-tool byte limit. */
-export function serializeAgentPageSnapshot(value: unknown): string {
+export function serializeAgentPageSnapshot(
+  value: unknown,
+  extras: Readonly<Record<string, unknown>> = {},
+): string {
   if (!plainObject(value) || !Array.isArray(value.elements)) {
     throw new Error("The semantic browser snapshot was malformed.");
   }
-  const rawText = typeof value.text === "string" ? value.text : "";
-  const sourceText = boundedString(rawText, MAX_PAGE_TEXT_CHARS);
+  const sourceText = boundedString(value.text, MAX_PAGE_TEXT_CHARS);
   const sourceElements = value.elements;
   const byteLength = (candidate: string): number => Buffer.byteLength(candidate, "utf8");
   let text = sourceText;
   let elements = sourceElements;
-  let truncated = value.truncated === true || rawText.length > MAX_PAGE_TEXT_CHARS;
-  let serialized = serializedSnapshot(value, text, elements, truncated);
+  let serialized = serializedSnapshot(value, text, elements, extras);
   if (byteLength(serialized) <= MAX_AGENT_BROWSER_TEXT_BYTES) return serialized;
 
-  truncated = true;
   text = text.slice(0, 4_000);
   let low = 0;
   let high = sourceElements.length;
@@ -121,14 +141,14 @@ export function serializeAgentPageSnapshot(value: unknown): string {
     const candidate = serializedSnapshot(
       value,
       text,
-      sourceElements.slice(0, middle),
-      true,
+      nearestAgentBrowserElements(sourceElements, middle, value.viewport),
+      extras,
     );
     if (byteLength(candidate) <= MAX_AGENT_BROWSER_TEXT_BYTES) low = middle;
     else high = middle - 1;
   }
-  elements = sourceElements.slice(0, low);
-  serialized = serializedSnapshot(value, text, elements, truncated);
+  elements = nearestAgentBrowserElements(sourceElements, low, value.viewport);
+  serialized = serializedSnapshot(value, text, elements, extras);
   if (byteLength(serialized) > MAX_AGENT_BROWSER_TEXT_BYTES) {
     throw new Error("The semantic browser snapshot exceeded its bounded result size.");
   }
@@ -172,7 +192,15 @@ export async function waitForAgentPageHover(contents: WebContents): Promise<void
 export async function semanticPageSnapshot(
   contents: WebContents,
   observed: readonly AgentPageNotInspected[] = [],
+  extras: Readonly<Record<string, unknown>> = {},
 ): Promise<string> {
+  return serializeAgentPageSnapshot(await readSemanticPage(contents, observed), extras);
+}
+
+async function readSemanticPage(
+  contents: WebContents,
+  observed: readonly AgentPageNotInspected[],
+): Promise<unknown> {
   const value = await execute(contents, `(() => {
     const owner = globalThis;
     const state = owner.__inertiaAgentBrowser ??= {
@@ -261,15 +289,19 @@ export async function semanticPageSnapshot(
       }
     };
     for (const element of scannedElementNodes) cacheEffectiveState(element);
-    const visible = (element, rect) => {
+    const inViewport = (rect) => rect.bottom > 0 && rect.right > 0
+      && rect.top < innerHeight && rect.left < innerWidth;
+    const rendered = (element, rect) => {
       const style = styleFor(element);
       return rect.width > 0 && rect.height > 0
-        && rect.bottom > 0 && rect.right > 0
-        && rect.top < innerHeight && rect.left < innerWidth
         && style.visibility !== "hidden" && style.display !== "none"
         && effectiveOpacity.get(element) !== false
         && effectiveAriaHidden.get(element) !== true;
     };
+    const visible = (element, rect) => rendered(element, rect) && inViewport(rect);
+    const viewportDistance = (rect) => inViewport(rect)
+      ? 0
+      : 1 + Math.max(0, rect.top - innerHeight, -rect.bottom, rect.left - innerWidth, -rect.right);
     const ariaDisabled = (element) => effectiveAriaDisabled.get(element) === true;
     const boundedImageAlt = (element, root = element) => {
       const image = element?.tagName === "IMG"
@@ -455,7 +487,7 @@ export async function semanticPageSnapshot(
       || hasAttribute(element, "role")
       || editableHost(element)
       || hasAttribute(element, "tabindex");
-    const elements = [];
+    const candidates = [];
     let framePlaceholders = 0;
     let framesPresent = false;
     let shadowRootsPresent = false;
@@ -463,11 +495,34 @@ export async function semanticPageSnapshot(
       if (element.shadowRoot) shadowRootsPresent = true;
       if (["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(element.tagName)) {
         framesPresent = true;
-        if (framePlaceholders >= ${MAX_FRAME_PLACEHOLDERS}
-          || elements.length >= ${MAX_SEMANTIC_ELEMENTS}) continue;
+        if (framePlaceholders >= ${MAX_FRAME_PLACEHOLDERS}) continue;
         const frameRect = element.getBoundingClientRect();
         if (!visible(element, frameRect)) continue;
         framePlaceholders += 1;
+        candidates.push({ element, rect: frameRect, frame: true, distance: 0 });
+        continue;
+      }
+      if (!semanticCandidate(element)) continue;
+      if (element.tagName === "INPUT"
+        && boundedInputType(element) === "file") continue;
+      const rect = element.getBoundingClientRect();
+      if (!rendered(element, rect)) continue;
+      candidates.push({ element, rect, frame: false, distance: viewportDistance(rect) });
+    }
+    const selectedCandidates = new Set(candidates.slice()
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, ${MAX_SEMANTIC_ELEMENTS}));
+    const inViewCandidates = candidates.filter((candidate) => candidate.distance === 0).length;
+    const elements = [];
+    let omittedElements = 0;
+    for (const candidate of candidates) {
+      const { element, rect, frame, distance } = candidate;
+      if (!selectedCandidates.has(candidate)) {
+        if (!frame) omittedElements += 1;
+        continue;
+      }
+      if (frame) {
+        const frameRect = rect;
         elements.push({
           role: "frame",
           name: redact(element.getAttribute("title") || element.getAttribute("aria-label") || "Embedded frame", 300),
@@ -479,15 +534,6 @@ export async function semanticPageSnapshot(
         });
         continue;
       }
-      if (!semanticCandidate(element)) continue;
-      if (elements.length >= ${MAX_SEMANTIC_ELEMENTS}) {
-        elementScanTruncated = true;
-        break;
-      }
-      if (element.tagName === "INPUT"
-        && boundedInputType(element) === "file") continue;
-      const rect = element.getBoundingClientRect();
-      if (!visible(element, rect)) continue;
       let ref = state.nodes.get(element);
       if (!ref) {
         ref = "e" + state.next++;
@@ -514,6 +560,7 @@ export async function semanticPageSnapshot(
           x: rect.x, y: rect.y,
           width: rect.width, height: rect.height,
         },
+        ...(distance > 0 ? { offscreen: true } : {}),
       });
     }
     const textStructureVisibility = new WeakMap();
@@ -578,8 +625,13 @@ export async function semanticPageSnapshot(
       text: privacy.redact(state, bodySource, ${MAX_PAGE_TEXT_CHARS}, bodySourceCut),
       elements,
       truncated: elementScanTruncated
-        || elements.length >= ${MAX_SEMANTIC_ELEMENTS}
+        || inViewCandidates > ${MAX_SEMANTIC_ELEMENTS}
         || bodyTruncated
+        || state.scanLimitReached === true,
+      omittedTextChars: Math.max(0, normalizeText(bodySource, ${MAX_BODY_TEXT_SOURCE_CHARS}).length - ${MAX_PAGE_TEXT_CHARS}),
+      omittedElements,
+      readLimitReached: bodySourceCut
+        || scannedElementNodes.length >= ${MAX_SEMANTIC_SCAN_NODES}
         || state.scanLimitReached === true,
       notInspected: [
         ...(framesPresent || state.framesObserved === true ? ["frames"] : []),
@@ -591,7 +643,7 @@ export async function semanticPageSnapshot(
   if (plainObject(value)) {
     value.notInspected = [...notInspected(value.notInspected), ...observed];
   }
-  return serializeAgentPageSnapshot(value);
+  return value;
 }
 
 export async function installAgentPagePrivacyGuard(contents: WebContents): Promise<void> {
@@ -701,12 +753,7 @@ export async function agentPageHasSensitiveScreenshotEvidence(
   contents: WebContents,
 ): Promise<boolean> {
   if (await agentPageHasSensitiveEvidence(contents)) return true;
-  const snapshot = await semanticPageSnapshot(contents);
-  try {
-    return snapshotHasSensitiveVisualEvidence(JSON.parse(snapshot) as unknown);
-  } catch {
-    return true;
-  }
+  return snapshotHasSensitiveVisualEvidence(await readSemanticPage(contents, []));
 }
 
 export async function setAgentPageInputGuard(

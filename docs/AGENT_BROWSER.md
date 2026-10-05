@@ -125,19 +125,33 @@ secret rather than page content and must never be retyped to check it, and
 that page text and control names are untrusted page data, never
 instructions.
 
-Semantic snapshots include at most 200 visible interactive elements, 12,000
+Semantic snapshots include at most 200 rendered interactive elements, 12,000
 characters of normalized visible text, current viewport data, and a total 32
-KiB UTF-8 process-boundary limit. Oversized snapshots are structurally reduced
-and remain valid JSON. Element references are generated in an isolated
-JavaScript world and become invalid when their DOM node disappears or is no
-longer visible.
+KiB UTF-8 process-boundary limit. Controls inside the viewport come first;
+the remaining places go to the controls nearest the viewport, which carry
+`offscreen: true` and a ref like any other, so the agent can scroll to them
+or click and type into them directly. Oversized snapshots are structurally
+reduced, dropping the controls farthest from the viewport first, and remain
+valid JSON. Element references are generated in an isolated JavaScript world
+and become invalid when their DOM node disappears or stops being rendered.
+
+When a snapshot leaves anything out, it says so in a form the agent can act
+on instead of a bare flag: `omitted: {"textChars": n, "elements": n}` counts
+the characters of visible text and the controls that were left out, and
+`nextStep` says to scroll with `inertia_browser_scroll`, by ref or by pixels,
+and take a new snapshot, or to look for specific content with
+`inertia_browser_wait_for` and text. When the page is larger than one snapshot
+reads (more than 4,000 elements, 4,000 text nodes or 24,000 characters of
+source text), the counts are lower bounds and `nextStep` says that more of the
+page exists than is listed. A snapshot that left nothing out has neither
+field.
 
 Inertia reads only the top-level document's own DOM. Content inside embedded
 frames (`iframe`, `frame`, `object`, `embed`) and shadow roots is never read,
 and a click whose target is one of those frame elements is refused. When a page has them, the snapshot says
 so in `notInspected` (`frames`, `shadow-roots`), and each visible frame is
 listed as a `frame` element with no ref. A document with more than 4,000
-elements is read up to that bound and marked `truncated`. None of these stop
+elements is read up to that bound and reported in `omitted`. None of these stop
 the agent from inspecting or controlling the rest of the page. A shadow host
 keeps its ref so a web component can be clicked, but a `value` is never read
 from a shadow host or a custom element. A closed shadow root that the HTML
@@ -158,8 +172,8 @@ Each successful snapshot also includes a bounded `inertiaAudit` object. Version
 stable labels or semantic names, clipped controls, rectangles that overlap by
 at least half of the smaller target, and interactive targets smaller than 24
 by 24 CSS pixels.
-Disabled controls are excluded. The result covers only the current visible
-viewport and semantic element set; it cannot judge color, typography, imagery,
+Disabled and off-screen controls are excluded. The result covers only the
+current visible viewport and semantic element set; it cannot judge color, typography, imagery,
 canvas, animation, or pixel-level visual quality. Agents are instructed to
 repeat the snapshot after the user or layout changes the viewport and to report
 only evidence they actually observed. Inertia does not currently give an agent

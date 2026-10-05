@@ -778,10 +778,10 @@ describe("agent browser semantic snapshots", () => {
       .toBeLessThanOrEqual(MAX_AGENT_BROWSER_TEXT_BYTES);
     expect(() => JSON.parse(serialized)).not.toThrow();
     const parsed = JSON.parse(serialized) as {
-      truncated: boolean;
+      omitted: { elements: number };
       elements: unknown[];
     };
-    expect(parsed.truncated).toBe(true);
+    expect(parsed.omitted.elements).toBe(200 - parsed.elements.length);
     expect(parsed.elements.length).toBeGreaterThan(0);
     expect(parsed.elements.length).toBeLessThan(200);
   });
@@ -796,9 +796,9 @@ describe("agent browser semantic snapshots", () => {
       truncated: false,
     });
 
-    const parsed = JSON.parse(serialized) as { text: string; truncated: boolean };
+    const parsed = JSON.parse(serialized) as { text: string; omitted: unknown };
     expect(parsed.text).toHaveLength(12_000);
-    expect(parsed.truncated).toBe(true);
+    expect(parsed.omitted).toEqual({ textChars: 1, elements: 0 });
   });
 
   it("reports text-only clipping from the semantic page collector", async () => {
@@ -838,11 +838,11 @@ describe("agent browser semantic snapshots", () => {
 
     const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
       text: string;
-      truncated: boolean;
+      omitted: unknown;
       url: string;
     };
     expect(parsed).toMatchObject({
-      truncated: true,
+      omitted: { textChars: 12_000, elements: 0 },
       url: "http://127.0.0.1:3000",
     });
     expect(parsed.text).toHaveLength(12_000);
@@ -1261,9 +1261,9 @@ describe("agent browser semantic snapshots", () => {
 
     const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
       elements: unknown[];
-      truncated: boolean;
+      omitted: unknown;
     };
-    expect(parsed).toMatchObject({ elements: [], truncated: true });
+    expect(parsed).toMatchObject({ elements: [], omitted: { textChars: 0, elements: 0 } });
     expect(nextNodeCalls).toBe(4_001);
     expect(querySelectorAll).not.toHaveBeenCalled();
   });

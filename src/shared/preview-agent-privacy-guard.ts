@@ -872,7 +872,7 @@ export function installPreviewAgentPrivacyGuard(
           && values.every((value) => typeof value === "string" && value.length <= 4_096)) {
           for (const value of values as string[]) {
             if (!value) continue;
-            privacy.remember(state, value, "signal");
+            privacy.remember(state, value);
             remembered = true;
           }
         }
@@ -914,6 +914,7 @@ export function installPreviewAgentPrivacyGuard(
   activationTarget.addEventListener("beforeinput", inspectInputEvent, true);
   activationTarget.addEventListener("input", inspectInputEvent, true);
   activationTarget.addEventListener("change", (event) => {
+    privacy.settle(state);
     const path = boundedEventPath(event);
     for (let index = 0; path && index < path.length; index += 1) {
       const input = inputElement(path[index]);

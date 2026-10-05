@@ -377,6 +377,7 @@ async function readSemanticPage(
       const text = chunks.join(" ");
       return normalizeText(truncated ? privacy.clip(state, text) : text, text.length);
     };
+    privacy.settle(state);
     for (const input of scannedInputs) privacy.inspect(state, input, "settle");
     const passwordField = (element) => passwordNodes.has(element) || privacy.isSensitiveField(element);
     const editableHost = (element) => {
@@ -622,7 +623,7 @@ async function readSemanticPage(
       title: redact(document.title, 300),
       url: redact(routeUrl, 4096),
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
-      text: privacy.redact(state, bodySource, ${MAX_PAGE_TEXT_CHARS}, bodySourceCut),
+      text: privacy.redact(state, bodySource, ${MAX_PAGE_TEXT_CHARS}, bodySourceCut, bodySource.length),
       elements,
       truncated: elementScanTruncated
         || inViewCandidates > ${MAX_SEMANTIC_ELEMENTS}
@@ -665,6 +666,7 @@ export async function agentPageEvidencePrivacy(
     }
     const privacy = ${PRIVACY_RUNTIME};
     const inspection = ${JSON.stringify(purpose === "semantic" ? "settle" : "observe")};
+    if (inspection === "settle") privacy.settle(state);
     const inspect = (input) => privacy.inspect(state, input, inspection);
     if (typeof document.getElementsByTagName === "function") {
       let scanned = 0;
@@ -963,6 +965,7 @@ export async function locateAgentPageRef(
     }
     const scanTruncated = scannedNodes >= ${MAX_SEMANTIC_SCAN_NODES}
       && Boolean(scanIterator.nextNode());
+    privacy.settle(state);
     for (const input of scannedInputs) privacy.inspect(state, input, "settle");
     const rawInputType = element.tagName === "INPUT" ? element.type : "";
     const inputType = element.tagName === "INPUT"
@@ -1018,7 +1021,9 @@ export async function locateAgentPageRef(
       editable,
       role: password ? "textbox" : boundedLowerAttribute(element, "role", 50)
         || (editable ? "textbox" : ({ A: "link", SUMMARY: "button" })[element.tagName] || element.tagName.toLowerCase()),
-      sensitive: password || passwordValues.size > 0 || scanTruncated,
+      sensitive: password || passwordValues.size > 0 || scanTruncated
+        || ((editableHost(element) || boundedLowerAttribute(element, "role", 50) === "textbox")
+          && privacy.hasSensitiveName(element)),
       label: scanTruncated || state.evidenceWithheld
         ? "page element"
         : redact(

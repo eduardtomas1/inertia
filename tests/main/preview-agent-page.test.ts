@@ -1467,11 +1467,14 @@ describe("agent browser semantic snapshots", () => {
     ["a password field", { type: "password" }, true],
     ["an API key field", { type: "text", name: "api_key" }, true],
     ["a one-time code field", { type: "text", autocomplete: "one-time-code" }, true],
+    ["an editable region labelled Password", { tagName: "DIV", contenteditable: "true", "aria-label": "Password" }, true],
+    ["a textbox role labelled API key", { tagName: "DIV", role: "textbox", "aria-label": "API key" }, true],
+    ["an editable region labelled Notes", { tagName: "DIV", contenteditable: "true", "aria-label": "Notes" }, false],
   ])("classifies %s for approvals with the shared sensitive field rules", async (_name, attributes, expected) => {
-    const { type, ...named } = attributes as Record<string, string>;
+    const { type, tagName = "INPUT", ...named } = attributes as Record<string, string>;
     const input: Record<string, unknown> = {
-      tagName: "INPUT", type, value: "", defaultValue: "", disabled: false, readOnly: false,
-      isConnected: true, isContentEditable: false, firstChild: null,
+      tagName, type, value: "", defaultValue: "", disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: named.contenteditable === "true", firstChild: null,
       getAttribute: (name: string) => named[name] ?? null,
       getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
       contains: (candidate: unknown) => candidate === input,

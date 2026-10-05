@@ -73,6 +73,13 @@ describe("Browser sensitive field redaction", () => {
     ["cvv", `<input name="cvv">`, true],
     ["cvc", `<input placeholder="CVC">`, true],
     ["card number label", `<label>Card number <input></label>`, true],
+    ["newpassword", `<input name="newpassword">`, true],
+    ["confirmpassword", `<input name="confirmpassword">`, true],
+    ["clientsecret", `<input name="clientsecret">`, true],
+    ["secretkey", `<input name="secretkey">`, true],
+    ["otpcode", `<input name="otpcode">`, true],
+    ["accesskey", `<input name="accesskey">`, true],
+    ["account number", `<input name="acc_number">`, false],
     ["cardnumber", `<input name="cardnumber">`, true],
     ["pin", `<input type="tel" aria-label="PIN">`, true],
     ["cc-number", `<input autocomplete="cc-number">`, true],
@@ -106,23 +113,28 @@ describe("Browser sensitive field redaction", () => {
     expect(current.passwordNodes.has(search)).toBe(true);
   });
 
-  it("collapses one field's typed prefixes unless they were settled", () => {
+  it("collapses typed prefixes at the next settle point only while the field still extends them", () => {
     const privacy = runtime();
     const typed = state();
     const password = field();
     typeInto(privacy, typed, password, "admin123");
+    expect(typed.passwordValues.size).toBe(8);
+    privacy.settle(typed);
     expect([...typed.passwordValues]).toEqual(["admin123"]);
     expect(privacy.redact(typed, "Create a new account. Signed in as admin, admin123", 300))
       .toBe("Create a new account. Signed in as admin, [redacted]");
     password.value = "admin12";
     privacy.inspect(typed, password, "type");
+    privacy.settle(typed);
     expect(typed.passwordValues).toEqual(new Set(["admin123", "admin12"]));
 
     const settled = state();
     const otherPassword = field();
     typeInto(privacy, settled, otherPassword, "hun");
+    privacy.settle(settled);
     privacy.inspect(settled, otherPassword, "settle");
     typeInto(privacy, settled, otherPassword, "hunter2", 4);
+    privacy.settle(settled);
     expect(settled.passwordValues).toEqual(new Set(["hun", "hunter2"]));
 
     const observed = state();
@@ -130,16 +142,27 @@ describe("Browser sensitive field redaction", () => {
     privacy.inspect(observed, synthetic);
     synthetic.value = "abcdef";
     privacy.inspect(observed, synthetic);
+    privacy.settle(observed);
     expect(observed.passwordValues).toEqual(new Set(["abcd", "abcdef"]));
 
-    const stale = state();
-    const react = field();
-    typeInto(privacy, stale, react, "admi");
-    privacy.remember(stale, "adm", "signal");
-    expect(stale.passwordValues).toEqual(new Set(["admi"]));
-    react.value = "adm";
-    privacy.inspect(stale, react, "type");
-    expect(stale.passwordValues).toEqual(new Set(["admi", "adm"]));
+    for (const leave of [(input: { value: string }) => { input.value = ""; },
+      (input: { value: string; isConnected?: boolean }) => { input.isConnected = false; }]) {
+      const scripted = state();
+      const scriptedField = field();
+      typeInto(privacy, scripted, scriptedField, "hunter2x");
+      expect(scripted.passwordValues.has("hunter2")).toBe(true);
+      leave(scriptedField);
+      privacy.settle(scripted);
+      expect(scripted.passwordValues.size).toBe(8);
+    }
+
+    const extended = state();
+    const extendedField = field();
+    typeInto(privacy, extended, extendedField, "hunter2x");
+    privacy.settle(extended);
+    expect([...extended.passwordValues]).toEqual(["hunter2x"]);
+    privacy.remember(extended, "hunter2");
+    expect(extended.passwordValues).toEqual(new Set(["hunter2x", "hunter2"]));
   });
 
   it("forgets a mirror mark whose typed prefix was collapsed, but not a settled one", () => {
@@ -151,7 +174,8 @@ describe("Browser sensitive field redaction", () => {
     privacy.inspect(typed, username);
     expect(typed.passwordNodes.has(username)).toBe(true);
     typeInto(privacy, typed, password, "admin123", 6);
-    privacy.inspect(typed, username);
+    privacy.settle(typed);
+    privacy.inspect(typed, username, "settle");
     expect(typed.passwordNodes.has(username)).toBe(false);
     expect([...typed.passwordValues]).toEqual(["admin123"]);
 
@@ -159,6 +183,7 @@ describe("Browser sensitive field redaction", () => {
     const other = field();
     const replacement = field("hunter2", "text");
     typeInto(privacy, settled, other, "hunter2");
+    privacy.settle(settled);
     privacy.inspect(settled, other, "settle");
     privacy.inspect(settled, replacement);
     replacement.value = "hunter3";
@@ -197,6 +222,10 @@ describe("Browser sensitive field redaction", () => {
     ["form encoding with an encoded asterisk", "it's (ok)! *", "Before it%27s+%28ok%29%21+%2A after"],
     ["hexadecimal", "Summer 2026!", `Before ${Buffer.from("Summer 2026!").toString("hex").toUpperCase()} after`],
     ["JSON escaping", "say \"hi\"\n\tnow", "Before say \\\"hi\\\"\\n\\tnow after"],
+    ["left-to-right mark", "Summer 2026!", "Before Summer\u200e 2026! after"],
+    ["combining grapheme joiner", "Summer 2026!", "Before Sum\u034fmer 2026! after"],
+    ["invisible function application", "Summer 2026!", "Before Summer\u2061\u2064 2026! after"],
+    ["variation selector", "Summer 2026!", "Before Sum\ufe0fmer 2026! after"],
   ])("redacts a %s copy of a remembered value", (_name, secret, text) => {
     const privacy = runtime();
     const current = state();
@@ -216,6 +245,11 @@ describe("Browser sensitive field redaction", () => {
     expect(privacy.redact(short, "CVC943 and CVC 943", 300)).toBe("CVC943 and CVC [redacted]");
     privacy.remember(short, "943", "settle");
     expect(privacy.redact(short, "CVC943 and CVC 943", 300)).toBe("CVC[redacted] and CVC [redacted]");
+
+    const tiny = state();
+    privacy.remember(tiny, "1", "settle");
+    privacy.remember(tiny, "12", "settle");
+    expect(privacy.redact(tiny, "Order 1 of 123, 12 left, 312", 300)).toBe("Order [redacted] of 123, [redacted] left, 312");
   });
 
   it("never leaks the prefix of a value cut by a source window", () => {
@@ -227,7 +261,14 @@ describe("Browser sensitive field redaction", () => {
     const cut = privacy.redact(current, `Account${" ".repeat(1_191)}hunt`, 300, true);
     expect(cut).not.toContain("hunt");
     expect(privacy.clip(current, `Account ${" ".repeat(1_183)}hunt`)).not.toContain("hunt");
-    expect(privacy.clip(current, `Account hunter2 ${"y".repeat(100)}`).startsWith("Account hunter2 y")).toBe(true);
+    expect(privacy.clip(current, `Account hunter2 ${"y".repeat(100)}`)).toBe(`Account hunter2 ${"y".repeat(100)}`);
+    expect(privacy.clip(current, `Account ${"y".repeat(100)} hunt`)).toBe(`Account ${"y".repeat(100)} `);
+    const long = state();
+    const token = `tok-${"q".repeat(896)}`;
+    privacy.remember(long, token);
+    const label = `Deploy ${"y".repeat(1_180)}`;
+    expect(privacy.clip(long, label)).toBe(label);
+    expect(privacy.clip(long, `${label} tok-qq`)).toBe(`${label} `);
   });
 
   it("refuses redaction overflow without forgetting any previous secret", () => {
@@ -241,5 +282,11 @@ describe("Browser sensitive field redaction", () => {
     const oversized = state();
     privacy.remember(oversized, "x".repeat(4097));
     expect(oversized.evidenceWithheld).toBe("redaction-limit");
+ 
+    const expanding = state();
+    for (let index = 0; index < 256; index++) privacy.remember(expanding, `${index}${"\ud55c".repeat(3_990)}`);
+    expect(expanding.evidenceWithheld).toBeUndefined();
+    privacy.redact(expanding, "Order shipped", 300);
+    expect(expanding.evidenceWithheld).toBe("redaction-limit");
   });
 });

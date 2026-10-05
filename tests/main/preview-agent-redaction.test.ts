@@ -68,7 +68,18 @@ describe("Browser snapshot redaction", () => {
       <p>${"a".repeat(11_986)} hunter2 tail</p>
       <button aria-label="${" ".repeat(1_195)}hunter2">Go</button>
       <button>${" ".repeat(1_195)}hunter2</button>`);
-    const serialized = JSON.stringify(await snapshot());
-    expect(serialized).not.toContain("hunt");
+    const result = await snapshot();
+    expect(JSON.stringify(result)).not.toContain("hunt");
+    expect(result.text).toContain(`Password ${"a".repeat(100)}`);
+    expect(result.elements).toContainEqual(expect.objectContaining({ name: "[redacted]" }));
+  });
+
+  it("keeps whitespace-heavy page text complete once a value is remembered", async () => {
+    const words = Array.from({ length: 1_500 }, (_, index) => `w${String(index).padStart(4, "0")}`);
+    const { snapshot } = page(`<label>Password <input type="password" value="hunter2"></label>
+      <p>${words.join(" ".repeat(10))}</p>`);
+    const result = await snapshot() as { text: string; omitted?: unknown };
+    expect(result.text.endsWith("w1499")).toBe(true);
+    expect(result.omitted).toBeUndefined();
   });
 });

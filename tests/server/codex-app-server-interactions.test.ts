@@ -40,6 +40,7 @@ function interactionHarness() {
   const resolved: Array<[string, string]> = [];
   const writes: JsonObject[] = [];
   const activities: Array<[string, string, string]> = [];
+  const reasoning: string[] = [];
   const cancel = vi.fn();
   const rememberFailure = vi.fn();
   const host: CodexAppServerEventHost = {
@@ -54,6 +55,7 @@ function interactionHarness() {
       onApproval: (request) => approvals.push(request),
       onApprovalResolved: (requestId, decision) => resolved.push([requestId, decision]),
       onActivity: (kind, phase, label) => activities.push([kind, phase, label]),
+      onReasoning: (text) => reasoning.push(text),
     },
     resultText: new CappedTextBuffer(1_024),
     isSettled: () => phase === "settled",
@@ -87,6 +89,7 @@ function interactionHarness() {
     events: new CodexAppServerEvents(host),
     inputs,
     approvals,
+    reasoning,
     resolved,
     rememberFailure,
     writes,
@@ -443,6 +446,21 @@ describe("Codex native approval turn authority", () => {
       });
       expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
       expect(h.writes).toEqual([{ id: "legacy", result: { decision: "approved" } }]);
+    } finally { h.events.dispose(); }
+  });
+});
+
+describe("Codex reasoning summary parts", () => {
+  it("separates streamed summary parts of one reasoning item", () => {
+    const h = interactionHarness();
+    const owner = { threadId: ROOT_THREAD_ID, turnId: ROOT_TURN_ID };
+    try {
+      h.events.handleNotification("item/reasoning/summaryPartAdded", { ...owner, itemId: "reasoning-1", summaryIndex: 0 });
+      h.events.handleNotification("item/reasoning/summaryTextDelta", { ...owner, itemId: "reasoning-1", summaryIndex: 0, delta: "**Inspecting**\n\nRead the tests." });
+      h.events.handleNotification("item/reasoning/summaryPartAdded", { ...owner, itemId: "reasoning-1", summaryIndex: 1 });
+      h.events.handleNotification("item/reasoning/summaryTextDelta", { ...owner, itemId: "reasoning-1", summaryIndex: 1, delta: "**Verifying**\n\nRan them." });
+      h.events.handleNotification("item/reasoning/summaryPartAdded", { ...owner, itemId: "reasoning-2", summaryIndex: 0 });
+      expect(h.reasoning.join("")).toBe("**Inspecting**\n\nRead the tests.\n**Verifying**\n\nRan them.");
     } finally { h.events.dispose(); }
   });
 });

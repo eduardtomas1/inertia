@@ -56,7 +56,7 @@ export function parseCodexInputRequest(
     ) return undefined;
     const options: AgentInputQuestion["options"] = [];
     const optionIds = new Set<string>();
-    if (question.options !== undefined) {
+    if (question.options !== undefined && question.options !== null) {
       if (!Array.isArray(question.options)) return undefined;
       if (question.options.length > MAX_INPUT_OPTIONS) return undefined;
       for (const rawOption of question.options) {

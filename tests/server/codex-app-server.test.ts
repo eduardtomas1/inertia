@@ -11,6 +11,7 @@ import {
   type ProviderGoalClearedEvent,
   type ProviderGoalSnapshot,
   type ProviderGoalUpdatedEvent,
+  type ProviderInputEvent,
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
@@ -355,7 +356,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       expect.objectContaining({ phase: "completed", label: "Context compaction", activityId: "compact-rich" }),
       expect.objectContaining({ phase: "info", label: "Entered review mode" }),
       expect.objectContaining({ phase: "info", label: "Exited review mode" }),
-      expect.objectContaining({ phase: "completed", label: "Context compacted" }),
       expect.objectContaining({ phase: "started", label: "Plan updated", detail: "Progress:\nVerifying implementation" }),
       expect.objectContaining({ phase: "completed", label: "Plan completed" }),
       expect.objectContaining({ phase: "completed", label: "Patch updated", detail: expect.stringContaining("diff --git") }),
@@ -2363,6 +2363,39 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     }));
     expect(captured(fake.capturePath).find(({ id }) => id === "approval-rpc"))
       .toMatchObject({ result: { decision: "decline" } });
+    await manager.disposeAll();
+  });
+
+  it("answers a free-text Codex question whose options are null", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "free-text-input";
+    const manager = trackedManager(fake.command);
+    const questions: ProviderInputEvent["request"]["questions"][] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-free-text-input",
+      cwd: fake.root,
+      prompt: "Ask me",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onInput: (event) => {
+        questions.push(event.request.questions);
+        expect(manager.respondToInput(
+          event.conversationId,
+          event.request.requestId,
+          { choice: ["Take the careful path"] },
+          { runId: event.runId, turnId: event.turnId },
+        )).toBe(true);
+      },
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(questions).toEqual([[expect.objectContaining({ id: "choice", isOther: true, options: [] })]]);
+    expect(captured(fake.capturePath).find(({ id }) => id === "input-rpc"))
+      .toMatchObject({ result: { answers: { choice: { answers: ["Take the careful path"] } } } });
     await manager.disposeAll();
   });
 

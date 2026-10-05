@@ -45,6 +45,7 @@ params: {
   threadId,
   turnId,
   itemId: "input-item",
+  isBlocking: true,
   autoResolutionMs: null,
   questions: [{
     id: "choice",
@@ -52,7 +53,9 @@ params: {
     question: "Which path should Codex take?",
     isOther: true,
     isSecret: false,
-    options: [{ label: "Safe", description: "Use the bounded path." }],
+    options: process.env.INERTIA_APP_SERVER_SCENARIO === "free-text-input"
+      ? null
+      : [{ label: "Safe", description: "Use the bounded path." }],
   }],
 },
 });
@@ -366,7 +369,6 @@ if (message.method === "turn/start") {
       { method: "turn/diff/updated", params: { threadId, turnId, diff: "diff --git a/src/example.ts b/src/example.ts" } },
       { method: "item/completed", params: { threadId, turnId, item: { id: "review-in", type: "enteredReviewMode", review: "Review changes" } } },
       { method: "item/completed", params: { threadId, turnId, item: { id: "review-out", type: "exitedReviewMode", review: "No findings" } } },
-      { method: "thread/compacted", params: { threadId, turnId } },
       { method: "future/notification", params: { threadId, turnId, payload: "ignored safely" } },
       { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-rich", delta: "Done" } },
       { method: "item/completed", params: { threadId, turnId, item: { id: "message-rich", type: "agentMessage", text: "Done", phase: "final_answer" } } },

@@ -430,6 +430,28 @@ describe("Codex protocol seams", () => {
     expect(codexInputAnswers(request!, { target: [""] })).toBeUndefined();
   });
 
+  it("treats schema-native null options as a free-text question", () => {
+    const request = parseCodexInputRequest("item/tool/requestUserInput", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      isBlocking: true,
+      autoResolutionMs: null,
+      questions: [{
+        id: "notes", header: "Notes", question: "Anything else?", isOther: true, isSecret: false, options: null,
+      }],
+    });
+
+    expect(request).toMatchObject({
+      autoResolutionMs: null,
+      questions: [{ id: "notes", header: "Notes", question: "Anything else?", isOther: true, options: [] }],
+    });
+    expect(codexInputAnswers(request!, { notes: ["Ship it"] })).toEqual({ notes: { answers: ["Ship it"] } });
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [{ id: "notes", question: "Anything else?", options: "none" }],
+    })).toBeUndefined();
+  });
+
   it("rejects user-input payloads that cannot be represented without truncation", () => {
     const question = (index: number, optionCount = 1) => ({
       id: `question-${index}`,

@@ -726,6 +726,11 @@ export class CodexAppServerEvents {
       this.host.options.onText?.(delta);
       return;
     }
+    if (method === "item/reasoning/summaryPartAdded") {
+      const itemId = boundedText(params.itemId, 512);
+      if (itemId && this.reasoningDeltaItems.has(itemId)) this.host.options.onReasoning?.("\n");
+      return;
+    }
     if (method === "item/reasoning/summaryTextDelta") {
       const delta = stringValue(params.delta);
       if (!delta) return;
@@ -833,10 +838,6 @@ export class CodexAppServerEvents {
           : "Codex rerouted the model",
         reason ? { detail: `Reason:\n${reason}` } : undefined,
       );
-      return;
-    }
-    if (method === "thread/compacted") {
-      this.emitActivity("system", "completed", "Context compacted");
       return;
     }
     if (method === "item/plan/delta") {

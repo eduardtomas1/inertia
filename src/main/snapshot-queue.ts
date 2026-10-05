@@ -25,11 +25,13 @@ function parseJson(bytes: Buffer | null): unknown {
 }
 
 async function readContained(path: string, limit: number): Promise<Buffer | null> {
+  const link = await missing(lstat(path)).catch(() => null);
+  if (!link?.isFile() || link.isSymbolicLink() || await realpath(path).catch(() => null) !== path) return null;
   const handle = await missing(open(path, constants.O_RDONLY | constants.O_NOFOLLOW)).catch(() => null);
   if (!handle) return null;
   try {
     const stat = await handle.stat();
-    return stat.isFile() && stat.size <= limit ? await handle.readFile() : null;
+    return stat.isFile() && stat.dev === link.dev && stat.ino === link.ino && stat.size <= limit ? await handle.readFile() : null;
   } finally { await handle.close(); }
 }
 

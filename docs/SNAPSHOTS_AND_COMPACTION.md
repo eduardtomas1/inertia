@@ -23,7 +23,9 @@ not move focus while the running capture is still checking the foreground window
 
 Pending snapshots are stored in a private `snapshot-queue` folder inside
 Inertia's application data (folder `0700`, files `0600`, created exclusively and
-never followed through symbolic links). On macOS that is
+never followed through links: each file is checked with `lstat` and `realpath`
+before it is opened and must be the same file after opening, which also refuses
+symbolic links and junctions on Windows, where `O_NOFOLLOW` does not exist). On macOS that is
 under `~/Library/Application Support` (`Inertia` for the stable build), which
 Time Machine backs up, so a
 snapshot that is pending while a backup runs can be copied into it. The `0700`

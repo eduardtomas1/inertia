@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CliConversationDiscovery } from "../../src/server/cli-import/discovery";
+import { CliConversationDiscovery, localAbsolutePath } from "../../src/server/cli-import/discovery";
 import { CliTranscriptDeadline, readCliLines } from "../../src/server/cli-import/line-reader";
 import { parseCliTranscript } from "../../src/server/cli-import/transcript";
 import { RuntimeStore } from "../../src/server/database";
@@ -169,5 +169,9 @@ describe("CLI transcripts larger than the old 16 MiB file bound", () => {
       message("user", "Late request"), message("assistant", "Late reply")].join("\n") + "\n");
     const discovery = new CliConversationDiscovery([{ providerId: "codex", path: sessions }], [], undefined, { fullReadBytes: 1024, prefixBytes: 2048 });
     expect(await discovery.scan("project", workspace, unowned)).toMatchObject({ skipped: 0, candidates: [{ title: "Late request", opening: { user: "Late request", assistant: "Late reply" } }] });
+  });
+  it("refuses network-share workspace paths before resolving them", () => {
+    for (const path of ["\\\\host\\share\\project", "//host/share/project", "relative/project", "/workspace/\0project"]) expect(localAbsolutePath(path)).toBe(false);
+    expect(localAbsolutePath(join(tmpdir(), "project"))).toBe(true);
   });
 });

@@ -101,8 +101,23 @@ function userProse(text: string, provider: CliProvider): string {
   return /^\[Request interrupted by user[^\]]*\]$/u.test(prose) ? "" : prose;
 }
 
+const MESSAGE_MAX_TEXT = 32 * 1024;
+const SHORTENED = "\n\n[Shortened on import]";
+const IMPORT_SECRET_PATTERNS = [
+  /(?<![A-Za-z0-9-])(?:set-)?cookie\s*:[^\n]*/giu,
+  /(?<![A-Za-z0-9])(?:proxy-)?authorization["']?\s*[:=]\s*["']?(?:Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\b[^\n]*/giu,
+  /(?<![A-Za-z0-9])(?:api[-_ ]?key|access[-_ ]?key|password|passwd|pwd|secret|token)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')/giu,
+  /\b[A-Z0-9_]*(?:API_KEY|ACCESS_KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD)\s*=\s*[^\s,;]+/gu,
+] as const;
+
+function bounded(text: string): string {
+  if (text.length <= MESSAGE_MAX_TEXT) return text;
+  return `${text.slice(0, MESSAGE_MAX_TEXT - SHORTENED.length).replace(/[\uD800-\uDBFF]$/u, "")}${SHORTENED}`;
+}
+
 function redact(text: string, secrets: readonly string[]): string {
   let clean = redactCredentialUrls(redactHostToolPayload(text, secrets));
+  for (const pattern of IMPORT_SECRET_PATTERNS) clean = clean.replace(pattern, "[redacted credential]");
   for (const pattern of SECRET_PATTERNS) clean = clean.replace(pattern, "[redacted credential]");
   return clean.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
 }
@@ -230,7 +245,7 @@ export class CliTranscriptParser {
   private message(role: unknown, raw: string, time: unknown): CliMessage | null {
     if (role !== "user" && role !== "assistant") return null;
     const content = role === "user" ? userProse(raw, this.provider) : withoutWrappers(raw, "assistant").trim();
-    const clean = redact(content, this.secrets).slice(0, 32 * 1024);
+    const clean = bounded(redact(content, this.secrets));
     return clean.trim() ? { role, content: clean, createdAt: timestamp(time, this.fallbackDate) } : null;
   }
 

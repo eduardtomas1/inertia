@@ -227,4 +227,17 @@ describe("native CLI transcript projection", () => {
       `Here:\n${fence}`,
     ]);
   });
+  it("redacts cookies, escaped quoted secrets, other authorization schemes and secret environment assignments once", () => {
+    const user = (text: string) => parseCliTranscript(lines(meta, codex("user", text)), "codex", date).messages[0]!.content;
+    expect(user("Cookie: session=abc123secretvalue9; theme=dark\nnext")).toBe("[redacted credential]\nnext");
+    expect(user('password: "a\\"bcdefgh" done')).toBe("[redacted credential] done");
+    const digest = user('Authorization: Digest username="bob", realm="x", response="6629fae49393a05397450978507c4ef1"\nnext');
+    expect(digest).toBe("[redacted credential]\nnext");
+    expect(user("OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456 next")).toBe("[redacted credential] next");
+  });
+  it("marks a message shortened to the per-message bound", () => {
+    const [message] = parseCliTranscript(lines(meta, codex("user", "x".repeat(40_000))), "codex", date).messages;
+    expect(message!.content.length).toBeLessThanOrEqual(32 * 1024);
+    expect(message!.content.endsWith("[Shortened on import]")).toBe(true);
+  });
 });

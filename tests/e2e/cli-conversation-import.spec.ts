@@ -319,11 +319,17 @@ test("imports a rollout larger than the old 16 MiB limit with its opening and ne
   await dialog.getByRole("button", { name: "Import conversation", exact: true }).click();
   await dialog.getByRole("button", { name: "Open chat", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(app.page.getByText("Step 480 of the packaging pipeline passes.", { exact: true })).toBeVisible();
+  const transcript = app.page.getByLabel("Thread transcript");
   const note = app.page.getByRole("article", { name: "Agent system notice" });
-  await expect(note).toHaveCount(1);
+  const earlier = app.page.getByRole("button", { name: "Load earlier messages", exact: true });
+  await expect.poll(async () => {
+    if (await earlier.isVisible()) await earlier.click();
+    await transcript.evaluate((element) => { element.scrollTop = 0; });
+    return await note.count();
+  }).toBe(1);
   await expect(note).toContainText("Earlier messages were not imported: 762 of 962");
   await expect(app.page.locator(".response-turn").first()).toContainText(largeTitle);
-  await expect(app.page.getByText("Step 480 of the packaging pipeline passes.", { exact: true })).toBeVisible();
   await note.scrollIntoViewIfNeeded();
   await captureState(info, "chat-large-note-light-wide");
   expect(app.rendererErrors).toEqual([]);

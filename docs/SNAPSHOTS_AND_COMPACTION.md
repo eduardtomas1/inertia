@@ -12,8 +12,10 @@ accessibility data before sending. Capture does not send a message automatically
 A shortcut press is never dropped silently. If no chat message box is open (for
 example while Settings is showing, or after the chat window closed), the capture
 is kept as a pending snapshot and Inertia comes forward with the selected chat,
-or starts a new chat when none is selected; the first chat whose message box
-binds receives every pending snapshot, oldest first. Pressing the shortcut while
+or starts a new chat when neither a chat nor a new-chat draft exists; the first
+chat whose message box binds receives every pending snapshot, oldest first. If
+the macOS main window was closed while Inertia kept running, it is opened again;
+a notice from that moment is shown once the reopened window's message box binds. Pressing the shortcut while
 another capture is still running shows a notice in the main window instead of
 starting a second capture, and a failed capture with no open chat is reported
 the same way. The notice uses the main window's existing status notice and does
@@ -21,12 +23,18 @@ not move focus while the running capture is still checking the foreground window
 
 Pending snapshots are stored in a private `snapshot-queue` folder inside
 Inertia's application data (folder `0700`, files `0600`, created exclusively and
-never followed through symbolic links). The folder must resolve inside the real
-application-data path, or the capture fails. At most four snapshots wait at a
-time; a press beyond that takes no pixels and says why. Each one expires ten
-minutes after capture and is deleted then, whether or not a chat opened.
-Turning Snapshots off deletes the folder before the setting is acknowledged, and
-a launch with Snapshots off deletes it too. A pending snapshot that fails to
+never followed through symbolic links). On macOS that is
+under `~/Library/Application Support` (`Inertia` for the stable build), which
+Time Machine backs up, so a
+snapshot that is pending while a backup runs can be copied into it. The `0700`
+and `0600` modes are POSIX permissions; on Windows the files are protected only
+by the per-user profile folder's access control list. The folder must resolve
+inside the real application-data path, or the capture fails. At most four
+snapshots wait at a time; a press beyond that takes no pixels and says why. Each
+one is deleted when its own ten minutes from capture end, whether or not a chat
+opened. Quitting Inertia deletes the folder, and so does turning Snapshots off
+(before the setting is acknowledged); a launch removes anything a crash left
+behind. A pending snapshot that fails to
 import is reported once in the chat that received it and then deleted, so it
 cannot reappear on every focus; one whose chat closes before delivery stays
 pending for the next chat.
@@ -49,15 +57,19 @@ from context. Screenshots and accessibility context may still contain sensitive
 information. On macOS the worker matches the accessibility window to exactly one
 window-server window by process, bounds (within one point) and, when macOS
 reports it, title, then runs `/usr/sbin/screencapture -l <window> -o -x` without
-a shell, with an empty environment, a three-second limit and a private temporary
-folder. The image therefore holds only that window, without its shadow or any
+a shell, with an empty environment, in its own process group and with a
+three-second limit. The unmasked image is written to a folder that the main
+process creates for each capture under `snapshot-capture` in application data
+and deletes when the worker exits, however it exits; the worker kills the whole
+`screencapture` process group when it is stopped or exits, and a launch deletes
+any capture folder a crash left behind. The image therefore holds only that window, without its shadow or any
 window overlapping it. The window number is part of the before/after identity,
 so a different window matching after the screenshot discards the pixels. Masks
 are mapped from accessibility points onto the image's pixels, including Retina
 images at two or more pixels per point and windows on displays left of or above
-the main display. No match, more than one match, or an image whose
-width and height scale differ by more than 2 % fails the capture instead of
-guessing where masks belong. On Windows and Linux the
+the main display. No match, more than one match, or an image that is
+not within one pixel of the window frame at one shared scale on both axes fails
+the capture instead of guessing where masks belong. On Windows and Linux the
 [backend captures pixels under the window bounds](https://xa11y.dev/guides/screenshots/),
 which can include overlapping windows outside that accessibility tree. Review the
 attachment before sending it. A changed foreground identity, an
@@ -173,9 +185,9 @@ preview, keyboard focus, compact geometry, reduced motion, receipt reload, and
 loading the actual native bindings in a utility process. Visual scenarios use
 synthetic Notes content; they do not claim to capture a permission-protected OS
 desktop. Package smoke also loads the shipped bindings without desktop access.
-Window matching reads the real macOS window list in a unit test on macOS hosts
-(numbers, owners, layers and bounds; titles stay unavailable without Screen
-Recording). Interactive permission grants and real foreground capture were not exercised on
+Window matching reads the real macOS window list (numbers, owners, layers and
+bounds) and reads a real CoreFoundation string through the title path in unit
+tests on macOS hosts. Interactive permission grants and real foreground capture were not exercised on
 the locked macOS host. Windows/Linux capture also requires manual platform
 validation, including overlapping windows, mixed-DPI monitors and partially
 off-screen targets. Deterministic tests do not substitute for this physical
@@ -212,7 +224,10 @@ On a signed and notarized build:
    accessibility read and capture in the main process (no separate process to
    kill on a hang or a native crash) and turning `RunAsNode` back on (weaker
    packaged-app hardening); neither is done without that decision. A category
-   `permission-denied` means macOS itself reports Inertia as not allowed.
+   `permission-denied` means macOS itself reports Inertia as not allowed. A
+   `native-failure` in phase `screenshot`, or a tile that arrives blank or shows
+   only the desktop, means Screen Recording does not reach `screencapture`
+   started by the helper.
 5. Also check whether macOS asks for Screen Recording again for
    `screencapture`. It is started by the helper, so it should be attributed to
    Inertia; a prompt naming another program is a finding to report.

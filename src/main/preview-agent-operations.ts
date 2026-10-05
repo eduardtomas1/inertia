@@ -1,49 +1,55 @@
 import type { NativeImage, Rectangle } from "electron";
 
 import {
-  AGENT_BROWSER_INPUT_BUDGET_MS,
-  AGENT_BROWSER_INSPECT_BUDGET_MS,
-  AGENT_BROWSER_NAVIGATION_BUDGET_MS,
   type AgentBrowserActivity,
   type AgentBrowserCommand,
   type AgentBrowserResult,
   type AgentBrowserRunIdentity,
   type AgentBrowserState,
 } from "../shared/agent-browser.js";
-import { sanitizeBrowserEvidenceText } from "../shared/browser-evidence.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
+import type { PreviewAgentDialogAnswer } from "../shared/preview-agent-dialogs.js";
 import type { BrowserEvidenceCapture } from "./browser-evidence-capture.js";
 import { AgentBrowserRefusal, changedGeometry, providerVisiblePageUrl, stopForAbort } from "./preview-agent-action.js";
 import type { BrowserApprovalGuard } from "./preview-agent-approvals.js";
 import {
-  agentPageActivationFailureMessage, agentPageBoundaryGaps, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationFailureMessage, agentPageBoundaryGaps, agentPageKeyInput, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import {
   agentPageEvidencePrivacy, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
-  type AgentPageNotInspected, type AgentPageWithheldReason,
+  type AgentPageEvidencePrivacy, type AgentPageNotInspected, type PreviewAgentTarget,
 } from "./preview-agent-page.js";
+import { sendAgentPageInput } from "./preview-agent-control.js";
+import { agentDialogDetail, armAgentPageDialogs, takeAgentPageDialogs, takeAgentPageUnloadPrompts } from "./preview-agent-dialogs.js";
+import { navigationFailureMessage, withheldEvidenceMessage } from "./preview-agent-messages.js";
 import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, type PreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
+import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
+import { agentPageRefOutsideViewport, describeAgentPageRef, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
+import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
 
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const NAVIGATION_REPORT_RESERVE_MS = 3_000;
-const AGENT_PAGE_REST_DELAY_MS = 2_000;
 const WAIT_POLL_MS = 400;
-const WAIT_REPORT_RESERVE_MS = 5_000;
 export const PARKED_PREVIEW_BOUNDS: Rectangle = { x: 0, y: 0, width: 1_280, height: 800 };
 
 const BLANK_TAB_NEXT_STEP = "This tab is blank. Open a page with the navigate tool and a local development URL such as http://localhost:3000, then take a snapshot.";
 const STILL_LOADING_NOTE = "The page is still loading. Wait for it with the wait tool, or take a snapshot to read what has rendered so far.";
 const FAILED_LOAD_MESSAGE = "This tab is showing a browser error page because its last navigation failed. Check that the development server is running, then navigate again.";
 const CANCELLED_NAVIGATION_MESSAGE = "The navigation was cancelled before a page loaded, usually because it redirected to an address outside this machine or started a download. The tab still shows its previous page.";
+const OUTSIDE_VIEWPORT_MESSAGE = "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.";
 const CRASHED_PAGE_MESSAGE = "This tab's page crashed. Navigate to the page again to reload it.";
 const NAVIGATION_REPLACED_NOTE = "The page replaced this navigation before it finished. Take a snapshot to see which page is showing.";
 
 type PreviewContents = PreviewTab["view"]["webContents"];
+
+type PageReading =
+  | { ok: true; text: string; state: AgentBrowserState }
+  | { ok: false; result: AgentBrowserResult };
 
 export interface AgentOperationSession {
   contextId: string;
@@ -75,152 +81,6 @@ export interface AgentOperationHost<Session extends AgentOperationSession> {
   recordOperationFailure?(failure: PreviewAgentOperationFailure): void;
 }
 
-class AgentBrowserTimeout extends Error {}
-
-type PageReading =
-  | { ok: true; text: string; state: AgentBrowserState }
-  | { ok: false; result: AgentBrowserResult };
-
-const restTimers = new WeakMap<PreviewContents, ReturnType<typeof setTimeout>>();
-
-export class AgentOperationScope {
-  readonly signal: AbortSignal;
-  inputSent = false;
-  timedOut = false;
-  readonly #deadlineAt: number;
-  readonly #controller = new AbortController();
-  readonly #timer: ReturnType<typeof setTimeout>;
-  readonly #awake = new Set<PreviewContents>();
-  readonly #caller: AbortSignal | undefined;
-  readonly #onCallerAbort = (): void => this.#controller.abort();
-
-  constructor(budgetMs: number, caller?: AbortSignal) {
-    this.#deadlineAt = Date.now() + budgetMs;
-    this.#caller = caller;
-    this.signal = this.#controller.signal;
-    this.#timer = setTimeout(() => {
-      this.timedOut = true;
-      this.#controller.abort();
-    }, budgetMs);
-    this.#timer.unref();
-    if (caller?.aborted) this.#controller.abort();
-    else caller?.addEventListener("abort", this.#onCallerAbort, { once: true });
-  }
-
-  remaining(): number {
-    return Math.max(0, this.#deadlineAt - Date.now());
-  }
-
-  keepAwake(contents: PreviewContents): void {
-    if (contents.isDestroyed() || this.#awake.has(contents)) return;
-    this.#awake.add(contents);
-    const pending = restTimers.get(contents);
-    if (pending) clearTimeout(pending);
-    restTimers.delete(contents);
-    contents.setBackgroundThrottling(false);
-  }
-
-  dispose(): void {
-    clearTimeout(this.#timer);
-    this.#caller?.removeEventListener("abort", this.#onCallerAbort);
-    for (const contents of this.#awake) {
-      const timer = setTimeout(() => {
-        if (restTimers.get(contents) !== timer) return;
-        restTimers.delete(contents);
-        if (!contents.isDestroyed()) contents.setBackgroundThrottling(true);
-      }, AGENT_PAGE_REST_DELAY_MS);
-      timer.unref();
-      restTimers.set(contents, timer);
-    }
-    this.#awake.clear();
-  }
-}
-
-export function agentOperationBudget(command: AgentBrowserCommand): number {
-  switch (command.action) {
-    case "navigate":
-    case "tab-open":
-      return AGENT_BROWSER_NAVIGATION_BUDGET_MS;
-    case "click":
-    case "type":
-    case "press":
-    case "scroll":
-      return AGENT_BROWSER_INPUT_BUDGET_MS;
-    case "wait":
-      return command.timeoutMs + WAIT_REPORT_RESERVE_MS;
-    default:
-      return AGENT_BROWSER_INSPECT_BUDGET_MS;
-  }
-}
-
-function outcomeAfterTimeout(scope: AgentOperationScope | undefined): string {
-  return scope?.inputSent
-    ? " Input may already have reached the page, so its effect is unknown: take a snapshot before repeating it."
-    : " Nothing had been sent to the page yet, so it is safe to try again.";
-}
-
-export function agentOperationFailure(
-  error: unknown,
-  scope: AgentOperationScope | undefined,
-): AgentBrowserResult {
-  if (error instanceof AgentBrowserRefusal) return error.result;
-  if (error instanceof AgentBrowserTimeout) {
-    return failure("timeout", `${error.message}${outcomeAfterTimeout(scope)}`);
-  }
-  if (error instanceof Error && error.message === "browser-action-cancelled") {
-    return scope?.timedOut
-      ? failure("timeout", `The browser action ran out of time.${outcomeAfterTimeout(scope)}`)
-      : failure("cancelled", "The browser action was cancelled.");
-  }
-  return failure(
-    "unavailable",
-    error instanceof Error
-      ? sanitizeBrowserEvidenceText(error.message, "The Inertia Browser action failed.", 600).text
-      : "The Inertia Browser action failed.",
-  );
-}
-
-function withheldEvidenceMessage(reason: AgentPageWithheldReason, subject: string): string {
-  const recovery = " Navigate to the page again to load a new document, then continue.";
-  if (reason === "password") {
-    return `${subject} withheld because this document holds a password value, which Inertia never sends to a model.${recovery}`;
-  }
-  if (reason === "hidden-input") {
-    return `${subject} withheld because text was typed into a control Inertia cannot inspect (inside a closed shadow root), so it could be a password.${recovery}`;
-  }
-  if (reason === "document-too-large") {
-    return `${subject} withheld because this page has more than 4,000 inputs, too many for Inertia to check safely for password values. Open a smaller page or a more specific route that shows fewer inputs, then continue.`;
-  }
-  return `${subject} withheld because a script changed a password field in this document.${recovery}`;
-}
-
-function navigationFailureMessage(error: unknown): string {
-  const text = error instanceof Error ? error.message : "";
-  const code = /\bERR_[A-Z_]+/u.exec(text)?.[0] ?? "";
-  if (code === "ERR_CONNECTION_REFUSED") {
-    return "Nothing answered at that address (connection refused). Start the development server or check its port, then navigate again.";
-  }
-  if (code === "ERR_UNSAFE_PORT") {
-    return "Chromium refuses to open that port. Run the development server on a different port, then navigate to it.";
-  }
-  if (code === "ERR_NAME_NOT_RESOLVED") {
-    return "That host name could not be resolved. Use localhost, 127.0.0.1 or [::1] with the development server's port.";
-  }
-  if (["ERR_CONNECTION_RESET", "ERR_CONNECTION_CLOSED", "ERR_EMPTY_RESPONSE"].includes(code)) {
-    return "The server closed the connection before sending a page. Check the development server's output, then navigate again.";
-  }
-  if (["ERR_CONNECTION_TIMED_OUT", "ERR_TIMED_OUT"].includes(code)) {
-    return "The server did not answer in time. Check that the development server is running, then navigate again.";
-  }
-  if (code.startsWith("ERR_CERT_") || code === "ERR_SSL_PROTOCOL_ERROR") {
-    return "The page's HTTPS certificate is not trusted by Inertia Browser. Use the development server's http:// address if it has one.";
-  }
-  if (code === "ERR_BLOCKED_BY_CLIENT" || code === "ERR_BLOCKED_BY_RESPONSE") {
-    return "The page was blocked, usually because it redirected to an address outside this machine. Inertia Browser only opens local development pages.";
-  }
-  return `The page could not be loaded${code ? ` (${code})` : ""}. Check that the development server is running, then navigate again.`;
-}
-
 function blankTab(contents: PreviewContents): boolean {
   const url = contents.getURL();
   return !url || url === "about:blank";
@@ -230,7 +90,7 @@ export function blankTabRefusal(
   contents: PreviewContents,
   command: AgentBrowserCommand,
 ): AgentBrowserResult | null {
-  return ["click", "type", "press", "scroll"].includes(command.action) && blankTab(contents)
+  return ["click", "type", "press", "scroll", "history"].includes(command.action) && blankTab(contents)
     ? failure("not-found", BLANK_TAB_NEXT_STEP)
     : null;
 }
@@ -262,22 +122,6 @@ function snapshotContains(snapshot: string, needle: string): boolean {
     if (typeof element !== "object" || element === null) return false;
     const candidate = element as { name?: unknown; value?: unknown };
     return matches(candidate.name) || matches(candidate.value);
-  });
-}
-
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(new Error("browser-action-cancelled"));
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-    timer.unref();
-    if (signal.aborted) onAbort();
-    else signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -375,7 +219,21 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (blankTab(contents)) throw new AgentBrowserRefusal(failure("not-found", BLANK_TAB_NEXT_STEP));
     await this.#ensureSecurityDebugger(contents, undefined, signal);
     await this.rendererOperation(contents, () => installAgentPagePrivacyGuard(contents), { signal, phase: "privacy-guard" });
-    return await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
+    const located = await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
+    if (!located.found && await this.rendererOperation(
+      contents,
+      () => agentPageRefOutsideViewport(contents, ref),
+      { signal, phase: "page-scroll" },
+    )) throw new AgentBrowserRefusal(failure("not-found", OUTSIDE_VIEWPORT_MESSAGE));
+    return located;
+  }
+
+  async describe(tab: PreviewTab, ref: string, signal?: AbortSignal): Promise<PreviewAgentTarget> {
+    const contents = tab.view.webContents;
+    if (blankTab(contents)) throw new AgentBrowserRefusal(failure("not-found", BLANK_TAB_NEXT_STEP));
+    await this.#ensureSecurityDebugger(contents, undefined, signal);
+    await this.rendererOperation(contents, () => installAgentPagePrivacyGuard(contents), { signal, phase: "privacy-guard" });
+    return await this.rendererOperation(contents, () => describeAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
   }
 
   async sensitiveDocument(contents: PreviewContents): Promise<boolean> {
@@ -434,7 +292,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (Date.now() - startedAt + WAIT_POLL_MS >= command.timeoutMs) {
         return report(false, "The condition was not reached in time. Take a snapshot to see what the page shows now.");
       }
-      await delay(WAIT_POLL_MS, scope.signal);
+      await agentOperationDelay(WAIT_POLL_MS, scope.signal);
     }
   }
 
@@ -501,7 +359,47 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     const loaded = await this.#agentLoad(contents, target, scope, validate);
     stopForAbort(scope.signal);
     this.host.record(session, "navigate", "Agent navigated the page");
-    return this.#stateResult(session, this.#loadNote(contents, loaded));
+    return this.#navigationResult(session, contents, loaded);
+  }
+
+  async history(
+    session: Session,
+    direction: AgentHistoryDirection,
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+  ): Promise<AgentBrowserResult> {
+    const contents = this.host.active(session).view.webContents;
+    await this.#ensureSecurityDebugger(contents, scope);
+    stopForAbort(scope.signal);
+    validate?.();
+    const refusal = agentHistoryRefusal(contents, direction);
+    if (refusal) return refusal;
+    const loaded = direction === "reload"
+      ? await this.#agentReload(contents, scope)
+      : await agentHistoryNavigation(
+        contents,
+        direction,
+        scope,
+        Math.max(1_000, scope.remaining() - NAVIGATION_REPORT_RESERVE_MS),
+      );
+    stopForAbort(scope.signal);
+    const label = direction === "back" ? "Agent went back a page"
+      : direction === "forward" ? "Agent went forward a page" : "Agent reloaded the page";
+    this.host.record(session, "navigate", label);
+    return this.#navigationResult(session, contents, loaded);
+  }
+
+  async #agentReload(contents: PreviewContents, scope: AgentOperationScope): Promise<boolean> {
+    const current = this.#localTarget(contents.getURL());
+    if (!current) throw new AgentBrowserRefusal(this.#remoteAddressFailure());
+    const target = new URL(current);
+    if (!target.hash) return await this.#agentLoad(contents, current, scope);
+    target.hash = "";
+    const document = this.#localTarget(target.toString());
+    if (!document) throw new AgentBrowserRefusal(this.#remoteAddressFailure());
+    if (!await this.#agentLoad(contents, document, scope)) return false;
+    stopForAbort(scope.signal);
+    return await this.#agentLoad(contents, current, scope);
   }
 
   async openTab(
@@ -533,21 +431,23 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     return this.#stateResult(session, this.#loadNote(tab.view.webContents, loaded));
   }
 
-  async click(session: Session, ref: string, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
+  async click(
+    session: Session,
+    ref: string,
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+    dialog?: PreviewAgentDialogAnswer,
+  ): Promise<AgentBrowserResult> {
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     const boundsGeneration = session.boundsGeneration;
-    const located = await this.rendererOperation(
-      contents,
-      () => locateAgentPageRef(contents, ref),
-      { scope, phase: "element-lookup" },
-    );
+    const located = await this.#locateInView(contents, ref, scope);
     if (session.boundsGeneration !== boundsGeneration) return changedGeometry();
     let x = located.x;
     let y = located.y;
     if (!located.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
+      return failure("not-found", "That page element is stale. Take a new inertia_browser_snapshot for current refs.");
     }
     if (located.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (located.disabled) return failure("invalid", "That page element is disabled.");
@@ -569,7 +469,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     x = revalidated.x;
     y = revalidated.y;
     if (!revalidated.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element changed before the click. Inspect the page again for current refs.");
+      return failure("not-found", "That page element changed before the click. Take a new inertia_browser_snapshot for current refs.");
     }
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
@@ -590,7 +490,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (!finalTarget.found || x === undefined || y === undefined) {
         throw new AgentBrowserRefusal(failure(
           "not-found",
-          "That page element changed before the click. Inspect the page again for current refs.",
+          "That page element changed before the click. Take a new inertia_browser_snapshot for current refs.",
         ));
       }
       if (finalTarget.blocked) throw new AgentBrowserRefusal(failure(
@@ -600,16 +500,17 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         "invalid", "That page element is disabled.",
       ));
       validate?.(finalTarget);
-      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
-    }, scope, ref);
-    if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Inspect the page again for current refs.");
+      if (dialog === "accept") await this.#armDialogs(contents, scope);
+      sendAgentPageInput(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      sendAgentPageInput(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 });
+    }, scope, ref, dialog);
+    if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Take a new inertia_browser_snapshot for current refs.");
     if (deliveryRefusal) return failure("invalid", deliveryRefusal === "file"
       ? "File inputs cannot be activated by the Browser agent."
       : deliveryRefusal === "disabled" ? "That page element became disabled during the click."
         : "The click could not be delivered because the page reported a target Inertia cannot inspect. Take a new snapshot and click a listed control.");
     this.host.record(session, "click", "Agent clicked a page element", { x, y });
-    return this.#stateResult(session, { clicked: ref });
+    return this.#stateResult(session, { clicked: ref, ...await this.#dialogDetail(contents, scope) });
   }
 
   async type(
@@ -624,16 +525,12 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     const boundsGeneration = session.boundsGeneration;
-    const located = await this.rendererOperation(
-      contents,
-      () => locateAgentPageRef(contents, ref),
-      { scope, phase: "element-lookup" },
-    );
+    const located = await this.#locateInView(contents, ref, scope);
     if (session.boundsGeneration !== boundsGeneration) return changedGeometry();
     let x = located.x;
     let y = located.y;
     if (!located.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
+      return failure("not-found", "That page element is stale. Take a new inertia_browser_snapshot for current refs.");
     }
     if (located.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (located.disabled) return failure("invalid", "That page element is disabled.");
@@ -656,7 +553,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     x = revalidated.x;
     y = revalidated.y;
     if (!revalidated.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element lost focus before typing. Inspect the page again for current refs.");
+      return failure("not-found", "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.");
     }
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
@@ -678,7 +575,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (!finalTarget.found || x === undefined || y === undefined) {
         throw new AgentBrowserRefusal(failure(
           "not-found",
-          "That page element lost focus before typing. Inspect the page again for current refs.",
+          "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.",
         ));
       }
       if (finalTarget.blocked) throw new AgentBrowserRefusal(failure(
@@ -697,58 +594,92 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       );
       if (!stillFocused) throw new AgentBrowserRefusal(failure(
         "not-found",
-        "That page element lost focus before typing. Inspect the page again for current refs.",
+        "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.",
       ));
       if (validate) validate(await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" }));
       await contents.insertText(text);
     }, scope);
     stopForAbort(scope.signal);
     this.host.record(session, "type", "Agent typed in a page element", { x, y });
-    return this.#stateResult(session, { typed: ref, characters: text.length });
+    return this.#stateResult(session, {
+      typed: ref,
+      characters: text.length,
+      ...await this.#dialogDetail(contents, scope),
+    });
   }
 
-  async press(session: Session, key: string, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
+  async press(
+    session: Session,
+    key: string,
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+    dialog?: PreviewAgentDialogAnswer,
+  ): Promise<AgentBrowserResult> {
     stopForAbort(scope.signal);
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     let activationBlocked: "disabled" | "file" | "nested" | "retargeted" | null = null;
+    const { keyCode, modifiers } = agentPageKeyInput(key);
     const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
       scope.inputSent = true;
-      if (key === "Enter" || key === "Space") {
+      if (dialog === "accept") await this.#armDialogs(contents, scope);
+      if (keyCode === "Enter" || keyCode === "Space") {
         activationBlocked = await deliverAgentPageActivation(
           contents,
-          key,
+          keyCode,
           async (operation) => {
             const result = await this.rendererOperation(contents, operation, { scope, phase: "key-activation" });
             validate?.();
             return result;
           },
           scope.signal,
+          modifiers,
         );
         if (activationBlocked) return;
       } else {
         validate?.();
-        contents.sendInputEvent({ type: "keyDown", keyCode: key });
-        contents.sendInputEvent({ type: "keyUp", keyCode: key });
+        const keyModifiers = modifiers.length > 0 ? { modifiers } : {};
+        sendAgentPageInput(contents, { type: "keyDown", keyCode, ...keyModifiers });
+        sendAgentPageInput(contents, { type: "keyUp", keyCode, ...keyModifiers });
       }
-    }, scope);
+    }, scope, undefined, dialog);
     const refusal = activationBlocked || deliveryRefusal;
     if (refusal) return failure("invalid", agentPageActivationFailureMessage(refusal));
     this.host.record(session, "press", `Agent pressed ${key}`);
-    return this.#stateResult(session, { pressed: key });
+    return this.#stateResult(session, { pressed: key, ...await this.#dialogDetail(contents, scope) });
   }
 
-  async scroll(session: Session, deltaY: number, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
+  async scroll(
+    session: Session,
+    target: { deltaY: number } | { ref: string },
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+  ): Promise<AgentBrowserResult> {
     stopForAbort(scope.signal);
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
+    if ("ref" in target) {
+      validate?.();
+      scope.inputSent = true;
+      const scrolled = await this.rendererOperation(
+        contents,
+        () => scrollAgentPageRefIntoView(contents, target.ref),
+        { scope, phase: "page-scroll" },
+      );
+      if (!scrolled.found) {
+        return failure("not-found", "That page element is stale. Take a new inertia_browser_snapshot for current refs.");
+      }
+      this.host.record(session, "scroll", "Agent scrolled to a page element");
+      return this.#stateResult(session, { scrolled: target.ref, viewport: scrolled.viewport });
+    }
+    const { deltaY } = target;
     const bounds = session.bounds ?? PARKED_PREVIEW_BOUNDS;
     await this.#sendInputAndWait(contents, () => {
       validate?.();
       scope.inputSent = true;
-      contents.sendInputEvent({
+      sendAgentPageInput(contents, {
         type: "mouseWheel",
         x: Math.max(0, Math.floor(bounds.width / 2)),
         y: Math.max(0, Math.floor(bounds.height / 2)),
@@ -760,9 +691,44 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     return this.#stateResult(session, { scrolled: deltaY });
   }
 
+  async #locateInView(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<PreviewAgentTarget> {
+    const located = await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+    if (located.found) return located;
+    const outside = await this.rendererOperation(contents, () => agentPageRefOutsideViewport(contents, ref), { scope, phase: "page-scroll" });
+    if (!outside) return located;
+    await this.rendererOperation(contents, () => scrollAgentPageRefIntoView(contents, ref), { scope, phase: "page-scroll" });
+    return await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+  }
+
+  async #armDialogs(contents: PreviewContents, scope: AgentOperationScope): Promise<void> {
+    await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "accept"), { scope, phase: "page-dialogs" });
+  }
+
+  async #dialogDetail(
+    contents: PreviewContents,
+    scope: AgentOperationScope,
+    scanned?: AgentPageEvidencePrivacy,
+  ): Promise<Record<string, unknown>> {
+    const privacy = scanned ?? await this.rendererOperation(
+      contents,
+      () => agentPageEvidencePrivacy(contents, "semantic"),
+      { scope, phase: "privacy-check" },
+    );
+    return agentDialogDetail(await this.rendererOperation(
+      contents,
+      () => takeAgentPageDialogs(contents, privacy.withheld !== null),
+      { scope, phase: "page-dialogs" },
+    ));
+  }
+
   #stateResult(session: Session, detail?: Record<string, unknown>): AgentBrowserResult {
     const state = this.host.agentState(session);
     return successfulAgentBrowserResult(boundedAgentStateText(state, detail), state);
+  }
+
+  #navigationResult(session: Session, contents: PreviewContents, loaded: boolean): AgentBrowserResult {
+    const detail = { ...this.#loadNote(contents, loaded), ...agentDialogDetail(takeAgentPageUnloadPrompts(contents)) };
+    return this.#stateResult(session, Object.keys(detail).length > 0 ? detail : undefined);
   }
 
   #loadNote(contents: PreviewContents, loaded: boolean): Record<string, unknown> | undefined {
@@ -772,7 +738,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
 
   #localTarget(url: string): string | null {
     try {
-      const target = previewNavigationTarget(url);
+      const target = previewNavigationTarget(withLoopbackScheme(url));
       return target.kind === "embed" ? target.url.toString() : null;
     } catch {
       return null;
@@ -812,7 +778,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (capture) {
         await this.rendererOperation(contents, () => setAgentPageFrozen(contents, true), { scope, phase: "page-freeze" });
       }
-      const before = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents), { scope, phase: "privacy-check" });
+      const before = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents, "semantic"), { scope, phase: "privacy-check" });
       if (before.withheld) {
         return { ok: false, result: failure("sensitive", withheldEvidenceMessage(before.withheld, "Page content is")) };
       }
@@ -821,11 +787,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         ...(gaps.frames ? ["frames" as const] : []),
         ...(gaps.shadowRoots ? ["shadow-roots" as const] : []),
       ];
-      const text = await this.rendererOperation(contents, () => semanticPageSnapshot(contents, observed), {
+      const dialogs = capture ? await this.#dialogDetail(contents, scope, before) : {};
+      const text = await this.rendererOperation(contents, () => (Object.keys(dialogs).length > 0
+        ? semanticPageSnapshot(contents, observed, dialogs)
+        : semanticPageSnapshot(contents, observed)), {
         scope,
         phase: "page-snapshot",
       });
-      const after = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents), { scope, phase: "privacy-check" });
+      const after = await this.rendererOperation(contents, () => agentPageEvidencePrivacy(contents, "semantic"), { scope, phase: "privacy-check" });
       if (after.withheld) {
         return { ok: false, result: failure("sensitive", withheldEvidenceMessage(after.withheld, "Page content is")) };
       }
@@ -860,16 +829,21 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     scope.inputSent = true;
     return await new Promise<boolean>((resolve, reject) => {
       let settled = false;
+      let committed = false;
       const finish = (action: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         contents.removeListener("destroyed", onDestroyed);
+        contents.removeListener("did-stop-loading", onStopped);
+        contents.removeListener("did-navigate", onCommitted);
         scope.signal.removeEventListener("abort", onAbort);
         action();
       };
+      const onStopped = (): void => finish(() => resolve(true));
+      const onCommitted = (): void => { committed = true; };
       const onAbort = (): void => finish(() => {
-        if (!contents.isDestroyed()) contents.stop();
+        if (!contents.isDestroyed() && !(scope.interrupted && committed)) contents.stop();
         reject(new Error("browser-action-cancelled"));
       });
       const onDestroyed = (): void => finish(() => reject(
@@ -878,10 +852,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       const timer = setTimeout(() => finish(() => resolve(false)), waitMs);
       timer.unref();
       contents.once("destroyed", onDestroyed);
+      contents.on("did-navigate", onCommitted);
       scope.signal.addEventListener("abort", onAbort, { once: true });
       contents.loadURL(url).then(() => {
-        if (!contents.isDestroyed()) settleAgentPageDebuggerBootstrap(contents);
-        finish(() => resolve(true));
+        if (contents.isDestroyed()) return;
+        committed = true;
+        settleAgentPageDebuggerBootstrap(contents);
+        if (!contents.isLoading()) finish(() => resolve(true));
+        else if (!settled) contents.once("did-stop-loading", onStopped);
       }, (error: unknown) => {
         if (error instanceof Error && /\bERR_ABORTED\b/u.test(error.message)) {
           finish(() => {
@@ -956,6 +934,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     dispatch: () => void | Promise<void>,
     scope: AgentOperationScope,
     expectedClickRef?: string,
+    dialog?: PreviewAgentDialogAnswer,
   ): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {
     stopForAbort(scope.signal);
     const chooserGeneration = await this.rendererOperation(
@@ -975,6 +954,10 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       return capturedAgentPageInputRefusal(contents) ?? isolated;
     } finally {
       if (!contents.isDestroyed()) {
+        if (dialog === "accept") {
+          await this.rendererOperation(contents, () => armAgentPageDialogs(contents, "dismiss"), { phase: "page-dialogs" })
+            .catch(() => undefined);
+        }
         await this.rendererOperation(
           contents,
           () => setAgentPageInputGuard(contents, false),

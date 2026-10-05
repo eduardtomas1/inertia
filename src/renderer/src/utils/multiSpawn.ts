@@ -10,6 +10,7 @@ import type {
 import { providerIdForHarness } from "../../../shared/model-routing";
 import {
   buildNewConversationPayload,
+  defaultAccessModeForProject,
   withNewConversationModelSelection,
   type NewConversationPayload,
 } from "../lib/newConversation";
@@ -369,7 +370,10 @@ export function initialMultiSpawnDraft(input: {
       projectId: input.activeProjectId,
       title: saved?.title ?? defaultTitle,
       selection,
-      accessMode: saved?.accessMode ?? input.settings.defaultAccessMode,
+      accessMode: saved?.accessMode ?? defaultAccessModeForProject(
+        input.snapshot.projects.find(({ id }) => id === input.activeProjectId),
+        input.settings,
+      ),
       interactionMode: input.settings.defaultInteractionMode,
     };
   };

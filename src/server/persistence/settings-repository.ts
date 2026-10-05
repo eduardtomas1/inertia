@@ -32,7 +32,8 @@ export class SettingsRepository {
       ...current.completionSound,
       ...update.completionSound,
     });
-    const next = { ...current, ...update, workingIndicator, completionSound };
+    const quotaWarnings = { ...current.quotaWarnings, ...update.quotaWarnings };
+    const next = { ...current, ...update, workingIndicator, completionSound, quotaWarnings };
     const completionSoundJson = JSON.stringify(next.completionSound);
     // A legacy whole-family selection still updates both halves atomically.
     const lightColorTheme = update.lightColorTheme ?? update.colorTheme ?? current.lightColorTheme ?? current.colorTheme;
@@ -41,16 +42,17 @@ export class SettingsRepository {
       : update.lightColorTheme !== undefined || update.colorTheme !== undefined ? null : current.lightCustomColor;
     const darkCustomColor = update.darkCustomColor !== undefined ? update.darkCustomColor
       : update.darkColorTheme !== undefined || update.colorTheme !== undefined ? null : current.darkCustomColor;
+    const mutedCustomColors = Boolean(next.mutedCustomColors) && Boolean(lightCustomColor || darkCustomColor);
     this.context.database.prepare(`
       UPDATE app_state SET
         theme = ?, color_theme = ?, light_color_theme = ?, dark_color_theme = ?, light_custom_color = ?, dark_custom_color = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
         default_provider = ?, default_model = ?, default_access_mode = ?,
         new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ?, show_thinking = ?,
-        show_usage = ?, usage_display_mode = ?, interface_scale = ?, response_density = ?,
-        workspace_startup_surface = ?, default_code_wrap = ?,
+        usage_display_mode = ?, interface_scale = ?, response_density = ?,
+        default_code_wrap = ?,
         auto_collapse_work_log = ?, show_changed_file_summaries = ?,
         auto_scroll_to_final_answer = ?,
-        sidebar_mode = ?, project_grouping = ?, auto_open_plan = ?,
+        project_grouping = ?, auto_open_plan = ?,
         confirm_destructive_actions = ?, desktop_notifications = ?,
         provider_identity_labels_json = ?,
         keybindings_json = ?,
@@ -60,7 +62,10 @@ export class SettingsRepository {
         discord_release_repository_url = ?,
         attachment_storage_gib = ?, auto_remove_old_attachments = ?,
         working_indicator_json = ?,
-        completion_sound_json = ?
+        completion_sound_json = ?,
+        quota_warnings_enabled = ?, quota_warning_threshold = ?,
+        notify_only_in_background = ?,
+        muted_custom_colors = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -79,16 +84,13 @@ export class SettingsRepository {
       Number(next.wrapDiffs),
       Number(next.ignoreWhitespace),
       Number(next.showThinking),
-      Number(next.usageDisplayMode !== "hidden"),
       next.usageDisplayMode,
       next.interfaceScale,
       next.responseDensity,
-      next.workspaceStartupSurface,
       Number(next.defaultCodeWrap),
       Number(next.autoCollapseWorkLog),
       Number(next.showChangedFileSummaries),
       Number(next.autoScrollToFinalAnswer),
-      next.sidebarMode,
       next.projectGrouping,
       Number(next.autoOpenPlan),
       Number(next.confirmDestructiveActions),
@@ -104,6 +106,9 @@ export class SettingsRepository {
       completionSoundJson.length <= COMPLETION_SOUND_JSON_MAX_LENGTH
         ? completionSoundJson
         : state.completion_sound_json ?? "{}",
+      Number(next.quotaWarnings.enabled), next.quotaWarnings.firstThreshold,
+      Number(next.notifyOnlyInBackground),
+      Number(mutedCustomColors),
     );
   }
 

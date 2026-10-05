@@ -8,7 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivateConnectRuntimeGateway } from "../../../src/server/private-connect/runtime-gateway";
 import { RuntimeStore } from "../../../src/server/database";
 import { privateConnectRuntimeGrantsFromProjectIds } from "../../../src/shared/private-connect/runtime-grants";
-import type { PrivateConnectRuntimeAuthorization } from "../../../src/shared/private-connect/runtime-contract";
+import {
+  privateConnectRuntimeSafeSubagentSchema,
+  type PrivateConnectRuntimeAuthorization,
+} from "../../../src/shared/private-connect/runtime-contract";
 
 const directories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -63,6 +66,58 @@ describe("Private Connect supervised runtime gateway", () => {
     expect(respondToInput).not.toHaveBeenCalled();
     expect(stopRun).not.toHaveBeenCalled();
     expect(detail).not.toHaveBeenCalled();
+  });
+
+  it("never projects delegated task telemetry into the strict remote detail", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-telemetry-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const conversation = store.createConversation(project.id, "Allowed chat");
+    const { turn } = store.beginAgentTurn({ id: "turn-telemetry", runId: "run-telemetry",
+      conversationId: conversation.id, content: "Delegate", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative" });
+    store.upsertSubagentTrace({ conversationId: conversation.id, runId: turn.runId, turnId: turn.id,
+      providerId: "codex", providerTaskId: null, providerAgentId: "agent-telemetry", parentProviderAgentId: null,
+      parentProviderToolUseId: null, providerToolUseId: null, providerRole: null, providerName: "Reviewer",
+      status: "running", isLive: true, description: null, progress: null, result: null, model: "private-model",
+      activity: "Reading private files", usage: { totalTokens: 50, inputTokens: null, cachedInputTokens: null,
+        cacheWriteInputTokens: null, outputTokens: null, reasoningOutputTokens: null, contextTokens: null,
+        maxContextTokens: null }, toolUseCount: 2, durationMs: 300, sequence: 1 });
+    expect(store.conversationDetail(conversation.id)!.subagents[0]).toMatchObject({
+      model: "private-model", activity: "Reading private files", toolUseCount: 2, durationMs: 300,
+    });
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => store.shellSnapshot(),
+      conversation: (conversationId) => store.conversationShell(conversationId),
+      detail: (conversationId) => store.conversationDetail(conversationId),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+    });
+    const subject: PrivateConnectRuntimeAuthorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const response = await gateway.request(subject, {
+      type: "conversation.get", requestId: "33333333-3333-4333-8333-333333333333", conversationId: conversation.id,
+    });
+    if (!response.ok || response.result.kind !== "conversation") throw new Error("Expected a conversation detail.");
+    const [subagent] = response.result.detail.subagents;
+    expect(Object.keys(subagent!).sort()).toEqual(
+      ["description", "id", "name", "progress", "providerLabel", "status", "turnId", "updatedAt"],
+    );
+    expect(privateConnectRuntimeSafeSubagentSchema.safeParse(subagent).success).toBe(true);
+    expect(privateConnectRuntimeSafeSubagentSchema.safeParse({ ...subagent, model: "private-model" }).success)
+      .toBe(false);
+    expect(JSON.stringify(response)).not.toMatch(/private-model|Reading private files/u);
   });
 
   it("projects only granted conversations and never queues an ungranted prompt", async () => {

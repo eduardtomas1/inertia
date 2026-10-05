@@ -2,7 +2,7 @@
 
 ## Protected snapshots
 
-Snapshots is experimental. Open **Settings → Snapshots** and enable capture. Return to your chat and focus its message box before switching to the window you want to share. On macOS and
+Snapshots is experimental. Open **Settings → Devices & integrations → Snapshots** and turn on **Window snapshots**. Return to your chat and focus its message box before switching to the window you want to share. On macOS and
 Windows, press both physical Shift keys together while another application is
 foreground. You can instead select Cmd+Option+S on macOS or Ctrl+Alt+S on Windows.
 Linux X11 uses Ctrl+Alt+S. The selected chat receives a removable screenshot tile

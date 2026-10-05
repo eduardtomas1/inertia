@@ -18,9 +18,9 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 
 1. Install the build for your platform: macOS, Windows, or Linux, on Intel/AMD or ARM64.
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
-3. Open **Settings → Providers**, connect a provider, and start a chat.
+3. Open **Settings → Agents**, connect a provider, and start a chat.
 
-Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly.
+Use **Ctrl/Cmd+K** to find commands, settings, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly.
 
 ![Search saved messages and agent answers across projects](docs/screenshots/inertia-message-search.png)
 
@@ -35,14 +35,14 @@ When a stopped chat has a reported subscription reset time, the composer offers 
 ## One workspace for the coding loop
 
 - **Chat with context.** Attach images, documents, spreadsheets, and plain-text source or configuration files; mention files or reference up to three chats, including this chat's own earlier messages with `@this-chat`; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
-- **Capture a window.** On Linux, use **Take reviewed screenshot** in the composer to select, crop, mask, and approve an image. Enable protected [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in Settings → Snapshots for foreground capture with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
+- **Capture a window.** On Linux, use **Take reviewed screenshot** in the composer to select, crop, mask, and approve an image. Enable protected [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in **Settings → Devices & integrations → Snapshots** for foreground capture with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
 - **Bring CLI conversations into Inertia.** In **Settings → Projects → Import conversations…**, preview and import Codex or Claude Code text history for the selected project folder. The chat resumes its original native session; close that session in your terminal before continuing here. Already imported sessions are marked, including after restarting Inertia.
 - **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Open the tools you need.** Choose Terminal in **Open a surface** for multiple terminal tabs and splits, or use the bottom dock. Find sent files in the dedicated **Attachments** surface. New chats start with the panel closed; each chat remembers its own surfaces and visibility.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
 - **Follow active work.** The Work tab shows activity and elapsed time for running threads, with a brief cue when a thread needs input or finishes. Choose a Working indicator in Settings for the Work tab and working cue; Automatic can also match individual tool and agent activity.
-- **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
+- **Optional desktop mascot.** Enable it in **Settings → Notifications → Desktop mascot** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)
 
@@ -87,6 +87,6 @@ See [AGENTS.md](AGENTS.md) for repository conventions and [RELEASING.md](docs/RE
 
 If an older Windows update leaves startup blocked by unconfirmed process cleanup, follow the [profile recovery steps](docs/WINDOWS_STARTUP_RECOVERY.md).
 
-See [Troubleshooting](docs/user/troubleshooting.md) for fixes grouped by symptom. Refresh a provider in **Settings → Providers** if it stops responding. For app problems, use **Settings → Runtime diagnostics → Copy diagnostic report**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
+See [Troubleshooting](docs/user/troubleshooting.md) for fixes grouped by symptom. Refresh a provider in **Settings → Agents** if it stops responding. For app problems, use **Settings → Help → Diagnostics → Copy support summary**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
 
 [Apache 2.0](LICENSE). Packaged builds include third-party notices and dependency licenses.

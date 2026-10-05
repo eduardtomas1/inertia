@@ -100,10 +100,9 @@ export async function measureDesktopDiscovery<Run extends DiscoveryRun>(
     });
     try {
       await run.page.getByRole("button", { name: "Settings", exact: true }).click();
-      await run.page.getByRole("button", { name: "Providers", exact: true }).click();
-      const status = run.page.locator(".provider-settings-list-row").filter({
-        has: run.page.getByRole("button", { name: "Configure Codex", exact: true }),
-      }).locator(".provider-status");
+      await run.page.getByRole("button", { name: "Agents", exact: true }).click();
+      const status = run.page.getByRole("button", { name: "Configure Codex", exact: true })
+        .locator(".provider-state");
       await expect(status).not.toHaveClass(/is-checking/u, { timeout: SETTLED_DISCOVERY_TIMEOUT_MS });
       await expect(status).toHaveClass(installedCase ? /is-ready/u : /is-unavailable/u);
       const discoveryVisibleMs = performance.now() - startedAt;

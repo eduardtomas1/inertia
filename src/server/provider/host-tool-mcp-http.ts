@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 
-import { handleProviderMcpBody } from "./host-tool-mcp-protocol";
+import { handleProviderMcpBody, type ProviderMcpToolOptions } from "./host-tool-mcp-protocol";
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 
 const MAX_MCP_BODY_BYTES = 128 * 1024;
@@ -142,6 +142,7 @@ async function readBody(
 export function createProviderHostToolMcpSession(
   runtime: ProviderHostToolRuntime,
   testDependencies: ProviderHostToolMcpSessionTestDependencies = {},
+  toolOptions: ProviderMcpToolOptions = {},
 ): ProviderHostToolMcpSession {
   const token = randomBytes(32).toString("base64url");
   const requests = new Set<AbortController>();
@@ -228,6 +229,7 @@ export function createProviderHostToolMcpSession(
           body.body,
           runtime,
           controller.signal,
+          toolOptions,
         );
         if (result.body === undefined) empty(response, result.status);
         else json(response, result.status, result.body);

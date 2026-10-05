@@ -183,7 +183,11 @@ describe("provider capability manifests", () => {
     const kimi = manifest("kimi-acp");
     expect(capability(kimi, "structured-input").support).toBe("native");
     expect(capability(kimi, "images").support).toBe("negotiated");
-    expect(capability(kimi, "compaction").support).toBe("negotiated");
+    expect(capability(kimi, "compaction")).toMatchObject({
+      support: "unavailable",
+      fallback: "reject-unsupported-operation",
+      unavailableReasonCode: "unsupported-operation",
+    });
     expect(capability(kimi, "model-discovery").support).toBe("negotiated");
     expect(capability(kimi, "maintenance-update").support)
       .toBe("unavailable");
@@ -196,7 +200,8 @@ describe("provider capability manifests", () => {
     const openCode = manifest("opencode-sdk");
     expect(capability(openCode, "images").support).toBe("negotiated");
     expect(capability(openCode, "provider-owned-server").support).toBe("native");
-    expect(capability(openCode, "subagent-create").support).toBe("unavailable");
+    expect(capability(openCode, "subagent-create").support).toBe("native");
+    expect(capability(openCode, "subagent-stop").support).toBe("unavailable");
     expect(capability(openCode, "custom-backend").support).toBe("unavailable");
     expect(capability(openCode, "endpoint-selection").support)
       .toBe("unavailable");

@@ -125,6 +125,10 @@ export class LimitResetScheduler {
     }
     return plan;
   }
+  usageLimited(conversationId: string): boolean {
+    const latest = this.store.latestAgentTurnForConversation(conversationId);
+    return latest ? this.store.limitResets.usageLimited(latest.id) : false;
+  }
   async get(conversationId: string): Promise<LimitResetResult> {
     this.store.conversation(conversationId);
     const plan = this.retireStalePlan(conversationId);
@@ -139,6 +143,7 @@ export class LimitResetScheduler {
           canResume: this.dependencies.enabled,
           unavailableReason: this.dependencies.enabled ? null : RUNTIME_UNAVAILABLE,
         },
+        usageLimited: this.usageLimited(conversationId),
       };
     }
     const offer = await this.offer(conversationId, "automatic").catch(() => null);
@@ -153,6 +158,7 @@ export class LimitResetScheduler {
         unavailableReason: offer.unavailableReason,
       } : null,
       plan: latestPlan ? publicLimitResetPlan(latestPlan) : null,
+      usageLimited: this.usageLimited(conversationId),
     };
   }
   async schedule(input: { conversationId: string; id: string; failedTurnId: string; resetsAt: string }): Promise<LimitResetResult> {

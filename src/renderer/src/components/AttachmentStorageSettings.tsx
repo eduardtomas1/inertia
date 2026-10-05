@@ -3,12 +3,14 @@ import type { AppSettings, ServerEvent } from "@shared/contracts";
 import { ATTACHMENT_CLEANUP_BATCH_RECORDS, ATTACHMENT_STORAGE_GIB_OPTIONS, type AttachmentStorageGiB, type AttachmentStorageStatus } from "@shared/attachment-storage";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { INTERFACE_LOCALE } from "../lib/locale";
+import { formatBytes } from "../utils/formatBytes";
+import { Switch } from "./ui";
+import { SettingSelect } from "./settings/SettingControls";
+import { SettingActionRow, SettingRow } from "./settings/SettingsLayout";
+import { useSettingAction } from "./settings/useSettingAction";
 
-function size(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-}
+const STORAGE_OPERATION_FAILED = "Storage operation did not finish. Refresh usage before trying again.";
+const LIMIT_OPTIONS = ATTACHMENT_STORAGE_GIB_OPTIONS.map((gib) => ({ value: String(gib), label: `${gib} GiB${gib === 16 ? " (default)" : ""}` }));
 
 export function AttachmentStorageSettings({ settings, disabled, request, onUpdate }: {
   settings: AppSettings;
@@ -16,20 +18,21 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
   request(command: CommandWithoutId): Promise<ServerEvent>;
   onUpdate(update: Partial<AppSettings>): Promise<void>;
 }): React.JSX.Element {
+  const cleanupAction = useSettingAction();
+  const autoRemoveAction = useSettingAction();
   const [storage, setStorage] = useState<AttachmentStorageStatus | null>(null);
-  const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"cleanup" | "automatic" | null>(null);
-  const [notice, setNotice] = useState("");
+  const [readFailed, setReadFailed] = useState(false);
   const [revision, setRevision] = useState(0);
   const requestRef = useRef(request);
   requestRef.current = request;
-  const mounted = useRef(true);
-  const busyRef = useRef(false);
-  const triggerRef = useRef<HTMLButtonElement | HTMLInputElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
+  const autoRemoveRef = useRef<HTMLSpanElement>(null);
   const restoreFocusRef = useRef(false);
-  const confirmationRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (confirm) confirmationRef.current?.focus(); }, [confirm]);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const busy = cleanupAction.busy || autoRemoveAction.busy;
+  useEffect(() => { if (confirm) cancelRef.current?.focus(); }, [confirm]);
   useEffect(() => {
     if (busy || confirm || !restoreFocusRef.current) return;
     restoreFocusRef.current = false;
@@ -37,63 +40,109 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
     (trigger && !trigger.disabled ? trigger : refreshRef.current)?.focus();
   }, [busy, confirm]);
   useEffect(() => {
-    mounted.current = true;
     let active = true;
     void requestRef.current({ type: "attachment.storage.get" }).then((event) => {
-      if (active && event.type === "request.result" && event.result.kind === "attachment.storage") setStorage(event.result.storage);
-    }).catch(() => { if (active) setNotice("Storage usage could not be read. Refresh to try again."); });
-    return () => { active = false; mounted.current = false; };
+      if (active && event.type === "request.result" && event.result.kind === "attachment.storage") {
+        setStorage(event.result.storage);
+        setReadFailed(false);
+      }
+    }).catch(() => { if (active) setReadFailed(true); });
+    return () => { active = false; };
   }, [revision, settings.attachmentStorageGiB, settings.autoRemoveOldAttachments]);
 
-  const perform = async (operation: () => Promise<void>): Promise<void> => {
-    if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setNotice("");
-    try { await operation(); }
-    catch { if (mounted.current) setNotice("Storage operation did not finish. Refresh usage before trying again."); }
-    finally {
-      busyRef.current = false;
-      if (mounted.current) { setBusy(false); setConfirm(null); setRevision((value) => value + 1); }
-    }
+  const perform = async (
+    target: typeof cleanupAction,
+    operation: () => Promise<string | null | void>,
+    success?: (message: string | null | void) => string | null,
+  ): Promise<void> => {
+    if (busy) return;
+    await target.run(operation, { exclusive: true, success, failure: STORAGE_OPERATION_FAILED });
+    setConfirm(null);
+    setRevision((value) => value + 1);
   };
-  const cleanup = async (): Promise<void> => {
+  const cleanup = async (): Promise<string> => {
     const event = await requestRef.current({ type: "attachment.storage.cleanup" });
     if (event.type !== "request.result" || event.result.kind !== "attachment.storage") throw new Error("Storage result unavailable.");
-    if (mounted.current) {
-      setStorage(event.result.storage);
-      setNotice(`Removed ${event.result.removed?.records ?? 0} files and freed ${size(event.result.removed?.bytes ?? 0)}.`);
-    }
+    setStorage(event.result.storage);
+    return `Removed ${event.result.removed?.records ?? 0} files and freed ${formatBytes(event.result.removed?.bytes ?? 0)}.`;
   };
   const blocked = disabled || busy;
-  return <div className="codex-binary-path runtime-log-setting attachment-storage-setting">
-    <span>
-      <strong>Attachment storage · all chats</strong>
-      <small>Original images and documents kept on this device. This disk budget does not reserve RAM.</small>
-      <small role="status">{storage?.state === "ready"
-        ? `${size(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${size(storage.availableDiskBytes)} free on disk`}`
-        : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : !storage && !notice ? "Checking attachment usage…" : "Attachment usage unavailable. Refresh to check again."}</small>
-      <label>Global attachment disk budget <select aria-label="Global attachment disk budget" value={settings.attachmentStorageGiB} disabled={blocked} onChange={(event) => {
-        const attachmentStorageGiB = Number(event.target.value) as AttachmentStorageGiB;
-        void perform(() => onUpdate({ attachmentStorageGiB }));
-      }}>{ATTACHMENT_STORAGE_GIB_OPTIONS.map((gib) => <option key={gib} value={gib}>{gib} GiB{gib === 16 ? " (default)" : ""}</option>)}</select></label>
-      <small>Changes apply immediately. Lowering the budget keeps existing files. New attachments need at least 512 MiB left free on disk.</small>
-      <label><input type="checkbox" checked={settings.autoRemoveOldAttachments} disabled={blocked} onChange={(event) => {
-        if (event.target.checked) { triggerRef.current = event.currentTarget; setConfirm("automatic"); }
-        else void perform(() => onUpdate({ autoRemoveOldAttachments: false }));
-      }} /> Automatically remove oldest stored files when full</label>
-      <small>{settings.autoRemoveOldAttachments ? "Old attachments in finished chats can be removed when new ones need space." : "Existing attachments are kept when storage fills. Increase the budget or explicitly remove old files to make room."} Files used by running chats are protected. Deleting a chat also releases its unshared files.</small>
-      <small>Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Removing a draft attachment frees it; abandoned temporary files are cleaned up after restart.</small>
-      <small>Per message: 100 files, 50 MiB each. Images up to 50 MiB, 40 megapixels and 8,192 pixels per side are resized to 10 MiB each, 80 MiB combined; animated images share the 40-megapixel decode budget across at most 256 frames. Your provider may impose lower limits.</small>
-      {confirm && <div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm attachment deletion">
-        <strong>{confirm === "cleanup" ? `Permanently remove up to ${ATTACHMENT_CLEANUP_BATCH_RECORDS} oldest files?` : "Allow automatic removal of old files?"}</strong>
-        <small>This removes original images and documents from finished chats across the app, including archived chats. Messages remain, but those attachments will no longer open. Running chats are protected.</small>
-        <button type="button" className="secondary-button" disabled={blocked} onClick={() => { restoreFocusRef.current = true; void perform(confirm === "cleanup" ? cleanup : () => onUpdate({ autoRemoveOldAttachments: true })); }}>{confirm === "cleanup" ? "Remove stored files" : "Allow automatic removal"}</button>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => { setConfirm(null); triggerRef.current?.focus(); }}>Cancel</button>
-      </div>}
-      {notice && <small role="status">{notice}</small>}
-    </span>
-    <div>
-      <button ref={refreshRef} type="button" className="secondary-button" disabled={blocked} onClick={() => { setConfirm(null); setRevision((value) => value + 1); }}>Refresh storage</button>
-      <button type="button" className="secondary-button" disabled={blocked || storage?.state !== "ready" || !storage.removableRecords} onClick={(event) => { triggerRef.current = event.currentTarget; setConfirm("cleanup"); }}>Remove oldest files{storage?.removableRecords ? ` (${storage.removableRecords} · ${size(storage.removableBytes)})` : ""}</button>
-    </div>
+  return <div className="attachment-storage-setting">
+    <SettingActionRow
+      id="attachment-storage"
+      className="runtime-log-setting"
+      title="Attachment storage"
+      description="Original images and documents kept on this device. Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Each message takes up to 100 files, 50 MiB each."
+      details={<>
+        <small role="status" className="data-facts">{storage?.state === "ready"
+          ? `${formatBytes(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${formatBytes(storage.availableDiskBytes)} free`}`
+          : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : !storage && !readFailed ? "Checking attachment usage…" : "Attachment usage unavailable. Refresh to check again."}</small>
+        {readFailed && !cleanupAction.notice && <small role="status">Storage usage could not be read. Refresh to try again.</small>}
+      </>}
+      actions={<button ref={refreshRef} type="button" className="secondary-button" disabled={disabled} aria-disabled={busy || undefined} onClick={() => { if (busy) return; setConfirm(null); setRevision((value) => value + 1); }}>Refresh storage</button>}
+    />
+    <SettingSelect
+      id="attachment-storage-limit"
+      title="Attachment storage limit"
+      description="Lowering it keeps existing files."
+      value={String(settings.attachmentStorageGiB)}
+      options={LIMIT_OPTIONS}
+      disabled={blocked}
+      onChange={(value) => onUpdate({ attachmentStorageGiB: Number(value) as AttachmentStorageGiB })}
+    />
+    <SettingRow
+      id="attachment-auto-remove"
+      title="Free space automatically when full"
+      description="Removes old attachments from finished chats when new ones need space. Running chats are protected."
+      notice={autoRemoveAction.notice}
+    >
+      <span ref={autoRemoveRef}>
+        <Switch
+          label="Free space automatically when full"
+          checked={settings.autoRemoveOldAttachments}
+          disabled={disabled}
+          inactive={busy}
+          onChange={(next) => {
+            triggerRef.current = autoRemoveRef.current?.querySelector("button") ?? null;
+            if (next) setConfirm("automatic");
+            else void perform(autoRemoveAction, () => onUpdate({ autoRemoveOldAttachments: false }));
+          }}
+        />
+      </span>
+    </SettingRow>
+    <SettingActionRow
+      id="attachment-remove-oldest"
+      className="runtime-log-setting"
+      title="Remove oldest files"
+      description="Deleting a chat also releases its unshared files."
+      notice={cleanupAction.notice}
+      actions={<button type="button" className="secondary-button" disabled={blocked || storage?.state !== "ready" || !storage.removableRecords} onClick={(event) => { triggerRef.current = event.currentTarget; setConfirm("cleanup"); }}>Remove oldest files{storage?.removableRecords ? ` (${storage.removableRecords} · ${formatBytes(storage.removableBytes)})` : ""}</button>}
+    />
+    {confirm && <div
+      className="attachment-storage-confirm"
+      tabIndex={-1}
+      role="group"
+      aria-label="Confirm attachment deletion"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        if (busy) return;
+        setConfirm(null);
+        triggerRef.current?.focus();
+      }}
+    >
+      <strong>{confirm === "cleanup" ? `Permanently remove up to ${ATTACHMENT_CLEANUP_BATCH_RECORDS} oldest files?` : "Allow automatic removal of old files?"}</strong>
+      <small>This removes original images and documents from finished chats across the app, including archived chats. Messages remain, but those attachments will no longer open. Running chats are protected.</small>
+      <div>
+        <button ref={cancelRef} type="button" className="secondary-button" aria-disabled={busy || undefined} onClick={() => { if (busy) return; setConfirm(null); triggerRef.current?.focus(); }}>Cancel</button>
+        <button type="button" className="secondary-button is-danger" disabled={disabled} aria-disabled={busy || undefined} onClick={() => {
+          if (busy) return;
+          restoreFocusRef.current = true;
+          void (confirm === "cleanup"
+            ? perform(cleanupAction, cleanup, (message) => message ?? null)
+            : perform(autoRemoveAction, () => onUpdate({ autoRemoveOldAttachments: true })));
+        }}>{confirm === "cleanup" ? "Remove stored files" : "Allow automatic removal"}</button>
+      </div>
+    </div>}
   </div>;
 }

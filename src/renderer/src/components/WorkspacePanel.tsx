@@ -34,7 +34,7 @@ export type WorkspacePanelProps = {
   activeSurface: WorkspacePanelTab | null;
   unavailable?: Partial<Record<WorkspacePanelTab, string>>;
   badges?: Partial<Record<WorkspacePanelTab, number>>;
-  liveAgentCount?: number;
+  activeBackgroundTaskCount?: number;
   presentation?: WorkspacePanelPresentation;
   visible?: boolean;
   children: ReactNode;
@@ -55,14 +55,14 @@ const AddSurfaceMenuItems = lazy(async () => ({
 function surfaceActions(
   unavailable: Partial<Record<WorkspacePanelTab, string>>,
   badges: Partial<Record<WorkspacePanelTab, number>>,
-  liveAgentCount: number,
+  activeBackgroundTaskCount: number,
 ): SurfaceAction[] {
   return RIGHT_PANEL_SURFACES.map((surface) => ({
     surface,
     ...RIGHT_PANEL_SURFACE_META[surface],
     available: !unavailable[surface],
     ...(unavailable[surface] ? { reason: unavailable[surface] } : {}),
-    badge: surface === "agents" ? liveAgentCount : badges[surface] ?? 0,
+    badge: surface === "agents" ? activeBackgroundTaskCount : badges[surface] ?? 0,
   }));
 }
 
@@ -71,7 +71,7 @@ export function WorkspacePanel({
   activeSurface,
   unavailable = {},
   badges = {},
-  liveAgentCount = 0,
+  activeBackgroundTaskCount = 0,
   presentation = "inline",
   visible = true,
   children,
@@ -86,7 +86,7 @@ export function WorkspacePanel({
   const selected = activeSurface && visibleSurfaces.includes(activeSurface)
     ? activeSurface
     : null;
-  const actions = surfaceActions(unavailable, badges, liveAgentCount);
+  const actions = surfaceActions(unavailable, badges, activeBackgroundTaskCount);
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"add">();
   const wasVisibleRef = useRef(visible);
@@ -204,7 +204,7 @@ export function WorkspacePanel({
             {visibleSurfaces.map((surface) => {
               const meta = RIGHT_PANEL_SURFACE_META[surface];
               const active = surface === selected;
-              const badge = surface === "agents" ? liveAgentCount : badges[surface] ?? 0;
+              const badge = surface === "agents" ? activeBackgroundTaskCount : badges[surface] ?? 0;
               return (
                 <div
                   key={surface}
@@ -222,7 +222,11 @@ export function WorkspacePanel({
                     type="button"
                     role="tab"
                     id={`${panelId}-tab-${surface}`}
-                    aria-label={badge > 0 ? `${meta.label} ${badge}` : meta.label}
+                    aria-label={badge === 0
+                      ? meta.label
+                      : surface === "agents"
+                        ? `${meta.label}, ${badge} active`
+                        : `${meta.label} ${badge}`}
                     aria-selected={active}
                     aria-controls={`${panelId}-content`}
                     aria-keyshortcuts="Delete"

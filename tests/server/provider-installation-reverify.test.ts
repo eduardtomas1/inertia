@@ -58,7 +58,7 @@ it("re-verifies Codex after its executable is replaced while Inertia runs", asyn
   try {
     expect(manager.providerInstallationState("codex")).toBe("unverified");
     expect(() => manager.run(input)).toThrow(
-      "Inertia has not verified this Codex installation yet. Open Settings > Providers and choose Refresh all providers, or restart Inertia.",
+      "Inertia has not verified this Codex installation yet. Open Settings > Agents and choose Refresh all providers, or restart Inertia.",
     );
     await expect(manager.detect("codex", { cwd: root })).resolves.toMatchObject({
       canRun: true, protocolVerified: true, cleanupConfirmed: true,
@@ -71,7 +71,7 @@ it("re-verifies Codex after its executable is replaced while Inertia runs", asyn
     expect(manager.providerInstallationState("codex")).toBe("changed");
     expect(manager.providerCapabilityAdmissible(input, "text-streaming")).toBe(false);
     expect(() => manager.run(input)).toThrow(
-      "Codex changed since Inertia last checked it, for example after an update, and Inertia could not verify the new installation. Open Settings > Providers and choose Refresh all providers, or restart Inertia.",
+      "Codex changed since Inertia last checked it, for example after an update, and Inertia could not verify the new installation. Open Settings > Agents and choose Refresh all providers, or restart Inertia.",
     );
 
     await expect(manager.detect("codex", { cwd: root })).resolves.toMatchObject({

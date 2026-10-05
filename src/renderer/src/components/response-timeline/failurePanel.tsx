@@ -87,7 +87,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
         </div>
         <div className="turn-failure-actions" aria-label="Failure diagnostic actions">
           {typeof window.inertia?.queryDiagnostics === "function" && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
-            section: "diagnostics", selection: { turnId: turn.id },
+            section: "help", anchor: "diagnostics-incidents", selection: { turnId: turn.id },
           })}>View diagnostics</button>}
           <button
             type="button"

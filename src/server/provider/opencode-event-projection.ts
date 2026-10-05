@@ -10,7 +10,7 @@ const MAX_PART_CHARS = 256 * 1024;
 const MAX_RETAINED_PART_CHARS = 8 * 1024 * 1024;
 const MAX_CANONICAL_TEXT_CHARS = 4 * 1024 * 1024;
 
-interface OpenCodeMessageUsage {
+export interface OpenCodeMessageUsage {
   total: number | null;
   input: number | null;
   cachedRead: number | null;
@@ -145,7 +145,7 @@ export function handleOpenCodePart(
     emitter.activity(
       tool === "bash" ? "command" : "tool",
       phase,
-      bounded(stringValue(state?.title) ?? tool),
+      bounded(openCodeToolPartLabel(part)),
       {
         ...(stringValue(part.callID) ?? stringValue(part.id)
           ? { activityId: (stringValue(part.callID) ?? stringValue(part.id))! }
@@ -154,6 +154,12 @@ export function handleOpenCodePart(
       },
     );
   }
+}
+
+export function openCodeToolPartLabel(part: Record<string, unknown>): string {
+  return stringValue(objectValue(part.state)?.title)
+    ?? stringValue(part.tool)
+    ?? "OpenCode tool";
 }
 
 export function handleOpenCodePartDelta(
@@ -436,21 +442,7 @@ export function emitOpenCodeUsage(
   state: OpenCodeUsageState,
   emit: AgentHarnessEmitter["rich"],
 ): void {
-  const input = finite(tokens.input);
-  const output = finite(tokens.output);
-  const reasoning = finite(tokens.reasoning);
-  const cache = objectValue(tokens.cache);
-  const cachedRead = finite(cache?.read);
-  const cacheWrite = finite(cache?.write);
-  const messageUsage: OpenCodeMessageUsage = {
-    total: finite(tokens.total)
-      ?? sumTokenParts([input, output, reasoning, cachedRead, cacheWrite]),
-    input,
-    cachedRead,
-    cacheWrite,
-    output,
-    reasoning,
-  };
+  const messageUsage = openCodeMessageUsage(tokens);
   const previous = state.messages.get(messageId);
   if (!previous && state.messages.size >= MAX_TRACKED_MESSAGES) {
     throw new Error("OpenCode exceeded the bounded usage-message budget.");
@@ -461,12 +453,34 @@ export function emitOpenCodeUsage(
   else state.totalProcessedTokens += messageUsage.total;
   state.messages.set(messageId, messageUsage);
   state.last = messageUsage;
-  state.currentContextTokens = sumTokenParts([
+  state.currentContextTokens = openCodeContextTokens(messageUsage);
+  emitOpenCodeUsageSnapshot(state, emit);
+}
+
+export function openCodeMessageUsage(
+  tokens: Record<string, unknown>,
+): OpenCodeMessageUsage {
+  const input = finite(tokens.input);
+  const output = finite(tokens.output);
+  const reasoning = finite(tokens.reasoning);
+  const cache = objectValue(tokens.cache);
+  const cachedRead = finite(cache?.read);
+  const cacheWrite = finite(cache?.write);
+  return {
+    total: finite(tokens.total)
+      ?? sumTokenParts([input, output, reasoning, cachedRead, cacheWrite]),
     input,
     cachedRead,
     cacheWrite,
-  ]);
-  emitOpenCodeUsageSnapshot(state, emit);
+    output,
+    reasoning,
+  };
+}
+
+export function openCodeContextTokens(
+  usage: OpenCodeMessageUsage,
+): number | null {
+  return sumTokenParts([usage.input, usage.cachedRead, usage.cacheWrite]);
 }
 
 export function emitOpenCodeUsageSnapshot(

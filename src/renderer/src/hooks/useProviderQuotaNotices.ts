@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ProviderInfo } from "@shared/contracts";
+import type { QuotaWarningSettings } from "@shared/quota-warnings";
 import {
   evaluateQuotaNotifications,
   parseQuotaNotificationState,
@@ -41,7 +42,9 @@ export interface ProviderQuotaNoticeController {
 
 export function useProviderQuotaNotices(
   providers: readonly ProviderInfo[],
+  warnings: QuotaWarningSettings,
 ): ProviderQuotaNoticeController {
+  const { enabled, firstThreshold } = warnings;
   const stateRef = useRef<PersistedQuotaNotificationState>(readState());
   const serializedStateRef = useRef(serializeQuotaNotificationState(
     stateRef.current,
@@ -53,12 +56,21 @@ export function useProviderQuotaNotices(
   }, []);
 
   useEffect(() => {
-    const evaluation = evaluateQuotaNotifications(providers, stateRef.current);
+    const evaluation = evaluateQuotaNotifications(
+      providers,
+      stateRef.current,
+      new Date().toISOString(),
+      { enabled, firstThreshold },
+    );
     stateRef.current = evaluation.state;
     const serialized = serializeQuotaNotificationState(evaluation.state);
     if (serialized !== serializedStateRef.current) {
       serializedStateRef.current = serialized;
       writeState(evaluation.state);
+    }
+    if (!enabled) {
+      setNotices((current) => current.length === 0 ? current : []);
+      return;
     }
     if (evaluation.notices.length === 0) return;
     setNotices((current) => {
@@ -66,7 +78,7 @@ export function useProviderQuotaNotices(
       for (const notice of evaluation.notices) byId.set(notice.id, notice);
       return [...byId.values()].slice(-MAX_VISIBLE_NOTICES);
     });
-  }, [providers]);
+  }, [enabled, firstThreshold, providers]);
 
   useEffect(() => {
     if (notices.length === 0) return;

@@ -250,9 +250,6 @@ export class ProviderRunCoordinator {
         "The custom backend run does not match the exact probed model identity.",
       );
     }
-    if (input.toolRestriction === "none" && (input.harnessId !== "claude-agent-sdk" || callbacks.hostTools || input.skills?.length || input.sessionId || input.access !== "supervised")) {
-      this.refuse(expectedIdentity, "invalid_input", "This provider cannot enforce a report chat without tools.");
-    }
     const providerId = input.providerId;
     const runId = input.runId;
     const turnId = input.turnId;
@@ -533,7 +530,7 @@ export class ProviderRunCoordinator {
           environment: { ...launchOptions.environment },
           installationVersion:
             this.options.metadataCache.nativeScope(providerId).version ?? null,
-          providerNativeToolsAvailable: input.toolRestriction !== "none" && this.options.capabilityAvailable(
+          providerNativeToolsAvailable: this.options.capabilityAvailable(
             input,
             "provider-native-tools",
           ),
@@ -734,10 +731,8 @@ export class ProviderRunCoordinator {
         ...(instruction ? { instruction } : {}),
       },
     };
-    const instructionForwarded = (
-      operationInput.providerId === "claude"
-      || operationInput.providerId === "kimi"
-    ) && instruction !== undefined;
+    const instructionForwarded = operationInput.providerId === "claude"
+      && instruction !== undefined;
     let interactionError: string | undefined;
     const rejectInteractiveCompaction = (
       interaction: "approval" | "input",
@@ -1080,7 +1075,7 @@ function providerAdmissionRefusal(
   installation: "current" | "changed" | "unverified",
   capabilityId: ProviderCapabilityId,
 ): string {
-  const next = "Open Settings > Providers and choose Refresh all providers, or restart Inertia.";
+  const next = "Open Settings > Agents and choose Refresh all providers, or restart Inertia.";
   if (installation === "changed") {
     return `${name} changed since Inertia last checked it, for example after an update, and Inertia could not verify the new installation. ${next}`;
   }

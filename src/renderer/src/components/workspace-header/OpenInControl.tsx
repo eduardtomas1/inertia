@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   FolderOpen,
@@ -72,7 +72,7 @@ export function OpenInControl({
   const anchorRef = useRef<HTMLDivElement>(null);
   const dismissOnFocusOut = useCallback(() => dismissMenu("context-change"), [dismissMenu]);
   useFocusOutDismiss(anchorRef, menu !== null && presentation === "toolbar", dismissOnFocusOut);
-  useEffect(() => {
+  useLayoutEffect(() => {
     dismissMenu("context-change");
   }, [dismissMenu, presentation]);
   const platform = window.inertia?.getPlatform?.();

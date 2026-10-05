@@ -26,7 +26,8 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await app.resizeWindow(1280, 840);
     expect(app.electronApp.windows()).toHaveLength(1);
     await main.getByRole("button", { name: "Settings", exact: true }).click();
-    const toggle = main.getByRole("switch", { name: "Desktop mascot", exact: true });
+    await main.getByRole("button", { name: "Notifications", exact: true }).click();
+    const toggle = main.getByRole("switch", { name: "Show mascot", exact: true });
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     const opened = app.electronApp.waitForEvent("window");
     await toggle.click();
@@ -356,7 +357,10 @@ test("mascot previews provider progress, opens questions and approvals, and show
     await capture(overlay, "approval", info);
     await switchAway();
     await overlay.getByRole("button", { name: /Review approval/ }).click();
-    await app.page.getByRole("button", { name: "Approve once", exact: true }).click();
+    await expect(app.page.getByRole("heading", { name: "Make the mascot more useful", level: 1 })).toBeVisible();
+    const approval = app.page.getByRole("region", { name: "Approve command" });
+    await approval.getByRole("button", { name: "Approve once", exact: true }).click();
+    await expect(approval).toHaveCount(0);
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "running");
     await expect(overlay.locator(".mascot-message")).not.toContainText("Should I follow");
     await switchAway();

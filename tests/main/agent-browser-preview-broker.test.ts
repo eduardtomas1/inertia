@@ -519,7 +519,7 @@ describe("agent-owned native Browser", () => {
     })).resolves.toMatchObject({
       ok: false,
       code: "not-found",
-      message: "That page element lost focus before typing. Inspect the page again for current refs.",
+      message: "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.",
     });
     expect(pageTools.agentPageRefHasFocus).toHaveBeenCalledWith(expect.anything(), "e2");
     expect(children[0]!.webContents.insertedText).toEqual([]);
@@ -538,7 +538,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "not-found",
-        message: "That page element changed during the click. Inspect the page again for current refs.",
+        message: "That page element changed during the click. Take a new inertia_browser_snapshot for current refs.",
       });
     expect(children[0]!.webContents.sentInputs).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "mouseDown" }),
@@ -578,7 +578,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "invalid",
-        message: "The focused page element changed during activation. Inspect the page again for current refs.",
+        message: "The focused page element changed during activation. Take a new inertia_browser_snapshot for current refs.",
       });
     expect(contents.sentInputs).toEqual([{ type: "keyDown", keyCode: "Enter" }]);
     await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))
@@ -1040,7 +1040,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "sensitive",
-        message: expect.stringMatching(/holds a password value.*Navigate to the page again/u),
+        message: expect.stringMatching(/holds a password or another sensitive value.*Navigate to the page again/u),
       });
     pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "password" });
     await expect(broker.perform(conversationId, { action: "screenshot" }))
@@ -1271,7 +1271,7 @@ describe("agent-owned native Browser", () => {
     await expect(click).resolves.toMatchObject({
       ok: false,
       code: "not-found",
-      message: "The Browser page layout changed during this action. Inspect the page again for current refs.",
+      message: "The Browser page layout changed during this action. Take a new inertia_browser_snapshot for current refs.",
     });
     expect(electronState.interactionTimeline.slice(timelineOffset)).toEqual([
       "bounds:0,0,1280,800",
@@ -1325,7 +1325,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "not-found",
-        message: "That page element changed before the click. Inspect the page again for current refs.",
+        message: "That page element changed before the click. Take a new inertia_browser_snapshot for current refs.",
       });
     expect(children[0]!.webContents.sentInputs).toEqual([]);
 
@@ -1345,7 +1345,7 @@ describe("agent-owned native Browser", () => {
     })).resolves.toMatchObject({
       ok: false,
       code: "not-found",
-      message: "That page element lost focus before typing. Inspect the page again for current refs.",
+      message: "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.",
     });
     expect(children[0]!.webContents.insertedText).toEqual([]);
   });

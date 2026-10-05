@@ -25,8 +25,15 @@ export interface ProviderMcpProtocolResult {
   body?: JsonRpcResponse | JsonRpcResponse[];
 }
 
-export function providerMcpTools(definitions: readonly ProviderHostToolDefinition[]): Tool[] {
-  return definitions.map(({ name, description, inputSchema, readOnly }) => {
+export interface ProviderMcpToolOptions {
+  destructiveHints?: boolean;
+}
+
+export function providerMcpTools(
+  definitions: readonly ProviderHostToolDefinition[],
+  options: ProviderMcpToolOptions = {},
+): Tool[] {
+  return definitions.map(({ name, description, inputSchema, readOnly, destructive }) => {
     if (inputSchema.type !== "object") {
       throw new Error(`Inertia host tool '${name}' must accept an object.`);
     }
@@ -36,7 +43,7 @@ export function providerMcpTools(definitions: readonly ProviderHostToolDefinitio
       inputSchema: { ...inputSchema, type: "object" },
       annotations: {
         readOnlyHint: readOnly,
-        destructiveHint: false,
+        destructiveHint: options.destructiveHints === true && destructive === true,
         idempotentHint: readOnly,
         openWorldHint: false,
       },
@@ -110,6 +117,7 @@ async function handleRequest(
   message: Extract<ParsedMessage, { kind: "request" }>,
   runtime: ProviderHostToolRuntime,
   signal: AbortSignal,
+  options: ProviderMcpToolOptions,
 ): Promise<JsonRpcResponse> {
   switch (message.method) {
     case "initialize":
@@ -118,7 +126,7 @@ async function handleRequest(
       return response(message.id, {});
     case "tools/list":
       return response(message.id, {
-        tools: providerMcpTools(runtime.definitions()),
+        tools: providerMcpTools(runtime.definitions(), options),
       });
     case "tools/call": {
       const tool = message.params.name;
@@ -158,6 +166,7 @@ export async function handleProviderMcpBody(
   body: unknown,
   runtime: ProviderHostToolRuntime,
   signal: AbortSignal,
+  options: ProviderMcpToolOptions = {},
 ): Promise<ProviderMcpProtocolResult> {
   const rawMessages = Array.isArray(body) ? body : [body];
   if (rawMessages.length === 0 || rawMessages.length > MAX_MCP_BATCH_MESSAGES) {
@@ -197,7 +206,7 @@ export async function handleProviderMcpBody(
           "Send batched tools/call requests as separate MCP messages.",
         ));
       }
-      return handleRequest(message, runtime, signal);
+      return handleRequest(message, runtime, signal, options);
     }
     if (message.kind === "invalid") {
       return Promise.resolve(error(message.id, -32600, "Invalid JSON-RPC request."));

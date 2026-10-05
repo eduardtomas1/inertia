@@ -95,6 +95,7 @@ type WorkspaceHeaderProps = {
   conversationMenu?: HeaderConversationMenu | null;
   onOpenSidebar: () => void;
   onOpenSettings: () => void;
+  onCloseSettings: () => void;
   onCreateConversationInProject?: () => void;
   onRenameConversation?: (title: string) => void;
   onOpenFolder: () => void;
@@ -137,6 +138,7 @@ export function WorkspaceHeader({
   conversationMenu = null,
   onOpenSidebar,
   onOpenSettings,
+  onCloseSettings,
   onCreateConversationInProject,
   onRenameConversation,
   onOpenFolder,
@@ -448,7 +450,7 @@ export function WorkspaceHeader({
           </div>
         )}
         {view === "settings" ? (
-          <IconButton label="Settings" aria-current="page" onClick={onOpenSettings}><Settings size={17} /></IconButton>
+          <IconButton label="Close settings" onClick={onCloseSettings}><Settings size={17} /></IconButton>
         ) : view !== "workspace" ? (
           <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={17} /></IconButton>
         ) : null}

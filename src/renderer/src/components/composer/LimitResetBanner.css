@@ -1,17 +1,29 @@
+.composer-shell .composer:has(> .limit-reset) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.composer-shell .composer:has(> .limit-reset) > .composer-surface,
+.composer-shell .composer:has(> .limit-reset) > .composer-ultra-glow {
+  grid-row-start: 2;
+}
+
 .limit-reset {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
-  margin: 0;
-  padding: 0 0 calc(var(--composer-zone-gap) + var(--composer-density-spacing-adjustment));
-  border-bottom: 1px solid var(--composer-zone-separator);
+  gap: 2px 8px;
+  margin: 0 var(--composer-drawer-inset);
+  padding: 3px 4px 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--composer-border));
+  border-bottom: 0;
+  border-radius: var(--radius-content) var(--radius-content) 0 0;
+  background: color-mix(in srgb, var(--warning) 8%, var(--composer-surface));
 }
 
 .limit-reset-icon {
   flex: 0 0 auto;
-  align-self: flex-start;
   color: var(--warning);
 }
 
@@ -22,25 +34,28 @@
 .limit-reset-copy {
   display: flex;
   min-width: 0;
-  flex: 1 1 160px;
-  flex-direction: column;
-  gap: 2px;
+  max-width: calc(100% - 22px);
+  flex: 1 0 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+  font-size: var(--ui-font-secondary);
+  line-height: 1.4;
 }
 
 .limit-reset-copy strong {
+  min-width: 0;
   overflow-wrap: anywhere;
   color: var(--text);
-  font-size: var(--ui-font-micro);
   font-weight: 600;
-  line-height: 1.4;
 }
 
 .limit-reset-copy time {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-  color: var(--text-muted);
-  font-size: max(calc(var(--ui-font-micro) - 1px), 8px);
+  color: var(--text-soft);
   font-variant-numeric: tabular-nums;
-  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -48,25 +63,26 @@
 .limit-reset-actions {
   display: flex;
   min-width: 0;
-  flex: 0 1 auto;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: 4px;
   margin-left: auto;
 }
 
 .limit-reset-action.secondary-button {
-  min-height: var(--control-height-small);
-  padding: 0 10px;
-  font-size: var(--ui-font-micro);
+  min-height: calc(var(--control-height-small) - 4px);
+  padding: 0 8px;
+  border-color: transparent;
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  font-size: var(--ui-font-secondary);
+  font-weight: 600;
   white-space: nowrap;
-  transition:
-    background var(--motion-fast) var(--motion-ease),
-    border-color var(--motion-fast) var(--motion-ease),
-    color var(--motion-fast) var(--motion-ease);
 }
 
 .limit-reset-action.secondary-button:hover:not([aria-disabled="true"]) {
-  border-color: var(--interactive-border-hover);
+  background: color-mix(in srgb, var(--text) 11%, transparent);
 }
 
 .limit-reset-action[aria-disabled="true"] {
@@ -74,19 +90,15 @@
   opacity: var(--disabled-opacity);
 }
 
-.limit-reset-action.secondary-button[aria-disabled="true"]:hover {
-  background: var(--surface-strong);
-}
-
 .limit-reset-message {
-  flex: 1 0 100%;
   min-width: 0;
-  margin: 0;
+  flex: 1 0 100%;
+  margin: 0 0 3px;
   padding-left: 22px;
   overflow-wrap: anywhere;
-  color: var(--text-muted);
-  font-size: max(calc(var(--ui-font-micro) - 1px), 8px);
-  line-height: 1.45;
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.4;
 }
 
 .limit-reset-message[role="alert"] {
@@ -94,6 +106,13 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .limit-reset-action.secondary-button {
+    transition:
+      background var(--motion-fast) var(--motion-ease),
+      color var(--motion-fast) var(--motion-ease),
+      transform var(--motion-fast) var(--motion-ease);
+  }
+
   .limit-reset-action.secondary-button:active:not([aria-disabled="true"]) {
     transform: scale(0.98);
   }
@@ -102,5 +121,15 @@
 @media (prefers-reduced-motion: reduce) {
   .limit-reset-action.secondary-button {
     transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .limit-reset {
+    border-color: CanvasText;
+  }
+
+  .limit-reset-action.secondary-button {
+    border-color: ButtonText;
   }
 }

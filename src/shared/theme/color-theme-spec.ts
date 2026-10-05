@@ -1,5 +1,6 @@
 import {
   contrastRatio,
+  gamutMapChroma,
   hexToRgb,
   hexToOklch,
   maxChromaAt,
@@ -16,6 +17,46 @@ interface FamilySpec {
   neutralTint: number;
   auroraHues: readonly number[];
   chromaScale?: number;
+  mute?: number;
+  seed?: { l: number; c: number };
+}
+
+interface AccentRoles { accent: string; accentHover: string; accentStrong: string; accentText: string }
+
+function seededAccents(
+  seed: { l: number; c: number },
+  hue: number,
+  appearance: PaletteAppearance,
+  guards: readonly string[],
+  textCandidates: readonly string[],
+): AccentRoles {
+  const arch = ARCHITECTURE[appearance];
+  const build = (l: number) => oklchToHex({ l, c: seed.c, h: hue });
+  const nearest = (target: number) => {
+    const clears = (l: number) => guards.every((background) => contrastRatio(build(l), background) >= target);
+    if (clears(seed.l)) return seed.l;
+    let low = seed.l;
+    let high = arch.direction === "darker" ? 0 : 1;
+    for (let step = 0; step < 24; step += 1) {
+      const mid = (low + high) / 2;
+      if (clears(mid)) high = mid;
+      else low = mid;
+    }
+    return high;
+  };
+  const accentL = nearest(3);
+  const accent = build(accentL);
+  const textOn = (fill: string) => textCandidates.find((candidate) => contrastRatio(candidate, fill) >= 4.6)
+    ?? (contrastRatio("#ffffff", fill) >= contrastRatio("#000000", fill) ? "#ffffff" : "#000000");
+  const accentText = textOn(accent);
+  const lighterText = contrastRatio(accentText, "#ffffff") < contrastRatio(accentText, "#000000");
+  const accentHover = build(Math.min(1, Math.max(0, accentL + (lighterText ? -0.05 : 0.05))));
+  return {
+    accent,
+    accentHover,
+    accentStrong: build(nearest(4.5)),
+    accentText: contrastRatio(accentText, accentHover) >= 4.6 ? accentText : textOn(accentHover),
+  };
 }
 export const PALETTE_APPEARANCES = ["light", "dark"] as const;
 
@@ -156,6 +197,10 @@ export function buildPaletteTokens(family: PaletteFamily, appearance: PaletteApp
 
 function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly [string, string])[] {
   const chromaScale = spec.chromaScale ?? 1;
+  const mute = spec.mute ?? 1;
+  const tint = chromaScale * mute;
+  const muted = (l: number, c: number, h: number): number =>
+    mute === 1 ? c : gamutMapChroma({ l, c, h }).c * mute;
   const arch = ARCHITECTURE[appearance];
   const hue = spec.neutralHue;
   const neutralChroma = BASE_NEUTRAL_CHROMA[appearance] * spec.neutralTint;
@@ -199,22 +244,38 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
 
   const accent = oklchToHex({
     l: arch.accentL,
-    c: maxChromaAt(arch.accentL, spec.accentHue, (arch.accentChroma * chromaScale)),
+    c: maxChromaAt(arch.accentL, spec.accentHue, (arch.accentChroma * chromaScale)) * mute,
     h: spec.accentHue,
   });
   const accentStrong = oklchToHex({
     l: arch.accentStrongL,
-    c: maxChromaAt(arch.accentStrongL, spec.accentHue, (arch.accentChroma * chromaScale)),
+    c: maxChromaAt(arch.accentStrongL, spec.accentHue, (arch.accentChroma * chromaScale)) * mute,
     h: spec.accentHue,
   });
   const accentTextCandidate = oklchToHex({
     l: arch.accentTextL,
-    c: (arch.accentTextChroma * chromaScale),
+    c: muted(arch.accentTextL, arch.accentTextChroma * chromaScale, spec.accentHue),
     h: spec.accentHue,
   });
   const accentText = contrastRatio(accentTextCandidate, accent) >= 4.6
     ? accentTextCandidate
     : (appearance === "light" ? "#ffffff" : "#000000");
+  const terminalBg = neutral(arch.terminalBgL);
+  const accentHover = oklchToHex({
+    l: arch.accentHoverL,
+    c: maxChromaAt(arch.accentHoverL, spec.accentHue, (arch.accentChroma * chromaScale)) * mute,
+    h: spec.accentHue,
+  });
+  const opposite = ARCHITECTURE[appearance === "light" ? "dark" : "light"];
+  const accents: AccentRoles = spec.seed
+    ? seededAccents({ l: spec.seed.l, c: spec.seed.c * mute }, spec.accentHue, appearance,
+      [surfaces["app-bg"], surfaces["sidebar-bg"], surfaces.surface, surfaces["surface-strong"], terminalBg],
+      [accentTextCandidate, oklchToHex({
+        l: opposite.accentTextL,
+        c: muted(opposite.accentTextL, opposite.accentTextChroma * chromaScale, spec.accentHue),
+        h: spec.accentHue,
+      })])
+    : { accent, accentHover, accentStrong, accentText };
 
   const codeSurface = neutral(arch.codeSurfaceL);
   const inlineCode = neutral(arch.inlineCodeL);
@@ -229,7 +290,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
 
   const activeRest = solveLightness({
     hue: spec.accentHue,
-    chromaCap: arch.statusChroma * arch.activeChromaScale * chromaScale,
+    chromaCap: arch.statusChroma * arch.activeChromaScale * tint,
     backgrounds: surfaceList,
     target: arch.statusTarget,
     direction: arch.direction,
@@ -237,7 +298,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
   }).hex;
   const activeHighlight = solveLightness({
     hue: spec.accentHue,
-    chromaCap: arch.statusChroma * arch.activeChromaScale * chromaScale,
+    chromaCap: arch.statusChroma * arch.activeChromaScale * tint,
     backgrounds: surfaceList,
     target: arch.statusTarget,
     direction: arch.direction,
@@ -257,33 +318,29 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     ["border", rgba(text, arch.borderAlpha)],
     ["border-strong", rgba(text, arch.borderStrongAlpha)],
     ["panel-border", rgba(text, arch.panelBorderAlpha)],
-    ["accent", accent],
-    ["accent-hover", oklchToHex({
-      l: arch.accentHoverL,
-      c: maxChromaAt(arch.accentHoverL, spec.accentHue, (arch.accentChroma * chromaScale)),
-      h: spec.accentHue,
-    })],
+    ["accent", accents.accent],
+    ["accent-hover", accents.accentHover],
     ["accent-soft", oklchToHex({
       l: arch.accentSoftL,
-      c: (arch.accentSoftChroma * chromaScale),
+      c: muted(arch.accentSoftL, arch.accentSoftChroma * chromaScale, spec.accentHue),
       h: spec.accentHue,
     })],
-    ["accent-text", accentText],
-    ["accent-strong", accentStrong],
+    ["accent-text", accents.accentText],
+    ["accent-strong", accents.accentStrong],
     ["message-action", oklchToHex({
       l: arch.accentL,
-      c: (arch.accentChroma * chromaScale) * 0.9,
+      c: muted(arch.accentL, (arch.accentChroma * chromaScale) * 0.9, (spec.accentHue + 50) % 360),
       h: (spec.accentHue + 50) % 360,
     })],
     ["code-surface", codeSurface],
     ["code-header-surface", neutral(arch.codeHeaderL)],
     ["code-border", rgba(text, arch.codeBorderAlpha)],
     ["inline-code-surface", inlineCode],
-    ["terminal-bg", neutral(arch.terminalBgL)],
+    ["terminal-bg", terminalBg],
     ["terminal-fg", neutral(arch.terminalFgL, neutralChroma * 2)],
     ["terminal-selection", oklchToHex({
       l: arch.terminalSelectionL,
-      c: (arch.terminalSelectionChroma * chromaScale),
+      c: muted(arch.terminalSelectionL, arch.terminalSelectionChroma * chromaScale, spec.accentHue),
       h: spec.accentHue,
     })],
     ["glass-chrome", rgba(
@@ -293,7 +350,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     ["glass-float", rgba(surfaces["surface-strong"], arch.glassFloatAlpha)],
     ["active-work-text-rest", activeRest],
     ["active-work-text-highlight", activeHighlight],
-    ["syntax-keyword", syntaxOn(spec.accentHue, arch.syntaxChroma * 1.25 * chromaScale)],
+    ["syntax-keyword", syntaxOn(spec.accentHue, arch.syntaxChroma * 1.25 * tint)],
     ["syntax-string", syntaxOn(SEMANTIC_HUES.success)],
     ["syntax-number", syntaxOn(SEMANTIC_HUES.number)],
     ["syntax-function", syntaxOn(SEMANTIC_HUES.code)],
@@ -319,7 +376,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     ["blue", status(SEMANTIC_HUES.info)],
     ["status-working", status(SEMANTIC_HUES.info)],
     ["status-approval", status(SEMANTIC_HUES.warning)],
-    ["status-input", status(spec.accentHue, arch.statusChroma * 1.2 * chromaScale)],
+    ["status-input", status(spec.accentHue, arch.statusChroma * 1.2 * tint)],
     ["status-failed", status(SEMANTIC_HUES.danger)],
     ["status-completed", status(SEMANTIC_HUES.success)],
     ["ultra-sweep", oklchToHex({
@@ -331,21 +388,26 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     // no hue flares brighter or sinks muddier than its neighbours.
     ...spec.auroraHues.map((auroraHue, index): readonly [string, string] => [`aurora-${index + 1}`, oklchToHex({
       l: arch.auroraL,
-      c: maxChromaAt(arch.auroraL, auroraHue, (arch.auroraChroma * chromaScale)),
+      c: maxChromaAt(arch.auroraL, auroraHue, (arch.auroraChroma * chromaScale)) * mute,
       h: auroraHue,
     })]),
   ];
 }
 
-export function buildCustomPaletteTokens(hex: string, appearance: PaletteAppearance): (readonly [string, string])[] {
+export const MUTED_CHROMA_SCALE = 0.5;
+
+export function buildCustomPaletteTokens(hex: string, appearance: PaletteAppearance, muted = false): (readonly [string, string])[] {
   if (!/^#[0-9a-f]{6}$/iu.test(hex)) throw new Error("Expected a six-digit hex color.");
-  const { h, c } = hexToOklch(hex);
+  const { l, h, c } = hexToOklch(hex);
   const chromaScale = c < 0.004 ? 0 : Math.min(c / 0.1, 1);
+  const mute = muted ? MUTED_CHROMA_SCALE : 1;
   return buildTokens({
     neutralHue: h,
     accentHue: h,
-    neutralTint: 3.2 * chromaScale,
+    neutralTint: 3.2 * chromaScale * mute,
     chromaScale,
+    mute,
+    seed: { l, c: c < 0.004 ? 0 : c },
     auroraHues: [h, (h + 325) % 360, (h + 35) % 360],
   }, appearance);
 }

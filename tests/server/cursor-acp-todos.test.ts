@@ -18,28 +18,36 @@ type TodoUpdate =
   | { createPlan: Array<Record<string, string>> }
   | { plan: Array<Record<string, string>> };
 
-function todoAgent(root: string, turns: Record<string, TodoUpdate[]>): string {
+function todoAgent(root: string, turns: Record<string, TodoUpdate[]>, finalWithResponse: boolean, afterResponse: TodoUpdate[]): string {
   const command = portableNodeExecutable(root, "cursor-agent");
   writeNodeSubcommand(root, "acp", `
 const readline = require("node:readline");
 const turns = ${JSON.stringify(turns)};
+const finalWithResponse = ${JSON.stringify(finalWithResponse)};
+const afterResponse = ${JSON.stringify(afterResponse)};
 const sessionId = "cursor-todo-session";
 const modes = { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] };
-const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
-readline.createInterface({ input: process.stdin }).on("line", (line) => {
-  const message = JSON.parse(line);
+const line = (value) => JSON.stringify(value) + "\\n";
+const send = (value) => process.stdout.write(line(value));
+const frame = (update, index) => {
+  if (update.createPlan) return { jsonrpc: "2.0", id: "plan-" + index, method: "cursor/create_plan", params: { toolCallId: "plan-tool", plan: "Replacement plan", todos: update.createPlan } };
+  if (update.plan) return { jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: update.plan } } };
+  return { jsonrpc: "2.0", method: "cursor/update_todos", params: { toolCallId: "todo-tool", ...update } };
+};
+readline.createInterface({ input: process.stdin }).on("line", (raw) => {
+  const message = JSON.parse(raw);
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: "Cursor", version: "test" } } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes, configOptions: [] } });
   if (message.method === "session/load") return send({ jsonrpc: "2.0", id: message.id, result: { modes, configOptions: [] } });
   if (message.method === "session/prompt") {
     const prompt = message.params.prompt.find((block) => block.type === "text").text;
     const updates = turns[prompt] ?? [];
-    updates.forEach((update, index) => setTimeout(() => {
-      if (update.createPlan) send({ jsonrpc: "2.0", id: "plan-" + index, method: "cursor/create_plan", params: { toolCallId: "plan-tool", plan: "Replacement plan", todos: update.createPlan } });
-      else if (update.plan) send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: update.plan } } });
-      else send({ jsonrpc: "2.0", method: "cursor/update_todos", params: { toolCallId: "todo-tool", ...update } });
-    }, index * 20));
-    return setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } }), updates.length * 20 + 20);
+    const timed = finalWithResponse ? updates.slice(0, -1) : updates;
+    const response = { jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } };
+    const last = finalWithResponse && updates.length > 0 ? [frame(updates[updates.length - 1], updates.length - 1)] : [];
+    timed.forEach((update, index) => setTimeout(() => send(frame(update, index)), index * 20));
+    const trailing = afterResponse.map((update, index) => frame(update, updates.length + index));
+    return setTimeout(() => process.stdout.write([...last, response, ...trailing].map(line).join("")), timed.length * 20 + 20);
   }
 });
 `);
@@ -54,11 +62,11 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  async function runTurns(turns: Record<string, TodoUpdate[]>) {
+  async function runTurns(turns: Record<string, TodoUpdate[]>, finalWithResponse = false, afterResponse: TodoUpdate[] = []) {
     const root = portableFixtureRoot("Cursor todo snapshots");
     roots.push(root);
     const manager = ProviderManager.createForTests(
-      { commands: { cursor: todoAgent(root, turns) } },
+      { commands: { cursor: todoAgent(root, turns, finalWithResponse, afterResponse) } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
     return async (prompt: string, sessionId?: string, access: "supervised" | "full" = "supervised") => {
@@ -125,6 +133,34 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
       ["C:completed", "D:pending"],
       ["E:pending"],
       ["F:pending"],
+    ]);
+  });
+
+  it("keeps the final todo update that arrives in the same write as the prompt response and drops one after it", async () => {
+    const turn = await runTurns({
+      first: [
+        { merge: false, todos: [{ id: "a", content: "A", status: "pending" }] },
+        { merge: true, todos: [{ id: "b", content: "B", status: "pending" }] },
+      ],
+    }, true, [{ merge: true, todos: [{ id: "c", content: "C", status: "pending" }] }]);
+
+    await expect(turn("first")).resolves.toEqual([
+      ["A:pending"],
+      ["A:pending", "B:pending"],
+    ]);
+  });
+
+  it("keeps the final plan session update that arrives in the same write as the prompt response", async () => {
+    const turn = await runTurns({
+      first: [
+        { merge: false, todos: [{ id: "a", content: "A", status: "pending" }] },
+        { plan: [{ content: "E", priority: "medium", status: "pending" }] },
+      ],
+    }, true);
+
+    await expect(turn("first")).resolves.toEqual([
+      ["A:pending"],
+      ["E:pending"],
     ]);
   });
 

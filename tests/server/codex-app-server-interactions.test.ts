@@ -39,6 +39,8 @@ function interactionHarness() {
   const approvals: AgentApprovalRequest[] = [];
   const resolved: Array<[string, string]> = [];
   const writes: JsonObject[] = [];
+  const activities: Array<[string, string, string]> = [];
+  const reasoning: string[] = [];
   const cancel = vi.fn();
   const rememberFailure = vi.fn();
   const host: CodexAppServerEventHost = {
@@ -52,6 +54,8 @@ function interactionHarness() {
       onInputRequest: (request) => inputs.push(request),
       onApproval: (request) => approvals.push(request),
       onApprovalResolved: (requestId, decision) => resolved.push([requestId, decision]),
+      onActivity: (kind, phase, label) => activities.push([kind, phase, label]),
+      onReasoning: (text) => reasoning.push(text),
     },
     resultText: new CappedTextBuffer(1_024),
     isSettled: () => phase === "settled",
@@ -80,10 +84,12 @@ function interactionHarness() {
     rememberFailure,
   };
   return {
+    activities,
     cancel,
     events: new CodexAppServerEvents(host),
     inputs,
     approvals,
+    reasoning,
     resolved,
     rememberFailure,
     writes,
@@ -263,6 +269,78 @@ describe("Codex native approval turn authority", () => {
     } finally { h.events.dispose(); }
   });
 
+  it.each([
+    ["heredoc", "command", "/bin/zsh -lc 'python3 - <<'\"'\"'EOF'\"'\"'\nprint(1)\nEOF'", "Approve command"],
+    ["tabbed", "command", "/bin/zsh -lc 'cat <<-EOF\n\tindented\nEOF'", "Approve command"],
+    ["terminal input", "writeStdin", "write_stdin --session-id 7 'yes\n'", "Send input to running command"],
+  ] as const)("surfaces a %s command approval without failing the turn", (_label, kind, command, title) => {
+    const h = interactionHarness();
+    try {
+      h.events.handleServerRequest("approval", "item/commandExecution/requestApproval", {
+        ...approvalParams(), kind, command, environmentId: null, availableDecisions: ["accept", "cancel"],
+      });
+      expect(h.approvals).toEqual([expect.objectContaining({ command, title, availableDecisions: ["approve", "cancel"] })]);
+      expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
+      expect(h.writes).toEqual([{ id: "approval", result: { decision: "accept" } }]);
+      expect(h.cancel).not.toHaveBeenCalled();
+      expect(h.rememberFailure).not.toHaveBeenCalled();
+    } finally { h.events.dispose(); }
+  });
+
+  it("declines only a command approval it cannot display safely", () => {
+    const h = interactionHarness();
+    try {
+      for (const [id, command] of [["long", `echo ${"x".repeat(4_000)}`], ["escape", "printf '\u001b[2J'"]] as const) {
+        h.events.handleServerRequest(id, "item/commandExecution/requestApproval", {
+          ...approvalParams(), kind: "command", command, environmentId: null, availableDecisions: ["accept", "cancel"],
+        });
+      }
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([
+        { id: "long", result: { decision: "decline" } },
+        { id: "escape", result: { decision: "decline" } },
+      ]);
+      expect(h.activities).toEqual([
+        ["system", "info", "Declined a Codex command that Inertia cannot display safely"],
+        ["system", "info", "Declined a Codex command that Inertia cannot display safely"],
+      ]);
+      expect(h.cancel).not.toHaveBeenCalled();
+      expect(h.rememberFailure).not.toHaveBeenCalled();
+      h.events.handleServerRequest("next", "item/commandExecution/requestApproval", approvalParams());
+      expect(h.approvals).toHaveLength(1);
+    } finally { h.events.dispose(); }
+    const foreign = interactionHarness();
+    try {
+      foreign.events.handleServerRequest("foreign", "item/commandExecution/requestApproval", {
+        ...approvalParams("other-thread"), command: `echo ${"x".repeat(4_000)}`,
+      });
+      expect(foreign.writes).toEqual([{ id: "foreign", error: expect.objectContaining({ code: -32602 }) }]);
+      expect(foreign.cancel).toHaveBeenCalledOnce();
+    } finally { foreign.events.dispose(); }
+  });
+
+  it("says it declined terminal input it cannot display safely", () => {
+    const h = interactionHarness();
+    try {
+      for (const [id, command] of [["interrupt", "write_stdin --session-id 7 '\u0003'"], ["escape", "write_stdin --session-id 7 '\u001b:q!\n'"]] as const) {
+        h.events.handleServerRequest(id, "item/commandExecution/requestApproval", {
+          ...approvalParams(), kind: "writeStdin", command, environmentId: null, availableDecisions: ["accept", "cancel"],
+        });
+      }
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([
+        { id: "interrupt", result: { decision: "decline" } },
+        { id: "escape", result: { decision: "decline" } },
+      ]);
+      expect(h.activities).toEqual([
+        ["system", "info", "Declined input to a running command that Inertia cannot display safely"],
+        ["system", "info", "Declined input to a running command that Inertia cannot display safely"],
+      ]);
+      expect(h.cancel).not.toHaveBeenCalled();
+      expect(h.rememberFailure).not.toHaveBeenCalled();
+    } finally { h.events.dispose(); }
+  });
+
   it.each(["stop", "turn-completed"] as const)("retires a displayed approval answered after %s without a protocol failure", (edge) => {
     const h = interactionHarness();
     try {
@@ -390,6 +468,21 @@ describe("Codex native approval turn authority", () => {
       });
       expect(h.events.respondToApproval(h.approvals[0]!.requestId, "approve")).toBe(true);
       expect(h.writes).toEqual([{ id: "legacy", result: { decision: "approved" } }]);
+    } finally { h.events.dispose(); }
+  });
+});
+
+describe("Codex reasoning summary parts", () => {
+  it("separates streamed summary parts of one reasoning item", () => {
+    const h = interactionHarness();
+    const owner = { threadId: ROOT_THREAD_ID, turnId: ROOT_TURN_ID };
+    try {
+      h.events.handleNotification("item/reasoning/summaryPartAdded", { ...owner, itemId: "reasoning-1", summaryIndex: 0 });
+      h.events.handleNotification("item/reasoning/summaryTextDelta", { ...owner, itemId: "reasoning-1", summaryIndex: 0, delta: "**Inspecting**\n\nRead the tests." });
+      h.events.handleNotification("item/reasoning/summaryPartAdded", { ...owner, itemId: "reasoning-1", summaryIndex: 1 });
+      h.events.handleNotification("item/reasoning/summaryTextDelta", { ...owner, itemId: "reasoning-1", summaryIndex: 1, delta: "**Verifying**\n\nRan them." });
+      h.events.handleNotification("item/reasoning/summaryPartAdded", { ...owner, itemId: "reasoning-2", summaryIndex: 0 });
+      expect(h.reasoning.join("")).toBe("**Inspecting**\n\nRead the tests.\n**Verifying**\n\nRan them.");
     } finally { h.events.dispose(); }
   });
 });

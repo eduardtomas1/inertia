@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import {
   ChevronDown,
   CloudDownload,
@@ -90,7 +90,7 @@ export function GitActionsControl({
   useEffect(() => {
     refreshRef.current = onRefreshStatus;
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     dismissMenu("context-change");
   }, [dismissMenu, presentation, status.root]);
   useEffect(() => {

@@ -68,7 +68,7 @@ describe("agent Browser page coverage", () => {
     const { contents } = page([element("BUTTON", 10, { type: "button", value: "" })]);
     const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as Record<string, unknown>;
     expect(snapshot).not.toHaveProperty("notInspected");
-    expect(snapshot.truncated).toBe(false);
+    expect(snapshot).not.toHaveProperty("omitted");
   });
 
   it("lists an embedded frame as a placeholder without a ref and never reads inside it", async () => {
@@ -145,7 +145,7 @@ describe("agent Browser page coverage", () => {
     expect(text).not.toContain("custom-element-secret");
   });
 
-  it("merges regions seen by the guard and by the debugger, and marks a bounded scan as truncated", async () => {
+  it("merges regions seen by the guard and by the debugger, and reports a bounded scan as omitted", async () => {
     const { contents } = page([element("BUTTON", 10, { type: "button", value: "" })], {
       refs: new Map(), nodes: new WeakMap(), passwordNodes: new WeakSet(),
       passwordValues: new Set(), next: 1,
@@ -153,9 +153,10 @@ describe("agent Browser page coverage", () => {
     });
     const snapshot = JSON.parse(
       await semanticPageSnapshot(contents as never, ["shadow-roots", "frames"]),
-    ) as { notInspected: string[]; truncated: boolean };
+    ) as { notInspected: string[]; omitted: unknown; nextStep: string };
     expect(snapshot.notInspected).toEqual(["frames", "shadow-roots"]);
-    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.omitted).toEqual({ textChars: 0, elements: 0 });
+    expect(snapshot.nextStep).toContain("larger than one snapshot reads");
   });
 
   it("marks Chromium's failed-load page so it is never mistaken for the requested page", async () => {

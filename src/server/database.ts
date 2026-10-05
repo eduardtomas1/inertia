@@ -63,11 +63,10 @@ import {
   importDatabaseRecoveryData,
   type DatabaseRecoveryImportOptions,
 } from "./persistence/database-recovery-store";
-import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
-import { cachedStatement } from "./persistence/statement-cache";
+import { requireRow } from "./persistence/required-row";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
 import {
@@ -88,6 +87,8 @@ import { QueuedMessageRepository } from "./persistence/queued-message-repository
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
+import { backgroundTasks } from "./persistence/background-task-repository";
+import type { BackgroundTaskCursor, BackgroundTasksResult } from "../shared/background-tasks";
 import type {
   AgentTurnRow,
   ConversationRow,
@@ -977,6 +978,11 @@ export class RuntimeStore {
     );
   }
 
+  backgroundTasks(conversationId: string, before: BackgroundTaskCursor | null): BackgroundTasksResult {
+    this.conversation(conversationId);
+    return backgroundTasks(this.database, conversationId, before);
+  }
+
   upsertSubagentTrace(
     input: UpsertSubagentTraceInput,
   ): UpsertSubagentTraceResult | null {
@@ -1198,6 +1204,12 @@ export class RuntimeStore {
   clearModelBackendDefault(projectId: string | null): void {
     this.backendProfileRepository.clearDefault(projectId);
   }
+  updateSettingsClearingGlobalDefault(update: AppSettingsUpdate): void {
+    this.database.transaction(() => {
+      this.settingsRepository.update(update);
+      this.backendProfileRepository.clearDefault(null);
+    })();
+  }
   updateSettings(update: AppSettingsUpdate): void {
     this.settingsRepository.update(update);
   }
@@ -1218,17 +1230,11 @@ export class RuntimeStore {
     return this.conversationRepository.path(conversationId);
   }
 
-  private requireProject(projectId: string): ProjectRow { return this.requireRow("projects", projectId, "Project not found."); }
+  private requireProject(projectId: string): ProjectRow { return requireRow(this.database, "projects", projectId, "Project not found."); }
 
-  private requireConversation(conversationId: string): ConversationRow { return this.requireRow("conversations", conversationId, "Conversation not found."); }
+  private requireConversation(conversationId: string): ConversationRow { return requireRow(this.database, "conversations", conversationId, "Conversation not found."); }
 
-  private requireAgentTurn(turnId: string): AgentTurnRow { return this.requireRow("agent_turns", turnId, "Agent turn not found."); }
-
-  private requireRow<Row>(table: "projects" | "conversations" | "agent_turns", id: string, missing: string): Row {
-    const row = cachedStatement(this.database, `SELECT * FROM ${table} WHERE id = ?`).get(id) as Row | undefined;
-    if (!row) throw new RecordNotFoundError(missing);
-    return row;
-  }
+  private requireAgentTurn(turnId: string): AgentTurnRow { return requireRow(this.database, "agent_turns", turnId, "Agent turn not found."); }
 
   recoverInterruptedRuns(): void {
     this.recoveryRepository.recoverInterruptedRuns();

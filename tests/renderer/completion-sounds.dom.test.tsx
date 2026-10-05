@@ -176,7 +176,7 @@ describe("completion sound settings", () => {
     await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ completionSound: next }));
     expect(importCompletionSound).toHaveBeenCalledWith([ding.file]);
     expect(player.playCompletionSound).toHaveBeenLastCalledWith({ sound: rain.file, library: [ding, rain] });
-    expect(screen.getByRole("status")).toHaveTextContent("only the first 3 seconds will play");
+    expect(screen.getByText(/only the first 3 seconds will play/u)).toHaveAttribute("role", "status");
     const name = screen.getByRole("textbox", { name: "Name for Rain" });
     expect(name).toHaveFocus();
     fireEvent.change(name, { target: { value: "  Soft   rain " } });
@@ -221,7 +221,7 @@ describe("completion sound settings", () => {
     expect(onUpdate).not.toHaveBeenCalled();
 
     fireEvent.click(importButton);
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("already in your sounds as “Ding”"));
+    await waitFor(() => expect(screen.getByText(/already in your sounds as “Ding”/u)).toHaveAttribute("role", "status"));
     expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, sound: ding.file, library: [ding] } });
 
     fireEvent.click(importButton);
@@ -338,17 +338,78 @@ describe("completion sound settings", () => {
     expect(screen.getByText(/You can keep up to 8 sounds/u)).toBeInTheDocument();
   });
 
-  it("chooses how long a task must run before it rings", () => {
-    const { onUpdate, rerender } = renderSettings(enabled);
+  it("chooses after which tasks the sound plays with one select", () => {
+    const { onUpdate, rerender } = renderSettings({ ...enabled, longRunSeconds: 120 });
+    expect(screen.queryByRole("switch", { name: "Only after long tasks" })).not.toBeInTheDocument();
     expect(screen.queryByRole("radiogroup", { name: "Long task duration" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("switch", { name: "Only after long tasks" }));
-    expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, longRunsOnly: true } });
-    rerender(<SoundSettings settings={{ ...enabled, longRunsOnly: true }} disabled={false} onUpdate={onUpdate} />);
-    const labels = [...screen.getByRole("radiogroup", { name: "Long task duration" }).querySelectorAll('[role="radio"]')].map((radio) => radio.textContent);
-    expect(labels).toEqual(["30 s", "1 min", "2 min", "5 min", "10 min", "15 min"]);
-    expect(screen.getByRole("radio", { name: "1 min" })).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(screen.getByRole("radio", { name: "5 min" }));
+    const select = screen.getByRole("combobox", { name: "Play sound" });
+    expect(select.closest("[data-setting-id]")).toHaveAttribute("data-setting-id", "completion-sound-when");
+    expect([...select.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "After every task",
+      "After tasks longer than 30 s",
+      "After tasks longer than 1 min",
+      "After tasks longer than 2 min",
+      "After tasks longer than 5 min",
+      "After tasks longer than 10 min",
+      "After tasks longer than 15 min",
+    ]);
+    expect(select).toHaveValue("every");
+    fireEvent.change(select, { target: { value: "300" } });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, longRunsOnly: true, longRunSeconds: 300 } });
+    rerender(<SoundSettings settings={{ ...enabled, longRunsOnly: true, longRunSeconds: 300 }} disabled={false} onUpdate={onUpdate} />);
+    expect(screen.getByRole("combobox", { name: "Play sound" })).toHaveValue("300");
+    fireEvent.change(screen.getByRole("combobox", { name: "Play sound" }), { target: { value: "every" } });
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+    expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, longRunsOnly: false, longRunSeconds: 300 } });
+  });
+
+  it("keeps Play sound visible but inactive while the sound is off", () => {
+    const { onUpdate } = renderSettings({ ...DEFAULT_COMPLETION_SOUND, longRunsOnly: true, longRunSeconds: 600 });
+    const select = screen.getByRole("combobox", { name: "Play sound" });
+    expect(select).toHaveValue("600");
+    expect(select).toBeEnabled();
+    expect(select).toHaveAttribute("aria-disabled", "true");
+    fireEvent.change(select, { target: { value: "30" } });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed Play sound save once, in its own row", async () => {
+    const { onUpdate } = renderSettings(enabled);
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    fireEvent.change(screen.getByRole("combobox", { name: "Play sound" }), { target: { value: "60" } });
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(screen.getByRole("alert").closest("[data-setting-id]")).toHaveAttribute("data-setting-id", "completion-sound-when");
+    expect(screen.getByRole("combobox", { name: "Play sound" })).toHaveValue("every");
+  });
+
+  it("confirms turning the sound on in its own row", async () => {
+    renderSettings(DEFAULT_COMPLETION_SOUND);
+    fireEvent.click(screen.getByRole("switch", { name: "Sound when a task ends" }));
+    const row = document.querySelector<HTMLElement>('[data-setting-id="completion-sound-enabled"]')!;
+    await waitFor(() => expect(row.querySelector('[role="status"]')).toHaveTextContent("Saved"));
+  });
+
+  it("reports a failed attempt to turn the sound on and turns the switch back off", async () => {
+    const { onUpdate } = renderSettings(DEFAULT_COMPLETION_SOUND);
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    const toggle = screen.getByRole("switch", { name: "Sound when a task ends" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(screen.getByRole("alert").closest("[data-setting-id]")).toHaveAttribute("data-setting-id", "completion-sound-enabled");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("confirms a sound choice and reports one that could not be saved", async () => {
+    const { onUpdate } = renderSettings(enabled);
+    fireEvent.click(screen.getByRole("radio", { name: /Glass/u }));
+    const heading = screen.getByText("Sound", { selector: "#completion-sound-label" }).parentElement!;
+    await waitFor(() => expect(heading.querySelector('[role="status"]')).toHaveTextContent("Saved"));
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    fireEvent.click(screen.getByRole("radio", { name: /Bell/u }));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(heading).toContainElement(screen.getByRole("alert"));
+    expect(screen.getByRole("radio", { name: /Chime/u })).toHaveAttribute("aria-checked", "true");
   });
 
   it("hides the library where the desktop bridge is unavailable", () => {

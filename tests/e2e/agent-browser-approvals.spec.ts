@@ -102,6 +102,32 @@ test("binds inspectable browser approvals to the exact native document and hides
     expect(evidence.passwordText).toBe("");
     expect(evidence.sensitive.detail).not.toContain("unrecognizable private value");
     expect(evidence.sensitive.detail).toContain("sensitive text hidden");
+    const immediate = await app.electronApp.evaluate(async (_electron, request) => {
+      type Command = import("../../src/shared/agent-browser-approval").AgentBrowserRequest;
+      type Result = import("../../src/shared/agent-browser").AgentBrowserResult;
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (identity: { conversationId: string; runId: string; turnId: string }, command: Command) => Promise<Result>;
+      };
+      const perform = (command: Command) => runtime.agentBrowser({ conversationId: request.id,
+        runId: "11111111-1111-4111-8111-111111111111", turnId: "22222222-2222-4222-8222-222222222222" }, command);
+      const outcomes: string[] = [];
+      for (const command of [
+        { action: "history", direction: "reload" },
+        { action: "history", direction: "back" },
+      ] as const) {
+        const navigated = await perform({ action: "navigate", url: `${request.origin}/agent-browser-history-first` });
+        outcomes.push(navigated.ok && navigated.state.tabs.every(({ loading }) => !loading) ? "loaded" : "still loading");
+        const prepared = await perform({ action: "prepare-approval", command });
+        if (!prepared.ok) {
+          outcomes.push(prepared.message);
+          continue;
+        }
+        const performed = await perform({ action: "perform-approved", token: (JSON.parse(prepared.text) as { token: string }).token });
+        outcomes.push(performed.ok ? `${command.direction} done` : performed.message);
+      }
+      return outcomes;
+    }, { id: conversationId, origin: new URL(destination.url).origin });
+    expect(immediate).toEqual(["loaded", "reload done", "loaded", "back done"]);
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

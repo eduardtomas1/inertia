@@ -20,13 +20,13 @@ test("selects custom colors per appearance, follows System, and restores them af
   try {
     await app.resizeWindow(1440, 1100);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: "Light", exact: true }).click();
-    const light = page.getByRole("textbox", { name: "Light color", exact: true });
+    const light = page.getByRole("textbox", { name: "Light colour", exact: true });
     await light.fill("#0d9488");
     await light.press("Enter");
     await expectPalette(page, "#0d9488", "light");
-    const dark = page.getByRole("textbox", { name: "Dark color", exact: true });
+    const dark = page.getByRole("textbox", { name: "Dark colour", exact: true });
     await dark.fill("#f97316");
     await dark.press("Enter");
     await expectPalette(page, "#0d9488", "light");
@@ -61,8 +61,8 @@ test("selects custom colors per appearance, follows System, and restores them af
     await popup.locator(".detached-chat-shell").waitFor();
     await expectPalette(popup, "#f97316", "dark");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Light color", exact: true })).toHaveValue("#0d9488");
-    await expect(page.getByRole("textbox", { name: "Dark color", exact: true })).toHaveValue("#f97316");
+    await expect(page.getByRole("textbox", { name: "Light colour", exact: true })).toHaveValue("#0d9488");
+    await expect(page.getByRole("textbox", { name: "Dark colour", exact: true })).toHaveValue("#f97316");
     await page.getByRole("button", { name: "Use Ocean for dark", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
     await expect.poll(() => page.locator("html").evaluate((root) => getComputedStyle(root).getPropertyValue("--accent").trim()))

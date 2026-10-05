@@ -73,7 +73,7 @@ test("Git badges reflect real status and colored editing preserves text, scrolli
     await panel.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(panel.getByRole("treeitem", { name: "sample.ts", exact: true })).not.toHaveAttribute("aria-description");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: "Dark", exact: true }).click();
     await page.getByRole("button", { name: /^file-git-editor fixture, Codex,/u }).click();
     const darkTools = await ensureWorkspaceTools(page);

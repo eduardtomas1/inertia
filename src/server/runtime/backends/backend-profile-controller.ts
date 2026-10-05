@@ -457,6 +457,18 @@ export class BackendProfileController {
     this.store.clearModelBackendDefault(projectId);
   }
 
+  replaceGlobalDefaultWithSettings(
+    update: Parameters<RuntimeStore["updateSettingsClearingGlobalDefault"]>[0],
+  ): void {
+    const current = this.store.listModelBackendDefaults().find(
+      (candidate) => candidate.projectId === null,
+    );
+    if (current) {
+      this.runtime.assertConfigurationMutable(current.selection.harnessId);
+    }
+    this.store.updateSettingsClearingGlobalDefault(update);
+  }
+
   async deleteProfile(profileId: string): Promise<void> {
     try {
       const existing = this.store.modelBackendProfile(profileId);

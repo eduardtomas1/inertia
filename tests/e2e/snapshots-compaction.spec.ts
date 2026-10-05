@@ -102,20 +102,23 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await expect(page.locator(".composer").getByRole("button", { name: "Snapshots", exact: true })).toHaveCount(0);
     await app.resizeWindow(1100, 760);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const navigation = page.getByRole("complementary", { name: "Settings sections" });
-    const snapshots = navigation.getByRole("button", { name: "Snapshots", exact: true });
-    await snapshots.focus(); await snapshots.press("Enter");
+    const navigation = page.getByRole("navigation", { name: "Settings sections" });
+    const devices = navigation.getByRole("button", { name: "Devices & integrations", exact: true });
+    await devices.focus(); await devices.press("Enter");
     const setup = page.getByRole("main", { name: "Settings", exact: true });
-    await expect(setup.getByRole("switch", { name: "Enable Snapshots" })).not.toBeChecked();
-    await expect(setup.getByRole("heading", { name: "Take a snapshot" })).toBeVisible();
-    await setup.getByRole("combobox", { name: "Capture shortcut" }).selectOption("accelerator");
-    await expect(setup.getByRole("combobox", { name: "Capture shortcut" })).toBeEnabled();
+    await expect(setup.getByRole("switch", { name: "Window snapshots" })).not.toBeChecked();
+    await setup.getByText("How to take a snapshot", { exact: true }).click();
+    await expect(setup.getByText(/Switch to the window you want to share/u)).toBeVisible();
     await app.expectNoViewportOverflow();
     await save(`snapshot-settings-privacy-${theme}`);
+    await navigation.getByRole("button", { name: "Keyboard", exact: true }).click();
+    await expect(setup.getByRole("combobox", { name: "Window snapshot" })).not.toHaveAttribute("aria-disabled", "true");
+    await setup.getByRole("combobox", { name: "Window snapshot" }).selectOption("accelerator");
+    await expect(setup.getByRole("combobox", { name: "Window snapshot" })).not.toHaveAttribute("aria-disabled", "true");
     await page.reload();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Snapshots", exact: true }).click();
-    await expect(page.getByRole("combobox", { name: "Capture shortcut" })).toHaveValue("accelerator");
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Keyboard", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "Window snapshot" })).toHaveValue("accelerator");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) { bodyFailure = { error }; throw error; }
   finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }

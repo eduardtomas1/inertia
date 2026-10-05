@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, Clock3 } from "lucide-react";
 import type { LimitResetResult } from "@shared/limit-reset";
 import type { LimitResetCommand, LimitResetCommandRunner } from "./limitResetClient";
@@ -8,6 +8,7 @@ import { useDocumentActivity } from "../../hooks/useDocumentPresence";
 import "./LimitResetBanner.css";
 
 const PENDING_POLL_MS = 30_000;
+const RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000];
 const MAX_TIMER_MS = 2_147_483_647;
 const MISSED_MESSAGE = "Inertia was closed or asleep at the reset, so nothing was sent.";
 const loads = new WeakMap<LimitResetCommandRunner, Map<string, Promise<LimitResetResult>>>();
@@ -39,16 +40,18 @@ function refreshDelay(result: LimitResetResult, now: number): number | null {
   return remaining > 0 ? Math.min(remaining + 1_000, MAX_TIMER_MS) : PENDING_POLL_MS;
 }
 
-export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, onCommand }: {
+export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, providerState, onCommand }: {
   conversationId: string;
   latestTurnId: string | null;
   snoozedUntil: string | null;
   disabled: boolean;
+  providerState: string;
   onCommand: LimitResetCommandRunner;
 }): React.JSX.Element | null {
   const [result, setResult] = useState<LimitResetResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [misses, setMisses] = useState(0);
   const active = useDocumentActivity();
   const reasonId = useId();
   const generation = useRef(0);
@@ -60,19 +63,29 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     setResult(null);
     setBusy(false);
     setError(null);
+    setMisses(0);
   }, [conversationId, latestTurnId, onCommand]);
   const refresh = useCallback((): void => {
     const owner = generation.current;
     const requested = revision.current;
     void load(onCommand, conversationId).then((next) => {
       if (generation.current !== owner || revision.current !== requested) return;
-      loaded.current = true;
+      const empty = next.usageLimited && !next.offer && !next.plan;
+      loaded.current = !empty;
       setResult(next);
-    }, () => undefined);
+      setMisses((current) => empty ? current + 1 : 0);
+    }, () => {
+      if (generation.current === owner) setMisses((current) => current + 1);
+    });
   }, [conversationId, onCommand]);
   useEffect(() => {
     if (active && !disabled && !loaded.current) refresh();
-  }, [active, disabled, refresh, latestTurnId]);
+  }, [active, disabled, refresh, latestTurnId, providerState]);
+  useEffect(() => {
+    if (!active || disabled || misses === 0 || misses > RETRY_DELAYS_MS.length) return;
+    const timer = window.setTimeout(refresh, RETRY_DELAYS_MS[misses - 1]);
+    return () => window.clearTimeout(timer);
+  }, [active, disabled, misses, refresh]);
   useEffect(() => {
     if (!active || disabled || result?.conversationId !== conversationId) return;
     const delay = refreshDelay(result, Date.now());
@@ -80,8 +93,16 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     const timer = window.setTimeout(refresh, delay);
     return () => window.clearTimeout(timer);
   }, [active, result, conversationId, disabled, refresh]);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const keepFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (busy || !keepFocus.current) return;
+    keepFocus.current = false;
+    if (document.activeElement === document.body) rowRef.current?.querySelector("button")?.focus();
+  });
   const mutate = async (command: LimitResetCommand): Promise<void> => {
     if (busy || disabled) return;
+    keepFocus.current = rowRef.current?.contains(document.activeElement) ?? false;
     const owner = generation.current;
     revision.current += 1;
     setBusy(true);
@@ -131,7 +152,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     if (!offer || snoozed) return;
     void mutate({ type: "conversation.limit-reset.snooze", payload: { conversationId, failedTurnId: offer.failedTurnId, resetsAt: offer.resetsAt } });
   };
-  return <div className="limit-reset" role="group" aria-label="Usage limit" data-state={state}>
+  return <div ref={rowRef} className="limit-reset" role="group" aria-label="Usage limit" data-state={state}>
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
       <strong>{title}</strong>

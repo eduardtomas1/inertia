@@ -134,7 +134,7 @@ export function RightPanelLauncher({
             {surfaceIcons[action.surface]}
             <span>{action.label}</span>
             {action.badge > 0 && (
-              <small>{action.surface === "agents" ? `${action.badge} running` : action.badge}</small>
+              <small>{action.surface === "agents" ? `${action.badge} active` : action.badge}</small>
             )}
             <kbd>{action.shortcut}</kbd>
           </button>

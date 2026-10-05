@@ -980,13 +980,12 @@ describe("RuntimeStore conversation lifecycle", () => {
     migrated.close();
   });
 
-  it("persists sidebar mode, canonical grouping metadata, and per-project overrides", async () => {
+  it("persists canonical grouping metadata and per-project overrides", async () => {
     const { databasePath, workspacePath, store } = await createStore({
       withProject: false,
     });
     expect(store.snapshot().settings.desktopNotifications).toBe(true);
     store.updateSettings({
-      sidebarMode: "activity",
       projectGrouping: "repository",
       codexBinaryPath: process.platform === "win32" ? "C:\\Tools\\Codex\\codex.exe" : "/opt/codex/bin/codex",
       desktopNotifications: false,
@@ -1018,8 +1017,9 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().settings).not.toHaveProperty("sidebarMode");
+    expect(reopened.snapshot().settings).not.toHaveProperty("workspaceStartupSurface");
     expect(reopened.snapshot().settings).toMatchObject({
-      sidebarMode: "activity",
       projectGrouping: "repository",
       codexBinaryPath: process.platform === "win32" ? "C:\\Tools\\Codex\\codex.exe" : "/opt/codex/bin/codex",
       desktopNotifications: false,
@@ -1157,7 +1157,6 @@ describe("RuntimeStore conversation lifecycle", () => {
       showThinking: false,
       usageDisplayMode: "expanded",
       interfaceScale: "comfortable",
-      workspaceStartupSurface: "tools",
       terminalFontSize: 17,
     });
     store.close();
@@ -1174,7 +1173,6 @@ describe("RuntimeStore conversation lifecycle", () => {
       showThinking: false,
       usageDisplayMode: "expanded",
       interfaceScale: "comfortable",
-      workspaceStartupSurface: "tools",
       terminalFontSize: 17,
     });
     reopened.close();
@@ -1196,11 +1194,14 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().settings).toMatchObject({
-      workspaceStartupSurface: "summary",
       responseDensity: "comfortable",
       terminalFontSize: 18,
     });
     migrated.close();
+    const column = new Database(databasePath);
+    expect(column.prepare("SELECT workspace_startup_surface FROM app_state WHERE id = 1").get())
+      .toEqual({ workspace_startup_surface: "summary" });
+    column.close();
   });
 
   it("adds interface scale after the Codex binary migration without changing existing preferences", async () => {
@@ -1233,14 +1234,24 @@ describe("RuntimeStore conversation lifecycle", () => {
     migrated.close();
   });
 
-  it("backfills legacy disabled usage as hidden while new profiles default to compact", async () => {
-    const { databasePath, workspacePath, store } = await createStore();
-    expect(store.snapshot().settings.usageDisplayMode).toBe("compact");
+  it("leaves the legacy usage column untouched when the usage display changes", async () => {
+    const { databasePath, store } = await createStore();
     store.updateSettings({ usageDisplayMode: "hidden" });
     store.close();
 
+    const database = new Database(databasePath);
+    expect(database.prepare("SELECT show_usage, usage_display_mode FROM app_state WHERE id = 1").get())
+      .toEqual({ show_usage: 1, usage_display_mode: "hidden" });
+    database.close();
+  });
+
+  it("backfills legacy disabled usage as hidden while new profiles default to compact", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    expect(store.snapshot().settings.usageDisplayMode).toBe("compact");
+    store.close();
+
     const legacy = new Database(databasePath);
-    expect((legacy.prepare("SELECT show_usage FROM app_state WHERE id = 1").get() as { show_usage: number }).show_usage).toBe(0);
+    legacy.prepare("UPDATE app_state SET show_usage = 0 WHERE id = 1").run();
     legacy.exec("ALTER TABLE app_state DROP COLUMN usage_display_mode");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 15").run();
     legacy.close();

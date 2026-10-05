@@ -210,6 +210,45 @@ it("splits every complete Electron target into display-sensitive and isolated-pl
     .toContain("matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'");
 });
 
+it("measures desktop workloads on the prepared bundle before any Electron end-to-end phase", () => {
+  const steps = workflow.jobs.electron.steps as Array<{ name: string; if?: string; run?: string; "continue-on-error"?: boolean }>;
+  const index = (name: string) => steps.findIndex((step) => step.name === name);
+  const measure = index("Measure desktop workloads under Xvfb");
+  const step = steps[measure]!;
+  expect(measure).toBeGreaterThan(index("Build the application bundle"));
+  expect(measure).toBe(index("Prepare Electron end-to-end binary") + 1);
+  expect(measure).toBeLessThan(steps.findIndex(({ run }) => run?.includes("playwright test --project=")));
+  expect(step.run).toBe("xvfb-run --auto-servernum npm run benchmark:desktop:built");
+  expect(step.if).toContain("needs.classify.outputs.benchmarks == 'true'");
+  expect(step.if).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/u);
+  expect(step["continue-on-error"]).not.toBe(true);
+  expect(index("Keep desktop performance evidence")).toBeGreaterThan(
+    steps.findLastIndex(({ run }) => run?.includes("playwright test --project=")),
+  );
+});
+
+it("measures release desktop workloads on a freshly built bundle before the unit suite and packaging", () => {
+  const steps = parse(source(".github/workflows/release-platforms.yml")).jobs.build.steps as Array<{ name: string; if?: string; run?: string; "continue-on-error"?: boolean }>;
+  const benchmarkBundle = steps.findIndex((step) => step.name === "Build the application bundle for the desktop benchmark");
+  expect(steps[benchmarkBundle]!.run).toBe("npm run build:bundle");
+  expect(steps[benchmarkBundle]!.if).toBeUndefined();
+  const measurements = steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => step.run?.includes("benchmark:desktop:built"));
+  expect(measurements.map(({ index }) => index)).toEqual([benchmarkBundle + 1, benchmarkBundle + 2]);
+  expect(measurements.map(({ step }) => step.if)).toEqual(["runner.os != 'Linux'", "runner.os == 'Linux'"]);
+  for (const { step } of measurements) {
+    expect(step["continue-on-error"]).not.toBe(true);
+  }
+  const unitSuites = steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => /^npm test\b/u.test(step.run ?? "") || step.run?.includes("npm test -- --maxWorkers=2"));
+  expect(unitSuites).toHaveLength(2);
+  for (const { index } of unitSuites) expect(index).toBeGreaterThan(benchmarkBundle + 2);
+  const releaseBundle = steps.findIndex((step) => step.run === "npm run build:packaged");
+  expect(releaseBundle).toBeGreaterThan(Math.max(...unitSuites.map(({ index }) => index)));
+  expect(steps.findIndex((step) => /^Build (?:macOS|Windows|Linux) release package$/u.test(step.name)))
+    .toBeGreaterThan(releaseBundle);
+});
+
 it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {
   const plan = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["benchmarks/data-throughput.test.ts"] });
   expect(plan.performanceSmoke).toBe(true);

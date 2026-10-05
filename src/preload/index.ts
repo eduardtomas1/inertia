@@ -199,6 +199,10 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(DIAGNOSTICS_IPC.export, query) as ReturnType<DesktopBridge["exportDiagnostics"]>,
   reportValidationDiagnostic: (report: Parameters<DesktopBridge["reportValidationDiagnostic"]>[0]) =>
     ipcRenderer.invoke(DIAGNOSTICS_IPC.reportValidation, report) as ReturnType<DesktopBridge["reportValidationDiagnostic"]>,
+  setDiagnosticsCapture: (enabled: boolean) =>
+    ipcRenderer.invoke(DIAGNOSTICS_IPC.setCapture, enabled === true) as ReturnType<DesktopBridge["setDiagnosticsCapture"]>,
+  clearDiagnostics: () =>
+    ipcRenderer.invoke(DIAGNOSTICS_IPC.clear) as ReturnType<DesktopBridge["clearDiagnostics"]>,
   onDiagnosticsChanged: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on(DIAGNOSTICS_IPC.changed, handler);

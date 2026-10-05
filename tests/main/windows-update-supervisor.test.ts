@@ -221,7 +221,7 @@ describe("Windows update supervisor launcher", () => {
 
   it.runIf(process.platform === "win32")(
     "forwards only one bounded native protocol diagnostic",
-    async () => {
+    async ({ signal }) => {
       const helperPath = resolve(
         "resources/generated/runtime-process-guardian/windows-runtime-job.exe",
       );
@@ -269,7 +269,6 @@ Capture (New-Object byte[] 8193) $false
         code: number | null;
         stderr: string;
         stdout: string;
-        timedOut: boolean;
       }>((resolveProcess, rejectProcess) => {
         const child = spawn(powershellPath, [
           "-NoLogo",
@@ -284,27 +283,21 @@ Capture (New-Object byte[] 8193) $false
             ...process.env,
             INERTIA_NATIVE_DIAGNOSTIC_PROBE: script,
           },
+          signal,
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         });
         let stderr = "";
         let stdout = "";
-        let timedOut = false;
         child.stdout.setEncoding("utf8");
         child.stderr.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => { stdout += chunk; });
         child.stderr.on("data", (chunk: string) => { stderr += chunk; });
         child.once("error", rejectProcess);
-        const timeout = setTimeout(() => {
-          timedOut = true;
-          child.kill();
-        }, 5_000);
         child.once("close", (code) => {
-          clearTimeout(timeout);
-          resolveProcess({ code, stderr, stdout, timedOut });
+          resolveProcess({ code, stderr, stdout });
         });
       });
-      expect(result.timedOut).toBe(false);
       if (result.code !== 0) {
         throw new Error(
           `Native diagnostic contract probe exited ${result.code}: ${result.stderr}`,
@@ -323,7 +316,6 @@ Capture (New-Object byte[] 8193) $false
         "<null>",
       ]);
     },
-    10_000,
   );
 
   it("pins canonical launch paths before a parent namespace is retargeted", async () => {

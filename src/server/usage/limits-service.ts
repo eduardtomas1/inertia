@@ -102,7 +102,8 @@ export class UsageLimitsService {
   async nativeAccount(providerId: ProviderInfo["id"], force = false, model?: string, cwd?: string, interactive = false): Promise<NativeUsageAccount | null> {
     const scope = JSON.stringify([providerId, model ?? null, cwd ?? null]);
     const cached = this.chatAccounts.get(scope);
-    if (!force && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < 60_000) {
+    const lifetime = cached?.status === "unavailable" || cached?.status === "error" ? 15_000 : 60_000;
+    if (!force && cached?.checkedAt && Date.now() - Date.parse(cached.checkedAt) < lifetime) {
       return { ...cached, ...staleProjection(cached, Date.now()) };
     }
     const key = `${scope}:${interactive}`;

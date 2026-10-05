@@ -11,6 +11,7 @@ import {
   type ProviderGoalClearedEvent,
   type ProviderGoalSnapshot,
   type ProviderGoalUpdatedEvent,
+  type ProviderInputEvent,
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
@@ -212,7 +213,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(result).not.toHaveProperty("diagnostic");
     expect(approvals).toEqual(["npm test"]);
     expect(approvalRequests[0]).toMatchObject({
-      availableDecisions: ["approve", "deny", "cancel"],
+      availableDecisions: ["approve", "cancel"],
       networkScope: { host: "registry.npmjs.org", protocol: "https" },
       permissionRoots: [
         { path: normalize(join(realpathSync(fake.root), "fixtures")), access: "read" },
@@ -244,7 +245,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       approvalPolicy: "untrusted",
       approvalsReviewer: "user",
       sandbox: "read-only",
-      effort: "high",
     });
     expect(turn.params).toEqual({
       threadId: "thread-existing",
@@ -356,7 +356,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       expect.objectContaining({ phase: "completed", label: "Context compaction", activityId: "compact-rich" }),
       expect.objectContaining({ phase: "info", label: "Entered review mode" }),
       expect.objectContaining({ phase: "info", label: "Exited review mode" }),
-      expect.objectContaining({ phase: "completed", label: "Context compacted" }),
       expect.objectContaining({ phase: "started", label: "Plan updated", detail: "Progress:\nVerifying implementation" }),
       expect.objectContaining({ phase: "completed", label: "Plan completed" }),
       expect.objectContaining({ phase: "completed", label: "Patch updated", detail: expect.stringContaining("diff --git") }),
@@ -760,6 +759,41 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
         },
       })]);
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+    expect(messages.some(({ method }) => method === "thread/settings/update")).toBe(false);
+  });
+
+  it.each([undefined, "thread-goal-effort"])("applies the selected reasoning effort to provider-started goal turns (session %s)", async (sessionId) => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-continuation";
+    const manager = trackedManager(fake.command);
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `conversation-goal-effort-${sessionId ?? "new"}`,
+      cwd: fake.root,
+      prompt: "/goal Ship it",
+      interactionMode: "build",
+      access: "full",
+      model: "model-a",
+      reasoningEffort: "high",
+      ...(sessionId ? { sessionId } : {}),
+      goalStart: { objective: "Ship it" },
+      goalContinuationExpected: true,
+    }));
+
+    expect(result).toMatchObject({ status: "completed", text: "First goal turn. Second goal turn." });
+    const messages = captured(fake.capturePath);
+    const methods = messages.flatMap(({ method }) => typeof method === "string" ? [method] : []);
+    const opened = messages.find(({ method }) => method === (sessionId ? "thread/resume" : "thread/start")) as { params: Record<string, unknown> };
+    expect(opened.params).toMatchObject({ model: "model-a" });
+    expect(opened.params).not.toHaveProperty("effort");
+    expect(messages.filter(({ method }) => method === "thread/settings/update")).toEqual([
+      expect.objectContaining({ params: { threadId: sessionId ?? "thread-new", effort: "high" } }),
+    ]);
+    expect(methods.indexOf("thread/settings/update")).toBeLessThan(methods.indexOf("thread/goal/set"));
+    expect(methods).not.toContain("turn/start");
+    await manager.disposeAll();
   });
 
   it("fails a rejected goal start without converting it into an ordinary turn", async () => {
@@ -1107,7 +1141,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       approvalPolicy: "never",
       approvalsReviewer: "user",
       sandbox: "danger-full-access",
-      effort: "high",
     });
     expect(turn.params).toEqual({
       threadId: "thread-full",
@@ -1252,6 +1285,30 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
         result: "Found coverage.",
       }),
     ]));
+    expect(subagents.find(({ providerAgentId }) =>
+      providerAgentId === "child-1")).toMatchObject({
+      model: "gpt-5.5-codex-mini",
+    });
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "child-1",
+      status: "running",
+      activity: "MCP · docs/search",
+    }));
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "child-1",
+      status: "running",
+      usage: {
+        totalTokens: 2048,
+        inputTokens: 640,
+        cachedInputTokens: 128,
+        cacheWriteInputTokens: 16,
+        outputTokens: 60,
+        reasoningOutputTokens: 12,
+        contextTokens: 700,
+        maxContextTokens: 128000,
+      },
+    }));
+    expect(JSON.stringify(subagents)).not.toContain("CHILD_MCP_ARGUMENT");
     expect(captured(fake.capturePath).find(({ method }) =>
       method === "turn/steer")).toMatchObject({
       params: {
@@ -1393,6 +1450,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     process.env.INERTIA_APP_SERVER_SCENARIO = "nested-collab";
     const manager = trackedManager(fake.command);
     const subagents: ProviderSubagentEvent[] = [];
+    const usages: unknown[] = [];
 
     const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
@@ -1405,9 +1463,51 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       access: "full",
     }), {
       onSubagent: (event) => subagents.push(event),
+      onUsage: (event) => usages.push(event),
     });
 
     await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(usages).toEqual([]);
+    expect(subagents.find(({ providerAgentId }) =>
+      providerAgentId === "child-parent")).toMatchObject({
+      model: "gpt-5.5-codex",
+    });
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "child-parent",
+      parentProviderAgentId: null,
+      status: "running",
+      activity: "npm run lint",
+    }));
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "grandchild-a",
+      parentProviderAgentId: "child-parent",
+      activity: "File change",
+    }));
+    expect(subagents.filter(({ usage }) => usage !== undefined)).toEqual([
+      expect.objectContaining({
+        providerAgentId: "grandchild-a",
+        parentProviderAgentId: "child-parent",
+        status: "running",
+        isLive: true,
+        usage: {
+          totalTokens: 5400,
+          inputTokens: 800,
+          cachedInputTokens: 300,
+          cacheWriteInputTokens: 50,
+          outputTokens: 100,
+          reasoningOutputTokens: 16,
+          contextTokens: 900,
+          maxContextTokens: 258400,
+        },
+      }),
+    ]);
+    const serialized = JSON.stringify(subagents);
+    for (const leaked of ["thread-foreign", "CHILD_COMMAND_OUTPUT", "--fix", "src/nested-a.ts"]) {
+      expect(serialized).not.toContain(leaked);
+    }
+    expect(subagents.map(({ sequence }) => sequence)).toEqual(
+      subagents.map((_, index) => index + 1),
+    );
     expect(subagents).toEqual(expect.arrayContaining([
       expect.objectContaining({
         providerAgentId: "grandchild-a",
@@ -2178,6 +2278,124 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(captured(fake.capturePath).find(({ id }) =>
       id === "approval-rpc"
     )).toMatchObject({ result: { decision: "accept" } });
+    await manager.disposeAll();
+  });
+
+  it.each([
+    ["multiline-approval", "Approve command", "/bin/zsh -lc 'python3 - <<EOF\nprint(1)\nEOF'"],
+    ["write-stdin-approval", "Send input to running command", "write_stdin --session-id 7 'yes\n'"],
+  ] as const)("shows the exact %s command and completes the supervised turn", async (scenario, title, command) => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = scenario;
+    const manager = trackedManager(fake.command);
+    const approvals: ProviderApprovalEvent["request"][] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `conversation-${scenario}`,
+      cwd: fake.root,
+      prompt: "Run the script",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => {
+        approvals.push(event.request);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+          { runId: event.runId, turnId: event.turnId },
+        )).toBe(true);
+      },
+      onInput: (event) => expect(manager.respondToInput(
+        event.conversationId,
+        event.request.requestId,
+        { choice: ["Safe"] },
+        { runId: event.runId, turnId: event.turnId },
+      )).toBe(true),
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(approvals).toEqual([expect.objectContaining({
+      kind: "command",
+      title,
+      command,
+      availableDecisions: ["approve", "cancel"],
+    })]);
+    expect(captured(fake.capturePath).find(({ id }) => id === "approval-rpc"))
+      .toMatchObject({ result: { decision: "accept" } });
+    await manager.disposeAll();
+  });
+
+  it("declines a command approval it cannot display and lets the turn continue", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "undisplayable-approval";
+    const manager = trackedManager(fake.command);
+    const approvals: string[] = [];
+    const activities: Array<{ phase: string; label: string }> = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-undisplayable-approval",
+      cwd: fake.root,
+      prompt: "Clear the screen",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => approvals.push(event.request.requestId),
+      onActivity: (event) => activities.push(event),
+      onInput: (event) => expect(manager.respondToInput(
+        event.conversationId,
+        event.request.requestId,
+        { choice: ["Safe"] },
+        { runId: event.runId, turnId: event.turnId },
+      )).toBe(true),
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(result).not.toHaveProperty("failure");
+    expect(approvals).toEqual([]);
+    expect(activities).toContainEqual(expect.objectContaining({
+      phase: "info",
+      label: "Declined a Codex command that Inertia cannot display safely",
+    }));
+    expect(captured(fake.capturePath).find(({ id }) => id === "approval-rpc"))
+      .toMatchObject({ result: { decision: "decline" } });
+    await manager.disposeAll();
+  });
+
+  it("answers a free-text Codex question whose options are null", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "free-text-input";
+    const manager = trackedManager(fake.command);
+    const questions: ProviderInputEvent["request"]["questions"][] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-free-text-input",
+      cwd: fake.root,
+      prompt: "Ask me",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onInput: (event) => {
+        questions.push(event.request.questions);
+        expect(manager.respondToInput(
+          event.conversationId,
+          event.request.requestId,
+          { choice: ["Take the careful path"] },
+          { runId: event.runId, turnId: event.turnId },
+        )).toBe(true);
+      },
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(questions).toEqual([[expect.objectContaining({ id: "choice", isOther: true, options: [] })]]);
+    expect(captured(fake.capturePath).find(({ id }) => id === "input-rpc"))
+      .toMatchObject({ result: { answers: { choice: { answers: ["Take the careful path"] } } } });
     await manager.disposeAll();
   });
 

@@ -76,4 +76,12 @@ describe("application incident producers", () => {
     expect(asynchronous({ code: "turn.failed", outcome: "failed" })).toEqual(expect.any(String));
     await Promise.resolve();
   });
+
+  it("returns no reference when the sink reports that nothing was stored", () => {
+    const observation = { code: "discord.delivery-unknown", outcome: "unknown" } as const;
+    expect(createIncidentReporter(() => null)(observation)).toBeNull();
+    expect(createIncidentReporter(() => false)(observation)).toBeNull();
+    expect(createIncidentReporter(() => ({ stored: true }))(observation)).toEqual(expect.any(String));
+    expect(createIncidentReporter(() => undefined)(observation)).toEqual(expect.any(String));
+  });
 });

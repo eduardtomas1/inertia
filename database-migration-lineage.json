@@ -695,8 +695,28 @@
     },
     {
       "version": 88,
+      "name": "PersistNotificationPreferences",
+      "digest": "d42c62f44e2a8d5c159d4093e63a3064b8c61f82a1cbf3455eaf8fc68d8899d4"
+    },
+    {
+      "version": 89,
+      "name": "PersistIssueReportPreview",
+      "digest": "50fdf2c19099a9afc5b90b09d862a21c31559ce8b865ebd87c8f3193f7d6cb5a"
+    },
+    {
+      "version": 90,
+      "name": "PersistSubagentTaskTelemetry",
+      "digest": "381d58213931bf6518e30e06b4f6763d44619361793e0b1d050f1a4d12076efa"
+    },
+    {
+      "version": 91,
+      "name": "PersistMutedCustomColors",
+      "digest": "953d3c401e62c801ef1a2c726e2a82b55adceb03ea12691c2907308deb2fec94"
+    },
+    {
+      "version": 92,
       "name": "CliConversationImports",
-      "digest": "6209aad47b5dca5b5643f460a0eeb8096e33c2c77ac59f071527f7d09a60c3ae"
+      "digest": "f13e996ce2ef4dac5f801713fa5bd58a87d2995ca7c88793a554d4373b0e69fd"
     }
   ]
 }

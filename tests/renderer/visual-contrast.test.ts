@@ -258,7 +258,7 @@ describe("visual contrast system", () => {
 
   it("keeps a visible focus outline on the new branch input", () => {
     expect(css).toMatch(
-      /\.new-branch-form input:focus-visible,[\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
+      /\.new-branch-form input:focus-visible\s*[,{][\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
     );
   });
 

@@ -9,17 +9,17 @@ let paletteBuilder: typeof buildCustomPaletteTokens | undefined;
 
 export function useTheme({
   theme: preference, colorTheme, lightColorTheme = colorTheme, darkColorTheme = colorTheme,
-  lightCustomColor, darkCustomColor,
-}: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor">): void {
+  lightCustomColor, darkCustomColor, mutedCustomColors = false,
+}: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor" | "mutedCustomColors">): void {
   useLayoutEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     let cancelled = false;
     const palettes: Record<ResolvedTheme, PaletteTokens | null> = { light: null, dark: null };
     const loadPalettes = () => {
       for (const [mode, color] of [["light", lightCustomColor], ["dark", darkCustomColor]] as const) {
-        palettes[mode] = paletteBuilder && isCustomColor(color) ? paletteBuilder(color, mode)
+        palettes[mode] = paletteBuilder && isCustomColor(color) ? paletteBuilder(color, mode, mutedCustomColors)
           : cachedCustomPalette(layoutStorage, color && cachedCustomColor(layoutStorage, mode), mode);
-        if (paletteBuilder || !color) cacheCustomColor(layoutStorage, color, mode, palettes[mode] ?? []);
+        if (paletteBuilder || !color) cacheCustomColor(layoutStorage, color, mode, palettes[mode] ?? [], mutedCustomColors);
       }
     };
     const applyTheme = () => {
@@ -43,5 +43,5 @@ export function useTheme({
     }
     media.addEventListener("change", applyTheme);
     return () => { cancelled = true; media.removeEventListener("change", applyTheme); };
-  }, [lightColorTheme, darkColorTheme, preference, lightCustomColor, darkCustomColor]);
+  }, [lightColorTheme, darkColorTheme, preference, lightCustomColor, darkCustomColor, mutedCustomColors]);
 }

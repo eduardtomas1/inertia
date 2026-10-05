@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Bot, RefreshCw } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Send } from "lucide-react";
 
 import {
   BACKEND_CREDENTIAL_MASK,
@@ -8,8 +8,16 @@ import {
 } from "@shared/backend-credentials";
 import type { AppSettings } from "@shared/contracts";
 import { diagnosticDefinition, type RendererDiagnostic } from "@shared/application-diagnostics";
+import { isReleaseRepositoryUrl, RELEASE_REPOSITORY_URL_MAX_LENGTH } from "@shared/release-repository";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
+import { SettingTextField } from "./settings/SettingControls";
+import { SettingActionRow, SettingCopy, SettingNoteStatus, SettingsGroup } from "./settings/SettingsLayout";
+import { useSettingAction } from "./settings/useSettingAction";
 import "./DiscordSettings.css";
+
+export const DISCORD_REPOSITORY_URL_ERROR = "Use an HTTPS GitHub or GitLab repository URL.";
+
+class DiscordReleaseError extends Error {}
 
 function storageIncidentId(error: unknown): string | null {
   return error instanceof Error ? /\[incident:([0-9a-f-]{36})\]$/u.exec(error.message)?.[1] ?? null : null;
@@ -22,21 +30,47 @@ export function DiscordSettings({
 }: {
   disabled: boolean;
   repositoryUrl: string;
-  onUpdate: (settings: Partial<AppSettings>) => void;
+  onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
 }): React.JSX.Element {
-  const [releaseInfoLoading, setReleaseInfoLoading] = useState(false);
-  const [releaseInfoError, setReleaseInfoError] = useState<string | null>(null);
-  const [releaseInfoStatus, setReleaseInfoStatus] = useState<string | null>(null);
+  const webhook = useSettingAction();
+  const post = useSettingAction();
+  const busy = webhook.busy || post.busy;
+  const [repositoryText, setRepositoryText] = useState({ text: repositoryUrl, invalid: false });
+  const [postRepository, setPostRepository] = useState("");
   const [webhookDraft, setWebhookDraft] = useState("");
-  const [webhookState, setWebhookState] =
-    useState<BackendCredentialState | null>(null);
-  const [webhookSaving, setWebhookSaving] = useState(false);
+  const [webhookState, setWebhookState] = useState<BackendCredentialState | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [incidentId, setIncidentId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const postTrigger = useRef<HTMLButtonElement>(null);
+  const confirmCancel = useRef<HTMLButtonElement>(null);
+  const restorePostFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (confirming) {
+      confirmCancel.current?.focus();
+      return;
+    }
+    if (!restorePostFocus.current) return;
+    restorePostFocus.current = false;
+    postTrigger.current?.focus();
+  }, [confirming]);
+  const releaseFailed = post.notice?.tone === "error";
+  const [captureOff, setCaptureOff] = useState(false);
+  useEffect(() => {
+    if (!releaseFailed || incidentId) return;
+    let active = true;
+    void window.inertia.queryDiagnostics({ limit: 1 })
+      .then((page) => { if (active) setCaptureOff(!page.capture); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [releaseFailed, incidentId]);
   const reportValidation = async (code: RendererDiagnostic["code"]): Promise<void> => {
     try {
       const result = await window.inertia.reportValidationDiagnostic({ code, correlationId: crypto.randomUUID() });
       setIncidentId(result?.incidentId ?? null);
-    } catch { /* Inline validation remains usable without diagnostics persistence. */ }
+    } catch {
+      setIncidentId(null);
+    }
   };
 
   useEffect(() => {
@@ -47,10 +81,13 @@ export function DiscordSettings({
       if (active) {
         setWebhookState(state);
         setIncidentId(state.diagnosticId ?? null);
-        if (!state.storage.available) setReleaseInfoError("Secure webhook storage is unavailable. No Discord message was sent.");
+        if (!state.storage.available) setStorageError("Secure webhook storage is unavailable. No Discord message was sent.");
       }
     }).catch((error: unknown) => {
-      if (active) { setReleaseInfoError("Secure webhook storage is unavailable."); setIncidentId(storageIncidentId(error)); }
+      if (active) {
+        setStorageError("Secure webhook storage is unavailable.");
+        setIncidentId(storageIncidentId(error));
+      }
     });
     return () => {
       active = false;
@@ -70,187 +107,214 @@ export function DiscordSettings({
     return state;
   };
 
-  const saveWebhook = async (): Promise<void> => {
-    if (webhookSaving || !webhookDraft.trim()) return;
-    setWebhookSaving(true);
-    setReleaseInfoError(null);
-    setReleaseInfoStatus(null);
-    try {
-      await storeWebhook();
-      setReleaseInfoStatus("Discord webhook saved securely.");
-    } catch (error) {
-      setIncidentId(storageIncidentId(error));
-      setReleaseInfoError("The Discord webhook could not be saved securely.");
-    } finally {
-      setWebhookSaving(false);
-    }
+  const failWith = (fallback: string) => (error: unknown): string => {
+    setIncidentId(storageIncidentId(error));
+    return error instanceof DiscordReleaseError ? error.message : fallback;
   };
 
-  const clearWebhook = async (): Promise<void> => {
-    if (webhookSaving) return;
-    setWebhookSaving(true);
-    setReleaseInfoError(null);
-    setReleaseInfoStatus(null);
-    try {
+  const saveUnavailable = disabled || busy || !webhookDraft.trim();
+  const removeUnavailable = disabled || busy || !webhookState?.hasSecret;
+  const postUnavailable = disabled || busy || (!webhookState?.hasSecret && !webhookDraft.trim());
+
+  const saveWebhook = (): void => {
+    if (saveUnavailable) return;
+    setStorageError(null);
+    void webhook.run(storeWebhook, {
+      key: "save",
+      exclusive: true,
+      success: "Discord webhook saved securely.",
+      failure: failWith("The Discord webhook could not be saved securely."),
+    });
+  };
+
+  const clearWebhook = (): void => {
+    if (removeUnavailable) return;
+    setStorageError(null);
+    void webhook.run(async () => {
       const state = await window.inertia.clearBackendCredential({
         profileId: DISCORD_RELEASE_WEBHOOK_PROFILE_ID,
       });
       setWebhookState(state);
       setWebhookDraft("");
-      setReleaseInfoStatus("Discord webhook removed.");
-    } catch (error) {
-      setIncidentId(storageIncidentId(error));
-      setReleaseInfoError("The Discord webhook could not be removed.");
-    } finally {
-      setWebhookSaving(false);
-    }
+    }, {
+      key: "remove",
+      exclusive: true,
+      success: "Discord webhook removed.",
+      failure: failWith("The Discord webhook could not be removed."),
+    });
   };
 
-  const generateReleaseInfo = async (): Promise<void> => {
-    if (releaseInfoLoading) return;
-    const normalizedRepositoryUrl = repositoryUrl.trim();
-    if (!normalizedRepositoryUrl) {
+  const requestPost = (): void => {
+    if (postUnavailable) return;
+    const target = repositoryText.text.trim();
+    if (!target) {
       void reportValidation("discord.repository-missing");
-      setReleaseInfoError("Add a release repository URL before generating.");
-      setReleaseInfoStatus(null);
+      post.report({ tone: "error", text: "Add a release repository URL before posting." });
       return;
     }
-    setReleaseInfoLoading(true);
+    if (repositoryText.invalid || !isReleaseRepositoryUrl(target)) {
+      post.report({ tone: "error", text: "Fix the repository URL before posting." });
+      return;
+    }
+    if (target !== repositoryUrl.trim()) {
+      post.report({ tone: "error", text: "Save the repository URL before posting." });
+      return;
+    }
+    post.report(null);
+    setPostRepository(target);
+    setConfirming(true);
+  };
+
+  const postReleaseInfo = (): void => {
+    const normalizedRepositoryUrl = postRepository;
+    restorePostFocus.current = true;
+    setConfirming(false);
     setIncidentId(null);
-    setReleaseInfoError(null);
-    setReleaseInfoStatus(null);
     let deliveryRequested = false;
-    try {
+    void post.run(async () => {
       const storedWebhook = await storeWebhook();
       if (!storedWebhook?.hasSecret) {
         void reportValidation("discord.webhook-missing");
-        setReleaseInfoError("Add and save a Discord webhook before generating.");
-        return;
+        throw new DiscordReleaseError("Add and save a Discord webhook before posting.");
       }
       deliveryRequested = true;
-      const result = await window.inertia.sendDiscordReleaseInfo({
-        repositoryUrl: normalizedRepositoryUrl,
-      });
+      const result = await window.inertia.sendDiscordReleaseInfo({ repositoryUrl: normalizedRepositoryUrl });
       setIncidentId(result.incidentId ?? null);
       if (!result.sent) {
         const explanation = diagnosticDefinition(result.code);
-        setReleaseInfoError(`${explanation.title}. ${explanation.nextStep}`);
-      } else setReleaseInfoStatus(result.comparisonLimited
+        throw new DiscordReleaseError(`${explanation.title}. ${explanation.nextStep}`);
+      }
+      return result.comparisonLimited;
+    }, {
+      key: "send",
+      exclusive: true,
+      success: (comparisonLimited) => comparisonLimited
         ? "Discord confirmed delivery. The comparison exceeded the preview limit; published release notes and the full comparison link were sent."
-        : "Discord confirmed delivery of the release info.");
-    } catch (error) {
-      setIncidentId(storageIncidentId(error));
-      setReleaseInfoError(deliveryRequested
-        ? "Delivery could not be confirmed. Check the Discord channel before trying again; the message may have arrived."
-        : "Secure webhook storage is unavailable. No Discord message was sent.");
-    } finally {
-      setReleaseInfoLoading(false);
-    }
+        : "Discord confirmed delivery of the release info.",
+      failure: (error) => {
+        if (error instanceof DiscordReleaseError) return error.message;
+        setIncidentId(storageIncidentId(error));
+        return deliveryRequested
+          ? "Delivery could not be confirmed. Check the Discord channel before trying again; the message may have arrived."
+          : "Secure webhook storage is unavailable. No Discord message was sent.";
+      },
+    });
   };
 
+  const webhookBusy = webhook.pending === "save" || webhook.pending === "remove";
   return (
-    <section className="settings-card discord-settings" aria-labelledby="discord-heading">
-      <div className="settings-card-heading">
-        <div><Bot size={18} /></div>
-        <span>
-          <h3 id="discord-heading">Discord</h3>
-          <p>Prepare release details before publishing them to Discord.</p>
-        </span>
-      </div>
-      <label className="discord-field">
-        <span>
-          <strong>Repository URL</strong>
-          <small>Public GitHub or GitLab repository used to find releases.</small>
-        </span>
-        <input
-          aria-label="Discord release repository URL"
-          disabled={disabled}
-          maxLength={500}
-          placeholder="https://github.com/org/repo"
-          type="url"
-          value={repositoryUrl}
-          onChange={(event) => {
-            void onUpdate({ discordReleaseRepositoryUrl: event.target.value });
-          }}
+    <SettingsGroup
+      className="discord-settings"
+      title="Discord"
+      headingId="discord-heading"
+    >
+      <SettingTextField
+        id="discord-repository"
+        layout="stacked"
+        className="discord-field"
+        title="Repository URL"
+        description="Public GitHub or GitLab repository used to find releases."
+        disabled={disabled}
+        maxLength={RELEASE_REPOSITORY_URL_MAX_LENGTH}
+        placeholder="https://github.com/org/repo"
+        type="url"
+        value={repositoryUrl}
+        validate={(value) => value === "" || isReleaseRepositoryUrl(value) ? null : DISCORD_REPOSITORY_URL_ERROR}
+        onSave={(discordReleaseRepositoryUrl) => onUpdate({ discordReleaseRepositoryUrl })}
+        onTextChange={(text, invalid) => setRepositoryText({ text, invalid })}
+      />
+      <div className="setting-field discord-field" data-setting-id="discord-webhook">
+        <SettingCopy
+          title="Webhook URL"
+          description={webhookState?.hasSecret
+            ? "Stored in the operating system credential vault. Paste a new value to replace it."
+            : "Incoming Discord webhook, stored only in the operating system credential vault."}
+          notice={webhook.notice ?? (storageError ? { tone: "info", text: storageError } : null)}
         />
-      </label>
-      <label className="discord-field">
-        <span>
-          <strong>Webhook URL</strong>
-          <small>
-            {webhookState?.hasSecret
-              ? "Stored in the operating system credential vault. Paste a value only to replace it."
-              : "Incoming Discord webhook stored only in the operating system credential vault."}
-          </small>
+        <span className="discord-webhook-control">
+          <input
+            className="setting-input"
+            aria-label="Webhook URL"
+            autoComplete="off"
+            disabled={disabled || webhookBusy
+              || webhookState?.storage.available === false}
+            maxLength={500}
+            placeholder={webhookState?.hasSecret
+              ? BACKEND_CREDENTIAL_MASK
+              : "https://discord.com/api/webhooks/…"}
+            type="password"
+            value={webhookDraft}
+            onChange={(event) => setWebhookDraft(event.target.value)}
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            aria-disabled={saveUnavailable || undefined}
+            onClick={saveWebhook}
+          >
+            {webhook.pending === "save" ? "Saving…" : "Save webhook"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            aria-disabled={removeUnavailable || undefined}
+            onClick={clearWebhook}
+          >
+            Remove webhook
+          </button>
         </span>
-        <input
-          aria-label="Discord webhook URL"
-          autoComplete="off"
-          disabled={disabled || webhookSaving
-            || webhookState?.storage.available === false}
-          maxLength={500}
-          placeholder={webhookState?.hasSecret
-            ? BACKEND_CREDENTIAL_MASK
-            : "https://discord.com/api/webhooks/..."}
-          type="password"
-          value={webhookDraft}
-          onChange={(event) => setWebhookDraft(event.target.value)}
-        />
-      </label>
-      <div className="settings-inline-actions">
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={disabled || webhookSaving || !webhookDraft.trim()}
-          onClick={() => { void saveWebhook(); }}
-        >
-          {webhookSaving ? "Saving..." : "Save webhook"}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={disabled || webhookSaving || !webhookState?.hasSecret}
-          onClick={() => { void clearWebhook(); }}
-        >
-          Remove webhook
-        </button>
       </div>
       {webhookState?.storage.available === false && (
-        <p className="settings-card-note" role="status">
+        <p className="discord-note" role="status">
           {webhookState.storage.message}
         </p>
       )}
-      <div className="codex-binary-path runtime-log-setting">
-        <span>
-          <strong>Release info</strong>
-          <small>Send published release notes and a bounded commit preview. No AI request is made.</small>
-        </span>
-        <div>
+      <SettingActionRow
+        id="discord-release"
+        className="runtime-log-setting"
+        title="Post release to Discord"
+        description="Posts the published release notes and a bounded commit preview to the webhook channel. No AI request is made."
+        actions={(
           <button
+            ref={postTrigger}
             type="button"
-            className="primary-button"
-            disabled={disabled || releaseInfoLoading || webhookSaving
-              || (!webhookState?.hasSecret && !webhookDraft.trim())}
-            onClick={() => { void generateReleaseInfo(); }}
+            className="secondary-button"
+            aria-expanded={confirming}
+            aria-disabled={postUnavailable || undefined}
+            onClick={requestPost}
           >
-            <RefreshCw size={14} />
-            {releaseInfoLoading ? "Sending..." : "Generate"}
+            <Send size={14} aria-hidden="true" />
+            {post.pending === "send" ? "Posting…" : "Post release to Discord…"}
           </button>
+        )}
+      />
+      {confirming && (
+        <div
+          className="discord-post-confirm"
+          role="group"
+          aria-label="Confirm Discord post"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            restorePostFocus.current = true;
+            setConfirming(false);
+          }}
+        >
+          <strong>Post the latest release of {postRepository} to Discord?</strong>
+          <small>Everyone in the webhook&apos;s channel will see it. Discord posts cannot be withdrawn from Inertia.</small>
+          <div>
+            <button ref={confirmCancel} type="button" className="secondary-button" onClick={() => { restorePostFocus.current = true; setConfirming(false); }}>Cancel</button>
+            <button type="button" className="primary-button" disabled={disabled || busy} onClick={postReleaseInfo}>Post to Discord</button>
+          </div>
         </div>
+      )}
+      <div className="release-info-status">
+        <SettingNoteStatus notice={post.notice} />
       </div>
-      {releaseInfoError && (
-        <p className="settings-card-note release-info-status" role="status">
-          {releaseInfoError}
-        </p>
-      )}
-      {releaseInfoStatus && (
-        <p className="settings-card-note release-info-status" role="status">
-          {releaseInfoStatus}
-        </p>
-      )}
+      {releaseFailed && !incidentId && captureOff && <p className="settings-card-note">Diagnostics capture is off, so this was not recorded.</p>}
       {incidentId && <button type="button" className="secondary-button discord-diagnostic-link" onClick={() => navigateDiagnosticContext({
-        section: "diagnostics", selection: { incidentId },
+        section: "help", anchor: "diagnostics-incidents", selection: { incidentId },
       })}>View diagnostics</button>}
-    </section>
+    </SettingsGroup>
   );
 }

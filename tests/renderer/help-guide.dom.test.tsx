@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("Help", () => {
-  it("opens from the sidebar as a labelled modal with focus on the first topic", async () => {
+  it("opens from the sidebar as a labelled modal on the first topic with focus in search", async () => {
     const { opener } = renderWithSidebarButton();
     expect(opener).toHaveAttribute("aria-haspopup", "dialog");
     expect(opener).toHaveAttribute("aria-expanded", "false");
@@ -76,8 +76,8 @@ describe("Help", () => {
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(within(dialog).getByRole("heading", { level: 2, name: "Help" })).toBeVisible();
     expect(opener).toHaveAttribute("aria-expanded", "true");
+    expect(within(dialog).getByRole("searchbox", { name: "Search help" })).toHaveFocus();
     const first = within(dialog).getByRole("tab", { name: "Getting started" });
-    expect(first).toHaveFocus();
     expect(first).toHaveAttribute("aria-selected", "true");
     expect(within(dialog).getAllByRole("tab").map((tab) => tab.textContent))
       .toEqual(HELP_TOPICS.map(({ title }) => title));
@@ -122,6 +122,7 @@ describe("Help", () => {
   it("closes with Escape from any control and returns focus to the opener every time", async () => {
     const { opener } = renderWithSidebarButton();
     const controls: Array<(dialog: HTMLElement) => HTMLElement> = [
+      (dialog) => within(dialog).getByRole("searchbox", { name: "Search help" }),
       (dialog) => within(dialog).getByRole("tab", { name: "Getting started" }),
       (dialog) => within(dialog).getByRole("tabpanel"),
       (dialog) => within(dialog).getByRole("button", { name: /Show welcome guide/u }),
@@ -155,8 +156,9 @@ describe("Help", () => {
     const reopened = await openFrom(opener);
     const first = within(reopened).getByRole("tab", { name: "Getting started" });
     expect(first).toHaveAttribute("aria-selected", "true");
-    expect(first).toHaveFocus();
-    fireEvent.keyDown(first, { key: "Escape" });
+    const field = within(reopened).getByRole("searchbox", { name: "Search help" });
+    expect(field).toHaveFocus();
+    fireEvent.keyDown(field, { key: "Escape" });
     expect(opener).toHaveFocus();
     await waitFor(() => expect(document.querySelector(".help-guide")).toBeNull());
   });
@@ -234,6 +236,7 @@ describe("Help", () => {
     const panel = within(dialog).getByRole("tabpanel", { name: "Keyboard" });
     expect([...panel.querySelectorAll(".help-guide-entries kbd")].map((key) => key.textContent))
       .toEqual(["⌘Y", "⌘N", "⌘B", "⌘J"]);
+    expect(within(panel).getByText(/⌘, on macOS or Ctrl\+, elsewhere opens and closes Settings\. Search settings finds a setting by name; ↑, ↓ and Enter open it\. Escape clears the search, then leaves Settings\./u)).toBeInTheDocument();
     const demo = panel.querySelector(".welcome-demo");
     expect(demo).toHaveAttribute("aria-hidden", "true");
     expect([...demo!.querySelectorAll(".d-key kbd")].map((key) => key.textContent))
@@ -241,6 +244,7 @@ describe("Help", () => {
 
     fireEvent.click(within(dialog).getByRole("tab", { name: "Search and history" }));
     expect(within(dialog).getByRole("tabpanel").querySelector(".welcome-demo")).toBeNull();
+    expect(within(dialog).getByRole("tabpanel")).toHaveTextContent("Find commands, settings, projects, chats and saved messages.");
   });
 
   it("runs every jump through an existing action, closes and hands focus back first", async () => {
@@ -266,7 +270,7 @@ describe("Help", () => {
       }
     }
 
-    expect(props.onOpenSettings.mock.calls.map(([section]) => section)).toEqual(expectedSettings);
+    expect(props.onOpenSettings.mock.calls.map(([target]) => target)).toEqual(expectedSettings.map((section) => ({ section })));
     expect(props.onLeave).toHaveBeenCalledTimes(expectedSettings.length + commandCalls);
     expect(Object.values(props.commands).every((command) => command.mock.calls.length > 0)).toBe(true);
   });

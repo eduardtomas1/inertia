@@ -125,6 +125,7 @@ export function useDraftConversation({
   const selectionWhenDraftOpenedRef = useRef(persistedConversationId);
   const independentDraftRef = useRef(false);
   const explicitModelRef = useRef(false);
+  const explicitAccessRef = useRef(false);
 
   const replaceDraft = useCallback((
     next: DraftConversationState | null,
@@ -147,6 +148,7 @@ export function useDraftConversation({
     discard();
     independentDraftRef.current = independent;
     explicitModelRef.current = false;
+    explicitAccessRef.current = false;
     selectionWhenDraftOpenedRef.current = persistedConversationId;
     const payload = snapshot
       ? defaultConversationPayloadForProject(snapshot, settings, projectId)
@@ -168,7 +170,7 @@ export function useDraftConversation({
         ? withNewConversationModelSelection(defaults, current.conversation.modelSelection)
         : defaults),
       interactionMode: current.conversation.interactionMode,
-      accessMode: current.conversation.accessMode,
+      accessMode: explicitAccessRef.current ? current.conversation.accessMode : defaults.accessMode,
     };
     // Keep the composer identity (prompt and attachments), but rebuild the
     // project-owned checkout and defaults. Selecting a project is not navigation.
@@ -377,6 +379,9 @@ export function useDraftConversation({
   ): boolean => {
     if (!draft || draft.materialized) return false;
     explicitModelRef.current = true;
+    if (configuration && configuration.accessMode !== draft.conversation.accessMode) {
+      explicitAccessRef.current = true;
+    }
     const payload = withNewConversationModelSelection(
       { ...draft.payload, ...configuration },
       selection,
@@ -397,6 +402,9 @@ export function useDraftConversation({
     if (!current || current.materialized) return;
     if (change.modelSelection || change.reasoningEffort !== undefined || change.providerId) {
       explicitModelRef.current = true;
+    }
+    if (change.accessMode !== undefined && change.accessMode !== current.conversation.accessMode) {
+      explicitAccessRef.current = true;
     }
     const next = (() => {
       const selection = change.modelSelection

@@ -6,6 +6,7 @@ export const CLAUDE_STARTUP_FAILURE_RESULTS = {
 
 const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
   org_pin_api_key_conflict: "Claude Code's API key conflicts with your organization's sign-in policy. Remove the key or sign in with your organization account.",
+  provider_not_allowed: "Your organization's Claude Code settings don't allow this chat's API provider. Choose an allowed backend or ask your administrator.",
   org_verify_failed: "Claude Code couldn't verify your organization. Check your connection and sign in again.",
   org_pin_mismatch: "This Claude account isn't in the organization Claude Code requires. Sign in with the right account.",
   managed_settings_invalid: "Claude Code's managed settings are invalid. Ask your administrator to fix them.",

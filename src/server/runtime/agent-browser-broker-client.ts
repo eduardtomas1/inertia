@@ -84,6 +84,7 @@ implements RuntimeAgentBrowserBroker {
           ok: false,
           code: "timeout",
           message: "Inertia Browser did not answer in time, so the outcome of this action is unknown. Take a snapshot to see the current page before repeating an action that changes it.",
+          reachedPage: true,
         });
       }, this.timeoutMs);
       const onAbort = signal

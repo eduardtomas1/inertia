@@ -58,7 +58,7 @@ export function createClaudeHostTools(
         inputSchema: definition.inputValidator,
         annotations: {
           readOnlyHint: definition.readOnly,
-          destructiveHint: false,
+          destructiveHint: definition.destructive === true,
           idempotentHint: definition.readOnly,
           openWorldHint: false,
         },
@@ -87,7 +87,7 @@ export function createClaudeHostTools(
     );
   }
   config.instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: providerMcpTools(runtime.definitions()).map((tool) => ({
+    tools: providerMcpTools(runtime.definitions(), { destructiveHints: true }).map((tool) => ({
       ...tool,
       _meta: { "anthropic/alwaysLoad": true },
     })),

@@ -2,6 +2,34 @@ export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
 )[];
 
+export interface DatabaseSchemaRequirements {
+  tables: DatabaseRequiredTables;
+  columns: readonly (readonly [number, string, readonly string[]])[];
+  indexes: readonly (readonly [number, string])[];
+}
+
+const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] = [
+  [1, "projects", ["id", "name", "path"]],
+  [1, "conversations", ["id", "project_id"]],
+  [1, "messages", ["id", "conversation_id", "content"]],
+  [1, "app_state", ["id"]],
+  [75, "messages", ["private_connect_device_id"]],
+  [88, "app_state", [
+    "quota_warnings_enabled",
+    "quota_warning_threshold",
+    "notify_only_in_background",
+  ]],
+  [90, "subagent_traces", [
+    "model",
+    "activity",
+    "usage_json",
+    "tool_use_count",
+    "duration_ms",
+  ]],
+  [91, "app_state", ["muted_custom_colors"]],
+  [92, "agent_turns", ["origin"]],
+];
+
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [1, ["projects", "conversations", "messages", "app_state"]],
   [2, ["activities", "checkpoints"]],
@@ -38,5 +66,11 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [74, ["usage_limit_sources", "usage_reset_attempts"]],
   [81, ["queued_messages"]],
   [87, ["usage_limit_resume_plans", "usage_limited_turns"]],
-  [88, ["cli_conversation_imports"]],
+  [92, ["cli_conversation_imports"]],
 ];
+
+export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
+  tables: REQUIRED_TABLES_BY_SCHEMA_VERSION,
+  columns: REQUIRED_COLUMNS_BY_SCHEMA_VERSION,
+  indexes: [[90, "workspace_runs_conversation_started_idx"]],
+};

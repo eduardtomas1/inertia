@@ -49,7 +49,7 @@ async function canvasSignature(orb: Locator): Promise<string> {
 
 async function openAppearanceSettings(): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "General", exact: true }).click();
+  await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.locator(".working-indicator-settings").scrollIntoViewIfNeeded();
 }
 

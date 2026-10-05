@@ -243,7 +243,7 @@ test("keeps preview and failed-run actions in the Run menu", async () => {
   }
 });
 
-test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
+test("shows a turn's delegated agents as one line that opens Background tasks while the composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -480,63 +480,37 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(page.locator(`[data-turn-id="${turn.id}"]`)).toBeFocused();
     await resizeWindow(1440, 920);
 
-    const disclosure = page.locator(".subagent-disclosure");
-    await expect(disclosure.getByText(
-      "3 delegated tasks · 1 working · 1 needs review · 1 settled",
-      {
-      exact: true,
-      },
-    )).toBeVisible();
-    await expect(disclosure).not.toHaveAttribute("open");
-    await disclosure.locator("summary").click();
-    await expect(disclosure).toHaveAttribute("open");
-    const disclosurePreferenceKey =
-      `inertia:subagent-disclosure:v1:${encodeURIComponent(conversation.id)}:${encodeURIComponent(turn.id)}`;
-    await expect.poll(() => page.evaluate(
-      (key) => window.localStorage.getItem(key),
-      disclosurePreferenceKey,
-    )).not.toBeNull();
     await page.reload();
     await expect(page.getByRole("heading", {
       name: "Delegated agent trace fixture",
       level: 1,
     })).toBeVisible();
-    await expect(disclosure).toHaveAttribute("open");
-    const delegatedWork = disclosure.getByRole("list", {
-      name: "Delegated agent tree",
+    const agentsLine = page.locator(`[data-turn-id="${turn.id}"]`).getByRole("button", {
+      name: "Open Background tasks, 1 agent working · 1 failed",
     });
-    await expect(delegatedWork.getByText("Evidence Scout", { exact: true }))
+    await expect(agentsLine).toHaveText("1 agent working · 1 failed");
+    await expect(agentsLine.locator(".background-task-live")).toHaveCount(1);
+    await expect(agentsLine.locator(".turn-agents-danger")).toHaveText("1 failed");
+    await agentsLine.click();
+    const agentsTab = page.locator('[data-workspace-tab="agents"]');
+    await expect(agentsTab).toHaveAttribute("aria-selected", "true");
+    await expect(agentsTab).toBeFocused();
+    const backgroundTasks = page.getByRole("region", { name: "Background tasks" });
+    await expect(backgroundTasks.getByText("Evidence Scout", { exact: true }))
       .toBeVisible();
-    await expect(delegatedWork.getByText("Policy Reader", { exact: true }))
-      .toBeVisible();
-    await expect(delegatedWork.getByText("Build Verifier", { exact: true }))
-      .toBeVisible();
-    await expect(delegatedWork.locator(".subagent-route")).toHaveCount(3);
-    await expect(delegatedWork.getByText("Running", { exact: true }))
-      .toBeVisible();
-    await expect(delegatedWork.getByText("Completed", { exact: true }))
-      .toBeVisible();
-    await expect(delegatedWork.getByText("Failed", { exact: true }))
-      .toBeVisible();
-    await expect(delegatedWork.locator(
-      '.subagent-status-mark[data-live="true"]',
-    )).toHaveCount(1);
-    await expect(delegatedWork.getByRole("button", {
+    await expect(backgroundTasks.getByRole("button", {
       name: "Stop Evidence Scout",
     })).toBeVisible();
-    await expect(delegatedWork.getByRole("button", { name: /^Stop /u }))
+    await expect(backgroundTasks.getByRole("button", { name: /^Stop /u }))
       .toHaveCount(1);
-
-    const traceRows = delegatedWork.locator("li");
-    const parentLeft = await traceRows.filter({
-      has: page.getByText("Evidence Scout", { exact: true }),
-    })
-      .evaluate((row) => row.getBoundingClientRect().left);
-    const childLeft = await traceRows.filter({
-      has: page.getByText("Policy Reader", { exact: true }),
-    })
-      .evaluate((row) => row.getBoundingClientRect().left);
-    expect(childLeft).toBeGreaterThan(parentLeft);
+    await expect(backgroundTasks.getByRole("button", { name: /^Finished/u }))
+      .toHaveAttribute("aria-expanded", "true");
+    await expect(backgroundTasks.getByText("Policy Reader", { exact: true }))
+      .toBeVisible();
+    await expect(backgroundTasks.getByText("Build Verifier", { exact: true }))
+      .toBeVisible();
+    await expect(backgroundTasks.getByText("Failed", { exact: true }))
+      .toBeVisible();
 
     const composer = page.getByRole("region", { name: "Message composer" });
     const textbox = composer.getByRole("textbox", { name: "Message" });
@@ -545,10 +519,12 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       "placeholder",
       "Enter sends · Tab queues",
     );
-    const evidenceRow = delegatedWork.getByRole("listitem", {
-      name: /Evidence Scout, Checking the provider lifecycle and exact task identity\., Claude · Agent SDK, Running/u,
-    });
-    await evidenceRow.getByRole("button", { name: "Guide parent" }).click();
+    await backgroundTasks.getByRole("button", {
+      name: "View transcript for Evidence Scout",
+    }).click();
+    await backgroundTasks.getByRole("button", {
+      name: "Guide parent about Evidence Scout",
+    }).click();
     await expect(textbox).toHaveValue(
       "Please follow up on the delegated task “Checking the provider lifecycle and exact task identity.” and incorporate its latest result.",
     );
@@ -660,11 +636,8 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     }).click();
 
     await resizeWindow(760, 800);
-    await disclosure.scrollIntoViewIfNeeded();
-    await expect(disclosure).toBeVisible();
-    await expect(delegatedWork.getByRole("button", {
-      name: "Stop Evidence Scout",
-    })).toBeVisible();
+    await agentsLine.scrollIntoViewIfNeeded();
+    await expect(agentsLine).toBeVisible();
     await expectNoViewportOverflow();
     const narrowScreenshot = testInfo.outputPath(
       "delegated-agent-trace-narrow-dark.png",

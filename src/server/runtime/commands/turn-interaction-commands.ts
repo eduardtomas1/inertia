@@ -428,6 +428,10 @@ export function createTurnInteractionCommandHandler(
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
         > = [];
         if (dependencies.queuedMessage) {
+          const queuedImageLimit = dependencies.enableProviders
+            ? providerImageRequestLimitError(conversation.providerId, dependencies.queuedMessage.attachments)
+            : null;
+          if (queuedImageLimit) throw new RuntimeRequestError(queuedImageLimit);
           for (const attachment of dependencies.queuedMessage.attachments) {
             const preview = await awaitMessageSendPreparation(
               dependencies.conversationAttachments.resolve(attachment.id), preparationDeadlineAt,

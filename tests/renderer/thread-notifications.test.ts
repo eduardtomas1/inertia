@@ -137,4 +137,22 @@ describe("thread notifications", () => {
     expect(parseDesktopNotificationRequest({ ...valid, kind: "arbitrary" }))
       .toBeNull();
   });
+
+  it("accepts the background-only flag as the one optional boolean key", () => {
+    const valid = {
+      conversationId: "11111111-1111-4111-8111-111111111111",
+      kind: "approval",
+    };
+    expect(parseDesktopNotificationRequest({ ...valid, onlyInBackground: true }))
+      .toEqual({ ...valid, onlyInBackground: true });
+    expect(parseDesktopNotificationRequest({ ...valid, onlyInBackground: false }))
+      .toEqual({ ...valid, onlyInBackground: false });
+    for (const invalid of [
+      { ...valid, onlyInBackground: "true" },
+      { ...valid, onlyInBackground: 1 },
+      { ...valid, onlyInBackground: null },
+      { ...valid, onlyInBackground: true, title: "secret prompt" },
+      { conversationId: valid.conversationId, onlyInBackground: true },
+    ]) expect(parseDesktopNotificationRequest(invalid)).toBeNull();
+  });
 });

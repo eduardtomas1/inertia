@@ -1,7 +1,7 @@
 import { expect, type Locator } from "@playwright/test";
 
 import type { AppFixture } from "./app-fixture";
-import { NATIVE_CREDENTIAL_AUDIT_ROUTES } from "./agent-browser-fixture-pages";
+import { NATIVE_CREDENTIAL_AUDIT_ROUTES, NATIVE_CREDENTIAL_REDACTED_ROUTES } from "./agent-browser-fixture-pages";
 
 export async function captureAgentBrowserSnapshot(
   app: AppFixture,
@@ -116,7 +116,7 @@ export async function expectDocumentStartPrivacyGuard(
   );
   expect(evidence, `privacy evidence remained available for ${url}`).toMatchObject({
     opened: { ok: true },
-    snapshot: { ok: false, code: "sensitive" },
+    snapshot: { ok: true },
     screenshot: { ok: false, code: "sensitive" },
     closed: { ok: true },
     restored: { ok: true },
@@ -132,7 +132,6 @@ export async function expectStructuralCoverage(
     notInspected: string[];
     present?: string;
     absent: string[];
-    truncated?: boolean;
   },
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(
@@ -179,10 +178,8 @@ export async function expectStructuralCoverage(
   const page = JSON.parse(evidence.snapshot?.text ?? "{}") as {
     notInspected?: string[];
     text?: string;
-    truncated?: boolean;
   };
   expect(page.notInspected ?? [], url).toEqual(expected.notInspected);
-  if (expected.truncated !== undefined) expect(page.truncated, url).toBe(expected.truncated);
   if (expected.present) expect(page.text, url).toContain(expected.present);
   for (const absent of expected.absent) {
     expect(JSON.stringify(evidence), url).not.toContain(absent);
@@ -241,7 +238,7 @@ export async function expectScreenshotPrivacyGuard(
     screenshot: {
       ok: false,
       code: "sensitive",
-      message: "Screenshots are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.",
+      message: expect.stringMatching(/Screenshots (?:are unavailable|are withheld)/u),
     },
     closed: { ok: true },
     restored: { ok: true },
@@ -288,7 +285,7 @@ export async function expectWindowCapturePrivacyGuard(
       const elements = initial.text
         ? (JSON.parse(initial.text) as { elements: Array<{ name: string; ref: string }> }).elements
         : [];
-      const ref = elements.find((element) => element.name === "Password field")?.ref;
+      const ref = elements.find((element) => element.name === "Window guarded password")?.ref;
       const typed = ref ? await runtime.agentBrowser(request.conversationId, {
         action: "type", ref, replace: true, text: request.secret,
       }) : null;
@@ -315,7 +312,7 @@ export async function expectWindowCapturePrivacyGuard(
     initial: { ok: true },
     typed: { ok: true },
     pageState: { inputEmpty: true, mirrorMatched: true },
-    snapshot: { ok: false, code: "sensitive" },
+    snapshot: { ok: true },
     screenshot: { ok: false, code: "sensitive" },
     closed: { ok: true },
     restored: { ok: true },
@@ -353,6 +350,7 @@ export async function expectPasswordAssignmentPrivacyGuard(
             code?: string;
             ok: boolean;
             state?: { activeTabId: string };
+            text?: string;
           }>;
         };
         const opened = await runtime.agentBrowser(request.conversationId, {
@@ -400,12 +398,13 @@ export async function expectPasswordAssignmentPrivacyGuard(
       page?: { produced?: boolean; route?: string; supported?: boolean };
       route?: string;
       screenshot?: { code?: string; ok?: boolean };
-      snapshot?: { code?: string; ok?: boolean };
+      snapshot?: { code?: string; ok?: boolean; text?: string };
     };
     return {
       closed: current.closed?.ok,
       opened: current.opened?.ok,
       page: current.page,
+      redactedMirror: current.snapshot?.text?.includes("[redacted]") === true,
       route: current.route,
       screenshot: { code: current.screenshot?.code, ok: current.screenshot?.ok },
       snapshot: { code: current.snapshot?.code, ok: current.snapshot?.ok },
@@ -415,10 +414,13 @@ export async function expectPasswordAssignmentPrivacyGuard(
     closed: true,
     opened: true,
     page: { produced: true, route, supported: true },
+    redactedMirror: NATIVE_CREDENTIAL_REDACTED_ROUTES.has(route),
     route,
     screenshot: { code: "sensitive", ok: false },
-    snapshot: { code: "sensitive", ok: false },
+    snapshot: NATIVE_CREDENTIAL_REDACTED_ROUTES.has(route)
+      ? { code: undefined, ok: true } : { code: "sensitive", ok: false },
   })));
+  expect(JSON.stringify(audit)).not.toContain("hunter2");
   await preview.getByRole("button", { name: /Evidence/u }).click();
   const evidence = preview.getByRole("list", { name: "Browser evidence timeline" });
   await expect(evidence).not.toContainText("hunter2");

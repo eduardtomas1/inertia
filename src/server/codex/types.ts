@@ -1,5 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import type { ProviderRateLimit } from "../../shared/contracts";
+import type { ProviderRateLimit, SubagentTaskUsage } from "../../shared/contracts";
 import type { ProviderSkillInput } from "../../shared/contracts";
 import type {
   AgentApprovalDecision,
@@ -105,6 +105,9 @@ export interface CodexAppServerOptions {
     description: string | null;
     progress: string | null;
     result: string | null;
+    model?: string;
+    activity?: string;
+    usage?: SubagentTaskUsage;
   }) => void;
   goalStart?: {
     objective?: string;

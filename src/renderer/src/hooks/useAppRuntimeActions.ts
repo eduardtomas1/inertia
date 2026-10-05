@@ -21,10 +21,17 @@ import {
 } from "../lib/runtimeCommands";
 import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import type { BackgroundTaskCursor, BackgroundTasksResult } from "@shared/background-tasks";
+
+export type ConversationBackgroundTasksLoader = (
+  conversationId: string,
+  before: BackgroundTaskCursor | null,
+) => Promise<BackgroundTasksResult>;
 
 export interface AppRuntimeActions {
   runQueueCommand: QueueCommandRunner;
   runLimitResetCommand: LimitResetCommandRunner;
+  loadBackgroundTasks: ConversationBackgroundTasksLoader;
   sendingConversationIds: ReadonlySet<string>;
   run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
   openProjectPath: (
@@ -77,6 +84,13 @@ export function useAppRuntimeActions(options: {
     if (event.type !== "request.result" || event.result.kind !== "conversation.limit-reset") throw new Error("The local service returned an unexpected reset response.");
     return event.result;
   }, [sendCommand]);
+  const loadBackgroundTasks = useCallback<ConversationBackgroundTasksLoader>(async (conversationId, before) => {
+    const event = await sendCommand(withRequestId({ type: "conversation.background-tasks.get", payload: { conversationId, before } }));
+    if (event.type !== "request.result" || event.result.kind !== "conversation.background-tasks") {
+      throw new Error("The local service returned an unexpected background tasks response.");
+    }
+    return event.result;
+  }, [sendCommand]);
   const runQueueCommand = useCallback<QueueCommandRunner>(async (command) => {
     const request = { ...command, requestId: command.type === "message.queue.enqueue" ? command.payload.id : crypto.randomUUID() };
     const attachments = command.type === "message.queue.enqueue" ? command.payload.attachments : [];
@@ -111,7 +125,7 @@ export function useAppRuntimeActions(options: {
     const passive = runOptions?.passive === true;
     if (!passive) {
       setBusyAction(key);
-      setActionError(null);
+      if (runOptions?.reportError !== false) setActionError(null);
     }
     try {
       const event = await sendCommand(withRequestId(command));
@@ -248,6 +262,7 @@ export function useAppRuntimeActions(options: {
   return {
     runQueueCommand,
     runLimitResetCommand,
+    loadBackgroundTasks,
     sendingConversationIds,
     run,
     openProjectPath,

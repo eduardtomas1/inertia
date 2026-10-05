@@ -46,8 +46,8 @@ export function unavailableRuntimeConnection(
       code: state.startupBlockerCode,
       retryable: false,
       message: platform === "win32"
-        ? "Runtime startup is blocked because prior process cleanup remains unconfirmed. Close Inertia, choose Restart from the Windows power menu, then reopen Inertia. Your saved work is preserved. If it is still blocked, copy the support summary in Settings → Lifecycle Integrity."
-        : "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
+        ? "Runtime startup is blocked because prior process cleanup remains unconfirmed. Close Inertia, choose Restart from the Windows power menu, then reopen Inertia. Your saved work is preserved. If it is still blocked, copy the support summary in Settings → Help."
+        : "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Runtime diagnostics in Settings → Help.",
     };
   }
   if (state.startupBlockerCode === "provider-installation-quarantined") {
@@ -55,7 +55,7 @@ export function unavailableRuntimeConnection(
       unavailable: true,
       code: state.startupBlockerCode,
       retryable: false,
-      message: "Runtime startup is blocked because provider installation recovery requires manual attention. Review Lifecycle Integrity in Settings.",
+      message: "Runtime startup is blocked because provider installation recovery requires manual attention. Review Runtime diagnostics in Settings → Help.",
     };
   }
   if (state.phase === "restarting") {
@@ -86,7 +86,7 @@ export function unavailableRuntimeConnection(
     unavailable: true,
     code: "runtime-stopped",
     retryable: false,
-    message: "The local service stopped. Review Lifecycle Integrity in Settings before restarting Inertia.",
+    message: "The local service stopped. Review Runtime diagnostics in Settings → Help before restarting Inertia.",
   };
 }
 

@@ -34,6 +34,10 @@ const appearanceFields = {
   colorEmphasis: z.enum(PROJECT_COLOR_EMPHASES).default("icon"),
   pinned: z.boolean().default(false),
 };
+const recoverableFields = {
+  ...appearanceFields,
+  defaultAccessMode: z.enum(["supervised", "auto-edit", "full"]).nullable().default(null),
+};
 export const projectAppearancePatchSchema = z.strictObject({
   icon: projectIconSchema.nullable(),
   color: projectColorSchema.nullable(),
@@ -43,6 +47,7 @@ export const projectAppearancePatchSchema = z.strictObject({
 export type ProjectAppearancePatch = z.infer<typeof projectAppearancePatchSchema>;
 export const projectPreferencesSchema = z.strictObject({
   workspace: z.enum(["local", "worktree"]).nullable(),
+  defaultAccessMode: recoverableFields.defaultAccessMode,
   autoPull: z.boolean(),
   browserAccess: z.boolean().nullable(),
   icon: projectIconSchema.nullable(),
@@ -64,7 +69,7 @@ export const projectPreferencesSchema = z.strictObject({
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
+  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
 }
 
 export function applyProjectAppearance(preferences: ProjectPreferences | undefined, appearance: ProjectAppearancePatch): ProjectPreferences {
@@ -80,7 +85,7 @@ export function parseProjectPreferences(value: unknown): ProjectPreferences {
     if (result.success) return result.data;
     if (!input || typeof input !== "object" || Array.isArray(input)) return defaultProjectPreferences();
     const salvaged = projectPreferencesSchema.safeParse(Object.fromEntries(Object.entries(input as Record<string, unknown>)
-      .filter(([key, field]) => !(key in appearanceFields) || appearanceFields[key as keyof typeof appearanceFields].safeParse(field).success)));
+      .filter(([key, field]) => !(key in recoverableFields) || recoverableFields[key as keyof typeof recoverableFields].safeParse(field).success)));
     return salvaged.success ? salvaged.data : defaultProjectPreferences();
   } catch { return defaultProjectPreferences(); }
 }

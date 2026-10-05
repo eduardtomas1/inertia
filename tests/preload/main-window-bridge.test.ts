@@ -46,6 +46,7 @@ describe("main window preload", () => {
       "checkAppUpdate",
       "clearAppCache",
       "clearBackendCredential",
+      "clearDiagnostics",
       "commitAttachmentImport",
       "copyDiagnostics",
       "copyRuntimeDiagnosticReport",
@@ -106,6 +107,7 @@ describe("main window preload", () => {
       "selectDirectory",
       "sendDiscordReleaseInfo",
       "setBackendCredential",
+      "setDiagnosticsCapture",
       "setPrivateConnectEnabled",
       "showThreadNotification",
       "snapshot",
@@ -126,5 +128,16 @@ describe("main window preload", () => {
       expect(bridge).not.toHaveProperty(detachedOnly);
     }
     expect(electron.sendSync).not.toHaveBeenCalled();
+  });
+
+  it("forwards only a boolean capture choice and no arguments when clearing diagnostics", async () => {
+    await bridge.setDiagnosticsCapture(false);
+    await bridge.setDiagnosticsCapture("yes" as unknown as boolean);
+    await bridge.clearDiagnostics();
+    expect(electron.invoke.mock.calls).toEqual([
+      ["inertia:diagnostics-set-capture", false],
+      ["inertia:diagnostics-set-capture", false],
+      ["inertia:diagnostics-clear"],
+    ]);
   });
 });

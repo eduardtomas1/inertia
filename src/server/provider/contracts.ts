@@ -12,6 +12,7 @@ import type {
   ProviderModel,
   ProviderRateLimit,
   ProviderSkillInput,
+  SubagentTaskUsage,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
@@ -74,8 +75,6 @@ export interface ProviderDetectionOptions {
 }
 
 interface ProviderRunRequest {
-  /** Privileged report-only restriction; never accepted from ordinary chat commands. */
-  toolRestriction?: "none";
   /** Native discovery/event compatibility projection; never used for routing. */
   providerId: ProviderId;
   harnessId: KnownHarnessId;
@@ -359,6 +358,11 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
   description: string | null;
   progress: string | null;
   result: string | null;
+  model?: string;
+  activity?: string;
+  usage?: SubagentTaskUsage;
+  toolUseCount?: number;
+  durationMs?: number;
 }
 
 export type ProviderEvent =
@@ -411,6 +415,7 @@ export interface ProviderHostToolDefinition {
   /** Process-local validator used by in-process provider tool transports. */
   inputValidator?: ZodType<Record<string, unknown>>;
   readOnly: boolean;
+  destructive?: boolean;
 }
 
 export interface ProviderHostToolApprovalRequest {

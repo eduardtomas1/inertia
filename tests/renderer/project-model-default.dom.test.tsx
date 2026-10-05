@@ -45,7 +45,7 @@ describe("project model defaults", () => {
     expect(screen.getByRole("combobox", { name: "Project default reasoning" })).toBeDisabled();
     expect(screen.getByRole("option", { name: "Team Alpha — unavailable" })).toBeDisabled();
     expect(onChange).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("combobox", { name: "Project default model" }), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Model for this project" }), { target: { value: "" } });
     expect(onChange).toHaveBeenCalledExactlyOnceWith(null);
   });
 });

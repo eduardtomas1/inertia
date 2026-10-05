@@ -692,7 +692,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.handler,
       ...usageRuntime.handlers,
-      createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
+      createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
@@ -709,7 +709,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         refreshProviderInfo,
         send,
       }),
-      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target) }),
+      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target), canStopWorkspaceRun }),
       createConversationCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
         providers,

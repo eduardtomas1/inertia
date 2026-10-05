@@ -1,7 +1,5 @@
 import { AcpSecretRedactor } from "./acp-redaction";
 import { acpStopReasonMessage } from "./acp-stop-reasons";
-import { acpPermissionDetail } from "./acp-permission-detail";
-import { acpAttachmentReadAllowed } from "./attachment-read-grant";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
@@ -12,7 +10,6 @@ import type {
   ContentBlock,
   InitializeResponse,
   RequestPermissionRequest,
-  RequestPermissionResponse,
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
@@ -65,8 +62,10 @@ import {
 import { selectAcpAgentAuthMethod } from "./acp-auth";
 import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import { AcpPromptFrames } from "./acp-prompt-frames";
 import {
   cursorQuestions,
+  cursorTaskSubagentEvent,
   CursorTodoSessions,
   cursorTodoSteps,
   parseCursorGenerateImageNotification,
@@ -76,11 +75,16 @@ import {
   parseCursorTodosRequest,
 } from "./cursor-acp-extensions";
 import {
+  askCursorPermission,
   cursorOneShotPermissionOption,
+  cursorPermission,
   cursorPermissionDisplayIsSafe,
   isCursorFileMutationKind,
+  MAX_PENDING_CURSOR_INTERACTIONS,
+  type PendingCursorApproval,
 } from "./cursor-acp-permissions";
 import { emitCursorMetadata } from "./cursor-acp-metadata";
+import { CursorInbandErrors } from "./cursor-acp-inband-errors";
 import { readBoundedProviderImage } from "./provider-image-read";
 import { configureCursorSession } from "./cursor-acp-session";
 export { findCursorAdvertisedConfigValue } from "./cursor-acp-session";
@@ -98,7 +102,6 @@ const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
-const MAX_PENDING_INTERACTIONS = 64;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_TOOL_ACTIVITY_ID_CHARS = 1_000;
 const MAX_TOOL_STATE_TEXT_CHARS = 4_000;
@@ -139,7 +142,6 @@ export const CURSOR_ACP_CAPABILITIES = {
   },
 } as const satisfies CursorAcpHarnessCapabilities;
 
-interface PendingApproval { resolve: (decision: AgentApprovalDecision) => void; settled: boolean }
 interface PendingInput { resolve: (answers: Record<string, string[]>) => void; settled: boolean }
 interface CursorContextUsage { usedTokens: number | null; maxTokens: number | null }
 
@@ -196,7 +198,7 @@ function startCursorRun(
   const promptPreparationAbort = new AbortController();
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const secretRedactor = new AcpSecretRedactor(options.environment);
-  const approvals = new Map<string, PendingApproval>();
+  const approvals = new Map<string, PendingCursorApproval>();
   const inputs = new Map<string, PendingInput>();
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
@@ -211,6 +213,7 @@ function startCursorRun(
   });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   const compactions = new AcpCompactionProjection("Cursor", "cursor", emitter);
+  const inbandErrors = new CursorInbandErrors();
   let subagentSequence = 0;
   const toolActivities = new Map<
     string,
@@ -261,6 +264,9 @@ function startCursorRun(
 
   const ownsActivePrompt = (): boolean =>
     Boolean(sessionId) && sessionReady && promptInFlight && !cancelRequested;
+  const promptFrames = new AcpPromptFrames();
+  const ownsPromptFrame = (params: unknown): boolean =>
+    Boolean(sessionId) && sessionReady && !cancelRequested && promptFrames.owns(params);
 
   const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
@@ -338,7 +344,9 @@ function startCursorRun(
         todoSessions.reset(sessionId);
       }
       handleCursorProviderEvent(() => {
-        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions, secretRedactor);
+        for (const update of inbandErrors.observe(safeParams)) {
+          handleCursorUpdate(update, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions, secretRedactor);
+        }
       }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
@@ -350,7 +358,7 @@ function startCursorRun(
       const requestId = randomUUID();
       const request = cursorQuestions(requestId, params);
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
-        if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+        if (inputs.size >= MAX_PENDING_CURSOR_INTERACTIONS) {
           throw new Error("Cursor exceeded the bounded question budget.");
         }
         inputs.set(requestId, { resolve, settled: false });
@@ -398,7 +406,7 @@ function startCursorRun(
           { optionId: "reject-plan", name: "Deny", kind: "reject_once" },
         ],
       };
-      const decision = await cursorPermission(
+      const decision = await (options.input.interactionMode === "plan" ? askCursorPermission : cursorPermission)(
         permission, permission, signal, options, emitter.rich, approvals,
       );
       if (!ownsActivePrompt() || signal.aborted || decision.outcome.outcome !== "selected") {
@@ -407,7 +415,7 @@ function startCursorRun(
       return { outcome: { outcome: decision.outcome.optionId === "accept-plan" ? "accepted" : "rejected" } };
     })
     .onNotification("cursor/update_todos", (value) => value, ({ params: rawParams }) => {
-      if (!ownsActivePrompt() || !sessionId) return;
+      if (!ownsPromptFrame(rawParams) || !sessionId) return;
       const todoSessionId = sessionId;
       handleCursorProviderEvent(() => {
         const params = parseCursorTodosRequest(redactHostMcpPayload(rawParams));
@@ -415,38 +423,21 @@ function startCursorRun(
       }, "Cursor ACP sent an invalid todo update.");
     })
     .onNotification("cursor/task", (value) => value, ({ params: rawParams }) => {
-      if (!ownsActivePrompt()) return;
+      if (!ownsPromptFrame(rawParams)) return;
       handleCursorProviderEvent(() => {
         const params = parseCursorTaskNotification(
           redactHostMcpPayload(rawParams),
         );
         subagentSequence += 1;
         emitter.capability("subagent-create", true);
-        emitter.subagent({
-          sequence: subagentSequence,
-          providerTaskId: params.toolCallId,
-          providerAgentId: params.agentId ?? null,
-          parentProviderAgentId: null,
-          parentProviderToolUseId: null,
-          providerToolUseId: params.toolCallId,
-          providerRole: params.subagentType,
-          providerName: params.model ?? null,
-          providerStatus: "completed",
-          status: "completed",
-          isLive: false,
-          description: params.description,
-          progress: params.durationMs === undefined
-            ? null
-            : `Completed in ${params.durationMs} ms`,
-          result: null,
-        });
+        emitter.subagent(cursorTaskSubagentEvent(params, subagentSequence));
       }, "Cursor ACP sent an invalid task notification.");
     })
     .onNotification(
       "cursor/generate_image",
       (value) => value,
       ({ params: rawParams }) => {
-        if (!ownsActivePrompt()) return;
+        if (!ownsPromptFrame(rawParams)) return;
         handleCursorProviderEvent(() => {
           const params = parseCursorGenerateImageNotification(
             redactHostMcpPayload(rawParams),
@@ -503,10 +494,10 @@ function startCursorRun(
     (frame) => validateCursorVendorFrame(frame, ownsActivePrompt()),
   );
   child.stdout.pipe(wireGuard);
-  const stream = acp.ndJsonStream(
+  const stream = promptFrames.wrap(acp.ndJsonStream(
     Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
     Readable.toWeb(wireGuard) as ReadableStream<Uint8Array>,
-  );
+  ));
   const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
     child,
     "Cursor ACP process tree",
@@ -634,11 +625,12 @@ function startCursorRun(
     }));
     if (providerEventError) throw providerEventError;
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter);
-    const compactionFailure = options.input.operation?.kind === "compact"
-      && compactions.completionEvidence() !== "completed"
-      ? unconfirmedAcpCompactionFailure("Cursor")
-      : undefined;
-    if (!cancelRequested && response.stopReason === "end_turn" && !compactionFailure) {
+    const turnFailure = inbandErrors.failure(redactHostMcpPayload, options.input.cwd)
+      ?? (options.input.operation?.kind === "compact"
+        && compactions.completionEvidence() !== "completed"
+        ? unconfirmedAcpCompactionFailure("Cursor")
+        : undefined);
+    if (!cancelRequested && response.stopReason === "end_turn" && !turnFailure) {
       finishOutputStreams();
     } else {
       secretRedactor.discardStreams();
@@ -656,8 +648,8 @@ function startCursorRun(
               terminalEvent: `session/prompt:${response.stopReason}`,
             });
           })()
-        : compactionFailure
-          ? finish("failed", compactionFailure.message, compactionFailure)
+        : turnFailure
+          ? finish("failed", turnFailure.message, turnFailure)
           : finish("completed");
     // Arm owned termination before returning control to connectWith, which may
     // close/reap the ACP transport before the public-result continuation runs.
@@ -797,72 +789,6 @@ async function waitForCursorCommandAdvertisement(
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-async function cursorPermission(
-  params: RequestPermissionRequest,
-  displayParams: RequestPermissionRequest,
-  signal: AbortSignal,
-  options: AgentHarnessStartOptions,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-  approvals: Map<string, PendingApproval>,
-): Promise<RequestPermissionResponse> {
-  const allow = cursorOneShotPermissionOption(params.options, true);
-  if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
-    return { outcome: { outcome: "selected", optionId: allow.optionId } };
-  }
-  if (options.input.interactionMode === "plan") {
-    return { outcome: { outcome: "cancelled" } };
-  }
-  const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
-  if (
-    options.input.access === "full"
-    || (options.input.access === "auto-edit" && fileMutation)
-  ) {
-    return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } };
-  }
-  if (!cursorPermissionDisplayIsSafe(displayParams)) {
-    return { outcome: { outcome: "cancelled" } };
-  }
-  const requestId = randomUUID();
-  const decision = await new Promise<AgentApprovalDecision>((resolve) => {
-    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
-      throw new Error("Cursor exceeded the bounded approval budget.");
-    }
-    approvals.set(requestId, { resolve, settled: false });
-    signal.addEventListener("abort", () => {
-      const pending = approvals.get(requestId);
-      if (!pending || pending.settled) return;
-      pending.settled = true;
-      approvals.delete(requestId);
-      emit({ type: "approval-resolved", requestId, decision: "cancel" });
-      resolve("cancel");
-    }, { once: true });
-    emit({
-      type: "approval",
-      request: {
-        requestId,
-        kind: params.toolCall.kind === "execute"
-          ? "command"
-          : fileMutation
-            ? "file-change"
-            : "permissions",
-        title: bounded(
-          displayParams.toolCall.title || "Cursor requested permission",
-        ),
-        detail: bounded(acpPermissionDetail(displayParams, "Cursor requested permission.")),
-        cwd: options.input.cwd,
-        permissionRoots: [],
-        availableDecisions: ["approve", "deny", "cancel"],
-      },
-    });
-  });
-  if (decision === "cancel") return { outcome: { outcome: "cancelled" } };
-  const selected = cursorOneShotPermissionOption(
-    params.options,
-    decision === "approve",
-  );
-  return selected ? { outcome: { outcome: "selected", optionId: selected.optionId } } : { outcome: { outcome: "cancelled" } };
 }
 
 function handleCursorUpdate(
@@ -1034,16 +960,15 @@ function handleCursorUpdate(
         );
       }
       return;
-    case "usage_update":
-      contextUsage.usedTokens = tokenCount(update.used);
-      contextUsage.maxTokens = tokenCount(update.size);
-      if (
-        contextUsage.usedTokens === null
-        || contextUsage.maxTokens === null
-        || contextUsage.usedTokens > contextUsage.maxTokens
-      ) {
+    case "usage_update": {
+      const usedTokens = tokenCount(update.used);
+      const maxTokens = tokenCount(update.size);
+      if (usedTokens === null || maxTokens === null) {
         throw new Error("Cursor ACP sent a malformed usage update.");
       }
+      if (usedTokens > maxTokens) return;
+      contextUsage.usedTokens = usedTokens;
+      contextUsage.maxTokens = maxTokens;
       emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
@@ -1061,6 +986,7 @@ function handleCursorUpdate(
         },
       });
       return;
+    }
     case "compaction_update":
       compactions.observeUpdate(update);
       return;
@@ -1072,13 +998,11 @@ function handleCursorUpdate(
       return;
     case "notice":
       throw new Error("Cursor ACP sent a notice without negotiated support.");
+    case "subagent_update":
+    case "session_message":
+    case "session_message_chunk":
+      throw new Error("Cursor ACP sent a subagent update without negotiated support.");
   }
-  const unsupportedUpdate: never = update;
-  throw new Error(
-    `Cursor ACP sent an unsupported session update: ${String(
-      (unsupportedUpdate as { sessionUpdate?: unknown }).sessionUpdate,
-    )}.`,
-  );
 }
 
 function cursorToolActivityPhase(

@@ -1,6 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MascotSettings } from "../../src/renderer/src/components/MascotSettings";
+import { MascotSettings as MascotRows } from "../../src/renderer/src/components/MascotSettings";
+import { useSettingAction } from "../../src/renderer/src/components/settings/useSettingAction";
+
+function MascotSettings(): React.JSX.Element {
+  return <MascotRows showAction={useSettingAction()} motionAction={useSettingAction()} />;
+}
 import { emptyMascotStatus, type MascotSettingsBridge, type MascotSnapshot } from "../../src/shared/mascot";
 import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 
@@ -39,7 +44,7 @@ describe("mascot custom sprite settings", () => {
     const section = await screen.findByRole("region", { name: "Custom sprites" });
     expect(section).toHaveTextContent("Import your own artwork for each state. The built-in mascot stays until you apply a set.");
     const guide = section.querySelector("details.mascot-sprite-guide")!;
-    expect(guide).toHaveProperty("open", true);
+    expect(guide).toHaveProperty("open", false);
     expect(within(section).getByText("How custom sprites work")).toBeInTheDocument();
     expect(within(section).getByRole("list", { name: "Steps" }).querySelectorAll("li")).toHaveLength(4);
     expect(within(section).getByRole("list", { name: "Steps" })).toHaveTextContent("Export template to get a folder with the five built-in images");
@@ -48,6 +53,7 @@ describe("mascot custom sprite settings", () => {
     expect(format).toHaveTextContent("To animate a state, add a .webp or .gif with the same name, like working.webp.");
     expect(format).toHaveTextContent("When animation is paused or reduced motion is on, the still PNG is shown.");
     const required = within(section).getByRole("list", { name: "Required files" });
+    expect(guide).toContainElement(required);
     expect(within(required).getAllByRole("listitem").map((item) => [
       item.querySelector("code")!.textContent,
       item.querySelector("strong")!.textContent,
@@ -70,7 +76,7 @@ describe("mascot custom sprite settings", () => {
     const rejected = await within(section).findByRole("alert");
     expect(rejected).toHaveTextContent("idea.png must be 96 × 96 pixels, not 128 × 128.");
     expect(rejected).toHaveClass("mascot-sprites-error");
-    expect(rejected.previousElementSibling).toBe(within(section).getByRole("list", { name: "Required files" }));
+    expect(rejected.previousElementSibling).toBe(guide);
 
     bridge.importSprites.mockResolvedValueOnce({ status: "ready", sprites: sprites("0123456789abcdef", 2) });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
@@ -123,8 +129,8 @@ describe("mascot custom sprite settings", () => {
     let finishImport: (value: Awaited<ReturnType<MascotSettingsBridge["importSprites"]>>) => void = () => undefined;
     bridge.importSprites.mockReturnValueOnce(new Promise((resolve) => { finishImport = resolve; }));
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
-    expect(await screen.findByRole("button", { name: "Importing…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Export template" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Importing…" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Export template" })).toHaveAttribute("aria-disabled", "true");
     finishImport({ status: "invalid", message: "idle.png is missing." });
     expect(await within(section).findByRole("alert")).toHaveTextContent("idle.png is missing.");
 
@@ -133,7 +139,7 @@ describe("mascot custom sprite settings", () => {
     const apply = await screen.findByRole("button", { name: "Apply sprites" });
     expect(apply).toHaveClass("primary-button");
     expect(screen.getByRole("button", { name: "Discard preview" })).toHaveClass("secondary-button");
-    expect(section).toHaveTextContent("Turn on Desktop mascot above to see these sprites on your desktop.");
+    expect(section).toHaveTextContent("Turn on Show mascot above to see these sprites on your desktop.");
 
     bridge.importSprites.mockResolvedValueOnce({ status: "invalid", message: "working.png is missing." });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
@@ -149,5 +155,56 @@ describe("mascot custom sprite settings", () => {
     expect(await screen.findByText("Custom sprites applied.")).toBeInTheDocument();
     expect(section.querySelector("details.mascot-sprite-guide")).toHaveProperty("open", false);
     expect(within(section).getByText("How custom sprites work")).toBeInTheDocument();
+  });
+});
+
+describe("mascot animation setting", () => {
+  it("pauses and resumes the mascot's animation through the mascot preferences", async () => {
+    const bridge = install();
+    await bridge.configure({ enabled: true, motion: true });
+    bridge.configure.mockClear();
+    render(<MascotSettings />);
+    const control = await screen.findByRole("switch", { name: "Animate mascot" });
+    expect(control.closest("[data-setting-id]")).toHaveAttribute("data-setting-id", "mascot-motion");
+    expect(control).toBeChecked();
+    expect(control).not.toHaveAttribute("aria-disabled");
+
+    fireEvent.click(control);
+    await waitFor(() => expect(bridge.configure).toHaveBeenCalledWith({ enabled: true, motion: false }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Animate mascot" })).not.toBeChecked());
+    fireEvent.click(screen.getByRole("switch", { name: "Animate mascot" }));
+    await waitFor(() => expect(bridge.configure).toHaveBeenLastCalledWith({ enabled: true, motion: true }));
+  });
+
+  it("keeps the animation switch focusable but unavailable while the mascot is off", async () => {
+    const bridge = install();
+    render(<MascotSettings />);
+    const control = await screen.findByRole("switch", { name: "Animate mascot" });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Show mascot" })).not.toHaveAttribute("aria-disabled"));
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    control.focus();
+    expect(control).toHaveFocus();
+    fireEvent.click(control);
+    expect(bridge.configure).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed animation change", async () => {
+    const bridge = install();
+    await bridge.configure({ enabled: true, motion: true });
+    bridge.configure.mockRejectedValueOnce(new Error("offline"));
+    render(<MascotSettings />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Animate mascot" }));
+    const motion = document.querySelector<HTMLElement>('[data-setting-id="mascot-motion"]')!;
+    expect(await within(motion).findByRole("alert")).toHaveTextContent("Could not update the mascot. Try again.");
+  });
+
+  it("confirms each switch save in its own row", async () => {
+    install();
+    render(<MascotSettings />);
+    fireEvent.click(await screen.findByRole("switch", { name: "Show mascot" }));
+    const show = document.querySelector<HTMLElement>('[data-setting-id="desktop-mascot"]')!;
+    const motion = document.querySelector<HTMLElement>('[data-setting-id="mascot-motion"]')!;
+    expect(await within(show).findByText("Saved")).toBeInTheDocument();
+    expect(within(motion).queryByText("Saved")).toBeNull();
   });
 });

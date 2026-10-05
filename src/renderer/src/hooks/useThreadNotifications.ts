@@ -30,6 +30,7 @@ export function useThreadNotifications(
   splitConversationIds: ReadonlySet<string>,
   enabled: boolean,
   onActivate: (conversation: Conversation) => void,
+  onlyInBackground = false,
 ): void {
   const previousRef = useRef<Map<string, Conversation> | null>(null);
   const snapshotRef = useRef(snapshot);
@@ -95,6 +96,7 @@ export function useThreadNotifications(
       const notification = window.inertia?.showThreadNotification?.({
         conversationId: conversation.id,
         kind,
+        ...(onlyInBackground ? { onlyInBackground } : {}),
       });
       void notification?.catch(() => undefined);
     }
@@ -102,6 +104,7 @@ export function useThreadNotifications(
     activeConversationVisible,
     documentActive,
     enabled,
+    onlyInBackground,
     snapshot,
     splitConversationIds,
   ]);
@@ -113,6 +116,7 @@ export function ThreadNotifications(props: {
   activeConversationVisible: boolean;
   splitConversationIds: ReadonlySet<string>;
   enabled: boolean;
+  onlyInBackground?: boolean;
   onActivate: (conversation: Conversation) => void;
 }): null {
   useThreadNotifications(
@@ -122,6 +126,7 @@ export function ThreadNotifications(props: {
     props.splitConversationIds,
     props.enabled,
     props.onActivate,
+    props.onlyInBackground,
   );
   return null;
 }

@@ -2,10 +2,14 @@
 // @inertia-harness opencode-sdk
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { PermissionRuleset } from "@opencode-ai/sdk/v2";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
+import type { ProviderSubagentEvent, ProviderUsageEvent } from "../../src/server/provider/contracts";
+import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
+import { openCodePermissions } from "../../src/server/provider/opencode-host-tools";
 import {
   createOpenCodeSdkHarness,
   exactOpenCodeSteerReceipt,
@@ -194,6 +198,38 @@ describe("OpenCode SDK harness", { concurrent: false }, () => {
     )).toBe(false);
   });
 
+  it.each([
+    ["full", "build", "allow"],
+    ["auto-edit", "build", "allow"],
+    ["supervised", "build", "ask"],
+    ["full", "plan", "deny"],
+    ["auto-edit", "plan", "deny"],
+    ["supervised", "plan", "deny"],
+  ] as const)("resolves %s access edits in %s mode after the native agent rules", (access, mode, expected) => {
+    const wildcard = (value: string, pattern: string) => new RegExp(
+      `^${pattern.replace(/[.+^${}()|[\]\\]/gu, "\\$&").replace(/\*/gu, ".*").replace(/\?/gu, ".")}$`,
+      "su",
+    ).test(value);
+    const planAgentRules: PermissionRuleset = [
+      { permission: "*", pattern: "*", action: "allow" },
+      { permission: "question", pattern: "*", action: "allow" },
+      { permission: "plan_exit", pattern: "*", action: "allow" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      { permission: "edit", pattern: ".opencode/plans/*.md", action: "allow" },
+    ];
+    const agentRules = mode === "plan"
+      ? planAgentRules
+      : [{ permission: "*", pattern: "*", action: "allow" } as const];
+    const evaluate = (permission: string, pattern: string) =>
+      [...agentRules, ...openCodePermissions(access, mode)].findLast((rule) =>
+        wildcard(permission, rule.permission) && wildcard(pattern, rule.pattern))?.action ?? "ask";
+
+    expect(evaluate("edit", "src/index.ts")).toBe(expected);
+    expect(evaluate("edit", ".opencode/plans/plan.md")).toBe(expected);
+    expect(evaluate("question", "*")).toBe("allow");
+    expect(evaluate(`${INERTIA_HOST_MCP_NAME}_send_message`, "*")).toBe("allow");
+  });
+
   it("rejects direction-changing approval titles, details, and paths", () => {
     expect(openCodeApprovalDisplay({
       permission: "bash",
@@ -370,6 +406,8 @@ server.listen(port, "127.0.0.1", () => {
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ method: string; path: string; body?: Record<string, unknown> }>;
     expect(captured.filter(({ path }) => path === "/provider")).toHaveLength(1);
     expect(captured.find(({ path }) => path === "/session")?.body).toMatchObject({ agent: "plan", model: { id: "model-a", providerID: "fake", variant: "high" } });
+    const sessionPermission = captured.find(({ path }) => path === "/session")?.body?.permission as PermissionRuleset | undefined;
+    expect(sessionPermission?.at(-1)).toEqual({ permission: "edit", pattern: "*", action: "deny" });
     expect(captured.find(({ path }) => path.endsWith("/prompt_async"))?.body).toMatchObject({
       agent: "plan",
       model: { modelID: "model-a", providerID: "fake" },
@@ -1695,6 +1733,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       })]),
     );
 
+    const subagents: ProviderSubagentEvent[] = [];
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-inactive-descendant",
@@ -1702,13 +1741,21 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       prompt: "Ignore inactive child events",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    })).resolves.toMatchObject({
       status: "failed",
       failure: {
         reason: "rpc-timeout",
         terminalEvent: "event/inactivity-deadline",
       },
     });
+    expect(subagents.map(({ providerAgentId, status, providerStatus, isLive }) => ({
+      providerAgentId, status, providerStatus, isLive,
+    }))).toEqual([
+      { providerAgentId: "opencode-child-session", status: "spawned", providerStatus: undefined, isLive: true },
+      { providerAgentId: "opencode-child-session", status: "waiting", providerStatus: "idle", isLive: true },
+    ]);
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
@@ -1770,6 +1817,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     );
     let markRunning!: () => void;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
+    const subagents: ProviderSubagentEvent[] = [];
     const result = manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-descendant-cancel",
@@ -1779,6 +1827,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       access: "supervised",
     }), {
       onStatus: ({ status }) => { if (status === "running") markRunning(); },
+      onSubagent: (event) => subagents.push(event),
     });
 
     await running;
@@ -1786,8 +1835,20 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(manager.activeConversationIds()).toContain(
       "opencode-descendant-cancel",
     );
+    expect(subagents.at(-1)).toMatchObject({
+      providerAgentId: "opencode-child-session",
+      status: "running",
+      isLive: true,
+      usage: { outputTokens: expect.any(Number) },
+    });
     expect(manager.cancel("opencode-descendant-cancel")).toBe(true);
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    const cancelled = subagents.findIndex(({ status }) => status === "cancelled");
+    expect(subagents[cancelled]).toMatchObject({
+      providerAgentId: "opencode-child-session",
+      isLive: false,
+    });
+    expect(cancelled).toBe(subagents.length - 1);
     const capture = readStableCapture<{ port: number }>(capturePath);
     await waitFor(
       "the descendant-active OpenCode server to close",
@@ -1796,6 +1857,139 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
   }, 20_000);
+
+  it("projects owned descendant sessions as delegated-agent traces", async () => {
+    const root = portableFixtureRoot("OpenCode delegated agents");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "subagent-traces"),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 2_000,
+      })]),
+    );
+    const subagents: ProviderSubagentEvent[] = [];
+    const usage: ProviderUsageEvent[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-delegated-agents",
+      cwd: root,
+      prompt: "Delegate parser review",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: (event) => subagents.push(event),
+      onUsage: (event) => usage.push(event),
+    });
+    const latest = (id: string) =>
+      subagents.filter(({ providerAgentId }) => providerAgentId === id).at(-1);
+
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Parent resumed after delegated work",
+      cleanupConfirmed: true,
+    });
+    expect(latest("opencode-child-session")).toMatchObject({
+      parentProviderAgentId: null,
+      providerName: "Inspect parser (@explore subagent)",
+      description: "Read the parser and report",
+      status: "completed",
+      isLive: false,
+      result: "Parser reviewed; grammar is valid.",
+      model: "fake/model-a",
+      usage: {
+        totalTokens: 165,
+        inputTokens: 100,
+        cachedInputTokens: 30,
+        cacheWriteInputTokens: 10,
+        outputTokens: 20,
+        reasoningOutputTokens: 5,
+        contextTokens: 140,
+        maxContextTokens: 200_000,
+      },
+      toolUseCount: 2,
+    });
+    expect(latest("opencode-grandchild-session")).toMatchObject({
+      parentProviderAgentId: "opencode-child-session",
+      providerName: "Check grammar (@general subagent)",
+      description: "Validate the grammar file",
+      status: "completed",
+      result: "Grammar is valid.",
+      model: "fake/model-a",
+      usage: { totalTokens: 50, contextTokens: 35 },
+      toolUseCount: 1,
+    });
+    expect(latest("opencode-failing-session")).toMatchObject({
+      parentProviderAgentId: null,
+      status: "failed",
+      isLive: false,
+      result: "Delegated model request failed.",
+    });
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "opencode-child-session",
+      activity: "Read src/parser.ts",
+    }));
+    expect(subagents).toContainEqual(expect.objectContaining({
+      providerAgentId: "opencode-grandchild-session",
+      activity: "Search grammar rules",
+    }));
+    expect(subagents.map(({ sequence }) => sequence))
+      .toEqual(subagents.map((_event, index) => index + 1));
+    expect(usage.at(-1)?.usage).toMatchObject({
+      totalProcessedTokens: 3,
+      inputTokens: 1,
+      outputTokens: 2,
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  }, 15_000);
+
+  it("fails closed when owned descendants exceed the session budget", async () => {
+    const root = portableFixtureRoot("OpenCode delegated agent overflow");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "subagent-overflow"),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 2_000,
+      })]),
+    );
+    const subagents: ProviderSubagentEvent[] = [];
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-delegated-agent-overflow",
+      cwd: root,
+      prompt: "Delegate too much",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      failure: { reason: "protocol-overflow" },
+    });
+    expect(result.error).toContain("bounded owned-session budget");
+    expect(new Set(subagents.map(({ providerAgentId }) => providerAgentId)).size)
+      .toBe(128);
+    expect(subagents.every(({ status }) => status === "spawned")).toBe(true);
+    expect(manager.activeConversationIds()).toEqual([]);
+  }, 15_000);
 
   it("fails and cleans up a slow event stream at the inactivity deadline", async () => {
     const root = portableFixtureRoot("OpenCode inactive stream");

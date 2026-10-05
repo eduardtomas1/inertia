@@ -33,8 +33,30 @@ describe("agent browser boundary", () => {
       .toBeNull();
     expect(parseAgentBrowserCommand({ action: "press", key: "Meta+A" }))
       .toBeNull();
+    for (const key of ["Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter", "Home", "End", "PageUp", "PageDown"]) {
+      expect(parseAgentBrowserCommand({ action: "press", key })).toEqual({ action: "press", key });
+    }
+    expect(parseAgentBrowserCommand({ action: "press", key: "Control+Tab" })).toBeNull();
+    for (const direction of ["back", "forward", "reload"]) {
+      expect(parseAgentBrowserCommand({ action: "history", direction })).toEqual({ action: "history", direction });
+    }
+    expect(parseAgentBrowserCommand({ action: "history", direction: "home" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "click", ref: "e1", dialog: "accept" }))
+      .toEqual({ action: "click", ref: "e1", dialog: "accept" });
+    expect(parseAgentBrowserCommand({ action: "press", key: "Enter", dialog: "accept" }))
+      .toEqual({ action: "press", key: "Enter", dialog: "accept" });
+    expect(parseAgentBrowserCommand({ action: "click", ref: "e1", dialog: "dismiss" }))
+      .toEqual({ action: "click", ref: "e1" });
+    expect(parseAgentBrowserCommand({ action: "click", ref: "e1", dialog: "yes" })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "type", ref: "e1", text: "a", replace: true, dialog: "accept" }))
+      .toBeNull();
+    expect(parseAgentBrowserCommand({ action: "history", direction: "back", url: "http://localhost:3000" }))
+      .toBeNull();
     expect(parseAgentBrowserCommand({ action: "scroll", deltaY: 2_001 }))
       .toBeNull();
+    expect(parseAgentBrowserCommand({ action: "scroll", ref: "e4" })).toEqual({ action: "scroll", ref: "e4" });
+    expect(parseAgentBrowserCommand({ action: "scroll", ref: "e4", deltaY: 10 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "scroll" })).toBeNull();
   });
 
   it("accepts only exact bounded wait commands", () => {
@@ -75,7 +97,7 @@ describe("agent browser boundary", () => {
 
   it("carries every failure code across the process boundary and rejects unknown ones", () => {
     expect(AGENT_BROWSER_FAILURE_CODES).toEqual([
-      "cancelled", "invalid", "not-found", "sensitive", "timeout", "too-large", "unavailable",
+      "cancelled", "interrupted", "invalid", "not-found", "sensitive", "timeout", "too-large", "unavailable",
     ]);
     for (const code of AGENT_BROWSER_FAILURE_CODES) {
       expect(parseAgentBrowserResult({ ok: false, code, message: "Explained." }))
@@ -84,6 +106,10 @@ describe("agent browser boundary", () => {
     expect(parseAgentBrowserResult({ ok: false, code: "blocked", message: "Explained." })).toBeNull();
     expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "" })).toBeNull();
     expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", retry: true }))
+      .toBeNull();
+    expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", reachedPage: true }))
+      .toEqual({ ok: false, code: "timeout", message: "Explained.", reachedPage: true });
+    expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", reachedPage: "yes" }))
       .toBeNull();
   });
 
@@ -107,6 +133,10 @@ describe("agent browser boundary", () => {
       image: { mimeType: "image/png", data: image },
     })).toBeNull();
     expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, tabs: [] } }))
+      .toBeNull();
+    expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, controller: "user" } }))
+      .toEqual({ ok: true, text: "snapshot", state: { ...state, controller: "user" } });
+    expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, controller: "agent" } }))
       .toBeNull();
     expect(parseAgentBrowserResult({
       ok: true,

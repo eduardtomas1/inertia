@@ -333,6 +333,26 @@ describe("quota reset actions", () => {
     expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
   });
 
+  it("keeps checking when the account cannot be read at the reset instead of blocking the resume", async () => {
+    await schedule();
+    vi.setSystemTime(Date.parse(reset) + 1_000);
+    const available = () => ({ ...account, windows: [{ ...account.windows[0]!, remainingPercent: 100 }],
+      updatedAt: new Date().toISOString(), checkedAt: new Date().toISOString() });
+    dependencies.readAccount = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...available(), identityKey: null, email: null, status: "error", windows: [] })
+      .mockImplementation(async () => available());
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    vi.setSystemTime(Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt));
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    vi.setSystemTime(Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt));
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
+  });
+
   it("does not persist an unexpected dispatch error as public provider output", async () => {
     await schedule(); vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
     dependencies.dispatch = vi.fn().mockRejectedValue(new Error("private provider diagnostics"));

@@ -25,6 +25,10 @@ import {
   type ConversationContextMaterialization,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import {
+  RUNTIME_INTERRUPTION_REASONS,
+  runtimeInterruptionInstruction,
+} from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
   ActiveTurn,
@@ -231,6 +235,12 @@ export function resolveTurnRequest(
     context: request.context,
     internalInstructions: [
       ...capabilityInstructions,
+      ...(latestTurn?.status === "interrupted"
+        && RUNTIME_INTERRUPTION_REASONS.includes(latestTurn.terminalReason ?? "")
+        ? [runtimeInterruptionInstruction(
+            dependencies.store.turnLedgerRepository.runtimeInterruption(latestTurn.id),
+          )]
+        : []),
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;

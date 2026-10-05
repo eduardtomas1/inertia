@@ -1024,6 +1024,43 @@ describe("provider manager installation ownership", () => {
     );
   });
 
+  it.each([
+    ["kimi", "Kimi Code CLI", "kimi", "Kimi Code CLI found, but ACP is unavailable"],
+    ["antigravity", "Antigravity", "agy", "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'"],
+    ["codex", "Codex", "codex", "Codex App Server is unsupported; update the selected CLI"],
+  ] as const)("lets an identified but outdated %s installation update", async (providerId, name, command, statusMessage) => {
+    const executable = `/tools/${command}`;
+    let cleanupConfirmed = true;
+    let identified = true;
+    const manager = ProviderManager.createForTests({
+      commands: { [providerId]: executable },
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      detectProvider: async (): Promise<ProviderDetection> => ({
+        provider: { id: providerId, name, command },
+        available: true,
+        ...(identified ? { version: "1.1.0", executable } : {}),
+        installState: "installed",
+        authState: "unknown",
+        canRun: false,
+        cleanupConfirmed,
+        statusMessage,
+      }),
+    });
+
+    await manager.detect(providerId);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, true)).toBe(true);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, "/tools/other", true)).toBe(false);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, false)).toBe(false);
+    identified = false;
+    await manager.detect(providerId);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, true)).toBe(false);
+    identified = true;
+    cleanupConfirmed = false;
+    await manager.detect(providerId).catch(() => undefined);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, true)).toBe(false);
+    await manager.disposeAll().catch(() => undefined);
+  });
+
   it("negotiates maintenance only for the exact verified installation", async () => {
     const manager = ProviderManager.createForTests({
       commands: { claude: "/tools/claude" },

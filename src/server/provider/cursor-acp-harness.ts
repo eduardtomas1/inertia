@@ -1060,6 +1060,10 @@ function handleCursorUpdate(
       return;
     case "notice":
       throw new Error("Cursor ACP sent a notice without negotiated support.");
+    case "subagent_update":
+    case "session_message":
+    case "session_message_chunk":
+      throw new Error("Cursor ACP sent a subagent update without negotiated support.");
   }
   const unsupportedUpdate: never = update;
   throw new Error(

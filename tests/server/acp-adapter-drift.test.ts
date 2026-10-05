@@ -92,6 +92,22 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
       .not.toHaveProperty("session.notices");
   });
 
+  it.each([
+    { sessionUpdate: "subagent_update", sessionId: "child-session", title: "Fixture child" },
+    { sessionUpdate: "session_message", messageId: "message-1", content: [{ type: "text", text: "Hello" }] },
+    { sessionUpdate: "session_message_chunk", messageId: "message-1", content: { type: "text", text: "Hello" } },
+  ])("rejects an unnegotiated ACP 1.7 $sessionUpdate and confirms cleanup", async (update) => {
+    const { start, marker } = fixture(providerId, undefined, update);
+    const result = await start().result;
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true });
+    expect(result.failure?.reason).toBe("malformed-protocol");
+    const requests = readFileSync(marker, "utf8").trim().split("\n").map((line) => (
+      JSON.parse(line) as { method: string; params?: { clientCapabilities?: object } }
+    ));
+    expect(requests.find((request) => request.method === "initialize")?.params?.clientCapabilities)
+      .not.toHaveProperty("subagents");
+  });
+
   it("rejects a tool identity containing NUL", async () => {
     const { start } = fixture(providerId, undefined, {
       sessionUpdate: "tool_call", toolCallId: "tool\0other", title: "Test tool", kind: "read", status: "completed",

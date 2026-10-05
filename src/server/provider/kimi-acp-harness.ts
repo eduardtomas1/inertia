@@ -1148,6 +1148,10 @@ function handleKimiUpdate(
       return;
     case "notice":
       throw new Error("Kimi ACP sent a notice without negotiated support.");
+    case "subagent_update":
+    case "session_message":
+    case "session_message_chunk":
+      throw new Error("Kimi ACP sent a subagent update without negotiated support.");
   }
   const unsupportedUpdate: never = update;
   throw new Error(

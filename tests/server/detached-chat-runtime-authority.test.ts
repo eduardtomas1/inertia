@@ -8,7 +8,7 @@ import type {
   RuntimeSequencedFrame,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts/app";
-import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   projectDetachedChatSnapshot,
   projectRuntimeFrameForAuthority,
@@ -320,7 +320,7 @@ describe("detached chat runtime authority", () => {
         requestId: REQUEST,
         payload: {
           sourceConversationId: CONVERSATION,
-          modelSelection: providerNativeModelSelection({ providerId: "claude" }),
+          modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "claude" })),
           accessMode: "supervised",
           interactionMode: "build",
         },

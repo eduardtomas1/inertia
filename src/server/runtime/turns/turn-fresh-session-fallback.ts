@@ -1,4 +1,5 @@
 import { cliProviderLabel } from "../../../shared/cli-conversations";
+import { importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type {
   ProviderFreshSessionFallback,
@@ -29,7 +30,7 @@ export function importedSessionUnavailableMessage(
   active: ActiveTurn,
   result: ProviderRunResult,
 ): string | null {
-  const provider = providerSessionUnavailable(result) ? store.cliConversationImport(active.conversation.id)?.providerId : null;
+  const provider = providerSessionUnavailable(result) ? importedSession(store, active.conversation.id, active.providerInput.sessionId)?.providerId : null;
   return provider ? `The original ${cliProviderLabel(provider)} session for this imported chat is no longer available.` : null;
 }
 
@@ -37,7 +38,7 @@ export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,
 ): void {
-  if (store.cliConversationImport(active.conversation.id)) return;
+  if (importedSession(store, active.conversation.id, active.providerInput.sessionId)) return;
   active.sessionAfter = null;
   store.updateConversation(active.conversation.id, {
     providerSessionId: null,
@@ -63,7 +64,7 @@ export function applyFreshSessionFallback(
     || active.reasoningId !== null
     || active.approvalIds.size > 0
     || active.inputIds.size > 0
-    || store.cliConversationImport(active.conversation.id) !== null
+    || importedSession(store, active.conversation.id, expectedSessionId) !== null
     || store.turnLedgerRepository.turnHasProviderActivity(
       active.conversation.id,
       active.turn.id,

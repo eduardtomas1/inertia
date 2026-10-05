@@ -45,10 +45,12 @@ export function cliSessionOwnership(database: Database.Database, providerId: Cli
   return { importedConversationId: null, omission: null, owned: owned !== undefined };
 }
 
-export function cliConversationImport(database: Database.Database, conversationId: string): { providerId: CliProvider; cwd: string } | null {
-  const imported = database.prepare("SELECT provider_id, cwd FROM cli_conversation_imports WHERE conversation_id = ?")
-    .get(conversationId) as { provider_id: CliProvider; cwd: string } | undefined;
-  return imported ? { providerId: imported.provider_id, cwd: imported.cwd } : null;
+export interface CliConversationImportRecord { providerId: CliProvider; cwd: string; sessionId: string }
+
+export function cliConversationImport(database: Database.Database, conversationId: string): CliConversationImportRecord | null {
+  const imported = database.prepare("SELECT provider_id, cwd, session_id FROM cli_conversation_imports WHERE conversation_id = ?")
+    .get(conversationId) as { provider_id: CliProvider; cwd: string; session_id: string } | undefined;
+  return imported ? { providerId: imported.provider_id, cwd: imported.cwd, sessionId: imported.session_id } : null;
 }
 
 function importTurns(

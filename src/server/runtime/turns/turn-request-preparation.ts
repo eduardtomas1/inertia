@@ -13,7 +13,7 @@ import {
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
-import { importedResumeCwd } from "../../cli-import/resume-cwd";
+import { importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type {
@@ -193,7 +193,7 @@ export function resolveTurnRequest(
   }
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
-    && dependencies.store.cliConversationImport(conversation.id) === null
+    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) === null
     && dependencies.store.turnLedgerRepository.savedSessionKeepsFailing(
       conversation.id,
       conversation.providerSessionId!,
@@ -296,7 +296,9 @@ export function resolveTurnRequest(
     conversationId: conversation.id,
     runId,
     turnId,
-    cwd: canResume ? importedResumeCwd(dependencies.store, conversation.id) : dependencies.store.conversationPath(conversation.id),
+    cwd: canResume
+      ? importedResumeCwd(dependencies.store, conversation.id, conversation.providerSessionId, dependencies.store.conversationPath(conversation.id))
+      : dependencies.store.conversationPath(conversation.id),
     prompt: assembled.executionPrompt,
     model: routeSelection.modelId === "provider-default"
       ? undefined

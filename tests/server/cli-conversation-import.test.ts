@@ -16,6 +16,7 @@ import { createCliConversationCommandHandler } from "../../src/server/runtime/co
 import { ScratchWorkspace } from "../../src/server/runtime/scratch-workspace";
 import { continuationIdentityForSelection, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { cliConversationScanSchema } from "../../src/shared/cli-conversations";
+import { staleProviderSessionDecision } from "../../src/shared/continuation-policy";
 import type { ProviderManager } from "../../src/server/providers";
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
@@ -277,6 +278,34 @@ describe("CLI conversation import authority and persistence", () => {
       runtime.store.close();
     }
   });
+  it("treats a later session of an imported chat like any other chat once that session is gone", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) });
+    try {
+      const original = randomUUID(); const later = randomUUID();
+      const selection = providerNativeModelSelection({ providerId: "claude" });
+      const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "8".repeat(64), providerId: "claude", sessionId: original, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
+      const moved = runtime.controller.queue({ conversationId, content: "Switch." });
+      runtime.controller.start(moved.turn.id);
+      expect(runtime.provider.input?.sessionId).toBe(original);
+      runtime.provider.resolve({ status: "completed", sessionId: later });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.conversation(conversationId).providerSessionId).toBe(later);
+      const unavailable = { reason: "provider-error", message: "The saved provider session is no longer available.", sessionUnavailable: true } as const;
+      const queued = runtime.controller.queue({ conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      expect(runtime.provider.input?.sessionId).toBe(later);
+      runtime.provider.resolve({ status: "failed", sessionId: later, error: unavailable.message, failure: unavailable });
+      await flushTurnControllerTestPromises();
+      const errors = (runtime.store.conversationDetail(conversationId)?.activities ?? []).filter(({ kind, turnId }) => kind === "error" && turnId === queued.turn.id);
+      expect(errors.map(({ title }) => title)).toEqual([staleProviderSessionDecision().reason]);
+      expect(runtime.store.conversation(conversationId).providerSessionId).toBeNull();
+      expect(runtime.controller.queue({ conversationId, content: "Once more." }).turn.providerSessionBefore).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
   it("lists imported sessions with their chat, hides sessions Inertia already owns, and records the transcript's cwd", async () => {
     const f = await fixture(); const store = new RuntimeStore(join(f.root, "inertia.sqlite"), f.workspace); stores.push(store);
     const project = store.createProject("Studio", f.workspace); const send = vi.fn();
@@ -294,7 +323,7 @@ describe("CLI conversation import authority and persistence", () => {
     if (preview.kind !== "conversation.cli.preview") throw new Error("Missing preview");
     const imported = await call({ type: "conversation.cli.import", requestId: "import", payload: { projectId: project.id, candidateId: scan.scan.candidates[0]!.id, revision: preview.preview.revision } });
     if (imported.kind !== "conversation.cli.imported") throw new Error("Missing import");
-    expect(store.cliConversationImport(imported.conversationId)).toEqual({ providerId: "codex", cwd: f.workspace });
+    expect(store.cliConversationImport(imported.conversationId)).toEqual({ providerId: "codex", cwd: f.workspace, sessionId: expect.any(String) });
     const rescan = await call({ type: "conversation.cli.scan", requestId: "rescan", payload: { projectId: project.id } });
     if (rescan.kind !== "conversation.cli.scan") throw new Error("Missing scan");
     expect(rescan.scan.candidates.map(({ importedConversationId }) => importedConversationId)).toEqual([imported.conversationId]);

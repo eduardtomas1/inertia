@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -183,6 +185,7 @@ function fixture(options: {
     store: {
       conversation: conversationLookup,
       conversationPath: vi.fn(() => "/workspace"),
+      cliConversationImport: vi.fn(() => null),
       assertConversationProvider: vi.fn(() => {
         if (options.mixedHistory) throw new ConversationProviderChangeError(MIXED_PROVIDER_HISTORY_MESSAGE);
       }),
@@ -418,6 +421,25 @@ describe("conversation compaction command", () => {
     expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ result: expect.objectContaining({
       kind: "conversation.compacted", message: expect.stringContaining("Usage could not be refreshed"),
     }) }));
+  });
+
+  it.skipIf(process.platform === "win32")("compacts an imported Claude session in the folder it was recorded under, and only that session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-compact-cwd-"));
+    try {
+      const real = join(root, "real"); const linked = join(root, "linked");
+      await mkdir(real); await symlink(real, linked, "dir");
+      for (const [sessionId, expected] of [["claude-session", real], ["earlier-session", linked]] as const) {
+        const { dependencies, compact } = fixture();
+        Object.assign(dependencies.store, {
+          conversationPath: vi.fn(() => linked),
+          cliConversationImport: vi.fn(() => ({ providerId: "claude", cwd: real, sessionId })),
+        });
+        await createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+          type: "conversation.compact", requestId, payload: { conversationId, instruction: "keep the tests" },
+        });
+        expect((compact.mock.calls[0] as unknown as [{ cwd: string }])[0].cwd).toBe(expected);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("persists provider-confirmed before and after counts in a system receipt", async () => {

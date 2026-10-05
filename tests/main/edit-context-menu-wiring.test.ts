@@ -75,7 +75,7 @@ describe("native editing menu wiring", () => {
   it("opens the editing menu in a detached chat window's trusted renderer", () => {
     const window = detachedWindow();
     window.webContents.emit("context-menu", {}, { ...editableParams, frame: window.webContents.mainFrame });
-    expect(electron.build).toHaveBeenCalledWith(expect.arrayContaining([{ role: "paste", enabled: true }]));
+    expect(electron.build).toHaveBeenCalledWith(expect.arrayContaining([{ role: "paste", label: "Paste", enabled: true }]));
     expect(electron.popup).toHaveBeenCalledWith({ window });
   });
 

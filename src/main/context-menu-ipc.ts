@@ -1,7 +1,7 @@
 import {
-  BrowserWindow,
   ipcMain,
   Menu,
+  type BrowserWindow,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from "electron";
@@ -15,7 +15,7 @@ import type { DesktopWindowContext } from "../shared/desktop.js";
 
 type ContextMenuEntry =
   | { label: string; action: ContextMenuAction; enabled?: boolean }
-  | { role: "copy" | "paste" }
+  | { role: "copy" | "paste"; label: string }
   | { separator: true };
 
 export interface ContextMenuIpcOptions {
@@ -25,6 +25,11 @@ export interface ContextMenuIpcOptions {
     argumentCount: number,
     expectedArguments: number,
   ) => DesktopWindowContext;
+  windowFor: (
+    event: IpcMainInvokeEvent,
+    argumentCount: number,
+    expectedArguments: number,
+  ) => BrowserWindow;
   isPackaged: () => boolean;
   platform?: NodeJS.Platform;
 }
@@ -34,7 +39,7 @@ const SEPARATOR = { separator: true } as const;
 function revealLabel(platform: NodeJS.Platform): string {
   if (platform === "darwin") return "Reveal in Finder";
   if (platform === "win32") return "Reveal in File Explorer";
-  return "Reveal in File Manager";
+  return "Reveal in file manager";
 }
 
 function pathEntries(platform: NodeJS.Platform, openable: boolean): ContextMenuEntry[] {
@@ -42,8 +47,8 @@ function pathEntries(platform: NodeJS.Platform, openable: boolean): ContextMenuE
     ...(openable ? [{ label: "Open", action: "open" } as const] : []),
     { label: revealLabel(platform), action: "reveal" },
     SEPARATOR,
-    { label: "Copy Path", action: "copy-path" },
-    { label: "Copy Relative Path", action: "copy-relative-path" },
+    { label: "Copy path", action: "copy-path" },
+    { label: "Copy relative path", action: "copy-relative-path" },
   ];
 }
 
@@ -54,16 +59,16 @@ export function contextMenuEntries(
   switch (request.kind) {
     case "message":
       return [
-        ...(request.hasSelection ? [{ role: "copy" } as const, SEPARATOR] : []),
-        { label: "Copy Message", action: "copy-message" },
+        ...(request.hasSelection ? [{ role: "copy", label: "Copy" } as const, SEPARATOR] : []),
+        { label: "Copy message", action: "copy-message" },
         ...(request.role === "assistant"
           ? [{ label: "Copy as Markdown", action: "copy-markdown" } as const]
           : []),
       ];
     case "code":
       return [
-        ...(request.hasSelection ? [{ role: "copy" } as const, SEPARATOR] : []),
-        { label: "Copy Code", action: "copy-code" },
+        ...(request.hasSelection ? [{ role: "copy", label: "Copy" } as const, SEPARATOR] : []),
+        { label: "Copy code", action: "copy-code" },
       ];
     case "project-link":
     case "diff-file":
@@ -73,8 +78,8 @@ export function contextMenuEntries(
     case "terminal":
       return [
         { label: "Copy", action: "terminal-copy", enabled: request.hasSelection },
-        { role: "paste" },
-        { label: "Select All", action: "terminal-select-all" },
+        { role: "paste", label: "Paste" },
+        { label: "Select all", action: "terminal-select-all" },
         ...(request.clearable
           ? [SEPARATOR, { label: "Clear", action: "terminal-clear" } as const]
           : []),
@@ -110,7 +115,7 @@ function showMenu(
       options.platform ?? process.platform,
     ).map((entry) => {
       if ("separator" in entry) return { type: "separator" };
-      if ("role" in entry) return { role: entry.role };
+      if ("role" in entry) return { role: entry.role, label: entry.label };
       return {
         label: entry.label,
         enabled: entry.enabled ?? true,
@@ -119,7 +124,7 @@ function showMenu(
     });
     if (!options.isPackaged()) {
       template.push({ type: "separator" }, {
-        label: "Inspect Element",
+        label: "Inspect element",
         click: () => {
           if (!window.isDestroyed()) window.webContents.inspectElement(x, y);
         },
@@ -142,8 +147,7 @@ export function registerContextMenuIpc(options: ContextMenuIpcOptions): void {
     if (!ownedByDetachedChat(context, request)) {
       throw new Error("Detached chats can show menus only for their owned conversation");
     }
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (!window || window.isDestroyed()) return null;
+    const window = options.windowFor(event, args.length, 1);
     return await showMenu(window, request, options);
   });
 }

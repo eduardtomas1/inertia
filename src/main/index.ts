@@ -513,7 +513,13 @@ function registerIpcHandlers(): void {
   );
 
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
-  registerContextMenuIpc({ channel: IPC.showContextMenu, assertTrusted: assertTrustedChatIpc, isPackaged: () => app.isPackaged });
+  registerContextMenuIpc({
+    channel: IPC.showContextMenu, assertTrusted: assertTrustedChatIpc, isPackaged: () => app.isPackaged,
+    windowFor: (event, count, expected) => {
+      if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+      return detachedChatMain.windowForTrustedChatIpc(event, count, expected);
+    },
+  });
 
   registerAppUpdateIpc({
     ipcMain,

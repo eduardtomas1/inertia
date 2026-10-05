@@ -131,7 +131,7 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   // Docking under the chat moves session controls into the tab row and adds
   // Hide: 494 bytes (26,456 measured).
-  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 188,
+  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,

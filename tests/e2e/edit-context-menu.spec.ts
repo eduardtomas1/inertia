@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, test, type Locator } from "@playwright/test";
 
 import { createAppFixture } from "./support/app-fixture";
-import { openTerminalDock } from "./support/workspace-tools";
+import { ensureWorkspaceTools, openTerminalDock, selectWorkspaceTool } from "./support/workspace-tools";
 
 for (const detached of [false, true]) test(`offers working native edit commands in the ${detached ? "detached chat" : "main"} window`, async () => {
   const app = await createAppFixture({
@@ -234,6 +234,50 @@ test("pastes into the workspace shell from the terminal menu", async () => {
     await expect(dock.locator(".xterm-helper-textarea")).toBeFocused();
     await page.keyboard.press("Enter");
     await expect.poll(() => readFile(output, "utf8").catch(() => "")).toBe("pasted-through-menu");
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("offers link and navigation actions for a user's right-click in the Browser pane", async () => {
+  const app = await createAppFixture({
+    name: "browser-context-menu",
+    initialState: "conversation",
+    windowDisplay: "primary",
+  });
+  try {
+    await recordMenus(app);
+    const { page } = app;
+    await ensureWorkspaceTools(page);
+    await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
+    const pageUrl = new URL("/agent-browser-page", app.previewUrl).toString();
+    await page.getByRole("textbox", { name: "Preview address" }).fill(pageUrl);
+    await page.getByRole("button", { name: "Go", exact: true }).click();
+    await expect.poll(() => app.electronApp.evaluate(({ webContents }, url) =>
+      webContents.getAllWebContents().some((contents) => contents.getURL() === url && !contents.isLoading()), pageUrl))
+      .toBe(true);
+    const previous = await surfaceMenuCount(app);
+    await app.electronApp.evaluate(async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === url)!;
+      const point = await contents.executeJavaScript(
+        "(() => { const box = document.querySelector('a').getBoundingClientRect(); return { x: Math.round(box.x + 4), y: Math.round(box.y + box.height / 2) }; })()",
+      ) as { x: number; y: number };
+      contents.sendInputEvent({ type: "mouseDown", button: "right", clickCount: 1, ...point });
+      contents.sendInputEvent({ type: "mouseUp", button: "right", clickCount: 1, ...point });
+    }, pageUrl);
+    await expect.poll(() => surfaceMenuCount(app)).toBe(previous + 1);
+    const items = await app.electronApp.evaluate(() => {
+      const menu = (Reflect.get(globalThis, "surfaceMenus") as Electron.Menu[]).at(-1)!;
+      return menu.items.map((item) => item.type === "separator" ? "-" : item.enabled ? item.label : `${item.label} (disabled)`);
+    });
+    expect(items).toEqual([
+      ...process.platform === "darwin" ? ["Copy", "-"] : [],
+      "Copy Link Address", "-", "Back (disabled)", "Forward (disabled)", "Reload",
+    ]);
+    await chooseSurfaceItem(app, { label: "Copy Link Address" });
+    await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe(new URL("/agent-browser-destination", app.previewUrl).toString());
     expect(app.rendererErrors).toEqual([]);
   } finally {
     await app.close();

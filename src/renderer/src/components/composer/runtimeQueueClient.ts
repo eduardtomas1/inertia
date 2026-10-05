@@ -2,10 +2,11 @@ import type { ChatAttachment } from "@shared/contracts";
 import type { MessageQueueResult } from "@shared/queued-messages";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { RUNTIME_QUEUE_CHANGED } from "./runtimeQueueEvents";
 
+export { RUNTIME_QUEUE_CHANGED };
 export type QueueCommand = Extract<CommandWithoutId, { type: `message.queue.${string}` }>;
 export type QueueCommandRunner = (command: QueueCommand) => Promise<MessageQueueResult>;
-export const RUNTIME_QUEUE_CHANGED = "inertia:runtime-queue-changed";
 
 function pendingIntents(conversationId: string): { id: string; identity: string }[] {
   try {

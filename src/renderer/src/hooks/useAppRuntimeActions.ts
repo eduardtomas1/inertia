@@ -20,7 +20,8 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
-import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import { RUNTIME_QUEUE_CHANGED } from "../components/composer/runtimeQueueEvents";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "@shared/background-tasks";
 
 export type ConversationBackgroundTasksLoader = (

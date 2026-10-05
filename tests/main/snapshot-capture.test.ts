@@ -104,12 +104,15 @@ describe("foreground snapshot pixels and context", () => {
     vi.useFakeTimers();
     const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
     Object.defineProperty(process, "parentPort", { configurable: true, value: new EventEmitter() });
+    const listeners = { exit: process.listeners("exit"), term: process.listeners("SIGTERM") };
     try {
       vi.resetModules(); await import("../../src/main/snapshot-capture-worker");
       await vi.advanceTimersByTimeAsync(11_999); expect(exit).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1); expect(exit).toHaveBeenCalledWith(1);
       expect(native.foreground).not.toHaveBeenCalled();
     } finally {
+      for (const listener of process.listeners("exit")) if (!listeners.exit.includes(listener)) process.removeListener("exit", listener);
+      for (const listener of process.listeners("SIGTERM")) if (!listeners.term.includes(listener)) process.removeListener("SIGTERM", listener);
       exit.mockRestore(); vi.useRealTimers();
       if (prior) Object.defineProperty(process, "parentPort", prior);
       else Reflect.deleteProperty(process, "parentPort");

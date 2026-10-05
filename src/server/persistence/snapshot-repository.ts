@@ -70,7 +70,7 @@ import {
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type ConversationDetailRow = ConversationShellRow & { mixed_provider_history: number };
-type LatestTurnRow = AgentTurnRow & { usage_limited: number };
+type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number };
 const TURN_USAGE_LIMITED_SQL = "EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id)";
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
@@ -161,7 +161,7 @@ export class SnapshotRepository {
           ORDER BY latest.requested_at DESC, latest.id DESC
           LIMIT 1
         )
-      `).all() as LatestTurnRow[])
+      `).all() as UsageLimitedTurnRow[])
         .map((row) => [row.conversation_id, { turn: agentTurnFromRow(row), usageLimited: row.usage_limited === 1 }] as const),
     );
     return {
@@ -209,7 +209,7 @@ export class SnapshotRepository {
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
-    `).get(conversationId) as LatestTurnRow | undefined;
+    `).get(conversationId) as UsageLimitedTurnRow | undefined;
     return conversationShellFromRow(
       row,
       latestTurn ? agentTurnFromRow(latestTurn) : null,
@@ -307,7 +307,7 @@ export class SnapshotRepository {
     };
     const messages = query<MessageRow>("messages", MESSAGE_PROJECTION_COLUMNS, "messages.created_at ASC, messages.id ASC").map(messageFromRow);
     return {
-      agentTurns: query<AgentTurnRow>("agent_turns", "*", "requested_at ASC, id ASC").map(agentTurnFromRow),
+      agentTurns: query<UsageLimitedTurnRow>("agent_turns", `agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited`, "requested_at ASC, id ASC").map(agentTurnFromRow),
       turnGitArtifacts: query<TurnGitArtifactRow>("turn_git_artifacts", "*", "created_at ASC, id ASC").map(turnGitArtifactFromRow),
       messages,
       activities: query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map(activityFromRow),
@@ -320,8 +320,8 @@ export class SnapshotRepository {
   }
 
   private omittedTurnRecords(conversationId: string, turnId: string): HistoryPageRecords {
-    const turn = this.context.database.prepare("SELECT * FROM agent_turns WHERE conversation_id = ? AND id = ?")
-      .get(conversationId, turnId) as AgentTurnRow;
+    const turn = this.context.database.prepare(`SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited
+      FROM agent_turns WHERE conversation_id = ? AND id = ?`).get(conversationId, turnId) as UsageLimitedTurnRow;
     const messages = (this.context.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
       WHERE messages.conversation_id = ? AND messages.id = ?`)
       .all(conversationId, turn.user_message_id) as MessageRow[]).map(messageFromRow);

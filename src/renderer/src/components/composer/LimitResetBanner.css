@@ -31,6 +31,15 @@
   color: var(--text-muted);
 }
 
+.limit-reset[data-state="limited"] {
+  border-color: var(--composer-border);
+  background: transparent;
+}
+
+.limit-reset[data-state="limited"] .limit-reset-copy strong {
+  color: var(--warning);
+}
+
 .limit-reset-copy {
   display: flex;
   min-width: 0;

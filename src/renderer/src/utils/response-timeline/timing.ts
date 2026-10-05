@@ -84,7 +84,9 @@ export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
   if (turn.agentTurn.status === "completed" && turn.toolCallCount === 0) {
     return "Completed without tool activity";
   }
-  const prefix = turn.agentTurn.status === "failed"
+  const prefix = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
+    ? duration ? `Usage limit reached after ${duration}` : "Usage limit reached"
+    : turn.agentTurn.status === "failed"
     ? duration
       ? `Failed after ${duration}`
       : turn.startedAt
@@ -113,6 +115,7 @@ export function turnTimingLabels(turn: ResponseTurn, now = Date.now()): string[]
   const status = turn.agentTurn.status;
   if (execution === null) {
     if (turn.isActive) return [queue];
+    if (status === "failed" && turn.agentTurn.usageLimited) return [queue, "Usage limit reached"];
     if (status === "failed") {
       return [queue, turn.startedAt ? "Failed" : "Failed before starting"];
     }
@@ -121,7 +124,9 @@ export function turnTimingLabels(turn: ResponseTurn, now = Date.now()): string[]
     }
     return [queue, turnStatusLabel(status)];
   }
-  const work = status === "failed"
+  const work = status === "failed" && turn.agentTurn.usageLimited
+    ? `Usage limit reached after ${formatElapsed(execution)}`
+    : status === "failed"
     ? `Failed after ${formatElapsed(execution)}`
     : status === "cancelled" || status === "interrupted"
       ? `Stopped after ${formatElapsed(execution)}`

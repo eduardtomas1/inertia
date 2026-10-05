@@ -90,6 +90,7 @@ export function startIdleRateLimitRefresh<Metadata>(
   const resetsReadThrough = new Map<ProviderId, number>(
     RATE_LIMIT_PROVIDER_IDS.map((providerId) => [providerId, now()]),
   );
+  const lastResetRead = new Map<ProviderId, number>();
   let refreshing = false;
   let stopped = false;
   let resetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -110,13 +111,17 @@ export function startIdleRateLimitRefresh<Metadata>(
       const reset = unreadReset(providerId);
       return reset === null
         ? []
-        : [Math.max(reset + RESET_READ_DELAY_MS, retry.get(providerId)?.at ?? 0)];
+        : [Math.max(
+            reset + RESET_READ_DELAY_MS,
+            retry.get(providerId)?.at ?? 0,
+            (lastResetRead.get(providerId) ?? -Infinity) + IDLE_READ_WINDOW_MS,
+          )];
     });
     if (due.length === 0) return;
     resetTimer = setTimeout(readResets, Math.min(MAX_TIMER_MS, Math.max(0, Math.min(...due) - now())));
     resetTimer.unref();
   };
-  const refresh = (due: readonly ProviderId[]): void => {
+  const refresh = (due: readonly ProviderId[], resetRead = false): void => {
     refreshing = true;
     void dependencies.track(async () => {
       for (const providerId of due) {
@@ -135,6 +140,10 @@ export function startIdleRateLimitRefresh<Metadata>(
           retry.set(providerId, { at: now() + delayMs, delayMs });
         }
         if (metadata !== null) dependencies.broadcastSnapshot();
+        if (resetRead) {
+          lastResetRead.set(providerId, now());
+          resetsReadThrough.set(providerId, Math.max(resetsReadThrough.get(providerId) ?? now(), now()));
+        }
       }
     }).catch(() => undefined).finally(() => {
       refreshing = false;
@@ -150,11 +159,12 @@ export function startIdleRateLimitRefresh<Metadata>(
       const reset = unreadReset(providerId);
       if (reset === null || reset + RESET_READ_DELAY_MS > now()) continue;
       if ((retry.get(providerId)?.at ?? 0) > now()) continue;
+      if ((lastResetRead.get(providerId) ?? -Infinity) + IDLE_READ_WINDOW_MS > now()) continue;
       resetsReadThrough.set(providerId, now() - RESET_READ_DELAY_MS);
       if (dependencies.canRun(providerId) && !busy.has(providerId)) due.push(providerId);
     }
     if (due.length === 0) armReset();
-    else refresh(due);
+    else refresh(due, true);
   }
   const tick = (): void => {
     if (dependencies.isClosed() || refreshing) return;

@@ -42,7 +42,7 @@ Inertia explains Git failures, such as authentication, connectivity, a rejected 
 
 ## Limits look stale, or a countdown reached zero
 
-A countdown reaching zero doesn't refill the bar. The window shows **Reset due** until the provider reports new quota, and Codex and Claude are checked again a few seconds after the reset. When a provider is limiting quota checks, Limits keeps the last reported numbers, marked stale, and says how long the provider asked Inertia to wait. **Refresh limits** asks right away. See [Provider usage limits](../USAGE_LIMITS.md).
+A countdown reaching zero doesn't refill the bar. The window shows **Reset due** until the provider reports new quota, and Codex and Claude are checked again a few seconds after the reset. When a provider is limiting quota checks, Limits says how long the provider asked Inertia to wait. It keeps the last reported numbers, marked stale, when it can confirm the same account; a Cursor login read from the macOS Keychain or a login without a stable account shows the message without numbers. **Refresh limits** asks right away. See [Provider usage limits](../USAGE_LIMITS.md).
 
 ## Inertia says it restored a backup or started with empty data
 

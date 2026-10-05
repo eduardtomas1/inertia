@@ -11422,6 +11422,10 @@ button.sent-attachment-open:focus-visible {
   color: var(--failure-accent);
 }
 
+.turn-work-log.is-settled[data-settled-work-status="limited"] .turn-settled-summary > svg {
+  color: var(--warning);
+}
+
 .turn-supporting-ledger {
   width: 100%;
   min-width: 0;

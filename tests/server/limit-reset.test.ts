@@ -333,6 +333,26 @@ describe("quota reset actions", () => {
     expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
   });
 
+  it("keeps checking when the account cannot be read at the reset instead of blocking the resume", async () => {
+    await schedule();
+    vi.setSystemTime(Date.parse(reset) + 1_000);
+    const available = () => ({ ...account, windows: [{ ...account.windows[0]!, remainingPercent: 100 }],
+      updatedAt: new Date().toISOString(), checkedAt: new Date().toISOString() });
+    dependencies.readAccount = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...available(), identityKey: null, email: null, status: "error", windows: [] })
+      .mockImplementation(async () => available());
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    vi.setSystemTime(Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt));
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    vi.setSystemTime(Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt));
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
+  });
+
   it("does not persist an unexpected dispatch error as public provider output", async () => {
     await schedule(); vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
     dependencies.dispatch = vi.fn().mockRejectedValue(new Error("private provider diagnostics"));
@@ -562,6 +582,21 @@ describe("usage-limited chat summary", () => {
     begin();
     expect(store.conversationShell(conversationId)!.latestTurn).not.toHaveProperty("usageLimited");
     expect(store.shellSnapshot().conversations.find(({ id }) => id === conversationId)?.latestTurn).not.toHaveProperty("usageLimited");
+  });
+});
+
+describe("usage-limited turns in history", () => {
+  it("marks every usage-limited turn in loaded history, including older ones, and validates the flag", () => {
+    vi.setSystemTime(instant + 1_000);
+    const next = begin();
+    const turns = store.conversationHistory(conversationId)!.agentTurns;
+    expect(turns.find(({ id }) => id === failedTurnId)).toMatchObject({ usageLimited: true });
+    expect(turns.find(({ id }) => id === next.id)).not.toHaveProperty("usageLimited");
+    const detail = store.conversationHistory(conversationId)!;
+    const event = { type: "request.result", requestId: randomUUID(), result: { kind: "conversation.detail", conversationId, state: "ready", detail } };
+    expect(serverEventSchema.safeParse(event).success).toBe(true);
+    const tampered = { ...detail, agentTurns: detail.agentTurns.map((turn) => ({ ...turn, usageLimited: "yes" })) };
+    expect(serverEventSchema.safeParse({ ...event, result: { ...event.result, detail: tampered } }).success).toBe(false);
   });
 });
 

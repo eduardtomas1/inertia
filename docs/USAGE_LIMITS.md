@@ -32,8 +32,10 @@ Inertia waits for its `Retry-After` (five minutes when absent, at most fifteen)
 before asking again for that login and says so in the account details. Other
 failures say the provider did not answer, or refused the check for this login,
 without asking you to sign in again. The Limits page and the composer's
-**All provider limits** dialog refresh at most every three minutes while
-visible. No additional background worker, persistent provider process or
+**All provider limits** dialog read the providers when they open and at most
+every three minutes while visible, and read again when they become visible
+with a reading older than three minutes. Opening either one is an explicit
+read, so on macOS it can read a Cursor login from the Keychain. No additional background worker, persistent provider process or
 startup probe is created by this feature.
 
 ## Usage-limited chats
@@ -44,8 +46,11 @@ reached**. Above the composer, **Usage limit reached** stays visible without a
 time or actions until a reset time is known, then **Resume at reset** and
 **Snooze until reset** appear. A scheduled resume checks the account at the
 reset and keeps checking with a backoff of 30 seconds doubling up to five
-minutes. If the provider has not reported new quota within an hour, nothing is
-sent and **Resume now** waits for you.
+minutes, also when the account cannot be read at that moment. The hour is the
+sum of those delays, about 15 checks, not wall-clock time. If the provider has
+not reported new quota by then, nothing is sent and **Resume now** waits for
+you; choosing it starts a new hour of checks. A different account, or one that
+cannot be confirmed without asking you, stops the resume for your attention.
 
 ## Accounts and averages
 

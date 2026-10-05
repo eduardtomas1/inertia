@@ -219,6 +219,8 @@ export function UsageLimitsPanel({ request, status }: Props): React.JSX.Element 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [about, setAbout] = useState(false); const aboutId = useId();
   const alive = useRef(true); const pending = useRef(false); const publish = context?.setSnapshot;
+  const checkedAt = useRef<string | null>(snapshot?.checkedAt ?? null);
+  useEffect(() => { checkedAt.current = snapshot?.checkedAt ?? null; }, [snapshot]);
   const load = useCallback(async (refresh: boolean, force = false, background = false): Promise<void> => {
     if (pending.current || status !== "online") return;
     pending.current = true; setBusy(true); setError(null);
@@ -238,6 +240,7 @@ export function UsageLimitsPanel({ request, status }: Props): React.JSX.Element 
       if (timer) clearInterval(timer);
       if (document.visibilityState === "hidden") return;
       setNow(Date.now());
+      if (Date.now() - Date.parse(checkedAt.current ?? "") > 180000) void load(true, false, true);
       timer = setInterval(() => { setNow(Date.now()); ticks += 1; if (ticks % 3 === 0) void load(true, false, true); }, 60000);
     };
     visibility(); document.addEventListener("visibilitychange", visibility);

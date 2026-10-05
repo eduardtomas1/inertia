@@ -326,6 +326,7 @@ export interface ActiveTurn {
   providerActivitiesById: Map<string, AgentActivity>;
   providerActivityDetailChars: number;
   providerCommandRuns: Map<string, { id: string; label: string }>;
+  providerOutputActivityIds: Set<string>;
   pendingActivityUpdates: Map<string, AgentActivity>;
   activityFlushTimer: unknown;
   approvalIds: Set<string>;

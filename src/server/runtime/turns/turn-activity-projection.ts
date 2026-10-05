@@ -2,6 +2,7 @@ import type { AgentActivity } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import {
   mergeProviderActivityDetailWithinTurnBudget,
+  mergeProviderActivityOutputWithinTurnBudget,
 } from "../../provider/activity-detail";
 import type { ProviderActivityEvent } from "../../provider/contracts";
 import {
@@ -53,7 +54,7 @@ export class TurnActivityProjection {
       const activity: AgentActivity = {
         ...identified,
         title: event.label,
-        detail: this.detail(active, identified.detail, event.detail ?? null),
+        detail: this.eventDetail(active, identified.id, identified.detail, event),
         status,
       };
       active.providerActivitiesById.set(event.activityId!, activity);
@@ -66,9 +67,10 @@ export class TurnActivityProjection {
     if (identified) {
       const activity = this.options.store.updateActivity(identified.id, {
         title: event.label,
-        detail: this.detail(active, identified.detail, event.detail ?? null),
+        detail: this.eventDetail(active, identified.id, identified.detail, event),
         status,
       });
+      active.providerOutputActivityIds.delete(identified.id);
       active.providerActivitiesById.delete(event.activityId!);
       if (pendingIndex >= 0) candidates.splice(pendingIndex, 1);
       if (candidates.length === 0) {
@@ -96,7 +98,7 @@ export class TurnActivityProjection {
         }
         const activity = this.options.store.updateActivity(match.id, {
           title: event.label,
-          detail: this.detail(active, match.detail, event.detail ?? null),
+          detail: this.eventDetail(active, null, match.detail, event),
           status,
         });
         return {
@@ -111,7 +113,7 @@ export class TurnActivityProjection {
       turnId: active.turn.id,
       kind,
       title: event.label,
-      detail: this.detail(active, null, event.detail ?? null),
+      detail: this.eventDetail(active, null, null, event),
       status,
       createdAt: this.options.now(),
     });
@@ -122,6 +124,7 @@ export class TurnActivityProjection {
     }
     if (event.activityId && event.phase === "started") {
       active.providerActivitiesById.set(event.activityId, activity);
+      if (event.outputDelta) active.providerOutputActivityIds.add(activity.id);
     }
     return { activity, runsChanged };
   }
@@ -178,6 +181,7 @@ export class TurnActivityProjection {
     }
     active.runningActivities.clear();
     active.providerActivitiesById.clear();
+    active.providerOutputActivityIds.clear();
   }
 
   private scheduleFlush(active: ActiveTurn): void {
@@ -204,6 +208,33 @@ export class TurnActivityProjection {
     if (active.activityFlushTimer === null) return;
     this.options.scheduler.clearTimeout(active.activityFlushTimer);
     active.activityFlushTimer = null;
+  }
+
+  private eventDetail(
+    active: ActiveTurn,
+    activityId: string | null,
+    previous: string | null,
+    event: ProviderActivityEvent,
+  ): string | null {
+    const continuing = activityId !== null
+      && !event.detail
+      && active.providerOutputActivityIds.has(activityId);
+    const detail = this.detail(active, previous, event.detail ?? null);
+    if (!event.outputDelta) {
+      if (activityId && event.detail) {
+        active.providerOutputActivityIds.delete(activityId);
+      }
+      return detail;
+    }
+    const merged = mergeProviderActivityOutputWithinTurnBudget(
+      detail,
+      event.outputDelta,
+      continuing,
+      active.providerActivityDetailChars,
+    );
+    active.providerActivityDetailChars = merged.totalChars;
+    if (activityId) active.providerOutputActivityIds.add(activityId);
+    return merged.detail;
   }
 
   private detail(

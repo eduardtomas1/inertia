@@ -15,10 +15,12 @@ import type { CodexAppServerOptions } from "./types";
 export type CodexItemActivity = {
   kind: "command" | "tool" | "system";
   label: string;
+  commandShown?: boolean;
 };
 
 export interface CodexItemProjectionState {
   deltaItems: Set<string>;
+  outputItems: Set<string>;
   reasoningDeltaItems: Set<string>;
   itemActivities: Map<string, CodexItemActivity>;
   completedPlanItemIds: Set<string>;
@@ -105,12 +107,18 @@ export function handleCodexItem(
     const output = item.aggregatedOutput ?? item.output
       ?? [item.stdout, item.stderr];
     const label = commandExecutionLabel(item);
+    const started = activityId ? state.itemActivities.get(activityId) : undefined;
+    const streamed = activityId ? state.outputItems.has(activityId) : false;
     const detail = providerActivityDetailSections({
-      command,
-      ...(method === "item/completed" ? { output } : {}),
+      ...(started?.commandShown ? {} : { command }),
+      ...(method === "item/completed" && !streamed ? { output } : {}),
     });
     if (method === "item/started") {
-      rememberItemActivity(state, activityId, { kind: "command", label });
+      rememberItemActivity(state, activityId, {
+        kind: "command",
+        label,
+        commandShown: detail !== null,
+      });
     }
     emitItemActivity(host, "command", phase, label, activityId, detail);
     deleteCompletedActivity(state, method, activityId);
@@ -233,6 +241,7 @@ function deleteCompletedActivity(
 ): void {
   if (method === "item/completed" && activityId) {
     state.itemActivities.delete(activityId);
+    state.outputItems.delete(activityId);
   }
 }
 

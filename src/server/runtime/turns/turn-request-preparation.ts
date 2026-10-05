@@ -455,6 +455,7 @@ export function resolveTurnRequest(
           providerActivitiesById: new Map<string, AgentActivity>(),
           providerActivityDetailChars: 0,
           providerCommandRuns: new Map<string, { id: string; label: string }>(),
+          providerOutputActivityIds: new Set<string>(),
           pendingActivityUpdates: new Map<string, AgentActivity>(),
           activityFlushTimer: null,
           approvalIds: new Set<string>(),

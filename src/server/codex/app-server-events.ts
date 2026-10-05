@@ -58,9 +58,6 @@ import { CodexApprovalAuthority } from "./app-server-approval-authority";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
-import {
-  providerActivityDetailSections,
-} from "../provider/activity-detail";
 import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type {
   ProviderGoalSnapshot,
@@ -138,6 +135,7 @@ export class CodexAppServerEvents {
   private readonly pendingInputs = new Map<string, PendingInput>();
   private readonly pendingServerRequestIds = new Set<string>();
   private readonly deltaItems = new Set<string>();
+  private readonly outputItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
   private readonly itemActivities = new Map<string, CodexItemActivity>();
   private readonly completedPlanItemIds = new Set<string>();
@@ -231,6 +229,7 @@ export class CodexAppServerEvents {
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
     this.deltaItems.clear();
+    this.outputItems.clear();
     this.reasoningDeltaItems.clear();
     this.itemActivities.clear();
     this.completedPlanItemIds.clear();
@@ -760,6 +759,7 @@ export class CodexAppServerEvents {
         },
         {
           deltaItems: this.deltaItems,
+          outputItems: this.outputItems,
           reasoningDeltaItems: this.reasoningDeltaItems,
           itemActivities: this.itemActivities,
           completedPlanItemIds: this.completedPlanItemIds,
@@ -818,9 +818,10 @@ export class CodexAppServerEvents {
           ? "Command"
           : "File change",
       };
+      if (!this.trackStreamItem(this.outputItems, itemId)) return;
       this.emitActivity(activity.kind, "started", activity.label, {
         activityId: itemId,
-        detail: providerActivityDetailSections({ output: delta }) ?? undefined,
+        outputDelta: delta,
       });
       return;
     }
@@ -940,6 +941,7 @@ export class CodexAppServerEvents {
         this.completeParentTurn("failed", 1);
       }
       this.deltaItems.clear();
+      this.outputItems.clear();
       this.reasoningDeltaItems.clear();
       this.itemActivities.clear();
       this.completedPlanItemIds.clear();

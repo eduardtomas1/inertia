@@ -12,6 +12,11 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
+import {
+  CodexAppServerEvents,
+  type CodexAppServerEventHost,
+} from "../../src/server/codex/app-server-events";
+import { CappedTextBuffer } from "../../src/server/codex/protocol";
 import { projectCodexRuntimeNotification } from
   "../../src/server/codex/app-server-runtime-notifications";
 import { createAgentHarnessEmitter } from
@@ -168,6 +173,41 @@ function runTimers(scheduler: FakeTurnScheduler, delayMs: number): number {
     callback?.();
   }
   return due.length;
+}
+
+function codexEvents(
+  value: Awaited<ReturnType<typeof runtime>>,
+): CodexAppServerEvents {
+  const host: CodexAppServerEventHost = {
+    options: {
+      executable: "/fake/codex",
+      environment: {},
+      cwd: "/workspace",
+      prompt: "Stream command output",
+      planMode: false,
+      access: "full",
+      onActivity: value.emitter.activity,
+    },
+    resultText: new CappedTextBuffer(1_024),
+    isSettled: () => false,
+    phase: () => "running",
+    setPhase: () => undefined,
+    providerThreadId: () => "codex-thread",
+    activeTurnId: () => "codex-turn",
+    requestedTurnId: () => undefined,
+    setActiveTurnId: () => undefined,
+    cancelRequested: () => false,
+    lastError: () => undefined,
+    setLastError: () => undefined,
+    setLastProtocolMethod: () => undefined,
+    setLastActivityId: () => undefined,
+    setTerminalEvent: () => undefined,
+    writeMessage: () => true,
+    cancel: () => undefined,
+    finish: () => undefined,
+    rememberFailure: () => undefined,
+  };
+  return new CodexAppServerEvents(host);
 }
 
 function activityEvents(value: Awaited<ReturnType<typeof runtime>>) {
@@ -374,6 +414,7 @@ describe("durable provider activity lifecycle contract", () => {
       providerActivitiesById: identified,
       providerActivityDetailChars: 0,
       providerCommandRuns: new Map(),
+      providerOutputActivityIds: new Set(),
       pendingActivityUpdates: new Map(),
       activityFlushTimer: null,
     } as ActiveTurn;
@@ -757,6 +798,108 @@ describe("durable provider activity lifecycle contract", () => {
       activityId: "shell-command",
     });
     expect(shells()).toBe(initial + 3);
+    await finish(value);
+  });
+
+  it("records streamed Codex command output once, in order, without section headers per chunk", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const item = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      type: "commandExecution",
+      command: "npm test",
+      ...extra,
+    });
+    const chunks = [
+      "  indented start\n",
+      "ok\n",
+      "ok\n",
+      "partial ",
+      "line\n",
+      "\n",
+      "done",
+    ];
+    const output = chunks.join("");
+    const commandDetail = (command: string) =>
+      turnActivities(value).find(({ detail }) =>
+        detail?.startsWith(`Command:\n${command}\n`))?.detail;
+
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: item("streamed", { status: "inProgress" }),
+    });
+    for (const delta of chunks) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "streamed",
+        delta,
+      });
+    }
+    runTimers(value.scheduler, 64);
+    expect(activityEvents(value).at(-1)?.detail)
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: item("streamed", {
+        status: "completed",
+        aggregatedOutput: output,
+      }),
+    });
+    expect(commandDetail("npm test"))
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { ...item("unstreamed", { status: "inProgress" }), command: "git status" },
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        ...item("unstreamed", { status: "completed", aggregatedOutput: "clean\n" }),
+        command: "git status",
+      },
+    });
+    expect(commandDetail("git status"))
+      .toBe("Command:\ngit status\n\nOutput:\nclean");
+    await finish(value);
+  });
+
+  it("redacts a credential split across Codex output chunks", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "secret", type: "commandExecution", command: "env", status: "inProgress" },
+    });
+    for (const delta of ["key sk-abcdefghij", "klmnopqrstuvwxyz0123\nnext\n"]) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "secret",
+        delta,
+      });
+    }
+    runTimers(value.scheduler, 64);
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "secret",
+        type: "commandExecution",
+        command: "env",
+        status: "completed",
+        aggregatedOutput: "key sk-abcdefghijklmnopqrstuvwxyz0123\nnext\n",
+      },
+    });
+
+    const details = [
+      ...activityEvents(value).map(({ detail }) => detail ?? ""),
+      ...turnActivities(value).map(({ detail }) => detail ?? ""),
+    ];
+    expect(details.join("\n")).not.toContain("abcdefghij");
+    expect(details.join("\n")).not.toContain("klmnopqrst");
+    expect(turnActivities(value)[0]?.detail)
+      .toBe("Command:\nenv\n\nOutput:\nkey [redacted]\nnext\n");
     await finish(value);
   });
 });

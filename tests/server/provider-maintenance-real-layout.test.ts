@@ -62,7 +62,7 @@ async function fakeManager(path: string, record: string, effect: string): Promis
   return await file(path, [
     `#!${process.execPath}`,
     "const fs = require(\"node:fs\");",
-    "const pick = [\"PNPM_HOME\", \"BUN_INSTALL\", \"VOLTA_HOME\", \"CODEX_HOME\", \"OPENAI_API_KEY\", \"CI\"];",
+    "const pick = [\"PNPM_HOME\", \"BUN_INSTALL\", \"VOLTA_HOME\", \"CODEX_HOME\", \"OPENAI_API_KEY\", \"CI\", \"HOMEBREW_NO_AUTO_UPDATE\"];",
     "const env = Object.fromEntries(pick.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));",
     `fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env }) + "\\n");`,
     effect,
@@ -305,17 +305,29 @@ describe("provider maintenance on real installation layouts", () => {
     await packageJson(manifest, "claude-code", "1.0.0");
     const executable = await file(join(prefix, "Caskroom/claude-code/1.0.0/claude"), "#!/bin/sh\n");
     await link(executable, join(prefix, "bin/claude"));
-    const brew = await fakeManager(join(prefix, "Homebrew/bin/brew"), record, bump(manifest));
+    const brew = await fakeManager(join(prefix, "Homebrew/bin/brew"), record, [
+      "if (process.argv[2] === \"info\") {",
+      "  process.stdout.write(JSON.stringify({ formulae: [], casks: [{ version: \"1.0.1,42\" }] }));",
+      "  process.exit(0);",
+      "}",
+      bump(manifest),
+    ].join("\n"));
     await link(brew, join(prefix, "bin/brew"));
-    const { terminal } = await runUpdate({
+    const { status, terminal } = await runUpdate({
       providerId: "claude",
       home,
       pathEntries: [join(prefix, "bin")],
       executable: async () => executable,
       version: async () => await versionOf(manifest),
     });
+    expect(status).toMatchObject({ latestVersion: "1.0.1", versionStatus: "update-available" });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
-    expect(await records(record)).toEqual([{ argv: ["upgrade", "--cask", "claude-code"], env: { CI: "1" } }]);
+    const info = { argv: ["info", "--json=v2", "--cask", "claude-code"], env: { CI: "1", HOMEBREW_NO_AUTO_UPDATE: "1" } };
+    expect(await records(record)).toEqual([
+      info,
+      { argv: ["upgrade", "--cask", "claude-code"], env: { CI: "1" } },
+      info,
+    ]);
   });
 
   posixIt.each([

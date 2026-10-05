@@ -10,7 +10,11 @@ import {
   installPreviewAgentPrivacyGuard,
   type PreviewAgentWithheldReason,
 } from "../shared/preview-agent-privacy-guard.js";
-import { createPreviewAgentPrivacyRuntime } from "../shared/preview-agent-sensitive-fields.js";
+import {
+  createPreviewAgentPrivacyRuntime,
+  PREVIEW_AGENT_NAME_WORD_SOURCE,
+  PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
+} from "../shared/preview-agent-sensitive-fields.js";
 import { agentPageIsFrozen, evaluateInFrozenAgentPage } from "./preview-agent-boundary.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
@@ -26,6 +30,8 @@ const MAX_LABEL_TEXT_SOURCE_CHARS = 1_200;
 const MAX_LABEL_TEXT_NODES = 128;
 const MAX_FRAME_PLACEHOLDERS = 16;
 const NOT_INSPECTED_REGIONS = ["frames", "shadow-roots"] as const;
+const PRIVACY_RUNTIME = `(${createPreviewAgentPrivacyRuntime.toString()})(${
+  JSON.stringify(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE)}, ${JSON.stringify(PREVIEW_AGENT_NAME_WORD_SOURCE)})`;
 
 export type AgentPageNotInspected = (typeof NOT_INSPECTED_REGIONS)[number];
 export type AgentPageWithheldReason = "password" | PreviewAgentWithheldReason;
@@ -179,10 +185,14 @@ export async function semanticPageSnapshot(
     state.refs.clear();
     const passwordNodes = state.passwordNodes ??= new WeakSet();
     state.passwordValues ??= new Set();
-    const privacy = (${createPreviewAgentPrivacyRuntime.toString()})();
+    const privacy = ${PRIVACY_RUNTIME};
     const normalizeText = (value, maximum = ${MAX_PAGE_VALUE_SOURCE_CHARS}) => String(value ?? "")
       .slice(0, maximum)
       .replace(/\\s+/gu, " ").trim();
+    const clippedText = (value, maximum) => normalizeText(
+      value.length > maximum ? privacy.clip(state, value.slice(0, maximum)) : value,
+      maximum,
+    );
     const boundedLowerAttribute = (element, name, maximum) => {
       const value = element.getAttribute?.(name);
       return typeof value === "string" && value.length <= maximum
@@ -207,7 +217,7 @@ export async function semanticPageSnapshot(
     }
     if (scannedElementNodes.length >= ${MAX_SEMANTIC_SCAN_NODES}
       && elementIterator?.nextNode()) elementScanTruncated = true;
-    const scannedInputs = scannedElementNodes.filter((element) => ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName));
+    const scannedInputs = scannedElementNodes.filter((element) => ["INPUT", "TEXTAREA"].includes(element.tagName));
     const elementStyles = new WeakMap();
     const effectiveOpacity = new WeakMap();
     const effectiveAriaHidden = new WeakMap();
@@ -289,34 +299,35 @@ export async function semanticPageSnapshot(
       if (!current) return "";
       const value = element.getAttribute?.("alt");
       return typeof value === "string"
-        ? normalizeText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS})
+        ? clippedText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS})
         : "";
     };
     const boundedElementText = (element) => {
       const chunks = [];
       let characters = 0;
       let visited = 0;
+      let truncated = false;
       let node = element?.firstChild || null;
       while (node) {
         visited += 1;
-        if (visited > ${MAX_LABEL_TEXT_NODES}) break;
+        if (visited > ${MAX_LABEL_TEXT_NODES}) { truncated = true; break; }
         if (node.nodeType === 3) {
           if (node.parentElement === element
             || styleFor(node.parentElement).visibility !== "hidden") {
             const value = String(node.nodeValue || "");
             const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
-            if (remaining <= 0) break;
+            if (remaining <= 0) { truncated = true; break; }
             chunks.push(value.slice(0, remaining));
             characters += Math.min(value.length, remaining);
-            if (value.length > remaining) break;
+            if (value.length > remaining) { truncated = true; break; }
           }
         } else if (node.nodeType === 1 && node.tagName === "IMG") {
           const value = boundedImageAlt(node, element);
           const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
-          if (remaining <= 0) break;
+          if (remaining <= 0) { truncated = true; break; }
           chunks.push(value.slice(0, remaining));
           characters += Math.min(value.length, remaining);
-          if (value.length > remaining) break;
+          if (value.length > remaining) { truncated = true; break; }
         } else if (node.nodeType === 1) {
           const style = styleFor(node);
           const hidden = ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
@@ -331,9 +342,10 @@ export async function semanticPageSnapshot(
         while (node && node !== element && !node.nextSibling) node = node.parentNode;
         node = node && node !== element ? node.nextSibling : null;
       }
-      return normalizeText(chunks.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+      const text = chunks.join(" ");
+      return normalizeText(truncated ? privacy.clip(state, text) : text, text.length);
     };
-    for (const input of scannedInputs) privacy.inspect(state, input);
+    for (const input of scannedInputs) privacy.inspect(state, input, "settle");
     const passwordField = (element) => passwordNodes.has(element) || privacy.isSensitiveField(element);
     const editableHost = (element) => {
       const state = element.getAttribute?.("contenteditable");
@@ -392,7 +404,7 @@ export async function semanticPageSnapshot(
         }
         labels.push(boundedElementText(label));
       }
-      return normalizeText(labels.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+      return clippedText(labels.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
     };
     const nameFor = (element) => {
       const isInput = element.tagName === "INPUT";
@@ -556,17 +568,14 @@ export async function semanticPageSnapshot(
       while (node && node !== body && !node.nextSibling) node = node.parentNode;
       node = node && node !== body ? node.nextSibling : null;
     }
-    const normalizedBodyText = normalizeText(
-      textChunks.join(" "),
-      ${MAX_BODY_TEXT_SOURCE_CHARS},
-    );
-    if (normalizedBodyText.length > ${MAX_PAGE_TEXT_CHARS}) bodyTruncated = true;
-    const bodyText = normalizedBodyText.slice(0, ${MAX_PAGE_TEXT_CHARS});
+    const bodySource = textChunks.join(" ");
+    const bodySourceCut = bodyTruncated;
+    if (normalizeText(bodySource, ${MAX_BODY_TEXT_SOURCE_CHARS}).length > ${MAX_PAGE_TEXT_CHARS}) bodyTruncated = true;
     return {
       title: redact(document.title, 300),
       url: redact(routeUrl, 4096),
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
-      text: redact(bodyText, ${MAX_PAGE_TEXT_CHARS}),
+      text: privacy.redact(state, bodySource, ${MAX_PAGE_TEXT_CHARS}, bodySourceCut),
       elements,
       truncated: elementScanTruncated
         || elements.length >= ${MAX_SEMANTIC_ELEMENTS}
@@ -586,9 +595,7 @@ export async function semanticPageSnapshot(
 }
 
 export async function installAgentPagePrivacyGuard(contents: WebContents): Promise<void> {
-  await execute(contents, `(${installPreviewAgentPrivacyGuard.toString()})((
-    ${createPreviewAgentPrivacyRuntime.toString()}
-  )())`);
+  await execute(contents, `(${installPreviewAgentPrivacyGuard.toString()})(${PRIVACY_RUNTIME})`);
 }
 
 export async function agentPageHasSensitiveEvidence(contents: WebContents): Promise<boolean> {
@@ -604,11 +611,12 @@ export async function agentPageEvidencePrivacy(
     if (state?.privacyGuardInstalled !== true) {
       throw new Error("The Browser privacy guard is unavailable.");
     }
-    const privacy = (${createPreviewAgentPrivacyRuntime.toString()})();
-    const inspect = (input) => privacy.inspect(state, input);
+    const privacy = ${PRIVACY_RUNTIME};
+    const inspection = ${JSON.stringify(purpose === "semantic" ? "settle" : "observe")};
+    const inspect = (input) => privacy.inspect(state, input, inspection);
     if (typeof document.getElementsByTagName === "function") {
       let scanned = 0;
-      for (const tag of ["input", "textarea", "select"]) {
+      for (const tag of ["input", "textarea"]) {
         const inputs = document.getElementsByTagName(tag);
         for (let index = 0; index < inputs.length; index += 1) {
           if (scanned++ >= ${MAX_SEMANTIC_SCAN_NODES}) {
@@ -629,7 +637,7 @@ export async function agentPageEvidencePrivacy(
         const candidate = iterator.nextNode();
         if (!candidate) break;
         scanned += 1;
-        if (["INPUT", "TEXTAREA", "SELECT"].includes(candidate.tagName)) inspect(candidate);
+        if (["INPUT", "TEXTAREA"].includes(candidate.tagName)) inspect(candidate);
       }
       if (!iterator) state.evidenceWithheld ??= "credential-signal";
       else if (scanned >= ${MAX_SEMANTIC_SCAN_NODES} && iterator.nextNode()) {
@@ -813,10 +821,14 @@ export async function locateAgentPageRef(
     if (hitOwner !== element) return { found: false };
     const passwordNodes = state.passwordNodes ??= new WeakSet();
     const passwordValues = state.passwordValues ??= new Set();
-    const privacy = (${createPreviewAgentPrivacyRuntime.toString()})();
+    const privacy = ${PRIVACY_RUNTIME};
     const normalizeText = (value, maximum = ${MAX_PAGE_VALUE_SOURCE_CHARS}) => String(value ?? "")
       .slice(0, maximum)
       .replace(/\\s+/gu, " ").trim();
+    const clippedText = (value, maximum) => normalizeText(
+      value.length > maximum ? privacy.clip(state, value.slice(0, maximum)) : value,
+      maximum,
+    );
     const boundedImageAlt = (candidate, root) => {
       const image = candidate?.tagName === "IMG"
         || (candidate?.tagName === "INPUT"
@@ -843,34 +855,35 @@ export async function locateAgentPageRef(
       if (!current) return "";
       const value = candidate.getAttribute?.("alt");
       return typeof value === "string"
-        ? normalizeText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS})
+        ? clippedText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS})
         : "";
     };
     const boundedElementText = (root) => {
       const chunks = [];
       let characters = 0;
       let visited = 0;
+      let truncated = false;
       let node = root?.firstChild || null;
       while (node) {
         visited += 1;
-        if (visited > ${MAX_LABEL_TEXT_NODES}) break;
+        if (visited > ${MAX_LABEL_TEXT_NODES}) { truncated = true; break; }
         if (node.nodeType === 3) {
           if (node.parentElement === root
             || getComputedStyle(node.parentElement).visibility !== "hidden") {
             const value = String(node.nodeValue || "");
             const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
-            if (remaining <= 0) break;
+            if (remaining <= 0) { truncated = true; break; }
             chunks.push(value.slice(0, remaining));
             characters += Math.min(value.length, remaining);
-            if (value.length > remaining) break;
+            if (value.length > remaining) { truncated = true; break; }
           }
         } else if (node.nodeType === 1 && node.tagName === "IMG") {
           const value = boundedImageAlt(node, root);
           const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
-          if (remaining <= 0) break;
+          if (remaining <= 0) { truncated = true; break; }
           chunks.push(value.slice(0, remaining));
           characters += Math.min(value.length, remaining);
-          if (value.length > remaining) break;
+          if (value.length > remaining) { truncated = true; break; }
         } else if (node.nodeType === 1) {
           const nodeStyle = getComputedStyle(node);
           const hidden = ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
@@ -885,7 +898,8 @@ export async function locateAgentPageRef(
         while (node && node !== root && !node.nextSibling) node = node.parentNode;
         node = node && node !== root ? node.nextSibling : null;
       }
-      return normalizeText(chunks.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+      const text = chunks.join(" ");
+      return normalizeText(truncated ? privacy.clip(state, text) : text, text.length);
     };
     const scanRoot = document.documentElement || document.body;
     const scanIterator = scanRoot && typeof document.createNodeIterator === "function"
@@ -898,11 +912,11 @@ export async function locateAgentPageRef(
       const candidate = scanIterator.nextNode();
       if (!candidate) break;
       scannedNodes += 1;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(candidate.tagName)) scannedInputs.push(candidate);
+      if (["INPUT", "TEXTAREA"].includes(candidate.tagName)) scannedInputs.push(candidate);
     }
     const scanTruncated = scannedNodes >= ${MAX_SEMANTIC_SCAN_NODES}
       && Boolean(scanIterator.nextNode());
-    for (const input of scannedInputs) privacy.inspect(state, input);
+    for (const input of scannedInputs) privacy.inspect(state, input, "settle");
     const rawInputType = element.tagName === "INPUT" ? element.type : "";
     const inputType = element.tagName === "INPUT"
       && (rawInputType === undefined
@@ -962,7 +976,7 @@ export async function locateAgentPageRef(
           ["id", "name", "autocomplete", "placeholder", "aria-label"].map((name) =>
             String(element.getAttribute?.(name) ?? "").slice(0, 300)).join(" ")
         ),
-      label: scanTruncated
+      label: scanTruncated || state.evidenceWithheld
         ? "page element"
         : redact(
           element.getAttribute("aria-label")
@@ -974,7 +988,7 @@ export async function locateAgentPageRef(
             })()
             || (element.labels?.[0] && boundedElementText(element.labels[0]))
             || boundedImageAlt(element, element)
-            || boundedElementText(element)
+            || (["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) ? "" : boundedElementText(element))
             || element.getAttribute("title") || element.getAttribute("placeholder")
             || (element.tagName === "INPUT" && !password ? element.value : "")
           || "element"

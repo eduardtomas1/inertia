@@ -17,6 +17,12 @@ import {
 } from "../../src/main/preview-agent-page";
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
 import { installPreviewAgentShadowBoundarySignal } from "../../src/shared/preview-agent-privacy-guard";
+import {
+  PREVIEW_AGENT_NAME_WORD_SOURCE,
+  PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
+} from "../../src/shared/preview-agent-sensitive-fields";
+
+const nameSources = `${JSON.stringify(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE)}, ${JSON.stringify(PREVIEW_AGENT_NAME_WORD_SOURCE)}`;
 
 function bodyWithText(text: string): {
   firstChild: { nodeType: number; parentElement: unknown; parentNode: unknown; readonly nodeValue: string; nextSibling: null };
@@ -294,7 +300,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     runInNewContext("new HTMLElement().attachInternals()", context);
@@ -331,7 +337,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     expect(() => runInNewContext("new Element().attachShadow({mode:'invalid'})", context))
@@ -446,7 +452,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     runInNewContext(`
@@ -667,7 +673,7 @@ describe("agent browser semantic snapshots", () => {
     };
 
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       context,
     );
     runInNewContext(`
@@ -744,7 +750,7 @@ describe("agent browser semantic snapshots", () => {
       Event: FakeEvent,
     };
     runInNewContext(
-      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal")`,
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary", "credential-signal", ${nameSources})`,
       bareContext,
     );
     runInNewContext("new Element().innerHTML = '<p>ordinary</p>'", bareContext);
@@ -1400,6 +1406,60 @@ describe("agent browser semantic snapshots", () => {
       y: 50,
     });
     expect(nextNodeCalls).toBe(4_001);
+  });
+
+  it("keeps interaction labels free of unredactable values and form control content", async () => {
+    const key = `-----BEGIN PRIVATE KEY-----\n${"MIIE".repeat(420)}\n-----END PRIVATE KEY-----`;
+    const textarea: Record<string, unknown> = {
+      tagName: "TEXTAREA", value: key, defaultValue: key, disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: false,
+      getAttribute: (name: string) => name === "placeholder" ? "Private key" : null,
+      getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
+      contains: (candidate: unknown) => candidate === textarea,
+    };
+    textarea.firstChild = { nodeType: 3, nodeValue: key, parentElement: textarea, parentNode: textarea, nextSibling: null };
+    const button: Record<string, unknown> = {
+      tagName: "BUTTON", type: "button", value: "", disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: false, firstChild: null,
+      getAttribute: (name: string) => name === "aria-label" ? "Open unremembered-secret" : null,
+      getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
+      contains: (candidate: unknown) => candidate === button,
+    };
+    let target: Record<string, unknown> = textarea;
+    const state: Record<string, unknown> = {
+      refs: new Map([["e1", textarea], ["e2", button]]),
+      passwordNodes: new WeakSet(),
+      passwordValues: new Set<string>(),
+    };
+    const context = {
+      __inertiaAgentBrowser: state,
+      document: {
+        documentElement: {},
+        createNodeIterator: () => {
+          let done = false;
+          return { nextNode: () => (done ? null : (done = true, target)) };
+        },
+        elementFromPoint: () => target,
+      },
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1")).resolves.toMatchObject({
+      found: true, label: "Private key", sensitive: true,
+    });
+    target = button;
+    state.evidenceWithheld = "redaction-limit";
+    await expect(locateAgentPageRef(contents as never, "e2")).resolves.toMatchObject({
+      found: true, label: "page element",
+    });
   });
 
   it("includes visible descendant text beneath a visibility-hidden ancestor", async () => {

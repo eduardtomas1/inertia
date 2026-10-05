@@ -20,6 +20,7 @@ import {
   type PrivateConnectSafeQuestion,
 } from "../../shared/private-connect/questions";
 import { privateConnectRuntimeGrantAllowsConversation } from "../../shared/private-connect/runtime-grants";
+import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
 import {
   privateConnectPromptSafetyIsUsable,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
@@ -257,6 +258,7 @@ export class PrivateConnectRuntimeGateway {
               createdAt: message.createdAt,
             })),
           activities: detail.activities
+            .filter((activity) => !isTurnCheckpointUnavailableActivity(activity))
             .slice(-PRIVATE_CONNECT_RUNTIME_LIMITS.activities)
             .map((activity) => ({
               id: activity.id,

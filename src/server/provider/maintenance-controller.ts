@@ -50,6 +50,8 @@ import type {
 const MAX_RETAINED_OPERATIONS = 64;
 const PIN_REFUSED_MESSAGE =
   "Inertia could not confirm that the latest release is one it supports.";
+const GATE_REFUSED_MESSAGE =
+  "Inertia has not verified this installation, so it will not run the update.";
 
 export class ProviderMaintenanceError extends Error {
   constructor(message: string) {
@@ -445,6 +447,10 @@ export class ProviderMaintenanceController {
         };
     const pinRefused = capabilities.update !== null
       && pinnedProviderUpdateAction(capabilities.update, latest.version) === null;
+    const gateRefused = capabilities.update !== null
+      && this.options.capabilityAvailable !== undefined
+      && !this.options.capabilityAvailable(target, capabilities);
+    const refused = pinRefused || gateRefused;
     const resolvedVersionStatus = versionStatus(
       target.installed,
       target.installedVersion,
@@ -458,17 +464,19 @@ export class ProviderMaintenanceController {
       freshness: latest.freshness,
       checkedAt: latest.checkedAt,
       installMethod: capabilities.installMethod,
-      updateAvailability: pinRefused
+      updateAvailability: refused
         ? "instructions-only"
         : capabilities.updateAvailability,
-      updateLabel: pinRefused ? null : capabilities.update?.label ?? null,
+      updateLabel: refused ? null : capabilities.update?.label ?? null,
       instructionsUrl: capabilities.instructionsUrl,
       message: [statusMessage(
         resolvedVersionStatus,
         latest.version,
         latest.freshness === "stale",
         latest.error,
-      ), capabilities.message, pinRefused ? PIN_REFUSED_MESSAGE : null]
+      ), capabilities.message, pinRefused
+        ? PIN_REFUSED_MESSAGE
+        : gateRefused ? GATE_REFUSED_MESSAGE : null]
         .filter(Boolean).join(" ") || null,
       manualCommand: pinnedManualCommand(
         capabilities.manualCommand ?? null,

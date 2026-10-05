@@ -27,6 +27,12 @@ import {
   type ProviderProtocolInstallationEvidence,
 } from "./runtime-capability-attestation";
 
+interface ProviderIdentifiedInstallation {
+  executable: string;
+  version: string;
+  installationFingerprint: string;
+}
+
 export interface ProviderCapabilityAuthorityOptions {
   metadataCache: ProviderMetadataCache;
   resolvedExecutable(providerId: ProviderId): string | undefined;
@@ -52,6 +58,8 @@ export interface ProviderCapabilityAuthorityOptions {
 export class ProviderCapabilityAuthority {
   private readonly protocolVerifiedInstallations =
     new Map<ProviderId, ProviderProtocolInstallationEvidence>();
+  private readonly identifiedInstallations =
+    new Map<ProviderId, ProviderIdentifiedInstallation>();
 
   constructor(private readonly options: ProviderCapabilityAuthorityOptions) {}
 
@@ -88,10 +96,23 @@ export class ProviderCapabilityAuthority {
       [],
       { "maintenance-update": true },
     );
-    return attestation
-      ? attestedProviderCapability(attestation, "maintenance-update")
-        .currentlyAvailable
-      : false;
+    if (attestation) {
+      return attestedProviderCapability(attestation, "maintenance-update")
+        .currentlyAvailable;
+    }
+    const identified = this.identifiedInstallations.get(providerId);
+    const support = providerCapabilityManifest(native.harnessId)?.capabilities
+      .find(({ id }) => id === "maintenance-update")?.support;
+    return Boolean(identified)
+      && support !== undefined
+      && support !== "unavailable"
+      && this.options.evidenceTrusted(providerId)
+      && identified!.executable === executable
+      && this.options.installationFingerprint(
+        providerId,
+        executable,
+        identified!.version,
+      ) === identified!.installationFingerprint;
   }
 
   available(
@@ -152,6 +173,7 @@ export class ProviderCapabilityAuthority {
 
   invalidate(providerId: ProviderId): void {
     this.protocolVerifiedInstallations.delete(providerId);
+    this.identifiedInstallations.delete(providerId);
   }
 
   installationState(providerId: ProviderId): "current" | "changed" | "unverified" {
@@ -174,6 +196,7 @@ export class ProviderCapabilityAuthority {
     const providerId = detection.provider.id;
     const harnessId = providerNativeHarnessId(providerId);
     const manifest = providerCapabilityManifest(harnessId);
+    this.rememberIdentifiedInstallation(detection);
     if (
       !manifest
       || !(detection.protocolVerified ?? detection.canRun)
@@ -181,7 +204,7 @@ export class ProviderCapabilityAuthority {
       || !detection.executable
       || !detection.version
     ) {
-      this.invalidate(providerId);
+      this.protocolVerifiedInstallations.delete(providerId);
       return;
     }
     this.protocolVerifiedInstallations.set(providerId, {
@@ -189,6 +212,28 @@ export class ProviderCapabilityAuthority {
       version: detection.version,
       harnessId,
       manifestDigest: manifest.digest,
+      installationFingerprint: this.options.installationFingerprint(
+        providerId,
+        detection.executable,
+        detection.version,
+      ),
+    });
+  }
+
+  private rememberIdentifiedInstallation(detection: ProviderDetection): void {
+    const providerId = detection.provider.id;
+    if (
+      detection.installState !== "installed"
+      || !detection.cleanupConfirmed
+      || !detection.executable
+      || !detection.version
+    ) {
+      this.identifiedInstallations.delete(providerId);
+      return;
+    }
+    this.identifiedInstallations.set(providerId, {
+      executable: detection.executable,
+      version: detection.version,
       installationFingerprint: this.options.installationFingerprint(
         providerId,
         detection.executable,

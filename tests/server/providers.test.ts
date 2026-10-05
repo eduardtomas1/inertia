@@ -948,6 +948,8 @@ setInterval(() => {}, 1000);
       },
     })).resolves.toMatchObject({
       available: true,
+      executable,
+      version: "1.17.0",
       installState: "installed",
       authState: "unknown",
       canRun: false,
@@ -966,7 +968,7 @@ setInterval(() => {}, 1000);
   ])("rejects OpenCode 2 with an explicit unsupported-version message when serve help is %s", async (serveHelp) => {
     const executable = join(temporaryRoot(), "opencode");
     const probes: string[][] = [];
-    await expect(detectProvider("opencode", { command: executable }, {
+    const detection = detectProvider("opencode", { command: executable }, {
       executableCandidates: async () => [executable],
       probeOpenCodePureIsolation: async () => ({
         cleanupConfirmed: true,
@@ -982,7 +984,9 @@ setInterval(() => {}, 1000);
           cleanupConfirmed: true,
         };
       },
-    })).resolves.toMatchObject({
+    });
+    await expect(detection).resolves.not.toHaveProperty("executable");
+    await expect(detection).resolves.toMatchObject({
       available: true,
       installState: "installed",
       authState: "unknown",
@@ -1213,6 +1217,8 @@ setInterval(() => {}, 1000);
       ),
     ).resolves.toMatchObject({
       available: true,
+      executable,
+      version: "1.1.0",
       installState: "installed",
       canRun: false,
       statusMessage:
@@ -1255,12 +1261,38 @@ setInterval(() => {}, 1000);
       authState: "authenticated",
       canRun: true,
     });
-    await expect(detectProvider("cursor", { command: wrong, cwd: wrongRoot })).resolves.toMatchObject({
+    const unidentified = await detectProvider("cursor", { command: wrong, cwd: wrongRoot });
+    expect(unidentified).toMatchObject({
       available: true,
       installState: "installed",
       authState: "unknown",
       canRun: false,
       statusMessage: "Cursor CLI found, but ACP is unavailable",
+    });
+    expect(unidentified.executable).toBeUndefined();
+  });
+
+  it.each([
+    ["cursor", "cursor-agent", "2026.10.01-e373342", "2026.10.01-e373342", "Cursor CLI found, but ACP is unavailable"],
+    ["kimi", "kimi", "kimi 0.30.0", "0.30.0", "Kimi Code CLI found, but ACP is unavailable"],
+  ] as const)("identifies an outdated %s CLI without ACP so it can be updated", async (providerId, name, versionOutput, version, statusMessage) => {
+    const executable = join(temporaryRoot(), name);
+    await expect(detectProvider(providerId, { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => ({
+        exitCode: args[0] === "--version" ? 0 : 2,
+        output: args[0] === "--version" ? versionOutput : "unknown command",
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+      }),
+    })).resolves.toMatchObject({
+      available: true,
+      executable,
+      version,
+      installState: "installed",
+      canRun: false,
+      statusMessage,
     });
   });
 

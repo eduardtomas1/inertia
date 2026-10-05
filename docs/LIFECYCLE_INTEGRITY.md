@@ -142,7 +142,7 @@ maintenance evidence remains quarantined and provider admission stays closed.
 | Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + containment | prompt abort + owned-server cleanup |
 | Provider-owned server | none | none | none | none | native, run-owned |
 | Custom backend / endpoint / performance mode | attested route / endpoint / native mode | attested route / endpoint / native mode | none | none | none |
-| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | manual only; non-interactive update unavailable | installation-dependent |
+| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | installation-dependent | installation-dependent |
 
 The machine-readable manifest and runtime attestation are versioned and bound
 to one harness, provider installation/configuration identity (including
@@ -219,6 +219,18 @@ unproven path. Discovery keeps the command name of a multiplexing shim (`snap`,
 were started with. The updater receives only the package-manager home it needs
 (`PNPM_HOME`, `BUN_INSTALL`, `VOLTA_HOME`, `CODEX_HOME`, `HOMEBREW_PREFIX`) on
 top of the existing allowlist.
+
+An installation too old for its protocol check can still update. Discovery
+returns the executable and version of an identified CLI that answered
+`--version` but lacks ACP (Cursor, Kimi), plugin-free serve (OpenCode 1.x),
+the App Server (Codex) or the headless release (Antigravity below 1.2.2); an
+unidentified executable and an OpenCode 2 install are not returned. The
+capability authority records such an installation as identified (version
+probe completed, cleanup confirmed, executable and file fingerprint bound) and
+admits `maintenance-update` for it when the manifest does not declare the
+operation unavailable. Every manifest now declares it negotiated, Kimi and
+Antigravity included. Settings applies the same gate, so it shows **Update**
+only when the update would be admitted, and otherwise the command to run.
 
 The former direct CLI harness is retained only as the explicitly named
 `createLegacyCliAgentHarnessForTests` fixture for lifecycle tests and

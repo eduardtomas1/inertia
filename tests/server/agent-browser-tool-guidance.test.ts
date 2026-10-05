@@ -32,4 +32,14 @@ describe("Browser tool guidance", () => {
     expect(pack.text).toContain(UNTRUSTED_GUIDANCE);
     expect(pack.revision).toBe(3);
   });
+
+  it("keeps the advertised tool list and every description bounded", () => {
+    const advertised = AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name, description, inputSchema }) => ({
+      name, description, inputSchema,
+    }));
+    expect(Buffer.byteLength(JSON.stringify(advertised), "utf8")).toBeLessThanOrEqual(7_500);
+    for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {
+      expect(definition.description.length, definition.name).toBeLessThanOrEqual(700);
+    }
+  });
 });

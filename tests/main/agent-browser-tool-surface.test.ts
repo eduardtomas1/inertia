@@ -41,4 +41,24 @@ describe("Browser tool surface", () => {
       message: "That page element is stale. Take a new inertia_browser_snapshot for current refs.",
     });
   });
+
+  it("presses modifier keys with trusted input and keeps modified Enter on the guarded activation path", async () => {
+    const { broker, contents } = await loadedHarness();
+    for (const key of ["Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter"] as const) {
+      await expect(broker.perform(runIdentity, { action: "press", key }))
+        .resolves.toMatchObject({ ok: true });
+    }
+    expect(contents.sentInputs).toEqual([
+      { type: "keyDown", keyCode: "Tab", modifiers: ["shift"] },
+      { type: "keyUp", keyCode: "Tab", modifiers: ["shift"] },
+      { type: "keyDown", keyCode: "Enter", modifiers: ["shift"] },
+      { type: "char", keyCode: "\r", modifiers: ["shift"] },
+      { type: "keyUp", keyCode: "Enter", modifiers: ["shift"] },
+      { type: "keyDown", keyCode: "Enter", modifiers: ["control"] },
+      { type: "keyUp", keyCode: "Enter", modifiers: ["control"] },
+      { type: "keyDown", keyCode: "Enter", modifiers: ["meta"] },
+      { type: "keyUp", keyCode: "Enter", modifiers: ["meta"] },
+    ]);
+    expect(pageTools.agentPageActivationBlocked).toHaveBeenCalled();
+  });
 });

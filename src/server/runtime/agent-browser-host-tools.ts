@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Conversation } from "../../shared/contracts.js";
 import {
+  AGENT_BROWSER_KEYS,
   AGENT_BROWSER_TAB_ID_PATTERN,
   DEFAULT_AGENT_BROWSER_WAIT_MS,
   MAX_AGENT_BROWSER_TYPE_CHARS,
@@ -12,7 +13,6 @@ import {
   MIN_AGENT_BROWSER_WAIT_MS,
   agentBrowserTextLength,
   type AgentBrowserCommand,
-  type AgentBrowserKey,
   type AgentBrowserRunIdentity,
   type AgentBrowserState,
 } from "../../shared/agent-browser.js";
@@ -30,10 +30,6 @@ import { isSafeApprovalDisplayText } from "../provider/approval-display.js";
 const REF_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 const NUL_FREE_PATTERN = "^[^\\u0000]*$";
 const SINGLE_LINE_PATTERN = "^[^\\u0000\\r\\n]*$";
-const BROWSER_KEYS = [
-  "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
-  "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
-] as const satisfies readonly AgentBrowserKey[];
 
 const boundedText = (maximum: number) => z.string().refine(
   (value) => agentBrowserTextLength(value) <= maximum,
@@ -43,7 +39,7 @@ const tabIdSchema = z.string().regex(new RegExp(AGENT_BROWSER_TAB_ID_PATTERN, "u
 const refSchema = z.string().regex(new RegExp(REF_PATTERN, "u"));
 const urlSchema = boundedText(MAX_AGENT_BROWSER_URL_CHARS).min(1).regex(new RegExp(NUL_FREE_PATTERN, "u"));
 const textSchema = boundedText(MAX_AGENT_BROWSER_TYPE_CHARS).regex(new RegExp(NUL_FREE_PATTERN, "u"));
-const keySchema = z.enum(BROWSER_KEYS);
+const keySchema = z.enum(AGENT_BROWSER_KEYS);
 const deltaSchema = z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0);
 const emptySchema = z.object({}).strict();
 const navigateSchema = z.object({ url: urlSchema }).strict();
@@ -133,7 +129,7 @@ readonly ProviderHostToolDefinition[] = [
   {
     name: "inertia_browser_press",
     description: "Press one key in the active Inertia Browser page. The key goes to the focused element, so click or type into it first.",
-    inputSchema: objectSchema({ key: { type: "string", enum: [...BROWSER_KEYS] } }, ["key"]),
+    inputSchema: objectSchema({ key: { type: "string", enum: [...AGENT_BROWSER_KEYS] } }, ["key"]),
     inputValidator: pressSchema,
     readOnly: false,
   },
@@ -207,7 +203,7 @@ readonly ProviderHostToolDefinition[] = [
         ref: { type: "string", pattern: REF_PATTERN },
         text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS },
         replace: { type: "boolean", default: true },
-        key: { enum: [...BROWSER_KEYS] },
+        key: { enum: [...AGENT_BROWSER_KEYS] },
         deltaY: { type: "integer", minimum: -2_000, maximum: 2_000 },
       },
       required: ["action"],

@@ -12,7 +12,7 @@ import type { BrowserEvidenceCapture } from "./browser-evidence-capture.js";
 import { AgentBrowserRefusal, changedGeometry, providerVisiblePageUrl, stopForAbort } from "./preview-agent-action.js";
 import type { BrowserApprovalGuard } from "./preview-agent-approvals.js";
 import {
-  agentPageActivationFailureMessage, agentPageBoundaryGaps, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationFailureMessage, agentPageBoundaryGaps, agentPageKeyInput, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import {
   agentPageEvidencePrivacy, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
@@ -551,24 +551,27 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     let activationBlocked: "disabled" | "file" | "nested" | "retargeted" | null = null;
+    const { keyCode, modifiers } = agentPageKeyInput(key);
     const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
       scope.inputSent = true;
-      if (key === "Enter" || key === "Space") {
+      if (keyCode === "Enter" || keyCode === "Space") {
         activationBlocked = await deliverAgentPageActivation(
           contents,
-          key,
+          keyCode,
           async (operation) => {
             const result = await this.rendererOperation(contents, operation, { scope, phase: "key-activation" });
             validate?.();
             return result;
           },
           scope.signal,
+          modifiers,
         );
         if (activationBlocked) return;
       } else {
         validate?.();
-        contents.sendInputEvent({ type: "keyDown", keyCode: key });
-        contents.sendInputEvent({ type: "keyUp", keyCode: key });
+        const keyModifiers = modifiers.length > 0 ? { modifiers } : {};
+        contents.sendInputEvent({ type: "keyDown", keyCode, ...keyModifiers });
+        contents.sendInputEvent({ type: "keyUp", keyCode, ...keyModifiers });
       }
     }, scope);
     const refusal = activationBlocked || deliveryRefusal;

@@ -63,6 +63,13 @@ advertises the same arguments the runtime validates:
 | `inertia_browser_select_tab` | `tabId` | Activate a page. |
 | `inertia_browser_close_tab` | `tabId` | Close a page. |
 
+`inertia_browser_press` accepts Enter, Tab, Escape, Backspace, Space, the
+arrow keys, Home, End, PageUp, PageDown, Shift+Tab, Shift+Enter, Control+Enter
+and Meta+Enter, sent as trusted input with their modifiers. Every Enter
+variant goes through the same guarded activation path as Enter. Control+Enter
+and Meta+Enter send key down and key up only, which is what shortcut handlers
+listen for, so they never insert a line break.
+
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at
 most 4,000, and `inertia_browser_wait_for` `text` at most 200. The runtime tool

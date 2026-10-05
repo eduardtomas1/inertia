@@ -33,6 +33,10 @@ describe("agent browser boundary", () => {
       .toBeNull();
     expect(parseAgentBrowserCommand({ action: "press", key: "Meta+A" }))
       .toBeNull();
+    for (const key of ["Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter", "Home", "End", "PageUp", "PageDown"]) {
+      expect(parseAgentBrowserCommand({ action: "press", key })).toEqual({ action: "press", key });
+    }
+    expect(parseAgentBrowserCommand({ action: "press", key: "Control+Tab" })).toBeNull();
     expect(parseAgentBrowserCommand({ action: "scroll", deltaY: 2_001 }))
       .toBeNull();
   });

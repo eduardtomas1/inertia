@@ -84,7 +84,17 @@ export type AgentBrowserKey =
   | "End"
   | "PageUp"
   | "PageDown"
-  | "Space";
+  | "Space"
+  | "Shift+Tab"
+  | "Shift+Enter"
+  | "Control+Enter"
+  | "Meta+Enter";
+
+export const AGENT_BROWSER_KEYS = [
+  "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
+  "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
+  "Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter",
+] as const satisfies readonly AgentBrowserKey[];
 
 export type AgentBrowserResult =
   | {
@@ -115,10 +125,7 @@ export const AGENT_BROWSER_TAB_ID_PATTERN =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 const UUID_PATTERN = new RegExp(AGENT_BROWSER_TAB_ID_PATTERN, "u");
 const SAFE_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
-const SAFE_KEYS = new Set<AgentBrowserKey>([
-  "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
-  "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
-]);
+const SAFE_KEYS = new Set<AgentBrowserKey>(AGENT_BROWSER_KEYS);
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

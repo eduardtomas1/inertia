@@ -267,6 +267,8 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await expect(resume).toBeEnabled();
     await expect(resume).not.toHaveAttribute("aria-disabled", "true");
     await expect(snooze).toBeVisible();
+    const continueElsewhere = row.getByRole("button", { name: "Continue with another model", exact: true });
+    await expect(continueElsewhere).toBeEnabled();
     await expect(row.getByRole("alert")).toHaveCount(0);
     await captureSizes(row, info, "limit-reset-offer");
 
@@ -292,6 +294,7 @@ test("offers, schedules and snoozes from a row inside the composer dock", async 
     await page.keyboard.press("Enter");
     const cancel = row.getByRole("button", { name: "Cancel resume", exact: true });
     await expect(row.getByText("Resume scheduled", { exact: true })).toBeVisible();
+    await expect(continueElsewhere).toHaveCount(0);
     await expect(cancel).toBeFocused();
     await expect(cancel).not.toHaveAttribute("aria-disabled", "true");
     await expectLayoutHolds(app, row);
@@ -346,13 +349,13 @@ test("offers Resume now for a missed resume inside the composer dock", async ({ 
   }
 });
 
-test("says Usage limit reached without a time or actions while no reset applies", async ({ browserName: _browserName }, info) => {
+test("says Usage limit reached without a time or resume actions while no reset applies", async ({ browserName: _browserName }, info) => {
   try {
     await app.resizeWindow(1440, 920);
     const row = await showChat(app, seed.limited);
-    await expect(row).toHaveText("Usage limit reached");
+    await expect(row).toHaveText("Usage limit reachedContinue with another model");
     await expect(row.locator("time")).toHaveCount(0);
-    await expect(row.getByRole("button")).toHaveCount(0);
+    await expect(row.getByRole("button")).toHaveText(["Continue with another model"]);
     await expect(app.page.getByRole("button", { name: new RegExp(`^${seed.limited.title}, .*, Limited$`, "u") })).toBeVisible();
     await captureSizes(row, info, "limit-reset-limited");
     expect(app.rendererErrors).toEqual([]);

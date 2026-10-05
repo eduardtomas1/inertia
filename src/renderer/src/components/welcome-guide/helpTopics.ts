@@ -115,7 +115,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Provider sessions",
-        detail: "A chat stays with the provider it started on; choosing another provider offers Start a new chat. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
+        detail: "A chat stays with the provider it started on; choosing another provider offers to continue in a new chat on the same checkout, with this chat attached as context you can preview or remove before sending. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
       },
     ],
     jumps: [
@@ -295,7 +295,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Resume at reset",
-        detail: "When a chat stops at a subscription limit, the sidebar shows it as Limited and the composer offers Resume at reset and Snooze until reset. Inertia must be running to resume. If the provider has not reported new quota within an hour of the reset, or Inertia was closed at the time, nothing is sent and Resume now waits for you.",
+        detail: "When a chat stops at a subscription limit, the sidebar shows it as Limited and the composer offers Resume at reset and Snooze until reset. Continue with another model opens the model chooser to carry the chat to another provider. Inertia must be running to resume. If the provider has not reported new quota within an hour of the reset, or Inertia was closed at the time, nothing is sent and Resume now waits for you.",
       },
       {
         name: "In the composer",

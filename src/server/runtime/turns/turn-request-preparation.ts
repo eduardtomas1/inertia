@@ -412,6 +412,9 @@ export function resolveTurnRequest(
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
           checkpointId: request.checkpointId ?? null,
+          checkpointFailure: request.checkpointId
+            ? null
+            : request.checkpointFailure ?? null,
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,

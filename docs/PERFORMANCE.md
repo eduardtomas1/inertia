@@ -23,6 +23,16 @@ process-tree termination overhead, raw process startup, deterministic terminal
 framing, and a real node-pty lifecycle. It writes
 `performance-results/platform-<platform>-<architecture>.json`.
 
+The same command also runs `tests/performance/checkpoint.benchmark.test.ts`,
+which times five repeated checkpoints of a 20-file and a 12,000-file
+repository with one edited and one untracked file, and writes
+`performance-results/checkpoint-<platform>-<architecture>.json`. Because a
+checkpoint reuses the repository index, unchanged tracked files should cost
+almost nothing; the smoke gate fails when the large median exceeds six times
+the small one or 10 s. On an Apple Silicon Mac the ratio is about 1.0 to 1.3
+(roughly 110 ms and 140 ms); the previous capture measured 18.0 (97 ms and
+1,755 ms).
+
 `benchmark:desktop` builds Inertia and launches the real Electron application
 under `NODE_ENV=test`, which deliberately disables provider discovery. It is a
 provider-disabled test-mode baseline for a fresh-profile launch, a reused-profile

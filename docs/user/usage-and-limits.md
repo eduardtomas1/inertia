@@ -15,9 +15,11 @@ Subscription quota across your accounts:
 - Select a row to list its accounts in the same columns, then select an account to see its plan, sources, freshness and banked reset credits.
 - The **i** next to the title explains how averages work.
 - Email addresses stay hidden until you choose **Reveal**.
-- **Refresh limits** asks the providers again. The page refreshes itself at most every three minutes while it's visible.
+- **Refresh limits** asks the providers again. The page and the **All provider limits** dialog refresh themselves at most every three minutes while visible.
 
-An unavailable measurement is never shown as zero, and a countdown reaching zero doesn't refill a bar: refresh to get the provider's answer.
+An unavailable measurement is never shown as zero, and a countdown reaching zero doesn't refill a bar. The window shows **Reset due** until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset.
+
+A chat that stopped at a usage limit shows **Limited** in the sidebar, and its notification says **Usage limit reached**. Above the composer it says **Usage limit reached**, with **Resume at reset** and **Snooze until reset** once the provider reports when the limit resets.
 
 ## Quota warnings
 

@@ -156,6 +156,99 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("private ignored bytes\n");
   });
 
+  function restoreStore(root: string) {
+    return {
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: (input: Parameters<import("../../src/server/database").RuntimeStore["addCheckpoint"]>[0]) => ({
+        ...input, id: randomUUID(), turnId: null, createdAt: new Date().toISOString(),
+      }),
+    };
+  }
+
+  function summary(captured: { id: string; ref: string }, conversationId: string): CheckpointSummary {
+    return {
+      ...captured, conversationId, label: "Before turn 1", turnId: null,
+      turnIndex: 1, filesChanged: 0, insertions: 0, deletions: 0,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  it("refuses to replace an ignored file with a checkpointed directory", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    mkdirSync(join(root, "build"));
+    writeFileSync(join(root, "build", "keep.txt"), "kept\n");
+    git(root, "add", "build/keep.txt");
+    git(root, "commit", "-m", "build");
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-r", "-q", "build");
+    writeFileSync(join(root, ".gitignore"), "build\n");
+    writeFileSync(join(root, "build"), "private ignored bytes\n");
+
+    await expect(restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "build"), "utf8")).toBe("private ignored bytes\n");
+  });
+
+  it("restores into an ignored directory only when no ignored file is replaced", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    mkdirSync(join(root, "cache"));
+    writeFileSync(join(root, "cache", "keep.txt"), "kept\n");
+    git(root, "add", "cache/keep.txt");
+    git(root, "commit", "-m", "cache");
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-q", "cache/keep.txt");
+    writeFileSync(join(root, ".gitignore"), "cache/\n");
+    mkdirSync(join(root, "cache"), { recursive: true });
+    for (let index = 0; index < 40; index += 1) {
+      writeFileSync(join(root, "cache", `entry-${index}.bin`), "ignored\n");
+    }
+    let published = 0;
+
+    await restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { published += 1; },
+    );
+    expect(published).toBe(1);
+    expect(readFileSync(join(root, "cache", "keep.txt"), "utf8")).toBe("kept\n");
+    expect(readFileSync(join(root, "cache", "entry-0.bin"), "utf8")).toBe("ignored\n");
+
+    writeFileSync(join(root, "cache", "keep.txt"), "private ignored bytes\n");
+    await expect(restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "cache", "keep.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
+
+  it("refuses to overwrite ignored files in a project folder below the repository root", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const project = join(root, "app");
+    mkdirSync(project);
+    writeFileSync(join(project, "settings.txt"), "tracked settings\n");
+    git(root, "add", "app/settings.txt");
+    git(root, "commit", "-m", "app");
+    const captured = await createCheckpoint(project, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-q", "--cached", "app/settings.txt");
+    writeFileSync(join(project, ".gitignore"), "settings.txt\n");
+    writeFileSync(join(project, "settings.txt"), "private ignored bytes\n");
+
+    await expect(restoreConversationCheckpoint(
+      restoreStore(project),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(project, "settings.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
+
   it("stops checkpoint preparation at an aggregate deadline", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));

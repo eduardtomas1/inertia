@@ -23,6 +23,7 @@ interface Seed {
   offer: { conversationId: string; title: string };
   blocked: { conversationId: string; title: string };
   missed: { conversationId: string; title: string };
+  limited: { conversationId: string; title: string };
 }
 
 function fakeCodex(statePath: string): string {
@@ -185,6 +186,10 @@ test.beforeAll(async () => {
           resetsAt: new Date(FIXED_NOW - 2 * HOUR).toISOString(), nextAttemptAt: new Date(FIXED_NOW - 2 * HOUR).toISOString(), attempts: 0,
           state: "missed", error: null, turnId: null });
         seeded.missed = { conversationId: third.id, title: "Summarize review feedback" };
+        const fourth = store.createConversation(first.projectId, "Plan the schema migration", { providerId: first.providerId });
+        failTurn(store, store.conversation(fourth.id), "Draft the migration steps and list what needs a backfill.");
+        store.updateConversation(fourth.id, { accessMode: store.conversation(fourth.id).accessMode === "full" ? "supervised" : "full" });
+        seeded.limited = { conversationId: fourth.id, title: "Plan the schema migration" };
         store.updateSettings({ theme: "dark", codexBinaryPath: binary });
       } finally {
         store.close();
@@ -334,6 +339,22 @@ test("offers Resume now for a missed resume inside the composer dock", async ({ 
     await expect(row.getByRole("button", { name: "Cancel resume", exact: true })).toBeEnabled();
     await expect(row.getByRole("alert")).toHaveCount(0);
     await captureSizes(row, info, "limit-reset-missed");
+    expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    await attachFailure(info);
+    throw error;
+  }
+});
+
+test("says Usage limit reached without a time or actions while no reset applies", async ({ browserName: _browserName }, info) => {
+  try {
+    await app.resizeWindow(1440, 920);
+    const row = await showChat(app, seed.limited);
+    await expect(row).toHaveText("Usage limit reached");
+    await expect(row.locator("time")).toHaveCount(0);
+    await expect(row.getByRole("button")).toHaveCount(0);
+    await expect(app.page.getByRole("button", { name: new RegExp(`^${seed.limited.title}, .*, Limited$`, "u") })).toBeVisible();
+    await captureSizes(row, info, "limit-reset-limited");
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     await attachFailure(info);

@@ -1156,6 +1156,29 @@ describe("authoritative response timeline", () => {
     expect(activityNeedsAttention(warning)).toBe(true);
   });
 
+  it("keeps the missing checkpoint notice out of the turn's work", () => {
+    const notice = activity("checkpoint", "turn", {
+      kind: "status",
+      title: "No checkpoint for this turn",
+      detail: "Skipped: the checkpoint operation timed out.",
+    });
+    const success = activity("success", "turn");
+    const turn = agentTurn("turn", "user");
+    const timeline = buildResponseTimeline({
+      turns: [turn],
+      messages: [message("user", turn.id, "user", "Try it", turn.requestedAt)],
+      activities: [notice, success],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const response = timelineTurn(timeline, turn.id);
+    expect(response.checkpointUnavailableReason)
+      .toBe("Skipped: the checkpoint operation timed out.");
+    expect(response.activities.map(({ id }) => id)).toEqual(["success"]);
+    expect(response.foldableActivities.map(({ id }) => id)).toEqual(["success"]);
+    expect(response.importantActivities).toEqual([]);
+  });
+
   it("associates checkpoints only through explicit turn identity, never turn index", () => {
     const turn = agentTurn("turn", "user");
     const checkpoint: CheckpointSummary = {

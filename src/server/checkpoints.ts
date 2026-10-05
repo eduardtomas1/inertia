@@ -489,6 +489,7 @@ export async function captureRawWorktreeTree(
           "--literal-pathspecs",
           "add",
           "-A",
+          "--force",
           "--pathspec-from-file=-",
           "--pathspec-file-nul",
         ]),

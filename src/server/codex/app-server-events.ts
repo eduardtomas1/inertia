@@ -422,7 +422,9 @@ export class CodexAppServerEvents {
       }
       if (parsedApproval.undisplayable) {
         this.host.writeMessage({ id, result: codexApprovalResult(parsedApproval.protocol, "deny") });
-        this.emitActivity("system", "info", "Declined a Codex command that Inertia cannot display safely");
+        this.emitActivity("system", "info", params.kind === "writeStdin"
+          ? "Declined input to a running command that Inertia cannot display safely"
+          : "Declined a Codex command that Inertia cannot display safely");
         return;
       }
       if (approval.availableDecisions.length === 0) {

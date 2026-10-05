@@ -319,6 +319,28 @@ describe("Codex native approval turn authority", () => {
     } finally { foreign.events.dispose(); }
   });
 
+  it("says it declined terminal input it cannot display safely", () => {
+    const h = interactionHarness();
+    try {
+      for (const [id, command] of [["interrupt", "write_stdin --session-id 7 '\u0003'"], ["escape", "write_stdin --session-id 7 '\u001b:q!\n'"]] as const) {
+        h.events.handleServerRequest(id, "item/commandExecution/requestApproval", {
+          ...approvalParams(), kind: "writeStdin", command, environmentId: null, availableDecisions: ["accept", "cancel"],
+        });
+      }
+      expect(h.approvals).toEqual([]);
+      expect(h.writes).toEqual([
+        { id: "interrupt", result: { decision: "decline" } },
+        { id: "escape", result: { decision: "decline" } },
+      ]);
+      expect(h.activities).toEqual([
+        ["system", "info", "Declined input to a running command that Inertia cannot display safely"],
+        ["system", "info", "Declined input to a running command that Inertia cannot display safely"],
+      ]);
+      expect(h.cancel).not.toHaveBeenCalled();
+      expect(h.rememberFailure).not.toHaveBeenCalled();
+    } finally { h.events.dispose(); }
+  });
+
   it.each(["stop", "turn-completed"] as const)("retires a displayed approval answered after %s without a protocol failure", (edge) => {
     const h = interactionHarness();
     try {

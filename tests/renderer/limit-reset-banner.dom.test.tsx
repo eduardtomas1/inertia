@@ -44,6 +44,15 @@ describe("quota reset banner", () => {
     await act(async () => undefined);
     expect(view.container).toBeEmptyDOMElement();
   });
+  it("says a usage limit was reached, without a time or actions, while no reset is reported", async () => {
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: null, usageLimited: true });
+    render(banner(run));
+    const row = await screen.findByRole("group", { name: "Usage limit" });
+    expect(row).toHaveTextContent(/^Usage limit reached$/);
+    expect(row).toHaveAttribute("data-state", "limited");
+    expect(row.querySelector("time")).toBeNull();
+    expect(screen.queryAllByRole("button")).toEqual([]);
+  });
   it("drops a late response from a different chat", async () => {
     let resolve!: (value: LimitResetResult) => void;
     const promise = new Promise<LimitResetResult>((done) => { resolve = done; });

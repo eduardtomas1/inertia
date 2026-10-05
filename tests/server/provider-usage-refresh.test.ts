@@ -4,6 +4,7 @@ import { claudeRateLimitReadResult } from "../../src/server/provider/claude-agen
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import {
   createTurnUsageRefresh,
+  IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS,
   startIdleRateLimitRefresh,
   type ProviderUsageRefreshDependencies,
 } from "../../src/server/runtime/provider-usage-refresh";
@@ -239,6 +240,57 @@ describe("quota read after a reported reset", () => {
     startIdleRateLimitRefresh(value.dependencies, hour);
     await vi.advanceTimersByTimeAsync(10 * 60 * 1_000);
     expect(value.reads).toEqual([]);
+    value.abort.abort();
+  });
+});
+
+describe("idle usage freshness", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("keeps idle usage fresh between reads at one read per interval", async () => {
+    let reads = 0;
+    const cache = new ProviderMetadataCache({
+      read: async () => {
+        reads += 1;
+        return { rateLimits: [{ id: "codex:primary", label: "Codex", usedPercent: 40, remainingPercent: 60, windowMinutes: 300, resetsAt: null }] };
+      },
+    });
+    const read = (providerId: ProviderId, fields: Array<"models" | "rateLimits">) => cache.metadata(providerId, `/tools/${providerId}`, {}, "/workspace", { fields, force: true });
+    await read("codex", ["rateLimits"]);
+    reads = 0;
+    const abort = new AbortController();
+    startIdleRateLimitRefresh({
+      enabled: true,
+      signal: abort.signal,
+      isClosed: () => false,
+      cachedState: (providerId) => cache.current(providerId),
+      read: (providerId, fields) => read(providerId as ProviderId, fields),
+      apply: () => undefined,
+      broadcastSnapshot: () => undefined,
+      isExternalTurn: () => false,
+      canRun: (providerId) => providerId === "codex",
+      activeProviderIds: () => new Set(),
+      track: async (operation) => await operation(),
+    });
+    const freshness = new Set<string>();
+    for (let elapsed = 0; elapsed < 30 * 60 * 1_000; elapsed += 10_000) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      freshness.add(cache.current("codex").metadataState.rateLimits.freshness);
+    }
+    expect([...freshness]).toEqual(["fresh"]);
+    expect(reads).toBe(10);
+    abort.abort();
+  });
+
+  it("reads fresh idle usage that would age out before the next read, and skips usage read moments ago", async () => {
+    const value = fixture({ now: () => Date.now() });
+    const tick = IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS;
+    value.states.set("codex", value.fresh([], new Date(Date.now() + tick - 2 * 60 * 1_000).toISOString()));
+    value.states.set("claude", value.fresh([], new Date(Date.now() + tick - 30 * 1_000).toISOString()));
+    startIdleRateLimitRefresh(value.dependencies);
+    await vi.advanceTimersByTimeAsync(tick);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
     value.abort.abort();
   });
 });

@@ -32,6 +32,9 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
 
 const RATE_LIMIT_PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
 export const IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS = 3 * 60 * 1_000;
+const RATE_LIMIT_READ_BUDGET_MS = 30 * 1_000;
+const IDLE_READ_WINDOW_MS = RATE_LIMIT_PROVIDER_IDS.length * RATE_LIMIT_READ_BUDGET_MS;
+export const RATE_LIMIT_TTL_MS = IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS + 2 * IDLE_READ_WINDOW_MS;
 const MAX_IDLE_RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1_000;
 export const RESET_READ_DELAY_MS = 5 * 1_000;
 const MAX_TIMER_MS = 2_147_483_647;
@@ -162,7 +165,8 @@ export function startIdleRateLimitRefresh<Metadata>(
         && !busy.has(providerId)
         && (retry.get(providerId)?.at ?? 0) <= now()
         && rateLimits.updatedAt !== null
-        && rateLimits.freshness !== "fresh";
+        && (rateLimits.freshness !== "fresh"
+          || now() - Date.parse(rateLimits.updatedAt) + intervalMs + IDLE_READ_WINDOW_MS > RATE_LIMIT_TTL_MS);
     });
     if (due.length === 0) armReset();
     else refresh(due);

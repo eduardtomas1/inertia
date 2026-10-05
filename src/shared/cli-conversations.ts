@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const CLI_IMPORT_MAX_MESSAGES = 200;
 export const CLI_IMPORT_MAX_TEXT = 256 * 1024;
-export const CLI_TRANSCRIPT_READ_DEADLINE_MS = 60_000;
+export { CLI_TRANSCRIPT_READ_DEADLINE_MS } from "./runtime-command-timeouts";
 export const cliProviderSchema = z.enum(["codex", "claude"]);
 export type CliProvider = z.infer<typeof cliProviderSchema>;
 export const cliProviderLabel = (provider: CliProvider): string => provider === "codex" ? "Codex" : "Claude Code";

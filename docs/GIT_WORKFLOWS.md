@@ -46,6 +46,35 @@ commit/pull through these controls. Git failures use bounded, credential-free
 guidance for authentication, connectivity, non-fast-forward rejection, index
 locks, occupied branches, and missing author identity.
 
+## Checkpoints
+
+Inertia records a checkpoint before each chat turn and after it finishes, under
+`refs/inertia/checkpoints/<chat>/<checkpoint>`. A checkpoint holds tracked files
+as they are on disk, including tracked files that match an ignore rule, and the
+untracked files Git does not ignore. Ignored untracked files are never
+included.
+
+Capture runs Git with an isolated configuration, raw attributes (no clean or
+smudge filters) and an empty hooks directory. It starts from a copy of the
+repository index so unchanged files are not hashed again: the copy keeps the
+index timestamp so Git still re-reads files written in the same second as the
+index, and assume-unchanged flags are cleared so hidden edits are captured. A
+project folder below the repository root, a split index, or an index that
+cannot be copied falls back to rebuilding the index from `git ls-files
+--stage`, which is slower but equivalent. Objects and the checkpoint reference
+are flushed to disk (`core.fsync=objects,reference`, batch method) before the
+reference is published. On a 24,130-file repository a checkpoint takes about
+0.25 s, down from about 5 s.
+
+When a checkpoint cannot be captured, the turn still runs and its request row
+says **No checkpoint for this turn**; hovering it shows the reason.
+
+**Revert** first saves current edits in a recovery checkpoint, then restores
+the selected one. It refuses when the restore would overwrite or replace an
+ignored file, because ignored files are not in the recovery checkpoint. The
+check lists wholly ignored directories once (for example `node_modules/`) and
+looks inside them only for paths the checkpoint would write.
+
 ## Design reference and architecture
 
 Reviewed current T3 Code upstream at

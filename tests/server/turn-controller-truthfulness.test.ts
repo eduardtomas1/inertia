@@ -397,6 +397,60 @@ describe("TurnController terminal truthfulness", () => {
     value.store.close();
   });
 
+  it("records a missing pre-turn checkpoint on the turn when it starts", async () => {
+    const value = await runtime();
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Start without a checkpoint.",
+      checkpointFailure: "Checkpoint operation timed out.",
+    });
+    expect(value.controller.start(queued.turn.id)).toBe(true);
+
+    const notice = {
+      turnId: queued.turn.id,
+      runId: queued.turn.runId,
+      kind: "status",
+      title: "No checkpoint for this turn",
+      detail: "Checkpoint operation timed out.",
+      status: "completed",
+    };
+    expect(value.store.conversationDetail(value.conversationId)?.activities)
+      .toEqual([expect.objectContaining(notice)]);
+    expect(value.events).toContainEqual(expect.objectContaining({
+      type: "agent.activity",
+      activity: expect.objectContaining(notice),
+    }));
+    value.provider.resolve();
+    await flushPromises();
+    value.store.close();
+  });
+
+  it("does not record a missing checkpoint when the turn has one", async () => {
+    const value = await runtime();
+    const checkpoint = value.store.addCheckpoint({
+      conversationId: value.conversationId,
+      ref: "refs/inertia/checkpoints/present",
+      label: "Before turn 1",
+      turnIndex: 1,
+      filesChanged: 0,
+      insertions: 0,
+      deletions: 0,
+    });
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Start with a checkpoint.",
+      checkpointId: checkpoint.id,
+      checkpointFailure: "Checkpoint operation timed out.",
+    });
+    expect(value.controller.start(queued.turn.id)).toBe(true);
+
+    expect(value.store.conversationDetail(value.conversationId)?.activities)
+      .toEqual([]);
+    value.provider.resolve();
+    await flushPromises();
+    value.store.close();
+  });
+
   it("keeps Claude starting until its provider emits running", async () => {
     const value = await runtime("claude");
     const queued = value.controller.queue({

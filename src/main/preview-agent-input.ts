@@ -111,17 +111,33 @@ async function dispatchAgentPageHover(
  * char/keyup. That makes the phase boundary authoritative in main rather than
  * depending on listener ordering between the page and isolated worlds.
  */
+export type AgentPageKeyModifier = "shift" | "control" | "meta";
+
+function keyModifiers(modifiers: readonly AgentPageKeyModifier[]): { modifiers?: AgentPageKeyModifier[] } {
+  return modifiers.length > 0 ? { modifiers: [...modifiers] } : {};
+}
+
+export function agentPageKeyInput(key: string): { keyCode: string; modifiers: AgentPageKeyModifier[] } {
+  const [prefix, keyCode] = key.split("+");
+  if (keyCode === undefined) return { keyCode: key, modifiers: [] };
+  return {
+    keyCode,
+    modifiers: [prefix === "Shift" ? "shift" : prefix === "Control" ? "control" : "meta"],
+  };
+}
+
 export async function dispatchAgentPageKeyDownAndSettle(
   contents: WebContents,
   keyCode: string,
   signal?: AbortSignal,
+  modifiers: readonly AgentPageKeyModifier[] = [],
 ): Promise<void> {
   stopForAbort(signal);
   if (contents.isDestroyed()) {
     throw new Error("The active Browser tab closed before key delivery.");
   }
   try {
-    contents.sendInputEvent({ type: "keyDown", keyCode });
+    contents.sendInputEvent({ type: "keyDown", keyCode, ...keyModifiers(modifiers) });
   } catch (error) {
     throw error instanceof Error ? error : new Error("The Browser key delivery failed.");
   }
@@ -140,11 +156,12 @@ export async function deliverAgentPageActivation(
   key: "Enter" | "Space",
   rendererOperation: <Result>(operation: () => Promise<Result>) => Promise<Result>,
   signal?: AbortSignal,
+  modifiers: readonly AgentPageKeyModifier[] = [],
 ): Promise<PreviewAgentInputRefusal | null> {
   const initial = await rendererOperation(() => agentPageActivationBlock(contents));
   if (initial) return initial;
   const keyCode = key === "Space" ? " " : key;
-  await dispatchAgentPageKeyDownAndSettle(contents, keyCode, signal);
+  await dispatchAgentPageKeyDownAndSettle(contents, keyCode, signal, modifiers);
   const guardRefusal = await rendererOperation(() => agentPageInputRefusal(contents));
   const targetStillFocused = await rendererOperation(
     () => agentPageActivationTargetStillFocused(contents),
@@ -155,8 +172,10 @@ export async function deliverAgentPageActivation(
   const refusal = guardRefusal ?? postKeydownBlocked
     ?? (targetStillFocused ? null : "retargeted");
   if (refusal) return refusal;
-  contents.sendInputEvent({ type: "char", keyCode: key === "Enter" ? "\r" : " " });
-  contents.sendInputEvent({ type: "keyUp", keyCode });
+  if (!modifiers.includes("control") && !modifiers.includes("meta")) {
+    contents.sendInputEvent({ type: "char", keyCode: key === "Enter" ? "\r" : " ", ...keyModifiers(modifiers) });
+  }
+  contents.sendInputEvent({ type: "keyUp", keyCode, ...keyModifiers(modifiers) });
   return null;
 }
 
@@ -166,7 +185,7 @@ export function agentPageActivationFailureMessage(
   if (refusal === "file") return "File inputs cannot be activated by the Browser agent.";
   if (refusal === "disabled") return "The focused page element is disabled.";
   if (refusal === "retargeted") {
-    return "The focused page element changed during activation. Inspect the page again for current refs.";
+    return "The focused page element changed during activation. Take a new inertia_browser_snapshot for current refs.";
   }
   return "Enter and Space are unavailable while focus is inside an embedded frame or a closed shadow root, because Inertia cannot see the control they would activate. Click a control from the latest snapshot first.";
 }

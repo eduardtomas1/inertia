@@ -11,7 +11,7 @@ export class AgentBrowserRefusal extends Error {
 export function changedGeometry(): AgentBrowserResult {
   return failure(
     "not-found",
-    "The Browser page layout changed during this action. Inspect the page again for current refs.",
+    "The Browser page layout changed during this action. Take a new inertia_browser_snapshot for current refs.",
   );
 }
 

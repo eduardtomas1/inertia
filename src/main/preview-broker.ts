@@ -19,10 +19,8 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { captureAgentPageInputRefusal } from "./preview-agent-input.js";
+import { agentOperationBudget, agentOperationFailure, AgentOperationScope } from "./preview-agent-scope.js";
 import {
-  agentOperationBudget,
-  agentOperationFailure,
-  AgentOperationScope,
   blankTabRefusal,
   PARKED_PREVIEW_BOUNDS,
   PreviewAgentOperations,
@@ -293,6 +291,8 @@ export class PreviewBroker {
                 return await this.#operations.wait(session, command, operation);
               case "navigate":
                 return await this.#operations.navigate(session, command.url, operation, validate);
+              case "history":
+                return await this.#operations.history(session, command.direction, operation, validate);
               case "click":
                 return await this.#operations.click(session, command.ref, operation, validate);
               case "type":

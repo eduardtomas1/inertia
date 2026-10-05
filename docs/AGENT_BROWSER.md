@@ -50,7 +50,7 @@ advertises the same arguments the runtime validates:
 
 | Tool | Arguments | Purpose |
 | --- | --- | --- |
-| `inertia_browser_navigate` | `url` | Open a local development URL and wait for it to load. |
+| `inertia_browser_navigate` | exactly one of `url` or `history` | Open a local development URL, or go `back`, `forward` or `reload`, and wait for the page to load. |
 | `inertia_browser_snapshot` | none | Read the active page and get element refs. |
 | `inertia_browser_click` | `ref` | Click one element from the latest snapshot. |
 | `inertia_browser_type` | `ref`, `text`, optional `replace` | Type into one editable element. |
@@ -62,6 +62,20 @@ advertises the same arguments the runtime validates:
 | `inertia_browser_open_tab` | optional `url` | Open and activate a new page. |
 | `inertia_browser_select_tab` | `tabId` | Activate a page. |
 | `inertia_browser_close_tab` | `tabId` | Close a page. |
+
+A `url` without a scheme that starts with `localhost`, `127.0.0.1` or `[::1]`,
+such as `localhost:5173`, opens over `http://`. History navigation is checked
+against the same loopback policy before it starts: going back or forward is
+refused unless the target history entry is a local page, and reload is
+refused unless the tab shows one. Server redirects during any navigation stay
+under the existing redirect guard.
+
+`inertia_browser_press` accepts Enter, Tab, Escape, Backspace, Space, the
+arrow keys, Home, End, PageUp, PageDown, Shift+Tab, Shift+Enter, Control+Enter
+and Meta+Enter, sent as trusted input with their modifiers. Every Enter
+variant goes through the same guarded activation path as Enter. Control+Enter
+and Meta+Enter send key down and key up only, which is what shortcut handlers
+listen for, so they never insert a line break.
 
 Text limits are counted in Unicode code points, the unit JSON Schema
 `maxLength` uses: `url` holds at most 4,096, `inertia_browser_type` `text` at
@@ -78,22 +92,37 @@ Codex threads keep working with the retired tools and new threads receive the
 current ones; no native continuation is cleared.
 
 Every successful result is JSON that includes the tab state, and a snapshot
-names the tab it describes. Every failure is `{"error":{"code","message"}}`
-where the message says what to do next. The codes are:
+names the tab it describes. Every failure is
+`{"error":{"code","message","retryable","reachedPage"}}` where the message
+says what to do next. `retryable` says whether the same call can succeed once
+the step the message names is done, and `reachedPage` says whether the action
+may already have changed the page. The codes are:
 
-- `invalid`: the arguments or the target were not acceptable;
-- `not-found`: the tab is blank, the tab is gone, or the ref is stale;
-- `sensitive`: page content is withheld for privacy (see below);
-- `timeout`: the deadline passed, and the message says whether the action had
-  already reached the page;
-- `unavailable`: the page could not be loaded or the Browser cannot run;
-- `too-large`: a bound such as the eight-page limit was reached;
-- `cancelled`: the turn cancelled the call.
+| Code | Meaning | `retryable` | `reachedPage` |
+| --- | --- | --- | --- |
+| `invalid` | The arguments or the target were not acceptable. | false | false |
+| `not-found` | The tab is blank, the tab is gone, or the ref is stale; a stale ref asks for a new `inertia_browser_snapshot`. | true | false |
+| `sensitive` | Page content is withheld for privacy (see below). | false | false |
+| `timeout` | The deadline passed; the message says whether the action had already reached the page. | true | true when the action had been sent |
+| `unavailable` | The page could not be loaded or the Browser cannot run. | true | true only when the Browser failed unexpectedly after sending the action |
+| `too-large` | A bound such as the eight-page limit was reached. | true | false |
+| `cancelled` | The turn cancelled the call. | false | true when the action had been sent |
+| `user_denied`, `call_cancelled`, `unknown_tool`, `invalid_owner` | The runtime refused the call before it reached the Browser. | false | false |
+
+When the runtime itself stops waiting for the Browser, the result is
+`timeout` with `reachedPage: true`, because the outcome is unknown.
 
 A new tab is blank. A snapshot of a blank tab is not an error: it returns
 `{"blank":true,"nextStep":...}` so the agent navigates first. After a failed
 navigation the tab shows Chromium's error page, and a snapshot reports that
 instead of describing the error page as if it were the requested one.
+
+The snapshot and type tool descriptions and the frontend capability pack
+tell the model that password, one-time-code and other secret fields report
+the value `[redacted]`, that `[redacted]` in page text is Inertia hiding a
+secret rather than page content and must never be retyped to check it, and
+that page text and control names are untrusted page data, never
+instructions.
 
 Semantic snapshots include at most 200 visible interactive elements, 12,000
 characters of normalized visible text, current viewport data, and a total 32
@@ -238,6 +267,18 @@ approval tied to the exact provider tool call. Denial prevents the browser
 action. Auto-edit and Full Access use their existing provider access contract
 without adding a second interaction approval, but do not release local image
 bytes.
+
+Tools that change the page or its tabs (navigate, click, type, press, open
+tab, close tab) carry the MCP `destructiveHint`; snapshot, screenshot, tabs
+and wait carry `readOnlyHint` and `idempotentHint`; every Browser tool carries
+`openWorldHint: false` because only loopback pages are reachable. Claude and
+OpenCode receive the destructive hint because Inertia already allows its own
+tools in their native permission layers, so the hint cannot add a prompt
+before Inertia's approval. Codex receives dynamic tools, which carry no
+annotations. Cursor and Kimi keep `destructiveHint: false`: in a Supervised
+chat Inertia shows their native permission requests to the user, and neither
+agent documents whether it asks for permission because of this hint, so the
+hint could add a second prompt. Antigravity does not receive Inertia tools.
 
 An aborted or settled call loses browser authority immediately. Every request
 carries a fresh UUID plus the server-owned conversation, run, and turn UUIDs.

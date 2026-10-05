@@ -61,6 +61,7 @@ export type AgentBrowserCommand =
   | { action: "snapshot" }
   | { action: "screenshot" }
   | { action: "navigate"; url: string }
+  | { action: "history"; direction: "back" | "forward" | "reload" }
   | { action: "click"; ref: string }
   | { action: "type"; ref: string; text: string; replace: boolean }
   | { action: "press"; key: AgentBrowserKey }
@@ -84,7 +85,17 @@ export type AgentBrowserKey =
   | "End"
   | "PageUp"
   | "PageDown"
-  | "Space";
+  | "Space"
+  | "Shift+Tab"
+  | "Shift+Enter"
+  | "Control+Enter"
+  | "Meta+Enter";
+
+export const AGENT_BROWSER_KEYS = [
+  "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
+  "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
+  "Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter",
+] as const satisfies readonly AgentBrowserKey[];
 
 export type AgentBrowserResult =
   | {
@@ -96,6 +107,7 @@ export type AgentBrowserResult =
       ok: false;
       code: AgentBrowserFailureCode;
       message: string;
+      reachedPage?: boolean;
     };
 
 export const AGENT_BROWSER_FAILURE_CODES = [
@@ -114,10 +126,7 @@ export const AGENT_BROWSER_TAB_ID_PATTERN =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 const UUID_PATTERN = new RegExp(AGENT_BROWSER_TAB_ID_PATTERN, "u");
 const SAFE_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
-const SAFE_KEYS = new Set<AgentBrowserKey>([
-  "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
-  "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
-]);
+const SAFE_KEYS = new Set<AgentBrowserKey>(AGENT_BROWSER_KEYS);
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -183,6 +192,11 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
     case "navigate":
       return exactKeys(value, ["action", "url"]) && safeUrl(value.url)
         ? { action: "navigate", url: value.url }
+        : null;
+    case "history":
+      return exactKeys(value, ["action", "direction"])
+        && (value.direction === "back" || value.direction === "forward" || value.direction === "reload")
+        ? { action: "history", direction: value.direction }
         : null;
     case "click":
       return exactKeys(value, ["action", "ref"])
@@ -317,11 +331,17 @@ function utf8Bytes(value: string): number {
 export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | null {
   if (!plainObject(value) || typeof value.ok !== "boolean") return null;
   if (!value.ok) {
-    return exactKeys(value, ["ok", "code", "message"])
+    return exactKeys(value, ["ok", "code", "message"], ["reachedPage"])
       && typeof value.code === "string"
       && (AGENT_BROWSER_FAILURE_CODES as readonly string[]).includes(value.code)
       && safeText(value.message, 1_000, true)
-      ? { ok: false, code: value.code as AgentBrowserFailureCode, message: value.message }
+      && (value.reachedPage === undefined || typeof value.reachedPage === "boolean")
+      ? {
+          ok: false,
+          code: value.code as AgentBrowserFailureCode,
+          message: value.message,
+          ...(typeof value.reachedPage === "boolean" ? { reachedPage: value.reachedPage } : {}),
+        }
       : null;
   }
   if (

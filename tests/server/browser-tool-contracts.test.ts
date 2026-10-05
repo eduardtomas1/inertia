@@ -35,6 +35,9 @@ const cases: Array<{
   { tool: "navigate", args: { url: "" }, valid: false },
   { tool: "navigate", args: { url: "http://localhost/\0" }, valid: false },
   { tool: "navigate", args: { url: "x".repeat(4_097) }, valid: false },
+  { tool: "navigate", args: { history: "back" }, valid: true },
+  { tool: "navigate", args: { history: "home" }, valid: false },
+  { tool: "navigate", args: { url: "http://localhost:3000/", history: "reload" }, valid: false },
   { tool: "click", args: { ref: "r1" }, valid: true },
   { tool: "click", args: {}, valid: false },
   { tool: "click", args: { ref: "r1", text: "wrong action" }, valid: false },
@@ -48,6 +51,8 @@ const cases: Array<{
   { tool: "press", args: { key: "Enter" }, valid: true },
   { tool: "press", args: {}, valid: false },
   { tool: "press", args: { key: "F1" }, valid: false },
+  { tool: "press", args: { key: "Shift+Tab" }, valid: true },
+  { tool: "press", args: { key: "Meta+A" }, valid: false },
   { tool: "scroll", args: { deltaY: -2_000 }, valid: true },
   { tool: "scroll", args: { deltaY: 2_000 }, valid: true },
   { tool: "scroll", args: {}, valid: false },
@@ -125,7 +130,7 @@ describe("browser contracts received by providers", () => {
         const result = await client.callTool({ name: `inertia_browser_${tool}`, arguments: args ?? {} });
         expect(result.isError === true, JSON.stringify(args).slice(0, 150)).toBe(!valid);
       }
-      expect(perform).toHaveBeenCalledTimes(6);
+      expect(perform).toHaveBeenCalledTimes(7);
       expect(perform).toHaveBeenCalledWith(identity,
         { action: "type", ref: "r1", text: "", replace: true }, expect.any(AbortSignal));
       expect(perform).toHaveBeenCalledWith(identity,

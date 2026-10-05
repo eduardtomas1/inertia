@@ -367,6 +367,7 @@ export class HarnessCapabilityRegistry {
         description: definition.description,
         inputSchema: definition.inputSchema,
         readOnly: definition.readOnly,
+        destructive: definition.destructive === true,
       })),
       evaluation: pack.evaluation,
     }));

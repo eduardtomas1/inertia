@@ -293,7 +293,8 @@ export class ClaudeSubagentTraceTracker {
         ...taskUsageTelemetry(record.usage),
         ...optionalText(
           "activity",
-          boundedSubagentText(record.last_tool_name, MAX_SUBAGENT_LABEL_CHARS),
+          boundedSubagentText(record.summary, MAX_SUBAGENT_LABEL_CHARS)
+            ?? boundedSubagentText(record.last_tool_name, MAX_SUBAGENT_LABEL_CHARS),
         ),
       },
     );

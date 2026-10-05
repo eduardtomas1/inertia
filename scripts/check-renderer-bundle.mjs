@@ -90,7 +90,9 @@ const budgets = {
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
-  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859,
+  // Keeping an expanded running task's moving line adds 49 bytes (19,340
+  // measured).
+  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   deferredCliConversationImportJavaScript: 9_449 + 256,
@@ -169,7 +171,9 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 1_382,
+  // The Providers description in Agents settings adds 97 core bytes
+  // (2,266,291 measured).
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

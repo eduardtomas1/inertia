@@ -219,6 +219,7 @@ export function ProvidersSettings({
       <div className="settings-card-heading provider-settings-heading">
         <span>
           <h3 id="providers-heading">Providers</h3>
+          <p>Use the coding tools and accounts already installed on this computer.</p>
         </span>
         <IconButton
           label="Refresh all providers"

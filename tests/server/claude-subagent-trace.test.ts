@@ -541,6 +541,90 @@ describe("Claude delegated-agent projection", () => {
     expect(updates[4]).not.toHaveProperty("activity");
   });
 
+  it("shows the provider's progress summary as the current activity instead of the last tool name", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-summary",
+      tool_use_id: "tool-summary",
+      description: "Review the provider adapters",
+      subagent_type: "reviewer",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-summary",
+      tool_use_id: "tool-summary",
+      description: "Review the provider adapters",
+      usage: { total_tokens: 900, tool_uses: 1, duration_ms: 2_000 },
+      last_tool_name: "Grep",
+      summary: "Reading the provider adapters",
+    }));
+    tracker.observe(sdkMessage({
+      type: "tool_progress",
+      task_id: "task-summary",
+      tool_use_id: "child-read",
+      tool_name: "Read",
+      parent_tool_use_id: "tool-summary",
+      elapsed_time_seconds: 2,
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-summary",
+      tool_use_id: "tool-summary",
+      description: "Review the provider adapters",
+      usage: { total_tokens: 1_800, tool_uses: 2, duration_ms: 4_000 },
+      last_tool_name: "Read",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-summary",
+      tool_use_id: "tool-summary",
+      description: "Review the provider adapters",
+      usage: { total_tokens: 2_700, tool_uses: 3, duration_ms: 6_000 },
+      last_tool_name: "Edit",
+      summary: `Comparing ${"adapter ".repeat(40)}`,
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_progress",
+      task_id: "task-summary",
+      tool_use_id: "tool-summary",
+      description: "Review the provider adapters",
+      usage: { total_tokens: 3_600, tool_uses: 4, duration_ms: 8_000 },
+      last_tool_name: "Bash",
+      summary: "   ",
+    }));
+
+    expect(updates.slice(1)).toEqual([
+      expect.objectContaining({
+        progress: "Reading the provider adapters",
+        activity: "Reading the provider adapters",
+      }),
+      expect.objectContaining({
+        progress: "Read · 2 seconds elapsed",
+        activity: "Read",
+      }),
+      expect.objectContaining({
+        progress: "Read",
+        activity: "Read",
+      }),
+      expect.objectContaining({
+        progress: `Comparing ${"adapter ".repeat(40)}`.trim(),
+        activity: `Comparing ${"adapter ".repeat(40)}`.slice(0, 200),
+      }),
+      expect.objectContaining({
+        activity: "Bash",
+      }),
+    ]);
+  });
+
   it("ignores malformed, negative, fractional, and oversized task numbers", () => {
     const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
     const tracker = new ClaudeSubagentTraceTracker((event) => {

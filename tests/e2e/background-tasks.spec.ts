@@ -254,7 +254,7 @@ function seedFixture(app: AppFixture): Seed {
         description: "Review the usage refactor for regressions.",
         progress: "Reading the provider adapters",
         model: "claude-sonnet-4-5",
-        activity: "Grep",
+        activity: "Reading the provider adapters",
         usage: usage({ totalTokens: 18_600 }),
         toolUseCount: 9,
         updatedAt: ago(70_000),
@@ -546,7 +546,7 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     const page = app.page;
     let region = await showChat(app, seed.claude);
     const reviewer = card(region, "Code reviewer");
-    await expect(reviewer).toContainText("Grep");
+    await expect(reviewer.locator(".background-task-live")).toHaveText("Reading the provider adapters");
     await expect(reviewer).toContainText("18.6K tokens");
     await expect(reviewer).toContainText("9 tool uses");
     await expect(reviewer.getByRole("button", { name: "Stop Code reviewer" })).toBeVisible();

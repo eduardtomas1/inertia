@@ -266,6 +266,24 @@ describe("Background tasks surface", () => {
     expect(screen.getByText("Explorer", { selector: ".background-task-title" })).not.toHaveClass("background-task-live");
   });
 
+  it("keeps the moving line of an expanded running task and shows its sentence once", async () => {
+    const summarized = taskTrace({
+      id: "claude-summarized",
+      turnId: "turn-claude",
+      runId: "run-claude",
+      providerName: "Code reviewer",
+      description: "Review the usage refactor for regressions.",
+      activity: "Reading the provider adapters",
+      progress: "Reading the provider adapters",
+    });
+    render(surface({ subagents: [summarized] }));
+    const transcript = await openTranscript("Code reviewer");
+    const lines = within(card("Code reviewer")).getAllByText("Reading the provider adapters");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toHaveClass("background-task-live");
+    expect(paragraphs(transcript)).toEqual(["Review the usage refactor for regressions."]);
+  });
+
   it("omits the runtime of a lost task instead of counting the downtime", async () => {
     const lost = taskTrace({
       id: "lost",

@@ -237,10 +237,11 @@ describe("Claude turn reliability", () => {
       event.type === "reasoning-summary" && event.text.includes("Checking the build")))
       .toBe(true);
     // Text and thinking block starts are not tool calls.
-    expect(events.filter((event) => event.type === "activity"
-      && (event.kind === "tool" || event.kind === "command"))
-      .map((event) => event.type === "activity" ? event.label : ""))
-      .toEqual(["Bash", "Bash"]);
+    const toolActivities = events.flatMap((event) => event.type === "activity"
+      && (event.kind === "tool" || event.kind === "command") ? [event] : []);
+    expect(toolActivities.map(({ phase, label }) => `${phase} ${label}`))
+      .toEqual(["started Bash", "started Bash", "completed Bash"]);
+    expect(toolActivities[1]?.detail).toContain("echo hi");
   });
 
   it("scopes cleanup doubt to the provider and spares runs that were already admitted", async () => {

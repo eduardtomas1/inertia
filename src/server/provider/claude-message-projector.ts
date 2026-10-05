@@ -1,6 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";
 import { CappedProviderBuffer } from "./io";
@@ -16,7 +15,6 @@ import {
   claudeAssistantFailure,
   claudeDetailLines as detailLines,
   claudeObjectValue as objectValue,
-  claudePlanSteps as planSteps,
   claudeTextItemId,
   ClaudeProjectedTextLedger,
   isChildOwnedClaudeMessage as isChildOwned,
@@ -33,6 +31,7 @@ import {
 } from "./claude-message-projector-support";
 import { ClaudeMessageStreamCorrelation } from "./claude-message-stream-correlation";
 import { isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
+import { ClaudeToolActivityProjection } from "./claude-tool-activity-projection";
 
 export {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
@@ -51,11 +50,6 @@ interface ClaudeMessageProjectorOptions {
   contextUsage: () => unknown;
   acceptContextUsage: (usage: unknown) => void;
   refreshContextUsage: () => void;
-}
-
-interface ClaudeToolActivity {
-  kind: "command" | "tool";
-  label: string;
 }
 
 
@@ -79,13 +73,7 @@ export class ClaudeMessageProjector {
   private readonly seenUserMessages = new BoundedStringSet(
     MAX_TRACKED_MESSAGE_IDS,
   );
-  private readonly completedToolActivities = new BoundedStringSet(
-    MAX_TRACKED_MESSAGE_IDS,
-  );
-  private readonly projectedPlanToolUses = new BoundedStringSet(
-    MAX_TRACKED_MESSAGE_IDS,
-  );
-  private readonly toolActivities = new Map<string, ClaudeToolActivity>();
+  private readonly tools: ClaudeToolActivityProjection;
   private readonly assistantFailures = new Map<string, ClaudeProjectedFailure>();
   private readonly projectedText = new ClaudeProjectedTextLedger();
   private readonly unknownRuntimeMessages = new BoundedStringSet(256);
@@ -97,7 +85,9 @@ export class ClaudeMessageProjector {
   private activeProviderStatus: "compacting" | "requesting" | null = null;
   private thinkingProgressActive = false;
 
-  constructor(private readonly options: ClaudeMessageProjectorOptions) {}
+  constructor(private readonly options: ClaudeMessageProjectorOptions) {
+    this.tools = new ClaudeToolActivityProjection(options.emitter);
+  }
 
   observe(message: SDKMessage, provesRequestedCompaction: boolean): void {
     const commandLifecycle = commandLifecycleMessage(message);
@@ -230,7 +220,7 @@ export class ClaudeMessageProjector {
         return;
       case "content_block_start": {
         const block = objectValue(event.content_block);
-        if (block && isToolUseBlock(block.type)) this.observeToolStart(block);
+        if (block && isToolUseBlock(block.type)) this.tools.start(block);
         return;
       }
       case "content_block_delta": {
@@ -380,12 +370,12 @@ export class ClaudeMessageProjector {
           streamed?.thinking ?? "",
         );
       } else if (isToolUseBlock(item.type)) {
-        this.observeToolStart(item);
+        this.tools.start(item);
       } else if (
         typeof item.type === "string"
         && item.type.endsWith("_tool_result")
       ) {
-        this.observeAssistantToolResult(item);
+        this.tools.assistantResult(item);
       }
     }
     if (correctedText) {
@@ -451,7 +441,7 @@ export class ClaudeMessageProjector {
     for (const block of content) {
       const result = objectValue(block);
       if (result?.type !== "tool_result") continue;
-      this.observeToolResult(result);
+      this.tools.result(result);
     }
     if (uuid) this.seenUserMessages.add(uuid);
   }
@@ -466,8 +456,7 @@ export class ClaudeMessageProjector {
     }));
     if (usage && !isClaudeQueuedCompletionAck(message)) this.options.emitter.rich({ type: "usage", usage });
     for (const denial of message.permission_denials ?? []) {
-      this.observePermissionDenial({
-        tool_name: denial.tool_name,
+      this.tools.denial({
         tool_use_id: denial.tool_use_id,
         message: "Claude denied this tool request.",
       });
@@ -479,12 +468,12 @@ export class ClaudeMessageProjector {
   ): void {
     if (isChildOwned(message.parent_tool_use_id)) return;
     const activityId = boundedIdentifier(message.tool_use_id);
-    if (!activityId || this.completedToolActivities.has(activityId)) return;
+    if (!activityId || this.tools.isCompleted(activityId)) return;
     const name = boundedLabel(message.tool_name, "Tool");
-    const existing = this.toolActivities.get(activityId);
+    const existing = this.tools.get(activityId);
     const kind = existing?.kind ?? (name === "Bash" ? "command" : "tool");
     const label = existing?.label ?? name;
-    if (!existing) this.rememberToolActivity(activityId, { kind, label });
+    if (!existing) this.tools.remember(activityId, { kind, label });
     const retry = message.subagent_retry;
     this.options.emitter.activity(kind, "started", label, {
       activityId,
@@ -884,7 +873,7 @@ export class ClaudeMessageProjector {
         );
         return;
       case "permission_denied":
-        if (!message.agent_id) this.observePermissionDenial(message);
+        if (!message.agent_id) this.tools.denial(message);
         return;
       case "mirror_error":
         this.options.emitter.activity(
@@ -1036,135 +1025,6 @@ export class ClaudeMessageProjector {
     );
   }
 
-  private observePermissionDenial(message: {
-    tool_name: string;
-    tool_use_id: string;
-    message: string;
-    decision_reason?: string;
-    decision_reason_type?: string;
-  }): void {
-    const activityId = boundedIdentifier(message.tool_use_id);
-    if (!activityId || this.completedToolActivities.has(activityId)) return;
-    const activity = this.toolActivities.get(activityId);
-    this.options.emitter.activity(
-      activity?.kind ?? "tool",
-      "failed",
-      activity?.label ?? boundedLabel(message.tool_name, "Tool"),
-      {
-        activityId,
-        detail: providerActivityDetailSections({
-          error: detailLines([
-            message.decision_reason,
-            message.decision_reason_type
-              ? `Decision: ${message.decision_reason_type}`
-              : null,
-            message.message,
-          ]),
-        }) ?? undefined,
-      },
-    );
-    this.toolActivities.delete(activityId);
-    this.completedToolActivities.add(activityId);
-  }
-
-  private observeToolStart(item: Record<string, unknown>): void {
-    const activityId = boundedIdentifier(item.id);
-    const name = boundedLabel(item.name, "Tool");
-    const input = objectValue(item.input);
-    if (
-      name === "ExitPlanMode"
-      && (!activityId || !this.projectedPlanToolUses.has(activityId))
-    ) {
-      const plan = typeof input?.plan === "string"
-        ? input.plan
-        : typeof input?.content === "string"
-          ? input.content
-          : undefined;
-      if (plan) {
-        this.options.emitter.rich({
-          type: "plan",
-          explanation: bounded(plan),
-          steps: planSteps(plan),
-        });
-        if (activityId) this.projectedPlanToolUses.add(activityId);
-      }
-    }
-    if (activityId && (
-      this.completedToolActivities.has(activityId)
-      || this.toolActivities.has(activityId)
-    )) return;
-    const kind = name === "Bash" ? "command" : "tool";
-    const label = name;
-    if (activityId) this.rememberToolActivity(activityId, { kind, label });
-    this.options.emitter.activity(kind, "started", label, {
-      ...(activityId ? { activityId } : {}),
-      ...(name === "Bash"
-        ? {
-            detail: providerActivityDetailSections({
-              command: input?.command,
-            }) ?? undefined,
-          }
-        : {}),
-    });
-  }
-
-  private observeToolResult(result: Record<string, unknown>): void {
-    const activityId = boundedIdentifier(result.tool_use_id);
-    if (!activityId || this.completedToolActivities.has(activityId)) return;
-    const activity = this.toolActivities.get(activityId);
-    // Replayed history and malformed out-of-order results must not create
-    // ghost transcript activities without a matching provider tool call.
-    if (!activity) return;
-    const failed = result.is_error === true;
-    const detail = providerActivityDetailSections({
-      [failed ? "error" : "output"]: result.content,
-    });
-    this.options.emitter.activity(
-      activity.kind,
-      failed ? "failed" : "completed",
-      activity.label,
-      {
-        activityId,
-        ...(detail ? { detail } : {}),
-      },
-    );
-    this.toolActivities.delete(activityId);
-    this.completedToolActivities.add(activityId);
-  }
-
-  private observeAssistantToolResult(result: Record<string, unknown>): void {
-    const activityId = boundedIdentifier(
-      result.tool_use_id ?? result.server_tool_use_id,
-    );
-    if (!activityId || this.completedToolActivities.has(activityId)) return;
-    const activity = this.toolActivities.get(activityId);
-    if (!activity) return;
-    const failed = result.is_error === true;
-    this.options.emitter.activity(
-      activity.kind,
-      failed ? "failed" : "completed",
-      activity.label,
-      {
-        activityId,
-        detail: providerActivityDetailSections({
-          [failed ? "error" : "output"]: result.content,
-        }) ?? undefined,
-      },
-    );
-    this.toolActivities.delete(activityId);
-    this.completedToolActivities.add(activityId);
-  }
-
-  private rememberToolActivity(
-    activityId: string,
-    activity: ClaudeToolActivity,
-  ): void {
-    this.toolActivities.set(activityId, activity);
-    if (this.toolActivities.size <= MAX_TRACKED_MESSAGE_IDS) return;
-    const oldest = this.toolActivities.keys().next().value;
-    if (typeof oldest === "string") this.toolActivities.delete(oldest);
-  }
-
   private rememberAssistantFailure(
     activityId: string,
     failure: ClaudeProjectedFailure,
@@ -1230,9 +1090,7 @@ export class ClaudeMessageProjector {
     this.streams.reset();
     this.seenAssistantMessages.clear();
     this.seenUserMessages.clear();
-    this.completedToolActivities.clear();
-    this.projectedPlanToolUses.clear();
-    this.toolActivities.clear();
+    this.tools.reset();
     this.assistantFailures.clear();
     this.projectedText.reset();
     this.textItemByProviderMessageId.clear();

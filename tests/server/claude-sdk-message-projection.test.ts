@@ -579,6 +579,52 @@ describe("Claude Agent SDK message projection", () => {
         || event.activityId === "history-tool"))).toBe(false);
   });
 
+  it("keeps a subagent's denied tool out of the parent activities", async () => {
+    const { events, result } = await run([
+      sdkMessage({
+        ...claudeSuccessResult("Parent response", "completed"),
+        permission_denials: [{
+          tool_name: "Bash",
+          tool_use_id: "child-denied-tool",
+          tool_input: { command: "rm -rf build" },
+        }],
+      }),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Parent response" });
+    expect(events.some((event) =>
+      event.type === "activity" && event.activityId === "child-denied-tool")).toBe(false);
+  });
+
+  it("shows the Bash command when the streamed tool block opened without input", () => {
+    const events: AgentHarnessEvent[] = [];
+    const projector = unitProjector(events);
+    projector.observe(streamMessage("bash-start", {
+      type: "message_start",
+      message: { id: "bash-api", content: [] },
+    }), false);
+    projector.observe(streamMessage("bash-block", {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", id: "bash-tool", name: "Bash", input: {} },
+    }), false);
+    const snapshot = assistantMessage({
+      uuid: "bash-assistant",
+      apiMessageId: "bash-api",
+      content: [{ type: "tool_use", id: "bash-tool", name: "Bash", input: { command: "rm -rf build" } }],
+    });
+    projector.observe(snapshot, false);
+    projector.observe({ ...snapshot, uuid: "bash-assistant-repeat" } as SDKMessage, false);
+
+    const bashActivities = events.flatMap((event) =>
+      event.type === "activity" && event.activityId === "bash-tool" ? [event] : []);
+    expect(bashActivities.map(({ phase, label }) => ({ phase, label }))).toEqual([
+      { phase: "started", label: "Bash" },
+      { phase: "started", label: "Bash" },
+    ]);
+    expect(bashActivities[1]?.detail).toContain("rm -rf build");
+  });
+
   it("returns the replacement result after a refusal supersedes streamed text", async () => {
     const { events, result } = await run([
       streamMessage("refused-partial", {

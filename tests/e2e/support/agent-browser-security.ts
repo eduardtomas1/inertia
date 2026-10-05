@@ -1,7 +1,7 @@
 import { expect, type Locator } from "@playwright/test";
 
 import type { AppFixture } from "./app-fixture";
-import { NATIVE_CREDENTIAL_AUDIT_ROUTES } from "./agent-browser-fixture-pages";
+import { NATIVE_CREDENTIAL_AUDIT_ROUTES, NATIVE_CREDENTIAL_REDACTED_ROUTES } from "./agent-browser-fixture-pages";
 
 export async function captureAgentBrowserSnapshot(
   app: AppFixture,
@@ -353,6 +353,7 @@ export async function expectPasswordAssignmentPrivacyGuard(
             code?: string;
             ok: boolean;
             state?: { activeTabId: string };
+            text?: string;
           }>;
         };
         const opened = await runtime.agentBrowser(request.conversationId, {
@@ -400,12 +401,13 @@ export async function expectPasswordAssignmentPrivacyGuard(
       page?: { produced?: boolean; route?: string; supported?: boolean };
       route?: string;
       screenshot?: { code?: string; ok?: boolean };
-      snapshot?: { code?: string; ok?: boolean };
+      snapshot?: { code?: string; ok?: boolean; text?: string };
     };
     return {
       closed: current.closed?.ok,
       opened: current.opened?.ok,
       page: current.page,
+      redactedMirror: current.snapshot?.text?.includes("[redacted]") === true,
       route: current.route,
       screenshot: { code: current.screenshot?.code, ok: current.screenshot?.ok },
       snapshot: { code: current.snapshot?.code, ok: current.snapshot?.ok },
@@ -415,9 +417,10 @@ export async function expectPasswordAssignmentPrivacyGuard(
     closed: true,
     opened: true,
     page: { produced: true, route, supported: true },
+    redactedMirror: NATIVE_CREDENTIAL_REDACTED_ROUTES.has(route),
     route,
     screenshot: { code: "sensitive", ok: false },
-    snapshot: NATIVE_CREDENTIAL_AUDIT_ROUTES.indexOf(route) < 10
+    snapshot: NATIVE_CREDENTIAL_REDACTED_ROUTES.has(route)
       ? { code: undefined, ok: true } : { code: "sensitive", ok: false },
   })));
   expect(JSON.stringify(audit)).not.toContain("hunter2");

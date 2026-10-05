@@ -172,5 +172,7 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
 });
 
 test("keeps React password replacement and same-document MFA usable with hidden values", async () => {
-  await expectSensitiveFieldInteraction(app, conversationId);
+  const workspaceTools = await ensureWorkspaceTools(page);
+  await selectWorkspaceTool(workspaceTools, "Browser");
+  await expectSensitiveFieldInteraction(app, conversationId, workspaceTools);
 });

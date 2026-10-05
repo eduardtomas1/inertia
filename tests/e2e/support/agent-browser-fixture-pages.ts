@@ -31,7 +31,26 @@ export const NATIVE_CREDENTIAL_AUDIT_ROUTES = [
   "reflect-set-prototype",
   "legacy-set-prototype",
   "prototype-before-type",
+  "configurable-accessor",
+  "array-to-json-decoy",
 ] as const;
+
+export const NATIVE_CREDENTIAL_REDACTED_ROUTES: ReadonlySet<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[number]> = new Set([
+  "set-attribute",
+  "default-value-after-type",
+  "default-value-before-type",
+  "set-range-text",
+  "attr-value-set-node",
+  "attr-node-value-set-node",
+  "named-node-map",
+  "attached-attr-value",
+  "attached-attr-node-value",
+  "attached-attr-text-content",
+  "configurable-accessor",
+  "array-to-json-decoy",
+]);
+
+let reactLoginScript: string | undefined;
 
 const nativeCredentialSource: Record<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[number], string> = {
   "set-attribute": "const input=document.createElement('input');input.type='password';input.setAttribute('value',secret);leaked=input.value;clear=()=>input.removeAttribute('value')",
@@ -62,6 +81,8 @@ const nativeCredentialSource: Record<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[num
   "reflect-set-prototype": "const input=document.createElement('input');input.type='password';const prototype=Object.getPrototypeOf(input);Reflect.setPrototypeOf(input,{value:secret});leaked=input.value;clear=()=>{Reflect.setPrototypeOf(input,prototype)}",
   "legacy-set-prototype": "const input=document.createElement('input');input.type='password';const prototype=Object.getPrototypeOf(input);input.__proto__={value:secret};leaked=input.value;clear=()=>{input.__proto__=prototype}",
   "prototype-before-type": "const input=document.createElement('input');const prototype=Object.getPrototypeOf(input);Object.setPrototypeOf(input,{type:'password',value:secret});leaked=input.value;clear=()=>{Object.setPrototypeOf(input,prototype)}",
+  "configurable-accessor": "const input=document.createElement('input');input.type='password';let stored='';Object.defineProperty(input,'value',{configurable:true,get(){return stored},set(value){stored=String(value)}});input.value=secret;leaked=input.value;clear=()=>{input.value=''}",
+  "array-to-json-decoy": "Array.prototype.toJSON=()=>['decoy'];const input=document.createElement('input');input.type='password';input.setAttribute('value',secret);leaked=input.value;clear=()=>input.removeAttribute('value')",
 };
 
 export function serveAgentBrowserPrivacyFixture(
@@ -69,13 +90,13 @@ export function serveAgentBrowserPrivacyFixture(
   response: ServerResponse,
 ): boolean {
   if (url === "/agent-browser-react-login") {
-    const script = buildSync({
+    reactLoginScript ??= buildSync({
       entryPoints: [fileURLToPath(new URL("agent-browser-react-login.ts", import.meta.url))],
       bundle: true, write: false, platform: "browser", format: "iife",
       define: { "process.env.NODE_ENV": '"production"' },
     }).outputFiles[0]!.text;
     response.writeHead(200, { "Content-Type": "text/html" });
-    response.end(`<!doctype html><title>React login</title><div id="root"></div><script>${script}</script>`);
+    response.end(`<!doctype html><title>React login</title><div id="root"></div><script>${reactLoginScript}</script>`);
     return true;
   }
   if (url === "/agent-browser-post-refusal-safe") {
@@ -118,11 +139,12 @@ export function serveAgentBrowserPrivacyFixture(
     "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
   });
   response.end(
-    "<!doctype html><title>Password assignment privacy probe</title>"
+    "<!doctype html><title>Password assignment privacy probe</title><body>"
     + "<script>const secret='hunter2';const markup=\"<input type='password' value='hunter2'>\";"
     + "let leaked='';let clear=()=>{};let supported=true;try{"
     + source
-    + "}catch{supported=false}if(leaked)console.error(leaked);clear();"
+    + "}catch{supported=false}if(leaked){console.error(leaked);"
+    + "const mirror=document.createElement('p');mirror.append(leaked);document.body.append(mirror)}clear();"
     + `window.__credentialRouteStatus={route:${JSON.stringify(route)},supported,produced:leaked===secret};`
     + "</script>",
   );

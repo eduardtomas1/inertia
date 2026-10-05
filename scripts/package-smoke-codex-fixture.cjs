@@ -13,6 +13,11 @@ let threadId = null;
 let requestedServiceTier;
 let compactTurnId = null;
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const turnShape = (id, status, startedAt) => ({
+  id, items: [], itemsView: "notLoaded", status, error: null, startedAt,
+  completedAt: status === "inProgress" ? null : startedAt,
+  durationMs: status === "inProgress" ? null : 0,
+});
 const tier = (params) => {
   if (!hasOwn(params, "serviceTier")
     || (params.serviceTier !== null && params.serviceTier !== "priority")) {
@@ -40,7 +45,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return result({
       thread: { id: threadId },
       model: "package-smoke-model",
+      modelProvider: "openai",
       serviceTier: requestedServiceTier === "priority" ? "priority" : "default",
+      disabledPluginIds: [],
+      cwd: process.cwd(),
+      instructionSources: [],
+      approvalPolicy: message.params.approvalPolicy ?? "on-request",
+      approvalsReviewer: message.params.approvalsReviewer ?? "user",
+      sandbox: { type: "readOnly", networkAccess: false },
+      reasoningEffort: null,
       ...(message.params.excludeTurns === true
         ? { initialTurnsPage: { data: [{ id: "package-smoke-previous-turn" }] } }
         : {}),
@@ -58,19 +71,20 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         message: "The packaged turn service tier does not match its exact challenge.",
       } });
     }
-    const turn = { id: randomUUID(), status: "inProgress", items: [], error: null };
+    const turnId = randomUUID();
     const itemId = randomUUID();
-    result({ turn });
-    send({ method: "turn/started", params: { threadId, turn } });
+    const startedAt = Math.floor(Date.now() / 1000);
+    result({ turn: turnShape(turnId, "inProgress", null) });
+    send({ method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress", startedAt) } });
     send({ method: "item/agentMessage/delta", params: {
-      threadId, turnId: turn.id, itemId, delta: `Completed ${token}`,
+      threadId, turnId, itemId, delta: `Completed ${token}`,
     } });
     send({ method: "item/completed", params: {
-      threadId, turnId: turn.id,
+      threadId, turnId, completedAtMs: Date.now(),
       item: { id: itemId, type: "agentMessage", text: `Completed ${token}` },
     } });
     return send({ method: "turn/completed", params: {
-      threadId, turn: { ...turn, status: "completed" },
+      threadId, turn: turnShape(turnId, "completed", startedAt),
     } });
   }
   if (message.method === "thread/compact/start" && threadId === message.params.threadId) {
@@ -84,8 +98,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const itemId = randomUUID();
     const lifecycleAtMs = Date.now();
     result({});
+    const startedAt = Math.floor(lifecycleAtMs / 1000);
     send({ method: "turn/started", params: {
-      threadId, turn: { id: compactTurnId, status: "inProgress", items: [], error: null },
+      threadId, turn: turnShape(compactTurnId, "inProgress", startedAt),
     } });
     send({ method: "item/started", params: {
       threadId, turnId: compactTurnId, startedAtMs: lifecycleAtMs,
@@ -97,7 +112,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     } });
     return send({ method: "turn/completed", params: {
       threadId,
-      turn: { id: compactTurnId, status: "completed", items: [], error: null },
+      turn: turnShape(compactTurnId, "completed", startedAt),
     } });
   }
   if (message.method === "thread/turns/list" && compactTurnId) {

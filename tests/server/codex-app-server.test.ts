@@ -213,7 +213,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(result).not.toHaveProperty("diagnostic");
     expect(approvals).toEqual(["npm test"]);
     expect(approvalRequests[0]).toMatchObject({
-      availableDecisions: ["approve", "deny", "cancel"],
+      availableDecisions: ["approve", "cancel"],
       networkScope: { host: "registry.npmjs.org", protocol: "https" },
       permissionRoots: [
         { path: normalize(join(realpathSync(fake.root), "fixtures")), access: "read" },

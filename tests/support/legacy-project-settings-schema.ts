@@ -2,6 +2,9 @@ import type Database from "better-sqlite3";
 
 export function removeProjectSettingsFromLegacyFixture(database: Database.Database): void {
   database.exec(`
+    DROP TABLE IF EXISTS cli_conversation_imports;
+    DROP INDEX IF EXISTS agent_turns_provider_session_before_idx;
+    DROP INDEX IF EXISTS agent_turns_provider_session_after_idx;
     DROP TABLE IF EXISTS usage_limited_turns;
     DROP TABLE IF EXISTS usage_limit_resume_plans;
     DROP TABLE IF EXISTS queued_messages;
@@ -18,6 +21,7 @@ export function removeProjectSettingsFromLegacyFixture(database: Database.Databa
     DELETE FROM schema_migrations WHERE version >= 72;
   `);
   const operationColumns = database.pragma("table_info(agent_thread_operations)") as Array<{ name: string }>;
+  if ((database.pragma("table_info(agent_turns)") as Array<{ name: string }>).some(({ name }) => name === "origin")) database.exec("ALTER TABLE agent_turns DROP COLUMN origin");
   for (const column of ["target_turn_id", "target_run_id"]) {
     if (operationColumns.some(({ name }) => name === column)) database.exec(`ALTER TABLE agent_thread_operations DROP COLUMN ${column}`);
   }

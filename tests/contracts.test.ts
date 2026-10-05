@@ -252,6 +252,26 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts a continuation only with its source, model and settings", () => {
+    const base = {
+      type: "conversation.continue",
+      requestId: crypto.randomUUID(),
+      payload: {
+        sourceConversationId: crypto.randomUUID(),
+        modelSelection: providerNativeModelSelection({ providerId: "claude" }),
+        accessMode: "supervised",
+        interactionMode: "plan",
+      },
+    };
+    expect(clientCommandSchema.parse(base)).toEqual(base);
+    for (const extra of [{ worktreePath: "/elsewhere" }, { branch: "main" }, { projectId: crypto.randomUUID() }]) {
+      expect(clientCommandSchema.safeParse({ ...base, payload: { ...base.payload, ...extra } }).success).toBe(false);
+    }
+    const { accessMode: _accessMode, ...withoutAccess } = base.payload;
+    expect(clientCommandSchema.safeParse({ ...base, payload: withoutAccess }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({ ...base, payload: { ...base.payload, sourceConversationId: "chat" } }).success).toBe(false);
+  });
+
   it("keeps agent context authority request-bound and message IDs renderer-owned", () => {
     const contextRequestId = crypto.randomUUID();
     const targetConversationId = crypto.randomUUID();

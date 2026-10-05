@@ -612,6 +612,7 @@ export function agentTurnFromRow(row: AgentTurnRow & { usage_limited?: number })
     usageAtCompletion: parseAgentTurnUsage(row.usage_completion_json),
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: row.association,
+    ...(row.origin === "cli-import" ? { origin: "cli-import" as const } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.usage_limited === 1 ? { usageLimited: true as const } : {}),

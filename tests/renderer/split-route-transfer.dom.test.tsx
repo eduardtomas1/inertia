@@ -67,7 +67,7 @@ describe("split pane route transfer", () => {
     const sendCommand = vi.fn(async (command: { type: string; requestId: string }): Promise<ServerEvent> => ({
       type: "request.result",
       requestId: command.requestId,
-      result: command.type === "conversation.create"
+      result: command.type === "conversation.continue"
         ? { kind: "conversation.created", conversationId: target.id }
         : { kind: "ok" },
     }) as unknown as ServerEvent);
@@ -102,9 +102,12 @@ describe("split pane route transfer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
     fireEvent.click(screen.getByTitle("Routed Agent").closest("button")!);
-    fireEvent.click(await screen.findByRole("button", { name: "New chat" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
 
-    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.create" })));
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: "conversation.continue",
+      payload: expect.objectContaining({ sourceConversationId: source.id }),
+    })));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
     act(() => show(source));

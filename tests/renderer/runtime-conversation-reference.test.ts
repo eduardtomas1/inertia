@@ -168,7 +168,7 @@ describe("runtime conversation references", () => {
       "conversationSelectionGenerationRef.current = selectionGeneration",
     );
     const createRequest = routeCreation.indexOf(
-      'run("conversation.create"',
+      "await run(command.type, command)",
     );
     const selectionRequest = routeCreation.indexOf(
       "await selectConversationCommand(",

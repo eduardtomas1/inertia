@@ -33,7 +33,7 @@ function renderWithSidebarButton(props = hostProps()) {
     <>
       <button type="button">Before</button>
       <SidebarHelpButton />
-      <HelpGuideHost {...props} />
+      <HelpGuideHost projects={[]} currentProjectId={null} {...props} />
     </>,
   );
   return { ...view, props, opener: screen.getByRole("button", { name: "Help" }) };
@@ -104,7 +104,7 @@ describe("Help", () => {
           onAddProject={vi.fn()}
           onOpenSettings={vi.fn()}
         />
-        <HelpGuideHost {...hostProps()} />
+        <HelpGuideHost projects={[]} currentProjectId={null} {...hostProps()} />
       </>,
     );
     const search = screen.getByRole("combobox", {

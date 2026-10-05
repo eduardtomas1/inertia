@@ -52,6 +52,20 @@ not reported new quota by then, nothing is sent and **Resume now** waits for
 you; choosing it starts a new hour of checks. A different account, or one that
 cannot be confirmed without asking you, stops the resume for your attention.
 
+**Continue with another model** in the same row opens the model chooser. It is
+not offered while a resume is scheduled; cancel the resume first. Choosing a
+model from another provider asks **Continue in a new chat with** that model.
+**Continue** creates the new chat on the same checkout and branch as the
+limited chat (its worktree, if it has one) and attaches the whole limited chat
+as context: up to 256 KiB of its visible messages, each excerpt at most 8 KiB,
+with secrets redacted. The context shows above the composer of the new chat,
+where you can preview or remove it before the first message. The limited chat
+keeps its history and its resume offer. Inertia refuses while the limited chat
+still has a turn in progress, when the project checkout has since moved to
+another branch, and for chats without a project, whose folder belongs to that
+chat. If you delete the limited chat before sending the first message in the
+new one, the unsent context goes with it; its worktree stays with the new chat.
+
 ## Accounts and averages
 
 Accounts with the same provider-issued account ID are counted once, including

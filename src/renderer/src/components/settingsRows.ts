@@ -117,6 +117,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["project-spend-limit", "Claude spend limit per turn", ["budget", "cost", "usd", "limit", "token"]],
     ],
     Checkout: [
+      ["project-cli-import", "CLI conversations", ["import", "codex", "claude code", "history", "sessions", "transcripts"]],
       ["project-grouping-override", "Group this project", ["repository", "grouping"]],
       ["project-auto-pull", "Automatically pull", ["git", "branch", "pull", "source control"]],
       ["project-actions", "Actions", ["commands", "scripts", "project actions"]],

@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ClientCommand, Conversation, ServerEvent } from "../../src/shared/contracts";
@@ -78,6 +81,7 @@ function dependencies(input: {
   workspaceRunActive?: boolean;
   workspaceRunChecks?: boolean[];
   providerTerminalResumes?: ProviderTerminalResumeRegistry;
+  imported?: { providerId: "codex" | "claude"; cwd: string; sessionId: string };
 } = {}) {
   const current = input.current ?? conversation();
   const onExitCallbacks: Array<(exitCode: number) => void> = [];
@@ -112,6 +116,7 @@ function dependencies(input: {
     dataDirectory: "/data",
     store: {
       conversation: vi.fn(() => current),
+      cliConversationImport: vi.fn(() => input.imported ?? null),
       hasActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
       hasRecordedActiveWorkspaceRunForConversation: vi.fn(() =>
         workspaceRunChecks.shift() ?? input.workspaceRunActive ?? false),
@@ -151,6 +156,20 @@ function dependencies(input: {
 }
 
 describe("terminal.provider.resume command", () => {
+  it.skipIf(process.platform === "win32")("resumes an imported Claude session in the folder it was recorded under while guarding the checkout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-resume-cwd-"));
+    try {
+      const real = join(root, "real"); const linked = join(root, "linked");
+      await mkdir(real); await symlink(real, linked, "dir");
+      const modelSelection = providerNativeModelSelection({ providerId: "claude" });
+      const claude = { ...conversation(), providerId: "claude" as const, modelSelection, continuationIdentity: continuationIdentityForSelection(modelSelection, null, false), worktreePath: linked };
+      const fixture = dependencies({ current: claude, imported: { providerId: "claude", cwd: real, sessionId } });
+      await expect(createProjectWorkspaceCommandHandler(fixture.value)({ readyState: 1 } as never, resumeCommand())).resolves.toBe("handled");
+      expect(fixture.terminalResumeLaunch).toHaveBeenCalledWith(conversationId, "claude", sessionId, real);
+      expect(fixture.replaceProcess.mock.calls[0]![2]).toBe(real);
+      expect(fixture.value.turns.hasActiveCheckout).toHaveBeenCalledWith(linked);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("derives the exact launch and owning worktree entirely on the server", async () => {
     const fixture = dependencies();
     const handler = createProjectWorkspaceCommandHandler(fixture.value);

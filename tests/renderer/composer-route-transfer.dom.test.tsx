@@ -38,7 +38,7 @@ type RouteOptions = { prefillText?: string; onCreated?: (conversationId: string)
 async function confirmNewChat(): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
   fireEvent.click(screen.getByTitle("Routed Agent").closest("button")!);
-  fireEvent.click(await screen.findByRole("button", { name: "New chat" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
 }
 
 describe("composer route transfer", () => {

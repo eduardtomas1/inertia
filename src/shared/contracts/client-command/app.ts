@@ -43,6 +43,7 @@ import {
   requestBase,
 } from "./common";
 import {
+  conversationContinueCommandSchema,
   conversationCreateCommandSchema,
   conversationCreatePayloadSchema,
 } from "./conversation-create";
@@ -214,6 +215,7 @@ export const appCommandSchemas = [
     })
     .strict(),
   conversationCreateCommandSchema,
+  conversationContinueCommandSchema,
   z
     .object({
       ...requestBase,

@@ -116,6 +116,7 @@ export class SystemSuspendRepository {
           suspended_duration_ms
         FROM agent_turns
         WHERE started_at IS NOT NULL
+          AND origin IS NULL
           AND started_at < @resumedAt
           AND (completed_at IS NULL OR completed_at > @suspendedAt)
         ORDER BY id ASC

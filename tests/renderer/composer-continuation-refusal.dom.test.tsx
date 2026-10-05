@@ -103,11 +103,12 @@ describe("composer for a chat that cannot continue", () => {
     fireEvent.click(start);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: current.modelSelection,
       configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
+      sourceConversationId: current.id,
       onCreated: expect.any(Function),
     }]);
     expect(onSend).not.toHaveBeenCalled();
@@ -125,9 +126,9 @@ describe("composer for a chat that cannot continue", () => {
     expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("Continue the legacy work.");
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ prefillText: "Continue the legacy work." });
+    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ prefillText: "Continue the legacy work.", sourceConversationId: expect.any(String) });
   });
 
   it.each([

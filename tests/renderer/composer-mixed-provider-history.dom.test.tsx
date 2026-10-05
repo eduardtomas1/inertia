@@ -242,9 +242,9 @@ describe("composer mixed-provider history", () => {
     expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(screen.queryAllByRole("alert").filter((element) =>
       element.textContent?.includes(MIXED_PROVIDER_HISTORY_MESSAGE))).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ selection: { reasoningEffort: "high" } });
+    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ selection: { reasoningEffort: "high" }, sourceConversationId: conversationId });
   });
 
   it.each(["main window", "detached window"] as const)(
@@ -273,11 +273,12 @@ describe("composer mixed-provider history", () => {
         return;
       }
       expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
-      fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
       await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
       expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
         selection: current.modelSelection,
         configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
+        sourceConversationId: conversationId,
         onCreated: expect.any(Function),
       }]);
     },
@@ -301,12 +302,13 @@ describe("composer mixed-provider history", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Continue this work.");
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: current.modelSelection,
       configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
       prefillText: "Continue this work.",
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });

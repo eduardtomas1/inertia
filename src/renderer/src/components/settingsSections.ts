@@ -139,6 +139,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       backendProfiles: context.backendProfiles,
       disabled: context.disabled,
       request: context.onSaveCommand ?? context.onReportCommand,
+      onOpenConversation: context.onOpenConversation,
       onUpdateSettings: context.onUpdate,
     }),
     instanceKey: (context) => context.target?.section === "projects" ? context.target.projectId ?? "all" : "all",

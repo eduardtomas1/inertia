@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import type { ContinuationIdentity, Conversation, ModelSelection } from "@shared/contracts";
+import { conversationHasHistory } from "../../../../shared/continuation-policy";
 
 import { pendingModelRoute, replacementChatRequest } from "../../utils/modelRouteTransition";
 import { useComposerRouteConversation } from "./composerRouteConversation";
@@ -16,6 +17,7 @@ export function useComposerNewChatOffer(options: {
   conversationIdRef: MutableRefObject<string>;
   editorRevisionsRef: MutableRefObject<Map<string, number>>;
   blockedReason: string | null;
+  scratchWorkspace: boolean;
   onCreateConversationForSelection: ComposerProps["onCreateConversationForSelection"];
   setConversationUpdateError: (message: string | null) => void;
   updateMessage: (message: string) => void;
@@ -31,6 +33,7 @@ export function useComposerNewChatOffer(options: {
     conversationIdRef,
     editorRevisionsRef,
     blockedReason,
+    scratchWorkspace,
     onCreateConversationForSelection,
     setConversationUpdateError,
     updateMessage,
@@ -110,7 +113,13 @@ export function useComposerNewChatOffer(options: {
     setPendingRoute(pendingModelRoute(
       conversation,
       latestTurn,
-      replacementChatRequest(conversation, { selection, configuration }),
+      replacementChatRequest(conversation, {
+        selection,
+        configuration,
+        ...(conversationHasHistory(conversation) && !scratchWorkspace
+          ? { sourceConversationId: conversation.id }
+          : {}),
+      }),
       label,
       reason,
     ));

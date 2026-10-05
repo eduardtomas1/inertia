@@ -1,0 +1,55 @@
+{
+  "baseline": "b6865e11",
+  "environment": "macOS arm64, Node 22.23.2, identical installed dependencies",
+  "measurements": {
+    "entryJavaScript": {
+      "before": 222476,
+      "after": 222476,
+      "delta": 0
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "before": 868412,
+      "after": 868901,
+      "delta": 489
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "before": 661286,
+      "after": 661472,
+      "delta": 186
+    },
+    "settingsJavaScript": {
+      "before": 80868,
+      "after": 80908,
+      "delta": 40
+    },
+    "deferredProjectSettingsJavaScript": {
+      "before": 16497,
+      "after": 17562,
+      "delta": 1065
+    },
+    "deferredWelcomeGuideJavaScript": {
+      "before": 36648,
+      "after": 37433,
+      "delta": 785
+    },
+    "deferredCliConversationImportJavaScript": {
+      "before": 0,
+      "after": 9797,
+      "delta": 9797
+    },
+    "coreJavaScript": {
+      "before": 2266291,
+      "after": 2268307,
+      "delta": 2016
+    }
+  },
+  "notes": [
+    "The importer is a separately budgeted deferred chunk. The bundle gate rejects loading it in either initial chat route.",
+    "UI polish (measured on macOS arm64, Node 22.23.2): the importer chunk grew from 7,781 to 8,539 bytes (+758) for the labelled dialog header, aria-disabled busy controls, inline status and error rows, and plural-aware counts; after merging main it still measures 8,539 bytes on macOS arm64, and its cap is that measurement plus 0.25 KiB (8,795 bytes). Moving the launcher into the existing Checkout card shrank the Project settings chunk by 120 bytes. Entry CSS is unchanged; the importer’s deferred stylesheet grew from 5,636 to 7,406 minified bytes.",
+    "Gallery pass (measured on macOS arm64, Node 22): miniatures render from the scan's opening exchange without per-card preview requests, and the scan-summary line, opening-text search and Open chat for earlier imports bring the importer chunk to 9,449 bytes; its cap is that measurement plus 0.25 KiB (9,705 bytes). Wiring Open chat from the app's existing conversation selection adds 186 bytes to core JavaScript and 142 bytes to the main workbench first load, the shared opening schema adds 78 more to core and the imported-turn origin field 44 more; each cap grows by exactly its measured amount.",
+    "Merge with main 7da8aba5 (rebuilt Settings, Help search): each measurement above compares a build of main with a build of this branch on the same machine. The Import conversations row now uses the shared Settings row primitives (+1,065 bytes to the Project settings chunk), its search entry and the Help entry add 343 bytes to the Help chunk, and core grows 1,382 bytes. Caps that the branch exceeded are main's cap plus that exact growth: main workbench +247, Project settings +1,065, Help +343, core +1,382. The detached chat and Settings chunks stay within main's caps and are unchanged.",
+    "Streaming import and review fixes, merged with main b6865e11 and measured against a build of it on the same machine: the omission line, read-deadline request timeouts and imported-chat contracts bring core to +1,887 bytes and the main workbench to +489; the Help entry's row link adds 696 bytes to the Help chunk in total. Each exceeded cap is main's cap plus that growth. The importer chunk is 9,608 bytes, inside its 9,705-byte cap; detached chat (+186) and Settings (+40) stay inside main's caps.",
+    "Continuation mode (native or a new session for archived Codex imports): the shared continuation schema and text add 129 more bytes to core (+2,016 over main b6865e11 in total), and the card and preview lines bring the importer chunk to 9,797 bytes; its cap stays that measurement plus 0.25 KiB.",
+    "The Help entry's sentence about archived Codex sessions adds 89 bytes to the Help chunk (+785 over main b6865e11 in total); its cap is main's plus that growth."
+  ]
+}

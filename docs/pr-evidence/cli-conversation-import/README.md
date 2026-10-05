@@ -66,7 +66,11 @@ Transcripts are read line by line, so a session of any size can be imported.
 Records over 16 MiB are skipped and counted, and a read that takes longer than
 60 seconds stops with a message instead of hanging. The import keeps the
 opening exchange and the newest messages that fit the 200-message, 256 KiB
-budget. The preview, the imported chat and the gallery card for an imported
+budget. A Codex rollback deeper than the kept newest messages (about 100 turns
+once older messages have been trimmed) keeps only the opening exchange and what
+came after the rollback. Records dropped for their size count as left out, and
+a Claude chain continues across them. The preview, the imported chat and the
+gallery card for an imported
 session say how many earlier messages were left out. A file whose session
 header belongs to this checkout but whose records cannot be read is counted
 in one muted line under the gallery.

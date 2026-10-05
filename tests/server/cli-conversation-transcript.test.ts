@@ -235,6 +235,11 @@ describe("native CLI transcript projection", () => {
     expect(digest).toBe("[redacted credential]\nnext");
     expect(user("OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456 next")).toBe("[redacted credential] next");
   });
+  it("redacts an authorization header with a key-shaped token once and keeps its quotes", () => {
+    const user = (text: string) => parseCliTranscript(lines(meta, codex("user", text)), "codex", date).messages[0]!.content;
+    expect(user("curl -H 'Authorization: Bearer sk_live_abcdefghijklmnop0123' https://x")).toBe("curl -H '[redacted credential]' https://x");
+    expect(user('curl -H "Authorization: Basic c2tfbGl2ZV9hYmNkZWZnaGlqa2w=" https://x')).toBe('curl -H "[redacted credential]" https://x');
+  });
   it("marks a message shortened to the per-message bound", () => {
     const [message] = parseCliTranscript(lines(meta, codex("user", "x".repeat(40_000))), "codex", date).messages;
     expect(message!.content.length).toBeLessThanOrEqual(32 * 1024);

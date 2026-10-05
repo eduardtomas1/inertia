@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CliConversationDiscovery, localAbsolutePath } from "../../src/server/cli-import/discovery";
 import { CliTranscriptDeadline, readCliLines } from "../../src/server/cli-import/line-reader";
 import { parseCliTranscript } from "../../src/server/cli-import/transcript";
@@ -85,6 +85,73 @@ describe("CLI transcripts larger than the old 16 MiB file bound", () => {
     expect(result.omittedBytes).toBe(all - bytes);
   });
 
+  it("finds the live branch's first request when a long abandoned branch fills the start of the file", () => {
+    const sessionId = randomUUID();
+    const record = (uuid: string, parentUuid: string | null, type: string, text: string) => JSON.stringify({ uuid, parentUuid, type, sessionId, cwd: "/workspace", timestamp: "2026-09-25T10:00:00.000Z", message: { role: type, content: text } });
+    const lines: string[] = [];
+    let parent: string | null = null;
+    for (let index = 0; index < 40; index += 1) { lines.push(record(`d${index}`, parent, index % 2 ? "assistant" : "user", `Dead ${index}`)); parent = `d${index}`; }
+    parent = null;
+    for (let index = 0; index < 300; index += 1) { lines.push(record(`l${index}`, parent, index % 2 ? "assistant" : "user", index === 0 ? "Live opening" : index === 1 ? "Live reply" : `Live ${index}`)); parent = `l${index}`; }
+    const result = parseCliTranscript(lines.join("\n"), "claude", "2026-09-25T10:00:00.000Z");
+    expect(result.title).toBe("Live opening");
+    expect(result.opening).toEqual({ user: "Live opening", assistant: "Live reply" });
+    expect(result.messages.slice(0, 2).map(({ content }) => content)).toEqual(["Live opening", "Live reply"]);
+    expect(result.messages.at(-1)?.content).toBe("Live 299");
+    expect(result.omittedMessages).toBe(300 - result.messages.length);
+  });
+
+  it("keeps a Claude chain together across a record dropped for its size and counts it as left out", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-cli-claude-drop-")); directories.push(root);
+    const workspace = join(root, "project"); const projects = join(root, "projects");
+    await Promise.all([mkdir(workspace), mkdir(join(projects, "project"), { recursive: true })]);
+    const sessionId = randomUUID();
+    const record = (uuid: string, parentUuid: string | null, type: string, text: string) => JSON.stringify({ uuid, parentUuid, type, sessionId, cwd: workspace, timestamp: "2026-09-25T10:00:00.000Z", message: { role: type, content: text } });
+    await writeFile(join(projects, "project", `${sessionId}.jsonl`), [record("u1", null, "user", "Opening request"), record("a1", "u1", "assistant", "Opening reply"),
+      record("u2", "a1", "user", "x".repeat(40 * 1024)), record("a2", "u2", "assistant", "Later reply"), record("u3", "a2", "user", "Later request"), record("a3", "u3", "assistant", "Last reply")].join("\n") + "\n");
+    const discovery = new CliConversationDiscovery([{ providerId: "claude", path: projects }], [], undefined, { recordBytes: 32 * 1024 });
+    const scan = await discovery.scan("project", workspace, unowned);
+    expect(scan.candidates[0]).toMatchObject({ title: "Opening request", opening: { user: "Opening request", assistant: "Opening reply" } });
+    const read = await discovery.read("project", workspace, scan.candidates[0]!.id);
+    expect(read.droppedRecords).toBe(1);
+    expect(read.transcript.messages.map(({ content }) => content)).toEqual(["Opening request", "Opening reply", "Later reply", "Later request", "Last reply"]);
+    expect(read.transcript.omittedMessages).toBeGreaterThanOrEqual(1);
+  });
+
+  it("stops a scan read at the provider's scan deadline and reports the scan as limited", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-cli-scan-deadline-")); directories.push(root);
+    const workspace = join(root, "project"); const sessions = join(root, "sessions");
+    await Promise.all([mkdir(workspace), mkdir(sessions)]);
+    const id = randomUUID();
+    await writeFile(join(sessions, `rollout-${id}.jsonl`), [JSON.stringify({ type: "session_meta", payload: { id, cwd: workspace, model_provider: "openai" } }), message("user", "Slow request"),
+      ...Array.from({ length: 20 }, () => toolOutput(1024 * 1024))].join("\n") + "\n");
+    const start = Date.now();
+    let calls = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => start + (calls += 1) * 100);
+    try {
+      const discovery = new CliConversationDiscovery([{ providerId: "codex", path: sessions }], [], undefined, { milliseconds: 1_500, fullReadBytes: 64 * 1024 * 1024 });
+      expect(await discovery.scan("project", workspace, unowned)).toMatchObject({ candidates: [], skipped: 0, limited: true });
+    } finally { clock.mockRestore(); }
+  });
+
+  it("gives an over-long transcript its own reason", async () => {
+    const f = await largeRollout(3, 16);
+    const discovery = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions }], [], undefined, { maxRecords: 6 });
+    const lister = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions }], []);
+    const listed = await lister.scan("project", f.workspace, unowned);
+    Reflect.set(discovery, "grants", Reflect.get(lister, "grants"));
+    await expect(discovery.read("project", f.workspace, listed.candidates[0]!.id)).rejects.toThrow(/too long to import/u);
+  });
+
+  it("shows an imported session's continuation from its receipt, not from where its file lives now", async () => {
+    const f = await largeRollout(1, 16);
+    const discovery = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions, continuation: "native" }], []);
+    const scan = await discovery.scan("project", f.workspace, () => ({ importedConversationId: randomUUID(), omission: null, continuation: "context", owned: false }));
+    expect(scan.candidates[0]).toMatchObject({ continuation: "context" });
+    const fresh = await discovery.scan("project", f.workspace, unowned);
+    expect(fresh.candidates[0]).toMatchObject({ continuation: "native" });
+  });
+
   it("follows Claude's final branch when the middle of a long session is not kept", () => {
     const sessionId = randomUUID();
     const record = (uuid: string, parentUuid: string | null, type: string, text: string) => JSON.stringify({ uuid, parentUuid, type, sessionId, cwd: "/workspace", timestamp: "2026-09-25T10:00:00.000Z", message: { role: type, content: text } });
@@ -112,7 +179,7 @@ describe("CLI transcripts larger than the old 16 MiB file bound", () => {
     expect(read.droppedRecords).toBe(3);
     expect(read.transcript.messages.map(({ content }) => content)).toEqual(["Opening request", "Opening reply", "Request 0", "Reply 0", "Request 1", "Reply 1", "Request 2", "Reply 2"]);
     const slow = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions }], [], undefined, { readMilliseconds: -1 });
-    await expect(slow.scan("project", f.workspace, unowned)).resolves.toMatchObject({ candidates: [], skipped: 1 });
+    await expect(slow.scan("project", f.workspace, unowned)).resolves.toMatchObject({ candidates: [], skipped: 0, limited: true });
     const timed = new CliConversationDiscovery([{ providerId: "codex", path: f.sessions }], []);
     const listed = await timed.scan("project", f.workspace, unowned);
     Reflect.set(Reflect.get(timed, "limits") as object, "readMilliseconds", -1);
@@ -133,7 +200,7 @@ describe("CLI transcripts larger than the old 16 MiB file bound", () => {
         messages: read.transcript.messages, omittedMessages: read.transcript.omittedMessages, omittedBytes: read.transcript.omittedBytes, droppedRecords: read.droppedRecords, continuation: "native",
         selection, continuationIdentity: continuationIdentityForSelection(selection, "native-fixture"),
       });
-      expect(store.cliSessionOwnership("codex", read.transcript.sessionId)).toEqual({ importedConversationId: conversationId, omission: { omitted: 1002, total: 1202 }, owned: false });
+      expect(store.cliSessionOwnership("codex", read.transcript.sessionId)).toEqual({ importedConversationId: conversationId, omission: { omitted: 1002, total: 1202 }, continuation: "native", owned: false });
       const detail = store.conversationDetail(conversationId)!;
       const notes = detail.messages.filter(({ role }) => role === "system");
       expect(notes.map(({ content, turnId }) => [content, turnId])).toEqual([["Earlier messages were not imported: 1,002 of 1,202", detail.agentTurns[0]!.id]]);

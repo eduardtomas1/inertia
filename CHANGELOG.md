@@ -6,9 +6,10 @@ The useful changes in each Inertia release, in plain language.
 
 - Import existing Codex and Claude Code conversations from **Settings →
   Projects → CLI conversations**. Preview local text history, avoid duplicate
-  imports, and continue the original CLI session in Inertia. Long sessions
-  keep their opening exchange and newest messages, and the chat says how many
-  earlier messages were left out. Source files stay unchanged.
+  imports, and continue the original CLI session in Inertia; archived Codex
+  sessions continue in a new session with the imported messages as context.
+  Long sessions keep their opening exchange and newest messages, and the chat
+  says how many earlier messages were left out. Source files stay unchanged.
 
 ## 0.0.67 — 2026-10-05
 

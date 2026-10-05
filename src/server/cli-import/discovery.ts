@@ -10,7 +10,7 @@ import { acpEnvironmentSecretValues } from "../provider/acp-redaction";
 import type { CliSessionOwnership } from "../persistence/cli-conversation-import";
 import { RuntimeRequestError } from "../runtime-errors";
 import { CLI_HEAD_CHUNK_BYTES, CLI_RECORD_MAX_BYTES, CliTranscriptDeadline, readCliLines } from "./line-reader";
-import { CliTranscriptParser, EmptyCliTranscript, transcriptHeader, type CliTranscriptHeader, type ParsedCliTranscript } from "./transcript";
+import { CLI_TRANSCRIPT_MAX_RECORDS, CliTranscriptParser, EmptyCliTranscript, OverlongCliTranscript, transcriptHeader, type CliTranscriptHeader, type ParsedCliTranscript } from "./transcript";
 
 export const CLI_SCAN_FULL_READ_BYTES = 16 * 1024 * 1024;
 const HEAD_MAX_BYTES = 1024 * 1024;
@@ -19,11 +19,11 @@ const MAX_CANDIDATES = 100;
 const GRANT_LIFETIME_MS = 10 * 60 * 1000;
 export interface CliScanLimits {
   entries: number; reads: number; headerBytes: number; bytes: number; milliseconds: number;
-  fullReadBytes: number; prefixBytes: number; recordBytes: number; readMilliseconds: number;
+  fullReadBytes: number; prefixBytes: number; recordBytes: number; readMilliseconds: number; maxRecords: number;
 }
 const DEFAULT_SCAN_LIMITS: CliScanLimits = {
   entries: 3_000, reads: 1_000, headerBytes: 32 * 1024 * 1024, bytes: 64 * 1024 * 1024, milliseconds: 5_000,
-  fullReadBytes: CLI_SCAN_FULL_READ_BYTES, prefixBytes: SCAN_PREFIX_BYTES, recordBytes: CLI_RECORD_MAX_BYTES, readMilliseconds: CLI_TRANSCRIPT_READ_DEADLINE_MS,
+  fullReadBytes: CLI_SCAN_FULL_READ_BYTES, prefixBytes: SCAN_PREFIX_BYTES, recordBytes: CLI_RECORD_MAX_BYTES, readMilliseconds: CLI_TRANSCRIPT_READ_DEADLINE_MS, maxRecords: CLI_TRANSCRIPT_MAX_RECORDS,
 };
 interface Root { providerId: CliProvider; path: string; continuation?: CliConversationContinuation }
 interface Grant { projectId: string; workspace: string; root: string; path: string; providerId: CliProvider; continuation: CliConversationContinuation; expiresAt: number }
@@ -31,7 +31,7 @@ interface Found { grant: Grant; candidate: Omit<CliConversationCandidate, "id"> 
 export interface ReadCliConversation {
   transcript: ParsedCliTranscript; revision: string; sourceKey: string; providerId: CliProvider; droppedRecords: number; continuation: CliConversationContinuation;
 }
-interface StreamOptions { secrets: readonly string[]; recordBytes: number; deadline: number; signal?: AbortSignal; limit?: number }
+interface StreamOptions { secrets: readonly string[]; recordBytes: number; maxRecords: number; deadline: number; signal?: AbortSignal; limit?: number }
 
 export function cliConversationRoots(environment: NodeJS.ProcessEnv = process.env): Root[] {
   const root = (key: string, fallback: string): string => {
@@ -88,10 +88,11 @@ async function streamTranscript(root: string, path: string, provider: CliProvide
   const { handle, before, pinned } = await openTranscript(root, path);
   try {
     if (pinned.size !== before.size) throw new Error("Transcript changed.");
-    const parser = new CliTranscriptParser(provider, pinned.mtime.toISOString(), options.secrets);
+    const parser = new CliTranscriptParser(provider, pinned.mtime.toISOString(), options.secrets, options.maxRecords);
     const read = await readCliLines(handle, {
       size: pinned.size, limit: options.limit, deadline: options.deadline, signal: options.signal, maxLineBytes: options.recordBytes,
       onLine: (line, terminated) => { parser.line(line, terminated); },
+      onDropped: () => parser.droppedRecord(),
     });
     const after = await handle.stat();
     const current = await lstat(path);
@@ -228,7 +229,7 @@ export class CliConversationDiscovery {
       if (known && (seen.has(known) || imported(providerId, known).owned)) continue;
       if (found.length >= MAX_CANDIDATES || bytes >= this.limits.bytes) { limited = true; break; }
       try {
-        const { transcript } = await this.scanRead(file, providerId);
+        const { transcript } = await this.scanRead(file, providerId, deadline);
         bytes += transcript.messages.reduce((total, message) => total + Buffer.byteLength(message.content), 0);
         if (!await inWorkspace(transcript.cwd) || seen.has(transcript.sessionId)) continue;
         seen.add(transcript.sessionId);
@@ -238,11 +239,13 @@ export class CliConversationDiscovery {
           grant: { projectId, workspace, root: file.root, path: file.path, providerId, continuation: file.continuation, expiresAt: Date.now() + GRANT_LIFETIME_MS },
           candidate: {
             providerId, title: transcript.title, updatedAt: transcript.updatedAt, importedConversationId: ownership.importedConversationId,
-            importedOmission: ownership.omission, continuation: file.continuation, opening: transcript.opening,
+            importedOmission: ownership.omission, opening: transcript.opening,
+            continuation: ownership.importedConversationId ? ownership.continuation ?? file.continuation : file.continuation,
           },
         });
       } catch (error) {
         this.signal?.throwIfAborted();
+        if (error instanceof CliTranscriptDeadline) { limited = true; break; }
         if (error instanceof EmptyCliTranscript) continue;
         skipped += 1;
       }
@@ -267,6 +270,7 @@ export class CliConversationDiscovery {
       };
     } catch (error) {
       this.signal?.throwIfAborted();
+      if (error instanceof OverlongCliTranscript) throw new RuntimeRequestError("This CLI conversation is too long to import.");
       if (error instanceof CliTranscriptDeadline) {
         throw new RuntimeRequestError(`This CLI conversation took longer than ${Math.round(this.limits.readMilliseconds / 1000)} seconds to read. Try again.`);
       }
@@ -274,25 +278,29 @@ export class CliConversationDiscovery {
     }
   }
 
-  private async scanRead(file: { root: string; path: string; size: number }, providerId: CliProvider) {
-    if (file.size <= this.limits.fullReadBytes) return await streamTranscript(file.root, file.path, providerId, this.streamOptions());
+  private async scanRead(file: { root: string; path: string; size: number }, providerId: CliProvider, deadline: number) {
+    if (file.size <= this.limits.fullReadBytes) return await streamTranscript(file.root, file.path, providerId, this.streamOptions(deadline));
     try {
-      return await streamTranscript(file.root, file.path, providerId, { ...this.streamOptions(), limit: this.limits.prefixBytes });
+      return await streamTranscript(file.root, file.path, providerId, { ...this.streamOptions(deadline), limit: this.limits.prefixBytes });
     } catch (error) {
       if (!(error instanceof EmptyCliTranscript)) throw error;
-      return await streamTranscript(file.root, file.path, providerId, this.streamOptions());
+      return await streamTranscript(file.root, file.path, providerId, this.streamOptions(deadline));
     }
   }
 
-  private streamOptions(): StreamOptions {
-    return { secrets: this.secrets, recordBytes: this.limits.recordBytes, deadline: Date.now() + this.limits.readMilliseconds, signal: this.signal };
+  private streamOptions(deadline = Number.POSITIVE_INFINITY): StreamOptions {
+    return {
+      secrets: this.secrets, recordBytes: this.limits.recordBytes, maxRecords: this.limits.maxRecords,
+      deadline: Math.min(deadline, Date.now() + this.limits.readMilliseconds), signal: this.signal,
+    };
   }
 
-  preview(candidateId: string, value: ReadCliConversation, ownership: Pick<CliSessionOwnership, "importedConversationId" | "omission">): CliConversationPreview {
+  preview(candidateId: string, value: ReadCliConversation, ownership: Pick<CliSessionOwnership, "importedConversationId" | "omission" | "continuation">): CliConversationPreview {
     return {
       candidate: {
         id: candidateId, providerId: value.providerId, title: value.transcript.title, updatedAt: value.transcript.updatedAt,
-        importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, continuation: value.continuation, opening: value.transcript.opening,
+        importedConversationId: ownership.importedConversationId, importedOmission: ownership.omission, opening: value.transcript.opening,
+        continuation: ownership.importedConversationId ? ownership.continuation ?? value.continuation : value.continuation,
       },
       revision: value.revision, messages: value.transcript.messages, omittedMessages: value.transcript.omittedMessages,
     };

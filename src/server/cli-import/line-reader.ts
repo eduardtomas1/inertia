@@ -17,6 +17,7 @@ export async function readCliLines(handle: FileHandle, options: {
   chunkBytes?: number;
   signal?: AbortSignal;
   onLine(line: string, terminated: boolean): boolean | void;
+  onDropped?(): void;
 }): Promise<CliLineRead> {
   const maxLineBytes = options.maxLineBytes ?? CLI_RECORD_MAX_BYTES;
   const limit = Math.min(options.limit ?? Number.POSITIVE_INFINITY, options.size + 1);
@@ -36,6 +37,7 @@ export async function readCliLines(handle: FileHandle, options: {
       skipping = true;
       droppedRecords += 1;
       parts = [];
+      options.onDropped?.();
       return;
     }
     parts.push(Buffer.from(segment));

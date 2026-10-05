@@ -72,6 +72,7 @@ describe("database health check for settings and subagent columns", () => {
     { version: 91, sql: "ALTER TABLE app_state DROP COLUMN muted_custom_colors" },
     { version: 92, sql: "DROP TABLE cli_conversation_imports" },
     { version: 92, sql: "ALTER TABLE agent_turns DROP COLUMN origin" },
+    { version: 92, sql: "DROP INDEX agent_turns_provider_session_before_idx" },
     { version: 92, sql: "DROP INDEX agent_turns_provider_session_after_idx" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));

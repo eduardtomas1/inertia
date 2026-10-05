@@ -61,7 +61,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Import CLI conversations",
-        detail: "Choose a project in Settings → Projects, then Import conversations… to bring in its Codex or Claude Code history. The chat continues the original CLI session, so close that session in your terminal first.",
+        detail: "Choose a project in Settings → Projects, then Import conversations… to bring in its Codex or Claude Code history. The chat continues the original CLI session, so close that session in your terminal first. Archived Codex sessions continue in a new session with the imported messages as context.",
         jump: "Open Settings → Projects",
         anchor: "project-cli-import",
       },

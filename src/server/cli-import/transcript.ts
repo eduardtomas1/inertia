@@ -106,6 +106,7 @@ const SHORTENED = "\n\n[Shortened on import]";
 const IMPORT_SECRET_PATTERNS = [
   /(?<![A-Za-z0-9-])(?:set-)?cookie\s*:[^\n]*/giu,
   /(?<![A-Za-z0-9])(?:proxy-)?authorization["']?\s*[:=]\s*["']?(?:Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\b[^\n]*/giu,
+  /(?<![A-Za-z0-9])(?:proxy-)?authorization\s*:\s*(?:Bearer|Basic)\s+[^\s,;'"]+/giu,
   /(?<![A-Za-z0-9])(?:api[-_ ]?key|access[-_ ]?key|password|passwd|pwd|secret|token)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')/giu,
   /\b[A-Z0-9_]*(?:API_KEY|ACCESS_KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD)\s*=\s*[^\s,;]+/gu,
 ] as const;
@@ -115,10 +116,15 @@ function bounded(text: string): string {
   return `${text.slice(0, MESSAGE_MAX_TEXT - SHORTENED.length).replace(/[\uD800-\uDBFF]$/u, "")}${SHORTENED}`;
 }
 
+const ORDERED_SECRET_PATTERNS = [
+  ...SECRET_PATTERNS.filter(({ source }) => /authorization|Bearer/u.test(source)),
+  ...SECRET_PATTERNS.filter(({ source }) => !/authorization|Bearer/u.test(source)),
+];
+
 function redact(text: string, secrets: readonly string[]): string {
   let clean = redactCredentialUrls(redactHostToolPayload(text, secrets));
   for (const pattern of IMPORT_SECRET_PATTERNS) clean = clean.replace(pattern, "[redacted credential]");
-  for (const pattern of SECRET_PATTERNS) clean = clean.replace(pattern, "[redacted credential]");
+  for (const pattern of ORDERED_SECRET_PATTERNS) clean = clean.replace(pattern, "[redacted credential]");
   return clean.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
 }
 
@@ -198,6 +204,8 @@ class MessageWindow {
 }
 
 export class EmptyCliTranscript extends Error {}
+export class OverlongCliTranscript extends Error {}
+const ROOT_OPENINGS = 16;
 
 export interface CliTranscriptHeader { cwd: string; sessionId?: string }
 
@@ -226,13 +234,28 @@ export class CliTranscriptParser {
   private readonly parents = new Map<string, string | null>();
   private readonly ids: string[] = [];
   private readonly sizes: number[] = [];
+  private readonly roots = new Map<string, string>();
+  private readonly openings = new Map<string, Entry[]>();
+  private lastSeen: string | null = null;
+  private bridge: string | null | undefined;
+  private dropped = 0;
 
-  constructor(private readonly provider: CliProvider, private readonly fallbackDate: string, private readonly secrets: readonly string[] = []) {}
+  constructor(
+    private readonly provider: CliProvider,
+    private readonly fallbackDate: string,
+    private readonly secrets: readonly string[] = [],
+    private readonly maxRecords = CLI_TRANSCRIPT_MAX_RECORDS,
+  ) {}
+
+  droppedRecord(): void {
+    this.dropped += 1;
+    this.bridge = this.lastSeen;
+  }
 
   line(line: string, terminated: boolean): void {
     if (!line.trim()) return;
     this.records += 1;
-    if (this.records > CLI_TRANSCRIPT_MAX_RECORDS) throw new Error("The CLI transcript has too many records.");
+    if (this.records > this.maxRecords) throw new OverlongCliTranscript("The CLI transcript has too many records.");
     let item: RecordValue;
     try { item = record(JSON.parse(line)); } catch {
       if (!terminated) return;
@@ -290,8 +313,15 @@ export class CliTranscriptParser {
     if (typeof item.uuid === "string") {
       id = item.uuid;
       if ("parentUuid" in item) {
-        this.parents.set(id, typeof item.parentUuid === "string" ? item.parentUuid : typeof item.logicalParentUuid === "string" ? item.logicalParentUuid : null);
+        const parent = typeof item.parentUuid === "string" ? item.parentUuid : typeof item.logicalParentUuid === "string" ? item.logicalParentUuid : null;
+        if (parent && this.bridge !== undefined && !this.parents.has(parent)) {
+          this.parents.set(parent, this.bridge);
+          if (this.bridge) this.roots.set(parent, this.roots.get(this.bridge) ?? this.bridge);
+        }
+        this.parents.set(id, parent);
+        this.roots.set(id, parent ? this.roots.get(parent) ?? parent : id);
       }
+      this.lastSeen = id;
       if (item.type === "user" || item.type === "assistant") this.lastId = id;
     }
     if (!["user", "assistant"].includes(String(item.type)) || item.isMeta === true || item.isCompactSummary === true
@@ -303,20 +333,30 @@ export class CliTranscriptParser {
     const entry = this.responses.push(message, id);
     this.ids.push(id ?? "");
     this.sizes.push(entry.bytes);
+    const root = id ? this.roots.get(id) : undefined;
+    if (!root) return;
+    const opening = this.openings.get(root) ?? (this.openings.size < ROOT_OPENINGS ? [] : undefined);
+    if (!opening) return;
+    if ((opening.length === 0 && entry.role === "user") || (opening.length === 1 && entry.role === "assistant")) opening.push(entry);
+    this.openings.set(root, opening);
   }
 
   finish(): ParsedCliTranscript {
     if (!uuid.test(this.sessionId) || !this.cwd || this.cwd.includes("\0")) throw new Error("The CLI transcript has no valid session or workspace.");
     const window = this.provider === "codex" && this.typedUser ? this.typed : this.responses;
-    let { entries, tailStart } = window.entries();
+    let { entries } = window.entries();
+    const { tailStart } = window.entries();
     let total = window.count;
     let totalBytes = window.bytes;
     if (this.provider === "claude" && this.lastId && this.parents.size) {
       const lineage = new Set<string>();
       let cursor: string | null = this.lastId;
-      while (cursor && !lineage.has(cursor)) { lineage.add(cursor); cursor = this.parents.get(cursor) ?? null; }
+      let root: string | null = null;
+      while (cursor && !lineage.has(cursor)) { lineage.add(cursor); root = cursor; cursor = this.parents.get(cursor) ?? null; }
       const visible = (id: string | undefined): boolean => !id || lineage.has(id);
-      entries = entries.filter((entry) => visible(entry.id));
+      const known = new Set(entries.map(({ index }) => index));
+      const opening = (root ? this.openings.get(root) ?? [] : []).filter(({ index }) => !known.has(index));
+      entries = [...entries, ...opening].sort((left, right) => left.index - right.index).filter((entry) => visible(entry.id));
       total = 0;
       totalBytes = 0;
       this.ids.forEach((id, index) => {
@@ -337,7 +377,7 @@ export class CliTranscriptParser {
     return {
       sessionId: this.sessionId, cwd: this.cwd, title, updatedAt: entries.at(-1)!.createdAt,
       messages: selected.map(({ role, content, createdAt }) => ({ role, content, createdAt })),
-      omittedMessages: total - selected.length,
+      omittedMessages: total + this.dropped - selected.length,
       omittedBytes: totalBytes - selected.reduce((sum, entry) => sum + entry.bytes, 0),
       opening,
     };

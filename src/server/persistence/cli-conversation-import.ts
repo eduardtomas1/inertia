@@ -31,14 +31,19 @@ export function importedCliConversation(database: Database.Database, providerId:
   return resumed?.id ?? null;
 }
 
-export interface CliSessionOwnership { importedConversationId: string | null; omission: CliConversationOmission | null; owned: boolean }
+export interface CliSessionOwnership {
+  importedConversationId: string | null;
+  omission: CliConversationOmission | null;
+  continuation?: CliConversationContinuation;
+  owned: boolean;
+}
 
 export function cliSessionOwnership(database: Database.Database, providerId: CliProvider, sessionId: string): CliSessionOwnership {
-  const imported = database.prepare("SELECT conversation_id, source_messages, omitted_messages FROM cli_conversation_imports WHERE provider_id = ? AND session_id = ?")
-    .get(providerId, sessionId) as { conversation_id: string; source_messages: number; omitted_messages: number } | undefined;
+  const imported = database.prepare("SELECT conversation_id, source_messages, omitted_messages, continuation FROM cli_conversation_imports WHERE provider_id = ? AND session_id = ?")
+    .get(providerId, sessionId) as { conversation_id: string; source_messages: number; omitted_messages: number; continuation: CliConversationContinuation } | undefined;
   if (imported) {
     const omission = imported.omitted_messages > 0 ? { omitted: imported.omitted_messages, total: imported.source_messages } : null;
-    return { importedConversationId: imported.conversation_id, omission, owned: false };
+    return { importedConversationId: imported.conversation_id, omission, continuation: imported.continuation, owned: false };
   }
   const owned = database.prepare("SELECT 1 FROM conversations WHERE provider_id = ? AND provider_session_id = ? LIMIT 1").get(providerId, sessionId)
     ?? database.prepare(`SELECT 1 FROM agent_turns WHERE provider_id = @providerId AND origin IS NULL

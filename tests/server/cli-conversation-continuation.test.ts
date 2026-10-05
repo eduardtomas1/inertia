@@ -68,7 +68,7 @@ describe("how an imported CLI chat continues", () => {
       const conversationId = importInto(runtime, "codex", "context", sessionId);
       expect(runtime.store.cliConversationImport(conversationId)).toMatchObject({ providerId: "codex", sessionId, continuation: "context" });
       expect(runtime.store.conversation(conversationId).providerSessionId).toBeNull();
-      expect(runtime.store.cliSessionOwnership("codex", sessionId)).toMatchObject({ importedConversationId: conversationId, owned: false });
+      expect(runtime.store.cliSessionOwnership("codex", sessionId)).toMatchObject({ importedConversationId: conversationId, continuation: "context", owned: false });
       const native = importInto(runtime, "codex", "native");
       expect(runtime.store.cliConversationImport(native)).toMatchObject({ continuation: "native" });
     } finally {

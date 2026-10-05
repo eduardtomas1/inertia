@@ -9,7 +9,7 @@ const original = window.inertia;
 const listeners = new Set<(event: SnapshotDelivery) => void>();
 afterEach(() => { cleanup(); listeners.clear(); window.inertia = original; });
 
-function fixture() {
+function fixture(hasChat = false) {
   const errors: unknown[] = [];
   const onError = (event: Event): void => { errors.push((event as CustomEvent<unknown>).detail); };
   window.addEventListener("inertia:snapshot-error", onError);
@@ -19,18 +19,19 @@ function fixture() {
   };
   const onNotice = vi.fn();
   const showChat = vi.fn();
+  const startChat = vi.fn();
   function Pane({ id }: { id: string }) {
     const textarea = useRef<HTMLTextAreaElement>(null);
     useComposerSnapshots(id, async () => "adopted", textarea);
     return <div className="conversation-pane-chat"><textarea ref={textarea} aria-label={`Message ${id}`} /></div>;
   }
   function Workbench({ chat }: { chat: string | null }) {
-    useSnapshotQueue(onNotice, showChat);
+    useSnapshotQueue(onNotice, { hasChat, show: showChat, start: startChat });
     return chat ? <Pane id={chat} /> : <p>Settings</p>;
   }
   const view = render(<Workbench chat={null} />);
   return {
-    errors, snapshot, onNotice, showChat, view, Workbench,
+    errors, snapshot, onNotice, showChat, startChat, view, Workbench,
     emit: (event: SnapshotDelivery) => { act(() => { for (const listener of listeners) listener(event); }); },
     cleanup: () => window.removeEventListener("inertia:snapshot-error", onError),
   };
@@ -44,11 +45,20 @@ it("shows a snapshot notice through the workbench notice", () => {
   value.cleanup();
 });
 
-it("opens a chat for a queued snapshot when no message box is mounted", () => {
+it("starts a chat for a queued snapshot when no chat or draft exists", () => {
   const value = fixture();
   value.emit({ pending: true });
-  expect(value.showChat).toHaveBeenCalledOnce();
+  expect(value.startChat).toHaveBeenCalledOnce();
+  expect(value.showChat).not.toHaveBeenCalled();
   expect(value.snapshot).not.toHaveBeenCalled();
+  value.cleanup();
+});
+
+it("returns to the existing chat or new-chat draft instead of starting another chat", () => {
+  const value = fixture(true);
+  value.emit({ pending: true });
+  expect(value.showChat).toHaveBeenCalledOnce();
+  expect(value.startChat).not.toHaveBeenCalled();
   value.cleanup();
 });
 
@@ -58,6 +68,7 @@ it("binds the mounted message box for a queued snapshot instead of opening anoth
   value.snapshot.mockClear();
   value.emit({ pending: true });
   expect(value.showChat).not.toHaveBeenCalled();
+  expect(value.startChat).not.toHaveBeenCalled();
   expect(value.snapshot).toHaveBeenCalledExactlyOnceWith({ type: "bind", conversationId: "11111111-1111-4111-8111-111111111111" });
   value.cleanup();
 });

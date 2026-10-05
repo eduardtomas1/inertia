@@ -696,10 +696,10 @@ export default function App(): React.JSX.Element {
     setSidebarCollapsed,
     setSidebarOpen,
   });
-  useSnapshotQueue(setActionError, () => {
-    if (!conversation) { createConversation(); return; }
-    navigateToView("workspace");
-    setSidebarOpen(false);
+  useSnapshotQueue(setActionError, {
+    hasChat: Boolean(conversation || draftConversation.conversation),
+    show: () => { navigateToView("workspace"); setSidebarOpen(false); },
+    start: () => createConversation(),
   });
   const createConversationForSelection = async (request: ReplacementChatRequest): Promise<void> => {
     if (!request.sourceConversationId && draftConversation.chooseModel(request.selection, request.configuration)) return;

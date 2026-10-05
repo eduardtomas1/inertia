@@ -1,11 +1,12 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 
 import { executableProcessExists } from "../helpers/executable-process";
 import { writeNodeClaudeExecutable, writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { filesContaining } from "./support/files-containing";
 
 type ProviderKey = "claude" | "codex" | "cursor" | "kimi" | "opencode" | "antigravity";
 
@@ -428,10 +429,10 @@ async function pasteFromMenu(dialog: Locator, text: string): Promise<void> {
   await expect.poll(menuCount).toBe(previous + 1);
   const items = await app.electronApp.evaluate(() => {
     const menu = (Reflect.get(globalThis, "__inertiaAuthInputMenus") as Electron.Menu[]).at(-1)!;
-    return menu.items.filter((item) => item.type !== "separator" && item.label !== "Inspect Element")
+    return menu.items.filter((item) => item.type !== "separator" && item.label !== "Inspect element")
       .map((item) => item.role ?? item.label);
   });
-  expect(items).toEqual(["Copy", "paste", "Select All"]);
+  expect(items).toEqual(["Copy", "paste", "Select all"]);
   await expectTerminalFocused(dialog);
   await app.electronApp.evaluate(({ BrowserWindow }) => {
     const menu = (Reflect.get(globalThis, "__inertiaAuthInputMenus") as Electron.Menu[]).at(-1)!;
@@ -439,6 +440,7 @@ async function pasteFromMenu(dialog: Locator, text: string): Promise<void> {
     const paste = menu.items.find((item) => item.role === "paste")!;
     if (process.platform === "darwin") window.webContents.paste();
     else paste.click({} as Electron.KeyboardEvent, window, window.webContents);
+    (Reflect.get(globalThis, "__inertiaAuthInputMenuClosed") as (() => void) | undefined)?.();
   });
 }
 
@@ -542,7 +544,10 @@ test.beforeAll(async () => {
     Reflect.set(shell, "openExternal", async (url: string) => { opened.push(url); });
     const menus: Electron.Menu[] = [];
     Reflect.set(globalThis, "__inertiaAuthInputMenus", menus);
-    Menu.prototype.popup = function () { menus.push(this); };
+    Menu.prototype.popup = function (options) {
+      menus.push(this);
+      Reflect.set(globalThis, "__inertiaAuthInputMenuClosed", options?.callback);
+    };
   });
   await app.page.getByRole("button", { name: "Settings", exact: true }).click();
   await app.page.getByRole("button", { name: "Agents", exact: true }).click();
@@ -552,6 +557,60 @@ test.afterAll(async () => {
   await app.electronApp.evaluate(({ clipboard }) =>
     clipboard.writeText(String(Reflect.get(globalThis, "__inertiaAuthInputClipboard") ?? "")));
   await app.close();
+});
+
+test("keeps a code pasted into Claude's sign-in out of diagnostics, issue reports and stored files", async () => {
+  test.setTimeout(120_000);
+  const page = app.page;
+  const applicationPaste = await app.electronApp.evaluate(({ Menu }) => {
+    const items = (menu: Electron.Menu | null): Electron.MenuItem[] =>
+      menu ? menu.items.flatMap((item) => [item, ...items(item.submenu ?? null)]) : [];
+    const paste = items(Menu.getApplicationMenu()).find((item) => item.role === "paste");
+    if (!paste) return null;
+    const defaultAccelerator = Reflect.get(paste, "getDefaultRoleAccelerator") as (() => string | undefined) | undefined;
+    return { accelerator: paste.accelerator ?? defaultAccelerator?.call(paste) ?? null };
+  });
+  expect(applicationPaste).toEqual({ accelerator: "CommandOrControl+V" });
+
+  await expect(page.getByRole("button", { name: "Configure Claude", exact: true }))
+    .toContainText("Sign in required", { timeout: 30_000 });
+  await page.evaluate(() => window.inertia.setDiagnosticsCapture(true));
+  const dialog = await openConnect("Claude", "Connect");
+  await expect(dialog.getByRole("status")).toContainText("Sign-in page opened in your browser");
+  const pid = await nextLoginPid("claude");
+  await leaveThroughHelperBar(dialog);
+  await pasteFromMenu(dialog, PASTE_SENTINEL);
+  await expect(dialog).toContainText(`Paste code here if prompted > ${PASTE_SENTINEL}`);
+  await page.keyboard.press("Enter");
+  await expectRejected(dialog, pid, "OAuth error: Invalid code");
+  expect(await stdinFor(pid)).toBe(`\x1b[200~${PASTE_SENTINEL}\x1b[201~\r`);
+  expect((await eventsFor(pid, "submit")).map((event) => event.value)).toEqual([PASTE_SENTINEL]);
+  expect(await filesContaining(state, PASTE_SENTINEL)).toEqual([join(state, "wire.jsonl")]);
+
+  await app.electronApp.evaluate(({ clipboard }) => clipboard.writeText("diagnostics-not-copied"));
+  expect(await page.evaluate(() => window.inertia.copyDiagnostics({ severity: "all" })))
+    .toMatchObject({ copied: true });
+  const diagnostics = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  expect(diagnostics).not.toBe("diagnostics-not-copied");
+  expect(diagnostics).not.toContain(PASTE_SENTINEL);
+
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("textbox", { name: "What happened", exact: true })
+    .fill("Signing in to Claude kept asking for the code after I pasted it into the terminal.");
+  await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
+  await page.getByRole("button", { name: "Preview issue" }).click();
+  const body = page.getByRole("textbox", { name: "Body", exact: true });
+  await expect(body).toHaveValue(/## Diagnostics/u);
+  expect(await body.inputValue()).not.toContain(PASTE_SENTINEL);
+
+  await page.evaluate(() => window.inertia.setDiagnosticsCapture(false));
+  expect([
+    ...await filesContaining(join(app.testDirectory, "data"), PASTE_SENTINEL),
+    ...await filesContaining(join(app.testDirectory, "electron-profile"), PASTE_SENTINEL),
+    ...await filesContaining(join(app.testDirectory, "t"), PASTE_SENTINEL),
+  ]).toEqual([]);
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true }).click();
+  expect(app.rendererErrors).toEqual([]);
 });
 
 test("Claude sign-in accepts typing and a pasted code after returning from the browser", async () => {
@@ -577,18 +636,6 @@ test("Claude sign-in accepts typing and a pasted code after returning from the b
   await app.page.keyboard.press("Enter");
   await expectRejected(dialog, rejected, "OAuth error: Invalid code");
   expect((await eventsFor(rejected, "submit")).map((event) => event.value)).toEqual(["typed-wrong-code"]);
-
-  dialog = await openConnect("Claude", "Connect");
-  await expect(dialog.getByRole("status")).toContainText("Sign-in page opened in your browser");
-  const sentinelPid = await nextLoginPid("claude");
-  await app.page.evaluate(() => window.inertia.setDiagnosticsCapture(true));
-  await leaveThroughHelperBar(dialog);
-  await pasteFromMenu(dialog, PASTE_SENTINEL);
-  await expect(dialog).toContainText(`Paste code here if prompted > ${PASTE_SENTINEL}`);
-  await app.page.keyboard.press("Enter");
-  await expectRejected(dialog, sentinelPid, "OAuth error: Invalid code");
-  expect((await eventsFor(sentinelPid, "submit")).map((event) => event.value)).toEqual([PASTE_SENTINEL]);
-  expect(await stdinFor(sentinelPid)).toBe(`\x1b[200~${PASTE_SENTINEL}\x1b[201~\r`);
 
   dialog = await openConnect("Claude", "Connect");
   await expect(dialog.getByRole("status")).toContainText("Sign-in page opened in your browser");
@@ -740,53 +787,5 @@ test("Antigravity sign-in accepts a retry and a menu paste in its own prompt", a
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(header).toContainText("Antigravity checks your sign-in");
-  expect(app.rendererErrors).toEqual([]);
-});
-
-async function filesContaining(directory: string, needle: string): Promise<string[]> {
-  const entries = await readdir(directory, { withFileTypes: true, recursive: true }).catch(() => []);
-  const matches: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const path = join(entry.parentPath, entry.name);
-    const contents = await readFile(path).catch(() => null);
-    if (contents?.includes(needle)) matches.push(path);
-  }
-  return matches;
-}
-
-test("keeps a pasted sign-in value out of diagnostics, issue reports and stored data", async () => {
-  test.setTimeout(90_000);
-  const page = app.page;
-  const applicationPaste = await app.electronApp.evaluate(({ Menu }) => {
-    const items = (menu: Electron.Menu | null): Electron.MenuItem[] =>
-      menu ? menu.items.flatMap((item) => [item, ...items(item.submenu ?? null)]) : [];
-    const paste = items(Menu.getApplicationMenu()).find((item) => item.role === "paste");
-    if (!paste) return null;
-    const defaultAccelerator = Reflect.get(paste, "getDefaultRoleAccelerator") as (() => string | undefined) | undefined;
-    return { accelerator: paste.accelerator ?? defaultAccelerator?.call(paste) ?? null };
-  });
-  expect(applicationPaste).toEqual({ accelerator: "CommandOrControl+V" });
-  await app.electronApp.evaluate(({ clipboard }) => clipboard.writeText("diagnostics-not-copied"));
-  expect(await page.evaluate(() => window.inertia.copyDiagnostics({ severity: "all" })))
-    .toMatchObject({ copied: true });
-  const diagnostics = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText());
-  expect(diagnostics).not.toBe("diagnostics-not-copied");
-  expect(diagnostics).not.toContain(PASTE_SENTINEL);
-
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
-  await page.getByRole("textbox", { name: "What happened", exact: true })
-    .fill("Signing in to Claude kept asking for the code after I pasted it into the terminal.");
-  await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
-  await page.getByRole("button", { name: "Preview issue" }).click();
-  const body = page.getByRole("textbox", { name: "Body", exact: true });
-  await expect(body).toHaveValue(/## Diagnostics/u);
-  expect(await body.inputValue()).not.toContain(PASTE_SENTINEL);
-
-  await page.evaluate(() => window.inertia.setDiagnosticsCapture(false));
-  expect([
-    ...await filesContaining(join(app.testDirectory, "data"), PASTE_SENTINEL),
-    ...await filesContaining(join(app.testDirectory, "electron-profile"), PASTE_SENTINEL),
-  ]).toEqual([]);
   expect(app.rendererErrors).toEqual([]);
 });

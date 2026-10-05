@@ -206,7 +206,7 @@ export function ProviderAuthDialog({
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform()));
+    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform() !== "darwin"));
     terminal.open(mount);
     fit.fit();
     terminalRef.current = terminal;

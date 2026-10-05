@@ -66,9 +66,12 @@ const editFlags = {
   canPaste: true, canDelete: false, canSelectAll: true, canEditRichly: false,
 };
 
-function fixture({ window = ownerWindow as unknown } = {}) {
+function fixture({ window = ownerWindow as unknown, busy = false } = {}) {
   const captureLocked = new WeakSet<WebContents>();
+  const navigate = vi.fn();
   createPreviewTab({
+    navigate,
+    agentBusy: () => busy,
     partition: "inertia-preview-test",
     pageNumber: 1,
     captureLocked,
@@ -84,7 +87,7 @@ function fixture({ window = ownerWindow as unknown } = {}) {
   const show = (patch: Partial<ContextMenuParams> = {}) => contents.emit("context-menu", {}, {
     x: 20, y: 30, frame: null, isEditable: false, selectionText: "", linkURL: "", editFlags, ...patch,
   });
-  return { captureLocked, contents, userClick, show };
+  return { captureLocked, contents, navigate, userClick, show };
 }
 
 const template = () => electron.build.mock.calls.at(-1)![0] as Item[];
@@ -99,16 +102,30 @@ beforeEach(() => {
 
 describe("Browser pane context menu", () => {
   it("offers page navigation for a user's right-click and anchors it inside the pane", () => {
-    const { contents, userClick, show } = fixture();
+    const { userClick, show } = fixture();
     userClick();
     show();
     expect(labels()).toEqual(["Back", "Forward (disabled)", "Reload"]);
     const options = electron.popup.mock.calls[0]![0] as PopupOptions;
     expect(options).toMatchObject({ window: ownerWindow, x: 320, y: 110 });
+  });
+
+  it("navigates through the broker's serialized navigation instead of the page directly", () => {
+    const { contents, navigate, userClick, show } = fixture();
+    userClick();
+    show();
     choose("Back");
     choose("Reload");
-    expect(contents.navigationHistory.goBack).toHaveBeenCalledOnce();
-    expect(contents.reload).toHaveBeenCalledOnce();
+    expect(navigate.mock.calls).toEqual([["back"], ["reload"]]);
+    expect(contents.navigationHistory.goBack).not.toHaveBeenCalled();
+    expect(contents.reload).not.toHaveBeenCalled();
+  });
+
+  it("disables navigation while an agent command runs", () => {
+    const { userClick, show } = fixture({ busy: true });
+    userClick();
+    show();
+    expect(labels()).toEqual(["Back (disabled)", "Forward (disabled)", "Reload (disabled)"]);
   });
 
   it("builds editing actions that act on the page itself", () => {
@@ -116,7 +133,7 @@ describe("Browser pane context menu", () => {
     userClick();
     show({ isEditable: true });
     expect(labels()).toEqual([
-      "Undo (disabled)", "Redo (disabled)", "-", "Cut (disabled)", "Copy", "Paste", "Select All",
+      "Undo (disabled)", "Redo (disabled)", "-", "Cut (disabled)", "Copy", "Paste", "Select all",
       "-", "Back", "Forward (disabled)", "Reload",
     ]);
     choose("Paste");
@@ -127,18 +144,21 @@ describe("Browser pane context menu", () => {
     const { contents, userClick, show } = fixture();
     userClick();
     show({ selectionText: "hello", linkURL: "https://example.com/a" });
-    expect(labels().slice(0, 4)).toEqual(["Copy", "-", "Copy Link Address", "-"]);
+    expect(labels().slice(0, 4)).toEqual(["Copy", "-", "Copy link address", "-"]);
     choose("Copy");
     expect(contents.copy).toHaveBeenCalledOnce();
-    choose("Copy Link Address");
+    choose("Copy link address");
     expect(electron.writeText).toHaveBeenCalledExactlyOnceWith("https://example.com/a");
   });
 
-  it.each(["javascript:alert(1)", "file:///etc/hosts", "data:text/plain,x"])("offers no link copy for %s", (linkURL) => {
+  it.each([
+    "javascript:alert(1)", "file:///etc/hosts", "data:text/plain,x",
+    "https://user:secret@example.com/", "http://example.com/",
+  ])("offers no link copy for %s", (linkURL) => {
     const { userClick, show } = fixture();
     userClick();
     show({ linkURL });
-    expect(labels()).not.toContain("Copy Link Address");
+    expect(labels().filter((label) => /link/iu.test(String(label)))).toEqual([]);
   });
 
   it("shows nothing while a capture holds the page", () => {
@@ -162,10 +182,10 @@ describe("Browser pane context menu", () => {
   it("does not act after the page closes and needs a live owner window", () => {
     const { contents, userClick, show } = fixture();
     userClick();
-    show();
+    show({ selectionText: "hello" });
     contents.destroyed = true;
-    choose("Reload");
-    expect(contents.reload).not.toHaveBeenCalled();
+    choose("Copy");
+    expect(contents.copy).not.toHaveBeenCalled();
     vi.clearAllMocks();
     const closed = fixture({ window: { isDestroyed: () => true } });
     closed.userClick();

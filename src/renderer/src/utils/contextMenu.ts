@@ -5,7 +5,7 @@ import type {
   ContextMenuRequest,
 } from "@shared/context-menu";
 import { UUID_PATTERN } from "@shared/request-identifiers";
-import { writeClipboardText } from "./clipboard";
+import { COPY_FAILURE_MESSAGE, writeClipboardText } from "./clipboard";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -35,7 +35,7 @@ export function hasNativeMenuTarget(target: EventTarget | null, surface: Element
 export function selectionInside(element: Element): boolean {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
-  return element.contains(selection.anchorNode) && element.contains(selection.focusNode);
+  return selection.getRangeAt(0).intersectsNode(element);
 }
 
 function clampedAnchor(x: number, y: number): ContextMenuAnchor {
@@ -45,18 +45,44 @@ function clampedAnchor(x: number, y: number): ContextMenuAnchor {
   };
 }
 
+let menuOpen = false;
+
 export function showContextMenu(
   descriptor: ContextMenuDescriptor,
   anchor: ContextMenuAnchor,
   perform: (action: ContextMenuAction) => void,
 ): void {
   const bridge = window.inertia;
-  if (!bridge?.showContextMenu) return;
+  if (!bridge?.showContextMenu || menuOpen) return;
+  menuOpen = true;
   void bridge.showContextMenu({ ...descriptor, anchor } as ContextMenuRequest)
     .then((action) => {
       if (action) perform(action);
     })
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .finally(() => {
+      menuOpen = false;
+    });
+}
+
+let copyFailureRegion: HTMLElement | null = null;
+
+function announceCopyFailure(): void {
+  if (!copyFailureRegion?.isConnected) {
+    copyFailureRegion = document.createElement("div");
+    copyFailureRegion.className = "visually-hidden";
+    copyFailureRegion.setAttribute("role", "alert");
+    document.body.append(copyFailureRegion);
+  }
+  const region = copyFailureRegion;
+  region.textContent = "";
+  window.requestAnimationFrame(() => {
+    region.textContent = COPY_FAILURE_MESSAGE;
+  });
+}
+
+export async function copyFromMenu(text: string): Promise<void> {
+  if (!await writeClipboardText(text)) announceCopyFailure();
 }
 
 export function contextMenuHandlers<Surface extends HTMLElement>(
@@ -124,9 +150,9 @@ function performProjectPathAction(
   } else if (action === "reveal") {
     void window.inertia.openProjectPath({ ...request, action: "reveal" }).catch(() => undefined);
   } else if (action === "copy-path") {
-    void writeClipboardText(absoluteProjectPath(target.projectRoot, target.relativePath));
+    void copyFromMenu(absoluteProjectPath(target.projectRoot, target.relativePath));
   } else if (action === "copy-relative-path") {
-    void writeClipboardText(target.relativePath);
+    void copyFromMenu(target.relativePath);
   }
 }
 

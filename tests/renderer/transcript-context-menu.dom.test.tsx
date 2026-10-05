@@ -83,6 +83,8 @@ const finalAnswer = () => screen.getByRole("article", { name: "Final assistant a
 const userRequest = () => screen.getByRole("article", { name: "Your request" });
 const lastRequest = () => bridge.showContextMenu.mock.calls.at(-1)![0];
 
+const settleMenu = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
 beforeEach(() => {
   vi.clearAllMocks();
   bridge.showContextMenu.mockResolvedValue(null);
@@ -105,7 +107,7 @@ describe("transcript context menus", () => {
       kind: "message", conversationId, role: "assistant", hasSelection: false, anchor: { x: 40, y: 60 },
     });
     expect(JSON.stringify(lastRequest())).not.toContain("build");
-    await act(async () => undefined);
+    await settleMenu();
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith(
       "The build passes.\n\nSee the entry point and the docs.\n\nconst value = 1;",
     );
@@ -115,7 +117,7 @@ describe("transcript context menus", () => {
     renderTimeline();
     bridge.showContextMenu.mockResolvedValueOnce("copy-markdown");
     fireEvent.contextMenu(finalAnswer().querySelector("p")!);
-    await act(async () => undefined);
+    await settleMenu();
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith(answer.content);
   });
 
@@ -124,7 +126,7 @@ describe("transcript context menus", () => {
     bridge.showContextMenu.mockResolvedValueOnce("copy-message");
     fireEvent.contextMenu(userRequest().querySelector(".message-body")!);
     expect(lastRequest()).toMatchObject({ kind: "message", role: "user" });
-    await act(async () => undefined);
+    await settleMenu();
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith(request.content);
   });
 
@@ -138,7 +140,45 @@ describe("transcript context menus", () => {
     expect(lastRequest()).toMatchObject({ kind: "message", hasSelection: true });
   });
 
-  it("opens the menu from the keyboard at the focused message and keeps focus", () => {
+  it("offers Copy for a selection that crosses from the request into the answer", async () => {
+    renderTimeline();
+    const range = document.createRange();
+    range.setStart(userRequest().querySelector(".message-body")!.firstChild!, 3);
+    range.setEnd(finalAnswer().querySelector("p")!.firstChild!, 2);
+    window.getSelection()!.addRange(range);
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    expect(lastRequest()).toMatchObject({ kind: "message", role: "assistant", hasSelection: true });
+    await settleMenu();
+    fireEvent.contextMenu(finalAnswer().querySelector("pre")!);
+    expect(lastRequest()).toMatchObject({ kind: "code", hasSelection: false });
+  });
+
+  it("opens one menu at a time when the Menu key also fires a contextmenu event", async () => {
+    renderTimeline();
+    let settle!: (action: ContextMenuAction | null) => void;
+    bridge.showContextMenu.mockImplementationOnce(() => new Promise((resolve) => { settle = resolve; }));
+    const article = userRequest();
+    article.focus();
+    fireEvent.keyDown(article, { key: "ContextMenu" });
+    const duplicate = fireEvent.contextMenu(article);
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    expect(duplicate).toBe(false);
+    expect(bridge.showContextMenu).toHaveBeenCalledOnce();
+    await act(async () => settle(null));
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    expect(bridge.showContextMenu).toHaveBeenCalledTimes(2);
+  });
+
+  it("announces a copy the clipboard refused", async () => {
+    renderTimeline();
+    bridge.copyText.mockResolvedValueOnce(false);
+    bridge.showContextMenu.mockResolvedValueOnce("copy-markdown");
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    await settleMenu();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't copy. Try again or select the text manually.");
+  });
+
+  it("opens the menu from the keyboard at the focused message and keeps focus", async () => {
     renderTimeline();
     const article = userRequest();
     article.getBoundingClientRect = () => ({
@@ -147,6 +187,7 @@ describe("transcript context menus", () => {
     article.focus();
     fireEvent.keyDown(article, { key: "F10", shiftKey: true });
     expect(lastRequest()).toMatchObject({ kind: "message", role: "user", anchor: { x: 10, y: 80 } });
+    await settleMenu();
     fireEvent.keyDown(article, { key: "ContextMenu" });
     expect(bridge.showContextMenu).toHaveBeenCalledTimes(2);
     expect(document.activeElement).toBe(article);
@@ -158,7 +199,7 @@ describe("transcript context menus", () => {
     fireEvent.contextMenu(finalAnswer().querySelector("pre")!);
     expect(bridge.showContextMenu).toHaveBeenCalledOnce();
     expect(lastRequest()).toEqual({ kind: "code", conversationId, hasSelection: false, anchor: { x: 0, y: 0 } });
-    await act(async () => undefined);
+    await settleMenu();
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith("const value = 1;");
   });
 
@@ -170,10 +211,11 @@ describe("transcript context menus", () => {
     expect(lastRequest()).toEqual({
       kind: "project-link", projectId, conversationId, relativePath: "src/index.ts", anchor: { x: 0, y: 0 },
     });
+    await settleMenu();
     for (const action of ["open", "reveal", "copy-path", "copy-relative-path"] as const) {
       bridge.showContextMenu.mockResolvedValueOnce(action);
       fireEvent.contextMenu(link);
-      await act(async () => undefined);
+      await settleMenu();
     }
     expect(onOpenTurnFile).toHaveBeenCalledExactlyOnceWith("src/index.ts");
     expect(bridge.openProjectPath).toHaveBeenCalledExactlyOnceWith({

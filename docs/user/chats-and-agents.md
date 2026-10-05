@@ -35,13 +35,13 @@ Right-click a chat in the sidebar, or focus it and press Shift+F10 or the Menu k
 
 Right-click inside Inertia, or focus an item and press Shift+F10 or the Menu key, for the actions that fit where you are:
 
-- **Messages:** **Copy** when text is selected, **Copy Message** as plain text, and **Copy as Markdown** for agent answers.
-- **Code blocks:** **Copy Code**.
-- **File links in answers, files in Files and changed files in Changes:** **Open**, **Reveal in Finder** (File Explorer on Windows, your file manager on Linux), **Copy Path** and **Copy Relative Path**. Folders leave out **Open**.
-- **Web links:** **Copy Link Address** and **Open Link**. Images offer **Copy Image**.
+- **Messages:** **Copy** when text is selected, **Copy message** as plain text, and **Copy as Markdown** for agent answers.
+- **Code blocks:** **Copy code**.
+- **File links in answers, files in Files and changed files in Changes:** **Open**, **Reveal in Finder** (File Explorer on Windows, your file manager on Linux), **Copy path** and **Copy relative path**. Folders leave out **Open**.
+- **Web links:** **Copy link address** and **Open link**. Images offer **Copy image**.
 - **Text fields:** the usual editing actions, with up to five spelling suggestions for a misspelled word.
-- **Terminal:** **Copy** the selection, **Paste**, **Select All** and **Clear**. On Windows and Linux, Ctrl+V also pastes into the terminal.
-- **Browser pane:** the page's editing actions, **Copy Link Address**, **Back**, **Forward** and **Reload**. Pages that show their own menu keep it, and nothing opens while the agent is driving the page.
+- **Terminal:** **Copy** the selection, **Paste**, **Select all** and **Clear**. On Windows, Ctrl+V also pastes into the terminal; on Linux, Ctrl+V still reaches terminal programs, so paste with Ctrl+Shift+V.
+- **Browser pane:** the page's editing actions, **Copy link address**, **Back**, **Forward** and **Reload**. Pages that show their own menu keep it. A right-click the agent sends opens nothing, and **Back**, **Forward** and **Reload** are unavailable while an agent Browser command runs.
 
 ## Find anything
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { writeClipboardText } from "../utils/clipboard";
+import { COPY_FAILURE_MESSAGE, writeClipboardText } from "../utils/clipboard";
 
 export interface ClipboardControlState {
   copied: boolean;
@@ -28,7 +28,7 @@ export function useCopiedState(): ClipboardControlState {
     if (operation.current !== sequence) return;
     setPending(false);
     if (!succeeded) {
-      setError("Couldn't copy. Try again or select the text manually.");
+      setError(COPY_FAILURE_MESSAGE);
       return;
     }
     setCopied(true);

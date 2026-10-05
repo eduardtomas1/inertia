@@ -140,4 +140,17 @@ describe("Codex compaction exact-run performance capability", () => {
     expect(events.some((event) => event.type === "capability-observation"
       && event.capabilityId === "performance-modes")).toBe(false);
   });
+
+  it("does not send reasoning effort in a resume field Codex ignores", async () => {
+    const { manager, input, requests } = await fixture({
+      selectedTier: null, echoedTier: "default",
+    });
+
+    await expect(manager.compact({ ...input, reasoningEffort: "high" }))
+      .resolves.toMatchObject({ status: "completed" });
+
+    const resumed = requests.find(({ method }) => method === "thread/resume")?.params;
+    expect(resumed).toMatchObject({ threadId: input.sessionId, model: "model-a" });
+    expect(resumed).not.toHaveProperty("effort");
+  });
 });

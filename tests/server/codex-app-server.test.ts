@@ -244,7 +244,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       approvalPolicy: "untrusted",
       approvalsReviewer: "user",
       sandbox: "read-only",
-      effort: "high",
     });
     expect(turn.params).toEqual({
       threadId: "thread-existing",
@@ -760,6 +759,41 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
         },
       })]);
     expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+    expect(messages.some(({ method }) => method === "thread/settings/update")).toBe(false);
+  });
+
+  it.each([undefined, "thread-goal-effort"])("applies the selected reasoning effort to provider-started goal turns (session %s)", async (sessionId) => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-continuation";
+    const manager = trackedManager(fake.command);
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `conversation-goal-effort-${sessionId ?? "new"}`,
+      cwd: fake.root,
+      prompt: "/goal Ship it",
+      interactionMode: "build",
+      access: "full",
+      model: "model-a",
+      reasoningEffort: "high",
+      ...(sessionId ? { sessionId } : {}),
+      goalStart: { objective: "Ship it" },
+      goalContinuationExpected: true,
+    }));
+
+    expect(result).toMatchObject({ status: "completed", text: "First goal turn. Second goal turn." });
+    const messages = captured(fake.capturePath);
+    const methods = messages.flatMap(({ method }) => typeof method === "string" ? [method] : []);
+    const opened = messages.find(({ method }) => method === (sessionId ? "thread/resume" : "thread/start")) as { params: Record<string, unknown> };
+    expect(opened.params).toMatchObject({ model: "model-a" });
+    expect(opened.params).not.toHaveProperty("effort");
+    expect(messages.filter(({ method }) => method === "thread/settings/update")).toEqual([
+      expect.objectContaining({ params: { threadId: sessionId ?? "thread-new", effort: "high" } }),
+    ]);
+    expect(methods.indexOf("thread/settings/update")).toBeLessThan(methods.indexOf("thread/goal/set"));
+    expect(methods).not.toContain("turn/start");
+    await manager.disposeAll();
   });
 
   it("fails a rejected goal start without converting it into an ordinary turn", async () => {
@@ -1107,7 +1141,6 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       approvalPolicy: "never",
       approvalsReviewer: "user",
       sandbox: "danger-full-access",
-      effort: "high",
     });
     expect(turn.params).toEqual({
       threadId: "thread-full",

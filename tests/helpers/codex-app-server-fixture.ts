@@ -139,6 +139,11 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   }
   return;
 }
+if (message.method === "thread/settings/update") {
+  send({ id: message.id, result: {} });
+  send({ method: "thread/settings/updated", params: { threadId, threadSettings: { disabledPluginIds: [], cwd: process.cwd(), approvalPolicy: "on-request", approvalsReviewer: "user", sandboxPolicy: { type: "readOnly", networkAccess: false }, activePermissionProfile: null, model: "fake", modelProvider: "openai", serviceTier: null, effort: message.params.effort ?? null, summary: "auto", collaborationMode: { mode: "default", settings: { model: "fake", reasoning_effort: message.params.effort ?? null, developer_instructions: null } }, multiAgentMode: "explicitRequestOnly", personality: null } } });
+  return;
+}
 if (message.method === "thread/compact/start") {
   send({ id: message.id, result: {} });
   send({ method: "turn/started", params: { threadId, turn: { id: "compact-turn-1", status: "inProgress", items: [], error: null } } });

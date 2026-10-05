@@ -178,8 +178,10 @@ failed on the unfixed code. Findings that did not hold are listed as refuted.
 - Security: a selected repository skill was copied into the plugin with its
   `SKILL.md` front matter, and the SDK keeps a host plugin's `allowed-tools`,
   so a skill could grant itself tools without Inertia's approval. Staging now
-  keeps only name, description and argument-hint, and refuses a selected skill
-  that declares `allowed-tools`, `hooks`, `model` or `context`. Proven by
+  keeps only name, description and argument-hint, so `allowed-tools`, `hooks`
+  and `model` are dropped in any casing. A skill that sets `context` or
+  `agent` (any casing) changes meaning without them, so discovery does not
+  offer it and selection refuses it by name. Proven by
   `claude-skill-staging.test.ts`.
 - A follow-up accepted while the first prompt ended in an error result was
   dropped. Error results now release the follow-ups they answer; while Claude

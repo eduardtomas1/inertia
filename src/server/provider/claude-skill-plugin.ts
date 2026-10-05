@@ -44,7 +44,7 @@ const MAX_STAGED_FILES = 256;
 const MAX_STAGED_FILE_BYTES = 1024 * 1024;
 const MAX_STAGED_TOTAL_BYTES = 8 * 1024 * 1024;
 const MAX_STAGED_DEPTH = 12;
-const REFUSED_SKILL_FIELDS: readonly string[] = ["allowed-tools", "hooks", "model", "context"];
+const REFUSED_SKILL_FIELDS: readonly string[] = ["context", "agent"];
 
 export const CLAUDE_ISOLATED_SKILL_PLUGIN_NAME = "inertia-selected-skills";
 
@@ -417,7 +417,7 @@ function skillFrontmatterSections(
 function refusedSkillField(content: Buffer): string | undefined {
   return skillFrontmatterSections(content)?.frontmatter
     .map((line) => /^([A-Za-z][A-Za-z0-9_-]{0,63}):/u.exec(line)?.[1])
-    .find((field) => field !== undefined && REFUSED_SKILL_FIELDS.includes(field));
+    .find((field) => field !== undefined && REFUSED_SKILL_FIELDS.includes(field.toLowerCase()));
 }
 
 function stagedSkillContent(
@@ -560,7 +560,7 @@ async function discoverRootSkills(
       }
       state.bytes += content.byteLength;
       const metadata = parseSkillFrontmatter(content, name);
-      if (!metadata) continue;
+      if (!metadata || refusedSkillField(content)) continue;
       const resolvedPath = await runClaudeSkillFilesystemOperation(
         control,
         "realpath",

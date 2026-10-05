@@ -101,8 +101,9 @@ release, with fixes for turns that could fail or end the wrong way.
   read from the right entry, and a rejected rate limit marks the turn as
   usage-limited, so it can be resumed or snoozed until the reset.
 - **Claude skills:** a selected repository skill can no longer grant itself
-  tools, hooks, a model or a context: its tool permissions always go through
-  Inertia's approvals, and a skill that declares them is refused by name.
+  tools, hooks or a model: those fields are ignored and its tool permissions
+  always go through Inertia's approvals. A skill that sets `context` or
+  `agent` is not offered, and is refused by name if selected.
 - **Cursor:** a sign-in, plan, payment or settings message from Cursor ends the
   turn as an error instead of appearing as the answer. "Upgrade your plan"
   counts as a usage limit, and "Please sign in" asks you to connect Cursor.

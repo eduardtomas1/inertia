@@ -271,26 +271,50 @@ a plan, renderer hydration and turn settlement save pending updates first, so
 activity events keep their order and nothing is shown before it is saved. A
 failed timed save fails the turn like a failed text save. The conversation
 shell is sent only when a command's workspace run is created or changes label
-or status, and the renderer keeps its snapshot object when a shell event
-matches what it already shows.
+or status, or when work resumes after a retry or a delegation, and the
+renderer keeps its snapshot object when a shell event matches what it already
+shows.
 
-Codex command output is now one Output section. Chunks are appended as they
-arrive, without a heading per chunk and without trimming their whitespace; the
-open line is scanned again for credentials so a secret split across two chunks
-is still redacted. The completion no longer repeats the command, nor the output
-that already streamed. Before, a repeated identical chunk was dropped and every
-chunk got its own `Output:` heading, then the completion appended the command
-and the whole output again.
+Codex command output is now one Output section, appended without a heading
+per chunk and without trimming whitespace. The Codex event handler holds the
+unfinished last line of each command and releases it at a line feed, at a
+carriage return followed by more output, before terminal input, when the
+command completes, or once it passes 1 KiB (cut at its last space, or whole
+when it has none). An open private key block is held until its END line, up to
+16 KiB. Each released piece is scrubbed whole, so a credential (`ghp_`,
+`Bearer`, `xoxb-`, a JWT, a private key) or a workspace path that arrives split
+across chunks is redacted like one that arrives in one piece. Credentials are
+still scrubbed one piece at a time, so a secret that straddles the 1 KiB cut of
+a single line longer than 1 KiB relies on the projection's rescan of the open
+line, which starts at its last line feed and covers at most 1 KiB. The cost is
+latency for an unfinished line: a prompt without a line feed shows when it
+ends, when the command completes, or at 1 KiB.
+
+The completion no longer repeats the command, nor the output that already
+streamed. Codex stops sending output deltas after a per-command limit, so when
+the completed output is longer than what streamed and continues it (checked on
+the last 64 streamed characters), the unseen ending is appended; when it
+differs, the completed output is added as its own Output section. Before, a
+repeated identical chunk was dropped and every chunk got its own `Output:`
+heading, then the completion appended the command and the whole output again.
+
+Once an update would not fit in what is left of the 256 KiB per-turn detail
+budget, the activity keeps the detail it has, including its command line, and
+the new part is dropped. Before, that update cut the stored detail down to the
+few characters left, which could replace the command line with a fragment of
+the omission marker.
 
 Five hundred output deltas delivered in ten 64 ms windows
-(`tests/server/provider-activity-lifecycle.test.ts`):
+(`tests/server/provider-activity-lifecycle.test.ts`). After the change the
+twelve writes are the ten windows, the unfinished last line released when the
+command completes, and the completion itself:
 
 | Measure | Before | After |
 | --- | ---: | ---: |
-| Activity row writes | 501 | 11 |
+| Activity row writes | 501 | 12 |
 | Workspace run writes | 501 | 1 |
-| `agent.activity` events | 502 | 12 |
-| Bytes in those events | 2,751,255 | 32,437 |
+| `agent.activity` events | 502 | 13 |
+| Bytes in those events | 2,751,255 | 37,008 |
 | Conversation shell events | 502 | 2 |
 | Stored detail for 4,390 characters of output | 13,325 | 4,417 |
 
@@ -301,7 +325,10 @@ the shell snapshot of 1,000 conversations is 2,023,310 bytes and takes about
 chat holds 20 of its 40 turns in 5,513,713 bytes (ceiling 6 MiB); one
 full-size `agent.activity` event is 34,345 bytes (ceiling 36 KiB), so the
 4 MiB replay ring holds about 122 of them; one shell event with 20 runs is
-9,690 bytes (ceiling 12 KiB).
+9,690 bytes (ceiling 12 KiB). The fixture output is ASCII and the ceilings
+hold only for that: the limits count UTF-16 characters, so 32 KiB of
+three-byte characters is about 96 KiB in one event. The runs carry `canStop`
+as stored (`false`); the live value adds at most one byte per run.
 
 `npm run benchmark:desktop:built`, three interleaved runs each of a main build
 (`b6865e11`) and this branch on the same Mac, medians: first streamed delta to

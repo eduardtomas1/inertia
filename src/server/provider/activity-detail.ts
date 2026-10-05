@@ -45,7 +45,7 @@ export function boundProviderActivityDetail(
   if (value.length <= limit) return value;
   if (limit === 0) return "";
   const marker = `\n… [${value.length - limit} or more characters omitted] …\n`;
-  if (marker.length >= limit) return marker.slice(0, limit);
+  if (marker.length >= limit) return value.slice(0, limit);
   const retained = limit - marker.length;
   const headLength = Math.ceil(retained * 0.65);
   return `${value.slice(0, headLength)}${marker}${value.slice(-(retained - headLength))}`;
@@ -138,7 +138,7 @@ export function sanitizeProviderActivityDetail(
     .replace(/<system(?:[_ -]?prompt)?\b[^>]*>[\s\S]*?<\/system(?:[_ -]?prompt)?>/giu, "system_prompt=[redacted]")
     .replace(
       /(?:^|\n)[ \t]*(?:-{2,}[ \t]*)?(?:developer|generated|internal|system)[_ -]?prompt(?:[ \t]*-{2,})?[ \t]*[:=][ \t]*(?:"[\s\S]*?"|'[\s\S]*?'|[^\n]*)/giu,
-      "\nsystem_prompt=[redacted]",
+      (match) => `${match.startsWith("\n") ? "\n" : ""}system_prompt=[redacted]`,
     )
     .replace(/\b(?:ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, "[redacted]")
@@ -328,8 +328,9 @@ export function appendProviderActivityOutput(
   if (!previous) return `Output:\n${output}`;
   if (!continuing) return `${previous}\n\nOutput:\n${output}`;
   const boundary = Math.max(
-    previous.lastIndexOf("\n") + 1,
+    previous.lastIndexOf("\n"),
     previous.length - OUTPUT_BOUNDARY_RESCAN_CHARS,
+    0,
   );
   return previous.slice(0, boundary) + (sanitizeProviderActivityDetail(
     previous.slice(boundary) + output,
@@ -340,16 +341,22 @@ export function appendProviderActivityOutput(
 function withinTurnBudget(
   previous: string | null,
   currentTurnChars: number,
-  merge: (maxChars: number) => string | null,
+  candidate: string | null,
 ): { detail: string | null; totalChars: number } {
   const baseChars = Math.max(0, currentTurnChars - (previous?.length ?? 0));
   const remaining = Math.max(
     0,
     MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS - baseChars,
   );
-  const detail = merge(
-    Math.min(MAX_PROVIDER_ACTIVITY_DETAIL_CHARS, remaining),
-  ) || null;
+  const detail = previous
+    && candidate
+    && candidate.length > remaining
+    && remaining < MAX_PROVIDER_ACTIVITY_DETAIL_CHARS
+    ? previous
+    : boundProviderActivityDetail(
+      candidate ?? "",
+      Math.min(MAX_PROVIDER_ACTIVITY_DETAIL_CHARS, remaining),
+    ) || null;
   return {
     detail,
     totalChars: baseChars + (detail?.length ?? 0),
@@ -361,8 +368,11 @@ export function mergeProviderActivityDetailWithinTurnBudget(
   next: string | null,
   currentTurnChars: number,
 ): { detail: string | null; totalChars: number } {
-  return withinTurnBudget(previous, currentTurnChars, (maxChars) =>
-    joinProviderActivityDetail(previous, next, maxChars));
+  return withinTurnBudget(
+    previous,
+    currentTurnChars,
+    joinProviderActivityDetail(previous, next, Number.MAX_SAFE_INTEGER),
+  );
 }
 
 export function mergeProviderActivityOutputWithinTurnBudget(
@@ -371,9 +381,9 @@ export function mergeProviderActivityOutputWithinTurnBudget(
   continuing: boolean,
   currentTurnChars: number,
 ): { detail: string | null; totalChars: number } {
-  return withinTurnBudget(previous, currentTurnChars, (maxChars) =>
-    boundProviderActivityDetail(
-      appendProviderActivityOutput(previous, output, continuing),
-      maxChars,
-    ));
+  return withinTurnBudget(
+    previous,
+    currentTurnChars,
+    appendProviderActivityOutput(previous, output, continuing),
+  );
 }

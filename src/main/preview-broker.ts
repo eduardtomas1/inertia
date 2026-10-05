@@ -19,10 +19,8 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { captureAgentPageInputRefusal } from "./preview-agent-input.js";
+import { agentOperationBudget, agentOperationFailure, AgentOperationScope } from "./preview-agent-scope.js";
 import {
-  agentOperationBudget,
-  agentOperationFailure,
-  AgentOperationScope,
   blankTabRefusal,
   PARKED_PREVIEW_BOUNDS,
   PreviewAgentOperations,

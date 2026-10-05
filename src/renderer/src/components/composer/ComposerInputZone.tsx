@@ -87,6 +87,7 @@ export interface ComposerInputZoneProps {
   canQueue: boolean;
   onQueue: () => void;
   running: boolean;
+  stopsBeforeSending: boolean;
   imageInputUnavailable: boolean;
   submissionPending: boolean;
   followUpPending: boolean;
@@ -156,6 +157,7 @@ export function ComposerInputZone({
   canQueue,
   onQueue,
   running,
+  stopsBeforeSending,
   imageInputUnavailable,
   submissionPending,
   followUpPending,
@@ -604,6 +606,8 @@ export function ComposerInputZone({
           aria-describedby={continuationRefusal ? continuationNoticeId : undefined}
           placeholder={continuationRefusal
             ? "This chat can't continue here. Start a new chat to keep working."
+            : stopsBeforeSending
+            ? "Enter stops and sends · Tab queues"
             : running
             ? "Enter sends · Tab queues"
             : imageInputUnavailable

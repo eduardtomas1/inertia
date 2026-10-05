@@ -93,6 +93,8 @@ async function showHelperBar(dialog: ReturnType<typeof renderDialog>): Promise<v
   await waitFor(() => expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument());
 }
 
+const settleMenu = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
 beforeEach(() => {
   terminals.length = 0;
   vi.clearAllMocks();
@@ -115,7 +117,7 @@ describe("provider sign-in paste", () => {
     const button = screen.getByRole("button", { name });
     button.focus();
     fireEvent.click(button);
-    await act(async () => undefined);
+    await settleMenu();
     expect(terminalInput()).toHaveFocus();
 
     dialog.behind.focus();
@@ -144,7 +146,7 @@ describe("provider sign-in paste", () => {
     expect(terminalInput()).toHaveFocus();
     const terminal = terminals[0]!;
     const selectAll = vi.spyOn(terminal, "selectAll");
-    await act(async () => undefined);
+    await settleMenu();
     expect(selectAll).toHaveBeenCalledOnce();
     vi.spyOn(terminal, "hasSelection").mockReturnValue(true);
     vi.spyOn(terminal, "getSelection").mockReturnValue("Paste code here if prompted >");
@@ -152,10 +154,10 @@ describe("provider sign-in paste", () => {
     bridge.showContextMenu.mockResolvedValueOnce("terminal-copy").mockResolvedValueOnce("terminal-clear");
     fireEvent.contextMenu(document.querySelector(".provider-auth-terminal")!);
     expect(bridge.showContextMenu.mock.calls.at(-1)![0]).toMatchObject({ hasSelection: true });
-    await act(async () => undefined);
+    await settleMenu();
     expect(bridge.copyText).toHaveBeenLastCalledWith("Paste code here if prompted >");
     fireEvent.contextMenu(document.querySelector(".provider-auth-terminal")!);
-    await act(async () => undefined);
+    await settleMenu();
     expect(clear).not.toHaveBeenCalled();
   });
 

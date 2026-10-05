@@ -1,4 +1,4 @@
-import type { IpcMainInvokeEvent, MenuItemConstructorOptions, PopupOptions } from "electron";
+import type { BrowserWindow, IpcMainInvokeEvent, MenuItemConstructorOptions, PopupOptions } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DesktopWindowContext } from "../../src/shared/desktop";
@@ -7,11 +7,9 @@ const electron = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, ...args: unknown[]) => Promise<unknown>>(),
   build: vi.fn(),
   popup: vi.fn(),
-  fromWebContents: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
-  BrowserWindow: { fromWebContents: electron.fromWebContents },
   ipcMain: {
     handle: (channel: string, handler: (event: unknown, ...args: unknown[]) => Promise<unknown>) => {
       electron.handlers.set(channel, handler);
@@ -40,12 +38,15 @@ function fixture({
     isDestroyed: vi.fn(() => false),
     webContents: { getZoomFactor: vi.fn(() => zoom), inspectElement: vi.fn() },
   };
-  electron.fromWebContents.mockReturnValue(window);
   const assertTrusted = vi.fn((_event: IpcMainInvokeEvent, count: number, expected: number) => {
     if (count !== expected) throw new Error("Rejected untrusted renderer request");
     return context;
   });
-  registerContextMenuIpc({ channel, assertTrusted, isPackaged: () => packaged, platform });
+  const windowFor = vi.fn((_event: IpcMainInvokeEvent, count: number, expected: number) => {
+    if (count !== expected || window.isDestroyed()) throw new Error("Rejected untrusted renderer request");
+    return window as unknown as BrowserWindow;
+  });
+  registerContextMenuIpc({ channel, assertTrusted, windowFor, isPackaged: () => packaged, platform });
   const handler = electron.handlers.get(channel)!;
   const show = (...args: unknown[]) => handler({ sender: {} }, ...args);
   return { window, assertTrusted, show };
@@ -53,7 +54,7 @@ function fixture({
 
 const template = () => electron.build.mock.calls.at(-1)![0] as Item[];
 const shape = () => template().map((item) => (
-  item.type === "separator" ? "-" : item.role ? `role:${item.role}` : item.enabled === false ? `${item.label} (disabled)` : item.label
+  item.type === "separator" ? "-" : item.role ? `role:${item.role}:${item.label}` : item.enabled === false ? `${item.label} (disabled)` : item.label
 ));
 const popupOptions = () => electron.popup.mock.calls.at(-1)![0] as PopupOptions;
 const choose = (label: string) => template().find((item) => item.label === label)!.click!();
@@ -70,38 +71,38 @@ describe("surface context menu IPC", () => {
     [
       "an assistant message with a selection",
       { kind: "message", conversationId, role: "assistant", hasSelection: true, anchor },
-      ["role:copy", "-", "Copy Message", "Copy as Markdown"],
+      ["role:copy:Copy", "-", "Copy message", "Copy as Markdown"],
     ],
     [
       "a user message",
       { kind: "message", conversationId, role: "user", hasSelection: false, anchor },
-      ["Copy Message"],
+      ["Copy message"],
     ],
-    ["a code block", { kind: "code", conversationId, hasSelection: false, anchor }, ["Copy Code"]],
+    ["a code block", { kind: "code", conversationId, hasSelection: false, anchor }, ["Copy code"]],
     [
       "a project link",
       { kind: "project-link", projectId, conversationId, relativePath: "src/a.ts", anchor },
-      ["Open", "Reveal in Finder", "-", "Copy Path", "Copy Relative Path"],
+      ["Open", "Reveal in Finder", "-", "Copy path", "Copy relative path"],
     ],
     [
       "a changed file",
       { kind: "diff-file", projectId, relativePath: "src/a.ts", anchor },
-      ["Open", "Reveal in Finder", "-", "Copy Path", "Copy Relative Path"],
+      ["Open", "Reveal in Finder", "-", "Copy path", "Copy relative path"],
     ],
     [
       "a folder",
       { kind: "file", projectId, relativePath: "src", directory: true, anchor },
-      ["Reveal in Finder", "-", "Copy Path", "Copy Relative Path"],
+      ["Reveal in Finder", "-", "Copy path", "Copy relative path"],
     ],
     [
       "a terminal without a selection",
       { kind: "terminal", hasSelection: false, clearable: true, anchor },
-      ["Copy (disabled)", "role:paste", "Select All", "-", "Clear"],
+      ["Copy (disabled)", "role:paste:Paste", "Select all", "-", "Clear"],
     ],
     [
       "a sign-in terminal with a selection",
       { kind: "terminal", hasSelection: true, clearable: false, anchor },
-      ["Copy", "role:paste", "Select All"],
+      ["Copy", "role:paste:Paste", "Select all"],
     ],
   ])("builds the fixed items for %s", async (_name, request, expected) => {
     const { show } = fixture();
@@ -114,7 +115,7 @@ describe("surface context menu IPC", () => {
 
   it.each([
     ["win32", "Reveal in File Explorer"],
-    ["linux", "Reveal in File Manager"],
+    ["linux", "Reveal in file manager"],
   ] as const)("names the reveal action for %s", async (platform, label) => {
     const { show } = fixture({ platform });
     const result = show({ kind: "file", projectId, relativePath: "a.ts", directory: false, anchor });
@@ -140,18 +141,18 @@ describe("surface context menu IPC", () => {
     expect(popupOptions()).toMatchObject({ window, x: 126, y: 41 });
   });
 
-  it("adds Inspect Element only to unpackaged builds", async () => {
+  it("adds Inspect element only to unpackaged builds", async () => {
     const packaged = fixture();
     void packaged.show({ kind: "code", hasSelection: false, anchor });
     await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
-    expect(shape()).not.toContain("Inspect Element");
+    expect(shape()).not.toContain("Inspect element");
 
     electron.handlers.clear();
     const development = fixture({ packaged: false, zoom: 2 });
     const result = development.show({ kind: "code", hasSelection: false, anchor });
     await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledTimes(2));
-    expect(shape().slice(-2)).toEqual(["-", "Inspect Element"]);
-    choose("Inspect Element");
+    expect(shape().slice(-2)).toEqual(["-", "Inspect element"]);
+    choose("Inspect element");
     expect(development.window.webContents.inspectElement).toHaveBeenCalledWith(200, 80);
     dismiss();
     await expect(result).resolves.toBeNull();
@@ -186,14 +187,14 @@ describe("surface context menu IPC", () => {
     expect(electron.build).not.toHaveBeenCalled();
     const result = show({ kind: "message", conversationId, role: "user", hasSelection: false, anchor });
     await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
-    choose("Copy Message");
+    choose("Copy message");
     await expect(result).resolves.toBe("copy-message");
   });
 
-  it("shows nothing when the sender has no live window", async () => {
+  it("refuses when the sender has no live window", async () => {
     const { window, show } = fixture();
     window.isDestroyed.mockReturnValue(true);
-    await expect(show({ kind: "code", hasSelection: false, anchor })).resolves.toBeNull();
+    await expect(show({ kind: "code", hasSelection: false, anchor })).rejects.toThrow("Rejected untrusted");
     expect(electron.build).not.toHaveBeenCalled();
   });
 });

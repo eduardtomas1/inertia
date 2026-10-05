@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1099,6 +1099,43 @@ describe("provider manager installation ownership", () => {
       false,
     )).toBe(false);
     await manager.disposeAll();
+  });
+
+  it.skipIf(process.platform === "win32")("notices an outside Volta install behind the same shim", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "inertia-volta-identity-")));
+    const voltaBin = join(root, ".volta", "bin");
+    const image = join(root, ".volta", "tools", "image", "packages", "@openai", "codex");
+    mkdirSync(voltaBin, { recursive: true });
+    mkdirSync(image, { recursive: true });
+    writeFileSync(join(voltaBin, "volta-shim"), "shim");
+    symlinkSync(join(voltaBin, "volta-shim"), join(voltaBin, "codex"));
+    const executable = join(voltaBin, "codex");
+    const manager = ProviderManager.createForTests({
+      commands: { codex: executable },
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      detectProvider: async (): Promise<ProviderDetection> => ({
+        provider: { id: "codex", name: "Codex", command: "codex" },
+        available: true,
+        version: "1.0.0",
+        executable,
+        installState: "installed",
+        authState: "authenticated",
+        canRun: true,
+        cleanupConfirmed: true,
+      }),
+    });
+
+    try {
+      await manager.detect("codex");
+      expect(manager.providerInstallationState("codex")).toBe("current");
+      rmSync(image, { recursive: true });
+      mkdirSync(image, { recursive: true });
+      writeFileSync(join(image, "package.json"), "{\"version\":\"1.0.1\"}");
+      expect(manager.providerInstallationState("codex")).toBe("changed");
+      await manager.disposeAll();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("invalidates capability evidence when the verified executable file changes", async () => {

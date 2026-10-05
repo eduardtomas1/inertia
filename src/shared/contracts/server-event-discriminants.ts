@@ -95,7 +95,8 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
   }),
   maintenanceInstallMethods: exhaustiveOptions<ProviderMaintenanceInstallMethod>({
     "provider-managed": true, "npm-global": true, "pnpm-global": true,
-    "bun-global": true, "yarn-global": true, volta: true, homebrew: true,
+    "bun-global": true, "yarn-global": true, volta: true, "uv-tool": true,
+    homebrew: true,
     snap: true, "version-manager": true, "system-package": true,
     manual: true, unknown: true,
   }),

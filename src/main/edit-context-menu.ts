@@ -42,7 +42,7 @@ function linkItems(link: string | null): MenuItemConstructorOptions[] {
   if (!link) return [];
   return [
     {
-      label: "Copy Link Address",
+      label: "Copy link address",
       click: () => {
         void clipboard.writeText(link).catch((error: unknown) => {
           console.error("Failed to copy a link from the context menu", error);
@@ -50,7 +50,7 @@ function linkItems(link: string | null): MenuItemConstructorOptions[] {
       },
     },
     {
-      label: "Open Link",
+      label: "Open link",
       click: () => {
         void openDesktopLink(link, shell).catch((error: unknown) => {
           console.error("Failed to open a link from the context menu", error);
@@ -67,7 +67,7 @@ function imageItems(
   if (params.mediaType !== "image" || !params.hasImageContents) return [];
   const { x, y } = params;
   return [{
-    label: "Copy Image",
+    label: "Copy image",
     click: () => {
       if (!window.webContents.isDestroyed()) window.webContents.copyImageAt(x, y);
     },
@@ -78,19 +78,19 @@ function editItems(params: ContextMenuParams): MenuItemConstructorOptions[] {
   const flags = params.editFlags;
   if (params.isEditable) {
     return [
-      { role: "undo", enabled: flags.canUndo },
-      { role: "redo", enabled: flags.canRedo },
+      { role: "undo", label: "Undo", enabled: flags.canUndo },
+      { role: "redo", label: "Redo", enabled: flags.canRedo },
       { type: "separator" },
-      { role: "cut", enabled: flags.canCut },
-      { role: "copy", enabled: flags.canCopy },
-      { role: "paste", enabled: flags.canPaste },
-      { role: "pasteAndMatchStyle", enabled: flags.canPaste },
-      { role: "delete", enabled: flags.canDelete },
+      { role: "cut", label: "Cut", enabled: flags.canCut },
+      { role: "copy", label: "Copy", enabled: flags.canCopy },
+      { role: "paste", label: "Paste", enabled: flags.canPaste },
+      { role: "pasteAndMatchStyle", label: "Paste and match style", enabled: flags.canPaste },
+      { role: "delete", label: "Delete", enabled: flags.canDelete },
       { type: "separator" },
-      { role: "selectAll", enabled: flags.canSelectAll },
+      { role: "selectAll", label: "Select all", enabled: flags.canSelectAll },
     ];
   }
-  return params.selectionText ? [{ role: "copy", enabled: flags.canCopy }] : [];
+  return params.selectionText ? [{ role: "copy", label: "Copy", enabled: flags.canCopy }] : [];
 }
 
 export function registerEditContextMenu(

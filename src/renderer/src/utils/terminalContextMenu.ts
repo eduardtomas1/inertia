@@ -1,15 +1,21 @@
 import type { MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { writeClipboardText } from "./clipboard";
-import { contextMenuHandlers } from "./contextMenu";
+import { contextMenuHandlers, copyFromMenu } from "./contextMenu";
+
+const V_KEY_CODE = 86;
+
+function isPasteLetter(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase();
+  if (key === "v") return true;
+  return !/^[a-z]$/u.test(key) && event.keyCode === V_KEY_CODE;
+}
 
 export function terminalPasteKeyHandler(
-  platform: string | undefined,
+  pastesWithControl: boolean,
 ): (event: KeyboardEvent) => boolean {
-  const pastesWithControl = platform !== "darwin";
   return (event) => !(pastesWithControl
     && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-    && event.code === "KeyV");
+    && isPasteLetter(event));
 }
 
 export function terminalContextMenu(
@@ -24,7 +30,7 @@ export function terminalContextMenu(
     (action) => {
       const current = terminal();
       if (!current) return;
-      if (action === "terminal-copy") void writeClipboardText(current.getSelection());
+      if (action === "terminal-copy") void copyFromMenu(current.getSelection());
       else if (action === "terminal-select-all") current.selectAll();
       else if (action === "terminal-clear" && clearable) current.clear();
     },

@@ -194,12 +194,27 @@ export function createQueuedMessageRuntime(
     },
   };
 
+  async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
+    const { conversationId, id, turnId } = input;
+    requireConversation(conversationId);
+    if (store.queuedMessages.list(conversationId).some((entry) => entry.id !== id)) {
+      throw new RuntimeRequestError("Send or remove the queued message first.");
+    }
+    await enqueue({ conversationId, id, content: input.content, attachments: input.attachments }, handoffId);
+    const owner = turns.activeIdentity(conversationId);
+    if (owner && !(owner.turnId === turnId && turns.cancelOwned(conversationId, owner))) {
+      void schedule(conversationId).catch(() => undefined);
+      return;
+    }
+    retryAfterCleanup(conversationId, id);
+  }
+
   const handler = defineRuntimeCommandHandler([
-    "message.queue.get", "message.queue.enqueue", "message.queue.remove", "message.queue.send",
+    "message.queue.get", "message.queue.enqueue", "message.queue.remove", "message.queue.send", "message.queue.stop-and-send",
   ], async (socket, command) => {
     if (!command.type.startsWith("message.queue.")) return "not-handled";
-    if (command.type !== "message.queue.get" && command.type !== "message.queue.enqueue"
-      && command.type !== "message.queue.remove" && command.type !== "message.queue.send") return "not-handled";
+    if (command.type !== "message.queue.get" && command.type !== "message.queue.enqueue" && command.type !== "message.queue.remove"
+      && command.type !== "message.queue.send" && command.type !== "message.queue.stop-and-send") return "not-handled";
     const { conversationId } = command.payload;
     store.conversation(conversationId);
     if (command.type === "message.queue.enqueue") {
@@ -218,6 +233,8 @@ export function createQueuedMessageRuntime(
       requireConversation(conversationId);
       await running.get(conversationId);
       await dispatch(conversationId, command.payload.id);
+    } else if (command.type === "message.queue.stop-and-send") {
+      await stopAndSend(command.payload, command.requestId);
     }
     const event: ServerEvent = { type: "request.result", requestId: command.requestId,
       result: result(conversationId, command.payload.id) };

@@ -82,6 +82,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "message.queue.enqueue": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "message.queue.remove": shortMutation,
   "message.queue.send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
+  "message.queue.stop-and-send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "activity.acknowledge": shortMutation,
   "activity.dismiss": shortMutation,
   "activity.mark-seen": shortMutation,

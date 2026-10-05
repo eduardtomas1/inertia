@@ -330,7 +330,6 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       compaction: "unavailable",
       "usage-tokens": "negotiated",
       "model-discovery": "negotiated",
-      "maintenance-update": "negotiated",
     },
   },
   {

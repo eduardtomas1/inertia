@@ -141,7 +141,6 @@ export function registerSnapshotIpc(options: {
         for (const item of items) attachments.push(...await importSnapshot(item.png, item.source, signal));
         return attachments;
       });
-      // A failure was explained once in the chat; do not repeat it on every focus.
       if (outcome !== "cancelled") await queue.remove(items.map(({ id }) => id));
     } catch {
       return;

@@ -33,7 +33,6 @@ async function readContained(path: string, limit: number): Promise<Buffer | null
   } finally { await handle.close(); }
 }
 
-/** Captures taken while no chat could receive them, kept briefly in application data. */
 export class SnapshotQueue {
   private tail: Promise<unknown> = Promise.resolve();
   private known: boolean | null = null;

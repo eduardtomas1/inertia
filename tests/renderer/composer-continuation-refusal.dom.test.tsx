@@ -102,7 +102,7 @@ describe("composer for a chat that cannot continue", () => {
     expect(start).toBeEnabled();
     fireEvent.click(start);
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(dialog).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
@@ -123,7 +123,7 @@ describe("composer for a chat that cannot continue", () => {
     expect(start.getAttribute("aria-describedby")).toBe(explanation().id);
     expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("Continue the legacy work.");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -170,7 +170,7 @@ describe("composer for a chat that cannot continue", () => {
     expect(newChat).toHaveTextContent("New chat");
     await waitFor(() => expect(newChat).toHaveFocus());
     fireEvent.click(newChat!);
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     expect(onSetGoal).not.toHaveBeenCalled();
     expect(onCreateConversationForSelection).not.toHaveBeenCalled();
   });

@@ -165,7 +165,7 @@ describe("composer mixed-provider history", () => {
     if (surface === "detached window") {
       expect(await screen.findByText(returnToMain)).toBeInTheDocument();
     } else {
-      expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+      expect(await screen.findByRole("alertdialog")).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     }
     expect(onUpdateConversation).not.toHaveBeenCalled();
     expect(onCreateConversationForSelection).not.toHaveBeenCalled();
@@ -183,7 +183,7 @@ describe("composer mixed-provider history", () => {
     })} />);
     await chooseRoute(title, providerLabel);
     if (newChat) {
-      expect(await screen.findByRole("alertdialog")).toHaveTextContent(CHAT_PROVIDER_CHANGE_MESSAGE);
+      expect(await screen.findByRole("alertdialog")).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
       expect(onUpdateConversation).not.toHaveBeenCalled();
     } else {
       await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
@@ -239,7 +239,7 @@ describe("composer mixed-provider history", () => {
     fireEvent.click(screen.getByRole("button", { name: /Choose reasoning level/u }));
     fireEvent.click(await screen.findByRole("menuitemradio", { name: /High/u }));
     await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     expect(screen.queryAllByRole("alert").filter((element) =>
       element.textContent?.includes(MIXED_PROVIDER_HISTORY_MESSAGE))).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -272,7 +272,7 @@ describe("composer mixed-provider history", () => {
         expect(screen.queryByText(returnToMain)).not.toBeInTheDocument();
         return;
       }
-      expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+      expect(await screen.findByRole("alertdialog")).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
       fireEvent.click(screen.getByRole("button", { name: "Continue" }));
       await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
       expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
@@ -300,7 +300,7 @@ describe("composer mixed-provider history", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(dialog).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Continue this work.");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());

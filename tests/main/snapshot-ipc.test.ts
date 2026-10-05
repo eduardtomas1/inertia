@@ -19,6 +19,7 @@ vi.mock("../../src/main/attachment-import-ipc", async (original) => ({ ...await 
 vi.mock("../../src/main/snapshot-service", () => ({
   SnapshotError: class extends Error {},
   SnapshotService: class {
+    static async sweepCaptureFolders() { return undefined; }
     enabled = false;
     disposalStarted = false;
     shortcut: SnapshotState["shortcut"] = "both-shift";

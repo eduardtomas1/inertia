@@ -2,7 +2,8 @@ import xa11y from "@crowecawcaw/xa11y";
 import { createCanvas, ImageData, loadImage, type Image } from "@napi-rs/canvas";
 import { readSnapshotAccessibility, SnapshotGeometryError } from "./snapshot-accessibility.js";
 import { snapshotImageScale, snapshotMaskRect } from "./snapshot-geometry.js";
-import { macWindowPixels, type MacWindowTarget } from "./snapshot-macos-window.js";
+import { isAbsolute } from "node:path";
+import { macWindowPixels, stopMacWindowCaptures, type MacWindowTarget } from "./snapshot-macos-window.js";
 import {
   SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema,
   type SnapshotCapturePhase, type SnapshotFailureCategory, type SnapshotRect, type SnapshotSource,
@@ -134,15 +135,20 @@ async function captureOnce(progress: { phase: SnapshotCapturePhase }, pixels?: S
 
 const parent = process.parentPort;
 // Keep an orphaned worker bounded even if main disappears before sending capture.
-if (parent) setTimeout(() => process.exit(1), 12_000);
+if (parent) {
+  setTimeout(() => process.exit(1), 12_000);
+  process.on("exit", stopMacWindowCaptures);
+  process.once("SIGTERM", () => process.exit(1));
+}
 if (parent) parent.once("message", (event) => {
-  if (event.data !== "capture") { process.exit(1); return; }
+  const directory: unknown = (event.data as { capture?: unknown } | null)?.capture;
+  if (typeof directory !== "string" || !isAbsolute(directory)) { process.exit(1); return; }
   const finish = (result: unknown): void => {
     const timer = setTimeout(() => process.exit(1), 3000);
     parent.once("message", (ack) => { clearTimeout(timer); process.exit(ack.data === "received" ? 0 : 1); });
     parent.postMessage(result);
   };
-  void captureForegroundSnapshot(process.platform === "darwin" ? macWindowPixels : undefined).then((result) => {
+  void captureForegroundSnapshot(process.platform === "darwin" ? macWindowPixels(directory) : undefined).then((result) => {
     finish(result);
   }, (error: unknown) => {
     finish(error instanceof SnapshotCaptureFailure ? { ok: false, code: error.category, phase: error.phase } : { ok: false, code: "native-failure" });

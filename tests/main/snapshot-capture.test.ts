@@ -117,6 +117,38 @@ describe("foreground snapshot pixels and context", () => {
   });
 });
 
+describe("capture worker lifetime", () => {
+  it("stops a running window capture when the worker exits or is terminated, and refuses a capture without its folder", async () => {
+    const prior = Object.getOwnPropertyDescriptor(process, "parentPort");
+    const stop = vi.fn();
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const parent = new EventEmitter();
+    const before = { exit: process.listeners("exit"), term: process.listeners("SIGTERM") };
+    vi.useFakeTimers();
+    Object.defineProperty(process, "parentPort", { configurable: true, value: parent });
+    try {
+      vi.resetModules();
+      vi.doMock("../../src/main/snapshot-macos-window", async (original) => ({ ...await original<typeof import("../../src/main/snapshot-macos-window")>(), stopMacWindowCaptures: stop }));
+      await import("../../src/main/snapshot-capture-worker");
+      expect(process.listeners("exit")).toContain(stop);
+      const terminate = process.listeners("SIGTERM").find((listener) => !before.term.includes(listener));
+      terminate?.("SIGTERM");
+      expect(exit).toHaveBeenCalledWith(1);
+      exit.mockClear();
+      parent.emit("message", { data: "capture" });
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(native.foreground).not.toHaveBeenCalled();
+    } finally {
+      for (const listener of process.listeners("exit")) if (!before.exit.includes(listener)) process.removeListener("exit", listener);
+      for (const listener of process.listeners("SIGTERM")) if (!before.term.includes(listener)) process.removeListener("SIGTERM", listener);
+      vi.doUnmock("../../src/main/snapshot-macos-window");
+      exit.mockRestore(); vi.useRealTimers();
+      if (prior) Object.defineProperty(process, "parentPort", prior);
+      else Reflect.deleteProperty(process, "parentPort");
+    }
+  });
+});
+
 describe("foreground snapshot failure categories", () => {
   it.each([
     [new AccessibilityNotEnabledError("empty tree"), "foreground", "accessibility-unavailable"],

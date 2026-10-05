@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdtemp, open, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { open, rm } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import ffi, { type DataType as FfiType, type JsExternal } from "ffi-rs";
 import type { SnapshotRect } from "../shared/snapshots.js";
 const { DataType, createPointer, freePointer, isNullPointer, load, open: openLibrary, PointerType, restorePointer } = ffi;
@@ -104,15 +103,36 @@ export function listMacWindows(target: MacWindowTarget): MacWindowInfo[] {
   } finally { call("inertia-snapshot-cf", "CFRelease", DataType.Void, [DataType.External], [list]); }
 }
 
-export async function captureMacWindowPng(id: number, timeoutMs = 3000): Promise<Buffer> {
-  if (!Number.isSafeInteger(id) || id <= 0 || id > 0xffff_ffff) throw new Error("Invalid window.");
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "inertia-snapshot-")));
+const captures = new Set<number>();
+
+function killGroup(pid: number): boolean {
+  try { process.kill(-pid, "SIGKILL"); return true; } catch { return false; }
+}
+
+export function stopMacWindowCaptures(): void {
+  for (const pid of captures) killGroup(pid);
+  captures.clear();
+}
+
+export async function captureMacWindowPng(id: number, directory: string, timeoutMs = 3000): Promise<Buffer> {
+  if (!Number.isSafeInteger(id) || id <= 0 || id > 0xffff_ffff || !isAbsolute(directory)) throw new Error("Invalid window.");
+  const output = join(directory, "window.png");
   try {
-    const output = join(directory, "window.png");
     await new Promise<void>((resolve, reject) => {
-      execFile(SCREENCAPTURE, ["-l", String(id), "-o", "-x", "-t", "png", output], {
-        timeout: timeoutMs, killSignal: "SIGKILL", env: {}, maxBuffer: 64 * 1024, windowsHide: true,
-      }, (error) => { if (error) reject(error); else resolve(); });
+      const child = spawn(SCREENCAPTURE, ["-l", String(id), "-o", "-x", "-t", "png", output], {
+        env: {}, stdio: "ignore", detached: true, windowsHide: true,
+      });
+      const pid = child.pid;
+      if (pid) captures.add(pid);
+      const timer = setTimeout(() => { if (!pid || !killGroup(pid)) child.kill("SIGKILL"); }, timeoutMs);
+      const settle = (error: Error | null): void => {
+        clearTimeout(timer);
+        if (pid) captures.delete(pid);
+        if (error) reject(error); else resolve();
+      };
+      child.once("error", settle);
+      child.once("exit", (code, signal) => settle(code === 0 ? null
+        : new Error(signal ? "Window capture was stopped." : "Window capture failed.")));
     });
     const handle = await open(output, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
@@ -120,13 +140,15 @@ export async function captureMacWindowPng(id: number, timeoutMs = 3000): Promise
       if (!stat.isFile() || stat.size > MAX_WINDOW_PNG_BYTES) throw new Error("Invalid window image.");
       return await handle.readFile();
     } finally { await handle.close(); }
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally { await rm(output, { force: true }); }
 }
 
-export const macWindowPixels = {
-  locate(target: MacWindowTarget): { id: number; frame: SnapshotRect } | null {
-    const window = matchMacWindow(listMacWindows(target), target);
-    return window ? { id: window.id, frame: window.bounds } : null;
-  },
-  capture: (id: number): Promise<Buffer> => captureMacWindowPng(id),
-};
+export function macWindowPixels(directory: string) {
+  return {
+    locate(target: MacWindowTarget): { id: number; frame: SnapshotRect } | null {
+      const window = matchMacWindow(listMacWindows(target), target);
+      return window ? { id: window.id, frame: window.bounds } : null;
+    },
+    capture: (id: number): Promise<Buffer> => captureMacWindowPng(id, directory),
+  };
+}

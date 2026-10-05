@@ -1,10 +1,13 @@
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 
-const native = vi.hoisted(() => ({ fork: vi.fn(), register: vi.fn(() => true), unregister: vi.fn(), screen: vi.fn(() => "granted"), accessibility: vi.fn((_prompt: boolean) => true) }));
+const native = vi.hoisted(() => ({ userData: "", fork: vi.fn(), register: vi.fn(() => true), unregister: vi.fn(), screen: vi.fn(() => "granted"), accessibility: vi.fn((_prompt: boolean) => true) }));
 vi.mock("electron", () => ({
-  app: { getPath: () => "/private/test-data" },
+  app: { getPath: () => native.userData },
   utilityProcess: { fork: native.fork },
   globalShortcut: { register: native.register, unregister: native.unregister },
   systemPreferences: { getMediaAccessStatus: native.screen, isTrustedAccessibilityClient: native.accessibility },
@@ -17,6 +20,8 @@ class Child extends EventEmitter {
   kill = vi.fn(() => { this.emit("exit", 1); return true; });
 }
 const services: SnapshotService[] = [];
+beforeEach(() => { native.userData = realpathSync(mkdtempSync(join(tmpdir(), "inertia-snapshot-service-"))); });
+afterEach(() => { rmSync(native.userData, { recursive: true, force: true }); });
 beforeEach(() => { vi.stubEnv("DISPLAY", ":0"); vi.stubEnv("WAYLAND_DISPLAY", ""); vi.stubEnv("XDG_SESSION_TYPE", "x11"); });
 afterEach(async () => {
   for (const service of services.splice(0)) await service.dispose();
@@ -125,7 +130,7 @@ describe("snapshot native worker ownership", () => {
     const capture = service.capture(); const failure = expect(capture).rejects.toThrow("cancelled");
     const disabling = service.configure(false, "accelerator");
     child.emit("spawn");
-    expect(child.postMessage).not.toHaveBeenCalledWith("capture");
+    expect(child.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ capture: expect.any(String) }));
     expect(child.kill).toHaveBeenCalledTimes(2);
     child.emit("exit", 0); await failure; await disabling;
   });
@@ -157,12 +162,29 @@ describe("snapshot native worker ownership", () => {
     const { service, child } = await fixture();
     const capture = service.capture(); const delivered = vi.fn(); void capture.then(delivered);
     child.emit("spawn");
-    expect(child.postMessage).toHaveBeenCalledWith("capture");
+    expect(child.postMessage).toHaveBeenCalledWith({ capture: expect.stringContaining(join(native.userData, "snapshot-capture", "inertia-snapshot-")) });
     child.emit("message", { ok: true, png: Buffer.alloc(10), source: snapshotFixture() });
     await Promise.resolve(); expect(delivered).not.toHaveBeenCalled();
     expect(child.postMessage).toHaveBeenCalledWith("received");
     child.emit("exit", 0);
     expect((await capture).source).toEqual(snapshotFixture());
+  });
+
+  it("gives each capture a private folder in application data and removes it when the killed worker exits", async () => {
+    const { service, child } = await fixture();
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow();
+    const folders = readdirSync(join(native.userData, "snapshot-capture"));
+    expect(folders).toEqual([expect.stringMatching(/^inertia-snapshot-/u)]);
+    child.emit("spawn");
+    expect(child.postMessage).toHaveBeenCalledWith({ capture: join(native.userData, "snapshot-capture", folders[0]!) });
+    child.kill(); await failure;
+    await vi.waitFor(() => expect(readdirSync(join(native.userData, "snapshot-capture"))).toEqual([]));
+  });
+
+  it("removes capture folders left by an earlier run", async () => {
+    mkdirSync(join(native.userData, "snapshot-capture", "inertia-snapshot-left"), { recursive: true });
+    await SnapshotService.sweepCaptureFolders();
+    expect(existsSync(join(native.userData, "snapshot-capture"))).toBe(false);
   });
 
   it("rejects concurrent work and kills a cancelled capture before allowing another", async () => {

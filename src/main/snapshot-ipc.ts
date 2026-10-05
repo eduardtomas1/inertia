@@ -209,7 +209,7 @@ export function registerSnapshotIpc(options: {
     catch { return await clearSnapshotPreferences(directory).then(() => true, () => false); }
   };
   configuration = readSnapshotPreferences(app.getPath("userData")).then(async (saved) => {
-    await (saved?.enabled ? queue.prune() : queue.clear()).catch(() => undefined);
+    await Promise.all([SnapshotService.sweepCaptureFolders(), saved?.enabled ? queue.prune() : queue.clear()]).catch(() => undefined);
     if (saved && generation === 0) {
       const state = await service.configure(saved.enabled, saved.shortcut);
       if (generation === 0) captureEnabled = state.enabled;

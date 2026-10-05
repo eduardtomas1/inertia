@@ -4,7 +4,7 @@ import { snapshotFixture } from "../helpers/snapshot-fixture";
 import type { SnapshotSource, SnapshotState } from "../../src/shared/snapshots";
 import type { ChatAttachment } from "../../src/shared/contracts";
 const native = vi.hoisted(() => ({
-  handle: vi.fn(), document: vi.fn(), capture: vi.fn(), trigger: null as (() => Promise<void>) | null,
+  handle: vi.fn(), document: vi.fn(), sweep: vi.fn(async () => undefined), capture: vi.fn(), trigger: null as (() => Promise<void>) | null,
   saved: { enabled: true, shortcut: "accelerator" } as { enabled: boolean; shortcut: string } | null,
   queue: { items: [] as { id: string; png: Buffer; source: SnapshotSource }[], add: vi.fn(), take: vi.fn(), remove: vi.fn(), clear: vi.fn(), prune: vi.fn() },
 }));
@@ -30,6 +30,7 @@ vi.mock("../../src/main/snapshot-queue", () => ({
 vi.mock("../../src/main/snapshot-service", () => ({
   SnapshotError: class extends Error {},
   SnapshotService: class {
+    static sweepCaptureFolders = native.sweep;
     enabled = false;
     shortcut: SnapshotState["shortcut"] = "both-shift";
     constructor(trigger: () => Promise<void>, _failure: unknown, private readonly stopOwned: () => Promise<void>) { native.trigger = trigger; }
@@ -230,6 +231,11 @@ describe("queued capture delivery", () => {
     await service.dispose();
     expect(native.queue.clear).toHaveBeenCalled();
     expect(native.queue.items).toEqual([]);
+  });
+
+  it("removes capture folders left by an earlier run at launch", async () => {
+    await fixture();
+    expect(native.sweep).toHaveBeenCalledOnce();
   });
 
   it("removes queued captures at launch when snapshots was left disabled", async () => {

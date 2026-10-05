@@ -1,15 +1,27 @@
-import { writeFile } from "node:fs/promises";
-import { afterEach, describe, expect, it, vi } from "vitest";
-const native = vi.hoisted(() => ({ execFile: vi.fn() }));
-vi.mock("node:child_process", async (original) => ({ ...await original<typeof import("node:child_process")>(), execFile: native.execFile }));
-import { captureMacWindowPng, listMacWindows, matchMacWindow, readMacString, type MacWindowInfo } from "../../src/main/snapshot-macos-window";
+import { EventEmitter } from "node:events";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const native = vi.hoisted(() => ({ spawn: vi.fn() }));
+vi.mock("node:child_process", async (original) => ({ ...await original<typeof import("node:child_process")>(), spawn: native.spawn }));
+function screencapture(pid: number, run: (output: string, child: EventEmitter) => void) {
+  native.spawn.mockImplementation((_file: string, args: string[]) => {
+    const child = Object.assign(new EventEmitter(), { pid, kill: vi.fn() });
+    run(args.at(-1)!, child);
+    return child;
+  });
+}
+import { captureMacWindowPng, listMacWindows, matchMacWindow, readMacString, stopMacWindowCaptures, type MacWindowInfo } from "../../src/main/snapshot-macos-window";
 
 const bounds = { x: 50, y: 60, width: 800, height: 600 };
 function window(id: number, overrides: Partial<MacWindowInfo> = {}): MacWindowInfo {
   return { id, pid: 123, layer: 0, bounds, title: null, ...overrides };
 }
 const target = { pid: 123, title: "Release checklist", bounds };
-afterEach(() => { vi.clearAllMocks(); });
+let directory = "";
+beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), "inertia-snapshot-window-")); });
+afterEach(async () => { vi.clearAllMocks(); vi.restoreAllMocks(); await rm(directory, { recursive: true, force: true }); });
 
 describe("macOS window matching", () => {
   it("matches the accessibility window by process and bounds when titles are unavailable", () => {
@@ -32,29 +44,45 @@ describe("macOS window matching", () => {
 describe("macOS window pixels", () => {
   it("runs screencapture for one window without a shell, sound, shadow or inherited environment", async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
-    native.execFile.mockImplementation((_file: string, args: string[], _options: unknown, done: (error: Error | null) => void) => {
-      void writeFile(args.at(-1)!, png).then(() => done(null), done);
-    });
-    await expect(captureMacWindowPng(4242, 1500)).resolves.toEqual(png);
-    const [file, args, options] = native.execFile.mock.calls[0]!;
+    screencapture(4321, (output, child) => { void writeFile(output, png).then(() => child.emit("exit", 0, null)); });
+    await expect(captureMacWindowPng(4242, directory, 1500)).resolves.toEqual(png);
+    const [file, args, options] = native.spawn.mock.calls[0]!;
     expect(file).toBe("/usr/sbin/screencapture");
-    expect(args.slice(0, -1)).toEqual(["-l", "4242", "-o", "-x", "-t", "png"]);
-    expect(options).toMatchObject({ timeout: 1500, killSignal: "SIGKILL", env: {} });
-    expect(options).not.toHaveProperty("shell");
+    expect(args).toEqual(["-l", "4242", "-o", "-x", "-t", "png", join(directory, "window.png")]);
+    expect(options).toEqual({ env: {}, stdio: "ignore", detached: true, windowsHide: true });
+    expect(await readdir(directory)).toEqual([]);
   });
-  it("removes its private output directory when capture fails", async () => {
-    let output = "";
-    native.execFile.mockImplementation((_file: string, args: string[], _options: unknown, done: (error: Error | null) => void) => {
-      output = args.at(-1)!;
-      void writeFile(output, "partial").then(() => done(new Error("timed out")));
-    });
-    await expect(captureMacWindowPng(4242)).rejects.toThrow("timed out");
-    const { access } = await import("node:fs/promises");
-    await expect(access(output)).rejects.toMatchObject({ code: "ENOENT" });
+  it("removes the unmasked window image when capture fails", async () => {
+    screencapture(4322, (output, child) => { void writeFile(output, "partial").then(() => child.emit("exit", 1, null)); });
+    await expect(captureMacWindowPng(4242, directory)).rejects.toThrow("Window capture failed.");
+    expect(await readdir(directory)).toEqual([]);
+  });
+  it("kills the screencapture process group at its time limit", async () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    let running!: EventEmitter;
+    screencapture(9875, (_output, child) => { running = child; });
+    const capture = captureMacWindowPng(4242, directory, 50);
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledWith(-9875, "SIGKILL"));
+    running.emit("exit", null, "SIGKILL");
+    await expect(capture).rejects.toThrow("Window capture was stopped.");
+  });
+  it("kills the whole screencapture process group when the worker stops", async () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    let running!: EventEmitter;
+    screencapture(9876, (_output, child) => { running = child; });
+    const capture = captureMacWindowPng(4242, directory);
+    stopMacWindowCaptures();
+    expect(kill).toHaveBeenCalledWith(-9876, "SIGKILL");
+    running.emit("exit", null, "SIGKILL");
+    await expect(capture).rejects.toThrow("Window capture was stopped.");
+  });
+  it("refuses a relative capture folder", async () => {
+    await expect(captureMacWindowPng(4242, "relative")).rejects.toThrow("Invalid window.");
+    expect(native.spawn).not.toHaveBeenCalled();
   });
   it.each([0, -1, 1.5, 2 ** 32])("refuses window number %s", async (id) => {
-    await expect(captureMacWindowPng(id)).rejects.toThrow("Invalid window.");
-    expect(native.execFile).not.toHaveBeenCalled();
+    await expect(captureMacWindowPng(id, directory)).rejects.toThrow("Invalid window.");
+    expect(native.spawn).not.toHaveBeenCalled();
   });
 });
 

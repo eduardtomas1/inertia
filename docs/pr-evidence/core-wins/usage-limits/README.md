@@ -6,7 +6,8 @@ The chat "Plan the schema migration" stopped at a usage limit, then its access m
 
 ## What changed
 
-- Above the composer: before, nothing; after, a plain "Usage limit reached" row with no time and no actions, in the existing limit row style.
+- Above the composer: before, nothing; after, a plain "Usage limit reached" row with no time and no actions. It keeps the row's shape but has no fill; only the clock and the words use the warning colour.
+- Transcript: before, "Failed after 1m" with the red triangle; after, "Usage limit reached after 1m" with the clock in the warning colour. The flag comes from each turn in loaded history, so older usage-limited turns keep it too.
 - Sidebar: before, every usage-limited chat said "Failed" with the red icon; after, "Limited" with a clock icon in the warning tone.
 
 The before run shows the Codex quota notice in the corner and lists "Add search filters" in Work; in the after run the earlier tests of the spec dismissed that notice and snoozed that chat. Neither is part of this change.

@@ -32,7 +32,7 @@ interface PageSnapshot {
   nextStep?: string;
   title?: string;
   text?: string;
-  truncated?: boolean;
+  omitted?: { textChars: number; elements: number };
   notInspected?: string[];
   viewport?: { width: number; height: number };
   elements?: Array<{ ref?: string; role: string; name: string; notInspected?: boolean }>;
@@ -165,7 +165,8 @@ test("an agent can browse without the Browser panel, through a login, and on pag
   await expect(browser(backgroundConversationId, { action: "navigate", url: backgroundUrl }))
     .resolves.toMatchObject({ ok: true });
   const large = parsed(await browser(backgroundConversationId, { action: "snapshot" }));
-  expect(large.truncated).toBe(true);
+  expect(large.omitted).toBeDefined();
+  expect(large.nextStep).toContain("larger than one snapshot reads");
   expect(large.notInspected).toBeUndefined();
   await expect(browser(backgroundConversationId, { action: "click", ref: refFor(large, "Top action") }))
     .resolves.toMatchObject({ ok: true });

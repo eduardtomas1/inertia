@@ -971,11 +971,7 @@ export async function locateAgentPageRef(
       editable,
       role: password ? "textbox" : boundedLowerAttribute(element, "role", 50)
         || (editable ? "textbox" : ({ A: "link", SUMMARY: "button" })[element.tagName] || element.tagName.toLowerCase()),
-      sensitive: password || passwordValues.size > 0 || scanTruncated
-        || /password|passcode|passphrase|token|secret|credential|api.?key|private.?key|authorization/iu.test(
-          ["id", "name", "autocomplete", "placeholder", "aria-label"].map((name) =>
-            String(element.getAttribute?.(name) ?? "").slice(0, 300)).join(" ")
-        ),
+      sensitive: password || passwordValues.size > 0 || scanTruncated,
       label: scanTruncated || state.evidenceWithheld
         ? "page element"
         : redact(

@@ -1462,6 +1462,50 @@ describe("agent browser semantic snapshots", () => {
     });
   });
 
+  it.each([
+    ["a token budget number field", { type: "number", name: "max_tokens" }, false],
+    ["a password field", { type: "password" }, true],
+    ["an API key field", { type: "text", name: "api_key" }, true],
+    ["a one-time code field", { type: "text", autocomplete: "one-time-code" }, true],
+  ])("classifies %s for approvals with the shared sensitive field rules", async (_name, attributes, expected) => {
+    const { type, ...named } = attributes as Record<string, string>;
+    const input: Record<string, unknown> = {
+      tagName: "INPUT", type, value: "", defaultValue: "", disabled: false, readOnly: false,
+      isConnected: true, isContentEditable: false, firstChild: null,
+      getAttribute: (name: string) => named[name] ?? null,
+      getBoundingClientRect: () => ({ x: 20, y: 30, left: 20, top: 30, right: 220, bottom: 70, width: 200, height: 40 }),
+      contains: (candidate: unknown) => candidate === input,
+    };
+    const context = {
+      __inertiaAgentBrowser: {
+        refs: new Map([["e1", input]]),
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set<string>(),
+      },
+      document: {
+        documentElement: {},
+        createNodeIterator: () => {
+          let done = false;
+          return { nextNode: () => (done ? null : (done = true, input)) };
+        },
+        elementFromPoint: () => input,
+      },
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1")).resolves.toMatchObject({
+      found: true, sensitive: expected,
+    });
+  });
+
   it("includes visible descendant text beneath a visibility-hidden ancestor", async () => {
     const body = {
       firstChild: null as unknown,

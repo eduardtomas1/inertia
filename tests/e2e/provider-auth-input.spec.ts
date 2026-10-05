@@ -6,7 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import { executableProcessExists } from "../helpers/executable-process";
 import { writeNodeClaudeExecutable, writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { filesContaining } from "./support/files-containing";
+import { filesContaining, isChromiumLockFile } from "./support/files-containing";
 
 type ProviderKey = "claude" | "codex" | "cursor" | "kimi" | "opencode" | "antigravity";
 
@@ -585,7 +585,7 @@ test("keeps a code pasted into Claude's sign-in out of diagnostics, issue report
   await expectRejected(dialog, pid, "OAuth error: Invalid code");
   expect(await stdinFor(pid)).toBe(`\x1b[200~${PASTE_SENTINEL}\x1b[201~\r`);
   expect((await eventsFor(pid, "submit")).map((event) => event.value)).toEqual([PASTE_SENTINEL]);
-  expect(await filesContaining(state, PASTE_SENTINEL)).toEqual([join(state, "wire.jsonl")]);
+  expect(await filesContaining(state, PASTE_SENTINEL)).toEqual({ matches: [join(state, "wire.jsonl")], unreadable: [] });
 
   await app.electronApp.evaluate(({ clipboard }) => clipboard.writeText("diagnostics-not-copied"));
   expect(await page.evaluate(() => window.inertia.copyDiagnostics({ severity: "all" })))
@@ -604,11 +604,11 @@ test("keeps a code pasted into Claude's sign-in out of diagnostics, issue report
   expect(await body.inputValue()).not.toContain(PASTE_SENTINEL);
 
   await page.evaluate(() => window.inertia.setDiagnosticsCapture(false));
-  expect([
-    ...await filesContaining(join(app.testDirectory, "data"), PASTE_SENTINEL),
-    ...await filesContaining(join(app.testDirectory, "electron-profile"), PASTE_SENTINEL),
-    ...await filesContaining(join(app.testDirectory, "t"), PASTE_SENTINEL),
-  ]).toEqual([]);
+  const scans = await Promise.all(["data", "electron-profile", "t"].map((name) =>
+    filesContaining(join(app.testDirectory, name), PASTE_SENTINEL)));
+  expect(scans.flatMap((scan) => scan.matches)).toEqual([]);
+  const unreadable = scans.flatMap((scan) => scan.unreadable);
+  expect(process.platform === "win32" ? unreadable.filter((path) => !isChromiumLockFile(path)) : unreadable).toEqual([]);
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true }).click();
   expect(app.rendererErrors).toEqual([]);
 });

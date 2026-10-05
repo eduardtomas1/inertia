@@ -21,8 +21,10 @@ describe("pending snapshot queue", () => {
     const items = await queue().take();
     expect(items.map(({ png: bytes, source }) => [bytes[8], source.windowTitle])).toEqual([[1, "Release checklist"], [2, "Second"]]);
     const directory = join(await realpath(root), "snapshot-queue");
-    expect((await stat(directory)).mode & 0o777).toBe(0o700);
-    for (const name of await readdir(directory)) expect((await stat(join(directory, name))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(directory)).mode & 0o777).toBe(0o700);
+      for (const name of await readdir(directory)) expect((await stat(join(directory, name))).mode & 0o777).toBe(0o600);
+    }
     await pending.remove(items.map(({ id }) => id));
     expect(await pending.take()).toEqual([]);
     expect(await readdir(directory)).toEqual([]);

@@ -3,7 +3,7 @@ import type { AgentPageWithheldReason } from "./preview-agent-page.js";
 export function withheldEvidenceMessage(reason: AgentPageWithheldReason, subject: string): string {
   const recovery = " Navigate to the page again to load a new document, then continue.";
   if (reason === "password") {
-    return `${subject} withheld because this document holds a password value, which Inertia never sends to a model.${recovery}`;
+    return `${subject} withheld because this document holds a password or another sensitive value, which Inertia never sends to a model.${recovery}`;
   }
   if (reason === "redaction-limit") {
     return `${subject} withheld because this document exceeds the limit for safely hiding sensitive values.${recovery}`;
@@ -12,9 +12,9 @@ export function withheldEvidenceMessage(reason: AgentPageWithheldReason, subject
     return `${subject} withheld because text was typed into a control Inertia cannot inspect (inside a closed shadow root), so it could be a password.${recovery}`;
   }
   if (reason === "document-too-large") {
-    return `${subject} withheld because this page has more than 4,000 inputs, too many for Inertia to check safely for password values. Open a smaller page or a more specific route that shows fewer inputs, then continue.`;
+    return `${subject} withheld because this page has more than 4,000 inputs and text areas, too many for Inertia to check safely for sensitive values. Open a smaller page or a more specific route that shows fewer inputs, then continue.`;
   }
-  return `${subject} withheld because a script changed a password field in this document.${recovery}`;
+  return `${subject} withheld because a script changed a sensitive field in this document.${recovery}`;
 }
 
 export function navigationFailureMessage(error: unknown): string {

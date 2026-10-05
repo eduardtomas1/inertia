@@ -223,23 +223,99 @@ bytes.
 
 ## Privacy guard
 
-A document-level privacy guard starts before the first inspection. It
-withholds all semantic evidence and local capture for a document, with the
-`sensitive` code, until that document is replaced by a navigation, once any of
-these is observed:
+A document-level privacy guard starts before the first inspection and keeps
+sensitive values out of everything a model receives.
 
-- a password field holds a value, whether typed or present when the page
-  loaded, so reveal controls, replacement inputs, and page-made copies remain
-  covered;
-- a script assigns a value to a password field, or changes the properties the
-  guard relies on to see one; or
-- text is typed into a control the guard cannot inspect because it is inside a
-  closed shadow root.
+A field is sensitive when it is a password field, or when it is a text-like
+control (a text, search, email, URL, telephone, number or hidden input, or a
+text area) whose id, name, autocomplete token, placeholder, `aria-label`,
+label or `aria-labelledby` text names a credential: password, passcode,
+passphrase, secret, credential, API key, private key, authorization, one-time
+code, an authentication, authenticator, verification, security, MFA, 2FA,
+recovery or backup code, OTP, TOTP, CVV, CVC, card number or PIN. "Token"
+counts only as an API, auth, access, secret, bearer, session or CSRF token, or
+as the whole name. Names are compared as words split at spaces, `_`, `-`, `.`,
+`:`, `/` and camelCase boundaries, so `api_key`, `authToken`, `password2` and
+`x-api-key` are sensitive while `max_tokens`, `token_type` and "Search design
+tokens" are not. Checkboxes, radio buttons, buttons and selects are never
+sensitive by name. Labels in other languages are not recognized; password
+fields and the standard autocomplete tokens still are.
 
-The refusal message names which of the three applied and that navigating to
-the page again starts a new document. An agent that signs in through a form
-therefore loses page content between typing the password and the page
-navigating, and regains it on the signed-in page.
+The guard remembers the value and default value of every sensitive field,
+values that page scripts assign to one, and treats any other field holding a
+remembered value of four or more characters as sensitive too. It keeps up to
+256 values of up to 4,096 characters for the life of the document, and never
+forgets one to make room.
+
+### Snapshots
+
+A snapshot is not withheld because a sensitive value exists. A sensitive
+field keeps its own label as its name, or "Sensitive field" when it has none,
+and always reports the value `[redacted]`. Every remembered value is replaced
+with `[redacted]` wherever else it appears: page text, the title, control
+names and values, and the labels of approval requests. Matching ignores case,
+compatibility forms such as fullwidth letters, whitespace and invisible
+formatting characters (soft hyphen, zero-width spaces, word joiner and byte
+order mark), so a value split across markup or restyled in capitals is still
+found. Its URL-encoded, form-encoded, hexadecimal UTF-8 and JSON-escaped
+copies are found the same way, and overlapping matches are merged into one
+`[redacted]`. Text is redacted before it is clipped to its output limit, and
+when a source itself had to be cut, the end that could hold part of a value is
+dropped.
+
+Values of four or more characters are hidden wherever they occur, even inside
+words, so a trivial password such as "test" also hides that word in ordinary
+text. Shorter values are hidden only as whole words, unless a snapshot or an
+interaction already saw them in a field, in which case they are hidden
+everywhere.
+
+Typing one key at a time produces every prefix of a value. When trusted
+typing extends a sensitive field's previous value, the previous one is
+forgotten unless a snapshot, an interaction or a `change` event already saw
+it; deleting characters keeps both values. A signed-in page that shows the
+username is therefore not mangled by the prefixes of a password that starts
+with it.
+
+A snapshot is withheld, with the `sensitive` code until the document is
+replaced by a navigation, only when the guard cannot enumerate or redact
+safely:
+
+- `hidden-input`: text was typed into a control the guard cannot inspect
+  because it is inside a closed shadow root;
+- `document-too-large`: the page has more than 4,000 inputs and text areas;
+- `redaction-limit`: the document holds more sensitive values, or a longer
+  one, than the guard can remember; or
+- `credential-signal`: a script changed a sensitive field in a way the guard
+  cannot inspect, such as replacing its value with a property the guard cannot
+  monitor, swapping its prototype, or parsing password markup outside the
+  document.
+
+React and similar frameworks install their own value accessor on every input.
+The guard watches that accessor instead of refusing the page, and treats it as
+a sensitive value only when it reports something other than the field's real
+value.
+
+Approval requests name the target control by its label. When the scan was cut
+short or the document's evidence is withheld for any reason, the label is
+"page element", and a form control's own content is never used as its label.
+
+### Screenshots and local capture
+
+Screenshots and local capture are withheld while the document holds any
+remembered sensitive value, and for every reason that withholds a snapshot.
+The refusal message names the reason and that navigating to the page again
+starts a new document.
+
+### Accepted limits
+
+- A page that records the intermediate keystrokes of a value typed by hand can
+  show the forgotten prefixes.
+- Reversed, base64-encoded or otherwise transformed copies of a value are not
+  recognized.
+- Values that exist only inside frames or parser-created shadow roots are
+  covered only as described below.
+
+### Frames, shadow roots and large pages
 
 Frames, shadow roots, large documents, and large markup writes do not withhold
 evidence. Earlier versions refused every page that had any of them, which made
@@ -255,12 +331,13 @@ ordinary text, a snapshot will include it like any other visible text. A
 script-created blank frame cannot be instrumented before page code reaches it,
 so this cannot be closed without refusing every page that has a frame.
 
-Password fields are found by enumerating the document's inputs rather than by
-walking its elements, so a password field is seen wherever it sits in a large
-document. A document with more than 4,000 inputs is treated as unverifiable
-and its evidence is withheld with its own reason: the page has too many inputs
-to check safely, so the agent is told to open a smaller page or a more
-specific route rather than to navigate to the same page again.
+Sensitive fields are found by enumerating the document's inputs and text
+areas rather than by walking its elements, so one is seen wherever it sits in
+a large document. A document with more than 4,000 inputs and text areas is
+treated as unverifiable and its evidence is withheld with its own reason: the
+page has too many fields to check safely, so the agent is told to open a
+smaller page or a more specific route rather than to navigate to the same page
+again.
 
 Enter and Space are refused while focus is inside an embedded frame or a
 closed shadow root, because Inertia cannot see the control they would

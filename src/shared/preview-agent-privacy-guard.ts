@@ -792,8 +792,7 @@ export function installPreviewAgentPrivacyGuard(
     wasPassword = false,
     inspection: PreviewAgentSensitiveInspection = "observe",
   ): void => {
-    if (wasPassword) state.passwordNodes.add(input);
-    privacy.inspect(state, input, inspection);
+    privacy.inspect(state, input, inspection, wasPassword);
   };
   const inputElement = (node: unknown): HTMLInputElement | null => {
     const candidate = node as Partial<HTMLInputElement> | null;

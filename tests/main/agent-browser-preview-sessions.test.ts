@@ -678,14 +678,14 @@ describe("conversation-owned Browser sessions", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "sensitive",
-        message: expect.stringContaining("a script changed a password field"),
+        message: expect.stringContaining("a script changed a sensitive field"),
       });
     pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "document-too-large" });
     const tooLarge = await broker.perform(conversationId, { action: "snapshot" });
     expect(tooLarge).toMatchObject({
       ok: false,
       code: "sensitive",
-      message: expect.stringContaining("more than 4,000 inputs"),
+      message: expect.stringContaining("more than 4,000 inputs and text areas"),
     });
     expect(tooLarge.ok ? "" : tooLarge.message).not.toMatch(/password field|Navigate to the page again/u);
     expect(tooLarge.ok ? "" : tooLarge.message).toMatch(/smaller page/u);

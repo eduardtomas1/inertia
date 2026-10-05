@@ -57,7 +57,9 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
     case "history": return `${page}\n${command.direction === "back" ? "Go back to the previous page"
       : command.direction === "forward" ? "Go forward to the next page" : "Reload the page"}`;
     case "press": return `${page}\nPress: ${command.key}${acceptsDialog(command)}`;
-    case "scroll": return `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
+    case "scroll": return "ref" in command
+      ? `${page}\nScroll a page control into view`
+      : `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;
     case "tab-close": return `${page}\nClose this tab`;
     case "tab-activate": return `${page}\nSwitch to this tab`;

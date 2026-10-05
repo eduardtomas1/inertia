@@ -57,7 +57,10 @@ const typeSchema = z.object({
   replace: z.boolean().default(true),
 }).strict();
 const pressSchema = z.object({ key: keySchema, dialog: dialogSchema }).strict();
-const scrollSchema = z.object({ deltaY: deltaSchema }).strict();
+const scrollSchema = z.object({ deltaY: deltaSchema.optional(), ref: refSchema.optional() }).strict().refine(
+  (value) => (value.deltaY === undefined) !== (value.ref === undefined),
+  "Provide exactly one of deltaY or ref.",
+);
 const waitSchema = z.object({
   text: boundedText(MAX_AGENT_BROWSER_WAIT_TEXT_CHARS).min(1)
     .regex(new RegExp(SINGLE_LINE_PATTERN, "u"))
@@ -154,10 +157,15 @@ readonly ProviderHostToolDefinition[] = [
   },
   {
     name: "inertia_browser_scroll",
-    description: "Scroll the active Inertia Browser page vertically by a number of pixels. Positive values scroll down and negative values scroll up.",
-    inputSchema: objectSchema({
-      deltaY: { type: "integer", minimum: -2_000, maximum: 2_000, description: "Pixels to scroll; must not be 0." },
-    }, ["deltaY"]),
+    description: "Scroll the active Inertia Browser page vertically by deltaY pixels (positive scrolls down), or scroll the element with ref to the centre of the view. Give exactly one of deltaY or ref.",
+    inputSchema: {
+      ...objectSchema({
+        deltaY: { type: "integer", minimum: -2_000, maximum: 2_000, description: "Pixels to scroll; must not be 0." },
+        ref: { ...refProperty, description: "An element ref from the latest inertia_browser_snapshot to scroll into view, including one marked offscreen." },
+      }),
+      minProperties: 1,
+      maxProperties: 1,
+    },
     inputValidator: scrollSchema,
     readOnly: false,
   },
@@ -281,7 +289,9 @@ function commandFor(call: ProviderHostToolCall): AgentBrowserCommand | null {
     }
     case "inertia_browser_scroll": {
       const args = scrollSchema.parse(call.arguments);
-      return { action: "scroll", deltaY: args.deltaY };
+      return args.ref === undefined
+        ? { action: "scroll", deltaY: args.deltaY! }
+        : { action: "scroll", ref: args.ref };
     }
     case "inertia_browser_wait_for": {
       const args = waitSchema.parse(call.arguments);

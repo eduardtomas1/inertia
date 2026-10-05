@@ -19,7 +19,7 @@ import {
   agentPageEvidencePrivacy, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
-  type AgentPageNotInspected,
+  type AgentPageNotInspected, type PreviewAgentTarget,
 } from "./preview-agent-page.js";
 import { sendAgentPageInput } from "./preview-agent-control.js";
 import { agentDialogDetail, armAgentPageDialogs, takeAgentPageDialogs, takeAgentPageUnloadPrompts } from "./preview-agent-dialogs.js";
@@ -28,6 +28,7 @@ import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, typ
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
+import { agentPageRefOutsideViewport, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
 import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
 
@@ -40,6 +41,7 @@ const BLANK_TAB_NEXT_STEP = "This tab is blank. Open a page with the navigate to
 const STILL_LOADING_NOTE = "The page is still loading. Wait for it with the wait tool, or take a snapshot to read what has rendered so far.";
 const FAILED_LOAD_MESSAGE = "This tab is showing a browser error page because its last navigation failed. Check that the development server is running, then navigate again.";
 const CANCELLED_NAVIGATION_MESSAGE = "The navigation was cancelled before a page loaded, usually because it redirected to an address outside this machine or started a download. The tab still shows its previous page.";
+const OUTSIDE_VIEWPORT_MESSAGE = "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.";
 const CRASHED_PAGE_MESSAGE = "This tab's page crashed. Navigate to the page again to reload it.";
 const NAVIGATION_REPLACED_NOTE = "The page replaced this navigation before it finished. Take a snapshot to see which page is showing.";
 
@@ -217,7 +219,13 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (blankTab(contents)) throw new AgentBrowserRefusal(failure("not-found", BLANK_TAB_NEXT_STEP));
     await this.#ensureSecurityDebugger(contents, undefined, signal);
     await this.rendererOperation(contents, () => installAgentPagePrivacyGuard(contents), { signal, phase: "privacy-guard" });
-    return await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
+    const located = await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
+    if (!located.found && await this.rendererOperation(
+      contents,
+      () => agentPageRefOutsideViewport(contents, ref),
+      { signal, phase: "page-scroll" },
+    )) throw new AgentBrowserRefusal(failure("not-found", OUTSIDE_VIEWPORT_MESSAGE));
+    return located;
   }
 
   async sensitiveDocument(contents: PreviewContents): Promise<boolean> {
@@ -412,11 +420,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     const boundsGeneration = session.boundsGeneration;
-    const located = await this.rendererOperation(
-      contents,
-      () => locateAgentPageRef(contents, ref),
-      { scope, phase: "element-lookup" },
-    );
+    const located = await this.#locateInView(contents, ref, scope);
     if (session.boundsGeneration !== boundsGeneration) return changedGeometry();
     let x = located.x;
     let y = located.y;
@@ -498,11 +502,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
     const boundsGeneration = session.boundsGeneration;
-    const located = await this.rendererOperation(
-      contents,
-      () => locateAgentPageRef(contents, ref),
-      { scope, phase: "element-lookup" },
-    );
+    const located = await this.#locateInView(contents, ref, scope);
     if (session.boundsGeneration !== boundsGeneration) return changedGeometry();
     let x = located.x;
     let y = located.y;
@@ -626,11 +626,31 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     return this.#stateResult(session, { pressed: key, ...await this.#dialogDetail(contents, scope) });
   }
 
-  async scroll(session: Session, deltaY: number, scope: AgentOperationScope, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
+  async scroll(
+    session: Session,
+    target: { deltaY: number } | { ref: string },
+    scope: AgentOperationScope,
+    validate?: BrowserApprovalGuard,
+  ): Promise<AgentBrowserResult> {
     stopForAbort(scope.signal);
     const contents = this.host.active(session).view.webContents;
     if (blankTab(contents)) return failure("not-found", BLANK_TAB_NEXT_STEP);
     await this.#prepareAgentPage(contents, scope);
+    if ("ref" in target) {
+      validate?.();
+      scope.inputSent = true;
+      const scrolled = await this.rendererOperation(
+        contents,
+        () => scrollAgentPageRefIntoView(contents, target.ref),
+        { scope, phase: "page-scroll" },
+      );
+      if (!scrolled.found) {
+        return failure("not-found", "That page element is stale. Take a new inertia_browser_snapshot for current refs.");
+      }
+      this.host.record(session, "scroll", "Agent scrolled to a page element");
+      return this.#stateResult(session, { scrolled: target.ref, viewport: scrolled.viewport });
+    }
+    const { deltaY } = target;
     const bounds = session.bounds ?? PARKED_PREVIEW_BOUNDS;
     await this.#sendInputAndWait(contents, () => {
       validate?.();
@@ -645,6 +665,15 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     }, scope);
     this.host.record(session, "scroll", `Agent scrolled ${deltaY > 0 ? "down" : "up"}`);
     return this.#stateResult(session, { scrolled: deltaY });
+  }
+
+  async #locateInView(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<PreviewAgentTarget> {
+    const located = await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+    if (located.found) return located;
+    const outside = await this.rendererOperation(contents, () => agentPageRefOutsideViewport(contents, ref), { scope, phase: "page-scroll" });
+    if (!outside) return located;
+    await this.rendererOperation(contents, () => scrollAgentPageRefIntoView(contents, ref), { scope, phase: "page-scroll" });
+    return await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
   }
 
   async #dialogDetail(contents: PreviewContents, scope: AgentOperationScope): Promise<Record<string, unknown>> {

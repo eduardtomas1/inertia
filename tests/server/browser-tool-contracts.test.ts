@@ -60,6 +60,9 @@ const cases: Array<{
   { tool: "scroll", args: { deltaY: 1.5 }, valid: false },
   { tool: "scroll", args: { deltaY: 2_001 }, valid: false },
   { tool: "scroll", args: { deltaY: -2_001 }, valid: false },
+  { tool: "scroll", args: { ref: "r1" }, valid: true },
+  { tool: "scroll", args: { ref: "r1", deltaY: 100 }, valid: false },
+  { tool: "scroll", args: { ref: "bad ref" }, valid: false },
   { tool: "wait_for", args: {}, valid: true },
   { tool: "wait_for", args: { text: "Saved", state: "absent", timeoutMs: 250 }, valid: true },
   { tool: "wait_for", args: { text: "   " }, valid: false, advertised: true },
@@ -130,7 +133,7 @@ describe("browser contracts received by providers", () => {
         const result = await client.callTool({ name: `inertia_browser_${tool}`, arguments: args ?? {} });
         expect(result.isError === true, JSON.stringify(args).slice(0, 150)).toBe(!valid);
       }
-      expect(perform).toHaveBeenCalledTimes(7);
+      expect(perform).toHaveBeenCalledTimes(8);
       expect(perform).toHaveBeenCalledWith(identity,
         { action: "type", ref: "r1", text: "", replace: true }, expect.any(AbortSignal));
       expect(perform).toHaveBeenCalledWith(identity,

@@ -17,12 +17,6 @@ interface DialogRecorderState {
   total: number;
 }
 
-/**
- * Runs in the page's main world before author scripts. It replaces the
- * blocking dialogs with built-ins captured at document start, records each
- * call through a DOM event, and answers from the policy armed for the current
- * agent action. Keep it self-contained: it is serialized into the page.
- */
 export function installPreviewAgentDialogPolicy(
   eventName: string,
   answerEventName: string,
@@ -81,7 +75,6 @@ export function installPreviewAgentDialogPolicy(
   });
 }
 
-/** Runs in the isolated Browser world and keeps a bounded per-document record. */
 export function installPreviewAgentDialogRecorder(
   eventName: string,
   maximumMessageChars: number,

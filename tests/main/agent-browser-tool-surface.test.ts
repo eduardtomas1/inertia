@@ -216,4 +216,75 @@ describe("Browser tool surface", () => {
     expect(pageTools.semanticPageSnapshot).toHaveBeenLastCalledWith(contents, []);
     contents.debugger.sendCommand.mockImplementation(send);
   });
+
+  function isolatedScripts(contents: { executeJavaScriptInIsolatedWorld?: unknown }, offscreen: () => boolean) {
+    const page = contents as unknown as {
+      executeJavaScriptInIsolatedWorld(world: number, scripts: Array<{ code: string }>): Promise<unknown>;
+    };
+    const codes: string[] = [];
+    const original = page.executeJavaScriptInIsolatedWorld.bind(page);
+    vi.spyOn(page, "executeJavaScriptInIsolatedWorld").mockImplementation(async (world, scripts) => {
+      const code = scripts[0]?.code ?? "";
+      if (code.includes("scrollIntoView")) {
+        codes.push("scroll");
+        return { found: true, viewport: { width: 1_280, height: 800, scrollX: 0, scrollY: 1_400 } };
+      }
+      if (code.includes("getBoundingClientRect")) {
+        codes.push("outside");
+        return offscreen();
+      }
+      return await original(world, scripts);
+    });
+    return codes;
+  }
+
+  it("scrolls an element into view by ref and returns the viewport", async () => {
+    const { broker, contents } = await loadedHarness();
+    const codes = isolatedScripts(contents, () => true);
+    const result = await broker.perform(runIdentity, { action: "scroll", ref: "e7" });
+    expect(JSON.parse((result as { text: string }).text)).toMatchObject({
+      scrolled: "e7",
+      viewport: { width: 1_280, height: 800, scrollX: 0, scrollY: 1_400 },
+    });
+    expect(codes).toEqual(["scroll"]);
+    expect(contents.sentInputs).toEqual([]);
+  });
+
+  it("scrolls an off-screen ref into view before clicking or typing, then hit-tests it as usual", async () => {
+    const { broker, contents } = await loadedHarness();
+    let outside = true;
+    const codes = isolatedScripts(contents, () => outside);
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e9" })).resolves.toMatchObject({ ok: true });
+    expect(codes).toEqual(["outside", "scroll"]);
+    expect(contents.sentInputs).toEqual(expect.arrayContaining([expect.objectContaining({ type: "mouseDown" })]));
+
+    codes.length = 0;
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "type", ref: "e9", text: "a", replace: true }))
+      .resolves.toMatchObject({ ok: true });
+    expect(codes).toEqual(["outside", "scroll"]);
+
+    codes.length = 0;
+    outside = false;
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e9" })).resolves.toMatchObject({
+      ok: false, code: "not-found",
+    });
+    expect(codes).toEqual(["outside"]);
+  });
+
+  it("asks a supervised agent to scroll before it approves a click on an off-screen control", async () => {
+    const { broker, contents } = await loadedHarness();
+    const codes = isolatedScripts(contents, () => true);
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({ found: false });
+    await expect(broker.perform(runIdentity, {
+      action: "prepare-approval", command: { action: "click", ref: "e9" },
+    })).resolves.toEqual({
+      ok: false,
+      code: "not-found",
+      message: "That control is outside the visible part of the page. Scroll it into view with inertia_browser_scroll and its ref, then try again.",
+    });
+    expect(codes).toEqual(["outside"]);
+  });
 });

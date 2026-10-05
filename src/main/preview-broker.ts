@@ -303,7 +303,7 @@ export class PreviewBroker {
               case "press":
                 return await this.#operations.press(session, command.key, operation, validate, command.dialog);
               case "scroll":
-                return await this.#operations.scroll(session, command.deltaY, operation, validate);
+                return await this.#operations.scroll(session, command, operation, validate);
               case "tabs":
                 return this.#success(session, boundedAgentStateText(this.#agentState(session)));
               case "tab-open":

@@ -415,7 +415,6 @@ export interface ProviderHostToolDefinition {
   /** Process-local validator used by in-process provider tool transports. */
   inputValidator?: ZodType<Record<string, unknown>>;
   readOnly: boolean;
-  /** Advertised as an MCP destructive hint only on transports that opt in. */
   destructive?: boolean;
 }
 

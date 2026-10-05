@@ -54,6 +54,9 @@ describe("agent browser boundary", () => {
       .toBeNull();
     expect(parseAgentBrowserCommand({ action: "scroll", deltaY: 2_001 }))
       .toBeNull();
+    expect(parseAgentBrowserCommand({ action: "scroll", ref: "e4" })).toEqual({ action: "scroll", ref: "e4" });
+    expect(parseAgentBrowserCommand({ action: "scroll", ref: "e4", deltaY: 10 })).toBeNull();
+    expect(parseAgentBrowserCommand({ action: "scroll" })).toBeNull();
   });
 
   it("accepts only exact bounded wait commands", () => {

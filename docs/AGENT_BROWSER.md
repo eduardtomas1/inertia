@@ -55,7 +55,7 @@ advertises the same arguments the runtime validates:
 | `inertia_browser_click` | `ref`, optional `dialog` | Click one element from the latest snapshot. |
 | `inertia_browser_type` | `ref`, `text`, optional `replace` | Type into one editable element. |
 | `inertia_browser_press` | `key`, optional `dialog` | Send one allowlisted key to the focused element. |
-| `inertia_browser_scroll` | `deltaY` | Scroll the page vertically. |
+| `inertia_browser_scroll` | exactly one of `deltaY` or `ref` | Scroll the page vertically, or scroll one element to the centre of the view and return the viewport. |
 | `inertia_browser_wait_for` | optional `text`, `state`, `timeoutMs` | Wait for text to appear or disappear, or for loading to finish. |
 | `inertia_browser_screenshot` | none | Capture one local Evidence image. |
 | `inertia_browser_tabs` | none | List the chat's pages. |
@@ -154,6 +154,15 @@ or click and type into them directly. Oversized snapshots are structurally
 reduced, dropping the controls farthest from the viewport first, and remain
 valid JSON. Element references are generated in an isolated JavaScript world
 and become invalid when their DOM node disappears or stops being rendered.
+
+A click or type on a ref whose element lies outside the viewport first
+scrolls that element to the centre of the view from the isolated Browser
+world, then locates and hit-tests it exactly as for any other ref; the
+approval binding to the inspected document and ref is unchanged. In a
+Supervised chat the approval for such a click or type is not prepared,
+because preparing it would scroll the page before the user approves anything:
+the agent is told to scroll the control into view with `inertia_browser_scroll`
+and its ref, which is itself an approved action, and to try again.
 
 When a snapshot leaves anything out, it says so in a form the agent can act
 on instead of a bare flag: `omitted: {"textChars": n, "elements": n}` counts

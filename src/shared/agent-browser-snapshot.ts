@@ -30,7 +30,6 @@ function viewportDistance(element: unknown, width: number, height: number): numb
   return 1 + Math.max(0, y - height, -(y + finite(rect?.height)), x - width, -(x + finite(rect?.width)));
 }
 
-/** Keeps the `count` controls nearest the viewport, in their original order. */
 export function nearestAgentBrowserElements<Element>(
   elements: readonly Element[],
   count: number,

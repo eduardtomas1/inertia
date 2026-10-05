@@ -67,6 +67,7 @@ export type AgentBrowserCommand =
   | { action: "type"; ref: string; text: string; replace: boolean }
   | { action: "press"; key: AgentBrowserKey; dialog?: "accept" }
   | { action: "scroll"; deltaY: number }
+  | { action: "scroll"; ref: string }
   | { action: "wait"; text?: string; state: "present" | "absent"; timeoutMs: number }
   | { action: "tabs" }
   | { action: "tab-open"; url?: string }
@@ -238,6 +239,11 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
           }
         : null;
     case "scroll":
+      if (exactKeys(value, ["action", "ref"])) {
+        return typeof value.ref === "string" && SAFE_REF_PATTERN.test(value.ref)
+          ? { action: "scroll", ref: value.ref }
+          : null;
+      }
       return exactKeys(value, ["action", "deltaY"])
         && typeof value.deltaY === "number"
         && Number.isSafeInteger(value.deltaY)

@@ -822,6 +822,19 @@ export class ConversationContextPacketRepository {
     })();
   }
 
+  hasDraftForTargetWithoutMessages(sourceConversationId: string): boolean {
+    return this.context.database.prepare(`
+      SELECT 1 FROM conversation_context_packets packet
+      WHERE packet.source_conversation_id = ?
+        AND packet.target_conversation_id <> packet.source_conversation_id
+        AND packet.consumed_message_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM messages WHERE messages.conversation_id = packet.target_conversation_id
+        )
+      LIMIT 1
+    `).get(sourceConversationId) !== undefined;
+  }
+
   targetConversationIdsForSource(sourceConversationId: string): string[] {
     this.context.requireConversation(sourceConversationId);
     const rows = this.context.database.prepare(`

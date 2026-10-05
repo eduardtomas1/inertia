@@ -26,7 +26,10 @@ import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-res
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
-import { ConversationCreationService } from "../conversation-creation-service";
+import {
+  ConversationCreationService,
+  type ConversationCreationDependencies,
+} from "../conversation-creation-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -99,6 +102,7 @@ export interface ConversationCommandDependencies {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
   };
   creation?: ConversationCreationService;
+  turns?: ConversationCreationDependencies["turns"];
   contextRequests?: ConversationContextRequestCoordinator;
 }
 
@@ -571,6 +575,11 @@ export function createConversationCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        if (dependencies.store.contextPackets.hasDraftForTargetWithoutMessages(conversation.id)) {
+          throw new RuntimeRequestError(
+            "A new chat continues from this one. Send its first message or remove the context first.",
+          );
+        }
         let ownership = dependencies.store.conversationWorktrees.get(
           conversation.id,
         );

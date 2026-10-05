@@ -19,6 +19,7 @@ import type { ProviderManager } from "../providers";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
+import type { TurnController } from "./turns/turn-controller";
 import type { WorkspaceRunController } from "./workspace-run-controller";
 import { ScratchWorkspace } from "./scratch-workspace";
 import {
@@ -38,6 +39,9 @@ export type ConversationContinuePayload = Extract<
 
 type ConversationInsertion = (insert: () => Conversation) => Conversation;
 
+const CONTINUATION_ADMISSION_TIMEOUT_MS = 1_000;
+const SOURCE_BUSY = "Wait for this chat's turn to finish before continuing in a new chat.";
+
 export interface ConversationCreationDependencies {
   store: RuntimeStore;
   providers: ProviderManager;
@@ -47,6 +51,7 @@ export interface ConversationCreationDependencies {
     "trackSourceControl"
   >;
   dataDirectory: string;
+  turns?: Pick<TurnController, "acquireTurnAdmission">;
   providerInfo?(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   testHooks?: {
@@ -111,6 +116,24 @@ export class ConversationCreationService {
     if (store.project(source.projectId).workspaceKind === "scratch") {
       throw new RuntimeRequestError("A chat without a project cannot continue in a new chat.");
     }
+    const admission = await this.dependencies.turns?.acquireTurnAdmission(
+      source.id,
+      CONTINUATION_ADMISSION_TIMEOUT_MS,
+    );
+    if (!admission) throw new RuntimeRequestError(SOURCE_BUSY);
+    try {
+      return await this.continueWithAdmission(source, payload, requestId);
+    } finally {
+      admission.release();
+    }
+  }
+
+  private async continueWithAdmission(
+    source: Conversation,
+    payload: ConversationContinuePayload,
+    requestId: string,
+  ): Promise<Conversation> {
+    const { store } = this.dependencies;
     this.assertIdle(source.id);
     return await this.create({
       projectId: source.projectId,
@@ -136,7 +159,7 @@ export class ConversationCreationService {
       || providers.isRunning(conversationId)
       || store.providerRunOwnership.forConversation(conversationId).length > 0
     ) {
-      throw new RuntimeRequestError("Wait for this chat's turn to finish before continuing in a new chat.");
+      throw new RuntimeRequestError(SOURCE_BUSY);
     }
   }
 

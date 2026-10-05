@@ -27,8 +27,8 @@ import {
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import {
-  RUNTIME_INTERRUPTION_REASONS,
   runtimeInterruptionInstruction,
+  sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
@@ -212,6 +212,8 @@ export function resolveTurnRequest(
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
+  const interruptedTurnId = dependencies.store.turnLedgerRepository
+    .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
   const assemblyInput = {
@@ -231,12 +233,14 @@ export function resolveTurnRequest(
     context: request.context,
     internalInstructions: [
       ...(resumesImportedCodex ? [] : capabilityInstructions),
-      ...(latestTurn?.status === "interrupted"
-        && RUNTIME_INTERRUPTION_REASONS.includes(latestTurn.terminalReason ?? "")
-        ? [runtimeInterruptionInstruction(
-            dependencies.store.turnLedgerRepository.runtimeInterruption(latestTurn.id),
-          )]
-        : []),
+      ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
+        sharesInterruptionEndpoint(
+          dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
+          route.continuationIdentity,
+        )
+          ? dependencies.store.turnLedgerRepository.runtimeInterruption(interruptedTurnId)
+          : null,
+      )]),
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;

@@ -9,6 +9,7 @@ import type {
   ServerEvent,
   ThreadUsageSnapshot,
 } from "../../../shared/contracts";
+import { importedResumeCwd } from "../../cli-import/resume-cwd";
 import {
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
@@ -275,7 +276,7 @@ export function createConversationCompactionCommandHandler(
           conversationId: conversation.id,
           runId: compactionRunId,
           turnId: compactionTurnId,
-          cwd: dependencies.store.conversationPath(conversation.id),
+          cwd: importedResumeCwd(dependencies.store, conversation.id, currentConversation.providerSessionId, dependencies.store.conversationPath(conversation.id)),
           prompt: "/compact",
           model: selection.modelId === "provider-default"
             ? undefined

@@ -54,6 +54,7 @@ describe("supervised runtime process environment", () => {
 
   it("passes only reviewed POSIX launch values and omits sentinel secrets", () => {
     const parent: NodeJS.ProcessEnv = {
+      CLAUDE_CONFIG_DIR: "/Users/person/.claude-work",
       CODEX_HOME: "/Users/person/.codex",
       ANTHROPIC_BASE_URL: "https://anthropic.example.test",
       AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
@@ -141,6 +142,7 @@ describe("supervised runtime process environment", () => {
     };
 
     expect(runtimeProcessEnvironment(parent, "linux")).toEqual({
+      CLAUDE_CONFIG_DIR: parent.CLAUDE_CONFIG_DIR,
       CODEX_HOME: parent.CODEX_HOME,
       ANTHROPIC_BASE_URL: parent.ANTHROPIC_BASE_URL,
       AWS_CA_BUNDLE: parent.AWS_CA_BUNDLE,

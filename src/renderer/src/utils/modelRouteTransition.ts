@@ -87,20 +87,26 @@ export function modelRouteTransitionContext(
 
 export function replacementChatRequest(
   conversation: Pick<Conversation, "modelSelection" | "accessMode" | "interactionMode">,
-  choice: { selection?: ModelSelection; configuration?: ChatConfiguration; prefillText?: string } = {},
+  choice: {
+    selection?: ModelSelection;
+    configuration?: ChatConfiguration;
+    prefillText?: string;
+    sourceConversationId?: string;
+  } = {},
 ): ReplacementChatRequest {
   return {
     selection: choice.selection ?? conversation.modelSelection,
     configuration: choice.configuration
       ?? { accessMode: conversation.accessMode, interactionMode: conversation.interactionMode },
     ...(choice.prefillText ? { prefillText: choice.prefillText } : {}),
+    ...(choice.sourceConversationId ? { sourceConversationId: choice.sourceConversationId } : {}),
   };
 }
 
 export function pendingModelRoute(
   conversation: Conversation,
   latestTurn: { id: string; modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
-  { selection, configuration }: ReplacementChatRequest,
+  { selection, configuration, sourceConversationId }: ReplacementChatRequest,
   label: string,
   reason: string,
 ): PendingModelRoute {
@@ -109,6 +115,7 @@ export function pendingModelRoute(
     configuration,
     label,
     reason,
+    carriesContext: sourceConversationId === conversation.id,
     sourceConversationId: conversation.id,
     sourceProjectId: conversation.projectId,
     sourceSelectionKey: JSON.stringify(conversation.modelSelection),

@@ -9,6 +9,7 @@ import {
   isProviderTerminalSessionId,
 } from "../../../shared/provider-terminal-resume";
 import { restoreConversationCheckpoint } from "../checkpoint-restoration";
+import { importedResumeCwd } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import { cloneProject } from "../../project-clone";
 import { inspectProjectIdentity } from "../../project-identity";
@@ -606,6 +607,7 @@ export function createProjectWorkspaceCommandHandler(
           command.payload.projectId,
           conversation.id,
         );
+        const resumeCwd = importedResumeCwd(dependencies.store, conversation.id, conversation.providerSessionId, cwd);
         if (dependencies.providers.isRunning(conversation.id)) {
           rejectResume("preflight", "provider-running");
         }
@@ -631,7 +633,7 @@ export function createProjectWorkspaceCommandHandler(
             conversation.id,
             conversation.providerId,
             conversation.providerSessionId,
-            cwd,
+            resumeCwd,
           );
           installationUse = launch.installationUse;
           if (socket.readyState !== WebSocket.OPEN) {
@@ -663,7 +665,7 @@ export function createProjectWorkspaceCommandHandler(
           const terminalId = await dependencies.terminals.replaceProcess(
             socket,
             command.payload.terminalId,
-            cwd,
+            resumeCwd,
             launch.executable,
             launch.args,
             launch.env,

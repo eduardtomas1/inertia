@@ -20,11 +20,6 @@ export interface ProviderEnvironment {
   pathEntries: string[];
 }
 
-/**
- * Expand the leading home-directory shorthand that a shell normally resolves.
- * Child processes are launched with shell:false, so CODEX_HOME=~/.codex-work
- * would otherwise reach Codex as a literal relative path.
- */
 export function expandHomePath(value: string): string {
   if (!value) return value;
   if (value === "~") return homedir();
@@ -34,16 +29,15 @@ export function expandHomePath(value: string): string {
   return value;
 }
 
-function normalizeCodexHomeEnvironment(
+function expandHomeEnvironment(
   environment: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const codexHomeKey = Object.keys(environment).find(
-    (key) => key.toUpperCase() === "CODEX_HOME",
+  name: string,
+): void {
+  const key = Object.keys(environment).find(
+    (candidate) => candidate.toUpperCase() === name,
   );
-  if (!codexHomeKey) return environment;
-  const value = environment[codexHomeKey];
-  if (value !== undefined) environment[codexHomeKey] = expandHomePath(value);
-  return environment;
+  const value = key && environment[key];
+  if (key && value) environment[key] = expandHomePath(value);
 }
 
 let environmentPromise: Promise<ProviderEnvironment> | undefined;
@@ -93,6 +87,7 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
   claude: [
     /^ANTHROPIC_[A-Z0-9_]+$/u,
     /^CLAUDE_CODE_[A-Z0-9_]+$/u,
+    /^CLAUDE_CONFIG_DIR$/u,
     /^DISABLE_(?:AUTOUPDATER|BUG_COMMAND|ERROR_REPORTING|PROMPT_CACHING|TELEMETRY)$/u,
   ],
   cursor: [
@@ -155,7 +150,8 @@ export function providerChildEnvironment(
       result[key] = value;
     }
   }
-  if (providerId === "codex") normalizeCodexHomeEnvironment(result);
+  if (providerId === "codex") expandHomeEnvironment(result, "CODEX_HOME");
+  if (providerId === "claude") expandHomeEnvironment(result, "CLAUDE_CONFIG_DIR");
   if (
     providerId === "claude"
     && (
@@ -189,12 +185,6 @@ export function providerChildEnvironment(
   return result;
 }
 
-/**
- * Environment for installation/readiness probes that must not receive provider
- * credentials. Only the executable path, process-launch essentials, locale,
- * and temporary-directory settings are retained. Home/config paths, proxies,
- * certificates, and provider-specific authentication variables are omitted.
- */
 export function credentialFreeProviderEnvironment(
   source: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
@@ -259,9 +249,6 @@ export function environmentValue(
 }
 
 export async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
-  // Login shells execute arbitrary user dotfiles, which may leave process
-  // trees outside the runtime's cleanup authority. Provider discovery uses
-  // the inherited environment plus bounded, reviewed CLI locations instead.
   return {};
 }
 
@@ -417,9 +404,8 @@ export function testProviderBinDirectory(
 }
 
 async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
-  const env = normalizeCodexHomeEnvironment({
-    ...process.env,
-  });
+  const env = { ...process.env };
+  expandHomeEnvironment(env, "CODEX_HOME");
   const inheritedPath = (environmentValue(process.env, "PATH") ?? "").split(delimiter);
   const fixtureDirectory = testProviderBinDirectory();
   const pathEntries = fixtureDirectory

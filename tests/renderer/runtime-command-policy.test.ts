@@ -14,8 +14,16 @@ import {
   runtimeCommandPolicy,
 } from "../../src/renderer/src/utils/runtimeCommandPolicy";
 import { commandRefreshesConversationDetail } from "../../src/renderer/src/lib/runtimeCommands";
+import { CLI_TRANSCRIPT_READ_DEADLINE_MS } from "../../src/shared/cli-conversations";
 
 describe("runtime command delivery policy", () => {
+  it("keeps CLI previews and imports pending past the server's transcript read deadline", () => {
+    for (const type of ["conversation.cli.preview", "conversation.cli.import"] as const) {
+      expect(runtimeCommandPolicy(type).timeoutMs).toBeGreaterThanOrEqual(CLI_TRANSCRIPT_READ_DEADLINE_MS + 30_000);
+    }
+    expect(runtimeCommandPolicy("conversation.cli.preview").timeoutDelivery).toBe("rejected");
+    expect(runtimeCommandPolicy("conversation.cli.import").timeoutDelivery).toBe("ambiguous");
+  });
   it("classifies representative reads and idempotent refreshes as retry-safe", () => {
     expect(runtimeCommandPolicy("app.refresh")).toEqual({
       timeoutMs: 15_000,

@@ -168,6 +168,7 @@ export interface PendingModelRoute {
   configuration: ChatConfiguration;
   label: string;
   reason: string;
+  carriesContext: boolean;
   sourceConversationId: string;
   sourceProjectId: string;
   sourceSelectionKey: string;

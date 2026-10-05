@@ -11,8 +11,9 @@ import { queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src
 import { MessageSendPreparationTimeoutError } from "../../src/server/runtime/commands/message-send-preparation";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
-  flushTurnControllerTestPromises, turnControllerTestAttachment, turnControllerTestProviderInfo,
+  flushTurnControllerTestPromises, turnControllerTestAttachment, turnControllerTestIdentity, turnControllerTestProviderInfo,
 } from "../support/turn-controller-runtime";
+import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
 import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller";
 import { join } from "node:path";
 
@@ -61,10 +62,88 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
       },
     } as ClientCommand);
   };
-  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, drain, command, abort,
+  const followUp = async (content = "Also check the tests.") => {
+    const requestId = randomUUID();
+    await queue!.turnInteractionHandler(null as unknown as WebSocket, {
+      type: "message.send", requestId, payload: { conversationId: runtime.conversationId, content, attachments: [] },
+    });
+    return requestId;
+  };
+  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, drain, command, followUp, abort,
     close: async () => { abort.abort(); await drain(); await runtime.controller.dispose(); await attachments.close(); runtime.store.close(); },
   };
 }
+
+describe("follow-ups that never reach the running agent", () => {
+  const startRunning = (f: Awaited<ReturnType<typeof fixture>>) => {
+    const initial = f.controller.queue({ conversationId: f.conversationId, content: "First task" });
+    f.controller.start(initial.turn.id);
+    f.provider.emit({ ...turnControllerTestIdentity(f), type: "status", status: "running" });
+    return initial;
+  };
+  const queueResult = (f: Awaited<ReturnType<typeof fixture>>, requestId: string) =>
+    f.events.find((event) => event.type === "request.result" && event.requestId === requestId);
+
+  it("queues a refused follow-up under its request id and sends it once after the turn completes", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      f.provider.steerSupported = false;
+      const requestId = await f.followUp();
+      expect(f.provider.steerCalls).toEqual(["Also check the tests."]);
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, state: "waiting", content: "Also check the tests." } } });
+      expect(f.store.queuedMessages.list(f.conversationId)).toHaveLength(1);
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("accepted"));
+      await f.drain();
+      const receipt = f.store.queuedMessages.get(f.conversationId, requestId)!;
+      expect(f.store.message(receipt.userMessageId!).content).toBe("Also check the tests.");
+      expect(f.provider.runCount).toBe(2);
+      expect(f.provider.steerCalls).toHaveLength(1);
+    } finally { await f.close(); }
+  });
+
+  it("queues a follow-up that arrives after the turn ended but before provider cleanup finished", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      f.provider.deferOwnedStop("settled");
+      f.provider.resolve({ status: "completed" }); await flushTurnControllerTestPromises();
+      expect(f.controller.isActive(f.conversationId)).toBe(true);
+      const requestId = await f.followUp();
+      expect(f.provider.steerCalls).toEqual([]);
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId } } });
+      expect(f.provider.runCount).toBe(1);
+      f.provider.resolveOwnedStop();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { f.provider.resolveOwnedStop(); await f.close(); }
+  });
+
+  it("keeps a follow-up the agent may have received out of the queue", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError());
+      await expect(f.followUp()).rejects.toMatchObject({ delivery: "ambiguous" });
+      expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("rejects a refused follow-up without queueing it when three messages already wait", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      for (let index = 0; index < 3; index += 1) await f.command("message.queue.enqueue", randomUUID());
+      f.provider.steerSupported = false;
+      await expect(f.followUp("A fourth message.")).rejects.toThrow("already has three queued messages");
+      expect(f.store.queuedMessages.list(f.conversationId).map(({ content }) => content)).toEqual(Array(3).fill("Do the next task."));
+    } finally { await f.close(); }
+  });
+});
 
 describe("durable runtime message queue", () => {
   it("dispatches in the background after completion and replays a lost enqueue acknowledgement without a duplicate turn", async () => {

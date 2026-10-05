@@ -13,7 +13,7 @@ describe("Codex follow-up acknowledgement ownership", () => {
     ["foreign", false],
     ["wrong-type", false],
     ["whitespace", false],
-  ] as const)("accepts only an exact receipt: %s", async (scenario, accepted) => {
+  ] as const)("accepts only an exact receipt and never calls an answered one refused: %s", async (scenario, accepted) => {
     const roots: string[] = [];
     const fake = fakeAppServer(roots);
     let running = false;
@@ -36,7 +36,8 @@ describe("Codex follow-up acknowledgement ownership", () => {
       await waitFor("the exact Codex turn to start", () => running);
       // The fixture writes the receipt and terminal event in one stdout batch.
       // Completion must not erase a real receipt, or turn a foreign one into success.
-      await expect(run.steer!(input)).resolves.toBe(accepted);
+      if (accepted) await expect(run.steer!(input)).resolves.toBe(true);
+      else await expect(run.steer!(input)).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError" });
       await expect(run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
       expect(processExists(run.child.pid!)).toBe(false);
       const requests = captured(fake.capturePath).filter(({ method }) => method === "turn/steer");

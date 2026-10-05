@@ -775,11 +775,11 @@ export function startCodexAppServerRun(
       }, undefined, false);
       // Capture ownership before awaiting: completion can share the response's
       // stdout batch, but only this exact provider turn can acknowledge input.
-      return receipt.turnId === expectedTurnId;
+      if (receipt.turnId === expectedTurnId) return true;
     } catch (error) {
       if (error instanceof CodexRequestRefusedError) return false;
-      throw new ProviderSteerDeliveryUnknownError();
     }
+    throw new ProviderSteerDeliveryUnknownError();
   };
 
   const setGoal = async (

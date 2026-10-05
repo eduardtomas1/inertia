@@ -59,4 +59,14 @@ describe("Claude rate-limit negotiation", () => {
     claude.observe(rateLimitEvent, false);
     expect(calls).toEqual([]);
   });
+
+  it("ignores a native rate-limit event without limit information", () => {
+    const { calls, projector: claude } = projector(true);
+    expect(() => claude.observe({
+      type: "rate_limit_event",
+      session_id: "33333333-3333-4333-8333-333333333333",
+    } as unknown as SDKMessage, false)).not.toThrow();
+    expect(claude.rateLimitRejected).toBe(false);
+    expect(calls).toEqual([]);
+  });
 });

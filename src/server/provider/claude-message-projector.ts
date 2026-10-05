@@ -74,6 +74,7 @@ export class ClaudeMessageProjector {
     MAX_TRACKED_MESSAGE_IDS,
   );
   private readonly tools: ClaudeToolActivityProjection;
+  private readonly rejectedRateLimits = new Set<string>();
   private readonly assistantFailures = new Map<string, ClaudeProjectedFailure>();
   private readonly projectedText = new ClaudeProjectedTextLedger();
   private readonly unknownRuntimeMessages = new BoundedStringSet(256);
@@ -119,6 +120,7 @@ export class ClaudeMessageProjector {
         return;
       case "rate_limit_event":
         if (this.options.usesNativeAnthropic) {
+          this.observeRateLimitStatus(message.rate_limit_info);
           projectClaudeRateLimitEvent(this.options.emitter, message);
         }
         return;
@@ -179,6 +181,10 @@ export class ClaudeMessageProjector {
     this.hadSupersession = true;
     this.projectedText.reset();
     this.textItemByProviderMessageId.clear();
+  }
+
+  get rateLimitRejected(): boolean {
+    return this.rejectedRateLimits.size > 0;
   }
 
   authoritativeText(): string {
@@ -486,6 +492,18 @@ export class ClaudeMessageProjector {
         retry ? `Error category: ${boundedLabel(retry.error_category, "unknown")}` : null,
       ]),
     });
+  }
+
+  private observeRateLimitStatus(value: unknown): void {
+    const info = objectValue(value);
+    if (!info) return;
+    const limit = boundedLabel(info.rateLimitType, "unknown");
+    if (
+      info.status === "rejected"
+      && info.overageStatus !== "allowed"
+      && info.overageStatus !== "allowed_warning"
+    ) this.rejectedRateLimits.add(limit);
+    else this.rejectedRateLimits.delete(limit);
   }
 
   private observeAuthStatus(

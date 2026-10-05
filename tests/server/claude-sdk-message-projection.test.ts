@@ -882,6 +882,54 @@ describe("Claude Agent SDK message projection", () => {
     });
   });
 
+  it.each([
+    ["a rejected limit", [{ status: "rejected", rateLimitType: "five_hour" }], true],
+    ["a rejected limit covered by extra usage", [{
+      status: "rejected", rateLimitType: "five_hour", overageStatus: "allowed", isUsingOverage: true,
+    }], undefined],
+    ["a rejected limit that was allowed again", [
+      { status: "rejected", rateLimitType: "five_hour" },
+      { status: "allowed", rateLimitType: "five_hour", utilization: 0.2 },
+    ], undefined],
+    ["a rejected limit beside another window's warning", [
+      { status: "rejected", rateLimitType: "five_hour" },
+      { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.8 },
+    ], true],
+    ["only a warning", [{ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9 }], undefined],
+  ])("marks a failed turn usage-limited after %s", async (_label, limits, usageLimited) => {
+    const { result } = await run([
+      ...limits.map((rate_limit_info, index) => sdkMessage({
+        type: "rate_limit_event",
+        uuid: `rate-limit-${index}`,
+        session_id: CLAUDE_PROTOCOL_SESSION_ID,
+        rate_limit_info,
+      })),
+      sdkMessage({
+        ...claudeSuccessResult("API Error: 429"),
+        is_error: true,
+        terminal_reason: "api_error",
+      }),
+    ]);
+
+    expect(result).toMatchObject({ status: "failed", failure: { terminalEvent: "result/api_error" } });
+    expect(result.failure?.usageLimited).toBe(usageLimited);
+  });
+
+  it("keeps a turn that succeeds after a rejected limit completed", async () => {
+    const { result } = await run([
+      sdkMessage({
+        type: "rate_limit_event",
+        uuid: "rate-limit-wait",
+        session_id: CLAUDE_PROTOCOL_SESSION_ID,
+        rate_limit_info: { status: "rejected", rateLimitType: "five_hour", resetsAt: 1_893_456_000 },
+      }),
+      claudeSuccessResult("Finished after the wait", "completed"),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Finished after the wait" });
+    expect(result.failure).toBeUndefined();
+  });
+
   it("keeps the resumed answer when queued delegate completions send an empty result first", async () => {
     const { events, result } = await run([
       claudeBackgroundTasks(["agent-1", "agent-2"]),

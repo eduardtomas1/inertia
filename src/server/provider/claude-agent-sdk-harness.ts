@@ -839,8 +839,11 @@ function startClaudeRun(
     const resultText = textOverride === undefined
       ? text.toString()
       : textOverride.slice(0, MAX_RESULT_TEXT_CHARS);
+    const settledFailure = failure && status === "failed" && messageProjector.rateLimitRejected
+      ? { ...failure, usageLimited: true as const }
+      : failure;
     return {
-      ...providerRunTerminal(options.input, status, failure),
+      ...providerRunTerminal(options.input, status, settledFailure),
       ...(sessionId ? { sessionId } : {}),
       text: resultText,
       textTruncated: textOverride === undefined
@@ -850,7 +853,7 @@ function startClaudeRun(
       signal: null,
       cleanupConfirmed: true,
       ...(error ? { error } : {}),
-      ...(failure ? { failure } : {}),
+      ...(settledFailure ? { failure: settledFailure } : {}),
     };
   }
 

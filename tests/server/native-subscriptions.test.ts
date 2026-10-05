@@ -171,6 +171,20 @@ describe("throttled and failing quota reads", () => {
     expect(excessive).toHaveBeenCalledTimes(2);
   });
 
+  it("honours Retry-After on an unavailable quota service", async () => {
+    vi.useFakeTimers();
+    const unavailable = vi.fn<typeof fetch>(async () => new Response("", { status: 503, headers: { "Retry-After": "180" } }));
+    const reader = keyed(unavailable);
+    expect((await read(reader)).detail).toBe("The provider asked Inertia to wait 3 min before checking quota again.");
+    await read(reader);
+    expect(unavailable).toHaveBeenCalledOnce();
+    const plain = vi.fn<typeof fetch>(async () => new Response("", { status: 503 }));
+    const other = keyed(plain);
+    expect((await read(other)).detail).toBe("The provider did not answer the quota check.");
+    await read(other);
+    expect(plain).toHaveBeenCalledTimes(2);
+  });
+
   it("describes failed quota checks without blaming the sign-in", async () => {
     const failed = await read(keyed(vi.fn<typeof fetch>(async () => { throw new TypeError("fetch failed"); })));
     expect(failed).toMatchObject({ status: "error", detail: "The provider did not answer the quota check." });

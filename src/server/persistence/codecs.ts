@@ -553,7 +553,7 @@ function persistedSessionRecovery(value: string | null): AgentTurn["sessionRecov
   return isTurnSessionRecovery(parsed) ? parsed : null;
 }
 
-export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
+export function agentTurnFromRow(row: AgentTurnRow & { usage_limited?: number }): AgentTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
     () => providerModelSelectionFromLegacyFields({
@@ -614,6 +614,7 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     association: row.association,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.usage_limited === 1 ? { usageLimited: true as const } : {}),
   };
 }
 

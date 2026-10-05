@@ -120,6 +120,45 @@ describe("Private Connect supervised runtime gateway", () => {
     expect(JSON.stringify(response)).not.toMatch(/private-model|Reading private files/u);
   });
 
+  it("leaves the missing checkpoint notice out of remote activity rows", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-notice-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const conversation = store.createConversation(project.id, "Allowed chat");
+    const { turn } = store.beginAgentTurn({ id: "turn-notice", runId: "run-notice",
+      conversationId: conversation.id, content: "Change the build", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative" });
+    store.addActivity({ conversationId: conversation.id, runId: turn.runId, turnId: turn.id, kind: "status",
+      title: "No checkpoint for this turn", detail: "Checkpoint operation timed out.", status: "completed" });
+    store.addActivity({ conversationId: conversation.id, runId: turn.runId, turnId: turn.id, kind: "command",
+      title: "npm test", detail: null, status: "completed" });
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => store.shellSnapshot(),
+      conversation: (conversationId) => store.conversationShell(conversationId),
+      detail: (conversationId) => store.conversationDetail(conversationId),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+    });
+    const response = await gateway.request({
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    }, {
+      type: "conversation.get", requestId: "33333333-3333-4333-8333-333333333333", conversationId: conversation.id,
+    });
+    if (!response.ok || response.result.kind !== "conversation") throw new Error("Expected a conversation detail.");
+    expect(response.result.detail.activities.map(({ kind }) => kind)).toEqual(["command"]);
+    expect(JSON.stringify(response)).not.toContain("No checkpoint for this turn");
+  });
+
   it("projects only granted conversations and never queues an ungranted prompt", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-runtime-"));
     directories.push(directory);

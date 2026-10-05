@@ -142,7 +142,7 @@ maintenance evidence remains quarantined and provider admission stays closed.
 | Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + containment | prompt abort + owned-server cleanup |
 | Provider-owned server | none | none | none | none | native, run-owned |
 | Custom backend / endpoint / performance mode | attested route / endpoint / native mode | attested route / endpoint / native mode | none | none | none |
-| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | manual only; non-interactive update unavailable | installation-dependent |
+| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | installation-dependent | installation-dependent |
 
 The machine-readable manifest and runtime attestation are versioned and bound
 to one harness, provider installation/configuration identity (including
@@ -181,6 +181,56 @@ negotiates that operation. Conformance registration proves each
 production harness as a whole. It does not yet claim independent
 observed/exercised telemetry for every feature, and the UI currently summarizes
 capability counts rather than showing a per-feature evidence ledger.
+
+### Provider install sources
+
+Maintenance derives the updater from the files that own the discovered
+executable and runs nothing to decide. It finds the PATH entry that resolved to
+that executable, reads its real path and checks a few files (link targets,
+package directories, a pnpm shim of at most 16 KiB). In order, it accepts:
+
+| Owner | Proof | Command | Lock |
+| --- | --- | --- | --- |
+| Codex standalone | real path under `$CODEX_HOME/packages/standalone/` (default `~/.codex`) | `codex update`, with `CODEX_HOME` when set | `native:codex` |
+| Claude installer | real path under `~/.local/share/claude/` or `~/.claude/local/` | `claude update` | `native:claude` |
+| Cursor installer | real path under `~/.local/share/cursor-agent/versions/` | `cursor-agent update` | `native:cursor` |
+| OpenCode installer | `~/.opencode/bin/opencode` | `opencode upgrade <latest 1.x> --method curl` | `native:opencode` |
+| Antigravity installer | `~/.local/bin/agy` (`%LOCALAPPDATA%\agy\bin\agy.exe` on Windows) | `agy update` | `native:antigravity` |
+| bun | real path under `$BUN_INSTALL/install/global/node_modules/<package>/` and `$BUN_INSTALL/bin/bun` exists | `bun add -g <package>` (`--trust` for Claude) | `bun-global:<home>` |
+| pnpm | the PATH hit is a shim in `$PNPM_HOME` naming `global/<n>/node_modules/<package>/`, which exists | `pnpm add -g <package>` (`--allow-build=` for Claude) | `pnpm-global:<home>` |
+| Yarn classic | real path under the Yarn global `node_modules/<package>/` | `yarn global add <package>` | `yarn-global:<dir>` |
+| Volta | the PATH hit in `$VOLTA_HOME/bin` resolves to `volta-shim` and `tools/image/packages/<package>` exists | `volta install <package>` | `volta:<home>` |
+| npm (also nvm, fnm, mise Node) | real path is `<prefix>/lib/node_modules/<package>/`, the prefix is not inside another `node_modules`, `<prefix>/bin/<command>` links to it, and no directory is redirected | that prefix's own Node and `npm-cli.js` with `install -g --prefix <prefix>` (`--allow-scripts=` for Claude) | `npm-global:<prefix>` |
+| Homebrew | real path is `<prefix>/Cellar` or `Caskroom/<name>/<version>/` for a known name (`codex`, `claude-code`, `opencode`), `<prefix>/bin/brew` resolves inside that prefix and the keg is writable | `<prefix>/bin/brew upgrade [--cask] <name>` | `homebrew:<prefix>` |
+
+Packages are `@openai/codex`, `@anthropic-ai/claude-code`,
+`@moonshot-ai/kimi-code` and `opencode-ai`. Every package manager installs
+`<package>@latest`, except OpenCode, which installs `opencode-ai@1`; the
+OpenCode installer and Homebrew paths run only when the latest known release is
+1.x. Everything else fails closed with one sentence and, where the command can
+be written from fixed words, system prefixes and home-relative paths, the exact
+command for a terminal: a prefix the account cannot write (`sudo npm install -g
+--prefix /usr <package>@latest` for a system prefix), a snap (`sudo snap refresh
+<name>`), a mise npm tool (`mise upgrade npm:<package>`), other mise or asdf
+installs, distribution and Nix packages, project-local `node_modules`, and any
+binary whose installer cannot be identified. A native updater never runs for an
+unproven path. Discovery keeps the command name of a multiplexing shim (`snap`,
+`mise`, `volta-shim`), because those programs pick the tool from the name they
+were started with. The updater receives only the package-manager home it needs
+(`PNPM_HOME`, `BUN_INSTALL`, `VOLTA_HOME`, `CODEX_HOME`, `HOMEBREW_PREFIX`) on
+top of the existing allowlist.
+
+An installation too old for its protocol check can still update. Discovery
+returns the executable and version of an identified CLI that answered
+`--version` but lacks ACP (Cursor, Kimi), plugin-free serve (OpenCode 1.x),
+the App Server (Codex) or the headless release (Antigravity below 1.2.2); an
+unidentified executable and an OpenCode 2 install are not returned. The
+capability authority records such an installation as identified (version
+probe completed, cleanup confirmed, executable and file fingerprint bound) and
+admits `maintenance-update` for it when the manifest does not declare the
+operation unavailable. Every manifest now declares it negotiated, Kimi and
+Antigravity included. Settings applies the same gate, so it shows **Update**
+only when the update would be admitted, and otherwise the command to run.
 
 The former direct CLI harness is retained only as the explicitly named
 `createLegacyCliAgentHarnessForTests` fixture for lifecycle tests and

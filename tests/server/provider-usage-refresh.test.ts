@@ -191,7 +191,7 @@ describe("quota read after a reported reset", () => {
   it("reads once about five seconds after the earliest cached reset", async () => {
     const value = fixture({ now: () => Date.now() });
     value.states.set("codex", value.fresh([
-      new Date(Date.now() + 60_000).toISOString(),
+      new Date(Date.now() + 90_000).toISOString(),
       new Date(Date.now() + 10_000).toISOString(),
     ]));
     value.states.set("claude", value.fresh([new Date(Date.now() + 3 * hour).toISOString()]));
@@ -201,9 +201,9 @@ describe("quota read after a reported reset", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
     expect(value.broadcasts()).toBe(1);
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(79_000);
     expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(value.reads).toEqual([["codex", ["rateLimits"]], ["codex", ["rateLimits"]]]);
     await vi.advanceTimersByTimeAsync(50 * 60 * 1_000);
     expect(value.reads).toHaveLength(2);
@@ -230,7 +230,24 @@ describe("quota read after a reported reset", () => {
     expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
     busy.clear();
     await vi.advanceTimersByTimeAsync(25_000);
+    expect(value.reads).toEqual([["codex", ["rateLimits"]]]);
+    await vi.advanceTimersByTimeAsync(35_000);
     expect(value.reads).toEqual([["codex", ["rateLimits"]], ["codex", ["rateLimits"]]]);
+    value.abort.abort();
+  });
+
+  it("bounds reset reads when every read reports another reset a moment away", async () => {
+    const value = fixture({
+      now: () => Date.now(),
+      apply: (providerId) => {
+        value.states.set(providerId as ProviderId, value.fresh([new Date(Date.now() + 1_000).toISOString()]));
+      },
+    });
+    value.states.set("codex", value.fresh([new Date(Date.now() + 1_000).toISOString()]));
+    startIdleRateLimitRefresh(value.dependencies, hour);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1_000);
+    expect(value.reads.length).toBeGreaterThan(0);
+    expect(value.reads.length).toBeLessThanOrEqual(10);
     value.abort.abort();
   });
 

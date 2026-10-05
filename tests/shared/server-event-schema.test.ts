@@ -1416,7 +1416,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     freshness: "fresh", checkedAt,
     installMethod: "npm-global", updateAvailability: "available",
     updateLabel: "Update", instructionsUrl: "https://example.test/update",
-    message: null,
+    message: null, manualCommand: null,
   };
   const operation = {
     id: "operation-1", providerId: "codex",
@@ -1602,6 +1602,9 @@ describe("server event remaining discriminant and identity boundary", () => {
   it.each([
     ["maintenance provider", { providers: [{ ...provider, maintenance: {
       ...maintenance, providerId: "claude",
+    } }] }],
+    ["maintenance manual command", { providers: [{ ...provider, maintenance: {
+      ...maintenance, manualCommand: 7,
     } }] }],
     ["operation provider", { maintenanceOperations: [{ ...operation, providerId: "unknown-provider" }] }],
     ["backend default relationship", { backendDefaults: [{

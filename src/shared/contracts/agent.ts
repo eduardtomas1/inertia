@@ -184,6 +184,7 @@ export interface AgentTurn {
   association: AgentTurnAssociation;
   createdAt: string;
   updatedAt: string;
+  usageLimited?: true;
 }
 
 /**

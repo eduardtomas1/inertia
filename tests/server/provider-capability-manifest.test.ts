@@ -190,12 +190,13 @@ describe("provider capability manifests", () => {
     });
     expect(capability(kimi, "model-discovery").support).toBe("negotiated");
     expect(capability(kimi, "maintenance-update").support)
-      .toBe("unavailable");
+      .toBe("negotiated");
 
     const antigravity = manifest("antigravity-cli");
     expect(capability(antigravity, "model-discovery").support).toBe("native");
     expect(capability(antigravity, "auth-state-discovery").support).toBe("unavailable");
     expect(capability(antigravity, "images").support).toBe("unavailable");
+    expect(capability(antigravity, "maintenance-update").support).toBe("negotiated");
 
     const openCode = manifest("opencode-sdk");
     expect(capability(openCode, "images").support).toBe("negotiated");

@@ -575,10 +575,22 @@ async function detectProviderRecordingCleanup(
       && serveProbe.exitCode === 0
       && /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output)
     );
+    const versionResponded = probe.started && !probe.timedOut && probe.exitCode === 0;
     return {
       executable,
       probe,
       version,
+      identified: versionResponded && Boolean(version) && (
+        providerId === "cursor"
+          ? cursorCandidateIsIdentified(executable, probe.output, acpProbe?.output ?? "")
+          : providerId === "kimi"
+            ? kimiCandidateIsIdentified(executable, probe.output, acpProbe?.output ?? "")
+            : providerId === "antigravity"
+              ? antigravityCandidateIsIdentified(executable)
+              : providerId === "opencode"
+                ? openCodeVersionIsSupported(version)
+                : true
+      ),
       versionReady: providerId === "antigravity"
         ? antigravityCandidateIsIdentified(executable)
           && antigravityVersionSupportsHeadless(version)
@@ -655,11 +667,24 @@ async function detectProviderRecordingCleanup(
         )
       : [];
     const providerWithoutPureServe = openCodeInstalls.length > 0;
+    const identifiedInstall = cleanupUnconfirmed
+      ? undefined
+      : versionProbes
+        .filter(({ identified }) => identified)
+        .sort((left, right) =>
+          (providerId === "cursor"
+            ? cursorExecutablePreference(right.executable)
+              - cursorExecutablePreference(left.executable)
+            : 0)
+          || compareVersions(right.version, left.version))[0];
     const openCodeTwoOnly = providerWithoutPureServe
       && openCodeInstalls.every(({ version }) => !openCodeVersionIsSupported(version));
     return {
       provider,
       available: providerWithoutAcp || providerWithoutPureServe || Boolean(antigravityInstall),
+      ...(identifiedInstall?.version
+        ? { executable: identifiedInstall.executable, version: identifiedInstall.version }
+        : {}),
       installState:
         providerWithoutAcp || providerWithoutPureServe || antigravityInstall
           ? "installed"

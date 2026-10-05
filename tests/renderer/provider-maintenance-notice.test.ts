@@ -33,6 +33,7 @@ function status(
     updateLabel: "Update Codex",
     instructionsUrl: "https://developers.openai.com/codex",
     message: null,
+    manualCommand: null,
     ...update,
   };
 }

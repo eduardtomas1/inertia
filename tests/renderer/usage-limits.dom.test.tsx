@@ -136,6 +136,29 @@ describe("Limits interface", () => {
     await act(async () => { resolve(prepared); await pending; });
     expect(screen.getByRole("button", { name: "Confirm reset" })).toBeVisible(); expect(moved).toHaveFocus();
   });
+  it("refreshes in the background when it becomes visible with a reading older than three minutes", async () => {
+    vi.useFakeTimers(); const f = fixture();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = render(<UsageLimitsPanel status="online" request={f.request} />);
+    await act(async () => { await Promise.resolve(); });
+    const toggle = async (state: DocumentVisibilityState): Promise<void> => {
+      visibility.mockReturnValue(state);
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await Promise.resolve(); });
+    };
+    await toggle("hidden");
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    await toggle("visible");
+    expect(f.request).toHaveBeenCalledOnce();
+    await toggle("hidden");
+    await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
+    await toggle("visible");
+    await act(async () => { await Promise.resolve(); });
+    expect(f.request.mock.calls.map(([command]) => command)).toEqual([
+      { type: "usage.limits.get", payload: { refresh: true, force: false } },
+      { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
+    ]);
+    view.unmount();
+  });
   it("says a passed reset is due without asking for a manual refresh", async () => {
     const due = usageAccount({ windows: [window("codex:primary", "5-hour window", 0, new Date(Date.now() - 60000).toISOString(), 300)] });
     render(<UsageLimitsPanel status="online" request={vi.fn(async () => limitsResult([due]))} />);
@@ -165,13 +188,15 @@ describe("Limits interface", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(600000); });
     expect(f.request).toHaveBeenCalledOnce();
     visibility.mockReturnValue("visible"); await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
     expect(f.request).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
+    expect(f.request).toHaveBeenCalledTimes(3);
     expect(f.request.mock.calls.map(([command]) => command)).toEqual([
       { type: "usage.limits.get", payload: { refresh: true, force: false } },
       { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
+      { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
     ]);
-    view.unmount(); await vi.advanceTimersByTimeAsync(180000); expect(f.request).toHaveBeenCalledTimes(2);
+    view.unmount(); await vi.advanceTimersByTimeAsync(180000); expect(f.request).toHaveBeenCalledTimes(3);
   });
 });
 

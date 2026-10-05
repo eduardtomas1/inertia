@@ -34,7 +34,6 @@ export interface ResponseTurn {
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   checkpoint: CheckpointSummary | null;
-  /** Safe reason recorded when the pre-turn checkpoint could not be captured. */
   checkpointUnavailableReason: string | null;
   gitArtifact: TurnGitArtifactSummary | null;
   requestedAt: string;

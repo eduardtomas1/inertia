@@ -234,6 +234,11 @@ export function ProviderMaintenanceNotice({
       <span>
         <strong>{title}</strong>
         {detail && <small>{detail}</small>}
+        {showStatus
+          && !activeOperation
+          && status.updateAvailability === "instructions-only"
+          && status.manualCommand
+          && <code className="provider-maintenance-command">{status.manualCommand}</code>}
       </span>
       <span className="provider-maintenance-actions">
         {activeOperation ? (

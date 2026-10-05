@@ -125,7 +125,8 @@ function providerMaintenanceStatus(value: unknown): boolean {
     && nullableStringField(value, "latestVersion")
     && nullableStringField(value, "checkedAt")
     && nullableStringField(value, "updateLabel")
-    && nullableStringField(value, "message");
+    && nullableStringField(value, "message")
+    && nullableStringField(value, "manualCommand");
 }
 
 function providerMaintenanceOperation(value: unknown): boolean {
@@ -895,6 +896,7 @@ function agentTurn(value: unknown): boolean {
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value)
     && nullableStringField(value, "modelAlias")
+    && (value.usageLimited === undefined || value.usageLimited === true)
     && nullableStringField(value, "providerSessionBefore")
     && nullableStringField(value, "providerSessionAfter")
     && nullableStringField(value, "startedAt")

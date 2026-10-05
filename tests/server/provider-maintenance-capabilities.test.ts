@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderEnvironment } from "../../src/server/environment";
 import {
-  codexInstallMethodFromPath,
   resolveProviderMaintenanceCapabilities,
   type ProviderMaintenanceTarget,
 } from "../../src/server/provider/maintenance-capabilities";
@@ -51,8 +50,10 @@ describe("provider maintenance capabilities", () => {
       installMethod: "manual",
       updateAvailability: "instructions-only",
       update: null,
+      manualCommand: null,
+      message: "Inertia could not tell how Codex was installed. Update it the way you installed it.",
     });
-    expect(loadEnvironment).not.toHaveBeenCalled();
+    expect(loadEnvironment).toHaveBeenCalledTimes(1);
     expect(resolveExecutable).not.toHaveBeenCalled();
   });
 
@@ -81,8 +82,9 @@ describe("provider maintenance capabilities", () => {
         executable: "/usr/local/bin/node",
         args: ["/usr/local/lib/node_modules/npm/bin/npm-cli.js", "install", "-g", "--prefix", "/usr/local", "@openai/codex@latest"],
         environmentPathPrefix: "/usr/local/bin",
-        lockKey: "package-manager:npm-global",
+        lockKey: "npm-global:/usr/local",
       },
+      manualCommand: "npm install -g --prefix /usr/local @openai/codex@latest",
     });
     expect(resolveExecutable).toHaveBeenCalledWith(
       "/usr/local/bin/npm",
@@ -184,7 +186,8 @@ describe("provider maintenance capabilities", () => {
     expect(capabilities).toMatchObject({
       update: null,
       updateAvailability: "instructions-only",
-      message: expect.stringContaining("not writable"),
+      message: "Your account cannot write this installation.",
+      manualCommand: "sudo npm install -g --prefix /usr/local @openai/codex@latest",
     });
     expect(resolveExecutable).not.toHaveBeenCalled();
   });
@@ -220,13 +223,15 @@ describe("provider maintenance capabilities", () => {
   );
 
   it.each([
-    "/home/user/.asdf/shims/codex",
-    "/home/user/.local/share/mise/shims/codex",
-    "/home/user/.volta/bin/codex",
-    "/usr/bin/codex",
-  ])("keeps an externally managed executable at %s manual", async (executable) => {
-    expect(await resolveProviderMaintenanceCapabilities(target({ executable })))
-      .toMatchObject({ update: null, message: expect.stringContaining("original installer") });
+    ["/home/user/.asdf/shims/codex", "version-manager"],
+    ["/home/user/.local/share/mise/shims/codex", "version-manager"],
+    ["/home/user/.volta/bin/codex", "manual"],
+    ["/usr/bin/codex", "system-package"],
+  ] as const)("keeps an externally managed executable at %s manual", async (executable, installMethod) => {
+    expect(await resolveProviderMaintenanceCapabilities(target({ executable }), {
+      platform: "linux",
+      environment: async () => environment,
+    })).toMatchObject({ installMethod, update: null, updateAvailability: "instructions-only" });
   });
 
   it.skipIf(process.platform === "win32")("verifies the discovered symlink and rejects redirected directories or native vendor targets", async () => {
@@ -277,13 +282,17 @@ describe("provider maintenance capabilities", () => {
     expect(resolveExecutable).not.toHaveBeenCalled();
   });
 
-  it("recognizes the standard Windows npm shim location", () => {
-    expect(codexInstallMethodFromPath(
-      "C:\\Users\\Ada\\AppData\\Roaming\\npm\\codex.cmd",
-    )).toBe("npm-global");
-    expect(codexInstallMethodFromPath(
-      "C:\\Tools\\codex.cmd",
-    )).toBe("manual");
+  it("does not treat an arbitrary Windows codex.cmd as an npm shim", async () => {
+    const resolveExecutable = vi.fn(async (command: string) => [command]);
+    expect(await resolveProviderMaintenanceCapabilities(
+      target({ executable: "C:\\Tools\\codex.cmd" }),
+      {
+        environment: async () => environment,
+        executableCandidates: resolveExecutable,
+        platform: "win32",
+      },
+    )).toMatchObject({ installMethod: "manual", update: null });
+    expect(resolveExecutable).not.toHaveBeenCalled();
   });
 
   it("binds a Windows Codex shim to npm in the same global directory", async () => {
@@ -306,26 +315,32 @@ describe("provider maintenance capabilities", () => {
     });
   });
 
-  it("uses Homebrew only for a canonical Cellar or Caskroom path", async () => {
+  it.each([
+    ["Caskroom", ["upgrade", "--cask", "codex"]],
+    ["Cellar", ["upgrade", "codex"]],
+  ] as const)("upgrades a %s Codex with the prefix's own brew", async (kind, args) => {
     const capabilities = await resolveProviderMaintenanceCapabilities(
-      target({
-        executable: "/opt/homebrew/Caskroom/codex/1.2.3/codex",
-      }),
+      target({ executable: `/opt/homebrew/${kind}/codex/1.2.3/bin/codex` }),
       {
+        platform: "darwin",
         environment: async () => environment,
-        executableCandidates: async (command) => (
-          command === "brew" ? ["/opt/homebrew/bin/brew"] : []
-        ),
+        lstat: async (path) => {
+          if (path !== "/opt/homebrew/bin/brew") throw new Error("ENOENT");
+          return { isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false };
+        },
+        realpath: async (path) => path,
+        access: async () => undefined,
       },
     );
 
     expect(capabilities.update).toEqual({
       executable: "/opt/homebrew/bin/brew",
-      args: ["upgrade", "--cask", "codex"],
-      lockKey: "package-manager:homebrew",
+      args,
+      lockKey: "homebrew:/opt/homebrew",
       installMethod: "homebrew",
       label: "Update Codex with Homebrew",
     });
+    expect(capabilities.manualCommand).toBe(["brew", ...args].join(" "));
   });
 
   it("falls back to instructions when the proven manager is unavailable", async () => {
@@ -334,8 +349,10 @@ describe("provider maintenance capabilities", () => {
         executable: "/opt/homebrew/Caskroom/codex/1.2.3/codex",
       }),
       {
+        platform: "darwin",
         environment: async () => environment,
-        executableCandidates: async () => [],
+        lstat: async () => { throw new Error("ENOENT"); },
+        realpath: async (path) => path,
       },
     );
 
@@ -343,37 +360,30 @@ describe("provider maintenance capabilities", () => {
       installMethod: "homebrew",
       updateAvailability: "instructions-only",
       update: null,
+      manualCommand: "brew upgrade --cask codex",
     });
   });
 
   it.each([
-    ["claude", "/exact/claude", ["update"]],
-    ["cursor", "/exact/cursor-agent", ["update"]],
-    ["opencode", "/exact/opencode", ["upgrade"]],
+    ["claude", "/exact/claude"],
+    ["cursor", "/exact/cursor-agent"],
+    ["opencode", "/exact/opencode"],
+    ["kimi", "/exact/kimi"],
+    ["antigravity", "/exact/agy"],
   ] as const)(
-    "uses the exact detected executable for the documented %s self-update",
-    async (providerId, executable, args) => {
+    "never runs a native %s updater for an unproven installation",
+    async (providerId, executable) => {
       const capabilities = await resolveProviderMaintenanceCapabilities(
         target({ providerId, executable }),
+        { platform: "linux", environment: async () => environment },
       );
-      expect(capabilities.update).toMatchObject({
-        executable,
-        args,
-        installMethod: "provider-managed",
+      expect(capabilities).toMatchObject({
+        installMethod: "manual",
+        updateAvailability: "instructions-only",
+        update: null,
+        manualCommand: null,
       });
+      expect(capabilities.message).toMatch(/^Inertia could not tell how /u);
     },
   );
-
-  it("keeps Kimi's interactive upgrader instructions-only", async () => {
-    await expect(resolveProviderMaintenanceCapabilities(target({
-      providerId: "kimi",
-      executable: "/exact/kimi",
-    }))).resolves.toMatchObject({
-      providerId: "kimi",
-      packageName: "@moonshot-ai/kimi-code",
-      installMethod: "provider-managed",
-      updateAvailability: "instructions-only",
-      update: null,
-    });
-  });
 });

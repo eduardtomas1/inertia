@@ -154,11 +154,11 @@ function checkpointNotice(): AgentActivity {
 describe("Quiet Ledger user request layer", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("says when a turn has no checkpoint and keeps the reason in its title", () => {
+  it("says when a turn has no checkpoint and gives the reason", () => {
     const html = renderRequest("Change the build.", { activities: [checkpointNotice()] });
 
     expect(html).toContain(
-      '<span class="message-checkpoint-missing" title="Checkpoint operation timed out.">No checkpoint for this turn</span>',
+      '<span class="message-checkpoint-missing" title="Checkpoint operation timed out.">No checkpoint for this turn<span class="visually-hidden">: Checkpoint operation timed out.</span></span>',
     );
     expect(html.split("No checkpoint for this turn")).toHaveLength(2);
     expect(html).not.toContain('class="message-revert"');

@@ -228,6 +228,29 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "cache", "keep.txt"), "utf8")).toBe("private ignored bytes\n");
   });
 
+  it("refuses to write into an ignored directory whose name differs only in case", async () => {
+    const root = repository();
+    git(root, "config", "core.ignorecase", "true");
+    const conversationId = randomUUID();
+    mkdirSync(join(root, "build"));
+    writeFileSync(join(root, "build", "keep.txt"), "kept\n");
+    git(root, "add", "build/keep.txt");
+    git(root, "commit", "-m", "build");
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-r", "-q", "build");
+    rmSync(join(root, "build"), { recursive: true, force: true });
+    writeFileSync(join(root, ".gitignore"), "Build/\n");
+    mkdirSync(join(root, "Build"));
+    writeFileSync(join(root, "Build", "keep.txt"), "private ignored bytes\n");
+
+    await expect(restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "Build", "keep.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
+
   it("refuses to overwrite ignored files in a project folder below the repository root", async () => {
     const root = repository();
     const conversationId = randomUUID();

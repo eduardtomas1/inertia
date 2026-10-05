@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LimitResetBanner } from "../../src/renderer/src/components/composer/LimitResetBanner";
@@ -52,6 +54,12 @@ describe("quota reset banner", () => {
     expect(row).toHaveAttribute("data-state", "limited");
     expect(row.querySelector("time")).toBeNull();
     expect(screen.queryAllByRole("button")).toEqual([]);
+  });
+  it("keeps the plain usage-limit row unfilled, with the status colour on its icon and words only", () => {
+    const css = readFileSync(join(process.cwd(), "src/renderer/src/components/composer/LimitResetBanner.css"), "utf8");
+    const limited = [...css.matchAll(/\.limit-reset\[data-state="limited"\]([^{]*)\{([^}]*)\}/gu)];
+    expect(limited.find(([, selector]) => selector.trim() === "")?.[2]).toMatch(/background:\s*transparent;/u);
+    expect(limited.find(([, selector]) => selector.trim() === ".limit-reset-copy strong")?.[2]).toMatch(/color:\s*var\(--warning\);/u);
   });
   it("drops a late response from a different chat", async () => {
     let resolve!: (value: LimitResetResult) => void;

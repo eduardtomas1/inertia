@@ -162,7 +162,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
     : error ? diagnosticErrorReference(error).message
       : scan && !rows.length ? scan.candidates.length ? "No conversations match your search." : "No CLI conversations found." : null;
   return createPortal(
-    <div className="dialog-backdrop cli-import-backdrop" role="presentation"
+    <div className="dialog-backdrop" role="presentation"
       onMouseDown={(event) => { if (event.target === event.currentTarget && !importing.current) onClose(); }}>
       <section className="cli-import-dialog" role="dialog" aria-modal="true" aria-label="Import CLI conversations" tabIndex={-1}
         onKeyDown={(event) => {

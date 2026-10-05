@@ -158,7 +158,7 @@ async function captureState(info: TestInfo, name: string): Promise<void> {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && focused.matches("button, input, select")) focused.blur();
   });
-  const path = info.outputPath(`${name}.png`);
+  const path = info.outputPath(`cli-import-${name}.png`);
   await page.screenshot({ path, animations: "disabled" });
   await info.attach(name, { path, contentType: "image/png" });
 }
@@ -257,9 +257,12 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await expectDialogLayout(dialog);
   await captureState(info, "dialog-long-title-light-narrow");
   await app.resizeWindow(1440, 920);
-  await writeFile(unreadableFile, "{\"type\":\"session_meta\"");
+  await writeFile(unreadableFile, `${JSON.stringify({ type: "session_meta", payload: { id: unreadableId, cwd: app.workspaceDirectory, model_provider: "openai" } })}\n{broken\n{}`);
   await dialog.getByRole("button", { name: "Scan again", exact: true }).click();
   await expect(dialog.getByRole("button", { name: new RegExp(claudeTitle, "u") })).toBeVisible();
+  await expect(dialog.locator(".cli-import-note")).toHaveText("1 conversation could not be read.");
+  await expectDialogLayout(dialog);
+  await captureState(info, "dialog-unreadable-light-wide");
   await rm(claudeFile);
   await dialog.getByRole("button", { name: new RegExp(claudeTitle, "u") }).click();
   await expect(dialog.getByRole("alert")).toContainText("no longer readable");
@@ -283,3 +286,46 @@ test("captures the importer in light, dark, narrow, empty and error states", asy
   await expect(launcher).toBeFocused();
   expect(app.rendererErrors).toEqual([]);
 });
+
+test("imports a rollout larger than the old 16 MiB limit with its opening and newest messages", async ({ browserName: _browserName }, info) => {
+  test.setTimeout(150_000);
+  historyRoot = await mkdtemp(join(tmpdir(), "inertia-cli-history-"));
+  const codexRoot = join(historyRoot, "codex"); const claudeRoot = join(historyRoot, "claude");
+  const codexDirectory = join(codexRoot, "sessions", "2026", "09", "26");
+  const largeTitle = "Port the release scripts to the new packaging pipeline";
+  app = await createAppFixture({ name: "cli-conversation-import-large", initialState: "conversation", codexAppServerSource: providerSource,
+    additionalEnvironment: { CODEX_HOME: codexRoot, CLAUDE_CONFIG_DIR: claudeRoot },
+    beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
+      await mkdir(codexDirectory, { recursive: true });
+      await mkdir(join(claudeRoot, "projects"), { recursive: true });
+      const timestamp = "2026-09-26T09:00:00.000Z";
+      const message = (role: string, text: string) => JSON.stringify({ type: "response_item", timestamp, payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] } });
+      const output = JSON.stringify({ type: "response_item", timestamp, payload: { type: "function_call_output", output: "log line\n".repeat(4096) } });
+      const lines = [JSON.stringify({ type: "session_meta", payload: { id: longId, cwd: workspaceDirectory, model_provider: "openai" } }), message("user", largeTitle), message("assistant", "I will move each release script and keep the old entry points working until the switch.")];
+      for (let index = 1; index <= 480; index += 1) lines.push(message("user", `Check step ${index} of the packaging pipeline.`), output, message("assistant", `Step ${index} of the packaging pipeline passes.`));
+      await writeFile(join(codexDirectory, `rollout-${longId}.jsonl`), `${lines.join("\n")}\n`);
+      const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
+      try { store.updateProject(store.shellSnapshot().projects[0]!.id, { name: "Workspace studio" }); store.updateSettings({ theme: "light", newThreadMode: "local" }); } finally { store.close(); }
+    },
+  });
+  await app.resizeWindow(1440, 920);
+  await openImporter(app.page);
+  const dialog = app.page.getByRole("dialog", { name: "Import CLI conversations" });
+  await expect(dialog.locator(".cli-import-note")).toHaveCount(0);
+  await dialog.getByRole("button", { name: new RegExp(largeTitle, "u") }).click();
+  await expect(dialog.getByRole("group", { name: largeTitle })).toBeVisible();
+  await expect(dialog.getByText("Earlier messages will not be imported: 762 of 962", { exact: true })).toBeVisible();
+  await captureState(info, "dialog-large-preview-light-wide");
+  await dialog.getByRole("button", { name: "Import conversation", exact: true }).click();
+  await dialog.getByRole("button", { name: "Open chat", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const note = app.page.getByRole("article", { name: "Agent system notice" });
+  await expect(note).toHaveCount(1);
+  await expect(note).toContainText("Earlier messages were not imported: 762 of 962");
+  await expect(app.page.locator(".response-turn").first()).toContainText(largeTitle);
+  await expect(app.page.getByText("Step 480 of the packaging pipeline passes.", { exact: true })).toBeVisible();
+  await note.scrollIntoViewIfNeeded();
+  await captureState(info, "chat-large-note-light-wide");
+  expect(app.rendererErrors).toEqual([]);
+});
+

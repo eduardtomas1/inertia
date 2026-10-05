@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { SETTINGS_SECTIONS } from "../../src/renderer/src/components/settingsSections";
-import { SETTINGS_ROWS, withRowProject } from "../../src/renderer/src/components/settingsRows";
+import { SETTINGS_ROWS, isProjectSettingsRow } from "../../src/renderer/src/components/settingsRows";
+import { ALL_PROJECTS_ROW_IDS, withRowProject } from "../../src/renderer/src/components/settings/projectRowTarget";
 import {
   HELP_COMMANDS,
   HELP_TOPICS,
@@ -167,5 +168,6 @@ describe("help topics", () => {
     expect(withRowProject(target, [project("scratch", "scratch")], null)).toEqual(target);
     expect(withRowProject({ section: "projects", anchor: "project-grouping" }, projects, "website")).toEqual({ section: "projects", anchor: "project-grouping" });
     expect(withRowProject({ ...target, projectId: "studio" }, projects, "website")).toEqual({ ...target, projectId: "studio" });
+    expect([...ALL_PROJECTS_ROW_IDS].sort()).toEqual(SETTINGS_ROWS.filter((row) => row.sectionId === "projects" && !isProjectSettingsRow(row)).map(({ id }) => id).sort());
   });
 });

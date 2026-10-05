@@ -47,7 +47,6 @@ import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
 import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
-import { withRowProject } from "./settingsRows";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
@@ -963,7 +962,9 @@ export const AppLayout = memo(function AppLayout({
           "daily-work": () => setDailyWorkOpen(true),
           "welcome-guide": openWelcomeGuide,
         }}
-        onOpenSettings={(target) => actions.openSettings(withRowProject(target, connection.snapshot?.projects ?? [], paletteCurrentProjectId(connection.snapshot, projectScopeId)))}
+        projects={connection.snapshot?.projects ?? []}
+        currentProjectId={paletteCurrentProjectId(connection.snapshot, projectScopeId)}
+        onOpenSettings={actions.openSettings}
         onLeave={() => setSidebarOpen(false)}
         onLoadError={setActionError}
       />

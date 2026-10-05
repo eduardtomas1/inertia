@@ -177,7 +177,7 @@ and become invalid when their DOM node disappears or stops being rendered.
 
 A click or type on a ref whose element lies outside the viewport first
 scrolls that element to the centre of the view from the isolated Browser
-world, then locates and hit-tests it exactly as for any other ref; the
+world, instantly even on a page that sets `scroll-behavior: smooth`, then locates and hit-tests it exactly as for any other ref; the
 approval binding to the inspected document and ref is unchanged. In a
 Supervised chat the approval for such a click or type is not prepared,
 because preparing it would scroll the page before the user approves anything:
@@ -486,8 +486,10 @@ new snapshot before continuing." After any click or keystroke by the user,
 `inertia_browser_tabs`, snapshots and every other result report
 `controller: "user"` until the next successful agent action other than
 listing tabs. Inertia tells its own input apart from the user's by recording
-each mouse press and key press it sends, at most 64 at a time and for two
-seconds each, and consuming the matching event when Chromium reports it;
+each mouse press it sends with its position and each key press with its key,
+at most 64 at a time and for two seconds each, and consuming only the
+matching event when Chromium reports it, so a different key the user presses
+in that window still counts as the user;
 pointer movement, wheel scrolling and key releases never count as the user.
 
 If a page's renderer crashes, or the inspection connection to a page is lost,

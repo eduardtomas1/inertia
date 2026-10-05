@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { agentBrowserToolSurfacePostCount } from "./support/agent-browser-tool-surface-pages";
 
 interface Result {
   ok: boolean;
@@ -76,16 +77,40 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test("an agent reaches a control below the fold by ref", async () => {
-  await navigate("agent-browser-below-fold");
+async function isolatedRefCount(path: string): Promise<number> {
+  return await app.electronApp.evaluate(async ({ webContents }, request) => {
+    const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().endsWith(request));
+    return await contents?.executeJavaScriptInIsolatedWorld(999, [{
+      code: "globalThis.__inertiaAgentBrowser?.refs?.size ?? 0",
+    }]) as number;
+  }, path);
+}
+
+async function interruptedWhile(path: string, input: Record<string, unknown>): Promise<void> {
+  await navigate(path);
+  const waiting = browser({ action: "wait", text: "never shown", state: "present", timeoutMs: 20_000 });
+  await expect.poll(() => isolatedRefCount(path)).toBeGreaterThan(0);
+  await app.electronApp.evaluate(({ webContents }, request) => {
+    const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().endsWith(request.path));
+    contents?.sendInputEvent(request.input as never);
+  }, { path, input });
+  expect(await waiting).toEqual({
+    ok: false,
+    code: "interrupted",
+    message: "The user is using this page; take a new snapshot before continuing.",
+  });
+}
+
+for (const path of ["agent-browser-below-fold", "agent-browser-below-fold-smooth"]) test(`an agent reaches a control below the fold by ref on ${path}`, async () => {
+  await navigate(path);
   const snapshot = parsed(await browser({ action: "snapshot" }));
   expect(snapshot.elements).toContainEqual(expect.objectContaining({ name: "Save at the bottom", offscreen: true }));
   const ref = refFor(snapshot, "Save at the bottom");
   expect(await browser({ action: "click", ref })).toMatchObject({ ok: true });
-  await expect.poll(() => pageValue<boolean>("agent-browser-below-fold", "window.__bottomClicked === true")).toBe(true);
-  expect(await pageValue<number>("agent-browser-below-fold", "scrollY")).toBeGreaterThan(0);
+  await expect.poll(() => pageValue<boolean>(path, "window.__bottomClicked === true")).toBe(true);
+  expect(await pageValue<number>(path, "scrollY")).toBeGreaterThan(0);
 
-  await navigate("agent-browser-below-fold");
+  await navigate(path);
   const again = parsed(await browser({ action: "snapshot" }));
   const scrolled = parsed(await browser({ action: "scroll", ref: refFor(again, "Save at the bottom") }));
   expect(scrolled).toMatchObject({ viewport: { scrollY: expect.any(Number) } });
@@ -107,6 +132,18 @@ test("an agent goes back through history and opens a schemeless loopback address
   expect(parsed(await browser({ action: "snapshot" })).title).toBe("Second page");
   expect(await browser({ action: "history", direction: "reload" })).toMatchObject({ ok: true });
   expect(parsed(await browser({ action: "snapshot" })).title).toBe("Second page");
+});
+
+test("reload never resubmits a form", async () => {
+  await navigate("agent-browser-post-form");
+  const before = agentBrowserToolSurfacePostCount();
+  const form = parsed(await browser({ action: "snapshot" }));
+  expect(await browser({ action: "click", ref: refFor(form, "Send post") })).toMatchObject({ ok: true });
+  expect(parsed(await browser({ action: "wait", text: `Posts: ${before + 1}`, state: "present", timeoutMs: 8_000 })))
+    .toMatchObject({ matched: true });
+  expect(await browser({ action: "history", direction: "reload" })).toMatchObject({ ok: true });
+  expect(parsed(await browser({ action: "snapshot" })).text).toContain(`Posts: ${before + 1}`);
+  expect(agentBrowserToolSurfacePostCount()).toBe(before + 1);
 });
 
 test("Shift+Tab moves focus backwards", async () => {
@@ -135,24 +172,14 @@ test("an agent sees a confirmation dialog and accepts it only when it asks to", 
 });
 
 test("the user takes over the page during an agent command", async () => {
-  await navigate("agent-browser-history-first");
-  const waiting = browser({ action: "wait", text: "never shown", state: "present", timeoutMs: 20_000 });
-  await new Promise((resolve) => setTimeout(resolve, 1_000));
-  await app.electronApp.evaluate(({ webContents }) => {
-    const contents = webContents.getAllWebContents()
-      .find((candidate) => candidate.getURL().endsWith("agent-browser-history-first"));
-    contents?.sendInputEvent({ type: "mouseDown", x: 20, y: 20, button: "left", clickCount: 1 });
-    contents?.sendInputEvent({ type: "mouseUp", x: 20, y: 20, button: "left", clickCount: 1 });
-  });
-  expect(await waiting).toEqual({
-    ok: false,
-    code: "interrupted",
-    message: "The user is using this page; take a new snapshot before continuing.",
-  });
+  await interruptedWhile("agent-browser-focus-order", { type: "mouseDown", x: 20, y: 20, button: "left", clickCount: 1 });
   expect(await browser({ action: "tabs" })).toMatchObject({ ok: true, state: { controller: "user" } });
   expect(await browser({ action: "snapshot" })).toMatchObject({ ok: true, state: { controller: "user" } });
   const tabs = await browser({ action: "tabs" });
   expect(tabs.ok).toBe(true);
   expect(tabs.state).not.toHaveProperty("controller");
+
+  await interruptedWhile("agent-browser-confirm", { type: "keyDown", keyCode: "a" });
+  expect(await browser({ action: "tabs" })).toMatchObject({ ok: true, state: { controller: "user" } });
   expect(app.rendererErrors).toEqual([]);
 });

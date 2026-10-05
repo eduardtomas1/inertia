@@ -101,7 +101,7 @@ async function createPreviewServer(): Promise<{
   const server = createServer((request, response) => {
     if (serveAgentBrowserPrivacyFixture(request.url, response)) return;
     if (serveAgentBrowserCoverageFixture(request, response)) return;
-    if (serveAgentBrowserToolSurfaceFixture(request.url, response)) return;
+    if (serveAgentBrowserToolSurfaceFixture(request, response)) return;
     if (
       request.method === "POST"
       && request.url === "/backend-probe/v1/messages"

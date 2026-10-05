@@ -36,7 +36,7 @@ export async function scrollAgentPageRefIntoView(contents: WebContents, ref: str
   const value = await execute(contents, `(() => {
     const element = globalThis.__inertiaAgentBrowser?.refs?.get(${JSON.stringify(ref)});
     if (!element || !element.isConnected) return { found: false };
-    element.scrollIntoView({ block: "center", inline: "nearest" });
+    element.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
     return { found: true, viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY } };
   })()`);
   if (typeof value !== "object" || value === null || (value as { found?: unknown }).found !== true) {

@@ -222,7 +222,7 @@ describe("fresh session fallback guards", () => {
         imagePaths: [],
       });
       admission.release();
-      expect(followUp).toMatchObject({ role: "user", turnId: queued.turn.id });
+      expect(followUp).toMatchObject({ kind: "accepted", message: { role: "user", turnId: queued.turn.id } });
       expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         providerSessionBefore: "saved-session",

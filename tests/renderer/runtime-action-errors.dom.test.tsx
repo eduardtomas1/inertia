@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
+import { RUNTIME_QUEUE_CHANGED } from "../../src/renderer/src/components/composer/runtimeQueueClient";
 
 const command: CommandWithoutId = {
   type: "git.branch.switch",
@@ -76,4 +77,27 @@ it.each([
   const reported = String(setActionError.mock.lastCall?.[0]);
   expect(reported.startsWith("Delivery could not be confirmed.")).toBe(unconfirmed);
   expect(reported).toContain(error.message);
+});
+
+it("treats a follow-up the runtime queued for the next turn as sent and refreshes that chat's queue", async () => {
+  const conversationId = "33333333-3333-4333-8333-333333333333";
+  const event = {
+    type: "request.result" as const,
+    requestId: "request",
+    result: { kind: "message.queue" as const, conversationId, entries: [], receipt: null },
+  };
+  const setActionError = vi.fn();
+  const queueChanged = vi.fn();
+  window.addEventListener(RUNTIME_QUEUE_CHANGED, queueChanged);
+  const { result } = renderHook(() => useAppRuntimeActions({
+    sendCommand: vi.fn().mockResolvedValue(event), refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+  }));
+  try {
+    await act(async () => {
+      await expect(result.current.sendMessageToConversation(conversationId, "Follow up", [])).resolves.toBeNull();
+    });
+    expect(setActionError).toHaveBeenCalledTimes(1);
+    expect(setActionError).toHaveBeenCalledWith(null);
+    expect(queueChanged).toHaveBeenCalledWith(expect.objectContaining({ detail: conversationId }));
+  } finally { window.removeEventListener(RUNTIME_QUEUE_CHANGED, queueChanged); }
 });

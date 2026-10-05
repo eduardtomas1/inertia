@@ -1,12 +1,13 @@
 import { snapshotPromptContext } from "../../../shared/snapshots";
 import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attachment-context";
-import type { ChatAttachment, ChatMessage } from "../../../shared/contracts";
+import type { ChatAttachment } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import { ProviderSteerDeliveryUnknownError, type ProviderSteerInput } from "../../provider/contracts";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
+  FollowUpSteerResult,
   TurnProviderRuntime,
 } from "./turn-controller-types";
 
@@ -88,7 +89,7 @@ export class TurnFollowUpCoordinator {
     attachments: readonly ChatAttachment[],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
-  ): Promise<ChatMessage | null> {
+  ): Promise<FollowUpSteerResult> {
     await lease.ready;
     const active = this.owners.get(lease);
     if (active?.runState.awaitingProviderTurn()) await providerTurnStarted(active, signal);
@@ -100,11 +101,13 @@ export class TurnFollowUpCoordinator {
       || !active.runState.acceptsProviderEvents()
       || active.turn.runId !== lease.runId
       || active.turn.id !== lease.turnId
-      || !followUp
+    ) return { kind: "turn-ended" };
+    if (
+      !followUp
       || (input.imagePaths.length > 0 && !lease.supportsImages)
       || !this.options.providers.steer
       || signal?.aborted
-    ) return null;
+    ) return { kind: "unavailable" };
     const snapshotContext = snapshotPromptContext(attachments);
     if (Buffer.byteLength(snapshotContext, "utf8") > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
       throw new Error("Snapshot accessibility context exceeds the follow-up attachment limit.");
@@ -128,7 +131,7 @@ export class TurnFollowUpCoordinator {
     }
     if (!accepted) {
       active.freshSessionRequest ??= freshSessionRequest;
-      return null;
+      return { kind: "refused" };
     }
     onProviderAcknowledged?.();
     const ownerAfterSteer = this.options.activeForConversation(
@@ -140,14 +143,17 @@ export class TurnFollowUpCoordinator {
       || active.turn.runId !== lease.runId
       || active.turn.id !== lease.turnId
     ) throw new RuntimeRequestError("The follow-up was accepted as its turn ended. Check this chat before retrying.", undefined, "ambiguous");
-    return this.options.store.createAcknowledgedFollowUpMessage(
-      lease.conversationId,
-      active.turn.id,
-      followUp,
-      lease.submittedAt,
-      this.options.now(),
-      attachments,
-    );
+    return {
+      kind: "accepted",
+      message: this.options.store.createAcknowledgedFollowUpMessage(
+        lease.conversationId,
+        active.turn.id,
+        followUp,
+        lease.submittedAt,
+        this.options.now(),
+        attachments,
+      ),
+    };
   }
 
   deferAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {

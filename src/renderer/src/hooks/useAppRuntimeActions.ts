@@ -20,7 +20,7 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
-import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "../components/composer/runtimeQueueClient";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "@shared/background-tasks";
 
 export type ConversationBackgroundTasksLoader = (
@@ -193,6 +193,10 @@ export function useAppRuntimeActions(options: {
         && event.result.kind === "message.accepted"
       ) return event.result;
       if (event.type === "request.ok") return null;
+      if (event.type === "request.result" && event.result.kind === "message.queue") {
+        window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: targetConversationId }));
+        return null;
+      }
       throw new Error("The local service returned an unexpected message response.");
     } catch (error) {
       preserveAmbiguousHandoff = runtimeCommandDelivery(error) === "ambiguous";

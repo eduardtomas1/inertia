@@ -21,11 +21,19 @@ describe("agent page input ownership", () => {
     sendAgentPageInput(page as never, { type: "keyDown", keyCode: "Tab" });
     expect(page.sendInputEvent).toHaveBeenCalledTimes(2);
     expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 40.4, y: 19.6 } as never)).toBe(false);
-    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", keyCode: "Tab" } as never)).toBe(false);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "Tab" } as never)).toBe(false);
     expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 40, y: 20 } as never)).toBe(true);
-    expect(agentPageInputIsUser(page as never, { type: "keyDown", keyCode: "a" } as never)).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "a" } as never)).toBe(true);
     sendAgentPageInput(page as never, { type: "mouseDown", x: 40, y: 20, button: "left", clickCount: 1 });
     expect(agentPageInputIsUser(page as never, { type: "mouseDown", x: 300, y: 200 } as never)).toBe(true);
+  });
+
+  it("matches the agent's key by its key code so a different user key is never swallowed", () => {
+    const page = contents();
+    sendAgentPageInput(page as never, { type: "keyDown", keyCode: "Tab" });
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "a" } as never)).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "Tab" } as never)).toBe(false);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "Tab" } as never)).toBe(true);
   });
 
   it("ignores pointer movement, wheels and characters, which are not the user taking over", () => {
@@ -40,7 +48,7 @@ describe("agent page input ownership", () => {
     const page = contents();
     sendAgentPageInput(page as never, { type: "keyDown", keyCode: "Tab" });
     vi.advanceTimersByTime(2_001);
-    expect(agentPageInputIsUser(page as never, { type: "keyDown", keyCode: "Tab" } as never)).toBe(true);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "Tab" } as never)).toBe(true);
     for (let index = 0; index < 65; index += 1) {
       sendAgentPageInput(page as never, { type: "mouseDown", x: index * 10, y: 0, button: "left", clickCount: 1 });
     }

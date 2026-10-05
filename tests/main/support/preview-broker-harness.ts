@@ -260,7 +260,7 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     sendInputEvent(input: Record<string, unknown>): void {
       this.sentInputs.push(input);
       electronState.interactionTimeline.push(String(input.type));
-      this.emit("input-event", {}, input);
+      this.emit("input-event", {}, typeof input.keyCode === "string" ? { ...input, key: input.keyCode } : input);
     }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
     readonly throttling: boolean[] = [];

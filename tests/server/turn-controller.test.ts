@@ -42,7 +42,7 @@ describe("TurnController authoritative lifecycle", () => {
     const rejectedAdmission = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;
     expect(await runtime.controller.steer(rejectedAdmission, {
       content: "Do not leave this rejected follow-up behind.", imagePaths: [],
-    })).toBeNull();
+    })).toEqual({ kind: "refused" });
     rejectedAdmission.release();
     expect(runtime.store.snapshot()).toEqual(beforeRejected);
     let acknowledgeFollowUp!: (accepted: boolean) => void;
@@ -64,7 +64,8 @@ describe("TurnController authoritative lifecycle", () => {
     });
     const interimActivity = runtime.store.snapshot().activities.find(({ title }) => title === "Observed during acknowledgement");
     acknowledgeFollowUp(true);
-    const followedUp = await pendingFollowUp;
+    const steered = await pendingFollowUp;
+    const followedUp = steered.kind === "accepted" ? steered.message : null;
     admission.release();
     runtime.provider.resolve();
     await flushPromises();

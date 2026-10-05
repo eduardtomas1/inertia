@@ -1158,7 +1158,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     });
   });
 
-  it("finishes after an in-flight steer receipt is rejected at idle", async () => {
+  it("finishes after an in-flight steer receipt answers with another delivery and keeps that delivery unknown", async () => {
     const root = portableFixtureRoot("OpenCode rejected steer");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -1191,7 +1191,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
         }, { runId: event.runId, turnId: event.turnId! });
       },
     })).resolves.toMatchObject({ status: "completed" });
-    await expect(followUp).resolves.toBe(false);
+    await expect(followUp).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError" });
   });
 
   it.each([

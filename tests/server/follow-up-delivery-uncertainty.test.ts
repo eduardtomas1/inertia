@@ -17,7 +17,7 @@ import {
 
 afterEach(cleanupTurnControllerTestDirectories);
 
-async function activeFollowUpRuntime() {
+async function activeFollowUpRuntime(undeliveredFollowUps?: TurnInteractionCommandDependencies["undeliveredFollowUps"]) {
   const runtime = await createTurnControllerTestRuntime();
   const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start" });
   runtime.controller.start(queued.turn.id);
@@ -40,6 +40,7 @@ async function activeFollowUpRuntime() {
     conversationAttachments,
     attachmentResolver,
     providerTerminalResumes: { isActive: () => false },
+    undeliveredFollowUps,
     send: vi.fn(),
     broadcast: vi.fn(),
     broadcastSnapshot: vi.fn(),
@@ -55,7 +56,7 @@ async function activeFollowUpRuntime() {
   });
   const persistedFollowUps = () => runtime.store.conversationDetail(runtime.conversationId)
     ?.messages.filter(({ content }) => content === "Inspect this image.") ?? [];
-  return { runtime, retained, conversationAttachments, attachmentResolver, send, persistedFollowUps };
+  return { runtime, retained, conversationAttachments, attachmentResolver, handler, send, persistedFollowUps };
 }
 
 describe("follow-up delivery uncertainty", () => {
@@ -96,6 +97,29 @@ describe("follow-up delivery uncertainty", () => {
     expect(attachmentResolver.relinquishAll).toHaveBeenCalledWith([retained.id]);
     runtime.provider.resolve();
     await flushTurnControllerTestPromises();
+    runtime.store.close();
+  });
+
+  it("hands a refused follow-up and its retained image to the queue instead of failing", async () => {
+    const queued = { kind: "message.queue" as const, conversationId: randomUUID(), entries: [], receipt: null };
+    const undelivered = { enqueue: vi.fn(), adopt: vi.fn(() => queued) };
+    const { runtime, retained, conversationAttachments, attachmentResolver, send, persistedFollowUps } = await activeFollowUpRuntime(undelivered);
+    vi.spyOn(runtime.provider, "steer").mockResolvedValue(false);
+
+    await expect(send()).resolves.toBe("handled");
+
+    expect(undelivered.adopt).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: runtime.conversationId, content: "Inspect this image.", attachments: [retained],
+    }));
+    expect(undelivered.enqueue).not.toHaveBeenCalled();
+    expect(persistedFollowUps()).toEqual([]);
+    expect(conversationAttachments.acceptRetention).toHaveBeenCalledTimes(1);
+    expect(conversationAttachments.releaseRetention).not.toHaveBeenCalled();
+    expect(attachmentResolver.releaseAll).toHaveBeenCalledWith([retained.id]);
+    expect(attachmentResolver.relinquishAll).not.toHaveBeenCalled();
+    runtime.provider.resolve();
+    await flushTurnControllerTestPromises();
+    expect(conversationAttachments.release).not.toHaveBeenCalled();
     runtime.store.close();
   });
 

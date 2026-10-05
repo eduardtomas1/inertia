@@ -96,6 +96,7 @@ async function runtime(providerId: ProviderId = "codex") {
   const provider = new FakeTurnProvider();
   const scheduler = new FakeTurnScheduler();
   const events: ServerEvent[] = [];
+  const shells: string[] = [];
   let sequence = 0;
   const controller = new TurnController(
     store,
@@ -105,6 +106,9 @@ async function runtime(providerId: ProviderId = "codex") {
     new Map<string, AgentPlan>(),
     {
       broadcast: (event) => events.push(event),
+      broadcastConversationShell: (conversationId) => {
+        shells.push(conversationId);
+      },
       broadcastSnapshot: () => undefined,
       providerInfo: () => [providerInfo(providerId)],
       captureStructuredContext: ({ content }) => ({ visibleRequest: content }),
@@ -150,7 +154,25 @@ async function runtime(providerId: ProviderId = "codex") {
     projected,
     scheduler,
     events,
+    shells,
   };
+}
+
+function runTimers(scheduler: FakeTurnScheduler, delayMs: number): number {
+  const due = [...scheduler.delays]
+    .filter(([, delay]) => delay === delayMs)
+    .map(([id]) => id);
+  for (const id of due) {
+    const callback = scheduler.callbacks.get(id);
+    scheduler.clearTimeout(id);
+    callback?.();
+  }
+  return due.length;
+}
+
+function activityEvents(value: Awaited<ReturnType<typeof runtime>>) {
+  return value.events.flatMap((event) =>
+    event.type === "agent.activity" ? [event.activity] : []);
 }
 
 function turnActivities(
@@ -352,11 +374,15 @@ describe("durable provider activity lifecycle contract", () => {
       providerActivitiesById: identified,
       providerActivityDetailChars: 0,
       providerCommandRuns: new Map(),
+      pendingActivityUpdates: new Map(),
+      activityFlushTimer: null,
     } as ActiveTurn;
     const projection = new TurnActivityProjection({
       store: value.store,
       hooks: {} as TurnControllerHooks,
+      scheduler: value.scheduler,
       now: () => "2030-01-01T00:00:01.000Z",
+      onPersistenceFailure: () => undefined,
     });
 
     const fact = projection.record(
@@ -375,7 +401,7 @@ describe("durable provider activity lifecycle contract", () => {
       "completed",
     );
 
-    expect(fact).toMatchObject({
+    expect(fact?.activity).toMatchObject({
       title: "Anonymous terminal fact",
       status: "completed",
     });
@@ -545,5 +571,192 @@ describe("durable provider activity lifecycle contract", () => {
         status: "failed",
       }),
     ]);
+  });
+
+  it("persists and projects a burst of running updates once per 64 ms window", async () => {
+    const value = await runtime();
+    const updates = vi.spyOn(value.store, "updateActivity");
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "noisy-command",
+      detail: "Command:\nnpm test",
+    });
+    expect(activityEvents(value)).toHaveLength(1);
+    const shells = value.shells.length;
+
+    for (let window = 0; window < 2; window += 1) {
+      for (let index = 0; index < 250; index += 1) {
+        value.emitter.activity("command", "started", "npm test", {
+          activityId: "noisy-command",
+          detail: `Progress:\nstep ${window * 250 + index}`,
+        });
+      }
+      expect(updates).toHaveBeenCalledTimes(window);
+      expect(activityEvents(value)).toHaveLength(1 + window);
+      expect(runTimers(value.scheduler, 64)).toBe(1);
+      expect(updates).toHaveBeenCalledTimes(window + 1);
+      expect(activityEvents(value)).toHaveLength(2 + window);
+      expect(activityEvents(value).at(-1)).toMatchObject({
+        status: "running",
+        detail: expect.stringContaining(`step ${window * 250 + 249}`),
+      });
+      expect(turnActivities(value)[0]?.detail).toBe(
+        activityEvents(value).at(-1)?.detail,
+      );
+    }
+    expect(value.shells).toHaveLength(shells);
+
+    value.emitter.activity("command", "completed", "npm test", {
+      activityId: "noisy-command",
+    });
+    expect(updates).toHaveBeenCalledTimes(3);
+    expect(activityEvents(value)).toHaveLength(4);
+    expect(value.shells).toHaveLength(shells + 1);
+    const [final] = turnActivities(value);
+    expect(final?.status).toBe("completed");
+    for (let index = 0; index < 500; index += 1) {
+      expect(final?.detail?.split(`\nstep ${index}\n`).length
+        ?? 0).toBeLessThanOrEqual(2);
+    }
+    expect(final?.detail).toContain("\nstep 0\n");
+    expect(final?.detail?.endsWith("\nstep 499")).toBe(true);
+    await finish(value);
+  });
+
+  it("lands pending running updates before every later visible activity edge", async () => {
+    const value = await runtime();
+    const running = (detail: string) => value.emitter.activity(
+      "command",
+      "started",
+      "npm test",
+      { activityId: "edge-command", detail },
+    );
+    const order = () => value.events.flatMap((event) =>
+      event.type === "agent.activity"
+        ? [`${event.activity.title}:${event.activity.detail?.split("\n").at(-1)}`]
+        : event.type === "agent.approval.requested"
+          || event.type === "agent.plan.updated"
+          ? [event.type]
+          : []);
+    running("Command:\nnpm test");
+    running("Progress:\nbefore tool");
+    value.emitter.activity("tool", "started", "Read file", {
+      activityId: "edge-tool",
+    });
+    running("Progress:\nbefore approval");
+    value.provider.emit({
+      providerId: "codex",
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+      type: "approval",
+      request: {
+        requestId: "edge-approval",
+        kind: "command",
+        title: "Run tests",
+        permissionRoots: [],
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    });
+    running("Progress:\nbefore plan");
+    value.provider.emit({
+      providerId: "codex",
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+      type: "plan",
+      explanation: null,
+      steps: [{ step: "Verify", status: "inProgress" }],
+    });
+    running("Progress:\nbefore hydration");
+    value.controller.flushActiveStreamsForHydration();
+    running("Progress:\nbefore settlement");
+
+    expect(order()).toEqual([
+      "npm test:npm test",
+      "npm test:before tool",
+      "Read file:undefined",
+      "npm test:before approval",
+      "agent.approval.requested",
+      "npm test:before plan",
+      "agent.plan.updated",
+      "npm test:before hydration",
+    ]);
+    expect(turnActivities(value).find(({ title }) => title === "npm test")
+      ?.detail?.endsWith("before hydration")).toBe(true);
+
+    expect(value.controller.cancel(value.conversationId)).toBe(true);
+    await flushPromises();
+    expect(runTimers(value.scheduler, 64)).toBe(0);
+    expect(turnActivities(value).find(({ title }) =>
+      title === "Interrupted · npm test")?.detail).toContain(
+      "before settlement\n\nInterrupted: Stopped",
+    );
+  });
+
+  it("fails the turn when a timed activity update cannot be saved", async () => {
+    const value = await runtime();
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "failing-command",
+      detail: "Command:\nnpm test",
+    });
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "failing-command",
+      detail: "Progress:\nunsaved",
+    });
+    vi.spyOn(value.store, "updateActivity").mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+
+    expect(runTimers(value.scheduler, 64)).toBe(1);
+    await flushPromises();
+
+    expect(value.provider.cancelCount).toBeGreaterThan(0);
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+    expect(value.store.agentTurn(value.turnId)).toMatchObject({
+      status: "failed",
+      terminalReason: "stream-persistence-failed",
+    });
+  });
+
+  it("publishes the conversation shell only when a workspace run changes", async () => {
+    const value = await runtime();
+    const shells = () => value.shells.length;
+    const initial = shells();
+
+    value.emitter.activity("tool", "started", "Read file", {
+      activityId: "quiet-tool",
+    });
+    value.emitter.activity("tool", "completed", "Read file", {
+      activityId: "quiet-tool",
+      detail: "Output:\nread",
+    });
+    value.emitter.activity("system", "info", "Model rerouted");
+    expect(shells()).toBe(initial);
+
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "shell-command",
+    });
+    expect(shells()).toBe(initial + 1);
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "shell-command",
+      detail: "Progress:\nsame label",
+    });
+    runTimers(value.scheduler, 64);
+    expect(shells()).toBe(initial + 1);
+    value.emitter.activity("command", "started", "npm run check", {
+      activityId: "shell-command",
+      detail: "Progress:\nnew label",
+    });
+    runTimers(value.scheduler, 64);
+    expect(shells()).toBe(initial + 2);
+    expect(value.store.workspaceRunsForConversation(value.conversationId)
+      .find(({ label }) => label === "npm run check")).toMatchObject({
+      status: "running",
+    });
+    value.emitter.activity("command", "completed", "npm run check", {
+      activityId: "shell-command",
+    });
+    expect(shells()).toBe(initial + 3);
+    await finish(value);
   });
 });

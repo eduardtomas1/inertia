@@ -325,7 +325,9 @@ export interface ActiveTurn {
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
   providerActivitiesById: Map<string, AgentActivity>;
   providerActivityDetailChars: number;
-  providerCommandRuns: Map<string, string>;
+  providerCommandRuns: Map<string, { id: string; label: string }>;
+  pendingActivityUpdates: Map<string, AgentActivity>;
+  activityFlushTimer: unknown;
   approvalIds: Set<string>;
   inputIds: Set<string>;
   subagentTelemetry?: TurnSubagentTelemetry;

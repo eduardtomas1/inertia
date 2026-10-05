@@ -193,10 +193,21 @@ export class TurnController {
         this.settle(active, "failed", "turn-timeout", message);
       },
     });
+    const onPersistenceFailure = (active: ActiveTurn, error: unknown): void => {
+      requestProviderCancellation(this.providers, active.conversation.id);
+      this.settle(
+        active,
+        "failed",
+        "stream-persistence-failed",
+        publicTurnError(error),
+      );
+    };
     this.activities = new TurnActivityProjection({
       store: this.store,
       hooks: this.hooks,
+      scheduler: this.scheduler,
       now: () => this.now(),
+      onPersistenceFailure,
     });
     this.artifacts = new TurnArtifactSequencer({
       hooks: this.hooks,
@@ -207,15 +218,7 @@ export class TurnController {
       hooks: this.hooks,
       scheduler: this.scheduler,
       now: () => this.now(),
-      onPersistenceFailure: (active, error) => {
-        requestProviderCancellation(this.providers, active.conversation.id);
-        this.settle(
-          active,
-          "failed",
-          "stream-persistence-failed",
-          publicTurnError(error),
-        );
-      },
+      onPersistenceFailure,
     });
     this.settlement = new TurnSettlementCoordinator({
       store: this.store,
@@ -535,6 +538,7 @@ export class TurnController {
         // hydration so the next delta can complete its astral character.
         active.assistantStream.flush();
         active.reasoningStream.flush();
+        this.activities.flushPending(active);
       } catch (error) {
         requestProviderCancellation(this.providers, active.conversation.id);
         this.settle(
@@ -1176,6 +1180,7 @@ export class TurnController {
     this.nativeGoals.cleanup(active);
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
+    this.activities.discardPending(active);
     clearPendingInteractionsForTurn(active, this.pendingApprovals, this.pendingInputs);
     if (this.activeByConversation.get(active.conversation.id) === active) {
       this.activeByConversation.delete(active.conversation.id);

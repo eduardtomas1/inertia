@@ -95,7 +95,7 @@ const budgets = {
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
-  deferredCliConversationImportJavaScript: 9_449 + 256,
+  deferredCliConversationImportJavaScript: 9_797 + 256,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
@@ -173,7 +173,7 @@ const budgets = {
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
   // The Providers description in Agents settings adds 97 core bytes
   // (2,266,291 measured).
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 1_887,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 2_016,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -4,7 +4,7 @@ import type {
   ContextMenuAnchor,
   ContextMenuRequest,
 } from "@shared/context-menu";
-import { UUID_PATTERN } from "@shared/desktop";
+import { UUID_PATTERN } from "@shared/request-identifiers";
 import { writeClipboardText } from "./clipboard";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

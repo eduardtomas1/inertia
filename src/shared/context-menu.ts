@@ -1,4 +1,4 @@
-import { isProjectRelativePath, UUID_PATTERN } from "./desktop";
+import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 
 export interface ContextMenuAnchor {
   x: number;

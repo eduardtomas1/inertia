@@ -22,46 +22,9 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
-vi.mock("@xterm/xterm", () => ({
-  Terminal: class {
-    cols = 80;
-    rows = 24;
-    options = {
-      fontSize: 13,
-      theme: {},
-    };
-
-    loadAddon(): void {}
-    attachCustomKeyEventHandler(): void {}
-
-    open(container: HTMLElement): void {
-      const textarea = document.createElement("textarea");
-      textarea.setAttribute("aria-label", "Terminal input");
-      container.append(textarea);
-      terminalState.textarea = textarea;
-    }
-
-    focus(): void {
-      terminalState.textarea?.focus();
-    }
-
-    onData(callback: (data: string) => void): { dispose: () => void } {
-      terminalState.onData = callback;
-      return { dispose: () => undefined };
-    }
-
-    clear(): void {
-      terminalState.writes = [];
-    }
-    writeln(data: string): void {
-      terminalState.writes.push(data);
-    }
-    write(data: string): void {
-      terminalState.writes.push(data);
-    }
-    dispose(): void {}
-  },
-}));
+vi.mock("@xterm/xterm", async () => (
+  (await import("./support/textarea-terminal-mock")).createTextareaTerminalModule(terminalState)
+));
 
 class TestResizeObserver implements ResizeObserver {
   readonly root = null;

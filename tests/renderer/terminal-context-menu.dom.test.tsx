@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuAction, ContextMenuRequest } from "../../src/shared/context-menu";
@@ -78,6 +78,8 @@ function key(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);
 }
 
+const settleMenu = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
 beforeEach(() => {
   terminals.instances = [];
   vi.clearAllMocks();
@@ -108,19 +110,31 @@ describe("workspace terminal context menu", () => {
 
   it("copies the terminal selection, selects all and clears", async () => {
     const { mount, terminal } = renderTerminal();
+    await waitFor(() => expect(document.querySelector(".terminal-panel")).toHaveAttribute("data-terminal-state", "ready"));
     terminal.selection = "line one";
+    const clears = terminal.clear.mock.calls.length;
     for (const action of ["terminal-copy", "terminal-select-all", "terminal-clear"] as const) {
       bridge.showContextMenu.mockResolvedValueOnce(action);
       fireEvent.contextMenu(mount);
-      await act(async () => undefined);
+      await settleMenu();
     }
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith("line one");
     expect(terminal.selectAll).toHaveBeenCalledOnce();
-    expect(terminal.clear.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(terminal.clear.mock.calls.length).toBe(clears + 1);
   });
 
-  it.each(["linux", "win32"] as const)("lets Ctrl+V paste on %s instead of sending ^V", (platform) => {
-    bridge.platform = platform;
+  it("announces a terminal copy the clipboard refused", async () => {
+    const { mount, terminal } = renderTerminal();
+    terminal.selection = "x".repeat(16);
+    bridge.copyText.mockResolvedValueOnce(false);
+    bridge.showContextMenu.mockResolvedValueOnce("terminal-copy");
+    fireEvent.contextMenu(mount);
+    await settleMenu();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't copy. Try again or select the text manually.");
+  });
+
+  it("lets Ctrl+V paste into the workspace shell on Windows instead of sending ^V", () => {
+    bridge.platform = "win32";
     const { terminal } = renderTerminal();
     expect(terminal.keyHandler!(key({ ctrlKey: true, code: "KeyV", key: "v" }))).toBe(false);
     expect(terminal.keyHandler!(key({ ctrlKey: true, shiftKey: true, code: "KeyV", key: "V" }))).toBe(true);
@@ -128,8 +142,18 @@ describe("workspace terminal context menu", () => {
     expect(terminal.keyHandler!(key({ ctrlKey: true, altKey: true, code: "KeyV", key: "v" }))).toBe(true);
   });
 
-  it("keeps Ctrl+V as a terminal key on macOS where Cmd+V pastes", () => {
-    bridge.platform = "darwin";
+  it.each([
+    ["the V key on Dvorak", { ctrlKey: true, code: "Period", key: "v", keyCode: 86 }, false],
+    ["the physical V key typing k on Dvorak", { ctrlKey: true, code: "KeyV", key: "k", keyCode: 75 }, true],
+    ["the V key on a Cyrillic layout", { ctrlKey: true, code: "KeyV", key: "м", keyCode: 86 }, false],
+  ])("follows the layout on Windows for %s", (_name, init, handledByTerminal) => {
+    bridge.platform = "win32";
+    const { terminal } = renderTerminal();
+    expect(terminal.keyHandler!(key(init))).toBe(handledByTerminal);
+  });
+
+  it.each(["linux", "darwin"] as const)("keeps Ctrl+V as a terminal key on %s", (platform) => {
+    bridge.platform = platform;
     const { terminal } = renderTerminal();
     expect(terminal.keyHandler!(key({ ctrlKey: true, code: "KeyV", key: "v" }))).toBe(true);
   });

@@ -1,7 +1,7 @@
 import type { ChatMessage } from "@shared/contracts";
-import { writeClipboardText } from "../../utils/clipboard";
 import {
   contextMenuHandlers,
+  copyFromMenu,
   hasNativeMenuTarget,
   isContextMenuId,
   selectionInside,
@@ -51,9 +51,9 @@ export function messageContextMenu(
       : { kind: "message", conversationId, role, hasSelection: selectionInside(surface) },
     (action, surface) => {
       if (action === "copy-message") {
-        void writeClipboardText(role === "assistant" ? renderedText(surface, content) : content);
+        void copyFromMenu(role === "assistant" ? renderedText(surface, content) : content);
       } else if (action === "copy-markdown") {
-        void writeClipboardText(content);
+        void copyFromMenu(content);
       }
     },
   );

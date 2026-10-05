@@ -182,7 +182,7 @@ export function TerminalSession({
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
-    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform()));
+    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform() === "win32"));
     terminal.open(container);
     terminalRef.current = terminal;
     fitRef.current = fitAddon;

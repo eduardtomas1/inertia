@@ -533,7 +533,7 @@ function registerIpcHandlers(): void {
     owner: (event, count) => {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
-    }, registry: attachmentRegistry, imports: rendererAttachmentImports,
+    }, mainWindow: () => mainWindow, registry: attachmentRegistry, imports: rendererAttachmentImports,
     onFailure: (diagnostic) => runtimeDiagnostics?.record("snapshot.failure", { ...diagnostic }),
   });
 

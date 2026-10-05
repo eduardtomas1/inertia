@@ -173,6 +173,15 @@ describe("snapshot native worker ownership", () => {
     controller.abort(); await failure; expect(child.kill).toHaveBeenCalledOnce();
   });
 
+  it("hands a shortcut pressed during a capture to its owner so the press can be explained", async () => {
+    const { service, child, onCapture } = await fixture();
+    const shortcut = (native.register.mock.calls.at(-1) as unknown as [string, () => void])[1];
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow();
+    shortcut();
+    expect(onCapture).toHaveBeenCalledOnce();
+    child.emit("exit", 1); await failure;
+  });
+
   it("times out hung native reads and waits for process exit", async () => {
     vi.useFakeTimers();
     const { service, child } = await fixture();

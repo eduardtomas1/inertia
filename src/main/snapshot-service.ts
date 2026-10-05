@@ -94,7 +94,7 @@ export class SnapshotService {
       this.message = "Allow Inertia in Accessibility and Screen Recording, then enable Snapshots again.";
       return this.state();
     }
-    const trigger = (): void => { if (this.enabled && !this.busy) void this.onCapture().catch(() => undefined); };
+    const trigger = (): void => { if (this.enabled) void this.onCapture().catch(() => undefined); };
     if (this.shortcut === "accelerator") {
       this.enabled = globalShortcut.register(ACCELERATOR, trigger);
       if (!this.enabled) this.message = "The snapshot shortcut is already used by another app.";

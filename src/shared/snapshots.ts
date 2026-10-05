@@ -63,8 +63,9 @@ export type SnapshotRequest =
   | { type: "bind"; conversationId: string }
   | { type: "unbind" }
   | { type: "permission"; permission: "screen" | "accessibility" };
-export type SnapshotDelivery = { conversationId: string } & (
+export type SnapshotDelivery = ({ conversationId: string; notice?: never; pending?: never } & (
   | { review: import("./snapshot-review").SnapshotReview; selection?: never; error?: never }
   | { selection: import("./desktop").DesktopAttachmentImportSelection; error?: never; review?: never }
   | { error: string; selection?: never; review?: never }
-);
+)) | { notice: string; pending?: never; conversationId?: never; review?: never; selection?: never; error?: never }
+  | { pending: true; notice?: never; conversationId?: never; review?: never; selection?: never; error?: never };

@@ -327,7 +327,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       ...CORE_NATIVE,
       images: "negotiated",
       "session-resume": "negotiated",
-      compaction: "negotiated",
+      compaction: "unavailable",
       "usage-tokens": "negotiated",
       "model-discovery": "negotiated",
       "maintenance-update": "unavailable",

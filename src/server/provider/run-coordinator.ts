@@ -731,10 +731,8 @@ export class ProviderRunCoordinator {
         ...(instruction ? { instruction } : {}),
       },
     };
-    const instructionForwarded = (
-      operationInput.providerId === "claude"
-      || operationInput.providerId === "kimi"
-    ) && instruction !== undefined;
+    const instructionForwarded = operationInput.providerId === "claude"
+      && instruction !== undefined;
     let interactionError: string | undefined;
     const rejectInteractiveCompaction = (
       interaction: "approval" | "input",

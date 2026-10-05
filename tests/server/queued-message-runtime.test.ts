@@ -7,7 +7,7 @@ import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/share
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { RuntimeStore } from "../../src/server/database";
-import { queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src/server/persistence/queued-message-repository";
+import { QueuedMessageLimitError, queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src/server/persistence/queued-message-repository";
 import { MessageSendPreparationTimeoutError } from "../../src/server/runtime/commands/message-send-preparation";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
@@ -206,6 +206,19 @@ describe("follow-ups that never reach the running agent", () => {
       expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
       f.provider.resolve({ status: "completed" }); await f.drain();
       expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("names the queue limit when another message fills the queue during a refused follow-up", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      f.provider.steerSupported = false;
+      vi.spyOn(f.store.queuedMessages, "add").mockImplementationOnce(() => {
+        throw new QueuedMessageLimitError();
+      });
+      await expect(f.followUp()).rejects.toThrow("This follow-up did not reach the agent, and this chat already has three queued messages.");
+      expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
     } finally { await f.close(); }
   });
 

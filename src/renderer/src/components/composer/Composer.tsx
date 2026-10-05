@@ -38,6 +38,7 @@ import {
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
+import { useRuntimeQueueLength } from "./runtimeQueueEvents";
 import { useComposerMenus } from "./useComposerMenus";
 import { useComposerNewChatOffer } from "./useComposerNewChatOffer";
 import { useTextareaAutosize } from "./useTextareaAutosize";
@@ -485,6 +486,10 @@ export const Composer = memo(function Composer({
       await queueCurrentMessage(stopAndSendTurnId);
       return;
     }
+    if (followUpState === "stop-and-send" && queuedMessageCount > 0) {
+      setAttachmentError("Send or remove the queued message first.");
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -708,7 +713,8 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
-  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand ? latestKnownTurn?.id ?? null : null;
+  const queuedMessageCount = useRuntimeQueueLength(conversation.id);
+  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
   const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
     if (!canQueue || queueingRef.current || conversationContext.isReferencing()) return;

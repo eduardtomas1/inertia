@@ -4,7 +4,7 @@ Platform: macOS 27.0.1, Electron at device scale 2. Spec: `tests/e2e/checkpoint-
 
 ## What changed
 
-- The second request row: before, only the time, with no Revert and nothing saying why; after, "No checkpoint for this turn" in the muted metadata style where Revert would be. Hovering it shows the reason.
+- The second request row: before, only the time, with no Revert and nothing saying why; after, "No checkpoint for this turn" in the muted metadata style where Revert would be. The reason shows on hover and is read by screen readers as part of the label.
 - The first request row keeps its Revert button.
 
 "Turn changes unavailable" under both answers comes from the seed, which stores no Git capture for these turns; it is the same before and after and not part of this change.

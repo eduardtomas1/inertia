@@ -244,7 +244,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Checkpoints",
-        detail: "Revert on a turn restores the project to before that turn and saves current edits in a recovery checkpoint first. When saving a checkpoint fails, the turn's request row says so; hover it for the reason.",
+        detail: "Revert on a turn restores the project to before that turn and saves current edits in a recovery checkpoint first. When saving a checkpoint fails, the turn's request row says so and gives the reason, shown on hover and read by screen readers.",
       },
     ],
     jumps: [

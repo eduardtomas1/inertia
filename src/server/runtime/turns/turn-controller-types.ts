@@ -213,7 +213,6 @@ export interface QueueTurnRequest {
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
-  /** Safe reason the pre-turn checkpoint could not be captured. */
   checkpointFailure?: string | null;
   /** Privileged provider-native skill references resolved from opaque IDs. */
   skills?: readonly ProviderSkillInput[];

@@ -9,7 +9,7 @@ import {
 } from "./preview-keyboard.js";
 import { agentPageInputIsUser } from "./preview-agent-control.js";
 import { hardenDesktopSession } from "./preview-session.js";
-import { registerPreviewContextMenu } from "./preview-context-menu.js";
+import { registerPreviewContextMenu, type PreviewNavigation } from "./preview-context-menu.js";
 
 export interface PreviewTab {
   id: string;
@@ -19,7 +19,7 @@ export interface PreviewTab {
   unregisterHealth(): void;
 }
 
-interface PreviewTabOptions {
+interface PreviewTabOptions extends PreviewNavigation {
   partition: string;
   pageNumber: number;
   captureLocked: WeakSet<WebContents>;
@@ -99,6 +99,8 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
     captureLocked: options.captureLocked,
     ownerWindow: options.ownerWindow,
     lastInputFromUser: () => lastInputFromUser,
+    navigate: options.navigate,
+    agentBusy: options.agentBusy,
   });
   contents.on("before-mouse-event", (event) => {
     if (options.captureLocked.has(contents)) event.preventDefault();

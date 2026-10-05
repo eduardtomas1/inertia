@@ -771,6 +771,11 @@ export class PreviewBroker {
       captureLocked: this.#captureLocked,
       registerHealthRenderer: this.options.registerHealthRenderer,
       ownerWindow: () => this.#window(),
+      navigate: (action) => {
+        void this.command({ ownerId: session.surface, contextId: session.contextId, action })
+          .catch(() => undefined);
+      },
+      agentBusy: () => session.busy > 0,
       targetContents: () => this.#window()?.webContents,
       guardNavigation: (event, url) => this.#guardNavigation(event, url),
       publish,

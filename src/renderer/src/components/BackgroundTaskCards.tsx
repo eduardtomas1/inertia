@@ -17,6 +17,7 @@ import { backgroundCommandIsLive } from "../utils/backgroundTaskRuns";
 import {
   backgroundCommandElapsedMs,
   backgroundCommandStateWord,
+  backgroundTaskCurrentActivity,
   backgroundTaskDoingNow,
   backgroundTaskElapsedMs,
   backgroundTaskStateWord,
@@ -147,6 +148,7 @@ function Transcript({
   trace,
   turns,
   title,
+  line,
   canOpen,
   canFollowUp,
   onOpen,
@@ -156,13 +158,15 @@ function Transcript({
   trace: SubagentTrace;
   turns: readonly AgentTurn[];
   title: string;
+  line: string | null;
   canOpen: boolean;
   canFollowUp: boolean;
   onOpen: () => void;
   onFollowUp: () => void;
 }): React.JSX.Element {
   const live = isLiveSubagentTrace(trace);
-  const update = live ? trace.progress : trace.result;
+  const reported = live ? trace.progress : trace.result;
+  const update = reported === line ? null : reported;
   const texts = live
     ? [[trace.description, 4, "the task"], [update, 6, "the progress"]] as const
     : [[update, 6, "the outcome"], [trace.description, 4, "the task"]] as const;
@@ -240,7 +244,8 @@ export const AgentCard = memo(function AgentCard({
   const doing = backgroundTaskDoingNow(trace);
   const live = isLiveSubagentTrace(trace);
   const running = live && (trace.status === "running" || trace.status === "spawned");
-  const line = expanded && doing === (live ? trace.progress : trace.result) ? null : doing;
+  const current = backgroundTaskCurrentActivity(trace);
+  const line = expanded && current === null && doing === (live ? trace.progress : trace.result) ? null : doing;
   const elapsed = live ? 0 : backgroundTaskElapsedMs(trace, now ?? Date.now());
   const total = trace.usage?.totalTokens ?? null;
   const facts = trace.model !== null || total !== null || trace.toolUseCount !== null;
@@ -293,6 +298,7 @@ export const AgentCard = memo(function AgentCard({
           trace={trace}
           turns={turns}
           title={title}
+          line={line}
           canOpen={canOpen}
           canFollowUp={canFollowUp}
           onOpen={() => onOpen(trace.id)}

@@ -87,6 +87,48 @@ const NEW_CHAT_SELECTS = [
   "Where new chats run",
 ] as const;
 
+async function distanceFromRail(row: Locator): Promise<number> {
+  return row.evaluate((element) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    const fill = (color: string): number[] => {
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3));
+    };
+    const rail = fill(getComputedStyle(element.parentElement!).backgroundColor);
+    const row = fill(getComputedStyle(element).backgroundColor);
+    return Math.hypot(...row.map((channel, index) => channel - rail[index]!));
+  });
+}
+
+async function expectHoverQuieterThanSelection(rail: Locator): Promise<void> {
+  const selected = rail.locator(".provider-settings-list-row.is-selected");
+  const other = rail.locator(".provider-settings-list-row:not(.is-selected)").first();
+  await other.hover();
+  const hovered = await distanceFromRail(other);
+  expect(hovered).toBeGreaterThan(0);
+  expect(hovered).toBeLessThan(await distanceFromRail(selected));
+  await page.mouse.move(0, 0);
+}
+
+async function expectNoHairlineOnFrameBottom(frame: Locator, rows: Locator): Promise<void> {
+  const [frameBox, lastBox] = await Promise.all([frame.boundingBox(), rows.last().boundingBox()]);
+  const innerBottom = frameBox!.y + frameBox!.height - 1;
+  expect(Math.abs(lastBox!.y + lastBox!.height - innerBottom)).toBeGreaterThan(0.5);
+}
+
+async function expectBackendRowsMatchProviderRows(): Promise<void> {
+  const heights = async (selector: string): Promise<number[]> =>
+    page.locator(selector).evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  const providerRows = await heights(".provider-settings-list-row");
+  const backendRows = await heights(".backend-profile-rail-item");
+  expect(backendRows.length).toBeGreaterThan(0);
+  expect(Math.min(...backendRows)).toBeGreaterThanOrEqual(Math.min(...providerRows));
+}
+
 async function selectedLabel(control: Locator): Promise<string> {
   return control.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.textContent ?? "");
 }
@@ -110,12 +152,15 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   expect(wideGeometry[0]?.y).toBe(wideGeometry[1]?.y);
   expect(wideGeometry[0]?.x ?? 0).toBeLessThan(wideGeometry[1]?.x ?? 0);
   await app.expectNoViewportOverflow();
+  await expectHoverQuieterThanSelection(rail);
   await capture(testInfo, "provider-settings-configuration-light-wide");
 
   await page.getByRole("tab", { name: /Models 2/u }).click();
   await expect(page.getByText("GPT-5.3 Codex", { exact: true })).toBeVisible();
   await expect(page.getByText("GPT-5.2 Codex Mini", { exact: true })).toBeVisible();
   await capture(testInfo, "provider-settings-models-light-wide");
+  await expectNoHairlineOnFrameBottom(shell, rail.locator(".provider-settings-list-row"));
+  await expectBackendRowsMatchProviderRows();
   await page.getByRole("tab", { name: "Configuration" }).click();
 
   await page.getByRole("button", { name: "Chats", exact: true }).click();
@@ -145,10 +190,13 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByRole("radio", { name: "Dark" }).click();
   await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await expectHoverQuieterThanSelection(rail);
   await app.resizeWindow(760, 1100);
   const narrowGeometry = await Promise.all([rail.boundingBox(), editor.boundingBox()]);
   expect(narrowGeometry[0]?.y ?? 0).toBeLessThan(narrowGeometry[1]?.y ?? 0);
   await app.expectNoViewportOverflow();
+  await expectNoHairlineOnFrameBottom(shell, rail.locator(".provider-settings-list-row"));
+  await expectBackendRowsMatchProviderRows();
   await capture(testInfo, "provider-settings-configuration-dark-narrow");
   await page.getByRole("button", { name: "Chats", exact: true }).click();
   const access = page.getByRole("combobox", { name: "Access", exact: true });

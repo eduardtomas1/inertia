@@ -1,4 +1,5 @@
-import type { SettingsSection } from "../lib/settingsTarget";
+import type { Project } from "@shared/contracts";
+import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
 
 export interface SettingsRowMetadata {
   id: string;
@@ -198,4 +199,12 @@ export function settingsSectionRows(id: SettingsSection): SettingsSectionRows {
 
 export function isProjectSettingsRow(row: SettingsRowMetadata): boolean {
   return row.sectionId === "projects" && row.group !== "All projects";
+}
+
+export function withRowProject(target: SettingsTarget, projects: readonly Pick<Project, "id" | "workspaceKind">[], currentProjectId: string | null): SettingsTarget {
+  const row = SETTINGS_ROWS.find(({ id, sectionId }) => id === target.anchor && sectionId === target.section);
+  if (!row || !isProjectSettingsRow(row) || target.projectId) return target;
+  const regular = projects.filter(({ workspaceKind }) => workspaceKind !== "scratch");
+  const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;
+  return projectId ? { ...target, projectId } : target;
 }

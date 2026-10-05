@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SETTINGS_SECTIONS } from "../../src/renderer/src/components/settingsSections";
-import { SETTINGS_ROWS } from "../../src/renderer/src/components/settingsRows";
+import { SETTINGS_ROWS, withRowProject } from "../../src/renderer/src/components/settingsRows";
 import {
   HELP_COMMANDS,
   HELP_TOPICS,
@@ -119,6 +119,7 @@ describe("help topics", () => {
       ["Working indicator", "working-indicator"],
       ["Report an issue", "report-issue"],
       ["Support summary", "runtime-diagnostics"],
+      ["Import CLI conversations", "project-cli-import"],
     ];
     const problems: string[] = [];
     for (const [entryName, rowId] of controls) {
@@ -152,5 +153,19 @@ describe("help topics", () => {
     }
     const delegated = entries.find(({ name }) => name === "Plan, goal and subagents")!;
     expect(delegated.detail).toContain(`${RIGHT_PANEL_SURFACE_META.agents.label} surface`);
+  });
+
+  it("lands a Help link on a project row in the current project, falling back to the first regular project", () => {
+    const project = (id: string, workspaceKind?: "scratch") => ({ id, ...(workspaceKind ? { workspaceKind } : {}) });
+    const projects = [project("scratch", "scratch"), project("studio"), project("website")];
+    const topic = HELP_TOPICS.find(({ entries }) => entries.some(({ name }) => name === "Import CLI conversations"))!;
+    const entry = topic.entries.find(({ name }) => name === "Import CLI conversations")!;
+    expect(entry.anchor).toBe("project-cli-import");
+    const target = { section: "projects" as const, anchor: entry.anchor };
+    expect(withRowProject(target, projects, "website")).toEqual({ ...target, projectId: "website" });
+    expect(withRowProject(target, projects, "scratch")).toEqual({ ...target, projectId: "studio" });
+    expect(withRowProject(target, [project("scratch", "scratch")], null)).toEqual(target);
+    expect(withRowProject({ section: "projects", anchor: "project-grouping" }, projects, "website")).toEqual({ section: "projects", anchor: "project-grouping" });
+    expect(withRowProject({ ...target, projectId: "studio" }, projects, "website")).toEqual({ ...target, projectId: "studio" });
   });
 });

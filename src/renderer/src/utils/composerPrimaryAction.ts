@@ -3,11 +3,13 @@ export type ComposerPrimaryActionState =
   | "send-ready"
   | "submitting"
   | "stop-ready"
+  | "stop-and-send"
   | "stop-pending";
 
 export type ComposerFollowUpState =
   | "hidden"
   | "unavailable"
+  | "stop-and-send"
   | "ready"
   | "pending";
 
@@ -35,8 +37,9 @@ export function composerFollowUpState({
   sending: boolean;
 }): ComposerFollowUpState {
   if (!running || !hasDraft) return "hidden";
-  if (stopping || !supportsActiveParentFollowUp(harnessId) || !textOnly) {
-    return "unavailable";
+  if (stopping || !textOnly) return "unavailable";
+  if (!supportsActiveParentFollowUp(harnessId)) {
+    return submitting || sending ? "unavailable" : "stop-and-send";
   }
   return submitting || sending ? "pending" : "ready";
 }

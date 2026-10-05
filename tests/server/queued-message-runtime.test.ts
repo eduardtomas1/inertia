@@ -62,6 +62,12 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
       },
     } as ClientCommand);
   };
+  const stopAndSend = async (id: string, turnId: string, content = "Do this instead.") => {
+    await queue!.handler(null as unknown as WebSocket, {
+      type: "message.queue.stop-and-send", requestId: id,
+      payload: { conversationId: runtime.conversationId, id, turnId, content, attachments: [] },
+    });
+  };
   const followUp = async (content = "Also check the tests.") => {
     const requestId = randomUUID();
     await queue!.turnInteractionHandler(null as unknown as WebSocket, {
@@ -69,20 +75,68 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
     });
     return requestId;
   };
-  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, drain, command, followUp, abort,
+  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, drain, command, followUp, stopAndSend, abort,
     close: async () => { abort.abort(); await drain(); await runtime.controller.dispose(); await attachments.close(); runtime.store.close(); },
   };
 }
 
+const startRunning = (f: Awaited<ReturnType<typeof fixture>>) => {
+  const initial = f.controller.queue({ conversationId: f.conversationId, content: "First task" });
+  f.controller.start(initial.turn.id);
+  f.provider.emit({ ...turnControllerTestIdentity(f), type: "status", status: "running" });
+  return initial;
+};
+const queueResult = (f: Awaited<ReturnType<typeof fixture>>, requestId: string) =>
+  f.events.find((event) => event.type === "request.result" && event.requestId === requestId);
+
+describe("stop and send", () => {
+  it("stops the exact running turn and starts the message as the next turn on the same provider session", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      f.provider.emit({ ...turnControllerTestIdentity(f), type: "session", sessionId: "provider-session" });
+      const id = randomUUID();
+      await f.stopAndSend(id, initial.turn.id);
+      expect(queueResult(f, id)).toMatchObject({ result: { kind: "message.queue", receipt: { id, content: "Do this instead." } } });
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+      expect(f.provider.runCount).toBe(2);
+      expect(f.provider.input).toMatchObject({ sessionId: "provider-session", prompt: expect.stringContaining("Do this instead.") });
+      await f.stopAndSend(id, initial.turn.id);
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+      expect(f.store.latestAgentTurnForConversation(f.conversationId)?.status).not.toBe("cancelled");
+    } finally { await f.close(); }
+  });
+
+  it("keeps the message queued and leaves a different running turn alone", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      const id = randomUUID();
+      await f.stopAndSend(id, randomUUID());
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("running");
+      expect(f.provider.cancelCount).toBe(0);
+    } finally { await f.close(); }
+  });
+
+  it("refuses without stopping the agent while earlier queued messages wait", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      await f.command("message.queue.enqueue", randomUUID());
+      await expect(f.stopAndSend(randomUUID(), initial.turn.id)).rejects.toThrow("Send or remove the queued message first.");
+      expect(f.store.queuedMessages.list(f.conversationId)).toHaveLength(1);
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("running");
+      expect(f.provider.cancelCount).toBe(0);
+    } finally { await f.close(); }
+  });
+});
+
 describe("follow-ups that never reach the running agent", () => {
-  const startRunning = (f: Awaited<ReturnType<typeof fixture>>) => {
-    const initial = f.controller.queue({ conversationId: f.conversationId, content: "First task" });
-    f.controller.start(initial.turn.id);
-    f.provider.emit({ ...turnControllerTestIdentity(f), type: "status", status: "running" });
-    return initial;
-  };
-  const queueResult = (f: Awaited<ReturnType<typeof fixture>>, requestId: string) =>
-    f.events.find((event) => event.type === "request.result" && event.requestId === requestId);
 
   it("queues a refused follow-up under its request id and sends it once after the turn completes", async () => {
     const f = await fixture();

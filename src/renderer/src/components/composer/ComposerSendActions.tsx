@@ -36,6 +36,16 @@ function primaryPresentation(
       label: state === "stop-pending" ? "Stopping agent" : "Stop agent",
     };
   }
+  if (state === "stop-and-send") {
+    return {
+      action: "stop-and-send" as const,
+      busy: false,
+      disabled: false,
+      icon: squareMorphIcon,
+      iconState: "stop",
+      label: "Stop and send",
+    };
+  }
   if (state === "submitting") {
     return {
       action: "send" as const,
@@ -132,12 +142,12 @@ export function ComposerSendActions({
         aria-label={presentation.label}
         title={presentation.label}
         className={`icon-button send-button${
-          presentation.action === "stop" ? " stop-button" : ""
+          presentation.action !== "send" ? " stop-button" : ""
         }${presentation.iconState === "sending" ? " send-button-loading" : ""}`}
         data-composer-action-state={primaryAction}
         data-motion-state={presentation.iconState}
         aria-busy={presentation.busy}
-        aria-describedby={presentation.action !== "stop" ? newChatReasonId : undefined}
+        aria-describedby={presentation.action === "send" ? newChatReasonId : undefined}
         onPointerEnter={() => setIntent(true)}
         onPointerLeave={() => setIntent(false)}
         onFocus={() => setIntent(true)}

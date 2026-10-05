@@ -6,6 +6,15 @@ import type { ChatAttachment } from "../../src/shared/contracts";
 const native = vi.hoisted(() => ({ review: vi.fn(), cancelReview: vi.fn(), handle: vi.fn(), document: vi.fn(), write: vi.fn(), clear: vi.fn(), capture: vi.fn(), configure: vi.fn(), revoke: vi.fn(), trigger: null as (() => Promise<void>) | null }));
 vi.mock("electron", () => ({ app: { getPath: () => "/private/fixture" }, ipcMain: { handle: native.handle }, shell: { openExternal: vi.fn() }, systemPreferences: { isTrustedAccessibilityClient: vi.fn() } }));
 vi.mock("../../src/main/snapshot-preferences", () => ({ readSnapshotPreferences: async () => ({ enabled: true, shortcut: "accelerator" }), writeSnapshotPreferences: native.write, clearSnapshotPreferences: native.clear }));
+vi.mock("../../src/main/snapshot-queue", () => ({ SNAPSHOT_QUEUE_LIMIT: 4, SnapshotQueue: class {
+  mayHaveEntries() { return false; }
+  async count() { return 0; }
+  async add() { return true; }
+  async take() { return []; }
+  async remove() { return undefined; }
+  async clear() { return undefined; }
+  async prune() { return undefined; }
+} }));
 vi.mock("../../src/main/attachment-import-ipc", async (original) => ({ ...await original<typeof import("../../src/main/attachment-import-ipc")>(), attachmentImportDocumentFromEvent: native.document }));
 vi.mock("../../src/main/snapshot-service", () => ({
   SnapshotError: class extends Error {},
@@ -62,8 +71,9 @@ describe("snapshot destination and preference boundaries", () => {
     await handler({}, { type: "configure", enabled: true, shortcut: "accelerator" });
     await handler({}, { type: "bind", conversationId: "11111111-1111-4111-8111-111111111111" });
     await handler({}, { type: "unbind" });
+    native.capture.mockResolvedValueOnce({ png: Buffer.alloc(10), source: snapshotFixture() });
     await native.trigger!();
-    expect(imports.begin).not.toHaveBeenCalled(); expect(native.capture).not.toHaveBeenCalled();
+    expect(imports.begin).not.toHaveBeenCalled(); expect(native.capture).toHaveBeenCalledOnce();
     expect(service.state().enabled).toBe(true);
   });
   it.each(["other-window", "replaced-document"])("does not release a destination owned by %s", async (cause) => {

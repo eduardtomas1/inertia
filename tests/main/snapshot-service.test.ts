@@ -173,6 +173,15 @@ describe("snapshot native worker ownership", () => {
     controller.abort(); await failure; expect(child.kill).toHaveBeenCalledOnce();
   });
 
+  it("hands a shortcut pressed during a capture to its owner so the press can be explained", async () => {
+    const { service, child, onCapture } = await fixture();
+    const shortcut = (native.register.mock.calls.at(-1) as unknown as [string, () => void])[1];
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow();
+    shortcut();
+    expect(onCapture).toHaveBeenCalledOnce();
+    child.emit("exit", 1); await failure;
+  });
+
   it("times out hung native reads and waits for process exit", async () => {
     vi.useFakeTimers();
     const { service, child } = await fixture();
@@ -204,14 +213,17 @@ describe("snapshot native worker ownership", () => {
 
 describe("snapshot failure reasons", () => {
   it.each(SNAPSHOT_FAILURE_CATEGORIES)("delivers the %s category as its specific message and a phase-only diagnostic", async (category) => {
-    const { service, child, onFailure } = await fixture();
-    const capture = service.capture(); const outcome = capture.then(() => "delivered", (error: Error) => error.message);
-    child.emit("message", { ok: false, code: category, phase: "verification" });
-    child.emit("exit", 0);
-    const message = await outcome;
-    expect(message).toBe(snapshotFailureMessage(category));
-    expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category, phase: "verification" });
-    if (category !== "permission-denied") expect(message).not.toMatch(/permission|denied/iu);
+    const restore = withPlatform("linux");
+    try {
+      const { service, child, onFailure } = await fixture();
+      const capture = service.capture(); const outcome = capture.then(() => "delivered", (error: Error) => error.message);
+      child.emit("message", { ok: false, code: category, phase: "verification" });
+      child.emit("exit", 0);
+      const message = await outcome;
+      expect(message).toBe(snapshotFailureMessage(category));
+      expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category, phase: "verification" });
+      if (category !== "permission-denied") expect(message).not.toMatch(/permission|denied/iu);
+    } finally { restore(); }
   });
 
   it("gives Linux-only accessibility bridge guidance and claims denial only from a denial", () => {
@@ -264,6 +276,29 @@ describe("snapshot failure reasons", () => {
       expect(service.state().permission).toBe(permission);
       expect(native.accessibility).not.toHaveBeenCalled();
     } finally { restore(); }
+  });
+
+  it("tells a denied capture helper apart from a missing macOS grant", async () => {
+    const restore = withPlatform("darwin");
+    try {
+      const { service, child, onFailure } = await fixture();
+      const failure = expect(service.capture()).rejects.toThrow("denied access to its snapshot helper");
+      child.emit("message", { ok: false, code: "permission-denied", phase: "accessibility" });
+      child.emit("exit", 0); await failure;
+      expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category: "helper-permission-denied", phase: "accessibility" });
+    } finally { restore(); }
+  });
+
+  it("keeps the grant guidance when macOS no longer allows Inertia itself", async () => {
+    const restore = withPlatform("darwin");
+    try {
+      const { service, child, onFailure } = await fixture();
+      native.accessibility.mockReturnValue(false);
+      const failure = expect(service.capture()).rejects.toThrow("Allow Inertia in Accessibility and Screen Recording");
+      child.emit("message", { ok: false, code: "permission-denied", phase: "accessibility" });
+      child.emit("exit", 0); await failure;
+      expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category: "permission-denied", phase: "accessibility" });
+    } finally { native.accessibility.mockReturnValue(true); restore(); }
   });
 
   it("reports macOS permission from the system checks", () => {

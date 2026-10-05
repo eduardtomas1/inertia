@@ -52,6 +52,7 @@ import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
+import { useSnapshotQueue } from "./hooks/useSnapshotQueue";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
 import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationCommand } from "./lib/newConversation";
@@ -694,6 +695,11 @@ export default function App(): React.JSX.Element {
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen,
+  });
+  useSnapshotQueue(setActionError, () => {
+    if (!conversation) { createConversation(); return; }
+    navigateToView("workspace");
+    setSidebarOpen(false);
   });
   const createConversationForSelection = async (request: ReplacementChatRequest): Promise<void> => {
     if (!request.sourceConversationId && draftConversation.chooseModel(request.selection, request.configuration)) return;

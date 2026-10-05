@@ -902,4 +902,50 @@ describe("durable provider activity lifecycle contract", () => {
       .toBe("Command:\nenv\n\nOutput:\nkey [redacted]\nnext\n");
     await finish(value);
   });
+
+  it("saves and shows 500 Codex output deltas once per window and the output once", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const updates = vi.spyOn(value.store, "updateActivity");
+    const workspaceRunUpdates = vi.spyOn(value.store, "updateWorkspaceRun");
+    const events = value.events.length;
+    const shells = value.shells.length;
+    const chunks = Array.from({ length: 500 }, (_, index) =>
+      `line ${index}${index % 7 === 0 ? "\n" : " "}`);
+    const output = chunks.join("");
+
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "hot", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    chunks.forEach((delta, index) => {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "hot",
+        delta,
+      });
+      if (index % 50 === 49) runTimers(value.scheduler, 64);
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "hot",
+        type: "commandExecution",
+        command: "npm test",
+        status: "completed",
+        aggregatedOutput: output,
+      },
+    });
+
+    const projected = value.events.slice(events);
+    expect(updates).toHaveBeenCalledTimes(11);
+    expect(workspaceRunUpdates).toHaveBeenCalledTimes(1);
+    expect(projected.filter(({ type }) => type === "agent.activity"))
+      .toHaveLength(12);
+    expect(value.shells.length - shells).toBe(2);
+    expect(turnActivities(value)[0]?.detail)
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    await finish(value);
+  });
 });

@@ -94,6 +94,7 @@ async function runtime(providerId: ProviderId = "codex") {
     },
   );
   const provider = new FakeTurnProvider();
+  const scheduler = new FakeTurnScheduler();
   const events: ServerEvent[] = [];
   let sequence = 0;
   const controller = new TurnController(
@@ -109,7 +110,7 @@ async function runtime(providerId: ProviderId = "codex") {
       captureStructuredContext: ({ content }) => ({ visibleRequest: content }),
     },
     {
-      scheduler: new FakeTurnScheduler(),
+      scheduler,
       clock: () => new Date("2030-01-01T00:00:00.000Z"),
       id: () => "activity-id-" + ++sequence,
       turnTimeoutMs: 1_000,
@@ -147,6 +148,8 @@ async function runtime(providerId: ProviderId = "codex") {
     turnId: queued.turn.id,
     emitter,
     projected,
+    scheduler,
+    events,
   };
 }
 
@@ -519,5 +522,28 @@ describe("durable provider activity lifecycle contract", () => {
       }),
     ]));
     await finish(value);
+  });
+
+  it("keeps streamed progress when a stopped turn interrupts a running activity", async () => {
+    const value = await runtime();
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "streamed-command",
+      detail: "Command:\nnpm test",
+    });
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "streamed-command",
+      detail: "Output:\nfirst suite passed",
+    });
+
+    expect(value.controller.cancel(value.conversationId)).toBe(true);
+    await flushPromises();
+
+    expect(turnActivities(value)).toEqual([
+      expect.objectContaining({
+        title: "Interrupted · npm test",
+        detail: "Command:\nnpm test\n\nOutput:\nfirst suite passed\n\nInterrupted: Stopped",
+        status: "failed",
+      }),
+    ]);
   });
 });

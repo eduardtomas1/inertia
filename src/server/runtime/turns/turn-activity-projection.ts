@@ -43,11 +43,13 @@ export class TurnActivityProjection {
         status,
       });
       active.providerActivitiesById.set(event.activityId!, activity);
-      if (event.phase !== "started") {
+      const pendingIndex = candidates.findIndex(
+        ({ id }) => id === identified.id,
+      );
+      if (event.phase === "started") {
+        if (pendingIndex >= 0) candidates[pendingIndex] = activity;
+      } else {
         active.providerActivitiesById.delete(event.activityId!);
-        const pendingIndex = candidates.findIndex(
-          ({ id }) => id === identified.id,
-        );
         if (pendingIndex >= 0) candidates.splice(pendingIndex, 1);
         if (candidates.length === 0) {
           active.runningActivities.delete(event.kind);

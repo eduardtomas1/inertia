@@ -313,7 +313,7 @@
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
-    "@vitest/coverage-v8": "5.0.1",
+    "@vitest/coverage-v8": "5.0.3",
     "electron": "^44.4.5",
     "electron-builder": "26.16.1",
     "electron-vite": "^5.0.0",
@@ -324,7 +324,7 @@
     "terser": "5.51.2",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
-    "vitest": "5.0.1",
+    "vitest": "5.0.3",
     "yaml": "2.9.1"
   },
   "overrides": {

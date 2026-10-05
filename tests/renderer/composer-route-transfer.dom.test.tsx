@@ -122,6 +122,29 @@ describe("composer route transfer", () => {
     expect(readComposerDraft(target.id)).toBe("Carry this over");
   });
 
+  it.each([
+    ["the same composer", false],
+    ["a new composer", true],
+  ] as const)("focuses the new chat's message box when %s shows it frames after creation", async (_label, remount) => {
+    const source = conversation("route-late-source");
+    const target = conversation("route-late-target");
+    const onCreateConversationForSelection = vi.fn(async (options?: RouteOptions): Promise<void> => {
+      options?.onCreated?.(target.id);
+    });
+    const props = { providers: [routedProvider], onCreateConversationForSelection };
+    const view = render(<Composer key={source.id} {...composerProps(source, props)} />);
+    await confirmNewChat();
+    await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    });
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveFocus();
+
+    view.rerender(<Composer key={remount ? target.id : source.id} {...composerProps(target, props)} />);
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+  });
+
   it("clears an unstored draft only when the cleared draft matches it", () => {
     storageSpies.push(vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new DOMException("Storage is full.", "QuotaExceededError");

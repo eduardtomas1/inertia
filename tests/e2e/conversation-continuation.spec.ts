@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../src/server/database";
 import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";
@@ -55,8 +56,11 @@ function seedUsageLimitedChat(branch: string): string {
       rateLimitsProvenance: null,
       rateLimitsStale: false,
     });
-    const source = store.snapshot().conversations[0]!;
-    store.updateConversation(source.id, { title: TITLE, branch });
+    const project = store.snapshot().projects[0]!;
+    const source = store.createConversation(project.id, TITLE, {
+      branch,
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
+    });
     const requestedAt = new Date(Date.now() - 60_000).toISOString();
     const failedAt = new Date(Date.now() - 30_000).toISOString();
     const run = store.createWorkspaceRun({ kind: "agent", projectId: source.projectId, conversationId: source.id,

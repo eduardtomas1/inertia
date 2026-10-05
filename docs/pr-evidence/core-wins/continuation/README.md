@@ -2,6 +2,8 @@
 
 Platform: macOS 27.0.1, Electron at device scale 2, window 1440x920. Spec: `tests/e2e/conversation-continuation.spec.ts`. The model chooser fixture keeps provider execution disabled and reports Codex and Claude as ready at the renderer transport, so no provider CLI runs. The seed adds one native Claude model, "Fixture Sonnet", to the cached catalog. The seeded chat "Fix the release parser" has one request, one answer and a turn that stopped at its usage limit; the provider reports no reset time, so the row has no resume actions. Before images come from a build of main at `b6865e11` with the same seed and the same model, opening the model chooser from its chip because main has no row action.
 
+The after images list the fixture's own empty chat ("conversation-continuation fixture") under the limited chat, because the spec now seeds a fresh chat on every run so repeated runs stay independent; the before run renamed that chat instead. It is not part of this change.
+
 ## What changed
 
 - The usage-limited row: before, main showed nothing above the composer for a limit without a reset time (the plain "Usage limit reached" row comes from area 1); after, the row has **Continue with another model**, which opens the model chooser with the search field focused.

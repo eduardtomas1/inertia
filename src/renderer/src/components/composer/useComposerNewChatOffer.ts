@@ -3,7 +3,7 @@ import type { ContinuationIdentity, Conversation, ModelSelection } from "@shared
 import { conversationHasHistory } from "../../../../shared/continuation-policy";
 
 import { pendingModelRoute, replacementChatRequest } from "../../utils/modelRouteTransition";
-import { useComposerRouteConversation } from "./composerRouteConversation";
+import { takeRouteConversationFocus, useComposerRouteConversation } from "./composerRouteConversation";
 import type { ComposerProps, PendingModelRoute } from "./types";
 
 export function useComposerNewChatOffer(options: {
@@ -48,6 +48,12 @@ export function useComposerNewChatOffer(options: {
   useEffect(() => {
     offerOriginRef.current = null;
   }, [conversation.id, conversation.modelSelection]);
+
+  useEffect(() => {
+    if (!takeRouteConversationFocus(conversation.id)) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversation.id, textareaRef]);
 
   useEffect(() => {
     if (!pendingRoute) return;

@@ -362,7 +362,7 @@ export interface AgentHarnessEmitter {
     kind: ProviderActivityEvent["kind"],
     phase: ProviderActivityEvent["phase"],
     label: string,
-    detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
+    detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta">,
   ) => void;
   status: (
     status: ProviderStatusEvent["status"],
@@ -426,6 +426,10 @@ export function createAgentHarnessEmitter(
       const safeDetail = sanitizeProviderActivityDetail(detail.detail, {
         workspaceRoot,
       });
+      const safeOutput = sanitizeProviderActivityDetail(detail.outputDelta, {
+        workspaceRoot,
+        preserveWhitespace: true,
+      });
       emit({
         ...base,
         type: "activity",
@@ -434,6 +438,7 @@ export function createAgentHarnessEmitter(
         label: safeLabel,
         ...(activityId ? { activityId } : {}),
         ...(safeDetail ? { detail: safeDetail } : {}),
+        ...(safeOutput ? { outputDelta: safeOutput } : {}),
       });
     },
     status: (status, message, providerState) => emit({

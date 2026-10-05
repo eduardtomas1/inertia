@@ -36,17 +36,22 @@ export function isTerminalSubagentStatus(status: SubagentTraceStatus): boolean {
   return TERMINAL_SUBAGENT_STATUSES.has(status);
 }
 
+export function scrubSubagentSecrets(value: string): string {
+  let text = value;
+  for (const [pattern, replacement] of SECRET_PATTERNS) {
+    text = text.replace(pattern, replacement);
+  }
+  return text;
+}
+
 export function boundedSubagentText(
   value: unknown,
   maxChars: number,
 ): string | null {
   if (typeof value !== "string") return null;
-  let text = value.replace(/\0/gu, "").trim();
+  const text = value.replace(/\0/gu, "").trim();
   if (!text) return null;
-  for (const [pattern, replacement] of SECRET_PATTERNS) {
-    text = text.replace(pattern, replacement);
-  }
-  return text.slice(0, maxChars);
+  return scrubSubagentSecrets(text).slice(0, maxChars);
 }
 
 export function boundedSubagentIdentifier(

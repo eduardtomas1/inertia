@@ -102,6 +102,7 @@ async function runtime(providerId: ProviderId = "codex") {
   const scheduler = new FakeTurnScheduler();
   const events: ServerEvent[] = [];
   const shells: string[] = [];
+  const shellRunStates: (string | undefined)[] = [];
   let sequence = 0;
   const controller = new TurnController(
     store,
@@ -113,6 +114,9 @@ async function runtime(providerId: ProviderId = "codex") {
       broadcast: (event) => events.push(event),
       broadcastConversationShell: (conversationId) => {
         shells.push(conversationId);
+        shellRunStates.push(
+          store.conversationShell(conversationId)?.latestTurn?.runState?.state,
+        );
       },
       broadcastSnapshot: () => undefined,
       providerInfo: () => [providerInfo(providerId)],
@@ -160,6 +164,7 @@ async function runtime(providerId: ProviderId = "codex") {
     scheduler,
     events,
     shells,
+    shellRunStates,
   };
 }
 
@@ -946,6 +951,42 @@ describe("durable provider activity lifecycle contract", () => {
     expect(value.shells.length - shells).toBe(2);
     expect(turnActivities(value)[0]?.detail)
       .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    await finish(value);
+  });
+
+  it("publishes the shell when work resumes after a retry or delegation", async () => {
+    const value = await runtime();
+    const identity = {
+      providerId: "codex" as const,
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+    };
+    const resumes = [
+      () => value.emitter.activity("tool", "started", "Read file", {
+        activityId: "resumed-tool",
+      }),
+      () => value.provider.emit({ ...identity, type: "text", text: "Working again." }),
+      () => value.provider.emit({
+        ...identity,
+        type: "plan",
+        explanation: null,
+        steps: [{ step: "Verify", status: "inProgress" }],
+      }),
+    ];
+    for (const [index, resume] of resumes.entries()) {
+      value.provider.emit({
+        ...identity,
+        type: "status",
+        status: index === 1 ? "delegated" : "retrying",
+      });
+      expect(value.shellRunStates.at(-1))
+        .toBe(index === 1 ? "delegated" : "retrying");
+      const shells = value.shells.length;
+      resume();
+      expect(value.shells.length - shells).toBe(1);
+      expect(value.shellRunStates.at(-1)).toBe("running");
+    }
     await finish(value);
   });
 });

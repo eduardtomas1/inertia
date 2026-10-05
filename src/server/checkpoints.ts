@@ -112,6 +112,18 @@ function checkpointGitArguments(
   ];
 }
 
+function durableCheckpointGitArguments(
+  args: readonly string[],
+): string[] {
+  return checkpointGitArguments([
+    "-c",
+    "core.fsync=objects,reference",
+    "-c",
+    "core.fsyncMethod=batch",
+    ...args,
+  ]);
+}
+
 async function checkpointEnvironment(
   repositoryPath: string,
   storageDirectory: string,
@@ -600,7 +612,7 @@ export async function createCheckpoint(
     }
     await runGit(
       repositoryPath,
-      checkpointGitArguments(["add", "--update"]),
+      durableCheckpointGitArguments(["add", "--update"]),
       environment,
       undefined,
       1024 * 1024,
@@ -610,7 +622,7 @@ export async function createCheckpoint(
     if (untrackedPaths.length > 0) {
       await runGit(
         repositoryPath,
-        checkpointGitArguments([
+        durableCheckpointGitArguments([
           "--literal-pathspecs",
           "add",
           "--force",
@@ -627,7 +639,7 @@ export async function createCheckpoint(
     const tree = (
       await runGit(
         repositoryPath,
-        ["write-tree"],
+        durableCheckpointGitArguments(["write-tree"]),
         environment,
         undefined,
         1024 * 1024,
@@ -640,7 +652,7 @@ export async function createCheckpoint(
     const commit = (
       await runGit(
         repositoryPath,
-        commitArgs,
+        durableCheckpointGitArguments(commitArgs),
         environment,
         undefined,
         1024 * 1024,
@@ -652,7 +664,7 @@ export async function createCheckpoint(
     // reference through the real repository after the object is created.
     await runGit(
       repositoryPath,
-      checkpointGitArguments([
+      durableCheckpointGitArguments([
         "-c",
         `core.hooksPath=${isolated.hooksDirectory}`,
         "update-ref",

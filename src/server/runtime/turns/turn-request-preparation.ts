@@ -200,6 +200,8 @@ export function resolveTurnRequest(
     )
     ? staleProviderSessionDecision()
     : resolvedContinuation;
+  const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
+    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
@@ -219,7 +221,7 @@ export function resolveTurnRequest(
     documentContexts: request.documentContexts,
     context: request.context,
     internalInstructions: [
-      ...capabilityInstructions,
+      ...(resumesImportedCodex ? [] : capabilityInstructions),
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;

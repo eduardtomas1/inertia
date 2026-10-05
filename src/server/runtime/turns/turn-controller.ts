@@ -791,7 +791,7 @@ export class TurnController {
     };
     active.providerStartAcknowledgement = acknowledge;
     try {
-      const hostTools = resolveTurnHostTools(active, this.hooks);
+      const hostTools = resolveTurnHostTools(active, this.hooks, this.store);
       this.store.providerRunOwnership.record(
         active.turn.id,
         active.conversation.id,

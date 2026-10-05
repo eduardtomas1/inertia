@@ -306,6 +306,31 @@ describe("CLI conversation import authority and persistence", () => {
       runtime.store.close();
     }
   });
+  it("does not describe or pass Inertia's host tools to an imported Codex session that never registered them", async () => {
+    const bridge = { definitions: [] } as never;
+    const runtime = await createTurnControllerTestRuntime({ harnessInstructionsForTurn: () => [{ label: "test-harness", text: "HARNESS_POLICY: use host tools." }], hostToolsForTurn: () => bridge },
+      { modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }) });
+    try {
+      const selection = providerNativeModelSelection({ providerId: "codex" });
+      const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
+      const importedSessionId = randomUUID();
+      const imported = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "7".repeat(64), providerId: "codex", sessionId: importedSessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0 });
+      const observed: Array<{ instructions: number; hostTools: unknown }> = [];
+      for (const conversationId of [runtime.conversationId, imported]) {
+        const queued = runtime.controller.queue({ conversationId, content: "Continue." });
+        runtime.controller.start(queued.turn.id);
+        observed.push({ instructions: runtime.store.turnExecutionManifest(queued.turn.id)!.internalInstructionCount, hostTools: runtime.provider.callbacks?.hostTools });
+        runtime.provider.resolve({ status: "completed", sessionId: conversationId === imported ? importedSessionId : randomUUID() });
+        await flushTurnControllerTestPromises();
+      }
+      expect(observed[0]!.hostTools).toBe(bridge);
+      expect(observed[1]!.hostTools).toBeUndefined();
+      expect(observed[1]!.instructions).toBe(observed[0]!.instructions - 1);
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
   it("lists imported sessions with their chat, hides sessions Inertia already owns, and records the transcript's cwd", async () => {
     const f = await fixture(); const store = new RuntimeStore(join(f.root, "inertia.sqlite"), f.workspace); stores.push(store);
     const project = store.createProject("Studio", f.workspace); const send = vi.fn();

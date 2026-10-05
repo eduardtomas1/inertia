@@ -6,6 +6,8 @@ import { KIMI_CLAUDE_BUILTIN_PROFILE_ID } from "../../../shared/claude-backend-p
 import type { ProviderId } from "../../../shared/contracts";
 import type { ModelBackendProfile } from "../../../shared/model-routing";
 import type { ProviderHostToolBridge } from "../../provider/contracts";
+import type { RuntimeStore } from "../../database";
+import { importedSession } from "../../cli-import/resume-cwd";
 import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
 
 /**
@@ -16,6 +18,7 @@ import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
 export function resolveTurnHostTools(
   active: ActiveTurn,
   hooks: TurnControllerHooks,
+  store: Pick<RuntimeStore, "cliConversationImport">,
 ): ProviderHostToolBridge | undefined {
   const capabilityContract = hooks.providerInfo().find(
     ({ id }) => id === active.providerInput.providerId,
@@ -30,6 +33,7 @@ export function resolveTurnHostTools(
       backendProfile: active.providerInput.backendProfile,
     });
   if (!hostToolsAttested) return undefined;
+  if (active.providerInput.providerId === "codex" && importedSession(store, active.conversation.id, active.providerInput.sessionId)) return undefined;
   return hooks.hostToolsForTurn?.({
     conversation: active.conversation,
     turn: active.turn,

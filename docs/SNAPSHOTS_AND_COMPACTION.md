@@ -9,6 +9,28 @@ Linux X11 uses Ctrl+Alt+S. The selected chat receives a removable screenshot til
 with the application and window names. Open it to inspect the image or its
 accessibility data before sending. Capture does not send a message automatically.
 
+A shortcut press is never dropped silently. If no chat message box is open (for
+example while Settings is showing, or after the chat window closed), the capture
+is kept as a pending snapshot and Inertia comes forward with the selected chat,
+or starts a new chat when none is selected; the first chat whose message box
+binds receives every pending snapshot, oldest first. Pressing the shortcut while
+another capture is still running shows a notice in the main window instead of
+starting a second capture, and a failed capture with no open chat is reported
+the same way. The notice uses the main window's existing status notice and does
+not move focus while the running capture is still checking the foreground window.
+
+Pending snapshots are stored in a private `snapshot-queue` folder inside
+Inertia's application data (folder `0700`, files `0600`, created exclusively and
+never followed through symbolic links). The folder must resolve inside the real
+application-data path, or the capture fails. At most four snapshots wait at a
+time; a press beyond that takes no pixels and says why. Each one expires ten
+minutes after capture and is deleted then, whether or not a chat opened.
+Turning Snapshots off deletes the folder before the setting is acknowledged, and
+a launch with Snapshots off deletes it too. A pending snapshot that fails to
+import is reported once in the chat that received it and then deleted, so it
+cannot reappear on every focus; one whose chat closes before delivery stays
+pending for the next chat.
+
 macOS requires Accessibility and Screen Recording permission; the Snapshots settings page
 opens the relevant system settings only after an explicit click. Snapshots starts
 disabled and saves the chosen setting locally. Linux requires an X11 desktop and
@@ -24,7 +46,19 @@ window at capture time, so the permission state is reported as unverified.
 The protected capture worker verifies the window before and after taking pixels. It masks detected editable
 controls and protected fields in the image and omits their text and descendants
 from context. Screenshots and accessibility context may still contain sensitive
-information. The [backend captures pixels under the window bounds](https://xa11y.dev/guides/screenshots/),
+information. On macOS the worker matches the accessibility window to exactly one
+window-server window by process, bounds (within one point) and, when macOS
+reports it, title, then runs `/usr/sbin/screencapture -l <window> -o -x` without
+a shell, with an empty environment, a three-second limit and a private temporary
+folder. The image therefore holds only that window, without its shadow or any
+window overlapping it. The window number is part of the before/after identity,
+so a different window matching after the screenshot discards the pixels. Masks
+are mapped from accessibility points onto the image's pixels, including Retina
+images at two or more pixels per point and windows on displays left of or above
+the main display. No match, more than one match, or an image whose
+width and height scale differ by more than 2 % fails the capture instead of
+guessing where masks belong. On Windows and Linux the
+[backend captures pixels under the window bounds](https://xa11y.dev/guides/screenshots/),
 which can include overlapping windows outside that accessibility tree. Review the
 attachment before sending it. A changed foreground identity, an
 incomplete protected-field scan, changed protected-field geometry across the
@@ -139,11 +173,52 @@ preview, keyboard focus, compact geometry, reduced motion, receipt reload, and
 loading the actual native bindings in a utility process. Visual scenarios use
 synthetic Notes content; they do not claim to capture a permission-protected OS
 desktop. Package smoke also loads the shipped bindings without desktop access.
-Interactive permission grants and real foreground capture were not exercised on
+Window matching reads the real macOS window list in a unit test on macOS hosts
+(numbers, owners, layers and bounds; titles stay unavailable without Screen
+Recording). Interactive permission grants and real foreground capture were not exercised on
 the locked macOS host. Windows/Linux capture also requires manual platform
 validation, including overlapping windows, mixed-DPI monitors and partially
 off-screen targets. Deterministic tests do not substitute for this physical
 validation or prove complete screen redaction.
+
+### Owner verification on a signed macOS build
+
+Nobody has yet granted permissions to a signed Inertia build and taken a real
+snapshot. The capture runs in an Electron utility process (the `Inertia Helper`
+executable), not in the Inertia executable that macOS lists in Accessibility and
+Screen Recording. T3 Code found that the helper does not share the Accessibility
+grant and forks its accessibility reader from the main executable with
+`ELECTRON_RUN_AS_NODE`. Inertia cannot do that: its packaged build turns off
+Electron's `RunAsNode` fuse, and the release checks require it to stay off.
+Instead, a denial is detected at run time: when the helper reports a permission
+denial while macOS reports Inertia as allowed for both permissions, the chat
+shows "macOS lists Inertia as allowed in Accessibility and Screen Recording, but
+denied access to its snapshot helper" and Diagnostics records the category
+`helper-permission-denied`.
+
+On a signed and notarized build:
+
+1. Turn on Window snapshots, allow Inertia in Accessibility and Screen Recording
+   when asked, and quit and reopen Inertia.
+2. Focus a chat, switch to TextEdit with a document open, and press both Shift
+   keys.
+3. Expected: a tile with TextEdit's window only. Place another window partly
+   over TextEdit and repeat: the tile must not show the covering window.
+   Type into a TextEdit find field or a Safari password field and repeat: the
+   field must be masked.
+4. If nothing arrives, open Settings → Help → Diagnostics. A
+   `snapshot.failure` with category `helper-permission-denied` means the grant
+   does not reach the helper. Then the choice is between running the
+   accessibility read and capture in the main process (no separate process to
+   kill on a hang or a native crash) and turning `RunAsNode` back on (weaker
+   packaged-app hardening); neither is done without that decision. A category
+   `permission-denied` means macOS itself reports Inertia as not allowed.
+5. Also check whether macOS asks for Screen Recording again for
+   `screencapture`. It is started by the helper, so it should be attributed to
+   Inertia; a prompt naming another program is a finding to report.
+6. Open Settings, press both Shift keys in TextEdit, and confirm Inertia comes
+   forward with the selected chat holding the tile. Press twice quickly and
+   confirm the second press shows the notice instead of a second capture.
 
 Reviewed Electron captures from synthetic Notes content:
 [dark](screenshots/inertia-snapshots-compaction-dark.png),

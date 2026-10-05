@@ -31,7 +31,7 @@ function fixture() {
   const view = render(<Workbench chat={null} />);
   return {
     errors, snapshot, onNotice, showChat, view, Workbench,
-    emit: (event: SnapshotDelivery) => { act(() => { for (const listener of [...listeners]) listener(event); }); },
+    emit: (event: SnapshotDelivery) => { act(() => { for (const listener of listeners) listener(event); }); },
     cleanup: () => window.removeEventListener("inertia:snapshot-error", onError),
   };
 }

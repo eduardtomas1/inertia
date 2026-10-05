@@ -241,10 +241,14 @@ failed on the unfixed code. Findings that did not hold are listed as refuted.
   "Please sign in to continue", "Upgrade your plan to continue", "Add a payment
   method to continue", "Check your settings to continue" or "Error: …" became
   the answer of a completed turn. When the turn's whole output is exactly one
-  of those, it now fails: sign-in as an authentication failure that asks you to
-  connect Cursor, "Upgrade your plan" as usage-limited, the others with the
-  text as the reason. Any further output releases the text unchanged. These
-  sentences come from the reviewed build 2026.09.02 and may change.
+  of those, it now fails: sign-in with the message "Cursor needs you to sign
+  in. Connect Cursor in provider settings, then try again.", "Upgrade your
+  plan" as usage-limited, the others with the text as the reason. Any further
+  output releases the text unchanged. These sentences come from the reviewed
+  build 2026.09.02 and may change. The sign-in failure is a message only: no
+  turn failure refreshes provider status or opens Connect for any provider
+  (Claude's and Codex's authentication failures are messages too), so the
+  failure's `auth` phase is recorded for diagnostics and has no consumer.
 - Refuted: a final message chunk arriving with the prompt response is lost (the
   SDK delivers notifications before the response; the reviewer's scenario
   passed 4 of 4 runs unfixed). Already handled: in-flight tool calls on cancel
@@ -405,6 +409,67 @@ smokes launch with `NODE_ENV=test`, where the runtime starts with providers
 disabled.
 
 Main's CI on `620e69a8` (run 37242230245) passed.
+
+## Review of this PR
+
+A read-only review of `60e62614` found no blocker. Its findings, each verified
+first:
+
+- Claude, fixed (`8874070b`): an error result followed by an answered queued
+  follow-up left no trace of the first failure; it is now a failed system
+  activity. A queued follow-up that never starts settled only on Cancel; it now
+  settles failed with "Your follow-up was not answered." after the existing
+  terminal drain bound (2 seconds by default), which a real follow-up's
+  `system/init` clears.
+- Claude skills, changed by the owner's decision (`541fa4e7`): refusing a skill
+  that declares `allowed-tools`, `hooks` or `model` failed the whole turn and
+  broke skills that worked before, while the staged front matter rewrite
+  already drops them. Those fields are now dropped silently in any casing; only
+  `context` and `agent`, whose removal changes the skill's meaning, are
+  refused, and discovery applies the same check so such a skill is not offered.
+  A skill whose `hooks` or `allowed-tools` is a block or list was never
+  discovered, before or after this PR, because the front matter parser accepts
+  only single-line values.
+- Claude, fixed (`28e40848`): a missing space in the startup failure map.
+- Codex, fixed (`70708148`): declined terminal input with control characters
+  is now named as input to a running command.
+- Codex, refuted: `thread/settings/update` only queues the change, but the
+  response is sent after the change is on the thread's single ordered work
+  queue, and `thread/goal/set` queues the goal turn behind it, so the goal turn
+  always runs with the new effort. Waiting for `thread/settings/updated` would
+  hang a goal start whenever the settings do not change, because upstream
+  sends that notification only on an effective change. `summary: "auto"` is
+  not added to goal turns: it would need a settings update even when no effort
+  is chosen, a separate decision.
+- Cursor, wording corrected: the sign-in failure asks you to connect Cursor
+  but does not open Connect (see above).
+
+After these fixes, on `70708148`, macOS ARM64, Node 22.23.2, discovery
+confined as above, each command on its own: `check:quality` exit 0 (91
+lineage entries, 1,409 source files); the six touched Claude and Codex test
+files 157 passed; `npm test -- --maxWorkers=2` exit 1 with 12,235 passed, 140
+skipped and only the expected `providers.test.ts` failure; `test:portable`
+exit 1 with 2,350 passed, 9 skipped and the same single failure;
+`test:windows-codex` exit 0 (4 passed, 4 skipped); `build:bundle` exit 0
+within every budget (core and main workbench unchanged at their caps). The
+Electron turn specs `core-bridge-smoke`, `image-follow-up-regression`,
+`transcript-turn-anchor`, `session-continuity`, `scratch-chat`,
+`limit-reset`, `antigravity-evidence`, `goal-reliability`, `usage-limits` and
+`terminal-resume` ran with `--repeat-each=3 --max-failures=1`: 45 passed, 0
+failed. There is no Electron turn driver for Claude or Cursor; their turn
+lifecycle is covered by the portable fixtures. Packaging was not repeated:
+these commits change provider runtime code and tests only, no dependency,
+packaging or native file.
+
+### Known limits
+
+- OpenCode plan mode with Full access can still change files through shell
+  commands, because upstream's `edit` permission covers only its edit, write
+  and patch tools. This matches upstream's own plan agent.
+- Possibly pre-existing and unverified: in Supervised, only deny rules may
+  reach OpenCode subagents. Follow-up.
+- Claude tool activities store the bounded raw command, as the other providers
+  do.
 
 ## Not exercised
 

@@ -184,7 +184,7 @@ export function registerSnapshotIpc(options: {
       const result = await service.capture(signal);
       return await importSnapshot(result.png, result.source, signal);
     });
-  }, options.onFailure, () => reviews.stop());
+  }, options.onFailure, () => Promise.all([reviews.stop(), queue.clear()]).then(() => undefined));
   const revoke = (): Promise<PromiseSettledResult<void>[]> => {
     generation += 1;
     captureEnabled = false;

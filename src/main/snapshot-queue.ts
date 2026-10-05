@@ -54,7 +54,7 @@ export class SnapshotQueue {
       try { await metadata.writeFile(JSON.stringify({ queuedAt: this.now(), source })); } finally { await metadata.close(); }
       await rename(temporary, join(directory, `${id}.json`));
       this.known = true;
-      this.schedule();
+      if (!this.timer) this.schedule(SNAPSHOT_QUEUE_TTL_MS + 1);
       return true;
     });
   }
@@ -88,8 +88,7 @@ export class SnapshotQueue {
 
   clear(): Promise<void> {
     return this.serial(async () => {
-      if (this.timer) clearTimeout(this.timer);
-      this.timer = null;
+      this.schedule(null);
       const directory = await this.directory(false);
       if (directory) await rm(directory, { recursive: true, force: true });
       this.known = false;
@@ -102,12 +101,14 @@ export class SnapshotQueue {
     return result;
   }
 
-  private schedule(): void {
-    if (this.timer) return;
+  private schedule(delay: number | null): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (delay === null) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.prune().catch(() => undefined);
-    }, SNAPSHOT_QUEUE_TTL_MS + 1000);
+    }, Math.max(0, delay));
     this.timer.unref();
   }
 
@@ -141,7 +142,8 @@ export class SnapshotQueue {
     }
     await Promise.all(names.filter((name) => !keep.has(name)).map((name) => rm(join(directory, name), { recursive: true, force: true })));
     this.known = entries.length > 0;
-    if (entries.length > 0) this.schedule();
+    const oldest = Math.min(...entries.map(({ queuedAt }) => queuedAt));
+    this.schedule(entries.length > 0 ? oldest + SNAPSHOT_QUEUE_TTL_MS + 1 - this.now() : null);
     return entries.sort((left, right) => left.queuedAt - right.queuedAt).slice(0, SNAPSHOT_QUEUE_LIMIT)
       .map(({ id, png, source }) => ({ id, png, source }));
   }

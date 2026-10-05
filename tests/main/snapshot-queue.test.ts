@@ -1,7 +1,7 @@
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import { SNAPSHOT_QUEUE_LIMIT, SNAPSHOT_QUEUE_TTL_MS, SnapshotQueue } from "../../src/main/snapshot-queue";
 
@@ -102,5 +102,31 @@ describe("pending snapshot queue", () => {
     clock += SNAPSHOT_QUEUE_TTL_MS + 1;
     await pending.prune();
     expect(await readdir(directory)).toEqual([]);
+  });
+});
+
+describe("pending snapshot lease timer", () => {
+  afterEach(() => { vi.useRealTimers(); });
+  async function settled(directory: string, expected: number): Promise<string[]> {
+    let names = await readdir(directory);
+    for (let attempt = 0; attempt < 200 && names.length !== expected; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      names = await readdir(directory);
+    }
+    return names;
+  }
+
+  it("deletes each capture when its own lease ends, not a full lease after an older one", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const pending = new SnapshotQueue(root);
+    const directory = join(root, "snapshot-queue");
+    await pending.add(png(1), snapshotFixture());
+    await pending.remove((await pending.take()).map(({ id }) => id));
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_QUEUE_TTL_MS - 10_000);
+    await pending.add(png(2), snapshotFixture());
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(await pending.count()).toBe(1);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_QUEUE_TTL_MS - 10_000);
+    expect(await settled(directory, 0)).toEqual([]);
   });
 });

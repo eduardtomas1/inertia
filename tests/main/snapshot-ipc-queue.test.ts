@@ -32,11 +32,11 @@ vi.mock("../../src/main/snapshot-service", () => ({
   SnapshotService: class {
     enabled = false;
     shortcut: SnapshotState["shortcut"] = "both-shift";
-    constructor(trigger: () => Promise<void>) { native.trigger = trigger; }
+    constructor(trigger: () => Promise<void>, _failure: unknown, private readonly stopOwned: () => Promise<void>) { native.trigger = trigger; }
     state() { return { enabled: this.enabled, shortcut: this.shortcut, available: true, permission: "granted", message: null }; }
     isDisposing() { return false; }
     async revokeCapture() { this.enabled = false; }
-    async dispose() { return undefined; }
+    async dispose() { await this.stopOwned(); }
     async configure(enabled: boolean, shortcut: SnapshotState["shortcut"]) { this.enabled = enabled; this.shortcut = shortcut; return this.state(); }
     capture = native.capture;
   },
@@ -69,10 +69,10 @@ async function fixture() {
     values.map(({ name }, index) => ({ id: `image-${importImage.mock.calls.length}-${index}`, name, path: "image", mimeType: "image/png", size: 10 })));
   const registry = { import: importImage, setSnapshotSource: vi.fn((id: string, snapshot: SnapshotSource) => ({ id, snapshot })) };
   const imports = { begin: vi.fn(() => "queue-batch"), importSelection: vi.fn(async (_owner, _id, run) => await run(new AbortController().signal)), cancel: vi.fn(async () => undefined) };
-  registerSnapshotIpc({ owner: ((event: { window?: typeof chat }) => event.window ?? chat) as never, mainWindow: () => main as never, registry: (() => registry) as never, imports: imports as never });
+  const service = registerSnapshotIpc({ owner: ((event: { window?: typeof chat }) => event.window ?? chat) as never, mainWindow: () => main as never, registry: (() => registry) as never, imports: imports as never });
   const handler = native.handle.mock.calls[0]![1] as (event: unknown, input: unknown) => Promise<SnapshotState>;
   await handler({}, { type: "state" });
-  return { handler, main, chat, imports, importImage, registry };
+  return { handler, main, chat, imports, importImage, registry, service };
 }
 
 describe("shortcut outcomes", () => {
@@ -189,6 +189,14 @@ describe("queued capture delivery", () => {
     await handler({}, { type: "bind", conversationId });
     await Promise.resolve();
     expect(chat.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("removes queued captures when Inertia quits", async () => {
+    const { service } = await fixture();
+    native.queue.items = [{ id: "a", ...captured() }];
+    await service.dispose();
+    expect(native.queue.clear).toHaveBeenCalled();
+    expect(native.queue.items).toEqual([]);
   });
 
   it("removes queued captures at launch when snapshots was left disabled", async () => {

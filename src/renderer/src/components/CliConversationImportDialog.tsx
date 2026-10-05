@@ -36,7 +36,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
   request(command: CommandWithoutId): Promise<ServerEvent>;
   disabled?: boolean;
   onClose(): void;
-  onOpenConversation?(conversationId: string): void;
+  onOpenConversation?(conversationId: string): boolean | void;
 }): React.JSX.Element {
   const [scan, setScan] = useState<CliConversationScan | null>(null);
   const [preview, setPreview] = useState<CliConversationPreview | null>(null);
@@ -50,6 +50,8 @@ export function CliConversationImportDialog({ project, request, disabled = false
   const importing = useRef(false);
   const requestRef = useRef(request);
   requestRef.current = request;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
   const searchInput = useRef<HTMLInputElement>(null);
   const gallery = useRef<HTMLDivElement>(null);
   const backButton = useRef<HTMLButtonElement>(null);
@@ -61,7 +63,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
   useLayoutEffect(() => { searchInput.current?.focus(); }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (importing.current || disabled) return;
+    if (importing.current || disabledRef.current) return;
     const generation = ++epoch.current;
     setBusy("scan"); setError(null); setScan(null); setPreview(null); setOpenId(null); setImported(false);
     try {
@@ -72,7 +74,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
     } catch (cause) {
       if (generation === epoch.current) setError(cause instanceof Error ? cause.message : "Could not scan CLI conversations.");
     } finally { if (generation === epoch.current) setBusy(null); }
-  }, [project.id, disabled]);
+  }, [project.id]);
   useEffect(() => {
     void refresh();
     return () => { epoch.current += 1; };
@@ -94,8 +96,9 @@ export function CliConversationImportDialog({ project, request, disabled = false
       setError(cause instanceof Error ? cause.message : "Could not preview this conversation.");
     } finally { if (generation === epoch.current) setBusy(null); }
   };
-  const back = (): void => {
+  const back = (restoreFocus = true): void => {
     if (importing.current) return;
+    if (!restoreFocus) returnFocusId.current = null;
     epoch.current += 1;
     setOpenId(null); setPreview(null); setBusy(null); setError(null); setImported(false);
   };
@@ -145,8 +148,8 @@ export function CliConversationImportDialog({ project, request, disabled = false
   const openedId = preview?.candidate.importedConversationId && onOpenConversation ? preview.candidate.importedConversationId : null;
   const openChat = (): void => {
     if (!openedId || !onOpenConversation) return;
-    onClose();
-    onOpenConversation(openedId);
+    if (onOpenConversation(openedId) === false) setError("This chat is archived or no longer exists.");
+    else onClose();
   };
   const runAction = (): void => { if (openedId) openChat(); else void importConversation(); };
   const openCandidate = openId ? scan?.candidates.find((item) => item.id === openId) ?? preview?.candidate ?? null : null;
@@ -174,7 +177,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
         <div className="cli-import-search">
           <Search size={17} aria-hidden="true" />
           <input ref={searchInput} aria-label="Search CLI conversations" placeholder="Search Codex and Claude Code conversations…" value={query} autoComplete="off"
-            onChange={(event) => { setQuery(event.target.value); if (openId) back(); }}
+            onChange={(event) => { setQuery(event.target.value); if (openId) back(false); }}
             onKeyDown={(event) => {
               if (event.key !== "ArrowDown" || openId) return;
               const first = gallery.current?.querySelector<HTMLElement>(".cli-import-card");
@@ -185,19 +188,19 @@ export function CliConversationImportDialog({ project, request, disabled = false
           <div className="cli-import-filter" role="group" aria-label="Filter by CLI provider">
             {providerFilters.map(([value, label], index) => <span key={value}>
               {index > 0 && <span aria-hidden="true">·</span>}
-              <button type="button" aria-pressed={provider === value} onClick={() => { setProvider(value); if (openId) back(); }}>{label}</button>
+              <button type="button" aria-pressed={provider === value} onClick={() => { setProvider(value); if (openId) back(false); }}>{label}</button>
             </span>)}
           </div>
           <IconButton label="Scan again" className={busy === "scan" ? "is-scanning" : undefined} aria-disabled={scanUnavailable}
             onClick={() => { if (!scanUnavailable) void refresh(); }}>
             <RefreshCw size={15} aria-hidden="true" />
           </IconButton>
-          <IconButton label="Close CLI import" disabled={busy === "import"} onClick={onClose}><X size={15} aria-hidden="true" /></IconButton>
+          <IconButton label="Close CLI import" aria-disabled={busy === "import"} onClick={() => { if (!importing.current) onClose(); }}><X size={15} aria-hidden="true" /></IconButton>
         </div>
         <div className="cli-import-body">
           {openId && openCandidate ? <div key={openId} className="cli-import-open" role="group" aria-labelledby={openTitleId}>
             <div className="cli-import-open-head">
-              <IconButton ref={backButton} label="Back to conversations" disabled={busy === "import"} onClick={back}><ArrowLeft size={15} aria-hidden="true" /></IconButton>
+              <IconButton ref={backButton} label="Back to conversations" aria-disabled={busy === "import"} onClick={() => back()}><ArrowLeft size={15} aria-hidden="true" /></IconButton>
               <h2 id={openTitleId}>{openCandidate.title}</h2>
             </div>
             <div className="cli-import-open-scroll">

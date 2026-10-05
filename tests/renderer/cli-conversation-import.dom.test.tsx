@@ -276,4 +276,80 @@ describe("CLI import dialog", () => {
     fireEvent.change(search, { target: { value: "nothing like this" } });
     expect(screen.getByText("No conversations match your search.")).toBeInTheDocument();
   });
+  it("keeps focus in the search field or filter when typing or filtering closes an open conversation", async () => {
+    render(<CliConversationImportDialog project={project} request={requester()} onClose={vi.fn()} />);
+    fireEvent.click(await findCard(/Build the sidebar/u));
+    await screen.findByRole("group", { name: "Build the sidebar" });
+    const search = screen.getByRole("textbox", { name: "Search CLI conversations" });
+    search.focus();
+    fireEvent.change(search, { target: { value: "sidebar" } });
+    await screen.findByRole("list", { name: "CLI conversations" });
+    expect(search).toHaveFocus();
+    fireEvent.click(card(/Build the sidebar/u));
+    await screen.findByRole("group", { name: "Build the sidebar" });
+    const codex = screen.getByRole("button", { name: "Codex" });
+    codex.focus();
+    fireEvent.click(codex);
+    await screen.findByRole("list", { name: "CLI conversations" });
+    expect(codex).toHaveFocus();
+  });
+  it("keeps the back and close controls focusable and inert while an import runs", async () => {
+    const pendingImport = deferred<ServerEvent>();
+    const onClose = vi.fn();
+    render(<CliConversationImportDialog project={project} request={requester((command) => command.type === "conversation.cli.import" ? pendingImport.promise : undefined)} onClose={onClose} />);
+    fireEvent.click(await findCard(/Build the sidebar/u));
+    const action = await screen.findByRole("button", { name: "Import conversation" });
+    const back = screen.getByRole("button", { name: "Back to conversations" });
+    back.focus();
+    fireEvent.keyDown(back, shortcut(action));
+    expect(action).toHaveTextContent("Importing…");
+    for (const control of [back, screen.getByRole("button", { name: "Close CLI import" })]) {
+      expect(control).not.toHaveAttribute("disabled");
+      expect(control).toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(control);
+    }
+    expect(back).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "Build the sidebar" })).toBeInTheDocument();
+    await act(async () => pendingImport.resolve(imported));
+    expect(back).toHaveAttribute("aria-disabled", "false");
+  });
+  it("neither rescans nor strands an import when the connection drops and returns mid-flight", async () => {
+    const pendingImport = deferred<ServerEvent>();
+    const request = requester((command) => command.type === "conversation.cli.import" ? pendingImport.promise : undefined);
+    const view = render(<CliConversationImportDialog project={project} request={request} onClose={vi.fn()} />);
+    fireEvent.click(await findCard(/Build the sidebar/u));
+    const action = await screen.findByRole("button", { name: "Import conversation" });
+    view.rerender(<CliConversationImportDialog project={project} request={request} disabled onClose={vi.fn()} />);
+    view.rerender(<CliConversationImportDialog project={project} request={request} onClose={vi.fn()} />);
+    expect(screen.getByRole("group", { name: "Build the sidebar" })).toBeInTheDocument();
+    fireEvent.click(action);
+    view.rerender(<CliConversationImportDialog project={project} request={request} disabled onClose={vi.fn()} />);
+    view.rerender(<CliConversationImportDialog project={project} request={request} onClose={vi.fn()} />);
+    await act(async () => pendingImport.resolve(imported));
+    expect(action).toHaveTextContent(/^Already imported$/u);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Imported\.$/u);
+    expect(commands(request, "conversation.cli.scan")).toBe(1);
+  });
+  it("stays open and says so when the imported chat can no longer be opened", async () => {
+    const earlier = { ...candidates[0]!, importedConversationId: importedId };
+    const onClose = vi.fn();
+    render(<CliConversationImportDialog project={project} onClose={onClose} onOpenConversation={() => false}
+      request={requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(scanOf([earlier])) : command.type === "conversation.cli.preview" ? Promise.resolve(previewOf(earlier, "Sidebar request")) : undefined)} />);
+    fireEvent.click(await findCard(/Build the sidebar/u));
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat" }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("This chat is archived or no longer exists.");
+  });
+  it("says how many earlier messages an import leaves out on the card and in the preview", async () => {
+    const earlier = { ...candidates[0]!, importedConversationId: importedId, importedOmission: { omitted: 1204, total: 1580 } };
+    const preview = result({ kind: "conversation.cli.preview", preview: { candidate: candidates[1]!, revision: "b".repeat(64), omittedMessages: 3,
+      messages: [{ role: "user", content: "Accessibility request", createdAt: candidates[1]!.updatedAt }] } });
+    render(<CliConversationImportDialog project={project} onClose={vi.fn()}
+      request={requester((command) => command.type === "conversation.cli.scan" ? Promise.resolve(scanOf([earlier, candidates[1]!])) : command.type === "conversation.cli.preview" && command.payload.candidateId === candidates[1]!.id ? Promise.resolve(preview) : undefined)} />);
+    expect((await findCard(/Build the sidebar/u)).querySelector(".cli-import-card-omission")).toHaveTextContent(/^Earlier messages were not imported: 1,204 of 1,580$/u);
+    expect(card(/Review accessibility/u).querySelector(".cli-import-card-omission")).toBeNull();
+    fireEvent.click(card(/Review accessibility/u));
+    expect(await screen.findByText("Earlier messages will not be imported: 3 of 4")).toBeInTheDocument();
+  });
 });

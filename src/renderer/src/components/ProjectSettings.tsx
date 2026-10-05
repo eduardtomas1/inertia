@@ -35,7 +35,7 @@ interface Props {
   settings: AppSettings;
   disabled: boolean;
   request?: IssueReportSettingsProps["request"];
-  onOpenConversation?: (conversationId: string) => void;
+  onOpenConversation?: (conversationId: string) => boolean;
   onUpdateSettings: (settings: Partial<AppSettings>) => Promise<void>;
 }
 

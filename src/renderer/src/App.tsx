@@ -823,9 +823,10 @@ export default function App(): React.JSX.Element {
       openUsageView: () => navigateToView("usage"),
       openConversation: (conversationId: string) => {
         const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
-        if (!target) return;
+        if (!target || target.archivedAt !== null) return false;
         selectConversation(target);
         setView("workspace");
+        return true;
       },
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {

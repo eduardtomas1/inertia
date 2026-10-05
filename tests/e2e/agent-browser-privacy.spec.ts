@@ -176,3 +176,23 @@ test("keeps React password replacement and same-document MFA usable with hidden 
   await selectWorkspaceTool(workspaceTools, "Browser");
   await expectSensitiveFieldInteraction(app, conversationId, workspaceTools);
 });
+
+test("never reports a dialog that echoes text typed into a closed shadow root", async () => {
+  const url = `${app.previewUrl}agent-browser-closed-shadow-alert`;
+  const evidence = await app.electronApp.evaluate(async ({ webContents }, request) => {
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      agentBrowser: (id: string, command: unknown) => Promise<{ ok: boolean; text?: string }>;
+    };
+    await runtime.agentBrowser(request.conversationId, { action: "navigate", url: request.url });
+    const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === request.url);
+    for (const keyCode of "hunter2") contents?.sendInputEvent({ type: "char", keyCode });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return await runtime.agentBrowser(request.conversationId, { action: "press", key: "Escape" });
+  }, { conversationId, url });
+  expect(evidence.ok).toBe(true);
+  expect(JSON.stringify(evidence)).not.toContain("hunter2");
+  expect(JSON.parse(evidence.text ?? "{}")).toMatchObject({
+    dialogs: expect.arrayContaining([{ kind: "alert", message: "", answer: "accept" }]),
+    dialogsWithheld: true,
+  });
+});

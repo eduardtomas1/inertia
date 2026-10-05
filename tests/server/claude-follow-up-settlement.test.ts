@@ -247,6 +247,9 @@ describe("Claude accepted follow-up settlement", () => {
           .toBe("settled");
         await expect(run.result).resolves.toMatchObject({
           status: "failed", cleanupConfirmed: true,
+          error: `${kind === "success-error"
+            ? "Claude could not complete the request."
+            : "Claude reached the maximum number of agent turns."} Your follow-up was not answered.`,
           failure: { terminalEvent: `result/${kind === "success-error" ? "api_error" : kind}` },
         });
         expect(close).toHaveBeenCalledOnce();
@@ -255,6 +258,49 @@ describe("Claude accepted follow-up settlement", () => {
         release();
         await run.result;
       }
+    },
+  );
+
+  it.each(["success-error", "error_max_turns"] as const)(
+    "keeps reading after a %s result while Claude reports the accepted follow-up as queued",
+    async (kind) => {
+      const root = portableFixtureRoot("Claude error result with queued follow-up");
+      roots.push(root);
+      let ready!: () => void;
+      const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+      const close = vi.fn();
+      const harness = createClaudeAgentSdkHarness({
+        createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+          const initial = (await iterator.next()).value!;
+          ready();
+          const followUp = (await iterator.next()).value!;
+          yield {
+            ...claudeSuccessResult("API Error: 529 overloaded"),
+            is_error: true,
+            queued_turn_count: 1,
+            user_message_uuid: initial.uuid,
+            ...(kind === "success-error"
+              ? { terminal_reason: "api_error" }
+              : { subtype: kind, errors: ["Maximum turns exceeded"] }),
+          } as SDKMessage;
+          yield { ...claudeSuccessResult("Follow-up answered", "completed"),
+            queued_turn_count: 0, user_message_uuid: followUp.uuid } as SDKMessage;
+        })(), { close }),
+      });
+      const run = harness.start({
+        input: nativeProviderRunInput({ providerId: "claude", conversationId: "error-follow-up",
+          cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+        executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+      });
+      await initialConsumed;
+      if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+      await expect(run.extension.steer?.({ content: "Also do this", imagePaths: [] })).resolves.toBe(true);
+      const result = await run.result;
+      expect(result).toMatchObject({ status: "completed", cleanupConfirmed: true });
+      expect(result.error).toBeUndefined();
+      expect(result.text).toContain("Follow-up answered");
+      expect(close).toHaveBeenCalledOnce();
     },
   );
 });

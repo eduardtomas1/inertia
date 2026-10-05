@@ -596,6 +596,14 @@ function startClaudeRun(
               messageProjector.resetTurnOutput();
               continue;
             }
+          } else if ((message.subtype !== "success" || message.is_error) && pendingFollowUpIds.size > 0) {
+            for (const userMessageId of claudeResultUserMessageIds(record, pendingFollowUpIds)) {
+              pendingFollowUpIds.delete(userMessageId);
+            }
+            if (pendingFollowUpIds.size > 0 && (message.queued_turn_count ?? 0) > 0) {
+              messageProjector.resetTurnOutput();
+              continue;
+            }
           }
           if (lifecycle.turnEnded && !hasLiveTaskTrace) break;
           if (lifecycle.turnEnded) terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
@@ -675,11 +683,14 @@ function startClaudeRun(
           },
         );
         const projectedFailure = messageProjector.preferredFailure();
-        const error = routeFailure(
+        const resultError = routeFailure(
           projectedFailure?.message
             ?? startupFailure?.message
             ?? claudeResultFailure(resultReason),
         );
+        const error = pendingFollowUpIds.size > 0
+          ? `${resultError} Your follow-up was not answered.`
+          : resultError;
         return finishResult(
           "failed",
           error,

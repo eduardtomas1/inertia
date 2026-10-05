@@ -213,4 +213,18 @@ describe("native CLI transcript projection", () => {
       claude("a2", "a1", "assistant", [{ type: "text", text: "Done <system-reminder>x</system-reminder>" }])), "claude", date);
     expect(claudeResult.messages.map(({ content }) => content)).toEqual(["Check in", "Done"]);
   });
+  it("keeps component markup in prose and code while still dropping injected blocks", () => {
+    const fence = "```vue\n<my-card>Hello</my-card>\n<v-btn>Save</v-btn>\n```";
+    const result = parseCliTranscript(lines(meta,
+      codex("user", "<environment_context>ctx</environment_context>\nUse <router-link to=\"/\">Home</router-link> in my nav and `<my-card>x</my-card>`."),
+      codex("assistant", "Write `<my-card>Hello</my-card>` then <v-btn>Save</v-btn>. <heartbeat>tick</heartbeat>"),
+      codex("user", `Render this:\n${fence}`),
+      codex("assistant", `<system-reminder>hidden</system-reminder>Here:\n${fence}`)), "codex", date);
+    expect(result.messages.map(({ content }) => content)).toEqual([
+      "Use <router-link to=\"/\">Home</router-link> in my nav and `<my-card>x</my-card>`.",
+      "Write `<my-card>Hello</my-card>` then <v-btn>Save</v-btn>.",
+      `Render this:\n${fence}`,
+      `Here:\n${fence}`,
+    ]);
+  });
 });

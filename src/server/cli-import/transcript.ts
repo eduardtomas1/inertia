@@ -36,6 +36,28 @@ export interface ParsedCliTranscript {
 const TITLE_MAX_TEXT = 160;
 const UNTITLED = "Untitled conversation";
 const WRAPPER_TAG = /<([a-z][a-z0-9]*(?:[-_][a-z0-9]+)+|heartbeat)(?:\s[^<>]*)?>/gu;
+const INJECTED_TAGS = new Set(["heartbeat", "system-reminder"]);
+type Speaker = "user" | "assistant";
+
+function codeRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const fence = /^ {0,3}(`{3,}|~{3,})[^\n]*$/gmu;
+  let open: { index: number; marker: string } | null = null;
+  for (let match = fence.exec(text); match; match = fence.exec(text)) {
+    if (!open) open = { index: match.index, marker: match[1]! };
+    else if (match[1]!.startsWith(open.marker)) {
+      ranges.push([open.index, match.index + match[0].length]);
+      open = null;
+    }
+  }
+  if (open) ranges.push([open.index, text.length]);
+  const inline = /`[^`\n]+`/gu;
+  for (let match = inline.exec(text); match; match = inline.exec(text)) {
+    const start = match.index;
+    if (!ranges.some(([from, to]) => start >= from && start < to)) ranges.push([start, start + match[0].length]);
+  }
+  return ranges;
+}
 
 function excerpt(text: string, limit: number): string {
   const flat = text.replace(/\s+/gu, " ").trim();
@@ -48,17 +70,21 @@ function delegatedInput(inner: string): string {
   const open = /<input(?:\s[^<>]*)?>/u.exec(inner);
   const close = inner.lastIndexOf("</input>");
   if (!open || close < open.index + open[0].length) return "";
-  return withoutWrappers(inner.slice(open.index + open[0].length, close));
+  return withoutWrappers(inner.slice(open.index + open[0].length, close), "user");
 }
 
-function withoutWrappers(text: string): string {
+function withoutWrappers(text: string, speaker: Speaker): string {
   const pattern = new RegExp(WRAPPER_TAG);
   const unclosed = new Set<string>();
+  const code = codeRanges(text);
   let result = "";
   let copied = 0;
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     const tag = match[1]!;
-    if (unclosed.has(tag)) continue;
+    const start = match.index;
+    if (unclosed.has(tag) || code.some(([from, to]) => start >= from && start < to)) continue;
+    const injected = INJECTED_TAGS.has(tag);
+    if (!injected && (speaker === "assistant" || text.slice(Math.max(copied, text.lastIndexOf("\n", start - 1) + 1), start).trim())) continue;
     const closing = text.indexOf(`</${tag}>`, pattern.lastIndex);
     if (closing < 0) { unclosed.add(tag); continue; }
     result += text.slice(copied, match.index);
@@ -70,7 +96,7 @@ function withoutWrappers(text: string): string {
 }
 
 function userProse(text: string, provider: CliProvider): string {
-  const prose = withoutWrappers(text).trim();
+  const prose = withoutWrappers(text, "user").trim();
   if (provider === "codex" && prose.startsWith("# AGENTS.md instructions")) return "";
   return /^\[Request interrupted by user[^\]]*\]$/u.test(prose) ? "" : prose;
 }
@@ -203,7 +229,7 @@ export class CliTranscriptParser {
 
   private message(role: unknown, raw: string, time: unknown): CliMessage | null {
     if (role !== "user" && role !== "assistant") return null;
-    const content = role === "user" ? userProse(raw, this.provider) : withoutWrappers(raw).trim();
+    const content = role === "user" ? userProse(raw, this.provider) : withoutWrappers(raw, "assistant").trim();
     const clean = redact(content, this.secrets).slice(0, 32 * 1024);
     return clean.trim() ? { role, content: clean, createdAt: timestamp(time, this.fallbackDate) } : null;
   }

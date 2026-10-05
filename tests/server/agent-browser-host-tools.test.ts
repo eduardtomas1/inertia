@@ -69,6 +69,22 @@ describe("agent browser host tools", () => {
     expect(request.requestApproval).not.toHaveBeenCalled();
   });
 
+  it("tells the model in a snapshot that the user has been using the page", async () => {
+    const broker = { perform: vi.fn(async () => ({
+      ok: true as const,
+      text: JSON.stringify({ title: "Local app", viewport: {}, text: "", elements: [] }),
+      state: {
+        activeTabId: tabId,
+        tabs: [{ id: tabId, title: "App", url: "http://127.0.0.1:3000", loading: false }],
+        activity: null,
+        controller: "user" as const,
+      },
+    })) };
+    const result = await new AgentBrowserHostTools(broker)
+      .invoke(conversation("full"), call("inertia_browser_snapshot", {}), identity);
+    expect(JSON.parse(result.text)).toMatchObject({ tabId, controller: "user", title: "Local app" });
+  });
+
   it("keeps screenshot bytes local even when a broker result regresses", async () => {
     const image = Buffer.from("png").toString("base64");
     const broker = { perform: vi.fn(async () => ({

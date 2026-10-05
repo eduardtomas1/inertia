@@ -4,6 +4,7 @@ import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-g
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, agentPageActivationTargetStillFocused, agentPageInputRefusal, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
 import { agentPageFocusIsHidden, installAgentFileChooserBlock, releaseAgentPageDebugger } from "./preview-agent-boundary.js";
+import { sendAgentPageInput } from "./preview-agent-control.js";
 
 export {
   agentPageBoundaryGaps,
@@ -95,7 +96,7 @@ async function dispatchAgentPageHover(
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
       if (contents.isDestroyed()) finish(new Error("The active Browser tab closed before hover."));
-      else contents.sendInputEvent({ type: "mouseMove", x, y });
+      else sendAgentPageInput(contents, { type: "mouseMove", x, y });
     } catch (error) {
       finish(error instanceof Error ? error : new Error("The Browser hover failed."));
     }
@@ -137,7 +138,7 @@ export async function dispatchAgentPageKeyDownAndSettle(
     throw new Error("The active Browser tab closed before key delivery.");
   }
   try {
-    contents.sendInputEvent({ type: "keyDown", keyCode, ...keyModifiers(modifiers) });
+    sendAgentPageInput(contents, { type: "keyDown", keyCode, ...keyModifiers(modifiers) });
   } catch (error) {
     throw error instanceof Error ? error : new Error("The Browser key delivery failed.");
   }
@@ -173,9 +174,9 @@ export async function deliverAgentPageActivation(
     ?? (targetStillFocused ? null : "retargeted");
   if (refusal) return refusal;
   if (!modifiers.includes("control") && !modifiers.includes("meta")) {
-    contents.sendInputEvent({ type: "char", keyCode: key === "Enter" ? "\r" : " ", ...keyModifiers(modifiers) });
+    sendAgentPageInput(contents, { type: "char", keyCode: key === "Enter" ? "\r" : " ", ...keyModifiers(modifiers) });
   }
-  contents.sendInputEvent({ type: "keyUp", keyCode, ...keyModifiers(modifiers) });
+  sendAgentPageInput(contents, { type: "keyUp", keyCode, ...keyModifiers(modifiers) });
   return null;
 }
 

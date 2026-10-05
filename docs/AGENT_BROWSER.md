@@ -107,6 +107,7 @@ may already have changed the page. The codes are:
 | `unavailable` | The page could not be loaded or the Browser cannot run. | true | true only when the Browser failed unexpectedly after sending the action |
 | `too-large` | A bound such as the eight-page limit was reached. | true | false |
 | `cancelled` | The turn cancelled the call. | false | true when the action had been sent |
+| `interrupted` | The user clicked or typed in the page while the call was running. | true | true when the action had been sent |
 | `user_denied`, `call_cancelled`, `unknown_tool`, `invalid_owner` | The runtime refused the call before it reached the Browser. | false | false |
 
 When the runtime itself stops waiting for the Browser, the result is
@@ -317,6 +318,17 @@ is using it and restores it two seconds after the last command. Menus,
 dialogs, and approval prompts hide the native page without resizing it, so an
 agent action that is waiting for approval is not invalidated by its own
 prompt; only a change to the page's size invalidates in-flight refs.
+
+The user can take over the page at any time. When the user clicks or types
+in the Browser pane while an agent command is running, the command stops and
+fails with `interrupted` and the message "The user is using this page; take a
+new snapshot before continuing." After any click or keystroke by the user,
+`inertia_browser_tabs`, snapshots and every other result report
+`controller: "user"` until the next successful agent action other than
+listing tabs. Inertia tells its own input apart from the user's by recording
+each mouse press and key press it sends, at most 64 at a time and for two
+seconds each, and consuming the matching event when Chromium reports it;
+pointer movement, wheel scrolling and key releases never count as the user.
 
 If a page's renderer crashes, or the inspection connection to a page is lost,
 the next command says so and that navigating to the page again recovers it.

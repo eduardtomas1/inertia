@@ -17,12 +17,15 @@ type PreviewContents = PreviewTab["view"]["webContents"];
 
 export class AgentBrowserTimeout extends Error {}
 
+const INTERRUPTED_MESSAGE = "The user is using this page; take a new snapshot before continuing.";
+
 const restTimers = new WeakMap<PreviewContents, ReturnType<typeof setTimeout>>();
 
 export class AgentOperationScope {
   readonly signal: AbortSignal;
   inputSent = false;
   timedOut = false;
+  interrupted = false;
   readonly #deadlineAt: number;
   readonly #controller = new AbortController();
   readonly #timer: ReturnType<typeof setTimeout>;
@@ -41,6 +44,11 @@ export class AgentOperationScope {
     this.#timer.unref();
     if (caller?.aborted) this.#controller.abort();
     else caller?.addEventListener("abort", this.#onCallerAbort, { once: true });
+  }
+
+  interrupt(): void {
+    this.interrupted = true;
+    this.#controller.abort();
   }
 
   remaining(): number {
@@ -101,7 +109,7 @@ function withReachedPage(
   scope: AgentOperationScope | undefined,
 ): AgentBrowserResult {
   return !result.ok && scope?.inputSent && result.reachedPage === undefined
-    && ["cancelled", "timeout", "unavailable"].includes(result.code)
+    && ["cancelled", "interrupted", "timeout", "unavailable"].includes(result.code)
     ? { ...result, reachedPage: true }
     : result;
 }
@@ -110,6 +118,7 @@ export function agentOperationFailure(
   error: unknown,
   scope: AgentOperationScope | undefined,
 ): AgentBrowserResult {
+  if (scope?.interrupted) return withReachedPage(failure("interrupted", INTERRUPTED_MESSAGE), scope);
   if (error instanceof AgentBrowserRefusal) return error.result;
   if (error instanceof AgentBrowserTimeout) {
     return withReachedPage(failure("timeout", `${error.message}${outcomeAfterTimeout(scope)}`), scope);

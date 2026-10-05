@@ -114,4 +114,32 @@ describe("Browser tool surface", () => {
     await expect(broker.perform(runIdentity, { action: "navigate", url: "example.com:5173" }))
       .resolves.toMatchObject({ ok: false, code: "invalid" });
   });
+
+  it("stops an agent command when the user clicks or types in the page and reports the user in control", async () => {
+    const { broker, contents } = await loadedHarness();
+    const waiting = broker.perform(runIdentity, {
+      action: "wait", text: "never shown", state: "present", timeoutMs: 10_000,
+    });
+    await vi.waitFor(() => expect(pageTools.semanticPageSnapshot).toHaveBeenCalled());
+    contents.emit("input-event", {}, { type: "mouseMove", x: 5, y: 5 });
+    contents.emit("input-event", {}, { type: "mouseDown", x: 5, y: 5 });
+    await expect(waiting).resolves.toEqual({
+      ok: false,
+      code: "interrupted",
+      message: "The user is using this page; take a new snapshot before continuing.",
+    });
+    const tabs = await broker.perform(runIdentity, { action: "tabs" });
+    expect(tabs).toMatchObject({ ok: true, state: { controller: "user" } });
+    expect(JSON.parse((tabs as { text: string }).text)).toMatchObject({ controller: "user" });
+    await expect(broker.perform(runIdentity, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true, state: { controller: "user" } });
+    const after = await broker.perform(runIdentity, { action: "tabs" });
+    expect(after).toMatchObject({ ok: true });
+    expect((after as { state: Record<string, unknown> }).state).not.toHaveProperty("controller");
+
+    await expect(broker.perform(runIdentity, { action: "click", ref: "e1" }))
+      .resolves.toMatchObject({ ok: true });
+    expect((await broker.perform(runIdentity, { action: "tabs" }) as { state: Record<string, unknown> }).state)
+      .not.toHaveProperty("controller");
+  });
 });

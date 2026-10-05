@@ -54,6 +54,8 @@ interface PreviewSession extends AgentOperationSession {
   nextPageNumber: number;
   lastUsedAt: number;
   busy: number;
+  controller: "agent" | "user";
+  operation: AgentOperationScope | null;
 }
 
 interface PreviewBrokerOptions {
@@ -265,6 +267,7 @@ export class PreviewBroker {
           session.activeIdentity = identity;
           session.lastUsedAt = this.#now();
           const operation = scope = new AgentOperationScope(budgetFor(request), signal);
+          session.operation = operation;
           operation.keepAwake(this.#active(session).view.webContents);
           if (request.action === "prepare-approval") {
             const refusal = blankTabRefusal(this.#active(session).view.webContents, request.command);
@@ -331,8 +334,15 @@ export class PreviewBroker {
             }
           } finally {
             if (session.activeIdentity === identity) session.activeIdentity = null;
+            if (session.operation === operation) session.operation = null;
           }
-        }, AGENT_BROWSER_QUEUE_WAIT_MS);
+        }, AGENT_BROWSER_QUEUE_WAIT_MS).then((result) => {
+          if (result?.ok && !scope?.interrupted && request.action !== "tabs"
+            && request.action !== "prepare-approval" && request.action !== "discard-approval") {
+            session.controller = "agent";
+          }
+          return result;
+        });
         return entered ?? failure(
           "timeout",
           "Inertia Browser is still busy with an earlier action in this chat. Nothing was sent to the page for this call; try again shortly.",
@@ -561,6 +571,7 @@ export class PreviewBroker {
       activeTabId: session.activeTabId,
       tabs: [...session.tabs.values()].map((tab) => this.#agentTab(tab)),
       activity: session.activity,
+      ...(session.controller === "user" ? { controller: "user" as const } : {}),
     };
   }
   #publish(session: PreviewSession): void {
@@ -716,6 +727,8 @@ export class PreviewBroker {
       nextPageNumber: 0,
       lastUsedAt: this.#now(),
       busy: 0,
+      controller: "agent",
+      operation: null,
     };
     const tab = this.#openTab(session);
     session.activeTabId = tab.id;
@@ -761,6 +774,11 @@ export class PreviewBroker {
           sameDocument,
           this.#evidenceAuthority(session, currentTab.id),
         );
+      },
+      userInput: () => {
+        if (this.#sessions.get(session.contextId) !== session) return;
+        session.controller = "user";
+        session.operation?.interrupt();
       },
       consoleError: (currentTab, message) => {
         session.evidence.recordConsoleError(

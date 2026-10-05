@@ -20,6 +20,7 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
   type AgentPageNotInspected,
 } from "./preview-agent-page.js";
+import { sendAgentPageInput } from "./preview-agent-control.js";
 import { navigationFailureMessage, withheldEvidenceMessage } from "./preview-agent-messages.js";
 import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, type PreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
@@ -465,8 +466,8 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         "invalid", "That page element is disabled.",
       ));
       validate?.(finalTarget);
-      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+      sendAgentPageInput(contents, { type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      sendAgentPageInput(contents, { type: "mouseUp", x, y, button: "left", clickCount: 1 });
     }, scope, ref);
     if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Take a new inertia_browser_snapshot for current refs.");
     if (deliveryRefusal) return failure("invalid", deliveryRefusal === "file"
@@ -597,8 +598,8 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       } else {
         validate?.();
         const keyModifiers = modifiers.length > 0 ? { modifiers } : {};
-        contents.sendInputEvent({ type: "keyDown", keyCode, ...keyModifiers });
-        contents.sendInputEvent({ type: "keyUp", keyCode, ...keyModifiers });
+        sendAgentPageInput(contents, { type: "keyDown", keyCode, ...keyModifiers });
+        sendAgentPageInput(contents, { type: "keyUp", keyCode, ...keyModifiers });
       }
     }, scope);
     const refusal = activationBlocked || deliveryRefusal;
@@ -616,7 +617,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     await this.#sendInputAndWait(contents, () => {
       validate?.();
       scope.inputSent = true;
-      contents.sendInputEvent({
+      sendAgentPageInput(contents, {
         type: "mouseWheel",
         x: Math.max(0, Math.floor(bounds.width / 2)),
         y: Math.max(0, Math.floor(bounds.height / 2)),

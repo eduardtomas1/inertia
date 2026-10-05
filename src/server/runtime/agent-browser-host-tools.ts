@@ -383,7 +383,9 @@ function resultText(
   if (!parsed) return text;
   if (command.action === "snapshot") {
     return withFrontendBrowserAudit(JSON.stringify(
-      Array.isArray(parsed.elements) ? { tabId: state.activeTabId, ...parsed } : { ...parsed, state },
+      Array.isArray(parsed.elements)
+        ? { tabId: state.activeTabId, ...(state.controller ? { controller: state.controller } : {}), ...parsed }
+        : { ...parsed, state },
     ));
   }
   if (Object.hasOwn(parsed, "state") || Object.hasOwn(parsed, "activeTabId")) return text;

@@ -55,6 +55,7 @@ export interface AgentBrowserState {
   activeTabId: string;
   tabs: AgentBrowserTab[];
   activity: AgentBrowserActivity | null;
+  controller?: "user";
 }
 
 export type AgentBrowserCommand =
@@ -112,6 +113,7 @@ export type AgentBrowserResult =
 
 export const AGENT_BROWSER_FAILURE_CODES = [
   "cancelled",
+  "interrupted",
   "invalid",
   "not-found",
   "sensitive",
@@ -314,7 +316,8 @@ function safeActivity(value: unknown): value is AgentBrowserActivity {
 
 function safeState(value: unknown): value is AgentBrowserState {
   return plainObject(value)
-    && exactKeys(value, ["activeTabId", "tabs", "activity"])
+    && exactKeys(value, ["activeTabId", "tabs", "activity"], ["controller"])
+    && (value.controller === undefined || value.controller === "user")
     && safeTabId(value.activeTabId)
     && Array.isArray(value.tabs)
     && value.tabs.length > 0

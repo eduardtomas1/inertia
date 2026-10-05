@@ -13,16 +13,16 @@ import type { HelpCommand } from "./welcome-guide/helpTopics";
 export function HelpGuideHost({
   shortcutLabel,
   commands,
-  projects = [],
-  currentProjectId = null,
+  projects,
+  currentProjectId,
   onOpenSettings,
   onLeave,
   onLoadError,
 }: {
   shortcutLabel: (action: AppShortcutAction) => string;
   commands: Record<HelpCommand, () => void>;
-  projects?: readonly Pick<Project, "id" | "workspaceKind">[];
-  currentProjectId?: string | null;
+  projects: readonly Pick<Project, "id" | "workspaceKind">[];
+  currentProjectId: string | null;
   onOpenSettings: (target: SettingsTarget) => void;
   onLeave: () => void;
   onLoadError: (message: string) => void;

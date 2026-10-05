@@ -86,7 +86,7 @@ function PaletteAndHelp({ props }: { props: ReturnType<typeof hostProps> }): Rea
         importProject={async () => undefined}
         openSettings={vi.fn()}
       />
-      <HelpGuideHost {...props} />
+      <HelpGuideHost projects={[]} currentProjectId={null} {...props} />
     </>
   );
 }
@@ -150,7 +150,7 @@ describe("Help native preview suspension", () => {
 
   it("releases the preview and reports the failure when the Help chunk cannot load, then retries", async () => {
     const props = hostProps();
-    render(<HelpGuideHost {...props} />);
+    render(<HelpGuideHost projects={[]} currentProjectId={null} {...props} />);
 
     act(() => openHelpGuide());
     expect(nativePreviewSuspended()).toBe(true);
@@ -169,7 +169,7 @@ describe("Help native preview suspension", () => {
   });
 
   it("keeps one continuous hold across a rapid open, close and reopen while loading", async () => {
-    render(<HelpGuideHost {...hostProps()} />);
+    render(<HelpGuideHost projects={[]} currentProjectId={null} {...hostProps()} />);
 
     act(() => openHelpGuide());
     act(() => closeHelpGuide());

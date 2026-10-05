@@ -34,7 +34,7 @@ async function openHelp(props = hostProps()) {
   render(
     <>
       <SidebarHelpButton />
-      <HelpGuideHost {...props} />
+      <HelpGuideHost projects={[]} currentProjectId={null} {...props} />
     </>,
   );
   const opener = screen.getByRole("button", { name: "Help" });

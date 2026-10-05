@@ -28,6 +28,7 @@ import {
   stabilizeResponseTimeline,
   turnExecutionElapsedMs,
   turnTimingLabels,
+  workSummaryLabel,
   type ResponseTurn,
   type TurnGitArtifactSummary,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -1026,6 +1027,25 @@ describe("authoritative response timeline", () => {
     expect(second.agentTurn.model).toBe("gpt-5.6");
     expect(second.agentTurn.harnessId).toBe("codex-app-server");
     expect(second.activities).toEqual([]);
+  });
+
+  it("says a turn stopped at its usage limit instead of calling it a failure", () => {
+    const failed = (usageLimited: boolean) => {
+      const turn = { ...agentTurn("limited", "limited-user", { status: "failed" }), ...(usageLimited ? { usageLimited: true as const } : {}) };
+      return timelineTurn(buildResponseTimeline({
+        turns: [turn],
+        messages: [message("limited-user", turn.id, "user", "Run it", turn.requestedAt)],
+        activities: [],
+        reasonings: [],
+        checkpoints: [],
+      }), turn.id);
+    };
+    expect(workSummaryLabel(failed(true))).toBe("Usage limit reached after 7s");
+    expect(turnTimingLabels(failed(true))).toEqual(["Queued 5s", "Usage limit reached after 7s"]);
+    expect(workSummaryLabel(failed(false))).toBe("Failed after 7s");
+    const unstarted = { ...failed(true), startedAt: null };
+    expect(workSummaryLabel(unstarted)).toBe("Usage limit reached");
+    expect(turnTimingLabels(unstarted)[1]).toBe("Usage limit reached");
   });
 
   it("excludes persisted system suspend time from completed work duration", () => {

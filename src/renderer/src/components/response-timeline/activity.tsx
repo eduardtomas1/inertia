@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDot,
+  Clock3,
   Code2,
   FileText,
   ListChecks,
@@ -1090,7 +1091,9 @@ export function WorkLog({
   }
 
   const hasFoldableDetails = stream.length > 0 || supplementalCount > 0;
-  const status = turn.agentTurn.status === "failed"
+  const status = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
+    ? "limited"
+    : turn.agentTurn.status === "failed"
     ? "failed"
     : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
       ? "stopped"
@@ -1099,6 +1102,8 @@ export function WorkLog({
     <>
       {status === "failed"
         ? <TriangleAlert size={13} aria-hidden="true" />
+        : status === "limited"
+          ? <Clock3 size={13} aria-hidden="true" />
         : status === "stopped"
           ? <CircleDot size={13} aria-hidden="true" />
           : <CheckCircle2 size={13} aria-hidden="true" />}
@@ -1157,7 +1162,7 @@ export function WorkLog({
         <ActivityGroup
           entry={attentionGroup}
           settled
-          revealLatestFailure={status === "failed"}
+          revealLatestFailure={status === "failed" || status === "limited"}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />

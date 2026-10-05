@@ -166,7 +166,7 @@ export function agentPageActivationFailureMessage(
   if (refusal === "file") return "File inputs cannot be activated by the Browser agent.";
   if (refusal === "disabled") return "The focused page element is disabled.";
   if (refusal === "retargeted") {
-    return "The focused page element changed during activation. Inspect the page again for current refs.";
+    return "The focused page element changed during activation. Take a new inertia_browser_snapshot for current refs.";
   }
   return "Enter and Space are unavailable while focus is inside an embedded frame or a closed shadow root, because Inertia cannot see the control they would activate. Click a control from the latest snapshot first.";
 }

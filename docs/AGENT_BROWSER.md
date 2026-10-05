@@ -78,17 +78,25 @@ Codex threads keep working with the retired tools and new threads receive the
 current ones; no native continuation is cleared.
 
 Every successful result is JSON that includes the tab state, and a snapshot
-names the tab it describes. Every failure is `{"error":{"code","message"}}`
-where the message says what to do next. The codes are:
+names the tab it describes. Every failure is
+`{"error":{"code","message","retryable","reachedPage"}}` where the message
+says what to do next. `retryable` says whether the same call can succeed once
+the step the message names is done, and `reachedPage` says whether the action
+may already have changed the page. The codes are:
 
-- `invalid`: the arguments or the target were not acceptable;
-- `not-found`: the tab is blank, the tab is gone, or the ref is stale;
-- `sensitive`: page content is withheld for privacy (see below);
-- `timeout`: the deadline passed, and the message says whether the action had
-  already reached the page;
-- `unavailable`: the page could not be loaded or the Browser cannot run;
-- `too-large`: a bound such as the eight-page limit was reached;
-- `cancelled`: the turn cancelled the call.
+| Code | Meaning | `retryable` | `reachedPage` |
+| --- | --- | --- | --- |
+| `invalid` | The arguments or the target were not acceptable. | false | false |
+| `not-found` | The tab is blank, the tab is gone, or the ref is stale; a stale ref asks for a new `inertia_browser_snapshot`. | true | false |
+| `sensitive` | Page content is withheld for privacy (see below). | false | false |
+| `timeout` | The deadline passed; the message says whether the action had already reached the page. | true | true when the action had been sent |
+| `unavailable` | The page could not be loaded or the Browser cannot run. | true | true only when the Browser failed unexpectedly after sending the action |
+| `too-large` | A bound such as the eight-page limit was reached. | true | false |
+| `cancelled` | The turn cancelled the call. | false | true when the action had been sent |
+| `user_denied`, `call_cancelled`, `unknown_tool`, `invalid_owner` | The runtime refused the call before it reached the Browser. | false | false |
+
+When the runtime itself stops waiting for the Browser, the result is
+`timeout` with `reachedPage: true`, because the outcome is unknown.
 
 A new tab is blank. A snapshot of a blank tab is not an error: it returns
 `{"blank":true,"nextStep":...}` so the agent navigates first. After a failed

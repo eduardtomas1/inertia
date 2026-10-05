@@ -573,6 +573,7 @@ describe("conversation-owned Browser sessions", () => {
         ok: false,
         code: "timeout",
         message: expect.stringContaining("Input may already have reached the page, so its effect is unknown"),
+        reachedPage: true,
       });
       expect(children[0]!.webContents.sentInputs).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "mouseDown" }),

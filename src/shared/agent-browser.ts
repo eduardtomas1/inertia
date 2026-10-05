@@ -96,6 +96,7 @@ export type AgentBrowserResult =
       ok: false;
       code: AgentBrowserFailureCode;
       message: string;
+      reachedPage?: boolean;
     };
 
 export const AGENT_BROWSER_FAILURE_CODES = [
@@ -317,11 +318,17 @@ function utf8Bytes(value: string): number {
 export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | null {
   if (!plainObject(value) || typeof value.ok !== "boolean") return null;
   if (!value.ok) {
-    return exactKeys(value, ["ok", "code", "message"])
+    return exactKeys(value, ["ok", "code", "message"], ["reachedPage"])
       && typeof value.code === "string"
       && (AGENT_BROWSER_FAILURE_CODES as readonly string[]).includes(value.code)
       && safeText(value.message, 1_000, true)
-      ? { ok: false, code: value.code as AgentBrowserFailureCode, message: value.message }
+      && (value.reachedPage === undefined || typeof value.reachedPage === "boolean")
+      ? {
+          ok: false,
+          code: value.code as AgentBrowserFailureCode,
+          message: value.message,
+          ...(typeof value.reachedPage === "boolean" ? { reachedPage: value.reachedPage } : {}),
+        }
       : null;
   }
   if (

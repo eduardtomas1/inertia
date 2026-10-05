@@ -95,25 +95,35 @@ function outcomeAfterTimeout(scope: AgentOperationScope | undefined): string {
     : " Nothing had been sent to the page yet, so it is safe to try again.";
 }
 
+function withReachedPage(
+  result: AgentBrowserResult,
+  scope: AgentOperationScope | undefined,
+): AgentBrowserResult {
+  return !result.ok && scope?.inputSent && result.reachedPage === undefined
+    && ["cancelled", "timeout", "unavailable"].includes(result.code)
+    ? { ...result, reachedPage: true }
+    : result;
+}
+
 export function agentOperationFailure(
   error: unknown,
   scope: AgentOperationScope | undefined,
 ): AgentBrowserResult {
   if (error instanceof AgentBrowserRefusal) return error.result;
   if (error instanceof AgentBrowserTimeout) {
-    return failure("timeout", `${error.message}${outcomeAfterTimeout(scope)}`);
+    return withReachedPage(failure("timeout", `${error.message}${outcomeAfterTimeout(scope)}`), scope);
   }
   if (error instanceof Error && error.message === "browser-action-cancelled") {
-    return scope?.timedOut
+    return withReachedPage(scope?.timedOut
       ? failure("timeout", `The browser action ran out of time.${outcomeAfterTimeout(scope)}`)
-      : failure("cancelled", "The browser action was cancelled.");
+      : failure("cancelled", "The browser action was cancelled."), scope);
   }
-  return failure(
+  return withReachedPage(failure(
     "unavailable",
     error instanceof Error
       ? sanitizeBrowserEvidenceText(error.message, "The Inertia Browser action failed.", 600).text
       : "The Inertia Browser action failed.",
-  );
+  ), scope);
 }
 
 export function agentOperationDelay(milliseconds: number, signal: AbortSignal): Promise<void> {

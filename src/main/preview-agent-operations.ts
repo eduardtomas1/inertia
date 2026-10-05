@@ -385,7 +385,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     let x = located.x;
     let y = located.y;
     if (!located.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
+      return failure("not-found", "That page element is stale. Take a new inertia_browser_snapshot for current refs.");
     }
     if (located.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (located.disabled) return failure("invalid", "That page element is disabled.");
@@ -407,7 +407,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     x = revalidated.x;
     y = revalidated.y;
     if (!revalidated.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element changed before the click. Inspect the page again for current refs.");
+      return failure("not-found", "That page element changed before the click. Take a new inertia_browser_snapshot for current refs.");
     }
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
@@ -428,7 +428,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (!finalTarget.found || x === undefined || y === undefined) {
         throw new AgentBrowserRefusal(failure(
           "not-found",
-          "That page element changed before the click. Inspect the page again for current refs.",
+          "That page element changed before the click. Take a new inertia_browser_snapshot for current refs.",
         ));
       }
       if (finalTarget.blocked) throw new AgentBrowserRefusal(failure(
@@ -441,7 +441,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
       contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
     }, scope, ref);
-    if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Inspect the page again for current refs.");
+    if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Take a new inertia_browser_snapshot for current refs.");
     if (deliveryRefusal) return failure("invalid", deliveryRefusal === "file"
       ? "File inputs cannot be activated by the Browser agent."
       : deliveryRefusal === "disabled" ? "That page element became disabled during the click."
@@ -471,7 +471,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     let x = located.x;
     let y = located.y;
     if (!located.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
+      return failure("not-found", "That page element is stale. Take a new inertia_browser_snapshot for current refs.");
     }
     if (located.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (located.disabled) return failure("invalid", "That page element is disabled.");
@@ -494,7 +494,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     x = revalidated.x;
     y = revalidated.y;
     if (!revalidated.found || x === undefined || y === undefined) {
-      return failure("not-found", "That page element lost focus before typing. Inspect the page again for current refs.");
+      return failure("not-found", "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.");
     }
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
@@ -516,7 +516,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       if (!finalTarget.found || x === undefined || y === undefined) {
         throw new AgentBrowserRefusal(failure(
           "not-found",
-          "That page element lost focus before typing. Inspect the page again for current refs.",
+          "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.",
         ));
       }
       if (finalTarget.blocked) throw new AgentBrowserRefusal(failure(
@@ -535,7 +535,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
       );
       if (!stillFocused) throw new AgentBrowserRefusal(failure(
         "not-found",
-        "That page element lost focus before typing. Inspect the page again for current refs.",
+        "That page element lost focus before typing. Take a new inertia_browser_snapshot for current refs.",
       ));
       if (validate) validate(await this.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" }));
       await contents.insertText(text);

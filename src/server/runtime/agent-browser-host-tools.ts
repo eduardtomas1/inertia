@@ -222,8 +222,13 @@ export const AGENT_BROWSER_TOOL_NAMES = new Set([
   ...RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 ].map(({ name }) => name));
 
-function failure(code: string, message: string): ProviderHostToolResult {
-  return { success: false, text: JSON.stringify({ error: { code, message } }) };
+const RETRYABLE_FAILURES = new Set(["interrupted", "not-found", "timeout", "too-large", "unavailable"]);
+
+function failure(code: string, message: string, reachedPage = false): ProviderHostToolResult {
+  return {
+    success: false,
+    text: JSON.stringify({ error: { code, message, retryable: RETRYABLE_FAILURES.has(code), reachedPage } }),
+  };
 }
 
 function retiredTabsArguments(value: unknown): boolean {
@@ -424,6 +429,6 @@ export class AgentBrowserHostTools {
     );
     return result.ok
       ? { success: true, text: resultText(command, result.text, result.state) }
-      : failure(result.code, result.message);
+      : failure(result.code, result.message, result.reachedPage === true);
   }
 }

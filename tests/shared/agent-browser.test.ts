@@ -85,6 +85,10 @@ describe("agent browser boundary", () => {
     expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "" })).toBeNull();
     expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", retry: true }))
       .toBeNull();
+    expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", reachedPage: true }))
+      .toEqual({ ok: false, code: "timeout", message: "Explained.", reachedPage: true });
+    expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", reachedPage: "yes" }))
+      .toBeNull();
   });
 
   it("keeps the runtime backstop above every deadline the main process enforces", () => {

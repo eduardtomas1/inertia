@@ -118,9 +118,12 @@ export function backgroundTaskCurrentActivity(trace: SubagentTrace): string | nu
 }
 
 export function backgroundTaskDoingNow(trace: SubagentTrace): string | null {
-  return isLiveSubagentTrace(trace)
-    ? backgroundTaskCurrentActivity(trace) ?? trace.progress
-    : trace.result;
+  if (!isLiveSubagentTrace(trace)) return trace.result;
+  const activity = backgroundTaskCurrentActivity(trace);
+  // A bare tool name such as "Bash" says less than the provider's own
+  // progress sentence, so the sentence wins; a descriptive activity stays.
+  if (activity && trace.progress && !/\s/u.test(activity.trim())) return trace.progress;
+  return activity ?? trace.progress;
 }
 
 export function backgroundTaskElapsedMs(trace: SubagentTrace, now: number): number | null {

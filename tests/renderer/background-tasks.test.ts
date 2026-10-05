@@ -52,7 +52,11 @@ describe("background task rows", () => {
 
   it("says what a live task is doing now and what a settled task produced", () => {
     expect(backgroundTaskDoingNow(taskTrace({ activity: "Read", progress: "Scanning files" })))
-      .toBe("Read");
+      .toBe("Scanning files");
+    expect(backgroundTaskDoingNow(taskTrace({
+      activity: "Searching src/server for usage parsers",
+      progress: "Mapping the token usage pipeline",
+    }))).toBe("Searching src/server for usage parsers");
     expect(backgroundTaskDoingNow(taskTrace({ progress: "Scanning files" })))
       .toBe("Scanning files");
     expect(backgroundTaskDoingNow(taskTrace({

@@ -546,7 +546,7 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     const page = app.page;
     let region = await showChat(app, seed.claude);
     const reviewer = card(region, "Code reviewer");
-    await expect(reviewer).toContainText("Grep");
+    await expect(reviewer.locator(".background-task-live")).toHaveText("Reading the provider adapters");
     await expect(reviewer).toContainText("18.6K tokens");
     await expect(reviewer).toContainText("9 tool uses");
     await expect(reviewer.getByRole("button", { name: "Stop Code reviewer" })).toBeVisible();

@@ -140,6 +140,38 @@ describe("agent harness architecture", () => {
     ]);
   });
 
+  it("scrubs streamed output without trimming its whitespace", () => {
+    const events: AgentHarnessEvent[] = [];
+    const emitter = createAgentHarnessEmitter("codex", "conversation-1", {
+      onEvent: (event) => events.push(event),
+    }, "run-1", "turn-1", "/workspace/project");
+
+    emitter.activity("command", "started", "npm test", {
+      activityId: "command-1",
+      outputDelta: "  /workspace/project/src ok\u001B[31m red\u001B[0m\r\n",
+    });
+    emitter.activity("command", "started", "npm test", {
+      activityId: "command-1",
+      outputDelta: "\n",
+    });
+    emitter.activity("command", "started", "npm test", {
+      activityId: "command-1",
+      outputDelta: "token=abcdefgh12345678 ",
+    });
+    emitter.activity("command", "started", "npm test", {
+      activityId: "command-1",
+      outputDelta: "",
+    });
+
+    expect(events.map((event) =>
+      event.type === "activity" ? event.outputDelta : null)).toEqual([
+      "  <workspace>/src ok red\n",
+      "\n",
+      "token=[redacted] ",
+      undefined,
+    ]);
+  });
+
   it("forwards delegated task telemetry from the harness to the provider event", () => {
     const events: ProviderEvent[] = [];
     const providerEmitter = createProviderEmitter("codex", "conversation-1", {

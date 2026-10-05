@@ -3,6 +3,8 @@ import type {
   RuntimeMutationEvent,
 } from "@shared/contracts";
 
+import { structurallyEqual } from "./structuralEquality";
+
 type ConversationShellEvent = Extract<
   RuntimeMutationEvent,
   { type: "conversation.shell.updated" }
@@ -19,6 +21,22 @@ function descendingTimestamp(
     || left.id.localeCompare(right.id, "en");
 }
 
+function unchangedShell(
+  snapshot: AppSnapshot,
+  event: ConversationShellEvent,
+): boolean {
+  const current = snapshot.conversations.find(
+    ({ id }) => id === event.conversation.id,
+  );
+  if (!current || !structurallyEqual(current, event.conversation)) return false;
+  const currentRuns = snapshot.runs.filter(
+    ({ conversationId }) => conversationId === event.conversation.id,
+  );
+  if (currentRuns.length !== event.runs.length) return false;
+  const runsById = new Map(currentRuns.map((run) => [run.id, run]));
+  return event.runs.every((run) => structurallyEqual(runsById.get(run.id), run));
+}
+
 /**
  * Applies one bounded conversation projection to the renderer's shell.
  * Transcript and execution-detail payloads remain on their subscribed stream.
@@ -27,6 +45,7 @@ export function applyConversationShellEvent(
   snapshot: AppSnapshot,
   event: ConversationShellEvent,
 ): AppSnapshot {
+  if (unchangedShell(snapshot, event)) return snapshot;
   const conversations = [
     ...snapshot.conversations.filter(({ id }) => id !== event.conversation.id),
     event.conversation,

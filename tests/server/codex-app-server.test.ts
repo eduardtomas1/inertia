@@ -225,8 +225,13 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(reasoning).toEqual(["Checking the safest path."]);
     expect(activities).toContainEqual(expect.objectContaining({
       activityId: "command-1",
+      phase: "started",
+      detail: "Command:\nnpm test",
+    }));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "command-1",
       phase: "completed",
-      detail: "Command:\nnpm test\n\nOutput:\npassed",
+      detail: "Output:\npassed",
     }));
     expect(usage).toEqual([126]);
     expect(metadata).toContainEqual(["codex:primary"]);

@@ -584,6 +584,13 @@ describe("TurnController coalesced streaming", () => {
     runtime.provider.emit({
       ...providerIdentity(runtime),
       type: "activity",
+      kind: "command",
+      phase: "started",
+      label: "npm test",
+    });
+    runtime.provider.emit({
+      ...providerIdentity(runtime),
+      type: "activity",
       kind: "tool",
       phase: "info",
       label: "Read source",

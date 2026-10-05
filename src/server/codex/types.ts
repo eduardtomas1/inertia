@@ -73,7 +73,7 @@ export interface CodexAppServerOptions {
     kind: "system" | "turn" | "tool" | "command" | "reasoning",
     phase: "started" | "completed" | "failed" | "info",
     label: string,
-    detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
+    detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta">,
   ) => void;
   onSession?: (sessionId: string) => void;
   onStatus?: (

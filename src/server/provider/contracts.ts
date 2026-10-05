@@ -243,6 +243,7 @@ export interface ProviderActivityEvent extends ProviderEventBase {
   activityId?: string;
   /** Bounded, scrubbed technical input/output; never assistant prose. */
   detail?: string;
+  outputDelta?: string;
 }
 
 export interface ProviderStatusEvent extends ProviderEventBase {

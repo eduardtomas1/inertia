@@ -190,7 +190,7 @@ export const Composer = memo(function Composer({
   const continuationNoticeId = useId();
   const {
     pendingRoute, creatingRouteConversation, routeCancelRef, canCreateRouteConversation, routeCreationBlockedReason,
-    offerNewChat, dismissPendingRoute, createRouteConversation, resetNewChatOffer,
+    offerNewChat, dismissPendingRoute, rememberOfferOrigin, createRouteConversation, resetNewChatOffer,
   } = useComposerNewChatOffer({
     conversation, latestTurn: latestKnownTurn ?? null, backendProfiles, message,
     composerRef, textareaRef, mountedRef, conversationIdRef, editorRevisionsRef, onCreateConversationForSelection, setConversationUpdateError,
@@ -967,7 +967,8 @@ export const Composer = memo(function Composer({
     });
   };
   const conversationProvider = providers.find(({ id }) => id === conversation.providerId);
-  const openModelChooser = (): void => {
+  const openModelChooser = (origin: HTMLButtonElement): void => {
+    rememberOfferOrigin(origin);
     const chip = composerRef.current?.querySelector<HTMLButtonElement>(".selected-model-chip");
     if (chip?.getAttribute("aria-expanded") !== "true") chip?.click();
   };
@@ -975,7 +976,8 @@ export const Composer = memo(function Composer({
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
       providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}
-      onCommand={onLimitResetCommand} onContinueElsewhere={onCreateConversationForSelection ? openModelChooser : undefined} />
+      onCommand={onLimitResetCommand} onContinueElsewhere={onCreateConversationForSelection ? openModelChooser : undefined}
+      continueElsewhereDisabled={pendingRoute !== null} />
   </Suspense>;
   return (
     <div className="composer-shell">

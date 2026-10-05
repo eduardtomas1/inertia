@@ -57,14 +57,20 @@ not offered while a resume is scheduled; cancel the resume first. Choosing a
 model from another provider asks **Continue in a new chat with** that model.
 **Continue** creates the new chat on the same checkout and branch as the
 limited chat (its worktree, if it has one) and attaches the whole limited chat
-as context: up to 256 KiB of its visible messages, each excerpt at most 8 KiB,
-with secrets redacted. The context shows above the composer of the new chat,
-where you can preview or remove it before the first message. The limited chat
-keeps its history and its resume offer. Inertia refuses while the limited chat
-still has a turn in progress, when the project checkout has since moved to
-another branch, and for chats without a project, whose folder belongs to that
-chat. If you delete the limited chat before sending the first message in the
-new one, the unsent context goes with it; its worktree stays with the new chat.
+as context: up to 256 KiB of its visible messages are stored, each excerpt at
+most 8 KiB. Pattern-matched secrets are redacted; review the preview before
+sending. The first message carries at most 192 KiB of context (three 64 KiB
+blocks, shared with any other chat you attach), so in a longer chat the oldest
+messages are left out of what is sent and counted as omitted. The context shows
+above the composer of the new chat, where you can preview or remove it before
+the first message. The limited chat keeps its history and its resume offer.
+Inertia refuses while the limited chat still has a turn in progress or a
+message being prepared, when the project checkout has since moved to another
+branch, and for chats without a project, whose folder belongs to that chat.
+Until the new chat's first message is sent, deleting the limited chat is
+refused, because its context would be lost; send the first message or remove
+the context first. After that, deleting it leaves the worktree with the new
+chat.
 
 ## Accounts and averages
 

@@ -1189,7 +1189,7 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(claudeRoute);
 
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Start a new chat to use a different provider.");
+    expect(dialog).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     expect(onUpdateConversation).not.toHaveBeenCalled();
     expect(onCreateConversationForSelection).not.toHaveBeenCalled();
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Carry this exact text.");

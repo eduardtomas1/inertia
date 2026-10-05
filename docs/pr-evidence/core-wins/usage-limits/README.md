@@ -12,6 +12,8 @@ The chat "Plan the schema migration" stopped at a usage limit, then its access m
 
 The before run shows the Codex quota notice in the corner and lists "Add search filters" in Work; in the after run the earlier tests of the spec dismissed that notice and snoozed that chat. Neither is part of this change.
 
+Area 5 later added **Continue with another model** to this row. The after images here predate it; the row as it is now is in [../continuation](../continuation/README.md#the-usage-limit-row-with-this-change).
+
 "Reset due" replacing "Reset due · refresh to check" is a text-only change, covered by `tests/renderer/header-usage-meter.test.ts` and `tests/renderer/usage-limits.dom.test.tsx`.
 
 | Size | Before | After |

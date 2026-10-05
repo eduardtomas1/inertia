@@ -40,14 +40,16 @@ function refreshDelay(result: LimitResetResult, now: number): number | null {
   return remaining > 0 ? Math.min(remaining + 1_000, MAX_TIMER_MS) : PENDING_POLL_MS;
 }
 
-export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, providerState, onCommand, onContinueElsewhere }: {
+export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, disabled, providerState, onCommand, onContinueElsewhere,
+  continueElsewhereDisabled = false }: {
   conversationId: string;
   latestTurnId: string | null;
   snoozedUntil: string | null;
   disabled: boolean;
   providerState: string;
   onCommand: LimitResetCommandRunner;
-  onContinueElsewhere?: () => void;
+  onContinueElsewhere?: (origin: HTMLButtonElement) => void;
+  continueElsewhereDisabled?: boolean;
 }): React.JSX.Element | null {
   const [result, setResult] = useState<LimitResetResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,8 +131,9 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   if (result?.conversationId !== conversationId) return null;
   const unavailable = disabled || busy;
   const action = "secondary-button limit-reset-action";
-  const continueElsewhere = onContinueElsewhere && <button type="button" className={action}
-    aria-disabled={unavailable || undefined} onClick={() => { if (!unavailable) onContinueElsewhere(); }}>Continue with another model</button>;
+  const continueUnavailable = unavailable || continueElsewhereDisabled;
+  const continueElsewhere = onContinueElsewhere && <button type="button" className={action} aria-disabled={continueUnavailable || undefined}
+    onClick={(event) => { if (!continueUnavailable) onContinueElsewhere(event.currentTarget); }}>Continue with another model</button>;
   const plan = result.plan && !["cancelled", "completed"].includes(result.plan.state)
     && (latestTurnId === null || result.plan.failedTurnId === latestTurnId) ? result.plan : null;
   const offer = result.offer;

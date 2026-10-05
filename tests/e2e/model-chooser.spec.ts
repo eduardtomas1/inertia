@@ -511,7 +511,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await kimi.click();
   await expect(modelChooser).toBeHidden();
   const newChatPrompt = page.getByRole("alertdialog");
-  await expect(newChatPrompt).toContainText("Start a new chat to use a different provider.");
+  await expect(newChatPrompt).toContainText("The new chat uses the same checkout and gets this chat as context.");
   await expect(page.getByText("Keep the authoritative Codex route.", { exact: true }))
     .toBeVisible();
   const pendingStore = new RuntimeStore(databasePath, workspaceDirectory, {

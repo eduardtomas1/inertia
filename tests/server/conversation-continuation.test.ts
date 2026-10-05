@@ -15,6 +15,7 @@ import {
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
+import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
@@ -58,13 +59,20 @@ async function fixture() {
   const running = new Set<string>();
   const hooks: { validateSelection?: () => void } = {};
   const events: ServerEvent[] = [];
+  const providers = {
+    resolveModelRoute: resolveNativeModelRoute,
+    isRunning: (conversationId: string) => running.has(conversationId),
+  };
+  const turns = new TurnController(store, providers as never, new Map(), new Map(), new Map(), {
+    broadcast: () => undefined,
+    broadcastSnapshot: () => undefined,
+    providerInfo: () => [],
+  });
   const dependencies = {
     store,
     conversationAttachments: { release: vi.fn(async () => undefined) },
-    providers: {
-      resolveModelRoute: resolveNativeModelRoute,
-      isRunning: (conversationId: string) => running.has(conversationId),
-    },
+    providers,
+    turns,
     backendProfileController: {
       validateSelection: (value: unknown) => {
         hooks.validateSelection?.();
@@ -151,7 +159,16 @@ async function fixture() {
     });
     return created(requestId);
   };
-  return { store, workspace, project, running, hooks, handler, createSource, seedHistory, continueChat };
+  const deleteChat = async (conversationId: string): Promise<void> => {
+    await handler(socket, { type: "conversation.delete", requestId: randomUUID(), payload: { conversationId } });
+  };
+  const sendFirstMessage = (conversationId: string): void => {
+    const [packet] = store.contextPackets.list(conversationId);
+    store.contextPackets.createUserMessageWithPackets({
+      conversationId, content: "Carry on.", attachments: [], packetIds: [packet!.id], requestId: randomUUID(),
+    });
+  };
+  return { store, workspace, project, running, hooks, handler, turns, deleteChat, sendFirstMessage, createSource, seedHistory, continueChat };
 }
 
 describe("continuing a chat with another model", () => {
@@ -188,8 +205,8 @@ describe("continuing a chat with another model", () => {
     }
   });
 
-  it("opens the new chat in the source's worktree and hands the worktree over when the source is deleted before the first send", async () => {
-    const { store, handler, createSource, seedHistory, continueChat } = await fixture();
+  it("opens the new chat in the source's worktree, refuses to delete the source before the first send and hands the worktree over after it", async () => {
+    const { store, createSource, seedHistory, continueChat, deleteChat, sendFirstMessage } = await fixture();
     try {
       const sourceId = await createSource(true);
       const source = store.conversation(sourceId);
@@ -208,11 +225,15 @@ describe("continuing a chat with another model", () => {
         messageCount: 2,
       }]);
 
-      await handler(socket, {
-        type: "conversation.delete",
-        requestId: randomUUID(),
-        payload: { conversationId: sourceId },
-      });
+      await expect(deleteChat(sourceId)).rejects.toThrow(
+        "A new chat continues from this one. Send its first message or remove the context first.",
+      );
+      expect(store.shellSnapshot().conversations).toHaveLength(2);
+      expect(store.conversationWorktrees.get(sourceId)).toMatchObject({ ownsWorktree: true });
+      expect(store.contextPackets.list(continuedId)).toHaveLength(1);
+
+      sendFirstMessage(continuedId);
+      await deleteChat(sourceId);
 
       expect(store.shellSnapshot().conversations.map(({ id }) => id)).toEqual([continuedId]);
       expect(existsSync(source.worktreePath!)).toBe(true);
@@ -220,7 +241,80 @@ describe("continuing a chat with another model", () => {
         ownsWorktree: true,
         path: source.worktreePath,
       });
-      expect(store.contextPackets.list(continuedId)).toEqual([]);
+      expect(store.contextPackets.list(continuedId)).toMatchObject([{
+        sourceConversationId: sourceId,
+        consumedMessageId: expect.any(String),
+        sourceState: "deleted",
+      }]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps the worktree with the source when the new chat is deleted first", async () => {
+    const { store, createSource, seedHistory, continueChat, deleteChat } = await fixture();
+    try {
+      const sourceId = await createSource(true);
+      const source = store.conversation(sourceId);
+      seedHistory(sourceId);
+      const continuedId = await continueChat(sourceId);
+
+      await deleteChat(continuedId);
+
+      expect(store.shellSnapshot().conversations.map(({ id }) => id)).toEqual([sourceId]);
+      expect(existsSync(source.worktreePath!)).toBe(true);
+      expect(store.conversationWorktrees.get(sourceId)).toMatchObject({
+        ownsWorktree: true,
+        path: source.worktreePath,
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses while a message for the source is still being prepared", async () => {
+    const { store, turns, createSource, seedHistory, continueChat } = await fixture();
+    try {
+      const sourceId = await createSource(false);
+      seedHistory(sourceId);
+      const sending = await turns.acquireTurnAdmission(sourceId, 1_000);
+      expect(sending).not.toBeNull();
+
+      await expect(continueChat(sourceId)).rejects.toThrow("Wait for this chat's turn to finish");
+      expect(store.shellSnapshot().conversations).toHaveLength(1);
+
+      sending!.release();
+      await expect(continueChat(sourceId)).resolves.toEqual(expect.any(String));
+    } finally {
+      store.close();
+    }
+  });
+
+  it("makes a message sent after the continuation began wait until the new chat exists", async () => {
+    const { store, turns, createSource, seedHistory, continueChat } = await fixture();
+    try {
+      const sourceId = await createSource(false);
+      seedHistory(sourceId);
+      let sendAdmitted = false;
+      let admittedBeforeSave: boolean | null = null;
+      const save = store.createConversation.bind(store);
+      vi.spyOn(store, "createConversation").mockImplementation((...args) => {
+        admittedBeforeSave = sendAdmitted;
+        return save(...args);
+      });
+
+      const continuation = continueChat(sourceId);
+      const send = turns.acquireTurnAdmission(sourceId, 5_000).then((lease) => {
+        sendAdmitted = lease !== null;
+        return lease;
+      });
+      const continuedId = await continuation;
+      const lease = await send;
+
+      expect(admittedBeforeSave).toBe(false);
+      expect(lease).not.toBeNull();
+      expect(store.contextPackets.list(continuedId)).toHaveLength(1);
+      lease!.release();
     } finally {
       store.close();
     }

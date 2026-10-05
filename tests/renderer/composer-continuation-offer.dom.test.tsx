@@ -36,7 +36,7 @@ const route = (id: string, label: string) => ({
   defaultReasoningEffort: "high",
 });
 const providers: ProviderInfo[] = [
-  { ...provider, models: [route("codex-route", "Codex Route")], metadataState: { models: catalogState, rateLimits: catalogState } },
+  { ...provider, models: [route("codex-route", "Codex Route"), { ...route("codex-next", "Codex Next"), isDefault: false }], metadataState: { models: catalogState, rateLimits: catalogState } },
   { ...provider, id: "claude", label: "Claude", models: [route("claude-route", "Claude Route")],
     metadataState: { models: catalogState, rateLimits: catalogState } },
 ];
@@ -104,6 +104,8 @@ describe("continuing a chat with another model", () => {
     await chooseClaudeRoute();
 
     const offer = await screen.findByRole("alertdialog", { name: /^Continue in a new chat with .*Claude Route\?$/u });
+    expect(offer).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
+    expect(offer).not.toHaveTextContent("different provider");
     const cancel = within(offer).getByRole("button", { name: "Cancel" });
     await waitFor(() => expect(cancel).toHaveFocus());
     fireEvent.click(within(offer).getByRole("button", { name: "Continue" }));
@@ -149,6 +151,60 @@ describe("continuing a chat with another model", () => {
     const offer = await screen.findByRole("alertdialog", { name: /^Continue in a new chat with .*Claude Route\?$/u });
     fireEvent.click(within(offer).getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ sourceConversationId: conversationId })));
+  });
+
+  it("returns focus to the row action on Cancel and keeps the action unavailable while the offer is open", async () => {
+    const current = chat();
+    renderComposer(current, { latestTurnSummary: failedTurn(current), onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()) });
+    const action = await screen.findByRole("button", { name: "Continue with another model" });
+    action.focus();
+    fireEvent.click(action);
+    fireEvent.click(await screen.findByRole("button", { name: /^Claude, /u }));
+    fireEvent.click(screen.getByTitle("Claude Route").closest("button")!);
+    const offer = await screen.findByRole("alertdialog", { name: /^Continue in a new chat with /u });
+
+    expect(action).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(action);
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(offer).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(action).toHaveFocus());
+    expect(action).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("switches in place without an offer when the row's chooser picks a model of the same provider", async () => {
+    const current = chat();
+    const onUpdateConversation = vi.fn<ComposerProps["onUpdateConversation"]>(async () => undefined);
+    const create = renderComposer(current, {
+      latestTurnSummary: failedTurn(current),
+      onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()),
+      onUpdateConversation,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Continue with another model" }));
+    fireEvent.click(screen.getByTitle("Codex Next").closest("button")!);
+
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledWith(expect.objectContaining({
+      modelSelection: expect.objectContaining({ modelId: "codex-next" }),
+    })));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("marks the row action unavailable whenever the model chooser is", async () => {
+    const current = chat();
+    const props = composerProps(current, {
+      providers,
+      latestTurnSummary: failedTurn(current),
+      onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()),
+    });
+    const view = render(<Composer {...props} />);
+    const action = await screen.findByRole("button", { name: "Continue with another model" });
+    view.rerender(<Composer {...props} disabled />);
+
+    expect(screen.getByRole("button", { name: /^Choose model\./u })).toBeDisabled();
+    expect(action).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(action);
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
   it("leaves the usage-limited row without the offer where no new chat can be created", async () => {

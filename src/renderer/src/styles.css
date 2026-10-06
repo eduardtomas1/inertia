@@ -7796,9 +7796,30 @@ button.turn-agents-line:focus-visible {
 
 .plan-progress { height: 3px; background: var(--surface-muted); }
 .plan-progress > span { display: block; height: 100%; background: var(--accent); transition: width var(--motion-base) var(--motion-ease); }
-.plan-percent { color: var(--text-muted); font-size: 8px; }
-.plan-summary { margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 9px; line-height: 1.55; }
-.plan-steps { min-height: 0; margin: 0; padding: 10px; overflow-y: auto; list-style: none; }
+.plan-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.plan-copy-button { display: grid; width: 26px; height: 26px; place-items: center; border-radius: var(--radius-small); color: var(--text-muted); background: transparent; }
+.plan-copy-button:hover { color: var(--text); background: var(--surface-hover); }
+.plan-percent { color: var(--text-muted); font-size: var(--ui-font-micro); }
+.plan-scroll { min-height: 0; flex: 1; overflow-y: auto; }
+.plan-summary { margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: var(--ui-font-secondary); line-height: 1.55; }
+.plan-document-shell { padding: 14px 16px 8px; border-bottom: 1px solid var(--border); }
+.plan-document { position: relative; font-size: max(var(--ui-font-secondary), calc(var(--ui-font-main) - 1.5px)); }
+.plan-document.is-collapsed { max-height: 16em; overflow: hidden; }
+.plan-document.is-collapsed::after { position: absolute; inset: auto 0 0; height: 5em; background: linear-gradient(transparent, var(--workspace-tools-surface)); content: ""; pointer-events: none; }
+.plan-document .response-markdown,
+.plan-document-text { color: var(--text-soft); font-size: inherit; line-height: 1.6; }
+.plan-document-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.plan-document .response-markdown h1 { font-size: 1.2em; }
+.plan-document .response-markdown h2 { padding-bottom: 0; border-bottom: 0; font-size: 1.08em; }
+.plan-document .response-markdown h3,
+.plan-document .response-markdown h4 { font-size: 1em; }
+.plan-document-toggle { display: flex; margin: 8px auto 2px; align-items: center; gap: 5px; padding: 4px 11px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-soft); background: var(--surface-strong); font-size: var(--ui-font-secondary); }
+.plan-document-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.plan-document-toggle svg { transition: transform var(--motion-fast) var(--motion-ease); }
+.plan-document-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.plan-steps-heading { display: flex; justify-content: space-between; padding: 13px 20px 0; color: var(--text-muted); font-size: var(--ui-font-micro); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.plan-steps-heading span + span { font-weight: 500; letter-spacing: 0; text-transform: none; }
+.plan-steps { margin: 0; padding: 10px; list-style: none; }
 .plan-step { border-radius: var(--radius-medium); }
 .plan-step + .plan-step { margin-top: 3px; }
 .plan-step-button, .plan-step-content { display: flex; width: 100%; align-items: flex-start; gap: 9px; padding: 10px; border-radius: var(--radius-medium); color: var(--text-soft); background: transparent; text-align: left; }
@@ -7808,8 +7829,13 @@ button.turn-agents-line:focus-visible {
 .plan-step-marker.is-in-progress { color: var(--accent); }
 .plan-step-marker.is-blocked { color: var(--danger); }
 .plan-step-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
-.plan-step-title { font-size: 9.5px; font-weight: 590; line-height: 1.45; }
-.plan-step-number, .plan-step-detail, .plan-step-status { color: var(--text-muted); font-size: 8px; }
+.plan-step-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: 9.5px; font-weight: 520; line-height: 1.45; overflow-wrap: anywhere; }
+.plan-step.is-in-progress .plan-step-title,
+.plan-step.is-active .plan-step-title { display: block; }
+.plan-step-title strong { color: var(--text); font-weight: 650; }
+.plan-step-title code { padding: 0 4px; border-radius: 4px; background: var(--surface-muted); font-family: var(--font-mono); font-size: .9em; }
+.plan-step.is-completed .plan-step-title { color: var(--text-muted); }
+.plan-step-number, .plan-step-detail, .plan-step-status { color: var(--text-muted); font-size: var(--ui-font-micro); }
 .plan-step-status { flex: 0 0 auto; padding-top: 3px; }
 .plan-actions { display: flex; justify-content: flex-end; gap: 7px; padding: 10px; border-top: 1px solid var(--border); }
 .plan-actions .primary-button { margin: 0; }

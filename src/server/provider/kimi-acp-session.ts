@@ -52,6 +52,7 @@ export async function configureKimiSession(
   model?: string,
   effort?: string,
   requestControl: KimiControlRequest = (request) => request,
+  restored = false,
 ): Promise<SessionConfigOption[]> {
   let authoritativeConfigOptions = configOptions;
   const requestedSelections: Array<{ id: string; value: string }> = [];
@@ -67,14 +68,17 @@ export async function configureKimiSession(
     interactionMode === "plan" ? "plan" : "build",
     wantedMode,
   );
-  if (nativeMode && modes?.currentModeId !== nativeMode.id) {
+  const restoredModeUnverified = restored && (modes?.availableModes.length ?? 0) > 1;
+  if (nativeMode && (restoredModeUnverified || modes?.currentModeId !== nativeMode.id)) {
     await requestControl(
       context.request(acp.methods.agent.session.setMode, {
         sessionId,
         modeId: nativeMode.id,
       }),
       "session/set_mode",
-    );
+    ).catch((error: unknown) => {
+      if (!kimiModeAlreadySelected(error)) throw error;
+    });
   } else if (!nativeMode && configMode) {
     const response = await requestControl(
       context.request(
@@ -138,6 +142,12 @@ export async function configureKimiSession(
     assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
   }
   return authoritativeConfigOptions;
+}
+
+function kimiModeAlreadySelected(error: unknown): boolean {
+  if (!(error instanceof acp.RequestError) || error.code !== -32603) return false;
+  const details = (error.data as { details?: unknown } | null | undefined)?.details;
+  return typeof details === "string" && /^already in [\w-]+ mode$/iu.test(details.trim());
 }
 
 export function findKimiAdvertisedConfigValue(

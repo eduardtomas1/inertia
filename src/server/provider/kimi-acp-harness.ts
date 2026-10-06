@@ -521,6 +521,7 @@ function startKimiRun(
         options.input.model,
         options.input.reasoningEffort,
         requestControl,
+        Boolean(options.input.sessionId),
       );
       emitKimiMetadata(configuredOptions, supportsImages, emitter);
 

@@ -2,14 +2,145 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.68 — 2026-10-06
+
+Bring your Codex and Claude Code CLI conversations into Inertia, continue a
+chat with another model when one hits its limit, and right-click across the
+app. Usage limits no longer ask you to refresh, checkpoints take a fraction of
+a second on large repositories, the Browser can work on sign-in pages without
+revealing what you type, and a follow-up that misses a running turn is queued
+instead of lost.
+
+### Browser
+
+- A page with a password or other secret field is no longer withheld from the
+  agent. Sensitive fields keep their labels and controls so the agent can sign
+  in or fill a code, while what you or the page typed into them is replaced by
+  `[redacted]` everywhere the agent reads the page, including copies of the
+  value elsewhere in the page. Screenshots and diagnostics are still withheld
+  while any such value is on the page.
+- The agent can scroll, go back, forward and reload, press Shift+Tab,
+  Shift+Enter and Ctrl or Cmd+Enter, and reach controls below the visible part
+  of the page. It
+  also sees the page's alerts and confirmations, which Inertia answers safely
+  (a confirmation is dismissed unless the action asked to accept it), and
+  every page-changing action still needs your approval in Supervised mode.
+- Clicking or typing in the Browser pane takes over from the agent: its
+  current command stops, and it is told you are in control until its next
+  action. Leaving a page that asks for confirmation shows Inertia's own Stay or
+  Leave box.
+
+### Chats and turns
+
+- A follow-up that does not reach the running agent, because the turn was
+  already ending or the agent refused it, is queued for the next turn instead
+  of failing. Cursor, Kimi Code and Antigravity, which cannot take a message
+  mid-turn, now offer **Stop and send**: Enter stops the agent and sends your
+  message as the next turn in the same session.
+- Choosing a model from another provider in a chat with history, or
+  **Continue with another model** in the usage-limit row, opens one new chat
+  on the same checkout and branch with the whole chat attached as context.
+  You can preview or remove that context before the first message, and the
+  earlier chat cannot be deleted until then.
+- After Inertia quit, crashed or restarted during a turn, the next turn tells
+  the agent which request was interrupted and which delegated tasks were lost.
+- Right-click menus across the app: **Copy message**, **Copy as Markdown** and
+  **Copy code** in the chat; **Open**, **Reveal**, **Copy path** and **Copy
+  relative path** on file links, Files and Changes; **Copy**, **Paste**,
+  **Select all** and **Clear** in the terminal; spelling suggestions in text
+  fields; link and image actions; and **Back**, **Forward** and **Reload** in
+  the Browser pane. Shift+F10 or the Menu key opens the menu for a focused
+  item. On Windows, Ctrl+V pastes into the terminal.
+- A running background task that reports what it is doing now shows the whole
+  sentence on its moving line, not just the name of its current tool.
+
+### Usage limits
+
+- Inertia no longer asks you to refresh around a limit. A passed reset shows
+  **Reset due**, Codex and Claude quota is checked again a few seconds after
+  the reset, and idle quota stays current instead of turning stale between
+  checks.
+- A scheduled resume keeps checking for new quota for up to an hour after the
+  reset. If the provider still reports none, nothing is sent and the row says
+  why, with **Resume now**.
+- When a provider limits quota checks, Inertia waits as long as it asks,
+  keeps the last numbers marked stale for the same login, and says how long it
+  is waiting.
+- A chat stopped at a usage limit shows **Usage limit reached** above the
+  composer even without a reset time, **Limited** with a clock in the sidebar
+  and the transcript instead of **Failed**, and its notification says **Usage
+  limit reached**. **All provider limits** refreshes itself like the Limits
+  page.
+
+### Settings and providers
+
+- **Settings → Agents** frames Providers and Custom backends in one bordered
+  panel again, with the list beside the details.
+- On Linux, **Update** uses whatever installed the agent's CLI: its own
+  installer, npm (also through nvm or fnm), pnpm, bun, Yarn, Volta, uv or
+  Homebrew. When Inertia will not run the update, Settings shows the command to
+  run instead. Installs too old for Inertia can be updated, Homebrew installs
+  are compared with Homebrew's own release, Volta and snap installs are found,
+  and OpenCode updates stay on 1.x.
+- Signing in with a pasted code works for every provider: after **Copy link**
+  or **Open again** the terminal keeps focus, the sign-in terminal has
+  **Copy**, **Paste** and **Select all** on right-click, and what you type
+  before the login starts is kept. A pasted code is never stored or added to
+  diagnostics.
+
+### CLI import
 
 - Import existing Codex and Claude Code conversations from **Settings →
-  Projects → CLI conversations**. Preview local text history, avoid duplicate
-  imports, and continue the original CLI session in Inertia; archived Codex
-  sessions continue in a new session with the imported messages as context.
-  Long sessions keep their opening exchange and newest messages, and the chat
-  says how many earlier messages were left out. Source files stay unchanged.
+  Projects → CLI conversations**. Browse them as cards, open one to read the
+  whole conversation, and import it; an imported conversation is never
+  imported twice and the source files stay unchanged. Credentials are redacted
+  before anything is shown or stored.
+- An imported chat continues the original CLI session. Conversations from
+  Codex's archive continue in a new session with the imported messages as
+  context, and the chat says which applies.
+- Conversations of any size can be imported. Long ones keep their opening
+  exchange and newest messages, and the chat says how many earlier messages
+  were left out.
+- `CLAUDE_CONFIG_DIR` from Inertia's environment now applies to every Claude
+  process Inertia starts, including sign-in and usage.
+
+### Checkpoints
+
+- Checkpoints take about a quarter of a second instead of about five on a
+  repository of 24,000 files, because they reuse the repository's index.
+- A tracked file that matches an ignore rule, including a case-insensitive
+  match on macOS, no longer stops checkpoints, commit review or a commit of
+  selected files.
+- A turn without a checkpoint says **No checkpoint for this turn** where
+  **Revert** would be, with the reason. Checkpoints are written durably, and
+  the check for ignored files before a revert is bounded and also works in a
+  project folder below the repository root.
+
+### Snapshots
+
+- A snapshot shortcut press is never dropped silently. A press during a
+  capture says so; a capture with no open chat is kept for up to ten minutes
+  and delivered to the selected chat, an existing draft or a new chat.
+  Pending captures are deleted at quit or when Snapshots is turned off.
+- On macOS a snapshot contains only the captured window, even when another
+  window covers part of it, and a capture helper denied by macOS is reported
+  separately from a missing permission.
+
+### Performance
+
+- Running tool output is saved and shown at most once every 64 ms instead of
+  once per chunk: 500 Codex output chunks now take 12 database writes instead
+  of 501, and the sidebar and conversation list are updated only when a
+  command's run actually changes.
+
+### Fixes
+
+- Codex command output is stored once and in order, without a heading per
+  chunk or a repeat at completion, and a credential split across chunks is
+  still redacted. A stopped turn keeps the output its commands had streamed.
+- A turn near its activity budget keeps each command line instead of cutting
+  it to a fragment.
+- Migration 92 records CLI conversation imports.
 
 ## 0.0.67 — 2026-10-05
 

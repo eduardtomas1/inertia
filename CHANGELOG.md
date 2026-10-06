@@ -133,6 +133,19 @@ instead of lost.
   of 501, and the sidebar and conversation list are updated only when a
   command's run actually changes.
 
+### Providers and dependencies
+
+- **Codex:** Inertia is checked against Codex 0.160.1, whose App Server
+  protocol is unchanged from 0.160.0.
+- **Claude:** Claude Agent SDK 0.3.290 (Claude Code 2.1.290), with no change
+  to the messages and options Inertia uses.
+- Cursor, Kimi Code, OpenCode and Antigravity need no change for their current
+  releases.
+- Updated the Claude Agent SDK to 0.3.290 and the MCP SDK to 1.32.1, with
+  oxlint 1.87.0 for development. Transitive `proxy-addr` and `source-map-js`
+  updates and a newer `global-agent` for the packaging tools clear the
+  production and development audits.
+
 ### Fixes
 
 - Codex command output is stored once and in order, without a heading per

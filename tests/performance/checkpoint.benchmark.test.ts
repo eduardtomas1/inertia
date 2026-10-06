@@ -1,16 +1,15 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
 import { createCheckpoint, deleteCheckpoints } from "../../src/server/checkpoints";
+import { createCheckpointBenchmarkRepository } from
+  "../helpers/checkpoint-benchmark-repository";
 
-const execFileAsync = promisify(execFile);
 const enforce = process.env.INERTIA_BENCHMARK_ENFORCE === "1";
 const reportPath = resolve(
   dirname(
@@ -25,47 +24,12 @@ const MAXIMUM_LARGE_TO_SMALL_RATIO = 6;
 const CATASTROPHIC_LARGE_CHECKPOINT_MS = 10_000;
 const SAMPLES = 5;
 
-async function repository(root: string, files: number): Promise<void> {
-  await mkdir(root);
-  await execFileAsync("git", ["init", "-q"], { cwd: root });
-  for (let start = 0; start < files; start += 500) {
-    await Promise.all(Array.from(
-      { length: Math.min(500, files - start) },
-      async (_, offset) => {
-        const index = start + offset;
-        const directory = join(root, `module-${Math.floor(index / 100)}`);
-        await mkdir(directory, { recursive: true });
-        await writeFile(
-          join(directory, `file-${index}.ts`),
-          `export const value${index} = ${index};\n`,
-        );
-      },
-    ));
-  }
-  await execFileAsync("git", ["-c", "gc.auto=0", "add", "-A"], { cwd: root });
-  await execFileAsync("git", [
-    "-c",
-    "gc.auto=0",
-    "-c",
-    "maintenance.auto=false",
-    "-c",
-    "user.name=Inertia Benchmark",
-    "-c",
-    "user.email=benchmark@inertia.local",
-    "commit",
-    "-qm",
-    "fixture",
-  ], { cwd: root });
-  await writeFile(join(root, "module-0", "file-0.ts"), "export const value0 = -1;\n");
-  await writeFile(join(root, "untracked.ts"), "export const untracked = true;\n");
-}
-
 async function checkpointMeasurement(
   root: string,
   files: number,
 ): Promise<{ files: number; medianMs: number; samples: number[] }> {
   const repositoryPath = join(root, `repository-${files}`);
-  await repository(repositoryPath, files);
+  await createCheckpointBenchmarkRepository(repositoryPath, files);
   const storage = join(root, `indexes-${files}`);
   const conversationId = randomUUID();
   try {

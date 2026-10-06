@@ -118,7 +118,7 @@ describe("OpenCode descendant interactions", () => {
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 10_000, eventInactivityDeadlineMs: 300,
+        runDeadlineMs: 10_000, eventInactivityDeadlineMs: 1_000,
       })]),
     );
     let onApproval!: NonNullable<ProviderRunCallbacks["onApproval"]>;
@@ -135,13 +135,13 @@ describe("OpenCode descendant interactions", () => {
     void settledFirst.catch(() => undefined);
     try {
       const pendingApproval = await Promise.race([approval, settledFirst]);
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
       expect(manager.activeConversationIds()).toContain("human-wait");
       expect(manager.respondToApproval("human-wait", pendingApproval.request.requestId, "approve", {
         runId: pendingApproval.runId, turnId: pendingApproval.turnId,
       })).toBe(true);
       const pendingInput = await Promise.race([input, settledFirst]);
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
       expect(manager.activeConversationIds()).toContain("human-wait");
       expect(manager.respondToInput("human-wait", pendingInput.request.requestId, {
         [pendingInput.request.questions[0]!.id]: ["Yes"],

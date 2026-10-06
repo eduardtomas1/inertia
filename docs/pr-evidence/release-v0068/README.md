@@ -44,7 +44,7 @@ is one commit; every package the groups exclude has its own commit.
 | `@modelcontextprotocol/sdk` | 1.32.0 | 1.32.1 | Excluded (provider SDK); own commit | `fa87c64d` |
 | `proxy-addr` (via MCP SDK and express, production) | 2.0.7 | 2.0.8 | Security (npm audit fix, lockfile only) | `c17918a9` |
 | `source-map-js` (via PostCSS, development) | 1.2.1 | 1.2.2 | Security (npm audit fix, lockfile only) | `efa69c18` |
-| `global-agent` (via electron-builder's `@electron/get` 3.1.0, development) | 3.0.0 | 4.1.3 | Security; `overrides` entry, own commit | `6ffdec57` |
+| `global-agent` (via electron-builder's `@electron/get` 3.1.0, development) | 3.0.0 | 4.1.3 | Security; `overrides` entry scoped to `app-builder-lib`, own commits | `6ffdec57`, `de628e19` |
 
 Every other direct package is already at its newest version within the
 configured rules: the production group, the vitest-contract group (Vitest
@@ -95,13 +95,17 @@ On main `07282b41`, `npm audit --omit=dev` reported one critical advisory and
   `ELECTRON_GET_USE_PROXY` is set, inside a try block) and calls its
   `bootstrap` export. global-agent 4.1 drops `roarr` and keeps that export;
   4.0 also defaults `rejectUnauthorized` to true. An `overrides` entry
-  `"global-agent": "4.1.3"` (next to the existing `@hono/node-server` one)
+  `"app-builder-lib": { "global-agent": "4.1.3" }` (next to the existing
+  `@hono/node-server` one), scoped to the one path that reaches `global-agent`,
   removes `roarr`, `sprintf-js`, `boolean`, `detect-node`, `es6-error`,
   `json-stringify-safe` and `semver-compare` from the lockfile and moves
   `matcher`, `serialize-error` and `type-fest` to the versions global-agent 4
   needs. With `HTTPS_PROXY` set, `@electron/get`'s own `initializeProxy()`
   still installs the global proxy agent. Nothing in the repository or its
-  workflows sets `ELECTRON_GET_USE_PROXY`.
+  workflows sets `ELECTRON_GET_USE_PROXY`. After scoping the entry
+  (`de628e19`), `npm install` left the lockfile unchanged, the seven packages
+  stay removed, `npm ls --all` exits 0 after a fresh `npm ci`, and both audits
+  report 0.
 
 After these commits `npm audit --omit=dev` and `npm audit` both report 0
 vulnerabilities, also after a fresh `npm ci` on the candidate.
@@ -271,11 +275,21 @@ fixed on this branch, each in its own commit:
   `tests/performance/checkpoint-benchmark-repository.test.ts` builds the
   12,000-file fixture under a global configuration with `core.autocrlf=true`
   and requires empty Git stderr and 12,000 tracked files; on this Mac it failed
-  with the same `RangeError` before the fix and passes after it. The 6x ratio
-  and the 10 s ceiling are unchanged. Windows itself is proven by the next
-  main run.
+  with the same `RangeError` before the fix and passes after it. In this PR's
+  CI it ran and passed on Windows x64 ("Windows unit tests (2/4)", job
+  112093103646, 10,711 ms). The 6x ratio and the 10 s ceiling are unchanged.
+  PR CI skips the enforced benchmark step, so only that step on Windows is
+  left to the next main run.
 
 The `merge-ready` job failed only because those jobs did.
+
+PR CI run 37406007770 on `57031f40` passed every job except `Linux x64 Electron
+(isolated)`, where `core-bridge-smoke` "keeps one cancelled provider turn
+authoritative" did not see the fake Codex interrupt marker within 30 s (it
+passed 3 of 3 locally and on main's run; this branch changes no turn, provider
+or renderer code); the rerun of the failed jobs passed and `merge-ready` went
+green. The run on the final head, after the changelog wording and the scoped
+override, is recorded in the PR description.
 
 ## Not exercised
 

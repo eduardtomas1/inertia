@@ -40,6 +40,7 @@ import {
   usageFromRow,
 } from "./codecs";
 import { RecordNotFoundError } from "./errors";
+import { cachedStatement } from "./statement-cache";
 import type {
   ActivityRow,
   AgentReasoningRow,
@@ -155,15 +156,15 @@ export class ExecutionLedgerRepository {
       id: randomUUID(),
       createdAt: activity.createdAt ?? new Date().toISOString(),
     };
-    this.context.database.prepare(`INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at) VALUES (@id, @conversationId, @runId, @turnId, @kind, @title, @detail, @status, @createdAt)`).run(record);
+    cachedStatement(this.context.database, `INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at) VALUES (@id, @conversationId, @runId, @turnId, @kind, @title, @detail, @status, @createdAt)`).run(record);
     return record;
   }
 
   updateActivity(id: string, update: Partial<Pick<AgentActivity, "title" | "detail" | "status">>): AgentActivity {
-    const row = this.context.database.prepare("SELECT * FROM activities WHERE id = ?").get(id) as ActivityRow | undefined;
+    const row = cachedStatement(this.context.database, "SELECT * FROM activities WHERE id = ?").get(id) as ActivityRow | undefined;
     if (!row) throw new RecordNotFoundError("Activity not found.");
     const next = { ...activityFromRow(row), ...update };
-    this.context.database.prepare("UPDATE activities SET title = ?, detail = ?, status = ? WHERE id = ?").run(next.title, next.detail, next.status, id);
+    cachedStatement(this.context.database, "UPDATE activities SET title = ?, detail = ?, status = ? WHERE id = ?").run(next.title, next.detail, next.status, id);
     return next;
   }
 

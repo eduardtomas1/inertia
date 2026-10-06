@@ -1,4 +1,3 @@
-import { createCanvas, Image } from "@napi-rs/canvas";
 import { MAX_IMAGE_ATTACHMENT_BYTES, MAX_SOURCE_IMAGE_BYTES, type ImageAttachmentMimeType } from "../shared/attachments.js";
 import { inspectImageMetadata, MAX_IMAGE_PIXELS } from "./attachment-image-validation.js";
 
@@ -9,6 +8,7 @@ export async function compressAttachmentImage(bytes: Buffer, mimeType: ImageAtta
     return null;
   }
   if (bytes.length <= MAX_IMAGE_ATTACHMENT_BYTES && metadata.width <= 8192 && metadata.height <= 8192) return null;
+  const { createCanvas, Image } = await import("@napi-rs/canvas");
   const image = new Image();
   image.src = bytes;
   await image.decode();

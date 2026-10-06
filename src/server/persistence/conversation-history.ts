@@ -64,39 +64,47 @@ type HistoryTable = typeof HISTORY_TABLES[number];
 const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries",
   "diff_review_states", "diff_review_notes"] as const;
 
+function historyConversationColumn(table: HistoryTable): string {
+  return table === "conversation_context_packets" ? "target_conversation_id" : "conversation_id";
+}
+
 export function historyPredicate(
   table: HistoryTable,
   scope: ConversationHistoryScope,
+  conversationId: string,
 ): { sql: string; parameters: string[] } {
   const turns = scope.units.filter(({ kind }) => kind === "turn").map(({ id }) => id);
   const messages = scope.units.filter(({ kind }) => kind === "message").map(({ id }) => id);
   const inValues = (field: string, values: string[]) => values.length
     ? `${table}.${field} IN (${values.map(() => "?").join(",")})` : "0";
-  if (table === "agent_turns") return { sql: inValues("id", turns), parameters: turns };
-  if (table === "messages") return {
-    sql: `(${inValues("turn_id", turns)} OR ${inValues("id", messages)})`,
-    parameters: [...turns, ...messages],
-  };
-  if (table === "conversation_context_packets") return {
-    sql: `(consumed_message_id IS NULL OR consumed_message_id IN (SELECT id FROM messages
+  const scoped = (sql: string, parameters: string[]) => ({
+    sql: `(${table}.${historyConversationColumn(table)} = ? AND ${sql})`,
+    parameters: [conversationId, ...parameters],
+  });
+  if (table === "agent_turns") return scoped(inValues("id", turns), turns);
+  if (table === "messages") {
+    return scoped(`(${inValues("turn_id", turns)} OR ${inValues("id", messages)})`, [...turns, ...messages]);
+  }
+  if (table === "conversation_context_packets") {
+    return scoped(`(consumed_message_id IS NULL OR consumed_message_id IN (SELECT id FROM messages
       WHERE ${inValues("turn_id", turns).replaceAll(`${table}.`, "messages.")} OR ${inValues("id", messages).replaceAll(`${table}.`, "messages.")}))`,
-    parameters: [...turns, ...messages],
-  };
+    [...turns, ...messages]);
+  }
   if (table === "turn_git_artifacts" || table === "subagent_traces") {
-    return { sql: inValues("turn_id", turns), parameters: turns };
+    return scoped(inValues("turn_id", turns), turns);
   }
   const timestamp = table === "agent_plans" ? "updated_at" : "created_at";
   const lower = scope.older ? scope.units.at(-1)?.at : undefined;
-  const legacy = [`${table}.turn_id IS NULL`,
+  const legacy = [`${table}.conversation_id = ?`, `${table}.turn_id IS NULL`,
     ...(lower ? [`${table}.${timestamp} >= ?`] : []),
     ...(scope.upper ? [`${table}.${timestamp} <= ?`] : [])];
-  return { sql: `(${inValues("turn_id", turns)} OR (${legacy.join(" AND ")}))`,
-    parameters: [...turns, ...(lower ? [lower] : []), ...(scope.upper ? [scope.upper] : [])] };
+  return { sql: `((${table}.conversation_id = ? AND ${inValues("turn_id", turns)}) OR (${legacy.join(" AND ")}))`,
+    parameters: [conversationId, ...turns, conversationId, ...(lower ? [lower] : []), ...(scope.upper ? [scope.upper] : [])] };
 }
 
 const columns = new WeakMap<Database.Database, Map<string, string[]>>();
 
-function storedBytes(database: Database.Database, table: string, conversationId: string,
+function storedBytes(database: Database.Database, table: string,
   where: { sql: string; parameters: string[] }): number {
   let cache = columns.get(database);
   if (!cache) { cache = new Map(); columns.set(database, cache); }
@@ -107,25 +115,23 @@ function storedBytes(database: Database.Database, table: string, conversationId:
     cache.set(table, names);
   }
   const lengths = names.map((name) => `COALESCE(length(CAST("${name}" AS BLOB)), 0)`).join(" + ");
-  const conversationColumn = table === "conversation_context_packets" ? "target_conversation_id" : "conversation_id";
   return (database.prepare(`SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes
-    FROM ${table} WHERE ${conversationColumn} = ? AND (${where.sql})`)
-    .get(conversationId, ...where.parameters) as { bytes: number }).bytes;
+    FROM ${table} WHERE ${where.sql}`)
+    .get(...where.parameters) as { bytes: number }).bytes;
 }
 
 export function historyStoredBytes(database: Database.Database, conversationId: string,
   scope: ConversationHistoryScope): number {
   let bytes = 0;
   for (const table of HISTORY_TABLES) {
-    const where = historyPredicate(table, scope);
-    bytes += storedBytes(database, table, conversationId, where);
+    const where = historyPredicate(table, scope, conversationId);
+    bytes += storedBytes(database, table, where);
     if (table === "messages" || table === "agent_reasonings") {
       const chunkTable = table === "messages" ? "message_content_chunks" : "reasoning_content_chunks";
       const key = table === "messages" ? "message_id" : "reasoning_id";
       bytes += (database.prepare(`SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS bytes
-        FROM ${chunkTable} WHERE ${key} IN (SELECT id FROM ${table}
-          WHERE conversation_id = ? AND (${where.sql}))`)
-        .get(conversationId, ...where.parameters) as { bytes: number }).bytes;
+        FROM ${chunkTable} WHERE ${key} IN (SELECT id FROM ${table} WHERE ${where.sql})`)
+        .get(...where.parameters) as { bytes: number }).bytes;
     }
     if (bytes > MAX_CONVERSATION_HISTORY_BYTES) return bytes;
   }
@@ -134,7 +140,7 @@ export function historyStoredBytes(database: Database.Database, conversationId: 
 
 export function conversationStoredBytes(database: Database.Database, conversationId: string): number {
   return CONVERSATION_TABLES.reduce((bytes, table) =>
-    bytes + storedBytes(database, table, conversationId, { sql: "1", parameters: [] }), 0);
+    bytes + storedBytes(database, table, { sql: `${table}.conversation_id = ?`, parameters: [conversationId] }), 0);
 }
 
 export const HISTORY_TOO_LARGE_MESSAGE =

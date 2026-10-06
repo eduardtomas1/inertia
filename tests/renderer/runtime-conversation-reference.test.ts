@@ -4,13 +4,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   runtimeConversationReference,
-  terminalResumeDirectory,
   visibleChatConversation,
   visibleChatProjection,
   visibleConversationLatestTurnSummary,
+} from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
+import {
+  terminalResumeDirectory,
   visibleWorkspaceConversation,
   workspaceDirectoryIdentity,
-} from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
+} from "../../src/renderer/src/components/workspace-scene/conversationWorkspaceOptions";
 import {
   draftWorkspaceToolsUnavailableReason,
 } from "../../src/renderer/src/utils/draftWorkspaceAvailability";

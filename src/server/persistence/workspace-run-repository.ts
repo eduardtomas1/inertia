@@ -4,6 +4,7 @@ import type { WorkspaceRun } from "../../shared/contracts";
 import { workspaceRunFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
+import { cachedStatement } from "./statement-cache";
 import type { WorkspaceRunRow } from "./rows";
 
 type WorkspaceRunPersistenceContext = Pick<
@@ -41,7 +42,7 @@ export class WorkspaceRunRepository {
       startedAt: new Date().toISOString(),
       finishedAt: null,
     };
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       INSERT INTO workspace_runs (
         id, kind, project_id, conversation_id, action_id, label, detail,
         status, attention_state, port, started_at, finished_at
@@ -51,7 +52,7 @@ export class WorkspaceRunRepository {
         @status, @attentionState, @port, @startedAt, @finishedAt
       )
     `).run(run);
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       DELETE FROM workspace_runs WHERE id IN (
         SELECT id FROM workspace_runs WHERE status NOT IN ('running', 'waiting') ORDER BY started_at DESC LIMIT -1 OFFSET 200
       )
@@ -63,7 +64,7 @@ export class WorkspaceRunRepository {
     id: string,
     update: Partial<Pick<WorkspaceRun, "label" | "detail" | "status" | "port" | "finishedAt">>,
   ): WorkspaceRun {
-    const row = this.context.database.prepare("SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
+    const row = cachedStatement(this.context.database, "SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
     if (!row) throw new RecordNotFoundError("Workspace activity not found.");
     const current = workspaceRunFromRow(row);
     const nextStatus = update.status ?? current.status;
@@ -89,7 +90,7 @@ export class WorkspaceRunRepository {
           ? new Date().toISOString()
           : current.finishedAt,
     };
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       UPDATE workspace_runs
       SET label = ?, detail = ?, status = ?, attention_state = ?, port = ?, finished_at = ?
       WHERE id = ?
@@ -104,13 +105,13 @@ export class WorkspaceRunRepository {
   }
 
   find(id: string): WorkspaceRun | null {
-    const row = this.context.database.prepare("SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
+    const row = cachedStatement(this.context.database, "SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
     return row ? workspaceRunFromRow(row) : null;
   }
 
   forConversation(conversationId: string): WorkspaceRun[] {
     this.context.requireConversation(conversationId);
-    return (this.context.database.prepare(`
+    return (cachedStatement(this.context.database, `
       SELECT * FROM workspace_runs
       WHERE conversation_id = ?
       ORDER BY started_at DESC, id ASC

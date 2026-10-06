@@ -62,6 +62,7 @@ import {
 } from "./conversation-history";
 import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
+import { cachedStatement } from "./statement-cache";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
 import {
   MESSAGE_PROJECTION_COLUMNS,
@@ -187,7 +188,7 @@ export class SnapshotRepository {
   }
 
   private conversationRow(conversationId: string): ConversationShellRow | undefined {
-    return this.context.database.prepare(`
+    return cachedStatement(this.context.database, `
       SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
       FROM conversations WHERE id = ?
     `).get(conversationId) as ConversationShellRow | undefined;
@@ -204,7 +205,7 @@ export class SnapshotRepository {
   conversationShell(conversationId: string): ConversationShell | null {
     const row = this.conversationRow(conversationId);
     if (!row) return null;
-    const latestTurn = this.context.database.prepare(`
+    const latestTurn = cachedStatement(this.context.database, `
       SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
@@ -300,10 +301,12 @@ export class SnapshotRepository {
 
   private historyRecords(conversationId: string, scope?: ConversationHistoryScope): HistoryPageRecords {
     const query = <T>(table: Parameters<typeof historyPredicate>[0], columns: string, order: string): T[] => {
-      const where = scope ? historyPredicate(table, scope) : { sql: "1", parameters: [] };
+      const where = scope
+        ? historyPredicate(table, scope, conversationId)
+        : { sql: `${table}.conversation_id = ?`, parameters: [conversationId] };
       return this.context.database.prepare(`SELECT ${columns} FROM ${table}
-        WHERE ${table}.conversation_id = ? AND (${where.sql}) ORDER BY ${order}`)
-        .all(conversationId, ...where.parameters) as T[];
+        WHERE ${where.sql} ORDER BY ${order}`)
+        .all(...where.parameters) as T[];
     };
     const messages = query<MessageRow>("messages", MESSAGE_PROJECTION_COLUMNS, "messages.created_at ASC, messages.id ASC").map(messageFromRow);
     return {

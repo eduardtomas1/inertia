@@ -1,6 +1,6 @@
 {
   "name": "inertia",
-  "version": "0.0.68",
+  "version": "0.0.69",
   "description": "A calm local workspace for coding with agents.",
   "desktopName": "dev.inertia.app.desktop",
   "inertiaReleaseChannel": "stable",
@@ -267,7 +267,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.7.0",
-    "@anthropic-ai/claude-agent-sdk": "0.3.290",
+    "@anthropic-ai/claude-agent-sdk": "0.3.291",
     "@anthropic-ai/sdk": "0.131.0",
     "@crowecawcaw/xa11y": "0.15.2",
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -323,7 +323,7 @@
     "tailwindcss": "^4.3.3",
     "terser": "5.51.2",
     "typescript": "^7.0.2",
-    "vite": "^7.3.6",
+    "vite": "^7.3.7",
     "vitest": "5.0.3",
     "yaml": "2.9.1"
   },

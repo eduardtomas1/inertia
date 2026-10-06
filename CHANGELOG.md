@@ -2,6 +2,54 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.69 — 2026-10-06
+
+Kimi Code plan-mode chats keep working after a failed or interrupted turn, the
+Plan tab shows the plan as a formatted document, and Inertia no longer treats
+the retired kimi-cli as a working Kimi.
+
+### Plan tab
+
+- The Plan tab shows the agent's plan as a formatted document: headings,
+  lists, bold and code render as they do in answers, at a readable size,
+  instead of one small paragraph of raw markdown.
+- The tab's title is the plan's own heading, a long plan opens as a short
+  preview with **Show full plan**, and **Copy plan** copies the whole plan.
+- Step titles show code and bold instead of raw `**` and backticks. Long steps
+  show three lines, and the step in progress shows in full.
+- A plan with no steps yet shows the document instead of **No plan yet**.
+
+### Kimi Code
+
+- A plan-mode chat whose previous Kimi turn failed or was interrupted no longer
+  fails every retry with **The Kimi ACP connection closed before the turn
+  completed**. Kimi reports a resumed session as being in its default mode
+  even when it is still in plan mode, so Inertia now selects the chat's mode
+  again on every resumed turn.
+- Switching a resumed Kimi chat from Plan to Build now leaves plan mode; before,
+  the turn could silently stay read-only.
+- The old Python kimi-cli is no longer maintained, and its last release only
+  prints that notice. Inertia now shows **The old kimi-cli is no longer
+  maintained; install Kimi Code with 'npm install -g @moonshot-ai/kimi-code'**
+  instead of offering it for chats, and **Update** no longer upgrades a
+  kimi-cli installed with uv into that placeholder.
+
+### Diagnostics
+
+- A turn that fails because the provider is not signed in is recorded as
+  **Provider authentication is required**, pointing to provider settings,
+  instead of as a generic failed turn.
+
+### Providers and dependencies
+
+- **Claude:** Claude Agent SDK 0.3.291 (Claude Code 2.1.291), whose types are
+  unchanged; it fixes dropped permission answers in cloud sessions and lost
+  final messages on quit.
+- **Antigravity:** agy 1.3.0 changes only the interactive terminal UI, so the
+  headless stream Inertia reads is unchanged.
+- Codex 0.160.1, Cursor, Kimi Code 2.1.1 and OpenCode 1.18.34 need no change.
+- Updated Vite to 7.3.7 for development.
+
 ## 0.0.68 — 2026-10-06
 
 Bring your Codex and Claude Code CLI conversations into Inertia, continue a

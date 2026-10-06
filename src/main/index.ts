@@ -132,7 +132,7 @@ import {
   type WindowThemePreference,
   writeWindowThemePreference,
 } from "./window-appearance.js";
-import { MAIN_WINDOW_DEFAULT_STATE, restoreMainWindowState,
+import { MAIN_WINDOW_DEFAULT_STATE, mainWindowStateSnapshot, restoreMainWindowState,
   type MainWindowState } from "./main-window-state.js";
 import { handleStartupFailure } from "./startup-failure.js";
 import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
@@ -151,10 +151,12 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       corsEnabled: true,
       stream: true,
+      codeCache: true,
     },
   },
 ]);
 let mainWindow: BrowserWindow | null = null;
+const shownNotifications = new Set<Notification>();
 let mascotMain: MascotMain | null = null;
 const mainWindowCreation = new MainWindowCreation();
 let runtimeSupervisor: RuntimeSupervisor | null = null;
@@ -306,8 +308,7 @@ function readWindowState(): MainWindowState {
 }
 function saveWindowState(window: BrowserWindow): void {
   try {
-    const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds();
-    writeFileSync(windowStatePath(), JSON.stringify({ ...bounds, maximized: window.isMaximized() }), { encoding: "utf8", mode: 0o600 });
+    writeFileSync(windowStatePath(), JSON.stringify(mainWindowStateSnapshot(window)), { encoding: "utf8", mode: 0o600 });
   } catch {
     // Window-state persistence is best effort and never blocks shutdown.
   }
@@ -608,7 +609,12 @@ function registerIpcHandlers(): void {
     if (!Notification.isSupported()) return false;
     const [title, body] = DESKTOP_NOTIFICATION_COPY[request.kind];
     const notification = new Notification({ title, body });
+    shownNotifications.add(notification);
+    const forget = (): void => { shownNotifications.delete(notification); };
+    notification.once("close", forget);
+    notification.once("failed", forget);
     notification.once("click", () => {
+      forget();
       if (detachedChatMain?.focusForNotification(request.conversationId)) return;
       void activateThreadNotification(request.conversationId, {
         channel: IPC.threadNotificationActivated,

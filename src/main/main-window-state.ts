@@ -28,6 +28,12 @@ function integer(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
 
+export function mainWindowStateSnapshot(
+  window: { isMaximized(): boolean; getNormalBounds(): Rectangle },
+): MainWindowState {
+  return { ...window.getNormalBounds(), maximized: window.isMaximized() };
+}
+
 export function restoreMainWindowState(
   value: unknown,
   displays: readonly WindowBoundsDisplay[],

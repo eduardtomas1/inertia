@@ -348,6 +348,8 @@ async function commonExecutableDirectories(
       local ? join(local, "Programs", "cursor", "resources", "app", "bin") : "",
       local ? join(local, "agy", "bin") : "",
       join(home, "AppData", "Roaming", "npm"),
+      join(home, ".local", "bin"),
+      join(home, ".opencode", "bin"),
     ]);
   }
 
@@ -468,7 +470,7 @@ export async function executableCandidates(
   if (!trimmed || trimmed.includes("\0")) return [];
 
   const candidates = (isAbsolute(trimmed) || trimmed.includes("/") || trimmed.includes("\\"))
-    ? [isAbsolute(trimmed) ? trimmed : resolve(cwd, trimmed)]
+    ? commandNames(isAbsolute(trimmed) ? trimmed : resolve(cwd, trimmed), environment.env, platform)
     : environment.pathEntries.flatMap((directory) => commandNames(trimmed, environment.env, platform).map((name) => join(directory, name)));
 
   const resolved = await Promise.all(unique(candidates, platform).map((candidate) => executableFile(candidate, platform)));

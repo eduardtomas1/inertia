@@ -58,6 +58,7 @@ interface ReversalState {
   root: string;
   plan: DiffReversalPlan;
   headContent: Buffer;
+  headWorktreeContent: Buffer;
   worktreeMode: number;
   worktreeContent: Buffer;
   index: IndexEntry;
@@ -270,9 +271,16 @@ export function reversalText(
   return Buffer.from(next, "utf8");
 }
 
-async function headFileContent(root: string, path: string): Promise<Buffer> {
+async function headFileContent(
+  root: string,
+  path: string,
+  layer: "index" | "worktree" = "index",
+): Promise<Buffer> {
   try {
-    return (await runGit(root, ["show", `HEAD:${path}`], {
+    const args = layer === "worktree"
+      ? ["cat-file", "--filters", `HEAD:${path}`]
+      : ["show", `HEAD:${path}`];
+    return (await runGit(root, args, {
       maxOutputBytes: MAX_DIFF_BYTES,
       failureMessage: "Unable to inspect the committed file.",
     })).stdout;
@@ -379,10 +387,11 @@ async function buildReversalState(
     MAX_DIFF_BYTES,
   );
 
-  const [index, stagedPatch, headContent] = await Promise.all([
+  const [index, stagedPatch, headContent, headWorktreeContent] = await Promise.all([
     readIndexEntry(root, file.path),
     completeLayerPatch(root, "index", file.path, selection.ignoreWhitespace),
     headFileContent(root, file.path),
+    headFileContent(root, file.path, "worktree"),
   ]);
   const worktreeContent = worktree.content;
   textBuffer(worktreeContent);
@@ -428,7 +437,7 @@ async function buildReversalState(
   const worktreeAnchors = deletionAnchors(file.hunks);
   const indexAnchors = deletionAnchors(stagedFile?.hunks ?? []);
   // Validate both transformations before exposing the plan.
-  reversalText(worktreeContent, selectedWorktreeLines, worktreeAnchors, headContent);
+  reversalText(worktreeContent, selectedWorktreeLines, worktreeAnchors, headWorktreeContent);
   if (selectedIndexLines.length > 0) {
     reversalText(index.content, selectedIndexLines, indexAnchors, headContent);
   }
@@ -458,6 +467,7 @@ async function buildReversalState(
   return {
     root,
     headContent,
+    headWorktreeContent,
     worktreeMode: worktree.mode,
     worktreeContent,
     index,
@@ -599,7 +609,7 @@ async function revertDiffSelectionLocked(
     state.worktreeContent,
     state.selectedWorktreeLines,
     state.worktreeAnchors,
-    state.headContent,
+    state.headWorktreeContent,
   );
   const nextIndex = state.selectedIndexLines.length > 0
     ? reversalText(

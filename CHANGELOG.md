@@ -37,7 +37,7 @@ instead of lost.
   of failing. Cursor, Kimi Code and Antigravity, which cannot take a message
   mid-turn, now offer **Stop and send**: Enter stops the agent and sends your
   message as the next turn in the same session.
-- Choosing a model from another provider in a chat with history, or
+- Choosing a model from another provider in a project chat with history, or
   **Continue with another model** in the usage-limit row, opens one new chat
   on the same checkout and branch with the whole chat attached as context.
   You can preview or remove that context before the first message, and the
@@ -97,12 +97,16 @@ instead of lost.
   before anything is shown or stored.
 - An imported chat continues the original CLI session. Conversations from
   Codex's archive continue in a new session with the imported messages as
-  context, and the chat says which applies.
+  context, and the chat says which applies. If that session no longer exists,
+  the turn fails instead of starting fresh, and a resumed Codex CLI session has
+  no Browser or other Inertia tools.
 - Conversations of any size can be imported. Long ones keep their opening
   exchange and newest messages, and the chat says how many earlier messages
   were left out.
 - `CLAUDE_CONFIG_DIR` from Inertia's environment now applies to every Claude
-  process Inertia starts, including sign-in and usage.
+  process Inertia starts, including sign-in and usage. If it points away from
+  `~/.claude`, an existing Claude chat continues in a new session with its
+  history.
 
 ### Checkpoints
 
@@ -154,8 +158,6 @@ instead of lost.
 - A turn near its activity budget keeps each command line instead of cutting
   it to a fragment.
 - Migration 92 records CLI conversation imports.
-- The MCP SDK's `proxy-addr` moves to 2.0.8, which fixes a critical IP
-  spoofing advisory and clears the production audit that failed main's CI.
 - CI only: the checkpoint benchmark's 12,000-file test repository no longer
   overflows Git's output on Windows, where line-ending conversion printed a
   warning per file.

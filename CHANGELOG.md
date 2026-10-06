@@ -154,6 +154,11 @@ instead of lost.
 - A turn near its activity budget keeps each command line instead of cutting
   it to a fragment.
 - Migration 92 records CLI conversation imports.
+- The MCP SDK's `proxy-addr` moves to 2.0.8, which fixes a critical IP
+  spoofing advisory and clears the production audit that failed main's CI.
+- CI only: the checkpoint benchmark's 12,000-file test repository no longer
+  overflows Git's output on Windows, where line-ending conversion printed a
+  warning per file.
 
 ## 0.0.67 — 2026-10-05
 

@@ -53,11 +53,13 @@ outlive the inactivity deadline.
 
 ## Verification
 
+On this branch with #587 applied, on Linux x64:
+
 | Command | Exit | Result |
 | --- | --- | --- |
-| `npm run check:quality` | QUALITY_EXIT | QUALITY_RESULT |
-| `npm run build` | BUILD_EXIT | BUILD_RESULT |
-| `npx vitest run` | TEST_EXIT | TEST_RESULT |
+| `npm run check:quality` | 0 | Workflow concurrency, migrations, architecture, color themes, lint and typecheck pass. |
+| `npm run build` | 0 | Typecheck, electron-vite build, Private Connect build and renderer bundle budgets pass; no renderer bytes change. |
+| `npx vitest run` | 0 | 1,167 files and 12,975 tests pass; 8 files and 99 tests are skipped by platform. |
 
 ## Changed files
 

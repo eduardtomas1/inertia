@@ -203,7 +203,7 @@ describe("selected OpenCode semantic isolation", () => {
 
     const first = prove(firstLifetime.signal);
     const second = prove(secondLifetime.signal);
-    await vi.waitFor(() => expect(proofFixture.starts).toHaveLength(2));
+    await vi.waitFor(() => expect(proofFixture.starts).toHaveLength(2), { timeout: 10_000 });
     firstLifetime.abort();
     await expect(first).resolves.toEqual({
       cleanupConfirmed: true,

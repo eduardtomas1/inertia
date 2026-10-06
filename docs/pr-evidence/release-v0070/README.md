@@ -51,6 +51,13 @@ v0.0.69. Both jobs were rerun without code changes. This PR raises the window
 to 1 s with 1.5 s human waits, which still proves that admitted interactions
 outlive the inactivity deadline.
 
+Build Windows ARM64 also failed one test on the first attempt,
+`windows-managed-terminal-native.test.ts` "preserves the ComSpec-unset
+basename shell fallback": after 16 s the native console had printed only its
+initialization sequences, not `FALLBACK_READY`. No terminal code changed in
+v0.0.69 and the job passed for v0.0.68, so it was rerun with the Linux jobs
+and is not changed here.
+
 ## Verification
 
 On this branch with #587 applied, on Linux x64:

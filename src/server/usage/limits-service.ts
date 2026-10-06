@@ -147,7 +147,7 @@ export class UsageLimitsService {
         });
       } catch {
         next.push({ id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
-          email: null, plan: null, identityKey: null, sources: ["This computer"], status: "error", detail: "Account usage could not be read. Refresh to retry.", windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: new Date().toISOString() });
+          email: null, plan: null, identityKey: null, sources: ["This computer"], status: "error", detail: "Account usage could not be read.", windows: [], credits: null, canReset: false, updatedAt: null, checkedAt: new Date().toISOString() });
       }
     }
     for (const profile of this.dependencies.customProfiles()) next.push({ id: `profile:${profile.id}`, providerId: "custom", providerLabel: profile.label, label: profile.label,
@@ -176,7 +176,9 @@ export class UsageLimitsService {
     this.accounts = next.map((account) => {
       const old = previous.get(account.id);
       if (account.keychain === "deferred" && old) return old;
-      return account.status === "error" && old?.identityKey && account.identityKey === old.identityKey
+      const sameLogin = old && ((old.identityKey && account.identityKey === old.identityKey)
+        || (old.credentialFingerprint && account.credentialFingerprint === old.credentialFingerprint));
+      return account.status === "error" && sameLogin
         ? { ...account, status: "stale", windows: old.windows, updatedAt: old.updatedAt, credits: old.credits, canReset: false }
         : account;
     });

@@ -6,6 +6,46 @@ import {
 } from "../../src/server/provider/maintenance-latest";
 
 describe("ProviderLatestVersionCache", () => {
+  it.each([
+    [true, { formulae: [], casks: [{ version: "0.160.0,a1b2c3" }] }, "0.160.0"],
+    [false, { formulae: [{ versions: { stable: "1.18.30" } }], casks: [] }, "1.18.30"],
+  ])("reads the release a Homebrew keg can upgrade to (cask %s)", async (cask, info, version) => {
+    const fetch = vi.fn();
+    const homebrewInfo = vi.fn(async () => JSON.stringify(info));
+    let now = 1_000_000;
+    const cache = new ProviderLatestVersionCache({
+      fetch: fetch as typeof globalThis.fetch,
+      homebrewInfo,
+      now: () => now,
+    });
+    const source = { brew: "/home/linuxbrew/.linuxbrew/bin/brew", name: cask ? "codex" : "opencode", cask };
+
+    await expect(cache.homebrew(source)).resolves.toMatchObject({ version, freshness: "fresh", error: null });
+    now += 1_000;
+    await expect(cache.homebrew(source)).resolves.toMatchObject({ version });
+    expect(homebrewInfo).toHaveBeenCalledTimes(1);
+    expect(homebrewInfo).toHaveBeenCalledWith(source.brew, [
+      "info", "--json=v2", cask ? "--cask" : "--formula", source.name,
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports a Homebrew read that fails or returns no version as unavailable", async () => {
+    const homebrewInfo = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(JSON.stringify({ formulae: [], casks: [{}] }));
+    let now = 1_000_000;
+    const cache = new ProviderLatestVersionCache({ homebrewInfo, now: () => now });
+    const source = { brew: "/opt/homebrew/bin/brew", name: "claude-code", cask: true };
+    await expect(cache.homebrew(source)).resolves.toMatchObject({
+      version: null,
+      freshness: "unavailable",
+      error: "Latest-version information is temporarily unavailable.",
+    });
+    now += 10 * 60_000;
+    await expect(cache.homebrew(source)).resolves.toMatchObject({ version: null, freshness: "unavailable" });
+  });
+
   it("deduplicates refreshes and serves a fresh bounded result from cache", async () => {
     const request = vi.fn(async () => new Response(
       JSON.stringify({ version: "2.3.4" }),

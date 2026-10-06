@@ -16,12 +16,11 @@ import {
   type TurnRequestContext,
 } from "../../../shared/contracts";
 import {
-  CheckpointError,
   createCheckpoint,
   deleteCheckpoint,
 } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
-import { getRepositoryStatus, GitError } from "../../git";
+import { getRepositoryStatus } from "../../git";
 import {
   MESSAGE_ADMISSION_UNAVAILABLE,
   publicRuntimeError,
@@ -36,6 +35,10 @@ import type { PrivateGeneratedAttachmentStore } from "../attachments/private-gen
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
+import {
+  checkpointFailureReason,
+  isExpectedCheckpointAbsence,
+} from "../turns/turn-checkpoint-notice";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
@@ -53,7 +56,7 @@ import {
   messageSendPreparationExpired,
 } from "./message-send-preparation";
 import { ConversationContextService } from "../conversation-context-service";
-import type { QueuedMessage } from "../../../shared/queued-messages";
+import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
 
 type MessageSendStage =
   | "conversation-state"
@@ -113,8 +116,19 @@ function classifiedMessageSendError(
   );
 }
 
+interface UndeliveredFollowUp {
+  conversationId: string;
+  id: string;
+  content: string;
+  attachments: ChatAttachment[];
+}
+
 export interface TurnInteractionCommandDependencies {
   queuedMessage?: QueuedMessage;
+  undeliveredFollowUps?: {
+    enqueue(input: UndeliveredFollowUp, handoffId: string): Promise<MessageQueueResult>;
+    adopt(input: UndeliveredFollowUp): MessageQueueResult;
+  };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
@@ -213,10 +227,23 @@ export function createTurnInteractionCommandHandler(
           const admission = dependencies.turns.acquireFollowUpAdmission(
             conversation.id,
           );
+          const undelivered = {
+            conversationId: conversation.id,
+            id: command.requestId,
+            content: command.payload.content,
+          };
           if (!admission) {
-            throw new RuntimeRequestError(
-              "This active agent route cannot accept a follow-up.",
+            if (!dependencies.undeliveredFollowUps || !dependencies.turns.followUpArrivedAfterTurn(conversation.id)) {
+              throw new RuntimeRequestError(
+                "This active agent route cannot accept a follow-up.",
+              );
+            }
+            const queued = await dependencies.undeliveredFollowUps.enqueue(
+              { ...undelivered, attachments: command.payload.attachments },
+              command.requestId,
             );
+            dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: queued });
+            return "handled";
           }
           const requestedAttachments = command.payload.attachments;
           if (requestedAttachments.length > 0 && !admission.supportsImages) {
@@ -293,7 +320,7 @@ export function createTurnInteractionCommandHandler(
               );
               retentionCompleted = true;
             }
-            const followUpMessage = await dependencies.turns.steer(
+            const steered = await dependencies.turns.steer(
               admission,
               {
                 content: command.payload.content,
@@ -309,6 +336,19 @@ export function createTurnInteractionCommandHandler(
               },
               AbortSignal.timeout(Math.max(0, preparationDeadlineAt - Date.now())),
             );
+            if ((steered.kind === "turn-ended" || steered.kind === "refused") && dependencies.undeliveredFollowUps) {
+              const queued = dependencies.undeliveredFollowUps.adopt({ ...undelivered, attachments });
+              followUpPersisted = true;
+              if (retentionId) {
+                dependencies.conversationAttachments.acceptRetention(retentionId);
+                retentionAccepted = true;
+              }
+              await dependencies.attachmentResolver?.releaseAll(sourceAttachmentIds);
+              sourceClaimSettled = true;
+              dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: queued });
+              return "handled";
+            }
+            const followUpMessage = steered.kind === "accepted" ? steered.message : null;
             if (!followUpMessage?.turnId) {
               throw new RuntimeRequestError(
                 "This active agent route cannot accept a follow-up.",
@@ -662,6 +702,7 @@ export function createTurnInteractionCommandHandler(
         }
         messageSendStage = "checkpoint";
         let checkpointId: string | null = null;
+        let checkpointFailure: string | null = null;
         let capturedCheckpoint: {
           repositoryPath: string;
           ref: string;
@@ -712,17 +753,8 @@ export function createTurnInteractionCommandHandler(
                 conversation.id,
               ).catch(() => undefined);
             }
-            if (
-              !(
-                error instanceof CheckpointError
-                && error.message === "not-repository"
-              )
-              && !(
-                error instanceof GitError
-                && error.code === "not-repository"
-              )
-            ) {
-              // A checkpoint is protective but not a reason to block a run.
+            if (!isExpectedCheckpointAbsence(error)) {
+              checkpointFailure = checkpointFailureReason(error);
             }
             if (messageSendPreparationExpired(preparationDeadlineAt)) {
               if (providerTransitionReserved) {
@@ -828,6 +860,7 @@ export function createTurnInteractionCommandHandler(
                 context: resolvedTurnContext,
                 contextRequestId: command.requestId,
                 checkpointId,
+                checkpointFailure,
                 skills: resolvedSkills.inputs,
               }, () => {
                 durableTurnPersisted = true;

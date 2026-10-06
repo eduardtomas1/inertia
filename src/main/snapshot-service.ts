@@ -1,4 +1,6 @@
-import { isAbsolute } from "node:path";
+import { lstatSync, mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, globalShortcut, systemPreferences, utilityProcess, type UtilityProcess } from "electron";
 import {
@@ -38,7 +40,19 @@ export function snapshotFailureMessage(category: SnapshotFailureCategory, platfo
   }
 }
 
+const HELPER_DENIED = "macOS lists Inertia as allowed in Accessibility and Screen Recording, but denied access to its snapshot helper, so nothing was captured. Snapshots cannot capture windows with this build on this Mac.";
+
 export interface SnapshotWorkerResult { png: Buffer; source: SnapshotSource }
+
+function captureRoot(): string { return join(realpathSync(app.getPath("userData")), "snapshot-capture"); }
+
+function captureFolder(): string {
+  const root = captureRoot();
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(root);
+  if (!stat.isDirectory() || realpathSync(root) !== root) throw new SnapshotError(snapshotFailureMessage("native-failure"));
+  return mkdtempSync(join(root, "inertia-snapshot-"));
+}
 const ACCELERATOR = "CommandOrControl+Alt+S";
 
 /** One capture at a time. A response is delivered only after its worker exits. */
@@ -60,6 +74,10 @@ export class SnapshotService {
     private readonly onFailure: (diagnostic: SnapshotFailureDiagnostic) => void = () => undefined,
     private readonly stopReview: () => Promise<void> = async () => undefined,
   ) {}
+
+  static async sweepCaptureFolders(): Promise<void> {
+    await rm(captureRoot(), { recursive: true, force: true });
+  }
 
   // Capture failures can disable the service without ending its reporting lifetime.
   isDisposing(): boolean { return this.disposalStarted; }
@@ -94,7 +112,7 @@ export class SnapshotService {
       this.message = "Allow Inertia in Accessibility and Screen Recording, then enable Snapshots again.";
       return this.state();
     }
-    const trigger = (): void => { if (this.enabled && !this.busy) void this.onCapture().catch(() => undefined); };
+    const trigger = (): void => { if (this.enabled) void this.onCapture().catch(() => undefined); };
     if (this.shortcut === "accelerator") {
       this.enabled = globalShortcut.register(ACCELERATOR, trigger);
       if (!this.enabled) this.message = "The snapshot shortcut is already used by another app.";
@@ -134,8 +152,12 @@ export class SnapshotService {
     this.busy = true;
     const generation = this.captureGeneration;
     try {
+      const directory = captureFolder();
       const captured = await new Promise<SnapshotWorkerResult>((resolve, reject) => {
-        const child = this.spawn("snapshot-capture-worker");
+        const removeFolder = (): void => { void rm(directory, { recursive: true, force: true }).catch(() => undefined); };
+        let child: UtilityProcess;
+        try { child = this.spawn("snapshot-capture-worker"); } catch (error) { removeFolder(); throw error; }
+        child.once("exit", removeFolder);
         this.captureChild = child;
         let result: SnapshotWorkerResult | null = null;
         let error: Error | null = null;
@@ -172,8 +194,10 @@ export class SnapshotService {
           } else {
             const category = SNAPSHOT_FAILURE_CATEGORIES.find((value) => data.ok === false && value === data.code) ?? "native-failure";
             const phase = SNAPSHOT_CAPTURE_PHASES.find((value) => value === data.phase);
-            this.onFailure(phase ? { category, phase } : { category });
-            error = new SnapshotError(snapshotFailureMessage(category));
+            const helperDenied = category === "permission-denied" && process.platform === "darwin" && this.state().permission === "granted";
+            const diagnostic = helperDenied ? "helper-permission-denied" : category;
+            this.onFailure(phase ? { category: diagnostic, phase } : { category: diagnostic });
+            error = new SnapshotError(helperDenied ? HELPER_DENIED : snapshotFailureMessage(category));
           }
           try { child.postMessage("received"); } catch { stop("Snapshot capture stopped before completing."); }
         });
@@ -191,7 +215,7 @@ export class SnapshotService {
         });
         child.once("spawn", () => {
           if (error) { child.kill(); return; }
-          try { child.postMessage("capture"); } catch { stop("Snapshot capture could not start."); }
+          try { child.postMessage({ capture: directory }); } catch { stop("Snapshot capture could not start."); }
         });
       });
       if (generation !== this.captureGeneration) throw new SnapshotError("Snapshot cancelled.");

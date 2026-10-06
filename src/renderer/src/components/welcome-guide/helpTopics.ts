@@ -105,7 +105,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Follow-ups",
-        detail: "While an agent works, Enter sends a follow-up and Tab queues it for the next turn. Send now sends a queued message right away.",
+        detail: "While an agent works, Enter sends a follow-up and Tab queues it for the next turn. A follow-up that arrives as the turn ends is queued instead. Agents that cannot take a message mid-turn offer Stop and send. Send now sends a queued message right away.",
       },
       {
         name: "Model, reasoning and mode",
@@ -122,7 +122,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Provider sessions",
-        detail: "A chat stays with the provider it started on; choosing another provider offers Start a new chat. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
+        detail: "A chat stays with the provider it started on; choosing another provider offers to continue in a new chat on the same checkout, with this chat attached as context you can preview or remove before sending. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
       },
     ],
     jumps: [
@@ -251,7 +251,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Checkpoints",
-        detail: "Revert on a turn restores the project to before that turn and saves current edits in a recovery checkpoint first.",
+        detail: "Revert on a turn restores the project to before that turn and saves current edits in a recovery checkpoint first. When saving a checkpoint fails, the turn's request row says so and gives the reason, shown on hover and read by screen readers.",
       },
     ],
     jumps: [
@@ -297,12 +297,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Limits",
-        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. Refresh limits asks the providers again; a countdown reaching zero does not refill a bar.",
+        detail: "Each provider shows the remaining quota for every reported window with a countdown to its reset. A window shows Reset due until the provider reports new quota; Codex and Claude are checked again a few seconds after the reset. Refresh limits asks the providers right away.",
         jump: "Open Usage",
       },
       {
         name: "Resume at reset",
-        detail: "When a chat stops at a subscription limit, the composer offers Resume at reset and Snooze until reset. Inertia must be running to resume, and a resume missed by more than an hour waits for you to choose Resume now.",
+        detail: "When a chat stops at a subscription limit, the sidebar shows it as Limited and the composer offers Resume at reset and Snooze until reset. Continue with another model opens the model chooser to carry the chat to another provider. Inertia must be running to resume. If the provider has not reported new quota within an hour of the reset, or Inertia was closed at the time, nothing is sent and Resume now waits for you.",
       },
       {
         name: "In the composer",

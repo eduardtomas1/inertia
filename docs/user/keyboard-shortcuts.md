@@ -37,12 +37,21 @@ Turn on Window snapshots in **Settings → Devices & integrations**, and choose 
 | Move between chats in the Work list | ↑ ↓, Home, End |
 | Open a chat's actions | Shift+F10 or the Menu key |
 
+## Right-click menus
+
+| Action | Keys |
+|---|---|
+| Open the menu for a focused message, file or changed file | Shift+F10 or the Menu key |
+| Paste into a workspace terminal | ⌘V on macOS, Ctrl+V on Windows, Ctrl+Shift+V on Linux |
+| Paste a code into a provider sign-in | ⌘V on macOS, Ctrl+V on Windows and Linux |
+
 ## Composer
 
 | Action | Keys |
 |---|---|
 | Send, or send a follow-up while an agent works | Enter |
-| Queue a follow-up for the next turn | Tab, while *Enter sends · Tab queues* is shown |
+| Stop the agent and send, for agents that cannot take a follow-up mid-turn | Enter, while *Enter stops and sends · Tab queues* is shown |
+| Queue a follow-up for the next turn | Tab, while *Enter sends · Tab queues* or *Enter stops and sends · Tab queues* is shown |
 
 ## Split view
 

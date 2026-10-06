@@ -23,6 +23,16 @@ process-tree termination overhead, raw process startup, deterministic terminal
 framing, and a real node-pty lifecycle. It writes
 `performance-results/platform-<platform>-<architecture>.json`.
 
+The same command also runs `tests/performance/checkpoint.benchmark.test.ts`,
+which times five repeated checkpoints of a 20-file and a 12,000-file
+repository with one edited and one untracked file, and writes
+`performance-results/checkpoint-<platform>-<architecture>.json`. Because a
+checkpoint reuses the repository index, unchanged tracked files should cost
+almost nothing; the smoke gate fails when the large median exceeds six times
+the small one or 10 s. On an Apple Silicon Mac the ratio is about 1.0 to 1.3
+(roughly 110 ms and 140 ms); the previous capture measured 18.0 (97 ms and
+1,755 ms).
+
 `benchmark:desktop` builds Inertia and launches the real Electron application
 under `NODE_ENV=test`, which deliberately disables provider discovery. It is a
 provider-disabled test-mode baseline for a fresh-profile launch, a reused-profile
@@ -161,6 +171,15 @@ application produced alongside the AppImage, not AppImage mount time.
   wait 1.5 seconds of idle and open both again; the gate applies to the median
   of those five. The report keeps the warm-up, every sample and the
   minimum/median/p95/maximum of each surface.
+- Runtime payload budget (`tests/server/runtime-payload-budget.test.ts`, part
+  of `npm test`): 1,000 conversations with one completed turn each, 200 of them
+  archived, and one chat with 40 turns of eight command activities filled to
+  the 32 KiB activity and 256 KiB turn detail limits. It records the shell
+  snapshot's JSON bytes and the median of five build-and-serialize samples,
+  the latest history page as a `request.result` event, one full-size
+  `agent.activity` event, and one `conversation.shell.updated` event with 20
+  runs, each against a fixed ceiling. Every event also passes the renderer's
+  event schema.
 - Split workload: Inertia's supported two-chat split view. Inertia intentionally
   owns one primary `BrowserWindow`; the benchmark does not invent a multi-window
   architecture.
@@ -236,6 +255,95 @@ The first untouched desktop baseline also exposed a benchmark race: native
 harness now waits for those children before counting them; one pre-fix run
 failed and the next passed, while all six post-fix desktop runs passed.
 
+### 2026-10-05 tool activity hot path
+
+Before this change every Codex `item/commandExecution/outputDelta` became a
+running activity update. Each one read and rewrote the activity row, rewrote
+the command's workspace run, sent an `agent.activity` event carrying the whole
+detail, and sent a conversation shell event (three queries) although nothing in
+the shell had changed. The renderer then re-sorted every conversation and
+replaced its snapshot for each of those events.
+
+Running updates to an activity that already exists are now kept in memory and
+saved, then shown, at most once per 64 ms window, the same sustained cadence as
+streamed text. A new activity, a terminal update, an approval or input request,
+a plan, renderer hydration and turn settlement save pending updates first, so
+activity events keep their order and nothing is shown before it is saved. A
+failed timed save fails the turn like a failed text save. The conversation
+shell is sent only when a command's workspace run is created or changes label
+or status, or when work resumes after a retry or a delegation, and the
+renderer keeps its snapshot object when a shell event matches what it already
+shows.
+
+Codex command output is now one Output section, appended without a heading
+per chunk and without trimming whitespace. The Codex event handler holds the
+unfinished last line of each command and releases it at a line feed, at a
+carriage return followed by more output, before terminal input, when the
+command completes, or once it passes 1 KiB (cut at its last space, or whole
+when it has none). An open private key block is held until its END line, up to
+16 KiB. Each released piece is scrubbed whole, so a credential (`ghp_`,
+`Bearer`, `xoxb-`, a JWT, a private key) or a workspace path that arrives split
+across chunks is redacted like one that arrives in one piece. Credentials are
+still scrubbed one piece at a time, so a secret that straddles the 1 KiB cut of
+a single line longer than 1 KiB relies on the projection's rescan of the open
+line, which starts at its last line feed and covers at most 1 KiB. The cost is
+latency for an unfinished line: a prompt without a line feed shows when it
+ends, when the command completes, or at 1 KiB.
+
+The completion no longer repeats the command, nor the output that already
+streamed. Codex stops sending output deltas after a per-command limit, so when
+the completed output is longer than what streamed and continues it (checked on
+the last 64 streamed characters), the unseen ending is appended; when it
+differs, the completed output is added as its own Output section. Before, a
+repeated identical chunk was dropped and every chunk got its own `Output:`
+heading, then the completion appended the command and the whole output again.
+
+Once an update would not fit in what is left of the 256 KiB per-turn detail
+budget, the activity keeps the detail it has, including its command line, and
+the new part is dropped. Before, that update cut the stored detail down to the
+few characters left, which could replace the command line with a fragment of
+the omission marker.
+
+Five hundred output deltas delivered in ten 64 ms windows
+(`tests/server/provider-activity-lifecycle.test.ts`). After the change the
+twelve writes are the ten windows, the unfinished last line released when the
+command completes, and the completion itself:
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Activity row writes | 501 | 12 |
+| Workspace run writes | 501 | 1 |
+| `agent.activity` events | 502 | 13 |
+| Bytes in those events | 2,751,255 | 37,008 |
+| Conversation shell events | 502 | 2 |
+| Stored detail for 4,390 characters of output | 13,325 | 4,417 |
+
+Payload budgets on the same Mac (`tests/server/runtime-payload-budget.test.ts`):
+the shell snapshot of 1,000 conversations is 2,023,310 bytes and takes about
+10 ms to build and serialize (ceilings: 2,200 bytes per conversation and
+250 ms, loose enough for hosted runners); the latest history page of the heavy
+chat holds 20 of its 40 turns in 5,513,713 bytes (ceiling 6 MiB); one
+full-size `agent.activity` event is 34,345 bytes (ceiling 36 KiB), so the
+4 MiB replay ring holds about 122 of them; one shell event with 20 runs is
+9,690 bytes (ceiling 12 KiB). The fixture output is ASCII and the ceilings
+hold only for that: the limits count UTF-16 characters, so 32 KiB of
+three-byte characters is about 96 KiB in one event. The runs carry `canStop`
+as stored (`false`); the live value adds at most one byte per run.
+
+`npm run benchmark:desktop:built`, three interleaved runs each of a main build
+(`b6865e11`) and this branch on the same Mac, medians: first streamed delta to
+paint 22 vs 21 ms, p95 visible-update gap 76.8 vs 76.3 ms, completion to final
+paint 276 vs 262 ms, 300-turn transcript p95 frame 10.2 vs 10.0 ms, warm
+runtime interactive 1,221 vs 1,205 ms, and no long tasks in either. Cold
+runtime interactive moved between about 1.2 and 1.4 s in both builds (1,291 vs
+1,432 ms here; a second interleaved set against the branch just before this
+change measured 1,391 vs 1,205 ms), which is run-to-run noise.
+
+Still open: tool output travels inline in history pages and activity events
+instead of loading when a row is expanded, archived chats stay in the shell
+snapshot, and the desktop benchmark streams text only, so it does not exercise
+tool activity.
+
 ### Historical V0.0.21 to V0.0.24 evidence
 
 The implementation baseline was `4640bbab6a49ffabd4dc211ef9d70b3c8c47e1e9`
@@ -306,9 +414,17 @@ host. Five deterministic streams produced these distributions in milliseconds:
 
 The end-to-end marker measurement was 29–35 ms to first visible paint and
 88–92 ms from provider completion to the final painted answer. Reader
-navigation was preserved in every sample. The immediate streaming bottom gap
-was at most 25 px; after terminal settlement and final Git-artifact layout it
-was 0 px in every sample.
+navigation was preserved in every sample. That completion figure is not
+comparable with current reports: the final-answer paint marker is now recorded
+only on the first frame where the persisted answer is visible and within the
+live-edge threshold of the bottom (`tests/performance/desktop.benchmark.spec.ts`),
+so it includes following the answer to the bottom after settlement. Three
+local reports from a main build on 2026-10-05 measured 269, 276 and 281 ms.
+Their stage medians account for about 16 ms of that (terminal persistence 1,
+final Markdown commit 11, final answer paint 4); the rest is the wait for the
+answer to reach the live edge, which no stage covers yet. The immediate
+streaming bottom gap was at most 25 px; after terminal settlement and final
+Git-artifact layout it was 0 px in every sample.
 
 The renderer-receipt interval begins at a causal marker recorded immediately
 before the runtime sends the WebSocket event. The separate send-accepted marker

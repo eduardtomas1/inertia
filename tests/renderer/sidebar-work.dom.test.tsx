@@ -1334,6 +1334,18 @@ describe("compact Work sidebar", () => {
     }
   });
 
+  it("labels a chat stopped by a usage limit as Limited with its own icon", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const failed = conversation("usage-limited", "Limited task", new Date(2026, 7, 11, 9), { status: "failed" });
+    const latestTurn = { id: "limited-turn", status: "failed", usageLimited: true } as unknown as NonNullable<ConversationShell["latestTurn"]>;
+    renderSidebar([{ ...failed, latestTurn }]);
+    const cue = document.querySelector('[data-work-status="limited"]');
+    expect(cue?.querySelector(".lucide-clock-3, .lucide-clock3")).not.toBeNull();
+    expect(cue?.closest(".activity-thread-status-label")).toHaveTextContent("Limited");
+    expect(screen.getByRole("button", { name: /Limited task.*Limited$/u })).toBeVisible();
+  });
+
   it("shows the orbiting pixel glyph and how long a running thread has been working", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

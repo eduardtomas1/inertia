@@ -225,8 +225,13 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(reasoning).toEqual(["Checking the safest path."]);
     expect(activities).toContainEqual(expect.objectContaining({
       activityId: "command-1",
+      phase: "started",
+      detail: "Command:\nnpm test",
+    }));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "command-1",
       phase: "completed",
-      detail: "Command:\nnpm test\n\nOutput:\npassed",
+      detail: "Output:\npassed",
     }));
     expect(usage).toEqual([126]);
     expect(metadata).toContainEqual(["codex:primary"]);
@@ -276,6 +281,36 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ result: { decision: "accept" } });
     expect(messages.find(({ id }) => id === "input-rpc")).toMatchObject({ result: { answers: { choice: { answers: ["  Safe  "] } } } });
     expect(messages.find(({ method }) => method === "initialized")).toEqual({ method: "initialized" });
+    await manager.disposeAll();
+  });
+
+  it("appends the end of a command when its output deltas stop before it finishes", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "capped-command-output";
+    const manager = trackedManager(fake.command);
+    const activities: Array<{ phase: string; activityId?: string; detail?: string; outputDelta?: string }> = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-capped-output",
+      cwd: fake.root,
+      prompt: "Run the tests",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onActivity: (event) => activities.push(event),
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Done" });
+    expect(activities.filter(({ activityId }) => activityId === "command-capped")
+      .map(({ phase, detail, outputDelta }) => ({ phase, detail, outputDelta }))).toEqual([
+      { phase: "started", detail: "Command:\nnpm test", outputDelta: undefined },
+      { phase: "started", detail: undefined, outputDelta: "line 1\n" },
+      { phase: "started", detail: undefined, outputDelta: "line 2\n" },
+      { phase: "started", detail: undefined, outputDelta: "line 3\nSummary: 2 failed\n" },
+      { phase: "failed", detail: undefined, outputDelta: undefined },
+    ]);
     await manager.disposeAll();
   });
 

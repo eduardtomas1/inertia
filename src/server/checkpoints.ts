@@ -1,6 +1,14 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -20,15 +28,16 @@ export interface CheckpointOperationOptions {
 }
 
 const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
+const CHECKPOINT_FAILURE = "Git could not create the checkpoint.";
 const RAW_CHECKPOINT_ATTRIBUTES =
   "* -crlf -filter -ident -text -working-tree-encoding -eol\n";
 const NUL_BYTE = Buffer.from([0]);
 
-function parseTaggedCheckpointPaths(
+function selectTaggedCheckpointPaths(
   output: Buffer,
-): { included: Buffer; skipped: Buffer } {
-  const included: Buffer[] = [];
-  const skipped: Buffer[] = [];
+  selected: (tag: number) => boolean,
+): Buffer {
+  const paths: Buffer[] = [];
   let offset = 0;
   while (offset < output.length) {
     const end = output.indexOf(0, offset);
@@ -41,15 +50,17 @@ function parseTaggedCheckpointPaths(
         "Git returned invalid checkpoint path data.",
       );
     }
-    const target = output[offset] === 0x53 ? skipped : included;
-    target.push(output.subarray(offset + 2, end), NUL_BYTE);
+    if (selected(output[offset]!)) {
+      paths.push(output.subarray(offset + 2, end), NUL_BYTE);
+    }
     offset = end + 1;
   }
-  return {
-    included: Buffer.concat(included),
-    skipped: Buffer.concat(skipped),
-  };
+  return Buffer.concat(paths);
 }
+
+const isSkippedWorktreeTag = (tag: number): boolean => tag === 0x53;
+const isAssumedUnchangedTag = (tag: number): boolean =>
+  tag >= 0x61 && tag <= 0x7a;
 
 async function runGit(
   cwd: string,
@@ -68,7 +79,7 @@ async function runGit(
       input,
       maxOutputBytes: maxStdoutBytes,
       timeoutMs: 20_000,
-      failureMessage: "Git could not create the checkpoint.",
+      failureMessage: CHECKPOINT_FAILURE,
     });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
@@ -86,7 +97,7 @@ async function runGit(
         throw new CheckpointError("not-repository");
       }
     }
-    throw new CheckpointError("Git could not create the checkpoint.");
+    throw new CheckpointError(CHECKPOINT_FAILURE);
   }
 }
 
@@ -99,6 +110,18 @@ function checkpointGitArguments(
     "core.fsmonitor=false",
     ...args,
   ];
+}
+
+function durableCheckpointGitArguments(
+  args: readonly string[],
+): string[] {
+  return checkpointGitArguments([
+    "-c",
+    "core.fsync=objects,reference",
+    "-c",
+    "core.fsyncMethod=batch",
+    ...args,
+  ]);
 }
 
 async function checkpointEnvironment(
@@ -227,6 +250,178 @@ async function checkpointEnvironment(
   }
 }
 
+interface RepositoryIndexEntries {
+  entries: Buffer;
+  skipped: Buffer;
+}
+
+async function readRepositoryIndexEntries(
+  repositoryPath: string,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<RepositoryIndexEntries> {
+  const entries = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments(["ls-files", "--stage", "-z"]),
+      {},
+      undefined,
+      MAX_CHECKPOINT_PATH_BYTES,
+      deadlineAt,
+      signal,
+    )
+  ).stdout;
+  const taggedPaths = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments(["ls-files", "--cached", "-t", "-z"]),
+      {},
+      undefined,
+      MAX_CHECKPOINT_PATH_BYTES,
+      deadlineAt,
+      signal,
+    )
+  ).stdout;
+  return {
+    entries,
+    skipped: selectTaggedCheckpointPaths(taggedPaths, isSkippedWorktreeTag),
+  };
+}
+
+async function writeIsolatedIndexEntries(
+  repositoryPath: string,
+  environment: NodeJS.ProcessEnv,
+  index: RepositoryIndexEntries,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  await runGit(
+    repositoryPath,
+    ["read-tree", "--empty"],
+    environment,
+    undefined,
+    1024 * 1024,
+    deadlineAt,
+    signal,
+  );
+  if (index.entries.length > 0) {
+    await runGit(
+      repositoryPath,
+      ["update-index", "-z", "--index-info"],
+      environment,
+      index.entries,
+      1024 * 1024,
+      deadlineAt,
+      signal,
+    );
+  }
+  if (index.skipped.length > 0) {
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "--literal-pathspecs",
+        "update-index",
+        "--skip-worktree",
+        "-z",
+        "--stdin",
+      ]),
+      environment,
+      index.skipped,
+      1024 * 1024,
+      deadlineAt,
+      signal,
+    );
+  }
+}
+
+async function repositoryIndexPath(
+  repositoryPath: string,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const lines = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "rev-parse",
+        "--show-prefix",
+        "--path-format=absolute",
+        "--git-path",
+        "index",
+      ]),
+      {},
+      undefined,
+      1024 * 1024,
+      deadlineAt,
+      signal,
+    )
+  ).stdout.toString("utf8").replace(/\n$/u, "").split("\n");
+  const [prefix, indexPath] = lines;
+  return lines.length === 2
+    && prefix === ""
+    && indexPath
+    && isAbsolute(indexPath)
+    && !indexPath.includes("\0")
+    ? indexPath
+    : null;
+}
+
+async function reuseRepositoryIndex(
+  repositoryPath: string,
+  sourcePath: string,
+  indexPath: string,
+  environment: NodeJS.ProcessEnv,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    const source = await stat(sourcePath, { bigint: true });
+    const seconds = source.mtimeNs / 1_000_000_000n;
+    if (seconds <= 0n) return false;
+    await copyFile(sourcePath, indexPath);
+    const taggedPaths = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments(["ls-files", "-v", "-z"]),
+        environment,
+        undefined,
+        MAX_CHECKPOINT_PATH_BYTES,
+        deadlineAt,
+        signal,
+      )
+    ).stdout;
+    const assumedUnchanged = selectTaggedCheckpointPaths(
+      taggedPaths,
+      isAssumedUnchangedTag,
+    );
+    if (assumedUnchanged.length > 0) {
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "update-index",
+          "--no-assume-unchanged",
+          "-z",
+          "--stdin",
+        ]),
+        environment,
+        assumedUnchanged,
+        1024 * 1024,
+        deadlineAt,
+        signal,
+      );
+    }
+    await utimes(indexPath, Number(seconds), Number(seconds));
+    return (await stat(indexPath, { bigint: true })).mtimeNs <= source.mtimeNs;
+  } catch (error) {
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
+    if (
+      error instanceof CheckpointError
+      && error.message !== CHECKPOINT_FAILURE
+    ) throw error;
+    return false;
+  }
+}
+
 /**
  * Produces a raw worktree tree without evaluating repository-provided clean
  * filters or attributes. The temporary Git metadata carries Inertia's
@@ -294,6 +489,7 @@ export async function captureRawWorktreeTree(
           "--literal-pathspecs",
           "add",
           "-A",
+          "--force",
           "--pathspec-from-file=-",
           "--pathspec-file-nul",
         ]),
@@ -362,30 +558,20 @@ export async function createCheckpoint(
       // Repositories without a first commit are supported. A spent aggregate
       // deadline is caught by the next bounded checkpoint operation.
     }
-    const taggedPaths = (
+    const sourceIndexPath = await repositoryIndexPath(
+      repositoryPath,
+      options.deadlineAt,
+      options.signal,
+    );
+    const untrackedPaths = (
       await runGit(
         repositoryPath,
         checkpointGitArguments([
           "ls-files",
-          "--cached",
           "--others",
           "--exclude-standard",
-          "-t",
           "-z",
         ]),
-        {},
-        undefined,
-        MAX_CHECKPOINT_PATH_BYTES,
-        options.deadlineAt,
-        options.signal,
-      )
-    ).stdout;
-    const includedPaths =
-      parseTaggedCheckpointPaths(taggedPaths).included;
-    const indexEntries = (
-      await runGit(
-        repositoryPath,
-        checkpointGitArguments(["ls-files", "--stage", "-z"]),
         {},
         undefined,
         MAX_CHECKPOINT_PATH_BYTES,
@@ -402,39 +588,50 @@ export async function createCheckpoint(
       options.signal,
     );
     const environment = isolated.environment;
-    if (indexEntries.length > 0) {
-      await runGit(
+    const reused = sourceIndexPath !== null && await reuseRepositoryIndex(
+      repositoryPath,
+      sourceIndexPath,
+      indexPath,
+      environment,
+      options.deadlineAt,
+      options.signal,
+    );
+    if (!reused) {
+      await rm(indexPath, { force: true });
+      await rm(`${indexPath}.lock`, { force: true });
+      await writeIsolatedIndexEntries(
         repositoryPath,
-        ["update-index", "-z", "--index-info"],
         environment,
-        indexEntries,
-        1024 * 1024,
-        options.deadlineAt,
-        options.signal,
-      );
-    } else {
-      await runGit(
-        repositoryPath,
-        ["read-tree", "--empty"],
-        environment,
-        undefined,
-        1024 * 1024,
+        await readRepositoryIndexEntries(
+          repositoryPath,
+          options.deadlineAt,
+          options.signal,
+        ),
         options.deadlineAt,
         options.signal,
       );
     }
-    if (includedPaths.length > 0) {
+    await runGit(
+      repositoryPath,
+      durableCheckpointGitArguments(["add", "--update"]),
+      environment,
+      undefined,
+      1024 * 1024,
+      options.deadlineAt,
+      options.signal,
+    );
+    if (untrackedPaths.length > 0) {
       await runGit(
         repositoryPath,
-        checkpointGitArguments([
+        durableCheckpointGitArguments([
           "--literal-pathspecs",
           "add",
-          "-A",
+          "--force",
           "--pathspec-from-file=-",
           "--pathspec-file-nul",
         ]),
         environment,
-        includedPaths,
+        untrackedPaths,
         1024 * 1024,
         options.deadlineAt,
         options.signal,
@@ -443,7 +640,7 @@ export async function createCheckpoint(
     const tree = (
       await runGit(
         repositoryPath,
-        ["write-tree"],
+        durableCheckpointGitArguments(["write-tree"]),
         environment,
         undefined,
         1024 * 1024,
@@ -456,7 +653,7 @@ export async function createCheckpoint(
     const commit = (
       await runGit(
         repositoryPath,
-        commitArgs,
+        durableCheckpointGitArguments(commitArgs),
         environment,
         undefined,
         1024 * 1024,
@@ -468,7 +665,7 @@ export async function createCheckpoint(
     // reference through the real repository after the object is created.
     await runGit(
       repositoryPath,
-      checkpointGitArguments([
+      durableCheckpointGitArguments([
         "-c",
         `core.hooksPath=${isolated.hooksDirectory}`,
         "update-ref",
@@ -535,26 +732,11 @@ export async function restoreCheckpoint(
         ]),
       )
     ).stdout.toString("utf8").trim();
-    const indexEntries = (
-      await runRestoreGit(
-        repositoryPath,
-        checkpointGitArguments(["ls-files", "--stage", "-z"]),
-        {},
-        undefined,
-        MAX_CHECKPOINT_PATH_BYTES,
-      )
-    ).stdout;
-    const taggedPaths = (
-      await runRestoreGit(
-        repositoryPath,
-        checkpointGitArguments(["ls-files", "--cached", "-t", "-z"]),
-        {},
-        undefined,
-        MAX_CHECKPOINT_PATH_BYTES,
-      )
-    ).stdout;
-    const skippedPaths =
-      parseTaggedCheckpointPaths(taggedPaths).skipped;
+    const index = await readRepositoryIndexEntries(
+      repositoryPath,
+      options.deadlineAt,
+      options.signal,
+    );
     const isolated = await checkpointEnvironment(
       repositoryPath,
       restoreDirectory,
@@ -563,33 +745,13 @@ export async function restoreCheckpoint(
       options.deadlineAt,
       options.signal,
     );
-    await runRestoreGit(
+    await writeIsolatedIndexEntries(
       repositoryPath,
-      ["read-tree", "--empty"],
       isolated.environment,
+      index,
+      options.deadlineAt,
+      options.signal,
     );
-    if (indexEntries.length > 0) {
-      await runRestoreGit(
-        repositoryPath,
-        ["update-index", "-z", "--index-info"],
-        isolated.environment,
-        indexEntries,
-      );
-    }
-    if (skippedPaths.length > 0) {
-      await runRestoreGit(
-        repositoryPath,
-        checkpointGitArguments([
-          "--literal-pathspecs",
-          "update-index",
-          "--skip-worktree",
-          "-z",
-          "--stdin",
-        ]),
-        isolated.environment,
-        skippedPaths,
-      );
-    }
     await runRestoreGit(
       repositoryPath,
       checkpointGitArguments([

@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDot,
+  Clock3,
   Code2,
   FileText,
   ListChecks,
@@ -63,6 +64,7 @@ import {
   resolveOrbMotion,
   usesActivityOrbs,
 } from "../working-indicator/orbMotion";
+import { messageContextMenu } from "./messageContextMenu";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
@@ -426,6 +428,7 @@ const CommentaryRow = memo(function CommentaryRow({
       className={clsx("turn-commentary-row", entry.streaming && "is-streaming")}
       aria-label={entry.streaming ? "Live agent update" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
+      {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content) : undefined)}
     >
       {entry.streaming
         ? (
@@ -463,6 +466,7 @@ export function FollowUpRow({
       aria-label="Your follow-up"
       data-follow-up-message-id={entry.message.id}
       tabIndex={-1}
+      {...messageContextMenu(entry.message, entry.message.content)}
     >
       <span>You</span>
       <p>{entry.message.content}</p>
@@ -1090,7 +1094,9 @@ export function WorkLog({
   }
 
   const hasFoldableDetails = stream.length > 0 || supplementalCount > 0;
-  const status = turn.agentTurn.status === "failed"
+  const status = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
+    ? "limited"
+    : turn.agentTurn.status === "failed"
     ? "failed"
     : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
       ? "stopped"
@@ -1099,6 +1105,8 @@ export function WorkLog({
     <>
       {status === "failed"
         ? <TriangleAlert size={13} aria-hidden="true" />
+        : status === "limited"
+          ? <Clock3 size={13} aria-hidden="true" />
         : status === "stopped"
           ? <CircleDot size={13} aria-hidden="true" />
           : <CheckCircle2 size={13} aria-hidden="true" />}
@@ -1157,7 +1165,7 @@ export function WorkLog({
         <ActivityGroup
           entry={attentionGroup}
           settled
-          revealLatestFailure={status === "failed"}
+          revealLatestFailure={status === "failed" || status === "limited"}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />

@@ -71,6 +71,7 @@ export interface ConversationLatestTurnSummary {
   completedAt: string | null;
   terminalReason: string | null;
   updatedAt: string;
+  usageLimited?: boolean;
 }
 
 export interface ProviderReasoningOption {

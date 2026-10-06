@@ -14,8 +14,11 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
   signal: AbortSignal;
   isClosed(): boolean;
   cachedState(providerId: ProviderId): {
-    models: MetadataFieldState;
-    rateLimits: MetadataFieldState;
+    metadataState: {
+      models: MetadataFieldState;
+      rateLimits: MetadataFieldState;
+    };
+    rateLimits: ReadonlyArray<{ resetsAt: string | null }>;
   };
   read(providerId: ProviderId, fields: MetadataField[]): Promise<Metadata>;
   apply(providerId: ProviderId, metadata: Metadata): void;
@@ -29,7 +32,12 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
 
 const RATE_LIMIT_PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
 export const IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS = 3 * 60 * 1_000;
+const RATE_LIMIT_READ_BUDGET_MS = 30 * 1_000;
+const IDLE_READ_WINDOW_MS = RATE_LIMIT_PROVIDER_IDS.length * RATE_LIMIT_READ_BUDGET_MS;
+export const RATE_LIMIT_TTL_MS = IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS + 2 * IDLE_READ_WINDOW_MS;
 const MAX_IDLE_RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1_000;
+export const RESET_READ_DELAY_MS = 5 * 1_000;
+const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * Refreshes provider usage after a settled turn (#344). Failed, cancelled and
@@ -41,7 +49,7 @@ export function createTurnUsageRefresh<Metadata>(
 ): (input: TurnMetadataRefreshHookInput) => Promise<void> {
   return async ({ providerId, turnId, runStartedAt, status }) => {
     if (!dependencies.enabled || dependencies.isExternalTurn(turnId)) return;
-    const state = dependencies.cachedState(providerId);
+    const state = dependencies.cachedState(providerId).metadataState;
     const fields: MetadataField[] = [];
     if (
       status === "completed"
@@ -79,19 +87,41 @@ export function startIdleRateLimitRefresh<Metadata>(
 ): () => void {
   const now = dependencies.now ?? Date.now;
   const retry = new Map<ProviderId, { at: number; delayMs: number }>();
+  const resetsReadThrough = new Map<ProviderId, number>(
+    RATE_LIMIT_PROVIDER_IDS.map((providerId) => [providerId, now()]),
+  );
+  const lastResetRead = new Map<ProviderId, number>();
   let refreshing = false;
-  const tick = (): void => {
-    if (dependencies.isClosed() || refreshing) return;
-    const busy = dependencies.activeProviderIds();
-    const due = RATE_LIMIT_PROVIDER_IDS.filter((providerId) => {
-      const rateLimits = dependencies.cachedState(providerId).rateLimits;
-      return dependencies.canRun(providerId)
-        && !busy.has(providerId)
-        && (retry.get(providerId)?.at ?? 0) <= now()
-        && rateLimits.updatedAt !== null
-        && rateLimits.freshness !== "fresh";
+  let stopped = false;
+  let resetTimer: ReturnType<typeof setTimeout> | null = null;
+  const unreadReset = (providerId: ProviderId): number | null => {
+    const cached = dependencies.cachedState(providerId);
+    if (cached.metadataState.rateLimits.updatedAt === null) return null;
+    const through = resetsReadThrough.get(providerId) ?? now();
+    const resets = cached.rateLimits
+      .map(({ resetsAt }) => Date.parse(resetsAt ?? ""))
+      .filter((reset) => Number.isFinite(reset) && reset > through);
+    return resets.length > 0 ? Math.min(...resets) : null;
+  };
+  const armReset = (): void => {
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = null;
+    if (stopped || dependencies.isClosed()) return;
+    const due = RATE_LIMIT_PROVIDER_IDS.flatMap((providerId) => {
+      const reset = unreadReset(providerId);
+      return reset === null
+        ? []
+        : [Math.max(
+            reset + RESET_READ_DELAY_MS,
+            retry.get(providerId)?.at ?? 0,
+            (lastResetRead.get(providerId) ?? -Infinity) + IDLE_READ_WINDOW_MS,
+          )];
     });
     if (due.length === 0) return;
+    resetTimer = setTimeout(readResets, Math.min(MAX_TIMER_MS, Math.max(0, Math.min(...due) - now())));
+    resetTimer.unref();
+  };
+  const refresh = (due: readonly ProviderId[], resetRead = false): void => {
     refreshing = true;
     void dependencies.track(async () => {
       for (const providerId of due) {
@@ -100,7 +130,7 @@ export function startIdleRateLimitRefresh<Metadata>(
           .catch(() => null);
         if (dependencies.isClosed()) return;
         if (metadata !== null) dependencies.apply(providerId, metadata);
-        if (dependencies.cachedState(providerId).rateLimits.freshness === "fresh") {
+        if (dependencies.cachedState(providerId).metadataState.rateLimits.freshness === "fresh") {
           retry.delete(providerId);
         } else {
           const delayMs = Math.min(
@@ -110,14 +140,56 @@ export function startIdleRateLimitRefresh<Metadata>(
           retry.set(providerId, { at: now() + delayMs, delayMs });
         }
         if (metadata !== null) dependencies.broadcastSnapshot();
+        if (resetRead) {
+          lastResetRead.set(providerId, now());
+          resetsReadThrough.set(providerId, Math.max(resetsReadThrough.get(providerId) ?? now(), now()));
+        }
       }
     }).catch(() => undefined).finally(() => {
       refreshing = false;
+      armReset();
     });
+  };
+  function readResets(): void {
+    resetTimer = null;
+    if (stopped || dependencies.isClosed() || refreshing) return;
+    const busy = dependencies.activeProviderIds();
+    const due: ProviderId[] = [];
+    for (const providerId of RATE_LIMIT_PROVIDER_IDS) {
+      const reset = unreadReset(providerId);
+      if (reset === null || reset + RESET_READ_DELAY_MS > now()) continue;
+      if ((retry.get(providerId)?.at ?? 0) > now()) continue;
+      if ((lastResetRead.get(providerId) ?? -Infinity) + IDLE_READ_WINDOW_MS > now()) continue;
+      resetsReadThrough.set(providerId, now() - RESET_READ_DELAY_MS);
+      if (dependencies.canRun(providerId) && !busy.has(providerId)) due.push(providerId);
+    }
+    if (due.length === 0) armReset();
+    else refresh(due, true);
+  }
+  const tick = (): void => {
+    if (dependencies.isClosed() || refreshing) return;
+    const busy = dependencies.activeProviderIds();
+    const due = RATE_LIMIT_PROVIDER_IDS.filter((providerId) => {
+      const rateLimits = dependencies.cachedState(providerId).metadataState.rateLimits;
+      return dependencies.canRun(providerId)
+        && !busy.has(providerId)
+        && (retry.get(providerId)?.at ?? 0) <= now()
+        && rateLimits.updatedAt !== null
+        && (rateLimits.freshness !== "fresh"
+          || now() - Date.parse(rateLimits.updatedAt) + intervalMs + IDLE_READ_WINDOW_MS > RATE_LIMIT_TTL_MS);
+    });
+    if (due.length === 0) armReset();
+    else refresh(due);
   };
   const timer = setInterval(tick, intervalMs);
   timer.unref();
-  const stop = (): void => clearInterval(timer);
+  armReset();
+  const stop = (): void => {
+    stopped = true;
+    clearInterval(timer);
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = null;
+  };
   dependencies.signal.addEventListener("abort", stop, { once: true });
   return stop;
 }

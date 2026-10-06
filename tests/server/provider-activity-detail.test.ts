@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appendProviderActivityOutput,
   MAX_PROVIDER_ACTIVITY_DETAIL_CHARS,
   MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   mergeProviderActivityDetailWithinTurnBudget,
+  mergeProviderActivityOutputWithinTurnBudget,
   officialToolResultText,
   providerActivityDetailSections,
   providerFailureActivityDetail,
@@ -85,6 +87,96 @@ describe("provider activity detail boundary", () => {
     expect(details.every((detail) =>
       detail.length <= MAX_PROVIDER_ACTIVITY_DETAIL_CHARS)).toBe(true);
     expect(details.length).toBeLessThan(12);
+  });
+
+  it("continues one output section and opens another after other detail", () => {
+    let detail = appendProviderActivityOutput(null, "first\n", false);
+    detail = appendProviderActivityOutput(detail, "first\n", true);
+    detail = appendProviderActivityOutput(detail, "  \n", true);
+    detail = `${detail}\n\nTerminal input:\ny`;
+    detail = appendProviderActivityOutput(detail, "after input", false);
+
+    expect(detail).toBe(
+      "Output:\nfirst\nfirst\n  \n\n\nTerminal input:\ny\n\nOutput:\nafter input",
+    );
+    expect(appendProviderActivityOutput("Command:\nls", "a", false))
+      .toBe("Command:\nls\n\nOutput:\na");
+  });
+
+  it("rescans only the open line when output continues", () => {
+    const longLine = "x".repeat(4_096);
+    expect(appendProviderActivityOutput(
+      `Output:\n${longLine} password=`,
+      "hunter22\nnext",
+      true,
+    )).toBe(`Output:\n${longLine} password=[redacted]\nnext`);
+    expect(appendProviderActivityOutput(
+      "Output:\nkey sk-abcdefghij",
+      "klmnopqrstuvwxyz0123\n",
+      true,
+    )).toBe("Output:\nkey [redacted]\n");
+  });
+
+  it("adds no blank line when a redacted prompt line continues the output", () => {
+    let detail = "Command:\nrun\n\nOutput:\nstart\n";
+    for (let index = 0; index < 6; index += 1) {
+      detail = appendProviderActivityOutput(
+        detail,
+        sanitizeProviderActivityDetail("system prompt: hidden\n", {
+          preserveWhitespace: true,
+        })!,
+        true,
+      );
+    }
+
+    expect(detail).toBe(
+      `Command:\nrun\n\nOutput:\nstart\n${"system_prompt=[redacted]\n".repeat(6)}`,
+    );
+  });
+
+  it("keeps the command line when the turn budget leaves no room for more detail", () => {
+    for (const merged of [
+      mergeProviderActivityDetailWithinTurnBudget(
+        "Command:\nls",
+        "Output:\nmore",
+        MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS,
+      ),
+      mergeProviderActivityOutputWithinTurnBudget(
+        "Command:\nls",
+        "more\n",
+        false,
+        MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS,
+      ),
+      mergeProviderActivityOutputWithinTurnBudget(
+        "Command:\nls",
+        "more\n",
+        false,
+        MAX_PROVIDER_ACTIVITY_DETAIL_PER_TURN_CHARS - 5,
+      ),
+    ]) {
+      expect(merged.detail?.startsWith("Command:\nls")).toBe(true);
+    }
+  });
+
+  it("keeps streamed output within the activity and turn budgets", () => {
+    let detail: string | null = null;
+    let totalChars = 0;
+    for (let index = 0; index < 100; index += 1) {
+      const merged = mergeProviderActivityOutputWithinTurnBudget(
+        detail,
+        `${index}:${"y".repeat(1_024)}\n`,
+        detail !== null,
+        totalChars,
+      );
+      detail = merged.detail;
+      totalChars = merged.totalChars;
+    }
+
+    expect(detail!.length).toBeLessThanOrEqual(MAX_PROVIDER_ACTIVITY_DETAIL_CHARS);
+    expect(totalChars).toBe(detail!.length);
+    expect(detail!.startsWith("Output:\n0:")).toBe(true);
+    expect(detail!.endsWith(`99:${"y".repeat(1_024)}\n`)).toBe(true);
+    expect(detail).toContain("characters omitted");
   });
 
   it("builds a bounded terminal envelope without duplicating provider metadata", () => {

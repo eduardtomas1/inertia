@@ -41,7 +41,7 @@ export const SNAPSHOT_FAILURE_CATEGORIES = [
   "accessibility-unavailable", "no-active-window", "permission-denied", "invalid-geometry", "native-failure", "incomplete", "changed", "large",
 ] as const;
 export type SnapshotFailureCategory = (typeof SNAPSHOT_FAILURE_CATEGORIES)[number];
-export const SNAPSHOT_DIAGNOSTIC_CATEGORIES = [...SNAPSHOT_FAILURE_CATEGORIES, "timed-out"] as const;
+export const SNAPSHOT_DIAGNOSTIC_CATEGORIES = [...SNAPSHOT_FAILURE_CATEGORIES, "timed-out", "helper-permission-denied"] as const;
 export interface SnapshotFailureDiagnostic { category: (typeof SNAPSHOT_DIAGNOSTIC_CATEGORIES)[number]; phase?: SnapshotCapturePhase }
 
 export function snapshotPlatformAvailable(platform: string, env: Record<string, string | undefined>): boolean {
@@ -63,8 +63,9 @@ export type SnapshotRequest =
   | { type: "bind"; conversationId: string }
   | { type: "unbind" }
   | { type: "permission"; permission: "screen" | "accessibility" };
-export type SnapshotDelivery = { conversationId: string } & (
+export type SnapshotDelivery = ({ conversationId: string; notice?: never; pending?: never } & (
   | { review: import("./snapshot-review").SnapshotReview; selection?: never; error?: never }
   | { selection: import("./desktop").DesktopAttachmentImportSelection; error?: never; review?: never }
   | { error: string; selection?: never; review?: never }
-);
+)) | { notice: string; pending?: never; conversationId?: never; review?: never; selection?: never; error?: never }
+  | { pending: true; notice?: never; conversationId?: never; review?: never; selection?: never; error?: never };

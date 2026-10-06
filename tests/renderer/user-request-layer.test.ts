@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { sessionRecoveryDetail } from "../../src/renderer/src/utils/sessionRecovery";
 import type {
+  AgentActivity,
   AgentTurn,
   ChatAttachment,
   ChatMessage,
@@ -88,6 +89,7 @@ function renderRequest(
     internalInstruction?: string;
     contextPackets?: ConversationContextPacketSummary[];
     turn?: Partial<AgentTurn>;
+    activities?: AgentActivity[];
   } = {},
 ): string {
   const currentTurn = { ...turn(options.checkpoint?.id ?? null), ...options.turn };
@@ -108,7 +110,7 @@ function renderRequest(
         : []),
     ],
     contextPackets: options.contextPackets,
-    activities: [],
+    activities: options.activities ?? [],
     reasonings: [],
     plans: [],
     checkpoints: options.checkpoint ? [options.checkpoint] : [],
@@ -135,8 +137,56 @@ function renderRequest(
   }));
 }
 
+function checkpointNotice(): AgentActivity {
+  return {
+    id: "activity-checkpoint",
+    conversationId,
+    runId: "run-1",
+    turnId: "turn-1",
+    kind: "status",
+    title: "No checkpoint for this turn",
+    detail: "Checkpoint operation timed out.",
+    status: "completed",
+    createdAt: "2026-07-23T10:00:01.000Z",
+  };
+}
+
 describe("Quiet Ledger user request layer", () => {
   afterEach(() => vi.useRealTimers());
+
+  it("says when a turn has no checkpoint and gives the reason", () => {
+    const html = renderRequest("Change the build.", { activities: [checkpointNotice()] });
+
+    expect(html).toContain(
+      '<span class="message-checkpoint-missing" title="Checkpoint operation timed out.">No checkpoint for this turn<span class="visually-hidden">: Checkpoint operation timed out.</span></span>',
+    );
+    expect(html.split("No checkpoint for this turn")).toHaveLength(2);
+    expect(html).not.toContain('class="message-revert"');
+  });
+
+  it("shows Revert instead of the missing checkpoint label when a checkpoint exists", () => {
+    const checkpoint: CheckpointSummary = {
+      id: "checkpoint-1",
+      conversationId,
+      turnId: "turn-1",
+      ref: "refs/inertia/checkpoints/conversation/checkpoint",
+      label: "Before turn 1",
+      turnIndex: 1,
+      filesChanged: 0,
+      insertions: 0,
+      deletions: 0,
+      createdAt: requestedAt,
+    };
+
+    const html = renderRequest("Change the build.", {
+      checkpoint,
+      activities: [checkpointNotice()],
+    });
+
+    expect(html).toContain('class="message-revert"');
+    expect(html).not.toContain("No checkpoint for this turn");
+    expect(renderRequest("Outside a repository.")).not.toContain("No checkpoint for this turn");
+  });
 
   it("shows the durable remote device origin beside the user request", () => {
     const deviceId = "11111111-1111-4111-8111-111111111111";

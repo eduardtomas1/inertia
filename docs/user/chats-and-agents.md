@@ -4,8 +4,9 @@
 
 - **Attach** images, documents and spreadsheets, and mention project files.
 - **Choose** the model, reasoning level and access mode for each chat. The composer border animates at the selected model’s highest supported reasoning level; reduced motion keeps it still.
+- **Switch provider** in a chat that already has messages: a chat stays with its provider, so choosing a model from another provider asks **Continue in a new chat with** that model. **Continue** opens the new chat on the same checkout and branch, carries your unsent text, and attaches this chat as context. Preview or remove it above the composer before the first message; secrets are redacted only where they match known patterns. Until that first message is sent, the earlier chat cannot be deleted. Chats without a project start an ordinary new chat instead.
 - **Invoke a skill** by typing `$` and part of its name. Use ↑/↓ to choose, Tab or Enter to insert, and Escape to dismiss. You can edit a skill token anywhere in your draft.
-- **Follow up** while an agent is working: send a message right away or queue it for the next turn. The composer shows *Enter sends · Tab queues* while this is possible.
+- **Follow up** while an agent is working: send a message right away or queue it for the next turn. The composer shows *Enter sends · Tab queues* while this is possible. If the turn ends or the agent refuses the message before it arrives, the message is queued for the next turn instead. Cursor, Kimi and Antigravity cannot take a message mid-turn: the composer shows *Enter stops and sends · Tab queues*, and **Stop and send** stops the agent and sends your message as the next turn. While another message is queued, send or remove it first.
 - **Keep queued work moving.** Up to three queued messages, including images, are saved by the local service and continue after a successful turn even when another chat is open. They survive an app restart. A stopped, failed or interrupted turn leaves its queue waiting for **Send now**. Changing the model, access or workspace pauses the affected message; remove and queue it again to confirm the new settings. Older local queues remain available for manual review.
 - **Capture a window.** Turn on [Snapshots](../SNAPSHOTS_AND_COMPACTION.md) in **Settings → Devices & integrations → Snapshots** to attach a screenshot of the foreground window with its accessibility context.
 - **Compact long chats** with `/compact`. A successful compaction leaves a receipt in the timeline with the provider-reported context counts.
@@ -30,6 +31,18 @@ Right-click a chat in the sidebar, or focus it and press Shift+F10 or the Menu k
 - **Copy** its path or thread ID.
 - **Archive** it with **Archive thread**.
 - **Open it in a new window** or **add it to split view**. See [Working side by side](working-side-by-side.md).
+
+## Right-click menus
+
+Right-click inside Inertia, or focus an item and press Shift+F10 or the Menu key, for the actions that fit where you are:
+
+- **Messages:** **Copy** when text is selected, **Copy message** as plain text, and **Copy as Markdown** for agent answers.
+- **Code blocks:** **Copy code**.
+- **File links in answers, files in Files and changed files in Changes:** **Open**, **Reveal in Finder** (File Explorer on Windows, your file manager on Linux), **Copy path** and **Copy relative path**. Folders leave out **Open**.
+- **Web links:** **Copy link address** and **Open link**. Images offer **Copy image**.
+- **Text fields:** the usual editing actions, with up to five spelling suggestions for a misspelled word.
+- **Terminal:** **Copy** the selection, **Paste**, **Select all** and **Clear**. On Windows, Ctrl+V also pastes into the terminal; on Linux, Ctrl+V still reaches terminal programs, so paste with Ctrl+Shift+V.
+- **Browser pane:** the page's editing actions, **Copy link address**, **Back**, **Forward** and **Reload**. Pages that show their own menu keep it. A right-click the agent sends opens nothing, and **Back**, **Forward** and **Reload** are unavailable while an agent Browser command runs.
 
 ## Find anything
 

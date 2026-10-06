@@ -137,4 +137,70 @@ describe("bounded conversation shell projection", () => {
     expect(next.runs).toHaveLength(200);
     expect(next.runs[0]?.id).toBe("latest");
   });
+
+  it("returns the same snapshot when a shell event changes nothing", () => {
+    const primary = conversation("primary", "2026-07-30T10:00:00.000Z");
+    const secondary = conversation("secondary", "2026-07-30T10:01:00.000Z");
+    const primaryRuns = [
+      run("primary-new", primary.id, "2026-07-30T10:02:00.000Z"),
+      run("primary-old", primary.id, "2026-07-30T10:00:00.000Z"),
+    ];
+    const snapshot: AppSnapshot = {
+      projects: [],
+      conversations: [secondary, primary],
+      runs: [
+        primaryRuns[0]!,
+        run("secondary-run", secondary.id, "2026-07-30T10:01:00.000Z"),
+        primaryRuns[1]!,
+      ],
+      providers: [],
+      settings: { ...defaultSettings },
+      activeProjectId: primary.projectId,
+      activeConversationId: primary.id,
+    };
+    const reordered = <T extends object>(value: T): T =>
+      Object.fromEntries(Object.entries(value).reverse()) as T;
+
+    const next = applyConversationShellEvent(snapshot, {
+      type: "conversation.shell.updated",
+      conversation: reordered(structuredClone(primary)),
+      runs: structuredClone([...primaryRuns].reverse()).map(reordered),
+    });
+
+    expect(next).toBe(snapshot);
+  });
+
+  it("projects a shell event that changes one nested field or run", () => {
+    const primary = conversation("primary", "2026-07-30T10:00:00.000Z");
+    const primaryRun = run("primary-run", primary.id, "2026-07-30T10:00:00.000Z");
+    const snapshot: AppSnapshot = {
+      projects: [],
+      conversations: [primary],
+      runs: [primaryRun],
+      providers: [],
+      settings: { ...defaultSettings },
+      activeProjectId: primary.projectId,
+      activeConversationId: primary.id,
+    };
+    const event = (
+      conversationValue: ConversationShell,
+      runs: WorkspaceRun[],
+    ) => applyConversationShellEvent(snapshot, {
+      type: "conversation.shell.updated",
+      conversation: conversationValue,
+      runs,
+    });
+
+    expect(event({
+      ...primary,
+      modelSelection: { ...primary.modelSelection, modelId: "other" },
+    }, [primaryRun])).not.toBe(snapshot);
+    expect(event(primary, [{ ...primaryRun, label: "Renamed" }]))
+      .not.toBe(snapshot);
+    expect(event(primary, [])).not.toBe(snapshot);
+    expect(event(primary, [primaryRun, run("extra", primary.id, "2026-07-30T09:00:00.000Z")]))
+      .not.toBe(snapshot);
+    expect(event({ ...primary, pendingApproval: true }, [primaryRun]))
+      .not.toBe(snapshot);
+  });
 });

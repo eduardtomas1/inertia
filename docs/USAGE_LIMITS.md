@@ -19,12 +19,58 @@ popover names it and says how old that reading is. It reads the cache only; it
 never refreshes providers.
 
 An unavailable measurement is never treated as zero. A reset countdown reaching
-zero does not refill a quota bar: refresh to obtain the provider's answer.
-Failed reads can retain stale observations only when the account identity is
-still verified. The Limits page refreshes at most every three minutes while
-visible; the composer dialog reads the cache until you explicitly refresh.
-No additional background worker, persistent provider process or startup probe
-is created by this feature.
+zero does not refill a quota bar; the window shows **Reset due** until the
+provider reports new quota. Codex and Claude quota is read once about five
+seconds after the earliest reported reset. Between turns their quota is read
+every three minutes and stays current for five, so the composer, the
+Environment panel and the header meter mark it stale only after a failed read
+or when no read was possible.
+
+Failed reads retain stale observations only for the same account: a verified
+account identity or the same login's private credential fingerprint. When a subscription quota endpoint answers HTTP 429,
+Inertia waits for its `Retry-After` (five minutes when absent, at most fifteen)
+before asking again for that login and says so in the account details. Other
+failures say the provider did not answer, or refused the check for this login,
+without asking you to sign in again. The Limits page and the composer's
+**All provider limits** dialog read the providers when they open and at most
+every three minutes while visible, and read again when they become visible
+with a reading older than three minutes. Opening either one is an explicit
+read, so on macOS it can read a Cursor login from the Keychain. No additional background worker, persistent provider process or
+startup probe is created by this feature.
+
+## Usage-limited chats
+
+A chat whose provider reported a usage limit shows **Limited** in the sidebar
+instead of **Failed**, and its desktop notification says **Usage limit
+reached**. Above the composer, **Usage limit reached** stays visible without a
+time or actions until a reset time is known, then **Resume at reset** and
+**Snooze until reset** appear. A scheduled resume checks the account at the
+reset and keeps checking with a backoff of 30 seconds doubling up to five
+minutes, also when the account cannot be read at that moment. The hour is the
+sum of those delays, about 15 checks, not wall-clock time. If the provider has
+not reported new quota by then, nothing is sent and **Resume now** waits for
+you; choosing it starts a new hour of checks. A different account, or one that
+cannot be confirmed without asking you, stops the resume for your attention.
+
+**Continue with another model** in the same row opens the model chooser. It is
+not offered while a resume is scheduled; cancel the resume first. Choosing a
+model from another provider asks **Continue in a new chat with** that model.
+**Continue** creates the new chat on the same checkout and branch as the
+limited chat (its worktree, if it has one) and attaches the whole limited chat
+as context: up to 256 KiB of its visible messages are stored, each excerpt at
+most 8 KiB. Pattern-matched secrets are redacted; review the preview before
+sending. The first message carries at most 192 KiB of context (three 64 KiB
+blocks, shared with any other chat you attach), so in a longer chat the oldest
+messages are left out of what is sent and counted as omitted. The context shows
+above the composer of the new chat, where you can preview or remove it before
+the first message. The limited chat keeps its history and its resume offer.
+Inertia refuses while the limited chat still has a turn in progress or a
+message being prepared, when the project checkout has since moved to another
+branch, and for chats without a project, whose folder belongs to that chat.
+Until the new chat's first message is sent, deleting the limited chat is
+refused, because its context would be lost; send the first message or remove
+the context first. After that, deleting it leaves the worktree with the new
+chat.
 
 ## Accounts and averages
 

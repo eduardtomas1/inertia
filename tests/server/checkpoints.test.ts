@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -155,6 +156,122 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("private ignored bytes\n");
   });
 
+  function restoreStore(root: string) {
+    return {
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: (input: Parameters<import("../../src/server/database").RuntimeStore["addCheckpoint"]>[0]) => ({
+        ...input, id: randomUUID(), turnId: null, createdAt: new Date().toISOString(),
+      }),
+    };
+  }
+
+  function summary(captured: { id: string; ref: string }, conversationId: string): CheckpointSummary {
+    return {
+      ...captured, conversationId, label: "Before turn 1", turnId: null,
+      turnIndex: 1, filesChanged: 0, insertions: 0, deletions: 0,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  it("refuses to replace an ignored file with a checkpointed directory", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    mkdirSync(join(root, "build"));
+    writeFileSync(join(root, "build", "keep.txt"), "kept\n");
+    git(root, "add", "build/keep.txt");
+    git(root, "commit", "-m", "build");
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-r", "-q", "build");
+    writeFileSync(join(root, ".gitignore"), "build\n");
+    writeFileSync(join(root, "build"), "private ignored bytes\n");
+
+    await expect(restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "build"), "utf8")).toBe("private ignored bytes\n");
+  });
+
+  it("restores into an ignored directory only when no ignored file is replaced", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    mkdirSync(join(root, "cache"));
+    writeFileSync(join(root, "cache", "keep.txt"), "kept\n");
+    git(root, "add", "cache/keep.txt");
+    git(root, "commit", "-m", "cache");
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-q", "cache/keep.txt");
+    writeFileSync(join(root, ".gitignore"), "cache/\n");
+    mkdirSync(join(root, "cache"), { recursive: true });
+    for (let index = 0; index < 40; index += 1) {
+      writeFileSync(join(root, "cache", `entry-${index}.bin`), "ignored\n");
+    }
+    let published = 0;
+
+    await restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { published += 1; },
+    );
+    expect(published).toBe(1);
+    expect(readFileSync(join(root, "cache", "keep.txt"), "utf8")).toBe("kept\n");
+    expect(readFileSync(join(root, "cache", "entry-0.bin"), "utf8")).toBe("ignored\n");
+
+    writeFileSync(join(root, "cache", "keep.txt"), "private ignored bytes\n");
+    await expect(restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "cache", "keep.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
+
+  it("refuses to write into an ignored directory whose name differs only in case", async () => {
+    const root = repository();
+    git(root, "config", "core.ignorecase", "true");
+    const conversationId = randomUUID();
+    mkdirSync(join(root, "build"));
+    writeFileSync(join(root, "build", "keep.txt"), "kept\n");
+    git(root, "add", "build/keep.txt");
+    git(root, "commit", "-m", "build");
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-r", "-q", "build");
+    rmSync(join(root, "build"), { recursive: true, force: true });
+    writeFileSync(join(root, ".gitignore"), "Build/\n");
+    mkdirSync(join(root, "Build"));
+    writeFileSync(join(root, "Build", "keep.txt"), "private ignored bytes\n");
+
+    await expect(restoreConversationCheckpoint(
+      restoreStore(root),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "Build", "keep.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
+
+  it("refuses to overwrite ignored files in a project folder below the repository root", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const project = join(root, "app");
+    mkdirSync(project);
+    writeFileSync(join(project, "settings.txt"), "tracked settings\n");
+    git(root, "add", "app/settings.txt");
+    git(root, "commit", "-m", "app");
+    const captured = await createCheckpoint(project, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "-q", "--cached", "app/settings.txt");
+    writeFileSync(join(project, ".gitignore"), "settings.txt\n");
+    writeFileSync(join(project, "settings.txt"), "private ignored bytes\n");
+
+    await expect(restoreConversationCheckpoint(
+      restoreStore(project),
+      summary(captured, conversationId),
+      () => { throw new Error("must not publish"); },
+    )).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(project, "settings.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
+
   it("stops checkpoint preparation at an aggregate deadline", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
@@ -196,7 +313,10 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "later-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("keep me\n");
   });
 
-  it("preserves out-of-cone files without materializing them in a sparse checkout", async () => {
+  it.each([
+    ["full", []],
+    ["sparse", ["--sparse-index"]],
+  ] as const)("preserves out-of-cone files without materializing them in a sparse checkout with a %s index", async (_kind, indexOptions) => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
     roots.push(indexes);
@@ -210,7 +330,7 @@ describe("Git checkpoints", () => {
     writeFileSync(sparsePath, "outside base\n", { flag: "wx" });
     git(root, "add", "visible", "sparse-only");
     git(root, "commit", "-m", "sparse paths");
-    git(root, "sparse-checkout", "init", "--cone");
+    git(root, "sparse-checkout", "init", "--cone", ...indexOptions);
     git(root, "sparse-checkout", "set", "visible");
     expect(existsSync(sparsePath)).toBe(false);
     writeFileSync(visiblePath, "visible checkpoint\n");
@@ -405,6 +525,98 @@ describe("Git checkpoints", () => {
     expect(paths).toContain("visible-untracked.txt");
     expect(paths).not.toContain("repository-secret.txt");
     expect(paths).not.toContain("configured-secret.txt");
+  });
+
+  it("captures tracked files that match ignore rules", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    writeFileSync(join(root, ".gitignore"), "build/\nsmoke\n");
+    mkdirSync(join(root, "build"));
+    mkdirSync(join(root, "Smoke"));
+    writeFileSync(join(root, "build", "keep.txt"), "kept base\n");
+    writeFileSync(join(root, "Smoke", "case.txt"), "case base\n");
+    git(root, "add", ".gitignore");
+    git(root, "add", "-f", "build/keep.txt", "Smoke/case.txt");
+    git(root, "commit", "-m", "ignored but tracked");
+    writeFileSync(join(root, "build", "keep.txt"), "kept edit\n");
+    writeFileSync(join(root, "Smoke", "case.txt"), "case edit\n");
+    writeFileSync(join(root, "build", "output.txt"), "ignored output\n");
+
+    const checkpoint = await createCheckpoint(root, indexes, randomUUID());
+
+    expect(git(root, "show", `${checkpoint.ref}:build/keep.txt`)).toBe("kept edit");
+    expect(git(root, "show", `${checkpoint.ref}:Smoke/case.txt`)).toBe("case edit");
+    expect(git(root, "ls-tree", "-r", "--name-only", checkpoint.ref).split("\n"))
+      .not.toContain("build/output.txt");
+  });
+
+  it("captures a same-size rewrite made in the same second as the index", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const path = join(root, "tracked.txt");
+    const second = new Date(Math.floor(Date.now() / 1_000) * 1_000 - 10_000);
+    writeFileSync(path, "first\n");
+    utimesSync(path, second, second);
+    utimesSync(join(root, ".git", "index"), second, second);
+    git(root, "add", "tracked.txt");
+    utimesSync(join(root, ".git", "index"), second, second);
+    writeFileSync(path, "later\n");
+    utimesSync(path, second, second);
+
+    const checkpoint = await createCheckpoint(root, indexes, randomUUID());
+
+    expect(git(root, "show", `${checkpoint.ref}:tracked.txt`)).toBe("later");
+  });
+
+  it("captures edits to files marked assume-unchanged", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    git(root, "update-index", "--assume-unchanged", "tracked.txt");
+    writeFileSync(join(root, "tracked.txt"), "hidden edit\n");
+
+    const checkpoint = await createCheckpoint(root, indexes, randomUUID());
+
+    expect(git(root, "show", `${checkpoint.ref}:tracked.txt`)).toBe("hidden edit");
+    expect(git(root, "ls-files", "-v", "tracked.txt")).toBe("h tracked.txt");
+  });
+
+  it("captures a repository that uses a split index", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    git(root, "update-index", "--split-index");
+    writeFileSync(join(root, "tracked.txt"), "split edit\n");
+    writeFileSync(join(root, "untracked.txt"), "untracked\n");
+
+    const checkpoint = await createCheckpoint(root, indexes, randomUUID());
+
+    expect(git(root, "show", `${checkpoint.ref}:tracked.txt`)).toBe("split edit");
+    expect(git(root, "show", `${checkpoint.ref}:untracked.txt`)).toBe("untracked");
+  });
+
+  it("limits a project folder checkpoint to that folder and its parent ignore rules", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const project = join(root, "app");
+    mkdirSync(project);
+    writeFileSync(join(root, ".gitignore"), "/app/secret.txt\n");
+    writeFileSync(join(project, "app.txt"), "app base\n");
+    git(root, "add", ".gitignore", "app/app.txt");
+    git(root, "commit", "-m", "app");
+    writeFileSync(join(project, "app.txt"), "app edit\n");
+    writeFileSync(join(project, "secret.txt"), "private\n");
+    writeFileSync(join(project, "new.txt"), "new\n");
+    writeFileSync(join(root, "tracked.txt"), "outside edit\n");
+
+    const checkpoint = await createCheckpoint(project, indexes, randomUUID());
+
+    expect(git(root, "ls-tree", "-r", "--name-only", checkpoint.ref).split("\n").sort())
+      .toEqual(["app.txt", "new.txt"]);
+    expect(git(root, "show", `${checkpoint.ref}:app.txt`)).toBe("app edit");
   });
 
   it("creates a provider-host pull request URL without network access", async () => {

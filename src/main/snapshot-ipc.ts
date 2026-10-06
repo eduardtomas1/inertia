@@ -3,7 +3,9 @@ import { z } from "zod";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import { attachmentImportDocumentFromEvent, type AttachmentImportDocument, type RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import { SnapshotError, SnapshotService } from "./snapshot-service.js";
-import type { SnapshotFailureDiagnostic } from "../shared/snapshots.js";
+import type { SnapshotDelivery, SnapshotFailureDiagnostic, SnapshotSource } from "../shared/snapshots.js";
+import type { ChatAttachment } from "../shared/contracts.js";
+import { SNAPSHOT_QUEUE_LIMIT, SnapshotQueue } from "./snapshot-queue.js";
 import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 import { privacySafeAttachmentImportError } from "./attachment-selection-import.js";
 import { clearSnapshotPreferences, readSnapshotPreferences, writeSnapshotPreferences, type SnapshotPreferences } from "./snapshot-preferences.js";
@@ -22,40 +24,66 @@ const requestSchema = z.discriminatedUnion("type", [
 
 const UNCONFIRMED_DISABLE = "Snapshot cleanup is unconfirmed, and the disabled setting could not be saved. Snapshots may turn back on at the next launch.";
 
+export const SNAPSHOT_BUSY = "A snapshot is already being captured. Try again when it finishes.";
+export const SNAPSHOT_QUEUE_FULL = "Snapshot not taken: earlier snapshots are still waiting for a chat. Open a chat to receive them, then try again.";
+
+type SnapshotTarget = { document: AttachmentImportDocument; window: BrowserWindow; conversationId: string };
+type DeliveryOutcome = "delivered" | "failed" | "cancelled";
+
 export function registerSnapshotIpc(options: {
   owner(event: IpcMainInvokeEvent, count: number): BrowserWindow;
+  mainWindow?(): BrowserWindow | null;
+  focusMainWindow?(): void;
   registry(): AttachmentRegistry;
   imports: RendererAttachmentImportCoordinator;
   onFailure?: (diagnostic: SnapshotFailureDiagnostic) => void;
 }): SnapshotService {
   const reviews = new SnapshotReviewService({ ...options, onFailure: () => options.onFailure?.({ category: "native-failure", phase: "screenshot" }) });
-  let target: { document: AttachmentImportDocument; window: BrowserWindow; conversationId: string } | null = null;
+  const queue = new SnapshotQueue(app.getPath("userData"));
+  let target: SnapshotTarget | null = null;
   let operation = false;
+  let draining = false;
   let generation = 0;
   let captureEnabled = false;
   let cancelCapture: ((document?: AttachmentImportDocument) => Promise<void>) | null = null;
   const sameDocument = (left: AttachmentImportDocument, right: AttachmentImportDocument): boolean =>
     left.owner === right.owner && left.processId === right.processId
       && left.frameId === right.frameId && left.frameToken === right.frameToken;
+  const documentLive = (owner: SnapshotTarget): boolean => {
+    if (owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
+    const frame = owner.window.webContents.mainFrame;
+    return owner.document.owner === owner.window.webContents && frame.processId === owner.document.processId
+      && frame.routingId === owner.document.frameId && frame.frameToken === owner.document.frameToken;
+  };
+  const failureMessage = (failure: unknown): string =>
+    failure instanceof SnapshotError ? failure.message : privacySafeAttachmentImportError(failure).message;
+  let heldNotice: string | null = null;
+  const notify = (delivery: SnapshotDelivery, focus: boolean): void => {
+    const window = options.mainWindow?.();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+      if (!focus) return;
+      if (delivery.notice) heldNotice = delivery.notice;
+      options.focusMainWindow?.();
+      return;
+    }
+    if (focus) { window.show(); window.focus(); }
+    window.webContents.send(DESKTOP_IPC.snapshotReady, delivery);
+  };
   let configuration = Promise.resolve();
-  const service = new SnapshotService(async () => {
-    const owner = target;
+  const deliver = async (
+    owner: SnapshotTarget,
+    produce: (signal: AbortSignal) => Promise<ChatAttachment[]>,
+  ): Promise<DeliveryOutcome> => {
     const captureGeneration = generation;
-    if (!captureEnabled || !owner || owner.window.isDestroyed() || operation) return;
     let invalidated = false;
     const invalidate = (): void => { invalidated = true; };
     const navigation = (details: { isMainFrame: boolean; isSameDocument: boolean }): void => {
       if (details.isMainFrame && !details.isSameDocument) invalidate();
     };
-    const live = (): boolean => {
-      if (!captureEnabled || captureGeneration !== generation || service.isDisposing()
-        || invalidated || owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
-      const frame = owner.window.webContents.mainFrame;
-      return owner.document.owner === owner.window.webContents && frame.processId === owner.document.processId
-        && frame.routingId === owner.document.frameId && frame.frameToken === owner.document.frameToken;
-    };
+    const live = (): boolean => captureEnabled && captureGeneration === generation && !service.isDisposing()
+      && !invalidated && documentLive(owner);
     const current = (): boolean => target === owner && live();
-    if (!current()) return;
+    if (!current()) return "cancelled";
     owner.document.owner.on("destroyed", invalidate);
     owner.document.owner.on("render-process-gone", invalidate);
     owner.document.owner.on("did-start-navigation", navigation);
@@ -72,14 +100,8 @@ export function registerSnapshotIpc(options: {
       batchId = options.imports.begin(owner.document);
       const attachments = await options.imports.importSelection(owner.document, batchId, async (signal) => {
         captureSignal = signal;
-        try {
-          const result = await service.capture(signal);
-          const attachment = await options.registry().import([{
-            name: `snapshot-${result.source.capturedAt.replace(/[:.]/gu, "-")}.png`,
-            mimeType: "image/png", data: result.png,
-          }], signal);
-          return attachment.map((item) => options.registry().setSnapshotSource(item.id, result.source));
-        } catch (error) {
+        try { return await produce(signal); }
+        catch (error) {
           // Failed-import rollback also aborts the signal; preserve the cause first.
           importerCancelled = signal.aborted;
           throw error;
@@ -88,6 +110,7 @@ export function registerSnapshotIpc(options: {
       if (!live() || !service.state().enabled) throw new Error("Snapshot destination closed.");
       owner.window.show(); owner.window.focus();
       owner.window.webContents.send(DESKTOP_IPC.snapshotReady, { conversationId: owner.conversationId, selection: { batchId, attachments } });
+      return "delivered";
     } catch (error) {
       const cancelled = importerCancelled ?? (captureSignal as AbortSignal | null)?.aborted ?? false;
       let failure = error;
@@ -95,12 +118,10 @@ export function registerSnapshotIpc(options: {
         try { await options.imports.cancel(owner.document, batchId); }
         catch (cleanup) { failure = new AggregateError([error, cleanup]); }
       }
-      if (!cancelled && current()) {
-        owner.window.show(); owner.window.focus();
-        owner.window.webContents.send(DESKTOP_IPC.snapshotReady, {
-          conversationId: owner.conversationId, error: failure instanceof SnapshotError ? failure.message : privacySafeAttachmentImportError(failure).message,
-        });
-      }
+      if (cancelled || !current()) return "cancelled";
+      owner.window.show(); owner.window.focus();
+      owner.window.webContents.send(DESKTOP_IPC.snapshotReady, { conversationId: owner.conversationId, error: failureMessage(failure) });
+      return "failed";
     } finally {
       owner.document.owner.removeListener("destroyed", invalidate);
       owner.document.owner.removeListener("render-process-gone", invalidate);
@@ -108,12 +129,74 @@ export function registerSnapshotIpc(options: {
       operation = false;
       cancelCapture = null;
     }
-  }, options.onFailure, () => reviews.stop());
+  };
+  const importSnapshot = async (png: Buffer, source: SnapshotSource, signal: AbortSignal): Promise<ChatAttachment[]> => {
+    const attachment = await options.registry().import([{
+      name: `snapshot-${source.capturedAt.replace(/[:.]/gu, "-")}.png`, mimeType: "image/png", data: png,
+    }], signal);
+    return attachment.map((item) => options.registry().setSnapshotSource(item.id, source));
+  };
+  const drain = async (): Promise<void> => {
+    if (draining || operation || !captureEnabled || !queue.mayHaveEntries()) return;
+    draining = true;
+    try {
+      const items = await queue.take();
+      const owner = target;
+      if (items.length === 0 || operation || !captureEnabled || !owner || !documentLive(owner)) return;
+      const outcome = await deliver(owner, async (signal) => {
+        const attachments: ChatAttachment[] = [];
+        for (const item of items) attachments.push(...await importSnapshot(item.png, item.source, signal));
+        return attachments;
+      });
+      if (outcome !== "cancelled") await queue.remove(items.map(({ id }) => id));
+    } catch {
+      return;
+    } finally { draining = false; }
+  };
+  const captureToQueue = async (): Promise<void> => {
+    const captureGeneration = generation;
+    const controller = new AbortController();
+    operation = true;
+    cancelCapture = async (document) => { if (!document) controller.abort(); };
+    try {
+      if (await queue.count() >= SNAPSHOT_QUEUE_LIMIT) {
+        notify({ pending: true }, true);
+        notify({ notice: SNAPSHOT_QUEUE_FULL }, false);
+        return;
+      }
+      const result = await service.capture(controller.signal);
+      if (controller.signal.aborted || captureGeneration !== generation || !captureEnabled || service.isDisposing()) return;
+      if (!await queue.add(result.png, result.source)) {
+        notify({ pending: true }, true);
+        notify({ notice: SNAPSHOT_QUEUE_FULL }, false);
+        return;
+      }
+      if (!target || !documentLive(target)) notify({ pending: true }, true);
+    } catch (error) {
+      if (!controller.signal.aborted && captureGeneration === generation && captureEnabled && !service.isDisposing()) {
+        notify({ notice: failureMessage(error) }, true);
+      }
+    } finally {
+      operation = false;
+      cancelCapture = null;
+    }
+    await drain();
+  };
+  const service = new SnapshotService(async () => {
+    if (!captureEnabled) return;
+    if (operation || draining) { notify({ notice: SNAPSHOT_BUSY }, false); return; }
+    const owner = target;
+    if (!owner || !documentLive(owner)) { await captureToQueue(); return; }
+    await deliver(owner, async (signal) => {
+      const result = await service.capture(signal);
+      return await importSnapshot(result.png, result.source, signal);
+    });
+  }, options.onFailure, () => Promise.all([reviews.stop(), queue.clear()]).then(() => undefined));
   const revoke = (): Promise<PromiseSettledResult<void>[]> => {
     generation += 1;
     captureEnabled = false;
     // Abort the captured owner's lease, not the requesting window or the latest target.
-    return Promise.allSettled([service.revokeCapture(), cancelCapture?.() ?? Promise.resolve()]);
+    return Promise.allSettled([service.revokeCapture(), cancelCapture?.() ?? Promise.resolve(), queue.clear()]);
   };
   const requireRevoked = (results: PromiseSettledResult<void>[]): void => {
     if (results.some((result) => result.status === "rejected")) throw new SnapshotError("Snapshot cleanup is unconfirmed.");
@@ -126,6 +209,7 @@ export function registerSnapshotIpc(options: {
     catch { return await clearSnapshotPreferences(directory).then(() => true, () => false); }
   };
   configuration = readSnapshotPreferences(app.getPath("userData")).then(async (saved) => {
+    await Promise.all([SnapshotService.sweepCaptureFolders(), saved?.enabled ? queue.prune() : queue.clear()]).catch(() => undefined);
     if (saved && generation === 0) {
       const state = await service.configure(saved.enabled, saved.shortcut);
       if (generation === 0) captureEnabled = state.enabled;
@@ -197,6 +281,11 @@ export function registerSnapshotIpc(options: {
             await cancelled;
           }
         }
+        if (heldNotice && window === options.mainWindow?.()) {
+          window.webContents.send(DESKTOP_IPC.snapshotReady, { notice: heldNotice });
+          heldNotice = null;
+        }
+        void drain();
         return service.state();
       }
       case "unbind": {

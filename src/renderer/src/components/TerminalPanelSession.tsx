@@ -15,6 +15,7 @@ import { Maximize2, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type { ProviderTerminalResumeDescriptor, ServerEvent } from "@shared/contracts";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
+import { terminalContextMenu, terminalPasteKeyHandler } from "../utils/terminalContextMenu";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import {
   command,
@@ -181,6 +182,7 @@ export function TerminalSession({
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform() === "win32"));
     terminal.open(container);
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
@@ -1075,7 +1077,11 @@ export function TerminalSession({
         </Suspense>
       )}
       <div className="terminal-stage">
-        <div className="terminal-mount" ref={containerRef} />
+        <div
+          className="terminal-mount"
+          ref={containerRef}
+          onContextMenu={terminalContextMenu(() => terminalRef.current, true)}
+        />
         {sessionState !== "ready" && (
           <div className="terminal-overlay" role="status">
             {sessionState === "starting" ? (

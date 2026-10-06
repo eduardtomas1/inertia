@@ -12,7 +12,16 @@ const RUNTIME_UNAVAILABLE = "Automatic resume requires an available provider run
 const ACCOUNT_UNCONFIRMED = "The provider did not report an account Inertia can confirm at the reset.";
 const CHAT_CHANGED = "The chat changed. Choose a new reset action to continue.";
 const STALLED = "Inertia could not update this resume. Resume this chat manually.";
+const ACCOUNT_UNCONFIRMED_AT_RESET = "The account could not be confirmed at the reset. Resume this chat manually.";
+const QUOTA_NOT_CONFIRMED = "The provider did not report new quota within an hour of the reset, so nothing was sent.";
 const MAX_BACKOFF_MS = 5 * 60_000;
+const QUOTA_CHECK_BACKOFF_MS = 30_000;
+const quotaCheckDelay = (attempts: number): number => Math.min(MAX_BACKOFF_MS, QUOTA_CHECK_BACKOFF_MS * 2 ** attempts);
+function quotaCheckedFor(attempts: number): number {
+  let elapsed = 0;
+  for (let attempt = 0; attempt <= attempts; attempt += 1) elapsed += quotaCheckDelay(attempt);
+  return elapsed;
+}
 const STALLED_AFTER_FAILURES = 5;
 type OfferMode = "automatic" | "explicit";
 interface Offer {
@@ -323,14 +332,17 @@ export class LimitResetScheduler {
     const conversation = this.store.conversation(plan.conversationId);
     const model = this.store.latestAgentTurnForConversation(plan.conversationId)!.model;
     const cwd = this.store.conversationPath(plan.conversationId);
-    const account = await this.dependencies.readAccount(conversation.providerId, true, model, cwd, false);
+    const account = await this.dependencies.readAccount(conversation.providerId, true, model, cwd, false).catch(() => null);
     this.assertDispatch(plan);
-    if (!account || account.providerId !== conversation.providerId || resumeAccountIdentity(account) !== plan.accountIdentity) {
-      throw new RuntimeRequestError("The account changed or could not be checked. Resume this chat manually.");
+    const identity = account ? resumeAccountIdentity(account) : null;
+    const unread = !account || (identity === null && account.status === "error");
+    if (account && (account.providerId !== conversation.providerId || (identity !== null && identity !== plan.accountIdentity))) {
+      throw new RuntimeRequestError("The account changed. Resume this chat manually.");
     }
-    if (resetQuota(account, model).kind !== "available") {
-      if (plan.attempts >= 2) throw new RuntimeRequestError("The provider has not confirmed available quota. Refresh limits before resuming.");
-      this.store.limitResets.retry(plan, new Date(Date.now() + 30_000).toISOString());
+    if (!unread && identity === null) throw new RuntimeRequestError(ACCOUNT_UNCONFIRMED_AT_RESET);
+    if (unread || resetQuota(account, model).kind !== "available") {
+      if (quotaCheckedFor(plan.attempts) > MISSED_RESUME_AFTER_MS) this.store.limitResets.settle(plan, "missed", QUOTA_NOT_CONFIRMED);
+      else this.store.limitResets.retry(plan, new Date(Date.now() + quotaCheckDelay(plan.attempts)).toISOString());
       return;
     }
     await this.dependencies.dispatch(plan, () => this.assertDispatch(plan));

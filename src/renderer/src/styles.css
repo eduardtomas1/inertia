@@ -10336,6 +10336,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: color-mix(in srgb, var(--surface-hover) 82%, transparent);
 }
 
+.message-checkpoint-missing {
+  color: var(--quiet-muted);
+  font-size: var(--metadata-font-size);
+}
+
 .turn-user-request-context {
   gap: 5px;
   margin-top: 9px;
@@ -11415,6 +11420,10 @@ button.sent-attachment-open:focus-visible {
 
 .turn-work-log.is-settled[data-settled-work-status="failed"] .turn-settled-summary > svg {
   color: var(--failure-accent);
+}
+
+.turn-work-log.is-settled[data-settled-work-status="limited"] .turn-settled-summary > svg {
+  color: var(--warning);
 }
 
 .turn-supporting-ledger {

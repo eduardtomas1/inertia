@@ -185,6 +185,7 @@ export interface AgentTurn {
   origin?: "cli-import";
   createdAt: string;
   updatedAt: string;
+  usageLimited?: true;
 }
 
 /**

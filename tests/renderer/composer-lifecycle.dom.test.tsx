@@ -1189,19 +1189,20 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(claudeRoute);
 
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Start a new chat to use a different provider.");
+    expect(dialog).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
     expect(onUpdateConversation).not.toHaveBeenCalled();
     expect(onCreateConversationForSelection).not.toHaveBeenCalled();
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Carry this exact text.");
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(dialog).toHaveTextContent("New chat failed safely."));
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Carry this exact text.");
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledTimes(2));
     expect(onCreateConversationForSelection.mock.calls[1]).toEqual([{
       selection: expect.objectContaining({ harnessId: "claude-agent-sdk", modelId: "claude-route" }),
       configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
       prefillText: "Carry this exact text.",
+      sourceConversationId: current.id,
       onCreated: expect.any(Function),
     }]);
     expect(onUpdateConversation).not.toHaveBeenCalled();

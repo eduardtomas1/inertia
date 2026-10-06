@@ -511,7 +511,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await kimi.click();
   await expect(modelChooser).toBeHidden();
   const newChatPrompt = page.getByRole("alertdialog");
-  await expect(newChatPrompt).toContainText("Start a new chat to use a different provider.");
+  await expect(newChatPrompt).toContainText("The new chat uses the same checkout and gets this chat as context.");
   await expect(page.getByText("Keep the authoritative Codex route.", { exact: true }))
     .toBeVisible();
   const pendingStore = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -523,7 +523,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   } finally {
     pendingStore.close();
   }
-  await newChatPrompt.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(newChatPrompt).toHaveAccessibleName(/^Continue in a new chat with .*K3\?$/u);
+  await newChatPrompt.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(newChatPrompt).toBeHidden();
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
@@ -579,7 +580,11 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     expect(preservedStore.conversation(destinationId)).toMatchObject({
       projectId: sourceBeforeChange.projectId,
       providerId: "claude", providerSessionId: null, continuationIdentity: null,
+      branch: currentBranch, worktreePath: preservedStore.conversation(currentConversation.id).worktreePath,
     });
+    expect(preservedStore.contextPackets.list(destinationId)).toMatchObject([{
+      sourceConversationId: currentConversation.id, consumedMessageId: null, messageCount: 1,
+    }]);
     expect(preservedStore.hasConversationMessages(destinationId)).toBe(false);
     expect(preservedStore.hasConversationTurns(destinationId)).toBe(false);
     expect(preservedStore.agentTurn(turn.id)).toMatchObject({

@@ -3,6 +3,7 @@ import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
+import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
@@ -21,6 +22,7 @@ import {
   type ResponseTurn,
 } from "../../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
+import { messageContextMenu } from "./messageContextMenu";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { AgentPixelGrid } from "../AgentPixelGrid";
@@ -110,12 +112,14 @@ export function UserRequestLayer({
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
+      {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
       <div className="message-meta">
         <span>You</span>
         <MessageOrigin message={turn.userMessage} />
         {props.showTimestamps && <time dateTime={turn.userMessage.createdAt} title={formatFullDateTime(turn.userMessage.createdAt)}>{formatMessageTime(turn.userMessage.createdAt)}</time>}
         {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
+        {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
       </div>
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
@@ -389,6 +393,7 @@ export function FinalAnswerDocument({
       data-turn-jump-target="final"
       data-turn-layer="final-answer"
       tabIndex={-1}
+      {...messageContextMenu(presentation.terminalAnswer, presentation.content)}
     >
       <header
         className="final-answer-identity"

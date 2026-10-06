@@ -12,6 +12,11 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
+import {
+  CodexAppServerEvents,
+  type CodexAppServerEventHost,
+} from "../../src/server/codex/app-server-events";
+import { CappedTextBuffer } from "../../src/server/codex/protocol";
 import { projectCodexRuntimeNotification } from
   "../../src/server/codex/app-server-runtime-notifications";
 import { createAgentHarnessEmitter } from
@@ -94,7 +99,10 @@ async function runtime(providerId: ProviderId = "codex") {
     },
   );
   const provider = new FakeTurnProvider();
+  const scheduler = new FakeTurnScheduler();
   const events: ServerEvent[] = [];
+  const shells: string[] = [];
+  const shellRunStates: (string | undefined)[] = [];
   let sequence = 0;
   const controller = new TurnController(
     store,
@@ -104,12 +112,18 @@ async function runtime(providerId: ProviderId = "codex") {
     new Map<string, AgentPlan>(),
     {
       broadcast: (event) => events.push(event),
+      broadcastConversationShell: (conversationId) => {
+        shells.push(conversationId);
+        shellRunStates.push(
+          store.conversationShell(conversationId)?.latestTurn?.runState?.state,
+        );
+      },
       broadcastSnapshot: () => undefined,
       providerInfo: () => [providerInfo(providerId)],
       captureStructuredContext: ({ content }) => ({ visibleRequest: content }),
     },
     {
-      scheduler: new FakeTurnScheduler(),
+      scheduler,
       clock: () => new Date("2030-01-01T00:00:00.000Z"),
       id: () => "activity-id-" + ++sequence,
       turnTimeoutMs: 1_000,
@@ -136,6 +150,7 @@ async function runtime(providerId: ProviderId = "codex") {
     },
     input.runId,
     input.turnId,
+    workspace,
   );
   return {
     store,
@@ -147,7 +162,64 @@ async function runtime(providerId: ProviderId = "codex") {
     turnId: queued.turn.id,
     emitter,
     projected,
+    scheduler,
+    events,
+    shells,
+    shellRunStates,
+    workspace,
   };
+}
+
+function runTimers(scheduler: FakeTurnScheduler, delayMs: number): number {
+  const due = [...scheduler.delays]
+    .filter(([, delay]) => delay === delayMs)
+    .map(([id]) => id);
+  for (const id of due) {
+    const callback = scheduler.callbacks.get(id);
+    scheduler.clearTimeout(id);
+    callback?.();
+  }
+  return due.length;
+}
+
+function codexEvents(
+  value: Awaited<ReturnType<typeof runtime>>,
+): CodexAppServerEvents {
+  const host: CodexAppServerEventHost = {
+    options: {
+      executable: "/fake/codex",
+      environment: {},
+      cwd: "/workspace",
+      prompt: "Stream command output",
+      planMode: false,
+      access: "full",
+      onActivity: value.emitter.activity,
+    },
+    resultText: new CappedTextBuffer(1_024),
+    isSettled: () => false,
+    phase: () => "running",
+    setPhase: () => undefined,
+    providerThreadId: () => "codex-thread",
+    activeTurnId: () => "codex-turn",
+    requestedTurnId: () => undefined,
+    setActiveTurnId: () => undefined,
+    cancelRequested: () => false,
+    lastError: () => undefined,
+    setLastError: () => undefined,
+    setLastProtocolMethod: () => undefined,
+    setLastActivityId: () => undefined,
+    setTerminalEvent: () => undefined,
+    writeMessage: () => true,
+    cancel: () => undefined,
+    finish: () => undefined,
+    rememberFailure: () => undefined,
+  };
+  return new CodexAppServerEvents(host);
+}
+
+function activityEvents(value: Awaited<ReturnType<typeof runtime>>) {
+  return value.events.flatMap((event) =>
+    event.type === "agent.activity" ? [event.activity] : []);
 }
 
 function turnActivities(
@@ -349,11 +421,16 @@ describe("durable provider activity lifecycle contract", () => {
       providerActivitiesById: identified,
       providerActivityDetailChars: 0,
       providerCommandRuns: new Map(),
+      providerOutputActivityIds: new Set(),
+      pendingActivityUpdates: new Map(),
+      activityFlushTimer: null,
     } as ActiveTurn;
     const projection = new TurnActivityProjection({
       store: value.store,
       hooks: {} as TurnControllerHooks,
+      scheduler: value.scheduler,
       now: () => "2030-01-01T00:00:01.000Z",
+      onPersistenceFailure: () => undefined,
     });
 
     const fact = projection.record(
@@ -372,7 +449,7 @@ describe("durable provider activity lifecycle contract", () => {
       "completed",
     );
 
-    expect(fact).toMatchObject({
+    expect(fact?.activity).toMatchObject({
       title: "Anonymous terminal fact",
       status: "completed",
     });
@@ -518,6 +595,512 @@ describe("durable provider activity lifecycle contract", () => {
         status: "completed",
       }),
     ]));
+    await finish(value);
+  });
+
+  it("keeps streamed progress when a stopped turn interrupts a running activity", async () => {
+    const value = await runtime();
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "streamed-command",
+      detail: "Command:\nnpm test",
+    });
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "streamed-command",
+      detail: "Output:\nfirst suite passed",
+    });
+
+    expect(value.controller.cancel(value.conversationId)).toBe(true);
+    await flushPromises();
+
+    expect(turnActivities(value)).toEqual([
+      expect.objectContaining({
+        title: "Interrupted · npm test",
+        detail: "Command:\nnpm test\n\nOutput:\nfirst suite passed\n\nInterrupted: Stopped",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("persists and projects a burst of running updates once per 64 ms window", async () => {
+    const value = await runtime();
+    const updates = vi.spyOn(value.store, "updateActivity");
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "noisy-command",
+      detail: "Command:\nnpm test",
+    });
+    expect(activityEvents(value)).toHaveLength(1);
+    const shells = value.shells.length;
+
+    for (let window = 0; window < 2; window += 1) {
+      for (let index = 0; index < 250; index += 1) {
+        value.emitter.activity("command", "started", "npm test", {
+          activityId: "noisy-command",
+          detail: `Progress:\nstep ${window * 250 + index}`,
+        });
+      }
+      expect(updates).toHaveBeenCalledTimes(window);
+      expect(activityEvents(value)).toHaveLength(1 + window);
+      expect(runTimers(value.scheduler, 64)).toBe(1);
+      expect(updates).toHaveBeenCalledTimes(window + 1);
+      expect(activityEvents(value)).toHaveLength(2 + window);
+      expect(activityEvents(value).at(-1)).toMatchObject({
+        status: "running",
+        detail: expect.stringContaining(`step ${window * 250 + 249}`),
+      });
+      expect(turnActivities(value)[0]?.detail).toBe(
+        activityEvents(value).at(-1)?.detail,
+      );
+    }
+    expect(value.shells).toHaveLength(shells);
+
+    value.emitter.activity("command", "completed", "npm test", {
+      activityId: "noisy-command",
+    });
+    expect(updates).toHaveBeenCalledTimes(3);
+    expect(activityEvents(value)).toHaveLength(4);
+    expect(value.shells).toHaveLength(shells + 1);
+    const [final] = turnActivities(value);
+    expect(final?.status).toBe("completed");
+    for (let index = 0; index < 500; index += 1) {
+      expect(final?.detail?.split(`\nstep ${index}\n`).length
+        ?? 0).toBeLessThanOrEqual(2);
+    }
+    expect(final?.detail).toContain("\nstep 0\n");
+    expect(final?.detail?.endsWith("\nstep 499")).toBe(true);
+    await finish(value);
+  });
+
+  it("lands pending running updates before every later visible activity edge", async () => {
+    const value = await runtime();
+    const running = (detail: string) => value.emitter.activity(
+      "command",
+      "started",
+      "npm test",
+      { activityId: "edge-command", detail },
+    );
+    const order = () => value.events.flatMap((event) =>
+      event.type === "agent.activity"
+        ? [`${event.activity.title}:${event.activity.detail?.split("\n").at(-1)}`]
+        : event.type === "agent.approval.requested"
+          || event.type === "agent.plan.updated"
+          ? [event.type]
+          : []);
+    running("Command:\nnpm test");
+    running("Progress:\nbefore tool");
+    value.emitter.activity("tool", "started", "Read file", {
+      activityId: "edge-tool",
+    });
+    running("Progress:\nbefore approval");
+    value.provider.emit({
+      providerId: "codex",
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+      type: "approval",
+      request: {
+        requestId: "edge-approval",
+        kind: "command",
+        title: "Run tests",
+        permissionRoots: [],
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    });
+    running("Progress:\nbefore plan");
+    value.provider.emit({
+      providerId: "codex",
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+      type: "plan",
+      explanation: null,
+      steps: [{ step: "Verify", status: "inProgress" }],
+    });
+    running("Progress:\nbefore hydration");
+    value.controller.flushActiveStreamsForHydration();
+    running("Progress:\nbefore settlement");
+
+    expect(order()).toEqual([
+      "npm test:npm test",
+      "npm test:before tool",
+      "Read file:undefined",
+      "npm test:before approval",
+      "agent.approval.requested",
+      "npm test:before plan",
+      "agent.plan.updated",
+      "npm test:before hydration",
+    ]);
+    expect(turnActivities(value).find(({ title }) => title === "npm test")
+      ?.detail?.endsWith("before hydration")).toBe(true);
+
+    expect(value.controller.cancel(value.conversationId)).toBe(true);
+    await flushPromises();
+    expect(runTimers(value.scheduler, 64)).toBe(0);
+    expect(turnActivities(value).find(({ title }) =>
+      title === "Interrupted · npm test")?.detail).toContain(
+      "before settlement\n\nInterrupted: Stopped",
+    );
+  });
+
+  it("fails the turn when a timed activity update cannot be saved", async () => {
+    const value = await runtime();
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "failing-command",
+      detail: "Command:\nnpm test",
+    });
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "failing-command",
+      detail: "Progress:\nunsaved",
+    });
+    vi.spyOn(value.store, "updateActivity").mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+
+    expect(runTimers(value.scheduler, 64)).toBe(1);
+    await flushPromises();
+
+    expect(value.provider.cancelCount).toBeGreaterThan(0);
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+    expect(value.store.agentTurn(value.turnId)).toMatchObject({
+      status: "failed",
+      terminalReason: "stream-persistence-failed",
+    });
+  });
+
+  it("publishes the conversation shell only when a workspace run changes", async () => {
+    const value = await runtime();
+    const shells = () => value.shells.length;
+    const initial = shells();
+
+    value.emitter.activity("tool", "started", "Read file", {
+      activityId: "quiet-tool",
+    });
+    value.emitter.activity("tool", "completed", "Read file", {
+      activityId: "quiet-tool",
+      detail: "Output:\nread",
+    });
+    value.emitter.activity("system", "info", "Model rerouted");
+    expect(shells()).toBe(initial);
+
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "shell-command",
+    });
+    expect(shells()).toBe(initial + 1);
+    value.emitter.activity("command", "started", "npm test", {
+      activityId: "shell-command",
+      detail: "Progress:\nsame label",
+    });
+    runTimers(value.scheduler, 64);
+    expect(shells()).toBe(initial + 1);
+    value.emitter.activity("command", "started", "npm run check", {
+      activityId: "shell-command",
+      detail: "Progress:\nnew label",
+    });
+    runTimers(value.scheduler, 64);
+    expect(shells()).toBe(initial + 2);
+    expect(value.store.workspaceRunsForConversation(value.conversationId)
+      .find(({ label }) => label === "npm run check")).toMatchObject({
+      status: "running",
+    });
+    value.emitter.activity("command", "completed", "npm run check", {
+      activityId: "shell-command",
+    });
+    expect(shells()).toBe(initial + 3);
+    await finish(value);
+  });
+
+  it("records streamed Codex command output once, in order, without section headers per chunk", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const item = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      type: "commandExecution",
+      command: "npm test",
+      ...extra,
+    });
+    const chunks = [
+      "  indented start\n",
+      "ok\n",
+      "ok\n",
+      "partial ",
+      "line\n",
+      "\n",
+      "done",
+    ];
+    const output = chunks.join("");
+    const commandDetail = (command: string) =>
+      turnActivities(value).find(({ detail }) =>
+        detail?.startsWith(`Command:\n${command}\n`))?.detail;
+
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: item("streamed", { status: "inProgress" }),
+    });
+    for (const delta of chunks) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "streamed",
+        delta,
+      });
+    }
+    runTimers(value.scheduler, 64);
+    expect(activityEvents(value).at(-1)?.detail)
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output.slice(0, output.lastIndexOf("\n") + 1)}`);
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: item("streamed", {
+        status: "completed",
+        aggregatedOutput: output,
+      }),
+    });
+    expect(commandDetail("npm test"))
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { ...item("unstreamed", { status: "inProgress" }), command: "git status" },
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        ...item("unstreamed", { status: "completed", aggregatedOutput: "clean\n" }),
+        command: "git status",
+      },
+    });
+    expect(commandDetail("git status"))
+      .toBe("Command:\ngit status\n\nOutput:\nclean");
+    await finish(value);
+  });
+
+  it("redacts a credential split across Codex output chunks", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "secret", type: "commandExecution", command: "env", status: "inProgress" },
+    });
+    for (const delta of ["key sk-abcdefghij", "klmnopqrstuvwxyz0123\nnext\n"]) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "secret",
+        delta,
+      });
+    }
+    runTimers(value.scheduler, 64);
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "secret",
+        type: "commandExecution",
+        command: "env",
+        status: "completed",
+        aggregatedOutput: "key sk-abcdefghijklmnopqrstuvwxyz0123\nnext\n",
+      },
+    });
+
+    const details = [
+      ...activityEvents(value).map(({ detail }) => detail ?? ""),
+      ...turnActivities(value).map(({ detail }) => detail ?? ""),
+    ];
+    expect(details.join("\n")).not.toContain("abcdefghij");
+    expect(details.join("\n")).not.toContain("klmnopqrst");
+    expect(turnActivities(value)[0]?.detail)
+      .toBe("Command:\nenv\n\nOutput:\nkey [redacted]\nnext\n");
+    await finish(value);
+  });
+
+  it("saves and shows 500 Codex output deltas once per window and the output once", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const updates = vi.spyOn(value.store, "updateActivity");
+    const workspaceRunUpdates = vi.spyOn(value.store, "updateWorkspaceRun");
+    const events = value.events.length;
+    const shells = value.shells.length;
+    const chunks = Array.from({ length: 500 }, (_, index) =>
+      `line ${index}${index % 7 === 0 ? "\n" : " "}`);
+    const output = chunks.join("");
+
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "hot", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    chunks.forEach((delta, index) => {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "hot",
+        delta,
+      });
+      if (index % 50 === 49) runTimers(value.scheduler, 64);
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "hot",
+        type: "commandExecution",
+        command: "npm test",
+        status: "completed",
+        aggregatedOutput: output,
+      },
+    });
+
+    const projected = value.events.slice(events);
+    expect(updates).toHaveBeenCalledTimes(12);
+    expect(workspaceRunUpdates).toHaveBeenCalledTimes(1);
+    expect(projected.filter(({ type }) => type === "agent.activity"))
+      .toHaveLength(13);
+    expect(value.shells.length - shells).toBe(2);
+    expect(turnActivities(value)[0]?.detail)
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    await finish(value);
+  });
+
+  it("publishes the shell when work resumes after a retry or delegation", async () => {
+    const value = await runtime();
+    const identity = {
+      providerId: "codex" as const,
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+    };
+    const resumes = [
+      () => value.emitter.activity("tool", "started", "Read file", {
+        activityId: "resumed-tool",
+      }),
+      () => value.provider.emit({ ...identity, type: "text", text: "Working again." }),
+      () => value.provider.emit({
+        ...identity,
+        type: "plan",
+        explanation: null,
+        steps: [{ step: "Verify", status: "inProgress" }],
+      }),
+    ];
+    for (const [index, resume] of resumes.entries()) {
+      value.provider.emit({
+        ...identity,
+        type: "status",
+        status: index === 1 ? "delegated" : "retrying",
+      });
+      expect(value.shellRunStates.at(-1))
+        .toBe(index === 1 ? "delegated" : "retrying");
+      const shells = value.shells.length;
+      resume();
+      expect(value.shells.length - shells).toBe(1);
+      expect(value.shellRunStates.at(-1)).toBe("running");
+    }
+    await finish(value);
+  });
+
+  it("keeps credentials and workspace paths split across Codex output chunks out of the record", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const pathSplit = Math.floor(value.workspace.length / 2);
+    const chunks = [
+      "token ghp_abcdefghij", "klmnopqrstuvwxyz0123\n",
+      "auth Bearer abcdefgh", "ijklmnop1234\n",
+      "slack xoxb-12345678", "90abcdefghij\n",
+      "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0", ".abcdefghijklmnop\n",
+      "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKC", "AQEA1234\nabcdEFGH5678\n", "-----END RSA PRIVATE KEY-----\n",
+      `open ${value.workspace.slice(0, pathSplit)}`, `${value.workspace.slice(pathSplit)}/src/index.ts\n`,
+    ];
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "split", type: "commandExecution", command: "env", status: "inProgress" },
+    });
+    chunks.forEach((delta) => {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "split",
+        delta,
+      });
+      runTimers(value.scheduler, 64);
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "split",
+        type: "commandExecution",
+        command: "env",
+        status: "completed",
+        aggregatedOutput: chunks.join(""),
+      },
+    });
+
+    const recorded = [
+      ...activityEvents(value).map(({ detail }) => detail ?? ""),
+      ...turnActivities(value).map(({ detail }) => detail ?? ""),
+    ].join("\n");
+    for (const leaked of [
+      "klmnopqrstuvwxyz0123",
+      "ijklmnop1234",
+      "90abcdefghij",
+      "abcdefghijklmnop",
+      "MIIEow",
+      "AQEA1234",
+      "abcdEFGH5678",
+      value.workspace.slice(pathSplit),
+    ]) {
+      expect(recorded).not.toContain(leaked);
+    }
+    expect(turnActivities(value)[0]?.detail).toContain(
+      "open <workspace>/src/index.ts\n",
+    );
+    await finish(value);
+  });
+
+  it("appends the end of a command whose output deltas stopped before it finished", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const streamed = Array.from({ length: 20 }, (_, index) => `line ${index}\n`);
+    const ending = "line 20\n\nSummary: 2 tests failed\n";
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "capped", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    for (const delta of streamed) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned,
+        itemId: "capped",
+        delta,
+      });
+    }
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "capped",
+        type: "commandExecution",
+        command: "npm test",
+        status: "failed",
+        aggregatedOutput: streamed.join("") + ending,
+      },
+    });
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "rewritten", type: "commandExecution", command: "make", status: "inProgress" },
+    });
+    codex.handleNotification("item/commandExecution/outputDelta", {
+      ...owned,
+      itemId: "rewritten",
+      delta: "building\n",
+    });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: {
+        id: "rewritten",
+        type: "commandExecution",
+        command: "make",
+        status: "completed",
+        aggregatedOutput: "[output trimmed by Codex]\nbuilt\n",
+      },
+    });
+
+    expect(turnActivities(value).map(({ detail }) => detail).sort()).toEqual([
+      "Command:\nmake\n\nOutput:\nbuilding\n\n\nOutput:\n[output trimmed by Codex]\nbuilt",
+      `Command:\nnpm test\n\nOutput:\n${streamed.join("")}${ending}`,
+    ]);
     await finish(value);
   });
 });

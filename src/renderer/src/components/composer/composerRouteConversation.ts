@@ -3,6 +3,16 @@ import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, t
 import { clearPersistedComposerDraft } from "../../utils/composerDraftPersistence";
 import type { ComposerProps, PendingModelRoute } from "./types";
 
+const ROUTE_FOCUS_WINDOW_MS = 2_000;
+let routeFocusRequest: { conversationId: string; until: number } | null = null;
+
+export function takeRouteConversationFocus(conversationId: string): boolean {
+  const request = routeFocusRequest;
+  if (request?.conversationId !== conversationId) return false;
+  routeFocusRequest = null;
+  return Date.now() <= request.until;
+}
+
 interface ComposerRouteConversationOptions {
   pendingRoute: PendingModelRoute | null;
   message: string;
@@ -49,14 +59,19 @@ export function useComposerRouteConversation(): (
       selection: pendingRoute.selection,
       configuration: pendingRoute.configuration,
       ...(prefillText ? { prefillText } : {}),
+      ...(pendingRoute.carriesContext ? { sourceConversationId: pendingRoute.sourceConversationId } : {}),
       onCreated: (createdId) => { createdConversationId = createdId; },
     }).then(
       () => {
         setPendingRoute(null);
+        if (createdConversationId !== null) {
+          routeFocusRequest = { conversationId: createdConversationId, until: Date.now() + ROUTE_FOCUS_WINDOW_MS };
+        }
         if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
         focusFrameRef.current = window.requestAnimationFrame(() => {
           focusFrameRef.current = null;
-          if (createdConversationId !== null && conversationIdRef.current === createdConversationId) {
+          if (createdConversationId !== null && conversationIdRef.current === createdConversationId
+            && takeRouteConversationFocus(createdConversationId)) {
             textareaRef.current?.focus();
           }
         });

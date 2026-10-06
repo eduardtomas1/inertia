@@ -75,6 +75,7 @@ export function detachedChatCommandRejection(
     case "message.queue.enqueue":
     case "message.queue.remove":
     case "message.queue.send":
+    case "message.queue.stop-and-send":
       return ownsExistingConversation(command.payload.conversationId)
         ? null
         : REJECTION;

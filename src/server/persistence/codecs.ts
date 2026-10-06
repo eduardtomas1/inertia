@@ -334,6 +334,7 @@ export function conversationWorktreeOwnershipFromRow(
 
 function conversationTurnSummary(
   turn: AgentTurn | null,
+  usageLimited: boolean,
 ): ConversationLatestTurnSummary | null {
   if (!turn) return null;
   return {
@@ -354,6 +355,7 @@ function conversationTurnSummary(
     completedAt: turn.completedAt,
     terminalReason: turn.terminalReason,
     updatedAt: turn.updatedAt,
+    ...(usageLimited ? { usageLimited: true } : {}),
   };
 }
 
@@ -370,6 +372,7 @@ export function conversationDetailFromRow(
 export function conversationShellFromRow(
   row: ConversationRow & { has_history: number },
   latestTurn: AgentTurn | null,
+  latestTurnUsageLimited = false,
 ): ConversationShell {
   const conversation = conversationFromRow(row);
   return {
@@ -398,7 +401,7 @@ export function conversationShellFromRow(
     hasHistory: row.has_history === 1,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
-    latestTurn: conversationTurnSummary(latestTurn),
+    latestTurn: conversationTurnSummary(latestTurn, latestTurnUsageLimited),
     pendingApproval: false,
     pendingInput: false,
   };
@@ -550,7 +553,7 @@ function persistedSessionRecovery(value: string | null): AgentTurn["sessionRecov
   return isTurnSessionRecovery(parsed) ? parsed : null;
 }
 
-export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
+export function agentTurnFromRow(row: AgentTurnRow & { usage_limited?: number }): AgentTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
     () => providerModelSelectionFromLegacyFields({
@@ -612,6 +615,7 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     ...(row.origin === "cli-import" ? { origin: "cli-import" as const } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.usage_limited === 1 ? { usageLimited: true as const } : {}),
   };
 }
 

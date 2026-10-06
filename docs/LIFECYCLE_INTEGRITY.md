@@ -74,7 +74,7 @@ lease; it does not mean an in-memory absence proves cleanup.
 | Agent child turn | `AgentThreadManager`; parent provider/conversation/run/turn + child conversation + handoff ID | active child registry / durable conversation provenance | Child's own turn controller; parent cannot synthesize its result | Stop targets the exact active child and waits for provider cleanup. Depth, active-child, access-ceiling, and source-turn checks are revalidated before every mutation. |
 | Approval request | Turn interaction coordinator; provider/conversation/run/turn + request/call ID | one open interaction / durable projected interaction state | Current exact turn interaction state | A response atomically consumes the open request. Duplicate, replayed, late, cancelled, cross-provider, cross-run, and cross-turn responses are rejected. |
 | Structured user-input request | Turn interaction coordinator; same tuple plus input request ID | one open interaction / durable projected interaction state | Current exact turn interaction state | Schema validation and exact-owner dispatch are required. Timeout and response race through one terminal interaction transition; root terminal cleanup retires it. |
-| Follow-up/steer request | Turn controller; exact active tuple + serialized follow-up ID | process-local per-turn tail/queue; provider acknowledgement is persisted after dispatch | Current root turn | Attachment resolution and owner identity are revalidated immediately before dispatch. Cancel, terminal, continuation change, or replacement rejects queued/late work. A pre-ack in-flight follow-up has no separate durable queue record and is resolved through turn recovery after a crash. |
+| Follow-up/steer request | Turn controller; exact active tuple + serialized follow-up ID | process-local per-turn tail/queue; provider acknowledgement is persisted after dispatch | Current root turn | Attachment resolution and owner identity are revalidated immediately before dispatch. Cancel, terminal, continuation change, or replacement rejects queued/late work. A follow-up that definitely never reached the provider (the turn stopped accepting input before dispatch, or the provider refused it) is stored in the durable message queue under its request ID and sent after the turn completes; one the provider may have received stays ambiguous and is never queued or resent. An OpenCode follow-up that OpenCode queues behind the current work (`delivery: "queue"` with a matching receipt) is owned like a steered one, so the run stays open until its output is projected. A pre-ack in-flight follow-up has no separate durable queue record and is resolved through turn recovery after a crash. |
 | Host-tool request | Process-local host-tool bridge; Inertia tuple + native provider thread/turn/tool-call ID | exact-turn bridge/call registry / no provider payload persisted | Host bridge policy and exact root turn | Cancellation/terminal revokes authority and settles pending calls. Approval cannot be supplied by the provider. Late/replayed native calls are deterministic failures. |
 | Attachment work | Main attachment broker/store runner; handoff/request ID + conversation/attachment identity + owning runtime record | request and claim registries / attachment metadata and one-shot worker protocol | Main-process broker for filesystem result; turn controller for transcript use | One-shot result acknowledgement, worker close, claim release, and exact runtime ownership. Partial/corrupt work preserves user content and is reconciled without exposing paths. |
 | Artifact generation | Turn artifact owner; conversation/run/turn + artifact operation ID | pending artifact/turn state / generated attachment and turn records | Root turn's authoritative settlement controls publication | Generation is cancelled/rejected after terminal; durable artifacts remain downstream of settlement and are never used to revive a turn. Recovery preserves content under uncertainty. |
@@ -142,7 +142,7 @@ maintenance evidence remains quarantined and provider admission stays closed.
 | Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + containment | prompt abort + owned-server cleanup |
 | Provider-owned server | none | none | none | none | native, run-owned |
 | Custom backend / endpoint / performance mode | attested route / endpoint / native mode | attested route / endpoint / native mode | none | none | none |
-| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | manual only; non-interactive update unavailable | installation-dependent |
+| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | installation-dependent | installation-dependent |
 
 The machine-readable manifest and runtime attestation are versioned and bound
 to one harness, provider installation/configuration identity (including
@@ -181,6 +181,82 @@ negotiates that operation. Conformance registration proves each
 production harness as a whole. It does not yet claim independent
 observed/exercised telemetry for every feature, and the UI currently summarizes
 capability counts rather than showing a per-feature evidence ledger.
+
+### Provider install sources
+
+Maintenance derives the updater from the files that own the discovered
+executable and runs nothing to decide. It finds the PATH entry that resolved to
+that executable, reads its real path and checks a few files (link targets,
+package directories, a pnpm shim of at most 16 KiB). In order, it accepts:
+
+| Owner | Proof | Command | Lock |
+| --- | --- | --- | --- |
+| Codex standalone | real path under `$CODEX_HOME/packages/standalone/` (default `~/.codex`) | `codex update`, with `CODEX_HOME` when set | `native:codex` |
+| Claude installer | real path under `~/.local/share/claude/` or `~/.claude/local/` (on Windows also `%USERPROFILE%\.local\bin\claude.exe`) | `claude update` | `native:claude` |
+| Cursor installer | real path under `~/.local/share/cursor-agent/versions/` | `cursor-agent update` | `native:cursor` |
+| OpenCode installer | `~/.opencode/bin/opencode` | `opencode upgrade <latest 1.x> --method curl` | `native:opencode` |
+| Antigravity installer | `~/.local/bin/agy` (`%LOCALAPPDATA%\agy\bin\agy.exe` on Windows) | `agy update` | `native:antigravity` |
+| bun | real path under `$BUN_INSTALL/install/global/node_modules/<package>/` and `$BUN_INSTALL/bin/bun` exists | `bun add -g <package>` (`--trust` for Claude, Kimi and OpenCode) | `bun-global:<home>` |
+| pnpm | the PATH hit is a shim in `$PNPM_HOME` naming `global/<n>/node_modules/<package>/`, which exists | `pnpm add -g <package>` (`--allow-build=` for each package with an install script) | `pnpm-global:<home>` |
+| Yarn classic | real path under the Yarn global `node_modules/<package>/` | `yarn global add <package>` | `yarn-global:<dir>` |
+| uv (Kimi) | real path under `$UV_TOOL_DIR/kimi-cli/` (default `~/.local/share/uv/tools`) | `uv tool upgrade kimi-cli`, with `UV_TOOL_DIR` when set | `uv-tool:<dir>` |
+| Volta | the PATH hit in `$VOLTA_HOME/bin` resolves to `volta-shim` and `tools/image/packages/<package>` exists | `volta install <package>` | `volta:<home>` |
+| npm (also nvm, fnm, mise Node) | real path is `<prefix>/lib/node_modules/<package>/`, the prefix is not inside another `node_modules`, `<prefix>/bin/<command>` links to it, and no directory is redirected | that prefix's own Node and `npm-cli.js` with `install -g --prefix <prefix>` (`--allow-scripts=` for each package with an install script) | `npm-global:<prefix>` |
+| Homebrew | real path is `<prefix>/Cellar` or `Caskroom/<name>/<version>/` for a known name (`codex`, `claude-code`, `opencode`), `<prefix>/bin/brew` resolves inside that prefix and the keg is writable | `<prefix>/bin/brew upgrade [--cask] <name>` | `homebrew:<prefix>` |
+
+Packages are `@openai/codex`, `@anthropic-ai/claude-code`,
+`@moonshot-ai/kimi-code` and `opencode-ai`. Install scripts are allowed for
+`@anthropic-ai/claude-code`, `opencode-ai`, and `@moonshot-ai/kimi-code` with
+its optional `node-pty`. Every package manager installs `<package>@latest`,
+except OpenCode, which installs `opencode-ai@1`; every OpenCode update, whatever
+its owner, runs only when the latest known release is 1.x, and otherwise
+Settings offers neither Update nor a command. Everything else fails closed with
+one sentence and, where the command can be written from fixed words, system
+prefixes and home-relative paths, the exact command for a terminal: an npm
+prefix the account cannot write (`sudo npm install -g --prefix <prefix>
+<package>@latest` only for `/usr`, `/usr/local` and `/opt/local`; a Homebrew
+prefix gets the sentence alone, so no root-owned files land inside Homebrew),
+a snap (`sudo snap refresh <name>`, the name read through one link hop of a
+snap alias), a mise npm tool (`mise upgrade npm:<package>`), other mise or
+asdf installs, distribution and Nix packages, project-local `node_modules`, and
+any binary whose installer cannot be identified. When the `yarn` on PATH is
+Yarn 2 or later (for example through Corepack), `yarn global add` does not
+exist, so the update fails with Yarn's own error and the installation is
+reverified as unchanged. A native updater never runs for an unproven
+path. Discovery keeps the command name of a multiplexing shim (`snap`,
+`volta-shim`), because those programs pick the tool from the name they were
+started with, and the installation fingerprint then also covers what the shim
+dispatches to (the Volta package image directory, or the real path of
+`/snap/<name>/current`), so an outside `volta install` or `snap refresh` marks
+the installation changed. mise shims are not kept: mise picks the version per
+working directory, so there is no single target to fingerprint. The updater
+receives only the package-manager home it needs (`PNPM_HOME`, `BUN_INSTALL`,
+`VOLTA_HOME`, `CODEX_HOME`, `UV_TOOL_DIR`) on top of the existing allowlist.
+
+An installation too old for its protocol check can still update. Discovery
+returns the executable and version of an identified CLI that answered
+`--version` but lacks ACP (Cursor, Kimi), plugin-free serve (OpenCode 1.x),
+the App Server (Codex) or the headless release (Antigravity below 1.2.2); an
+unidentified executable and an OpenCode 2 install are not returned. The
+capability authority records such an installation as identified (version
+probe completed, cleanup confirmed, executable and file fingerprint bound) and
+admits `maintenance-update` for it when the manifest does not declare the
+operation unavailable. Every manifest now declares it negotiated, Kimi and
+Antigravity included. This changes their manifest digest and therefore the
+compatibility token, but a native route resumes its saved session across a
+token change (see Session-continuation compatibility), and these harnesses
+have no custom-backend routes, so no existing chat starts a fresh session. Settings applies the same gate, so it shows **Update**
+only when the update would be admitted, and otherwise the command to run.
+
+The latest version comes from what the owner can install. A Homebrew keg is
+compared with `<prefix>/bin/brew info --json=v2 --cask|--formula <name>` (the
+stable formula version, or the cask version before any comma), run like an
+update without a shell, with `HOMEBREW_NO_AUTO_UPDATE=1` and
+`HOMEBREW_NO_ANALYTICS=1`, a 10 s deadline, process-tree cleanup and 64 KiB of
+stdout; a failed or oversized read leaves the version unknown. The npm-family
+owners use the npm registry entry of their package. Cursor and Antigravity
+publish no latest-version source, so their installer update stays **Check &
+update**. Results are cached for an hour (five minutes after a failure).
 
 The former direct CLI harness is retained only as the explicitly named
 `createLegacyCliAgentHarnessForTests` fixture for lifecycle tests and
@@ -240,6 +316,20 @@ so only its recognised missing-conversation result counts.
 The token no longer retires native sessions, so a harness change that makes
 previously saved sessions unusable must retire them explicitly with a
 migration, as schema 65 did for Codex.
+
+When Inertia quits, crashes or restarts while a turn runs, that turn is
+recorded as interrupted and its live delegated tasks as lost. The first turn
+after it carries one hidden instruction that says so. When that turn uses the
+backend profile and endpoint of the interrupted turn, the instruction adds the
+interrupted request and up to ten lost tasks, each at most 160 characters, as
+one JSON line it introduces as quoted data, because task labels are written by
+the provider; the whole note is at most 4 KiB. Another endpoint gets only the
+first sentence. The instruction is counted in that turn's execution manifest.
+It is derived from the latest earlier turn that did not fail to start
+(`turn-start-failed`) rather than stored as a flag, so a turn that fails
+before the provider does not consume it, and the turn after a delivered note
+does not repeat it. A start failure that happened after the provider received
+the prompt can therefore repeat the note once.
 
 A fresh session in an established chat does not start blank. The request
 carries the chat's earlier visible messages that were already sent to the

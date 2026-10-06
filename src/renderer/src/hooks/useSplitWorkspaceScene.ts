@@ -25,7 +25,7 @@ import {
 } from "../components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "../components/workspace-scene/createWorkspaceTurnActions";
 import {
-  replacementConversationPayload,
+  replacementConversationCommand,
   type ReplacementChatRequest,
 } from "../lib/newConversation";
 import {
@@ -308,10 +308,8 @@ export function useSplitWorkspaceScene({
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
       }
-      const event = resultEvent(await run("conversation.create", {
-        type: "conversation.create",
-        payload: replacementConversationPayload(splitProject, settings, request),
-      }));
+      const command = replacementConversationCommand(splitProject, settings, request);
+      const event = resultEvent(await run(command.type, command));
       if (event.result.kind !== "conversation.created") {
         throw new Error("The new split chat could not be identified.");
       }

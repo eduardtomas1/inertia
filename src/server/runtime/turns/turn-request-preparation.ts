@@ -26,6 +26,10 @@ import {
   type ConversationContextMaterialization,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import {
+  runtimeInterruptionInstruction,
+  sharesInterruptionEndpoint,
+} from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
   ActiveTurn,
@@ -208,6 +212,8 @@ export function resolveTurnRequest(
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
+  const interruptedTurnId = dependencies.store.turnLedgerRepository
+    .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
   const assemblyInput = {
@@ -227,6 +233,14 @@ export function resolveTurnRequest(
     context: request.context,
     internalInstructions: [
       ...(resumesImportedCodex ? [] : capabilityInstructions),
+      ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
+        sharesInterruptionEndpoint(
+          dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
+          route.continuationIdentity,
+        )
+          ? dependencies.store.turnLedgerRepository.runtimeInterruption(interruptedTurnId)
+          : null,
+      )]),
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;
@@ -411,6 +425,9 @@ export function resolveTurnRequest(
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
           checkpointId: request.checkpointId ?? null,
+          checkpointFailure: request.checkpointId
+            ? null
+            : request.checkpointFailure ?? null,
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,
@@ -450,7 +467,10 @@ export function resolveTurnRequest(
           runningActivities,
           providerActivitiesById: new Map<string, AgentActivity>(),
           providerActivityDetailChars: 0,
-          providerCommandRuns: new Map<string, string>(),
+          providerCommandRuns: new Map<string, { id: string; label: string }>(),
+          providerOutputActivityIds: new Set<string>(),
+          pendingActivityUpdates: new Map<string, AgentActivity>(),
+          activityFlushTimer: null,
           approvalIds: new Set<string>(),
           inputIds: new Set<string>(),
           onSettled: request.onSettled,

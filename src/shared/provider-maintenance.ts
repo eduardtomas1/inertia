@@ -25,7 +25,15 @@ export interface ProviderMaintenanceDiagnosticState {
 export type ProviderMaintenanceInstallMethod =
   | "provider-managed"
   | "npm-global"
+  | "pnpm-global"
+  | "bun-global"
+  | "yarn-global"
+  | "volta"
+  | "uv-tool"
   | "homebrew"
+  | "snap"
+  | "version-manager"
+  | "system-package"
   | "manual"
   | "unknown";
 
@@ -62,6 +70,7 @@ export interface ProviderMaintenanceStatus {
   updateLabel: string | null;
   instructionsUrl: string;
   message: string | null;
+  manualCommand: string | null;
 }
 
 export type ProviderMaintenanceOperationStatus =

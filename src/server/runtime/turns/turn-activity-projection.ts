@@ -2,21 +2,32 @@ import type { AgentActivity } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import {
   mergeProviderActivityDetailWithinTurnBudget,
+  mergeProviderActivityOutputWithinTurnBudget,
 } from "../../provider/activity-detail";
 import type { ProviderActivityEvent } from "../../provider/contracts";
 import {
+  broadcastTurnConversationShell,
   projectActionKind,
   providerLabel,
 } from "./turn-controller-support";
 import type {
   ActiveTurn,
   TurnControllerHooks,
+  TurnTimerScheduler,
 } from "./turn-controller-types";
+import { STREAM_PROJECTION_FLUSH_INTERVAL_MS } from "./turn-stream-channel";
 
 export interface TurnActivityProjectionOptions {
   store: RuntimeStore;
   hooks: TurnControllerHooks;
+  scheduler: TurnTimerScheduler;
   now(): string;
+  onPersistenceFailure(active: ActiveTurn, error: unknown): void;
+}
+
+export interface RecordedTurnActivity {
+  activity: AgentActivity;
+  runsChanged: boolean;
 }
 
 /**
@@ -31,30 +42,44 @@ export class TurnActivityProjection {
     event: ProviderActivityEvent,
     kind: AgentActivity["kind"],
     status: AgentActivity["status"],
-  ): AgentActivity {
+  ): RecordedTurnActivity | null {
     const candidates = active.runningActivities.get(event.kind) ?? [];
     const identified = event.activityId
       ? active.providerActivitiesById.get(event.activityId)
       : undefined;
+    const pendingIndex = identified
+      ? candidates.findIndex(({ id }) => id === identified.id)
+      : -1;
+    if (identified && event.phase === "started") {
+      const activity: AgentActivity = {
+        ...identified,
+        title: event.label,
+        detail: this.eventDetail(active, identified.id, identified.detail, event),
+        status,
+      };
+      active.providerActivitiesById.set(event.activityId!, activity);
+      if (pendingIndex >= 0) candidates[pendingIndex] = activity;
+      active.pendingActivityUpdates.set(activity.id, activity);
+      this.scheduleFlush(active);
+      return null;
+    }
+    this.flushPending(active);
     if (identified) {
       const activity = this.options.store.updateActivity(identified.id, {
         title: event.label,
-        detail: this.detail(active, identified.detail, event.detail ?? null),
+        detail: this.eventDetail(active, identified.id, identified.detail, event),
         status,
       });
-      active.providerActivitiesById.set(event.activityId!, activity);
-      if (event.phase !== "started") {
-        active.providerActivitiesById.delete(event.activityId!);
-        const pendingIndex = candidates.findIndex(
-          ({ id }) => id === identified.id,
-        );
-        if (pendingIndex >= 0) candidates.splice(pendingIndex, 1);
-        if (candidates.length === 0) {
-          active.runningActivities.delete(event.kind);
-        }
+      active.providerOutputActivityIds.delete(identified.id);
+      active.providerActivitiesById.delete(event.activityId!);
+      if (pendingIndex >= 0) candidates.splice(pendingIndex, 1);
+      if (candidates.length === 0) {
+        active.runningActivities.delete(event.kind);
       }
-      this.syncCommandRun(active, activity, event.phase);
-      return activity;
+      return {
+        activity,
+        runsChanged: this.syncCommandRun(active, activity, event.phase),
+      };
     }
     if (event.phase !== "started" && event.phase !== "info") {
       const identifiedActivityIds = new Set(
@@ -73,11 +98,13 @@ export class TurnActivityProjection {
         }
         const activity = this.options.store.updateActivity(match.id, {
           title: event.label,
-          detail: this.detail(active, match.detail, event.detail ?? null),
+          detail: this.eventDetail(active, null, match.detail, event),
           status,
         });
-        this.syncCommandRun(active, activity, event.phase);
-        return activity;
+        return {
+          activity,
+          runsChanged: this.syncCommandRun(active, activity, event.phase),
+        };
       }
     }
     const activity = this.options.store.addActivity({
@@ -86,19 +113,44 @@ export class TurnActivityProjection {
       turnId: active.turn.id,
       kind,
       title: event.label,
-      detail: this.detail(active, null, event.detail ?? null),
+      detail: this.eventDetail(active, null, null, event),
       status,
       createdAt: this.options.now(),
     });
-    this.syncCommandRun(active, activity, event.phase);
+    const runsChanged = this.syncCommandRun(active, activity, event.phase);
     if (event.phase === "started") {
       candidates.push(activity);
       active.runningActivities.set(event.kind, candidates);
     }
     if (event.activityId && event.phase === "started") {
       active.providerActivitiesById.set(event.activityId, activity);
+      if (event.outputDelta) active.providerOutputActivityIds.add(activity.id);
     }
-    return activity;
+    return { activity, runsChanged };
+  }
+
+  flushPending(active: ActiveTurn): void {
+    this.cancelFlush(active);
+    if (active.pendingActivityUpdates.size === 0) return;
+    const pending = [...active.pendingActivityUpdates.values()];
+    active.pendingActivityUpdates.clear();
+    let runsChanged = false;
+    for (const update of pending) {
+      const activity = this.options.store.updateActivity(update.id, {
+        title: update.title,
+        detail: update.detail,
+        status: update.status,
+      });
+      runsChanged = this.syncCommandRun(active, activity, "started")
+        || runsChanged;
+      this.options.hooks.broadcast({ type: "agent.activity", activity });
+    }
+    if (runsChanged) broadcastTurnConversationShell(this.options.hooks, active);
+  }
+
+  discardPending(active: ActiveTurn): void {
+    this.cancelFlush(active);
+    active.pendingActivityUpdates.clear();
   }
 
   settleRunning(
@@ -107,6 +159,7 @@ export class TurnActivityProjection {
     interruptedMessage?: string,
     commandStatus?: "failed" | "cancelled",
   ): void {
+    this.discardPending(active);
     for (const activities of active.runningActivities.values()) {
       for (const pending of activities) {
         const activity = this.options.store.updateActivity(pending.id, {
@@ -120,7 +173,7 @@ export class TurnActivityProjection {
                   `Interrupted: ${interruptedMessage}`,
                 ),
               }
-            : {}),
+            : { title: pending.title, detail: pending.detail }),
         });
         this.syncCommandRun(active, activity, undefined, commandStatus);
         this.options.hooks.broadcast({ type: "agent.activity", activity });
@@ -128,6 +181,60 @@ export class TurnActivityProjection {
     }
     active.runningActivities.clear();
     active.providerActivitiesById.clear();
+    active.providerOutputActivityIds.clear();
+  }
+
+  private scheduleFlush(active: ActiveTurn): void {
+    if (active.activityFlushTimer !== null) return;
+    active.activityFlushTimer = this.options.scheduler.setTimeout(() => {
+      active.activityFlushTimer = null;
+      if (active.runState.isTerminal()) {
+        active.pendingActivityUpdates.clear();
+        return;
+      }
+      try {
+        this.flushPending(active);
+      } catch (error) {
+        try {
+          this.options.onPersistenceFailure(active, error);
+        } catch {
+          active.pendingActivityUpdates.clear();
+        }
+      }
+    }, STREAM_PROJECTION_FLUSH_INTERVAL_MS);
+  }
+
+  private cancelFlush(active: ActiveTurn): void {
+    if (active.activityFlushTimer === null) return;
+    this.options.scheduler.clearTimeout(active.activityFlushTimer);
+    active.activityFlushTimer = null;
+  }
+
+  private eventDetail(
+    active: ActiveTurn,
+    activityId: string | null,
+    previous: string | null,
+    event: ProviderActivityEvent,
+  ): string | null {
+    let detail = previous;
+    if (event.outputDelta) {
+      const merged = mergeProviderActivityOutputWithinTurnBudget(
+        previous,
+        event.outputDelta,
+        activityId !== null && active.providerOutputActivityIds.has(activityId),
+        active.providerActivityDetailChars,
+      );
+      active.providerActivityDetailChars = merged.totalChars;
+      detail = merged.detail;
+      if (activityId) active.providerOutputActivityIds.add(activityId);
+    }
+    if (!event.outputDelta || event.detail) {
+      detail = this.detail(active, detail, event.detail ?? null);
+    }
+    if (activityId && event.detail) {
+      active.providerOutputActivityIds.delete(activityId);
+    }
+    return detail;
   }
 
   private detail(
@@ -149,8 +256,8 @@ export class TurnActivityProjection {
     activity: AgentActivity,
     phase?: ProviderActivityEvent["phase"],
     terminalStatus?: "failed" | "cancelled",
-  ): void {
-    if (activity.kind !== "command" || phase === "info") return;
+  ): boolean {
+    if (activity.kind !== "command" || phase === "info") return false;
     const status = terminalStatus ?? (activity.status === "running"
       ? "running"
       : activity.status === "failed"
@@ -159,13 +266,16 @@ export class TurnActivityProjection {
     const label = activity.title === "Command"
       ? "Agent command"
       : activity.title;
-    const existingId = active.providerCommandRuns.get(activity.id);
-    if (existingId) {
-      this.options.store.updateWorkspaceRun(existingId, { label, status });
-      if (status !== "running") {
+    const existing = active.providerCommandRuns.get(activity.id);
+    if (existing) {
+      if (status === "running" && existing.label === label) return false;
+      this.options.store.updateWorkspaceRun(existing.id, { label, status });
+      if (status === "running") {
+        existing.label = label;
+      } else {
         active.providerCommandRuns.delete(activity.id);
       }
-      return;
+      return true;
     }
     const workspaceRun = this.options.store.createWorkspaceRun({
       kind: projectActionKind(activity.title),
@@ -177,9 +287,13 @@ export class TurnActivityProjection {
       port: null,
     });
     if (status === "running") {
-      active.providerCommandRuns.set(activity.id, workspaceRun.id);
+      active.providerCommandRuns.set(activity.id, {
+        id: workspaceRun.id,
+        label,
+      });
     } else {
       this.options.store.updateWorkspaceRun(workspaceRun.id, { status });
     }
+    return true;
   }
 }

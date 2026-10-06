@@ -102,7 +102,10 @@ function conversationDependencies(
       attachments: vi.fn(() => []),
       referencedAttachmentIds: vi.fn(() => new Set<string>()),
       providerRunOwnership: { forConversation: vi.fn(() => []) },
-      contextPackets: { targetConversationIdsForSource: vi.fn(() => []) },
+      contextPackets: {
+        targetConversationIdsForSource: vi.fn(() => []),
+        hasDraftForTargetWithoutMessages: vi.fn(() => false),
+      },
       ...store,
     } as RuntimeStore,
     conversationAttachments: {

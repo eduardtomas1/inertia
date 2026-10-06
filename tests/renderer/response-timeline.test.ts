@@ -28,6 +28,7 @@ import {
   stabilizeResponseTimeline,
   turnExecutionElapsedMs,
   turnTimingLabels,
+  workSummaryLabel,
   type ResponseTurn,
   type TurnGitArtifactSummary,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -1028,6 +1029,25 @@ describe("authoritative response timeline", () => {
     expect(second.activities).toEqual([]);
   });
 
+  it("says a turn stopped at its usage limit instead of calling it a failure", () => {
+    const failed = (usageLimited: boolean) => {
+      const turn = { ...agentTurn("limited", "limited-user", { status: "failed" }), ...(usageLimited ? { usageLimited: true as const } : {}) };
+      return timelineTurn(buildResponseTimeline({
+        turns: [turn],
+        messages: [message("limited-user", turn.id, "user", "Run it", turn.requestedAt)],
+        activities: [],
+        reasonings: [],
+        checkpoints: [],
+      }), turn.id);
+    };
+    expect(workSummaryLabel(failed(true))).toBe("Usage limit reached after 7s");
+    expect(turnTimingLabels(failed(true))).toEqual(["Queued 5s", "Usage limit reached after 7s"]);
+    expect(workSummaryLabel(failed(false))).toBe("Failed after 7s");
+    const unstarted = { ...failed(true), startedAt: null };
+    expect(workSummaryLabel(unstarted)).toBe("Usage limit reached");
+    expect(turnTimingLabels(unstarted)[1]).toBe("Usage limit reached");
+  });
+
   it("excludes persisted system suspend time from completed work duration", () => {
     const turn = {
       ...agentTurn("turn-1", "user-1"),
@@ -1154,6 +1174,29 @@ describe("authoritative response timeline", () => {
     expect(response.foldableActivities.map(({ id }) => id)).toEqual(["success"]);
     expect(response.importantActivities.map(({ id }) => id)).toEqual(["failure", "warning"]);
     expect(activityNeedsAttention(warning)).toBe(true);
+  });
+
+  it("keeps the missing checkpoint notice out of the turn's work", () => {
+    const notice = activity("checkpoint", "turn", {
+      kind: "status",
+      title: "No checkpoint for this turn",
+      detail: "Skipped: the checkpoint operation timed out.",
+    });
+    const success = activity("success", "turn");
+    const turn = agentTurn("turn", "user");
+    const timeline = buildResponseTimeline({
+      turns: [turn],
+      messages: [message("user", turn.id, "user", "Try it", turn.requestedAt)],
+      activities: [notice, success],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const response = timelineTurn(timeline, turn.id);
+    expect(response.checkpointUnavailableReason)
+      .toBe("Skipped: the checkpoint operation timed out.");
+    expect(response.activities.map(({ id }) => id)).toEqual(["success"]);
+    expect(response.foldableActivities.map(({ id }) => id)).toEqual(["success"]);
+    expect(response.importantActivities).toEqual([]);
   });
 
   it("associates checkpoints only through explicit turn identity, never turn index", () => {

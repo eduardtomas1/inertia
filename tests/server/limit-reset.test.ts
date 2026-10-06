@@ -16,6 +16,7 @@ import { UsageLimitsRepository } from "../../src/server/persistence/usage-limits
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 import { UsageLimitsService } from "../../src/server/usage/limits-service";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
+import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
 import type { NativeUsageReader } from "../../src/server/usage/native";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
@@ -306,11 +307,50 @@ describe("quota reset actions", () => {
     expect(dependencies.dispatch).not.toHaveBeenCalled();
   });
 
-  it("bounds retries when the provider keeps reporting an expired exhausted window", async () => {
+  it("keeps checking with a capped backoff while the provider still reports the expired window, then offers Resume now", async () => {
     await schedule();
-    for (let attempt = 0; attempt < 3; attempt += 1) { vi.setSystemTime(instant + 61_000 + attempt * 31_000); await scheduler.tick(); }
-    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "blocked", attempts: 3 });
+    vi.setSystemTime(Date.parse(reset) + 1_000);
+    const checks: number[] = [];
+    while (store.limitResets.get(conversationId)?.state === "waiting") {
+      const due = Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt);
+      if (due > Date.now()) vi.setSystemTime(due);
+      checks.push(Date.now() - Date.parse(reset));
+      await scheduler.tick();
+      expect(checks.length).toBeLessThan(30);
+    }
+    const gaps = checks.slice(1).map((at, index) => at - checks[index]!);
+    expect(gaps.slice(0, 5)).toEqual([30_000, 60_000, 120_000, 240_000, 300_000]);
+    expect(Math.max(...gaps)).toBe(300_000);
+    expect(checks.at(-1)).toBeLessThanOrEqual(60 * 60_000);
+    const missed = store.limitResets.get(conversationId)!;
+    expect(missed).toMatchObject({ state: "missed", error: expect.stringContaining("nothing was sent") });
+    expect(missed.error).not.toMatch(/refresh/i);
     expect(dependencies.dispatch).not.toHaveBeenCalled();
+    account.windows[0]!.remainingPercent = 100;
+    expect((await scheduler.resume({ conversationId, id: missed.id })).plan).toMatchObject({ state: "waiting", error: null });
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
+  });
+
+  it("keeps checking when the account cannot be read at the reset instead of blocking the resume", async () => {
+    await schedule();
+    vi.setSystemTime(Date.parse(reset) + 1_000);
+    const available = () => ({ ...account, windows: [{ ...account.windows[0]!, remainingPercent: 100 }],
+      updatedAt: new Date().toISOString(), checkedAt: new Date().toISOString() });
+    dependencies.readAccount = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...available(), identityKey: null, email: null, status: "error", windows: [] })
+      .mockImplementation(async () => available());
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    vi.setSystemTime(Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt));
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", error: null });
+    vi.setSystemTime(Date.parse(store.limitResets.get(conversationId)!.nextAttemptAt));
+    await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+    expect(store.limitResets.get(conversationId)).toMatchObject({ state: "completed" });
   });
 
   it("does not persist an unexpected dispatch error as public provider output", async () => {
@@ -527,6 +567,36 @@ describe("cached reports for providers without a structured usage-limit signal",
       expect((await scheduler.get(conversationId)).offer).toMatchObject({ failedTurnId: turn.id, canResume: true });
       expect(read).toHaveBeenCalledOnce();
     } finally { db.close(); }
+  });
+});
+
+describe("usage-limited chat summary", () => {
+  it("marks the usage-limited latest turn in conversation shells and validates the flag at the event boundary", () => {
+    const shell = store.conversationShell(conversationId)!;
+    expect(shell.latestTurn).toMatchObject({ id: failedTurnId, status: "failed", usageLimited: true });
+    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversationId)?.latestTurn).toMatchObject({ usageLimited: true });
+    const event = { type: "conversation.shell.updated", conversation: shell, runs: [] };
+    expect(serverEventSchema.safeParse(event).success).toBe(true);
+    expect(serverEventSchema.safeParse({ ...event, conversation: { ...shell, latestTurn: { ...shell.latestTurn, usageLimited: "yes" } } }).success).toBe(false);
+    vi.setSystemTime(instant + 1_000);
+    begin();
+    expect(store.conversationShell(conversationId)!.latestTurn).not.toHaveProperty("usageLimited");
+    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversationId)?.latestTurn).not.toHaveProperty("usageLimited");
+  });
+});
+
+describe("usage-limited turns in history", () => {
+  it("marks every usage-limited turn in loaded history, including older ones, and validates the flag", () => {
+    vi.setSystemTime(instant + 1_000);
+    const next = begin();
+    const turns = store.conversationHistory(conversationId)!.agentTurns;
+    expect(turns.find(({ id }) => id === failedTurnId)).toMatchObject({ usageLimited: true });
+    expect(turns.find(({ id }) => id === next.id)).not.toHaveProperty("usageLimited");
+    const detail = store.conversationHistory(conversationId)!;
+    const event = { type: "request.result", requestId: randomUUID(), result: { kind: "conversation.detail", conversationId, state: "ready", detail } };
+    expect(serverEventSchema.safeParse(event).success).toBe(true);
+    const tampered = { ...detail, agentTurns: detail.agentTurns.map((turn) => ({ ...turn, usageLimited: "yes" })) };
+    expect(serverEventSchema.safeParse({ ...event, result: { ...event.result, detail: tampered } }).success).toBe(false);
   });
 });
 

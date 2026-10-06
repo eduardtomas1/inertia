@@ -21,6 +21,7 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { providerAuthBrowserUrlFromTerminal } from "../utils/providerAuthBrowser";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
+import { terminalContextMenu, terminalPasteKeyHandler } from "../utils/terminalContextMenu";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
 import "./ProviderAuthDialog.css";
@@ -47,8 +48,21 @@ type AuthAttempt = {
   cancelled: boolean;
   output: Map<string, string>;
   exits: Map<string, number>;
+  input: string;
+  inputOverflowed: boolean;
 };
 const MAX_EARLY_AUTH_TERMINALS = 8;
+const MAX_EARLY_AUTH_INPUT = 8_192;
+
+function holdEarlyInput(attempt: AuthAttempt, data: string): void {
+  if (attempt.inputOverflowed) return;
+  if (attempt.input.length + data.length > MAX_EARLY_AUTH_INPUT) {
+    attempt.input = "";
+    attempt.inputOverflowed = true;
+    return;
+  }
+  attempt.input += data;
+}
 
 function command(value: CommandWithoutId): ClientCommand {
   return { ...value, requestId: crypto.randomUUID() } as ClientCommand;
@@ -135,12 +149,23 @@ export function ProviderAuthDialog({
     }
   }, []);
 
+  const sendAuthInput = useCallback((terminalId: string, data: string): void => {
+    for (const chunk of terminalInputChunks(data)) {
+      void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
+    }
+  }, [sendCommand]);
+
+  const focusTerminal = useCallback((): void => {
+    terminalRef.current?.focus();
+  }, []);
+
   const closeDialog = useCallback((): void => {
     const attempt = authAttemptRef.current;
     if (attempt) {
       attempt.cancelled = true;
       attempt.output.clear();
       attempt.exits.clear();
+      attempt.input = "";
     }
     browserAttemptRef.current += 1;
     browserUrlRef.current = null;
@@ -181,10 +206,7 @@ export function ProviderAuthDialog({
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
-    const pastesWithControl = window.inertia?.getPlatform() !== "darwin";
-    terminal.attachCustomKeyEventHandler((event) => !(pastesWithControl
-      && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-      && event.code === "KeyV"));
+    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform() !== "darwin"));
     terminal.open(mount);
     fit.fit();
     terminalRef.current = terminal;
@@ -193,10 +215,13 @@ export function ProviderAuthDialog({
 
     const input = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
-      if (!terminalId || authAttemptRef.current?.cancelled) return;
-      for (const chunk of terminalInputChunks(data)) {
-        void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
+      const attempt = authAttemptRef.current;
+      if (attempt?.cancelled) return;
+      if (!terminalId) {
+        if (attempt?.pending) holdEarlyInput(attempt, data);
+        return;
       }
+      sendAuthInput(terminalId, data);
     });
     let frame: number | undefined;
     const observer = new ResizeObserver(() => {
@@ -224,7 +249,7 @@ export function ProviderAuthDialog({
       setInstanceReady(false);
       terminal.dispose();
     };
-  }, [providerId, sendCommand]);
+  }, [providerId, sendAuthInput, sendCommand]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -293,6 +318,10 @@ export function ProviderAuthDialog({
     const refocus = (): void => {
       refocusTimer = undefined;
       if (!dialog?.isConnected || dialog.contains(document.activeElement)) return;
+      if (lastFocused?.closest(".provider-auth-browser-actions") && terminalRef.current) {
+        terminalRef.current.focus();
+        return;
+      }
       const target = lastFocused?.isConnected && dialog.contains(lastFocused)
         ? lastFocused
         : dialog.querySelector<HTMLElement>("button");
@@ -350,6 +379,7 @@ export function ProviderAuthDialog({
     }
     const attempt: AuthAttempt = {
       pending: true, cancelled: false, output: new Map(), exits: new Map(),
+      input: "", inputOverflowed: false,
     };
     authAttemptRef.current = attempt;
     try { fitRef.current?.fit(); } catch { /* Safe defaults below. */ }
@@ -378,8 +408,10 @@ export function ProviderAuthDialog({
         terminalIdRef.current = event.terminalId;
         const buffered = attempt.output.get(event.terminalId);
         const earlyExit = attempt.exits.get(event.terminalId);
+        const earlyInput = attempt.input;
         attempt.output.clear();
         attempt.exits.clear();
+        attempt.input = "";
         if (buffered && terminal) {
           if (earlyExit === undefined) writeAuthOutput(terminal, attempt, event.terminalId, buffered);
           else terminal.write(buffered);
@@ -388,6 +420,7 @@ export function ProviderAuthDialog({
           finishTerminal(earlyExit);
           return;
         }
+        if (earlyInput) sendAuthInput(event.terminalId, earlyInput);
         setSessionState("ready");
         terminal?.focus();
       })
@@ -396,6 +429,7 @@ export function ProviderAuthDialog({
         attempt.pending = false;
         attempt.output.clear();
         attempt.exits.clear();
+        attempt.input = "";
         setError(reason instanceof Error ? reason.message : "The connection flow could not start.");
         setSessionState("error");
       });
@@ -404,6 +438,7 @@ export function ProviderAuthDialog({
       attempt.cancelled = true;
       attempt.output.clear();
       attempt.exits.clear();
+      attempt.input = "";
       if (authAttemptRef.current === attempt) authAttemptRef.current = null;
       browserAttemptRef.current += 1;
       browserUrlRef.current = null;
@@ -416,6 +451,7 @@ export function ProviderAuthDialog({
     instanceReady,
     providerId,
     providerLabel,
+    sendAuthInput,
     sendCommand,
     status,
     writeAuthOutput,
@@ -450,7 +486,11 @@ export function ProviderAuthDialog({
             : "Finish the official provider sign-in below or in the browser it opens."}</p></span>
           <IconButton label="Close connection window" onClick={closeDialog}><X size={16} /></IconButton>
         </header>
-        <div className="provider-auth-terminal" ref={mountRef} />
+        <div
+          className="provider-auth-terminal"
+          ref={mountRef}
+          onContextMenu={terminalContextMenu(() => terminalRef.current, false)}
+        />
         {browserUrl ? (
           <div
             className={`provider-auth-browser-assist is-${browserState}`}
@@ -478,8 +518,8 @@ export function ProviderAuthDialog({
               </span>
             </span>
             <span className="provider-auth-browser-actions">
-              <button type="button" className="secondary-button" onClick={() => { void copyBrowserUrl(); }}><Copy size={13} />Copy link</button>
-              <button type="button" className="secondary-button" disabled={browserState === "opening"} onClick={() => { void openBrowser(browserUrl); }}><ExternalLink size={13} />{browserState === "failed" ? "Try again" : "Open again"}</button>
+              <button type="button" className="secondary-button" onClick={() => { void copyBrowserUrl(); focusTerminal(); }}><Copy size={13} />Copy link</button>
+              <button type="button" className="secondary-button" disabled={browserState === "opening"} onClick={() => { void openBrowser(browserUrl); focusTerminal(); }}><ExternalLink size={13} />{browserState === "failed" ? "Try again" : "Open again"}</button>
             </span>
           </div>
         ) : null}

@@ -2,10 +2,11 @@ import type { ChatAttachment } from "@shared/contracts";
 import type { MessageQueueResult } from "@shared/queued-messages";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { RUNTIME_QUEUE_CHANGED } from "./runtimeQueueEvents";
 
+export { RUNTIME_QUEUE_CHANGED };
 export type QueueCommand = Extract<CommandWithoutId, { type: `message.queue.${string}` }>;
 export type QueueCommandRunner = (command: QueueCommand) => Promise<MessageQueueResult>;
-export const RUNTIME_QUEUE_CHANGED = "inertia:runtime-queue-changed";
 
 function pendingIntents(conversationId: string): { id: string; identity: string }[] {
   try {
@@ -45,14 +46,17 @@ export function finishQueueIntent(conversationId: string, expectedId: string): v
   window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
 }
 
-export async function enqueueRuntimePrompt(run: QueueCommandRunner, conversationId: string, content: string, attachments: readonly ChatAttachment[]): Promise<void> {
+export async function enqueueRuntimePrompt(run: QueueCommandRunner, conversationId: string, content: string, attachments: readonly ChatAttachment[], stopTurnId?: string): Promise<void> {
   const id = queueIntent(conversationId, content, attachments);
+  const payload = {
+    conversationId, id, content,
+    attachments: attachments.map(({ id: attachmentId, name, path, mimeType, size }) => ({ id: attachmentId, name, path, mimeType, size })),
+  };
   let result: MessageQueueResult;
   try {
-    result = await run({ type: "message.queue.enqueue", payload: {
-      conversationId, id, content,
-      attachments: attachments.map(({ id: attachmentId, name, path, mimeType, size }) => ({ id: attachmentId, name, path, mimeType, size })),
-    } });
+    result = await run(stopTurnId
+      ? { type: "message.queue.stop-and-send", payload: { ...payload, turnId: stopTurnId } }
+      : { type: "message.queue.enqueue", payload });
   } catch (error) {
     try { result = await run({ type: "message.queue.get", payload: { conversationId, id } }); }
     catch { throw error; }

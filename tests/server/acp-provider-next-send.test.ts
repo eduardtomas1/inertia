@@ -95,3 +95,80 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
     }
   });
 });
+
+describe("kimi stopped turn and next send", () => {
+  it("cancels the running prompt, confirms cleanup and sends the next message into the same session", async () => {
+    const providerId = "kimi";
+    const root = portableFixtureRoot("kimi stop then send");
+    const capturePath = join(root, "wire.jsonl");
+    const source = `
+const fs = require("node:fs");
+const readline = require("node:readline");
+let sessionId = "session-" + process.pid;
+let held = null;
+const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
+const modes = { currentModeId: "default", availableModes: [{ id: "default", name: "Default" }] };
+readline.createInterface({ input: process.stdin }).on("line", line => {
+  const message = JSON.parse(line);
+  fs.appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify({
+    pid: process.pid, method: message.method, sessionId: message.params?.sessionId,
+  }) + "\\n");
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
+    protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } },
+    authMethods: [], agentInfo: { name: "Kimi Code CLI", version: "fixture" },
+  } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes, configOptions: [] } });
+  if (message.method === "session/resume") {
+    sessionId = message.params.sessionId;
+    return send({ jsonrpc: "2.0", id: message.id, result: { modes, configOptions: [] } });
+  }
+  if (message.method === "session/cancel" && held !== null) {
+    send({ jsonrpc: "2.0", id: held, result: { stopReason: "cancelled" } });
+    held = null;
+    return;
+  }
+  if (message.method === "session/prompt") {
+    if (message.params.prompt.some(part => part.text === "Long request")) {
+      held = message.id;
+      return send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: {
+        sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Working" },
+      } } });
+    }
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: {
+      sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Sent after stop" },
+    } } });
+    send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`;
+    const command = portableNodeExecutable(root, providerId);
+    writeNodeSubcommand(root, "acp", source);
+    const manager = ProviderManager.createForTests({ commands: { [providerId]: command } },
+      new AgentHarnessRegistry([createKimiAcpHarness()]));
+    let pending: Promise<ProviderRunResult> | undefined;
+    try {
+      pending = manager.run(nativeProviderRunInput({
+        providerId, conversationId: "stopped-conversation", runId: "run-stopped", turnId: "turn-stopped",
+        cwd: root, prompt: "Long request", interactionMode: "build", access: "supervised",
+      }), { onText: () => { manager.cancel("stopped-conversation"); } });
+      const stopped = await pending;
+      expect(stopped).toMatchObject({ status: "cancelled", cleanupConfirmed: true, sessionId: expect.any(String) });
+      expect(manager.activeConversationIds()).toEqual([]);
+      pending = manager.run(nativeProviderRunInput({
+        providerId, conversationId: "stopped-conversation", runId: "run-next", turnId: "turn-next",
+        cwd: root, prompt: "Do this instead", interactionMode: "build", access: "supervised",
+        sessionId: stopped.sessionId!,
+      }), {});
+      await expect(pending).resolves.toMatchObject({ status: "completed", text: "Sent after stop", cleanupConfirmed: true });
+      const messages = readFileSync(capturePath, "utf8").trim().split("\n")
+        .map(line => JSON.parse(line) as { pid: number; method: string; sessionId?: string });
+      expect(messages.filter(message => message.method === "session/cancel")).toHaveLength(1);
+      expect(messages.find(message => message.method === "session/resume")?.sessionId).toBe(stopped.sessionId);
+      for (const pid of new Set(messages.map(entry => entry.pid))) expect(executableProcessExists(pid)).toBe(false);
+    } finally {
+      manager.cancel("stopped-conversation");
+      if (pending) await pending.catch(() => undefined);
+      await removePortableFixture(root);
+    }
+  });
+});

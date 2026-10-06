@@ -1,6 +1,7 @@
 import type { RuntimeMutationEvent } from "../../shared/contracts/events";
 import type { ConversationShell, Project } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
+import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, type MascotCounts, type MascotStatus } from "../../shared/mascot";
 
 function timestamp(value: string | null | undefined): string | null {
@@ -135,6 +136,7 @@ export class MascotStatusPublisher {
       case "agent.approval.resolved": requests.delete(`approval:${event.requestId}`); break;
       case "agent.activity":
         if (!live || status.phase.startsWith("waiting-") || event.activity.kind === "reasoning"
+          || isTurnCheckpointUnavailableActivity(event.activity)
           || event.activity.createdAt < entry.activityAt) return;
         entry.activityAt = event.activity.createdAt;
         status.message = preview(`${event.activity.status === "completed" ? "Finished: " : event.activity.status === "failed" ? "Failed: " : ""}${event.activity.title}`);

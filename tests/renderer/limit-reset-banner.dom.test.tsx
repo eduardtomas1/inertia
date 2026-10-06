@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LimitResetBanner } from "../../src/renderer/src/components/composer/LimitResetBanner";
@@ -44,6 +46,21 @@ describe("quota reset banner", () => {
     await act(async () => undefined);
     expect(view.container).toBeEmptyDOMElement();
   });
+  it("says a usage limit was reached, without a time or actions, while no reset is reported", async () => {
+    const run = vi.fn<LimitResetCommandRunner>().mockResolvedValue({ ...result(), offer: null, usageLimited: true });
+    render(banner(run));
+    const row = await screen.findByRole("group", { name: "Usage limit" });
+    expect(row).toHaveTextContent(/^Usage limit reached$/);
+    expect(row).toHaveAttribute("data-state", "limited");
+    expect(row.querySelector("time")).toBeNull();
+    expect(screen.queryAllByRole("button")).toEqual([]);
+  });
+  it("keeps the plain usage-limit row unfilled, with the status colour on its icon and words only", () => {
+    const css = readFileSync(join(process.cwd(), "src/renderer/src/components/composer/LimitResetBanner.css"), "utf8");
+    const limited = [...css.matchAll(/\.limit-reset\[data-state="limited"\]([^{]*)\{([^}]*)\}/gu)];
+    expect(limited.find(([, selector]) => selector.trim() === "")?.[2]).toMatch(/background:\s*transparent;/u);
+    expect(limited.find(([, selector]) => selector.trim() === ".limit-reset-copy strong")?.[2]).toMatch(/color:\s*var\(--warning\);/u);
+  });
   it("drops a late response from a different chat", async () => {
     let resolve!: (value: LimitResetResult) => void;
     const promise = new Promise<LimitResetResult>((done) => { resolve = done; });
@@ -79,6 +96,14 @@ describe("quota reset banner", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume now" }));
     await screen.findByText("Resume scheduled");
     expect(run.mock.calls[1]![0]).toEqual({ type: "conversation.limit-reset.resume", payload: { conversationId, id } });
+  });
+  it("explains a missed resume with the scheduler's reason when it gives one", async () => {
+    const missed = pending(); missed.offer = null;
+    missed.plan = { ...missed.plan!, state: "missed", error: "The provider did not report new quota within an hour of the reset, so nothing was sent." };
+    render(banner(vi.fn<LimitResetCommandRunner>().mockResolvedValue(missed)));
+    await screen.findByText("Resume missed");
+    expect(screen.getByRole("status")).toHaveTextContent("did not report new quota within an hour of the reset");
+    expect(screen.getByRole("button", { name: "Resume now" })).toBeVisible();
   });
   it("does not let an older turn's plan hide the offer for the latest failed turn", async () => {
     const newer = "55555555-5555-4555-8555-555555555555";

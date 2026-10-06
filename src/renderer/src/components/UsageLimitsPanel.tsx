@@ -16,7 +16,7 @@ import "./UsageLimitsPanel.css";
 export function resetCountdown(value: string | null, now: number): string {
   if (!value || !Number.isFinite(Date.parse(value))) return "Reset time unavailable";
   const minutes = Math.ceil((Date.parse(value) - now) / 60000);
-  if (minutes <= 0) return "Reset due · refresh to check";
+  if (minutes <= 0) return "Reset due";
   if (minutes < 60) return `in ${minutes}m`;
   if (minutes < 1440) return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   return `in ${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h`;
@@ -38,7 +38,7 @@ export function limitTone(remaining: number | null, stale: boolean): LimitTone {
 function ProviderLogo({ providerId }: { providerId: string }): React.JSX.Element {
   return <span className="limits-logo" aria-hidden="true"><ProviderBrandIcon providerId={providerId} decorative size={18} /></span>;
 }
-type Props = { request(command: CommandWithoutId): Promise<ServerEvent>; status: ConnectionStatus; compact?: boolean };
+type Props = { request(command: CommandWithoutId): Promise<ServerEvent>; status: ConnectionStatus };
 type LimitCellValue = { key: string; label: string; value: number | null; resetsAt: string | null; stale: boolean; accounts: number };
 
 function poolCells(pools: UsagePool[], account?: UsageAccount): Array<LimitCellValue | null> {
@@ -211,7 +211,7 @@ function UsageSources({ snapshot, request, onChange, online }: { snapshot: Usage
   </details>;
 }
 
-export function UsageLimitsPanel({ request, status, compact = false }: Props): React.JSX.Element {
+export function UsageLimitsPanel({ request, status }: Props): React.JSX.Element {
   const context = useUsageLimitsContext();
   const [snapshot, setSnapshot] = useState<UsageLimitsSnapshot | null>(context?.snapshot ?? null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
@@ -219,6 +219,8 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [about, setAbout] = useState(false); const aboutId = useId();
   const alive = useRef(true); const pending = useRef(false); const publish = context?.setSnapshot;
+  const checkedAt = useRef<string | null>(snapshot?.checkedAt ?? null);
+  useEffect(() => { checkedAt.current = snapshot?.checkedAt ?? null; }, [snapshot]);
   const load = useCallback(async (refresh: boolean, force = false, background = false): Promise<void> => {
     if (pending.current || status !== "online") return;
     pending.current = true; setBusy(true); setError(null);
@@ -231,18 +233,19 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
   }, [request, status, publish]);
   useEffect(() => {
     alive.current = true;
-    if (document.visibilityState !== "hidden") void load(!compact);
+    if (document.visibilityState !== "hidden") void load(true);
     let timer: ReturnType<typeof setInterval> | undefined;
     let ticks = 0;
     const visibility = (): void => {
       if (timer) clearInterval(timer);
       if (document.visibilityState === "hidden") return;
       setNow(Date.now());
-      timer = setInterval(() => { setNow(Date.now()); ticks += 1; if (!compact && ticks % 3 === 0) void load(true, false, true); }, 60000);
+      if (Date.now() - Date.parse(checkedAt.current ?? "") > 180000) void load(true, false, true);
+      timer = setInterval(() => { setNow(Date.now()); ticks += 1; if (ticks % 3 === 0) void load(true, false, true); }, 60000);
     };
     visibility(); document.addEventListener("visibilitychange", visibility);
     return () => { alive.current = false; if (timer) clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
-  }, [load, compact]);
+  }, [load]);
   const accounts = deduplicateUsageAccounts((snapshot?.accounts ?? []).map((account) => account.status === "ready" && (
     error || status !== "online" || now - Date.parse(account.updatedAt ?? "") > 180000 || account.windows.some((window) => window.resetsAt && Date.parse(window.resetsAt) <= now))
     ? { ...account, status: "stale", canReset: false } : account));
@@ -312,7 +315,7 @@ export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void;
   return <div className="dialog-backdrop limits-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-label="Provider usage limits" className="limits-dialog" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } else trapModalFocus(event, event.currentTarget); }}>
       <button type="button" className="limits-dialog-close" aria-label="Close provider limits" onClick={onClose}><X size={18} /></button>
-      <UsageLimitsPanel request={context.request} status={context.status} compact />
+      <UsageLimitsPanel request={context.request} status={context.status} />
     </section>
   </div>;
 }

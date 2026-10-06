@@ -109,6 +109,7 @@ describe("main window preload", () => {
       "setBackendCredential",
       "setDiagnosticsCapture",
       "setPrivateConnectEnabled",
+      "showContextMenu",
       "showThreadNotification",
       "snapshot",
       "syncThemePreference",

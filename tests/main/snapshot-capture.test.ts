@@ -104,12 +104,47 @@ describe("foreground snapshot pixels and context", () => {
     vi.useFakeTimers();
     const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
     Object.defineProperty(process, "parentPort", { configurable: true, value: new EventEmitter() });
+    const listeners = { exit: process.listeners("exit"), term: process.listeners("SIGTERM") };
     try {
       vi.resetModules(); await import("../../src/main/snapshot-capture-worker");
       await vi.advanceTimersByTimeAsync(11_999); expect(exit).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1); expect(exit).toHaveBeenCalledWith(1);
       expect(native.foreground).not.toHaveBeenCalled();
     } finally {
+      for (const listener of process.listeners("exit")) if (!listeners.exit.includes(listener)) process.removeListener("exit", listener);
+      for (const listener of process.listeners("SIGTERM")) if (!listeners.term.includes(listener)) process.removeListener("SIGTERM", listener);
+      exit.mockRestore(); vi.useRealTimers();
+      if (prior) Object.defineProperty(process, "parentPort", prior);
+      else Reflect.deleteProperty(process, "parentPort");
+    }
+  });
+});
+
+describe("capture worker lifetime", () => {
+  it("stops a running window capture when the worker exits or is terminated, and refuses a capture without its folder", async () => {
+    const prior = Object.getOwnPropertyDescriptor(process, "parentPort");
+    const stop = vi.fn();
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const parent = new EventEmitter();
+    const before = { exit: process.listeners("exit"), term: process.listeners("SIGTERM") };
+    vi.useFakeTimers();
+    Object.defineProperty(process, "parentPort", { configurable: true, value: parent });
+    try {
+      vi.resetModules();
+      vi.doMock("../../src/main/snapshot-macos-window", async (original) => ({ ...await original<typeof import("../../src/main/snapshot-macos-window")>(), stopMacWindowCaptures: stop }));
+      await import("../../src/main/snapshot-capture-worker");
+      expect(process.listeners("exit")).toContain(stop);
+      const terminate = process.listeners("SIGTERM").find((listener) => !before.term.includes(listener));
+      terminate?.("SIGTERM");
+      expect(exit).toHaveBeenCalledWith(1);
+      exit.mockClear();
+      parent.emit("message", { data: "capture" });
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(native.foreground).not.toHaveBeenCalled();
+    } finally {
+      for (const listener of process.listeners("exit")) if (!before.exit.includes(listener)) process.removeListener("exit", listener);
+      for (const listener of process.listeners("SIGTERM")) if (!before.term.includes(listener)) process.removeListener("SIGTERM", listener);
+      vi.doUnmock("../../src/main/snapshot-macos-window");
       exit.mockRestore(); vi.useRealTimers();
       if (prior) Object.defineProperty(process, "parentPort", prior);
       else Reflect.deleteProperty(process, "parentPort");
@@ -268,5 +303,55 @@ describe("Windows application roots", () => {
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window", phase: "foreground" });
     expect(native.foreground).toHaveBeenCalledTimes(3);
     expect(native.screenshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("window-only pixels", () => {
+  const frame = { x: 50, y: 50, width: 100, height: 100 };
+  function windowPng(width: number, height: number): Buffer {
+    const canvas = createCanvas(width, height); const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, width, height);
+    return canvas.toBuffer("image/png");
+  }
+  function pixels(png = windowPng(200, 200), ids: number[] = [77]) {
+    let call = 0;
+    return {
+      locate: vi.fn(() => ({ id: ids[Math.min(call++, ids.length - 1)]!, frame })),
+      capture: vi.fn(async () => png),
+    };
+  }
+
+  it("captures only the matched window and maps masks onto its Retina image", async () => {
+    const source = pixels();
+    const result = await captureForegroundSnapshot(source);
+    expect(native.screenshot).not.toHaveBeenCalled();
+    expect(source.capture).toHaveBeenCalledExactlyOnceWith(77);
+    expect(source.locate).toHaveBeenCalledWith({ pid: 123, title: "Review window", bounds: frame });
+    expect(result.source).toMatchObject({ width: 200, height: 200 });
+    expect(result.source.accessibility.nodes[1]).toMatchObject({ redacted: true, bounds: { x: 20, y: 20, width: 40, height: 40 } });
+    const canvas = createCanvas(200, 200); const ctx = canvas.getContext("2d");
+    ctx.drawImage(await loadImage(result.png), 0, 0);
+    for (const [x, y] of [[20, 20], [59, 59], [18, 18], [61, 61]]) expect([...ctx.getImageData(x!, y!, 1, 1).data]).toEqual([36, 36, 36, 255]);
+    expect([...ctx.getImageData(70, 70, 1, 1).data]).toEqual([255, 255, 255, 255]);
+  });
+
+  it("fails closed without pixels when no single window matches the accessibility window", async () => {
+    const source = { locate: vi.fn(() => null), capture: vi.fn() };
+    await expect(captureForegroundSnapshot(source)).rejects.toMatchObject({ category: "no-active-window", phase: "foreground" });
+    expect(source.capture).not.toHaveBeenCalled();
+    expect(native.screenshot).not.toHaveBeenCalled();
+  });
+
+  it("discards pixels when a different window matches after capture", async () => {
+    const source = pixels(windowPng(200, 200), [77, 77, 78]);
+    await expect(captureForegroundSnapshot(source)).rejects.toMatchObject({ category: "changed", phase: "verification" });
+    expect(source.capture).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["a stretched image", windowPng(200, 150)],
+    ["an image that is not a PNG", Buffer.from("not a png image at all, only text")],
+  ])("refuses %s rather than guessing where masks belong", async (_case, png) => {
+    await expect(captureForegroundSnapshot(pixels(png))).rejects.toMatchObject({ category: "native-failure", phase: "screenshot" });
   });
 });

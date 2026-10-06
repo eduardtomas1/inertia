@@ -23,6 +23,12 @@ export function queuedRouteIdentity(conversation: Conversation): string {
 export function queuedIntentDigest(content: string, attachments: readonly ChatAttachment[]): string {
   return createHash("sha256").update(JSON.stringify([content.trim(), attachments.map(({ id }) => id)])).digest("hex");
 }
+export class QueuedMessageLimitError extends Error {
+  constructor() {
+    super("This chat already has three queued messages.");
+    this.name = "QueuedMessageLimitError";
+  }
+}
 export const RETAINED_TERMINAL_QUEUED_MESSAGES = 50;
 export function pruneTerminalQueuedMessages(database: Database.Database, conversationId: string): void {
   database.prepare(`DELETE FROM queued_messages WHERE conversation_id = ? AND state IN ('accepted','cancelled') AND sequence NOT IN (
@@ -57,7 +63,7 @@ export class QueuedMessageRepository {
     return this.database.transaction(() => {
       const existing = this.replay(input.conversation.id, input.id, input.digest);
       if (existing) return existing;
-      if (this.list(input.conversation.id).length >= MAX_QUEUED_MESSAGES) throw new Error("This chat already has three queued messages.");
+      if (this.list(input.conversation.id).length >= MAX_QUEUED_MESSAGES) throw new QueuedMessageLimitError();
       this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity, state, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`).run(input.id, input.conversation.id, input.content.trim(),
         JSON.stringify(rendererSafeAttachments(input.attachments)), input.digest, queuedRouteIdentity(input.conversation), new Date().toISOString());

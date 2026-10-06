@@ -11,7 +11,6 @@ import {
   type AgentTurn,
   type AgentTurnTerminalStatus,
   type ChatAttachment,
-  type ChatMessage,
   type SubagentTrace,
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
@@ -28,6 +27,7 @@ import {
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
+  FollowUpSteerResult,
   ProviderStartAttempt,
   QueuedTurn,
   QueueTurnRequest,
@@ -58,6 +58,7 @@ import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { trackTurnSettlementTask } from "./turn-settlement-tasks";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
+import { recordTurnCheckpointUnavailable } from "./turn-checkpoint-notice";
 import { stopActiveSubagent } from "./turn-subagent-stop";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
@@ -187,10 +188,21 @@ export class TurnController {
         this.settle(active, "failed", "turn-timeout", message);
       },
     });
+    const onPersistenceFailure = (active: ActiveTurn, error: unknown): void => {
+      requestProviderCancellation(this.providers, active.conversation.id);
+      this.settle(
+        active,
+        "failed",
+        "stream-persistence-failed",
+        publicTurnError(error),
+      );
+    };
     this.activities = new TurnActivityProjection({
       store: this.store,
       hooks: this.hooks,
+      scheduler: this.scheduler,
       now: () => this.now(),
+      onPersistenceFailure,
     });
     this.artifacts = new TurnArtifactSequencer({
       hooks: this.hooks,
@@ -201,15 +213,7 @@ export class TurnController {
       hooks: this.hooks,
       scheduler: this.scheduler,
       now: () => this.now(),
-      onPersistenceFailure: (active, error) => {
-        requestProviderCancellation(this.providers, active.conversation.id);
-        this.settle(
-          active,
-          "failed",
-          "stream-persistence-failed",
-          publicTurnError(error),
-        );
-      },
+      onPersistenceFailure,
     });
     this.settlement = new TurnSettlementCoordinator({
       store: this.store,
@@ -513,6 +517,7 @@ export class TurnController {
       try {
         active.assistantStream.flush();
         active.reasoningStream.flush();
+        this.activities.flushPending(active);
       } catch (error) {
         requestProviderCancellation(this.providers, active.conversation.id);
         this.settle(
@@ -740,6 +745,7 @@ export class TurnController {
       runId: active.turn.runId,
       turnId: active.turn.id,
     });
+    recordTurnCheckpointUnavailable(this.store, this.hooks, active);
     broadcastTurnConversationShell(this.hooks, active);
     this.timeouts.start(active);
   }
@@ -907,6 +913,10 @@ export class TurnController {
     return this.followUps.acquire(this.activeByConversation.get(conversationId));
   }
 
+  followUpArrivedAfterTurn(conversationId: string): boolean {
+    return this.activeByConversation.get(conversationId)?.runState.acceptsProviderEvents() !== true;
+  }
+
   deferFollowUpAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {
     this.followUps.deferAttachmentCleanup(lease, cleanup);
   }
@@ -917,7 +927,7 @@ export class TurnController {
     attachments: readonly ChatAttachment[] = [],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
-  ): Promise<ChatMessage | null> {
+  ): Promise<FollowUpSteerResult> {
     return this.followUps.steer(
       lease,
       input,
@@ -1031,7 +1041,9 @@ export class TurnController {
           || event.type === "plan"
         )
       ) {
-        this.transition(active, "running");
+        if (this.transition(active, "running")) {
+          broadcastTurnConversationShell(this.hooks, active);
+        }
       }
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
@@ -1135,6 +1147,7 @@ export class TurnController {
     this.nativeGoals.cleanup(active);
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
+    this.activities.discardPending(active);
     clearPendingInteractionsForTurn(active, this.pendingApprovals, this.pendingInputs);
     if (this.activeByConversation.get(active.conversation.id) === active) {
       this.activeByConversation.delete(active.conversation.id);

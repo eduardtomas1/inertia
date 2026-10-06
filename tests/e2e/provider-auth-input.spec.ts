@@ -6,6 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import { executableProcessExists } from "../helpers/executable-process";
 import { writeNodeClaudeExecutable, writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { filesContaining, isChromiumLockFile } from "./support/files-containing";
 
 type ProviderKey = "claude" | "codex" | "cursor" | "kimi" | "opencode" | "antigravity";
 
@@ -20,6 +21,7 @@ interface WireEvent {
 }
 
 const CANONICAL_ENTER = process.platform === "win32" ? "\r\n" : "\n";
+const PASTE_SENTINEL = "inertia-paste-sentinel-7c1d0f4e";
 
 const CODES: Readonly<Record<ProviderKey, string>> = {
   claude: "synthetic-claude-code#fixture-state",
@@ -418,6 +420,39 @@ async function pasteFromClipboard(text: string): Promise<void> {
   await app.page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
 }
 
+async function pasteFromMenu(dialog: Locator, text: string): Promise<void> {
+  await app.electronApp.evaluate(({ clipboard }, value) => clipboard.writeText(value), text);
+  const menuCount = () => app.electronApp.evaluate(() =>
+    (Reflect.get(globalThis, "__inertiaAuthInputMenus") as Electron.Menu[]).length);
+  const previous = await menuCount();
+  await dialog.locator(".provider-auth-terminal").click({ button: "right" });
+  await expect.poll(menuCount).toBe(previous + 1);
+  const items = await app.electronApp.evaluate(() => {
+    const menu = (Reflect.get(globalThis, "__inertiaAuthInputMenus") as Electron.Menu[]).at(-1)!;
+    return menu.items.filter((item) => item.type !== "separator" && item.label !== "Inspect element")
+      .map((item) => item.role ?? item.label);
+  });
+  expect(items).toEqual(["Copy", "paste", "Select all"]);
+  await expectTerminalFocused(dialog);
+  await app.electronApp.evaluate(({ BrowserWindow }) => {
+    const menu = (Reflect.get(globalThis, "__inertiaAuthInputMenus") as Electron.Menu[]).at(-1)!;
+    const window = BrowserWindow.getAllWindows()[0]!;
+    const paste = menu.items.find((item) => item.role === "paste")!;
+    if (process.platform === "darwin") window.webContents.paste();
+    else paste.click({} as Electron.KeyboardEvent, window, window.webContents);
+    (Reflect.get(globalThis, "__inertiaAuthInputMenuClosed") as (() => void) | undefined)?.();
+  });
+}
+
+async function leaveThroughHelperBar(dialog: Locator): Promise<void> {
+  await dialog.getByRole("button", { name: "Copy link", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("Secure sign-in link copied.");
+  await expectTerminalFocused(dialog);
+  await dialog.getByRole("button", { name: "Open again", exact: true }).click();
+  await expectTerminalFocused(dialog);
+  await returnFromBrowser(dialog);
+}
+
 async function cancelWithInterrupt(
   dialog: Locator,
   pid: number,
@@ -502,11 +537,17 @@ test.beforeAll(async () => {
       });
     },
   });
-  await app.electronApp.evaluate(({ clipboard, shell }) => {
+  await app.electronApp.evaluate(({ clipboard, Menu, shell }) => {
     Reflect.set(globalThis, "__inertiaAuthInputClipboard", clipboard.readText());
     const opened: string[] = [];
     Reflect.set(globalThis, "__inertiaAuthInputOpened", opened);
     Reflect.set(shell, "openExternal", async (url: string) => { opened.push(url); });
+    const menus: Electron.Menu[] = [];
+    Reflect.set(globalThis, "__inertiaAuthInputMenus", menus);
+    Menu.prototype.popup = function (options) {
+      menus.push(this);
+      Reflect.set(globalThis, "__inertiaAuthInputMenuClosed", options?.callback);
+    };
   });
   await app.page.getByRole("button", { name: "Settings", exact: true }).click();
   await app.page.getByRole("button", { name: "Agents", exact: true }).click();
@@ -516,6 +557,60 @@ test.afterAll(async () => {
   await app.electronApp.evaluate(({ clipboard }) =>
     clipboard.writeText(String(Reflect.get(globalThis, "__inertiaAuthInputClipboard") ?? "")));
   await app.close();
+});
+
+test("keeps a code pasted into Claude's sign-in out of diagnostics, issue reports and stored files", async () => {
+  test.setTimeout(120_000);
+  const page = app.page;
+  const applicationPaste = await app.electronApp.evaluate(({ Menu }) => {
+    const items = (menu: Electron.Menu | null): Electron.MenuItem[] =>
+      menu ? menu.items.flatMap((item) => [item, ...items(item.submenu ?? null)]) : [];
+    const paste = items(Menu.getApplicationMenu()).find((item) => item.role === "paste");
+    if (!paste) return null;
+    const defaultAccelerator = Reflect.get(paste, "getDefaultRoleAccelerator") as (() => string | undefined) | undefined;
+    return { accelerator: paste.accelerator ?? defaultAccelerator?.call(paste) ?? null };
+  });
+  expect(applicationPaste).toEqual({ accelerator: "CommandOrControl+V" });
+
+  await expect(page.getByRole("button", { name: "Configure Claude", exact: true }))
+    .toContainText("Sign in required", { timeout: 30_000 });
+  await page.evaluate(() => window.inertia.setDiagnosticsCapture(true));
+  const dialog = await openConnect("Claude", "Connect");
+  await expect(dialog.getByRole("status")).toContainText("Sign-in page opened in your browser");
+  const pid = await nextLoginPid("claude");
+  await leaveThroughHelperBar(dialog);
+  await pasteFromMenu(dialog, PASTE_SENTINEL);
+  await expect(dialog).toContainText(`Paste code here if prompted > ${PASTE_SENTINEL}`);
+  await page.keyboard.press("Enter");
+  await expectRejected(dialog, pid, "OAuth error: Invalid code");
+  expect(await stdinFor(pid)).toBe(`\x1b[200~${PASTE_SENTINEL}\x1b[201~\r`);
+  expect((await eventsFor(pid, "submit")).map((event) => event.value)).toEqual([PASTE_SENTINEL]);
+  expect(await filesContaining(state, PASTE_SENTINEL)).toEqual({ matches: [join(state, "wire.jsonl")], unreadable: [] });
+
+  await app.electronApp.evaluate(({ clipboard }) => clipboard.writeText("diagnostics-not-copied"));
+  expect(await page.evaluate(() => window.inertia.copyDiagnostics({ severity: "all" })))
+    .toMatchObject({ copied: true });
+  const diagnostics = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  expect(diagnostics).not.toBe("diagnostics-not-copied");
+  expect(diagnostics).not.toContain(PASTE_SENTINEL);
+
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("textbox", { name: "What happened", exact: true })
+    .fill("Signing in to Claude kept asking for the code after I pasted it into the terminal.");
+  await expect(page.getByRole("checkbox", { name: /^Attach diagnostics/u })).toBeChecked();
+  await page.getByRole("button", { name: "Preview issue" }).click();
+  const body = page.getByRole("textbox", { name: "Body", exact: true });
+  await expect(body).toHaveValue(/## Diagnostics/u);
+  expect(await body.inputValue()).not.toContain(PASTE_SENTINEL);
+
+  await page.evaluate(() => window.inertia.setDiagnosticsCapture(false));
+  const scans = await Promise.all(["data", "electron-profile", "t"].map((name) =>
+    filesContaining(join(app.testDirectory, name), PASTE_SENTINEL)));
+  expect(scans.flatMap((scan) => scan.matches)).toEqual([]);
+  const unreadable = scans.flatMap((scan) => scan.unreadable);
+  expect(process.platform === "win32" ? unreadable.filter((path) => !isChromiumLockFile(path)) : unreadable).toEqual([]);
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Agents", exact: true }).click();
+  expect(app.rendererErrors).toEqual([]);
 });
 
 test("Claude sign-in accepts typing and a pasted code after returning from the browser", async () => {
@@ -545,7 +640,7 @@ test("Claude sign-in accepts typing and a pasted code after returning from the b
   dialog = await openConnect("Claude", "Connect");
   await expect(dialog.getByRole("status")).toContainText("Sign-in page opened in your browser");
   const accepted = await nextLoginPid("claude");
-  await returnFromBrowser(dialog);
+  await leaveThroughHelperBar(dialog);
   await pasteFromClipboard(CODES.claude);
   await expect(dialog).toContainText(`Paste code here if prompted > ${CODES.claude}`);
   await app.page.keyboard.press("Enter");
@@ -657,7 +752,7 @@ test("OpenCode credential setup accepts menu keys, typing and a pasted code", as
   const accepted = await nextLoginPid("opencode");
   await chooseClaudeProMax(dialog);
   await returnFromBrowser(dialog);
-  await pasteFromClipboard(CODES.opencode);
+  await pasteFromMenu(dialog, CODES.opencode);
   await expect(dialog).toContainText(`Paste the authorization code here: ${CODES.opencode}`);
   await app.page.keyboard.press("Enter");
   await expectCompleted(dialog, "OpenCode", "Configured");
@@ -679,8 +774,7 @@ test("Antigravity sign-in accepts a retry and a menu paste in its own prompt", a
   await app.page.keyboard.press("Enter");
   await expect(dialog).toContainText("Invalid authorization code. Try again.");
   await returnFromBrowser(dialog);
-  await app.electronApp.evaluate(({ clipboard }, value) => clipboard.writeText(value), CODES.antigravity);
-  await app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.paste());
+  await pasteFromMenu(dialog, CODES.antigravity);
   await expect(dialog).toContainText(`Authorization code: ${CODES.antigravity}`);
   await app.page.keyboard.press("Enter");
   await expect(dialog).toContainText("Signed in as synthetic@example.com.");

@@ -2,7 +2,7 @@ import type { ProviderId } from "../../shared/contracts";
 import type { UsageAccount } from "../../shared/provider-usage-limits";
 import { providerChildEnvironment, providerEnvironment } from "../environment";
 import { cursorSubscriptionWindows, kimiSubscriptionWindows, openCodeSubscriptionWindows } from "./subscription-parsers";
-import { readSubscriptionFile, subscriptionAccountIdentity, subscriptionJson, type NativeUsageAccount } from "./subscription-io";
+import { readSubscriptionFile, subscriptionAccountIdentity, subscriptionJson, SubscriptionHttpError, type NativeUsageAccount } from "./subscription-io";
 import {
   CURSOR_ENDPOINT,
   KIMI_ENDPOINT,
@@ -28,13 +28,20 @@ const NO_ACCOUNT_REASON = "The provider did not report an account Inertia can co
 const UNSUPPORTED_DETAIL = "This account or selected model does not expose a supported subscription reset time.";
 const OPENCODE_UNSUPPORTED_DETAIL = "Reset times are available for OpenCode Go models with a Go subscription. "
   + "Other OpenCode backends do not expose a shared quota API.";
-const ERROR_DETAIL = "Subscription limits could not be checked. Refresh Limits after signing in to this provider.";
+const FAILED_DETAIL = "The provider did not answer the quota check.";
+const REFUSED_DETAIL = "The provider refused the quota check for this login.";
+const DEFAULT_COOLDOWN_MS = 5 * 60_000;
+const MAX_COOLDOWN_MS = 15 * 60_000;
+const MAX_COOLDOWNS = 32;
+const waitDetail = (until: number) =>
+  `The provider asked Inertia to wait ${Math.max(1, Math.ceil((until - Date.now()) / 60_000))} min before checking quota again.`;
 const sameAccount = (left: SubscriptionCredential, right: SubscriptionCredential) => left.scope === right.scope
   && (credentialContinuity(left) ?? left.token) === (credentialContinuity(right) ?? right.token);
 
 export class NativeSubscriptionReader {
   private keychainRead: Promise<string | null> | null = null;
   private identityKey: string | null = null;
+  private readonly cooldowns = new Map<string, number>();
   constructor(private readonly dependencies: NativeSubscriptionDependencies = {}) {}
   private keychain(): Promise<string | null> {
     if (!this.keychainRead) {
@@ -68,6 +75,12 @@ export class NativeSubscriptionReader {
     if (!key) return { resumeUnavailable: STORAGE_REASON };
     return { credentialFingerprint: subscriptionAccountIdentity(key, credential.scope, continuity) };
   }
+  private coolDown(fingerprint: string, until: number): void {
+    this.cooldowns.delete(fingerprint);
+    for (const [key, at] of this.cooldowns) if (at <= Date.now()) this.cooldowns.delete(key);
+    if (this.cooldowns.size >= MAX_COOLDOWNS) this.cooldowns.delete(this.cooldowns.keys().next().value!);
+    this.cooldowns.set(fingerprint, until);
+  }
   private async credentials(provider: ProviderId, model: string | undefined, env: NodeJS.ProcessEnv, cwd: string,
     signal: AbortSignal, interactive: boolean): Promise<SubscriptionCredential | "deferred" | null> {
     const source = {
@@ -98,6 +111,7 @@ export class NativeSubscriptionReader {
       return { ...base, windows: [], status: "unsupported", detail: "Antigravity's current CLI protocol does not report subscription reset times." };
     }
     const signal = AbortSignal.any([lifetime, AbortSignal.timeout(10_000)]);
+    let identity: Partial<NativeUsageAccount> = {};
     const work = async (): Promise<NativeUsageAccount> => {
       const source = await (this.dependencies.environment?.() ?? providerEnvironment().then(({ env }) => env));
       const env = providerChildEnvironment(provider, source);
@@ -110,14 +124,21 @@ export class NativeSubscriptionReader {
         return { ...base, windows: [], status: "unsupported", detail: provider === "opencode" ? OPENCODE_UNSUPPORTED_DETAIL : UNSUPPORTED_DETAIL };
       }
       signal.throwIfAborted();
+      identity = await this.resumeIdentity(account, signal);
+      const fingerprint = identity.credentialFingerprint;
+      const until = fingerprint ? this.cooldowns.get(fingerprint) ?? 0 : 0;
+      if (until > Date.now()) return { ...base, ...identity, windows: [], status: "error", detail: waitDetail(until) };
       const raw = await this.quota(provider, account.token, signal);
       const receivedAt = Date.now();
       const current = account.keychain ? account : await this.credentials(provider, model, env, cwd, signal, interactive);
       signal.throwIfAborted();
-      if (!current || current === "deferred" || !sameAccount(current, account)) throw new Error("The provider account changed during the read.");
+      if (!current || current === "deferred" || !sameAccount(current, account)) {
+        identity = {};
+        throw new Error("The provider account changed during the read.");
+      }
+      if (fingerprint) this.cooldowns.delete(fingerprint);
       const windows = provider === "cursor" ? cursorSubscriptionWindows(raw)
         : provider === "kimi" ? kimiSubscriptionWindows(raw, receivedAt) : openCodeSubscriptionWindows(raw);
-      const identity = await this.resumeIdentity(account, signal);
       return {
         ...base,
         windows,
@@ -136,8 +157,15 @@ export class NativeSubscriptionReader {
     });
     try {
       return await Promise.race([work(), cancelled]);
-    } catch {
-      return { ...base, windows: [], status: "error", detail: ERROR_DETAIL };
+    } catch (error) {
+      const failed = { ...base, ...identity, windows: [], status: "error" as const };
+      if (!(error instanceof SubscriptionHttpError)) return { ...failed, detail: FAILED_DETAIL };
+      if (error.status === 401 || error.status === 403) return { ...failed, detail: REFUSED_DETAIL };
+      const throttled = error.status === 429 || (error.status === 503 && error.retryAfterMs !== null);
+      if (!throttled) return { ...failed, detail: FAILED_DETAIL };
+      const until = Date.now() + Math.min(MAX_COOLDOWN_MS, error.retryAfterMs || DEFAULT_COOLDOWN_MS);
+      if (identity.credentialFingerprint) this.coolDown(identity.credentialFingerprint, until);
+      return { ...failed, detail: waitDetail(until) };
     } finally {
       signal.removeEventListener("abort", aborted);
     }

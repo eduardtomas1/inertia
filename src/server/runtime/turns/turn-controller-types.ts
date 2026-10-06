@@ -213,6 +213,7 @@ export interface QueueTurnRequest {
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
+  checkpointFailure?: string | null;
   /** Privileged provider-native skill references resolved from opaque IDs. */
   skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
@@ -281,6 +282,7 @@ export interface ActiveTurn {
   attachmentIds: readonly string[];
   generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;
+  checkpointFailure: string | null;
   rendererOwnerId: string | null;
   structuredContext: unknown;
   gitBeforeCapture: Promise<void> | null;
@@ -322,7 +324,10 @@ export interface ActiveTurn {
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
   providerActivitiesById: Map<string, AgentActivity>;
   providerActivityDetailChars: number;
-  providerCommandRuns: Map<string, string>;
+  providerCommandRuns: Map<string, { id: string; label: string }>;
+  providerOutputActivityIds: Set<string>;
+  pendingActivityUpdates: Map<string, AgentActivity>;
+  activityFlushTimer: unknown;
   approvalIds: Set<string>;
   inputIds: Set<string>;
   subagentTelemetry?: TurnSubagentTelemetry;
@@ -339,3 +344,9 @@ export interface FollowUpAdmissionLease {
   /** Idempotent; every acquired lease must be released. */
   release(): void;
 }
+
+export type FollowUpSteerResult =
+  | { kind: "accepted"; message: ChatMessage }
+  | { kind: "turn-ended" }
+  | { kind: "refused" }
+  | { kind: "unavailable" };

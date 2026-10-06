@@ -58,10 +58,8 @@ import { CodexApprovalAuthority } from "./app-server-approval-authority";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
-import {
-  providerActivityDetailSections,
-} from "../provider/activity-detail";
 import { stableProviderActivityId } from "../provider/activity-lifecycle";
+import { CodexCommandOutput } from "./app-server-command-output";
 import type {
   ProviderGoalSnapshot,
   ProviderRunFailure,
@@ -138,6 +136,8 @@ export class CodexAppServerEvents {
   private readonly pendingInputs = new Map<string, PendingInput>();
   private readonly pendingServerRequestIds = new Set<string>();
   private readonly deltaItems = new Set<string>();
+  private readonly outputItems = new Set<string>();
+  private readonly commandOutput = new CodexCommandOutput();
   private readonly reasoningDeltaItems = new Set<string>();
   private readonly itemActivities = new Map<string, CodexItemActivity>();
   private readonly completedPlanItemIds = new Set<string>();
@@ -231,6 +231,8 @@ export class CodexAppServerEvents {
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
     this.deltaItems.clear();
+    this.outputItems.clear();
+    this.commandOutput.clear();
     this.reasoningDeltaItems.clear();
     this.itemActivities.clear();
     this.completedPlanItemIds.clear();
@@ -760,6 +762,8 @@ export class CodexAppServerEvents {
         },
         {
           deltaItems: this.deltaItems,
+          outputItems: this.outputItems,
+          commandOutput: this.commandOutput,
           reasoningDeltaItems: this.reasoningDeltaItems,
           itemActivities: this.itemActivities,
           completedPlanItemIds: this.completedPlanItemIds,
@@ -797,8 +801,10 @@ export class CodexAppServerEvents {
         processId ? `Process: ${processId}` : null,
         input ? `Terminal input:\n${input}` : null,
       ].filter((value): value is string => Boolean(value)).join("\n\n");
+      const held = this.commandOutput.release(itemId);
       this.emitActivity(activity.kind, "started", activity.label, {
         activityId: itemId,
+        ...(held ? { outputDelta: held } : {}),
         ...(detail ? { detail } : {}),
       });
       return;
@@ -818,9 +824,12 @@ export class CodexAppServerEvents {
           ? "Command"
           : "File change",
       };
+      if (!this.trackStreamItem(this.outputItems, itemId)) return;
+      const released = this.commandOutput.append(itemId, delta);
+      if (!released) return;
       this.emitActivity(activity.kind, "started", activity.label, {
         activityId: itemId,
-        detail: providerActivityDetailSections({ output: delta }) ?? undefined,
+        outputDelta: released,
       });
       return;
     }
@@ -940,6 +949,8 @@ export class CodexAppServerEvents {
         this.completeParentTurn("failed", 1);
       }
       this.deltaItems.clear();
+      this.outputItems.clear();
+      this.commandOutput.clear();
       this.reasoningDeltaItems.clear();
       this.itemActivities.clear();
       this.completedPlanItemIds.clear();

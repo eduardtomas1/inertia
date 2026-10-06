@@ -10,6 +10,7 @@ import {
 import type { FileTreeGitIndex } from "../utils/fileTreeGit";
 import type { DirectoryPage } from "../utils/workspaceDirectoryPages";
 import { FileGitBadge } from "./FileGitBadge";
+import type { ContextMenuHandlers } from "../utils/contextMenu";
 
 export type FileTreeProps = {
   label: string;
@@ -26,6 +27,7 @@ export type FileTreeProps = {
   treeRef: RefObject<HTMLDivElement | null>;
   onActivate: (row: WorkspaceTreeRow) => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>, row: WorkspaceTreeRow) => void;
+  contextMenuFor?: (row: WorkspaceTreeRow) => ContextMenuHandlers<HTMLButtonElement> | undefined;
 };
 
 export const FileTree = memo(function FileTree({
@@ -43,6 +45,7 @@ export const FileTree = memo(function FileTree({
   treeRef,
   onActivate,
   onKeyDown,
+  contextMenuFor,
 }: FileTreeProps): React.JSX.Element {
   const baseId = useId();
   const statuses: { id: string; path: string; text: string; error: boolean }[] = [];
@@ -70,6 +73,7 @@ export const FileTree = memo(function FileTree({
         || (directoryPage !== undefined && directoryPage.entries.length === 0)
         || directoryPage?.truncated
       );
+    const menu = contextMenuFor?.(row);
     const statusId = `${baseId}-status-${index}`;
     const gitDescriptionId = `${baseId}-git-${index}`;
     const statusText = directoryLoading
@@ -103,7 +107,11 @@ export const FileTree = memo(function FileTree({
           aria-selected={entry.kind === "file" && selectedPath === entry.path}
           aria-current={entry.kind === "file" && selectedPath === entry.path ? "true" : undefined}
           onClick={() => onActivate(row)}
-          onKeyDown={(event) => onKeyDown(event, row)}
+          onContextMenu={menu?.onContextMenu}
+          onKeyDown={(event) => {
+            menu?.onKeyDown(event);
+            if (!event.isDefaultPrevented()) onKeyDown(event, row);
+          }}
           ref={(node) => {
             if (node) itemRefs.current.set(entry.path, node);
             else itemRefs.current.delete(entry.path);

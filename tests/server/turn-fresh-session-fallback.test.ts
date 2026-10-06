@@ -162,6 +162,32 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
 });
 
 describe("fresh session fallback guards", () => {
+  it("restarts on a fresh session when the only record is a missing checkpoint", async () => {
+    const { runtime } = await establishedChat("claude");
+    try {
+      const queued = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: "Continue.",
+        checkpointFailure: "Checkpoint operation timed out.",
+      });
+      runtime.controller.start(queued.turn.id);
+      expect(runtime.store.conversationDetail(runtime.conversationId)?.activities
+        .filter(({ turnId }) => turnId === queued.turn.id)
+        .map(({ title }) => title)).toEqual(["No checkpoint for this turn"]);
+
+      const replacement = runtime.provider.callbacks!.freshSessionFallback!();
+
+      expect(replacement?.prompt).toContain("Keep the public API unchanged.");
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+        providerSessionBefore: null,
+        continuationReasonCode: "stale-provider-session",
+      });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
   it("refuses to restart once the provider has produced output or the turn has settled", async () => {
     const { runtime } = await establishedChat("claude");
     try {
@@ -196,7 +222,7 @@ describe("fresh session fallback guards", () => {
         imagePaths: [],
       });
       admission.release();
-      expect(followUp).toMatchObject({ role: "user", turnId: queued.turn.id });
+      expect(followUp).toMatchObject({ kind: "accepted", message: { role: "user", turnId: queued.turn.id } });
       expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         providerSessionBefore: "saved-session",

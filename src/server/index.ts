@@ -90,7 +90,7 @@ import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
-import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
+import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
@@ -589,7 +589,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     enabled: enableProviders,
     signal: runtimeLifetimeAbort.signal,
     isClosed: () => closed,
-    cachedState: (providerId) => providers.cachedMetadata(providerId).metadataState,
+    cachedState: (providerId) => providers.cachedMetadata(providerId),
     read: (providerId, fields) => providers.metadata(providerId, options.defaultWorkspacePath, { fields, force: true, signal: runtimeLifetimeAbort.signal }),
     apply: applyProviderMetadata,
     broadcastSnapshot,
@@ -729,7 +729,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         creation: agentThreads.creation,
         contextRequests: agentThreads.contextRequests,
       }),
-      createTurnInteractionCommandHandler(turnInteractionDependencies),
+      queuedMessages.turnInteractionHandler,
       createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
       createSourceControlCommandHandler({
         store,

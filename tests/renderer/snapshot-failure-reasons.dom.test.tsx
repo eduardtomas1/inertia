@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { act, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -7,7 +10,7 @@ import type { SnapshotDelivery } from "../../src/shared/snapshots";
 const native = vi.hoisted(() => {
   class XA11yError extends Error {}
   return {
-    foreground: vi.fn(), screenshot: vi.fn(), fork: vi.fn(),
+    userData: "", foreground: vi.fn(), screenshot: vi.fn(), fork: vi.fn(),
     AccessibilityNotEnabledError: class extends XA11yError {},
   };
 });
@@ -22,7 +25,7 @@ vi.mock("../../src/main/snapshot-x11-foreground", () => ({
   SnapshotX11ForegroundError: class extends Error {},
 }));
 vi.mock("electron", () => ({
-  app: { getPath: () => "/private/test-data" },
+  app: { getPath: () => native.userData },
   utilityProcess: { fork: native.fork },
   globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
   systemPreferences: { getMediaAccessStatus: vi.fn(() => "granted"), isTrustedAccessibilityClient: vi.fn(() => true) },
@@ -34,6 +37,8 @@ import { useComposerSnapshots } from "../../src/renderer/src/components/composer
 const original = window.inertia;
 const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
 const window_ = { active: true, stableId: "fixture-window", name: "Private roadmap", role: "window", value: null, raw: {}, bounds: { x: 0, y: 0, width: 100, height: 100 }, children: async () => [] };
+beforeEach(() => { native.userData = realpathSync(mkdtempSync(join(tmpdir(), "inertia-snapshot-reasons-"))); });
+afterEach(() => { rmSync(native.userData, { recursive: true, force: true }); });
 beforeEach(() => { vi.stubEnv("DISPLAY", ":0"); vi.stubEnv("WAYLAND_DISPLAY", ""); vi.stubEnv("XDG_SESSION_TYPE", "x11"); });
 afterEach(() => { window.inertia = original; vi.useRealTimers(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
 
@@ -43,15 +48,18 @@ async function workerResult(): Promise<unknown> {
   const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
   const port = Object.assign(new EventEmitter(), { postMessage: vi.fn() });
   Object.defineProperty(process, "parentPort", { configurable: true, value: port });
+  const listeners = { exit: process.listeners("exit"), term: process.listeners("SIGTERM") };
   try {
     vi.resetModules(); await import("../../src/main/snapshot-capture-worker");
-    port.emit("message", { data: "capture" });
+    port.emit("message", { data: { capture: native.userData } });
     await vi.advanceTimersByTimeAsync(1000);
     expect(port.postMessage).toHaveBeenCalledOnce();
     port.emit("message", { data: "received" });
     expect(exit).toHaveBeenCalledExactlyOnceWith(0);
     return port.postMessage.mock.calls[0]![0];
   } finally {
+    for (const listener of process.listeners("exit")) if (!listeners.exit.includes(listener)) process.removeListener("exit", listener);
+    for (const listener of process.listeners("SIGTERM")) if (!listeners.term.includes(listener)) process.removeListener("SIGTERM", listener);
     exit.mockRestore(); vi.useRealTimers();
     if (prior) Object.defineProperty(process, "parentPort", prior);
     else Reflect.deleteProperty(process, "parentPort");

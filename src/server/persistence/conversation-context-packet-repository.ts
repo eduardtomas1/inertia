@@ -437,6 +437,21 @@ export class ConversationContextPacketRepository {
     return this.insert(input, null);
   }
 
+  createTargetWithPacket<Target extends { id: string }>(
+    sourceConversationId: string,
+    createTarget: () => Target,
+  ): Target {
+    return this.context.database.transaction(() => {
+      const target = createTarget();
+      this.insert({
+        sourceConversationId,
+        targetConversationId: target.id,
+        acknowledgedWorkspaceDifference: false,
+      }, null);
+      return target;
+    })();
+  }
+
   createUserMessageWithPackets(input: {
     conversationId: string;
     content: string;
@@ -805,6 +820,19 @@ export class ConversationContextPacketRepository {
       }
       return { packet, resultJson };
     })();
+  }
+
+  hasDraftForTargetWithoutMessages(sourceConversationId: string): boolean {
+    return this.context.database.prepare(`
+      SELECT 1 FROM conversation_context_packets packet
+      WHERE packet.source_conversation_id = ?
+        AND packet.target_conversation_id <> packet.source_conversation_id
+        AND packet.consumed_message_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM messages WHERE messages.conversation_id = packet.target_conversation_id
+        )
+      LIMIT 1
+    `).get(sourceConversationId) !== undefined;
   }
 
   targetConversationIdsForSource(sourceConversationId: string): string[] {

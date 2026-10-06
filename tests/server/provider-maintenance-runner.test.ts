@@ -423,6 +423,48 @@ describe("provider maintenance runner", () => {
     }
   });
 
+  it("adds only allowlisted manager homes from the action environment", async () => {
+    let spawnedEnvironment: NodeJS.ProcessEnv | undefined;
+    const spawn = vi.fn((_command, _args, options) => {
+      spawnedEnvironment = options.env;
+      const child = fakeChild();
+      queueMicrotask(() => child.emit("close", 0, null));
+      return child;
+    });
+    const environment = {
+      PNPM_HOME: "/home/ada/.local/share/pnpm",
+      BUN_INSTALL: "/home/ada/.bun",
+      VOLTA_HOME: "/home/ada/.volta",
+      CODEX_HOME: "/home/ada/.codex-work",
+      HOMEBREW_PREFIX: "/home/linuxbrew/.linuxbrew",
+      NODE_OPTIONS: "--require=/untrusted.js",
+      OPENAI_API_KEY: "must-not-leak",
+    } as unknown as ProviderMaintenanceUpdateAction["environment"];
+    const result = await runProviderMaintenanceAction(action({ environment }), {
+      environment: {
+        HOME: "/home/ada",
+        PATH: "/usr/bin",
+        PNPM_HOME: "/inherited/pnpm",
+        VOLTA_HOME: "/inherited/volta",
+      },
+      platform: "linux",
+      signal: new AbortController().signal,
+      spawn,
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(spawnedEnvironment).toEqual({
+      CI: "1",
+      NO_COLOR: "1",
+      HOME: "/home/ada",
+      PATH: "/usr/bin",
+      PNPM_HOME: "/home/ada/.local/share/pnpm",
+      BUN_INSTALL: "/home/ada/.bun",
+      VOLTA_HOME: "/home/ada/.volta",
+      CODEX_HOME: "/home/ada/.codex-work",
+    });
+  });
+
   it("keeps only the environment required for the supervised updater", () => {
     expect(providerMaintenanceEnvironment({
       PATH: "/tools",

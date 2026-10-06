@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import type { ContinuationIdentity, Conversation, ModelSelection } from "@shared/contracts";
+import { conversationHasHistory } from "../../../../shared/continuation-policy";
 
 import { pendingModelRoute, replacementChatRequest } from "../../utils/modelRouteTransition";
-import { useComposerRouteConversation } from "./composerRouteConversation";
+import { takeRouteConversationFocus, useComposerRouteConversation } from "./composerRouteConversation";
 import type { ComposerProps, PendingModelRoute } from "./types";
 
 export function useComposerNewChatOffer(options: {
@@ -16,6 +17,7 @@ export function useComposerNewChatOffer(options: {
   conversationIdRef: MutableRefObject<string>;
   editorRevisionsRef: MutableRefObject<Map<string, number>>;
   blockedReason: string | null;
+  scratchWorkspace: boolean;
   onCreateConversationForSelection: ComposerProps["onCreateConversationForSelection"];
   setConversationUpdateError: (message: string | null) => void;
   updateMessage: (message: string) => void;
@@ -31,6 +33,7 @@ export function useComposerNewChatOffer(options: {
     conversationIdRef,
     editorRevisionsRef,
     blockedReason,
+    scratchWorkspace,
     onCreateConversationForSelection,
     setConversationUpdateError,
     updateMessage,
@@ -39,7 +42,18 @@ export function useComposerNewChatOffer(options: {
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
   const [routeCreationError, setRouteCreationError] = useState<string | null>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
+  const offerOriginRef = useRef<HTMLElement | null>(null);
   const routeConversation = useComposerRouteConversation();
+
+  useEffect(() => {
+    offerOriginRef.current = null;
+  }, [conversation.id, conversation.modelSelection]);
+
+  useEffect(() => {
+    if (!takeRouteConversationFocus(conversation.id)) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversation.id, textareaRef]);
 
   useEffect(() => {
     if (!pendingRoute) return;
@@ -110,23 +124,36 @@ export function useComposerNewChatOffer(options: {
     setPendingRoute(pendingModelRoute(
       conversation,
       latestTurn,
-      replacementChatRequest(conversation, { selection, configuration }),
+      replacementChatRequest(conversation, {
+        selection,
+        configuration,
+        ...(conversationHasHistory(conversation) && !scratchWorkspace
+          ? { sourceConversationId: conversation.id }
+          : {}),
+      }),
       label,
       reason,
     ));
   };
 
   const dismissPendingRoute = (): void => {
+    const origin = offerOriginRef.current;
+    offerOriginRef.current = null;
     setPendingRoute(null);
     setRouteCreationError(null);
     window.requestAnimationFrame(() => {
-      composerRef.current
-        ?.querySelector<HTMLButtonElement>(".selected-model-chip")
+      (origin?.isConnected ? origin : composerRef.current
+        ?.querySelector<HTMLButtonElement>(".selected-model-chip"))
         ?.focus();
     });
   };
 
+  const rememberOfferOrigin = (origin: HTMLElement): void => {
+    offerOriginRef.current = origin;
+  };
+
   const createRouteConversation = (): void => {
+    offerOriginRef.current = null;
     routeConversation({
       pendingRoute,
       message,
@@ -158,6 +185,7 @@ export function useComposerNewChatOffer(options: {
     routeCreationBlockedReason: (pendingRoute ? blockedReason : null) ?? routeCreationError,
     offerNewChat,
     dismissPendingRoute,
+    rememberOfferOrigin,
     createRouteConversation,
     resetNewChatOffer,
   };

@@ -76,7 +76,7 @@ describe("composer provider history", () => {
 
     if (established) {
       expect(await screen.findByRole("alertdialog"))
-        .toHaveTextContent("Start a new chat to use a different provider.");
+        .toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
       expect(onUpdateConversation).not.toHaveBeenCalled();
     } else {
       await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
@@ -131,7 +131,7 @@ describe("composer provider history", () => {
 
     if (established) {
       expect(await screen.findByRole("alertdialog"))
-        .toHaveTextContent("Start a new chat to use a different provider.");
+        .toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
       expect(updatePersistedConversation).not.toHaveBeenCalled();
     } else {
       await waitFor(() => expect(updatePersistedConversation).toHaveBeenCalledOnce());
@@ -222,7 +222,7 @@ describe("composer provider history", () => {
       expect(onUpdateConversation).not.toHaveBeenCalled();
     } else {
       expect(await screen.findByRole("alertdialog"))
-        .toHaveTextContent("Start a new chat to use a different provider.");
+        .toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
       expect(onUpdateConversation).not.toHaveBeenCalled();
     }
     expect(onCreateConversationForSelection).not.toHaveBeenCalled();

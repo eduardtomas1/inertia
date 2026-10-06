@@ -13,6 +13,7 @@ import {
   buildNewConversationPayload,
 } from "../../src/renderer/src/lib/newConversation";
 import type { InertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
+import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 
 import { routedProvider } from "./composer-fixtures";
 
@@ -117,7 +118,9 @@ function result(requestId: string, value: unknown): ServerEvent {
   return { type: "request.result", requestId, result: value } as unknown as ServerEvent;
 }
 
+const sentCommands: Parameters<InertiaConnection["sendCommand"]>[0][] = [];
 const sendCommand: InertiaConnection["sendCommand"] = async (command) => {
+  sentCommands.push(command);
   if (command.type === "conversation.detail.load") {
     const owner = command.payload.conversationId === targetId ? target : source;
     return result(command.requestId, {
@@ -127,9 +130,15 @@ const sendCommand: InertiaConnection["sendCommand"] = async (command) => {
       detail: detail(owner),
     });
   }
-  if (command.type === "conversation.create") {
+  if (command.type === "conversation.create" || command.type === "conversation.continue") {
     act(() => publish({ ...snapshot, conversations: [target, source] }));
     return result(command.requestId, { kind: "conversation.created", conversationId: targetId });
+  }
+  if (command.type === "conversation.delete") {
+    throw new RuntimeCommandError(
+      "A new chat continues from this one. Send its first message or remove the context first.",
+      "rejected",
+    );
   }
   if (command.type === "conversation.select") {
     act(() => publish({ ...snapshot, activeConversationId: command.payload.conversationId }));
@@ -156,6 +165,7 @@ function connection(next: AppSnapshot): InertiaConnection {
 
 beforeEach(() => {
   store.listeners.clear();
+  sentCommands.length = 0;
   publish({
     projects: [project],
     conversations: [source],
@@ -187,6 +197,7 @@ const storageSpies: { mockRestore: () => void }[] = [];
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   for (const spy of storageSpies.splice(0)) spy.mockRestore();
   Reflect.deleteProperty(window, "inertia");
   window.localStorage.clear();
@@ -232,6 +243,44 @@ describe("main window route transfer", () => {
 
     await waitFor(() => expect(snapshot.activeConversationId).toBe(targetId));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+  });
+
+  it("says why a chat that a new chat continues from cannot be deleted yet", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const { default: App } = await import("../../src/renderer/src/App");
+    render(<App />);
+    await screen.findByRole("textbox", { name: "Message" }, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: "Source chat" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }, { timeout: 5_000 }));
+
+    expect(await screen.findByText(
+      "A new chat continues from this one. Send its first message or remove the context first.",
+      { exact: false },
+    )).toBeVisible();
+    expect(sentCommands.filter(({ type }) => type === "conversation.delete")).toHaveLength(1);
+    expect(snapshot.conversations.map(({ id }) => id)).toEqual([sourceId]);
+  });
+
+  it("continues a chat with history in a new chat on its checkout with its context", async () => {
+    publish({ ...snapshot, conversations: [{ ...source, hasHistory: true }] });
+    const { default: App } = await import("../../src/renderer/src/App");
+    render(<App />);
+    await screen.findByRole("textbox", { name: "Message" }, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click((await screen.findByTitle("Routed Agent")).closest("button")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(snapshot.activeConversationId).toBe(targetId));
+    expect(sentCommands.filter(({ type }) => type === "conversation.create")).toEqual([]);
+    expect(sentCommands.find(({ type }) => type === "conversation.continue")).toMatchObject({
+      payload: {
+        sourceConversationId: sourceId,
+        modelSelection: { modelId: "agent" },
+        accessMode: source.accessMode,
+        interactionMode: source.interactionMode,
+      },
+    });
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
   });
 });

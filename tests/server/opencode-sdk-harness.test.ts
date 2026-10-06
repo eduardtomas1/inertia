@@ -170,7 +170,7 @@ describe("OpenCode SDK harness", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  it("requires an exact v2 steer admission receipt", () => {
+  it("requires an exact v2 steer or queue admission receipt", () => {
     const receipt = {
       data: {
         id: "follow-up-id",
@@ -191,6 +191,20 @@ describe("OpenCode SDK harness", { concurrent: false }, () => {
     )).toBe(true);
     expect(exactOpenCodeSteerReceipt(
       { data: { ...receipt.data, delivery: "queue" } },
+      "follow-up-id",
+      "session-id",
+      "Inspect",
+      ["file:///safe/reference.png"],
+    )).toBe(true);
+    expect(exactOpenCodeSteerReceipt(
+      { data: { ...receipt.data, delivery: "later" } },
+      "follow-up-id",
+      "session-id",
+      "Inspect",
+      ["file:///safe/reference.png"],
+    )).toBe(false);
+    expect(exactOpenCodeSteerReceipt(
+      { data: { ...receipt.data, delivery: "queue", prompt: { ...receipt.data.prompt, text: "Other" } } },
       "follow-up-id",
       "session-id",
       "Inspect",
@@ -1158,15 +1172,15 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     });
   });
 
-  it("finishes after an in-flight steer receipt is rejected at idle", async () => {
-    const root = portableFixtureRoot("OpenCode rejected steer");
+  it("projects a follow-up OpenCode queued instead of steering and finishes after its work", async () => {
+    const root = portableFixtureRoot("OpenCode queued steer");
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(
       root,
       "serve",
-      lifecycleServerSource(root, capturePath, "resume-rejected-steer"),
+      lifecycleServerSource(root, capturePath, "resume-queued-steer"),
     );
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
@@ -1176,7 +1190,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
 
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
-      conversationId: "opencode-rejected-steer",
+      conversationId: "opencode-queued-steer",
       cwd: root,
       prompt: "Continue",
       interactionMode: "build",
@@ -1186,12 +1200,59 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       onStatus: (event) => {
         if (event.status !== "running" || followUp) return;
         followUp = manager.steer(event.conversationId, {
-          content: "Do not admit this follow-up.",
+          content: "Run this after the current work.",
           imagePaths: [],
         }, { runId: event.runId, turnId: event.turnId! });
+        followUp.catch(() => undefined);
       },
-    })).resolves.toMatchObject({ status: "completed" });
-    await expect(followUp).resolves.toBe(false);
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Resumed OpenCode responseFollow-up OpenCode response",
+    });
+    await expect(followUp).resolves.toBe(true);
+  });
+
+  it("ends a run within the inactivity deadline when a queued follow-up never does work", async () => {
+    const root = portableFixtureRoot("OpenCode queued steer without work");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "resume-queued-steer-without-work"),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({ runDeadlineMs: 5_000, eventInactivityDeadlineMs: 300 })]),
+    );
+    let followUp: Promise<boolean> | null = null;
+    const started = Date.now();
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-queued-steer-idle",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Run this after the current work.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+        followUp.catch(() => undefined);
+      },
+    })).resolves.toMatchObject({
+      status: "failed",
+      failure: { terminalEvent: "event/inactivity-deadline" },
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    await expect(followUp).resolves.toBe(true);
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 
   it.each([

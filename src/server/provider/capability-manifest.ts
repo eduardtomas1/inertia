@@ -330,7 +330,6 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       compaction: "unavailable",
       "usage-tokens": "negotiated",
       "model-discovery": "negotiated",
-      "maintenance-update": "unavailable",
     },
   },
   {
@@ -365,7 +364,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       cancellation: "native",
       "native-session-id": "native",
       "process-cleanup": "host-exact-turn",
-      "maintenance-update": "unavailable",
+      "maintenance-update": "negotiated",
     },
   },
 ];

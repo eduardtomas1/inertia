@@ -4,9 +4,11 @@ import type {
   ProviderMaintenanceOperation,
   ProviderMaintenanceProviderId,
 } from "../../src/shared/provider-maintenance";
-import type {
-  ProviderMaintenanceCapabilities,
-  ProviderMaintenanceTarget,
+import {
+  resolveProviderMaintenanceCapabilities,
+  type ProviderMaintenanceCapabilities,
+  type ProviderMaintenanceTarget,
+  type ProviderMaintenanceUpdateAction,
 } from "../../src/server/provider/maintenance-capabilities";
 import {
   ProviderMaintenanceController,
@@ -133,6 +135,174 @@ describe("ProviderMaintenanceController", () => {
     expect(recovered).toMatchObject({ versionStatus: "update-available", updateAvailability: "instructions-only" });
     expect(recovered?.message).toContain("not writable");
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["1.4.2", "available", "opencode upgrade 1.4.2 --method curl"],
+    ["2.0.0", "instructions-only", null],
+  ] as const)("binds the OpenCode curl updater to the 1.x release %s", async (version, updateAvailability, manualCommand) => {
+    const runAction = vi.fn(async (_action: ProviderMaintenanceUpdateAction) => success());
+    const operations: ProviderMaintenanceOperation[] = [];
+    let installed = target("opencode", "1.0.0", "/home/ada/.opencode/bin/opencode");
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: () => installed,
+      refreshTarget: async () => installed,
+      latestVersions: new ProviderLatestVersionCache({
+        fetch: async () => new Response(JSON.stringify({ version })),
+      }),
+      resolveCapabilities: async () => ({
+        ...capabilities("opencode", "native:opencode", "opencode-ai"),
+        update: {
+          executable: "/home/ada/.opencode/bin/opencode",
+          args: ["upgrade", "--method", "curl"],
+          lockKey: "native:opencode",
+          installMethod: "provider-managed",
+          label: "Update OpenCode",
+          versionPin: { major: 1, argumentIndex: 1, command: "opencode" },
+        },
+        manualCommand: null,
+      }),
+      runAction: async (action) => {
+        installed = target("opencode", "1.4.2", "/home/ada/.opencode/bin/opencode");
+        return await runAction(action);
+      },
+      onOperation: (operation) => operations.push(operation),
+    });
+
+    const [status] = await controller.refresh(["opencode"]);
+    expect(status).toMatchObject({ updateAvailability, manualCommand });
+    if (updateAvailability === "instructions-only") {
+      expect(status?.updateLabel).toBeNull();
+      expect(status?.message).toContain("could not confirm");
+    }
+    const operation = await controller.startUpdate("opencode");
+    const terminal = await waitForTerminal(operations, operation.id);
+    if (version === "1.4.2") {
+      expect(terminal.status).toBe("succeeded");
+      expect(runAction).toHaveBeenCalledWith(expect.objectContaining({
+        args: ["upgrade", "1.4.2", "--method", "curl"],
+      }));
+    } else {
+      expect(terminal).toMatchObject({ status: "failed", message: expect.stringContaining("could not confirm") });
+      expect(runAction).not.toHaveBeenCalled();
+    }
+    expect(controller.hasBlockingAuthority("opencode")).toBe(false);
+  });
+
+  it("does not offer an npm OpenCode update when the registry's latest release is 2.x", async () => {
+    const runAction = vi.fn(async () => success());
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId, "1.4.0"),
+      refreshTarget: async (providerId) => target(providerId, "1.4.0"),
+      latestVersions: new ProviderLatestVersionCache({
+        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+      }),
+      resolveCapabilities: async () => await resolveProviderMaintenanceCapabilities(
+        target("opencode", "1.4.0", "/home/ada/.npm-global/lib/node_modules/opencode-ai/bin/opencode"),
+        {
+          platform: "linux",
+          home: "/home/ada",
+          environment: async () => ({ env: {}, pathEntries: [] }),
+          realpath: async (path) => path === "/home/ada/.npm-global/bin/opencode"
+            ? "/home/ada/.npm-global/lib/node_modules/opencode-ai/bin/opencode"
+            : path,
+          access: async () => undefined,
+          executableCandidates: async (command) => command === "/home/ada/.npm-global/bin/npm"
+            ? ["/home/ada/.npm-global/lib/node_modules/npm/bin/npm-cli.js"]
+            : command === "/home/ada/.npm-global/bin/node" ? [command] : [],
+        },
+      ),
+      runAction,
+    });
+
+    const [status] = await controller.refresh(["opencode"]);
+    expect(status).toMatchObject({
+      installMethod: "npm-global",
+      updateAvailability: "instructions-only",
+      updateLabel: null,
+      manualCommand: null,
+    });
+    await expect(controller.startUpdate("opencode")).resolves.toMatchObject({ status: "queued" });
+    await vi.waitFor(() => expect(controller.hasBlockingAuthority("opencode")).toBe(false));
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it("projects the manual command of a manager Inertia cannot run", async () => {
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: new ProviderLatestVersionCache({
+        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+      }),
+      resolveCapabilities: async () => ({
+        ...capabilities("codex", "npm", "@openai/codex"),
+        installMethod: "npm-global",
+        update: null,
+        updateAvailability: "instructions-only",
+        message: "Your account cannot write this installation.",
+        manualCommand: "sudo npm install -g --prefix /usr @openai/codex@latest",
+      }),
+    });
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({
+      updateAvailability: "instructions-only",
+      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@latest",
+      message: "Version 2.0.0 is available. Your account cannot write this installation.",
+    });
+  });
+
+  it("shows the manual command instead of Update when the capability gate would refuse it", async () => {
+    let allowed = false;
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: new ProviderLatestVersionCache({
+        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+      }),
+      resolveCapabilities: async ({ providerId }) => ({
+        ...capabilities(providerId, "native:claude", "@anthropic-ai/claude-code"),
+        manualCommand: "claude update",
+      }),
+      capabilityAvailable: () => allowed,
+    });
+
+    const [refused] = await controller.refresh(["claude"]);
+    expect(refused).toMatchObject({
+      updateAvailability: "instructions-only",
+      updateLabel: null,
+      manualCommand: "claude update",
+      message: "Version 2.0.0 is available. Inertia has not verified this installation, so it will not run the update.",
+    });
+    allowed = true;
+    const [admitted] = await controller.refresh(["claude"]);
+    expect(admitted).toMatchObject({
+      updateAvailability: "available",
+      updateLabel: "Update claude",
+      message: "Version 2.0.0 is available.",
+    });
+  });
+
+  it("compares a Homebrew installation with what Homebrew can install instead of npm", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ version: "9.9.9" })));
+    const homebrewInfo = vi.fn(async () => JSON.stringify({ casks: [{ version: "1.1.0" }] }));
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: new ProviderLatestVersionCache({ fetch, homebrewInfo }),
+      resolveCapabilities: async () => ({
+        ...capabilities("codex", "homebrew:/opt/homebrew", "@openai/codex"),
+        installMethod: "homebrew",
+        homebrew: { brew: "/opt/homebrew/bin/brew", name: "codex", cask: true },
+      }),
+    });
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({ latestVersion: "1.1.0", versionStatus: "update-available" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects an update outside the active capability attestation", async () => {

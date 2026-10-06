@@ -201,8 +201,10 @@ describe("TurnProviderEventProjector reasoning order", () => {
       } as never,
       activities: {
         record: vi.fn((_active: ActiveTurn, value: ProviderActivityEvent) => ({
-          id: value.activityId,
+          activity: { id: value.activityId },
+          runsChanged: false,
         })),
+        flushPending: vi.fn(() => calls.push("flush-activities")),
       } as never,
       interactions: {} as never,
       scheduler: defaultTurnScheduler(),
@@ -242,6 +244,7 @@ describe("TurnProviderEventProjector reasoning order", () => {
       "agent.activity",
       "close-assistant",
       "flush-reasoning",
+      "flush-activities",
       "persist-plan",
       "agent.plan.updated",
     ]);

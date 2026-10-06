@@ -116,6 +116,7 @@
 .activity-thread.status-approval .activity-thread-status-label { color: var(--status-approval); }
 .activity-thread.status-input .activity-thread-status-label { color: var(--status-input); }
 .activity-thread.status-failed .activity-thread-status-label { color: var(--status-failed); }
+.activity-thread.status-limited .activity-thread-status-label { color: var(--warning); }
 .activity-thread.status-completed .activity-thread-status-label { color: var(--status-completed); }
 
 .work-status-separator {

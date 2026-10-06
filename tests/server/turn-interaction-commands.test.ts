@@ -1347,7 +1347,7 @@ describe("message attachment ownership transfer", () => {
       relinquishAll: vi.fn(async () => undefined),
     });
     vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
-    vi.mocked(handlerDependencies.turns.steer).mockResolvedValue(followUp);
+    vi.mocked(handlerDependencies.turns.steer).mockResolvedValue({ kind: "accepted", message: followUp });
     const command = messageCommand();
     command.payload.attachments = [];
     command.payload.content = followUp.content;
@@ -1397,7 +1397,7 @@ describe("message attachment ownership transfer", () => {
       relinquishAll: vi.fn(async () => undefined),
     });
     vi.mocked(runtime.turns.isActive).mockReturnValue(true);
-    vi.mocked(runtime.turns.steer).mockResolvedValue(followUp);
+    vi.mocked(runtime.turns.steer).mockResolvedValue({ kind: "accepted", message: followUp });
     vi.mocked(runtime.send).mockImplementationOnce(() => {
       throw new Error("injected acknowledgement failure");
     });
@@ -1636,7 +1636,7 @@ describe("message attachment ownership transfer", () => {
       });
       expect(attachments).toEqual([durableAttachment]);
       acknowledge?.();
-      return {
+      return { kind: "accepted", message: {
         id: "77777777-7777-4777-8777-777777777777",
         conversationId,
         turnId: "88888888-8888-4888-8888-888888888888",
@@ -1644,7 +1644,7 @@ describe("message attachment ownership transfer", () => {
         content: input.content,
         attachments: [...(attachments ?? [])],
         createdAt: "2026-07-30T06:00:00.000Z",
-      };
+      } };
     });
 
     await expect(createTurnInteractionCommandHandler(handlerDependencies)(
@@ -1670,7 +1670,7 @@ describe("message attachment ownership transfer", () => {
       relinquishAll,
     });
     vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
-    vi.mocked(handlerDependencies.turns.steer).mockResolvedValue(null);
+    vi.mocked(handlerDependencies.turns.steer).mockResolvedValue({ kind: "refused" });
 
     await expect(createTurnInteractionCommandHandler(handlerDependencies)(
       {} as never,
@@ -1693,7 +1693,7 @@ describe("message attachment ownership transfer", () => {
     vi.mocked(handlerDependencies.turns.steer).mockImplementation(async (
       _lease,
       input,
-    ) => ({
+    ) => ({ kind: "accepted", message: {
       id: "77777777-7777-4777-8777-777777777777",
       conversationId,
       turnId: "88888888-8888-4888-8888-888888888888",
@@ -1701,7 +1701,7 @@ describe("message attachment ownership transfer", () => {
       content: input.content,
       attachments: [],
       createdAt: "2026-07-30T06:00:00.000Z",
-    }));
+    } }));
     const command = messageCommand();
     command.payload.content = "$security-review inspect the latest patch";
     command.payload.attachments = [];
@@ -1741,7 +1741,7 @@ describe("message attachment ownership transfer", () => {
       await new Promise((resolve) => {
         signal?.addEventListener("abort", resolve, { once: true });
       });
-      return null;
+      return { kind: "unavailable" };
     });
     const startedAt = Date.now();
     const now = vi.spyOn(Date, "now")
@@ -1993,6 +1993,52 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
+  it("passes the checkpoint failure reason to the turn when capture fails", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-failure-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await execFileAsync("git", ["init", "--quiet", join(repository, "nested")]);
+      const queue = vi.fn(() => queuedTurn());
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: repository,
+      });
+
+      await createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        messageCommand(),
+      );
+
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+      expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+        checkpointId: null,
+        checkpointFailure: "Git could not create the checkpoint.",
+      }), expect.any(Function), expect.anything());
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
+  it("does not report a checkpoint failure outside a Git repository", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-checkpoint-absent-"));
+    try {
+      const queue = vi.fn(() => queuedTurn());
+      await createTurnInteractionCommandHandler(dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: directory,
+      }))({} as never, messageCommand());
+
+      expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+        checkpointId: null,
+        checkpointFailure: null,
+      }), expect.any(Function), expect.anything());
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not release after an authoritative turn accepts ownership", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn(() => queuedTurn());
@@ -2142,7 +2188,7 @@ describe("image messages against a full durable attachment store", () => {
           await expect(readFile(path)).resolves.toEqual(png);
         }
         acknowledge?.();
-        return {
+        return { kind: "accepted", message: {
           id: randomUUID(),
           conversationId,
           turnId: "88888888-8888-4888-8888-888888888888",
@@ -2150,7 +2196,7 @@ describe("image messages against a full durable attachment store", () => {
           content: input.content,
           attachments: [...(attachments ?? [])],
           createdAt: "2026-09-22T09:53:19.126Z",
-        };
+        } };
       });
 
       await expect(createTurnInteractionCommandHandler(handlerDependencies)(

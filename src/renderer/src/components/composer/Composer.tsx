@@ -19,6 +19,7 @@ import { buildComposerTurnRequest } from "../../utils/requestContext";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,
+  supportsActiveParentFollowUp,
   composerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
 import { composerHarnessLabel } from "./config";
@@ -37,6 +38,7 @@ import {
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
+import { useRuntimeQueueLength } from "./runtimeQueueEvents";
 import { useComposerMenus } from "./useComposerMenus";
 import { useComposerNewChatOffer } from "./useComposerNewChatOffer";
 import { useTextareaAutosize } from "./useTextareaAutosize";
@@ -149,6 +151,7 @@ export const Composer = memo(function Composer({
   shownAttachmentsRef.current = attachments;
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const queueingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
   const { stopping, stopClaimRef, stop } = useComposerStopAction({
     conversationId: conversation.id, running, onStop,
@@ -187,13 +190,14 @@ export const Composer = memo(function Composer({
   const continuationNoticeId = useId();
   const {
     pendingRoute, creatingRouteConversation, routeCancelRef, canCreateRouteConversation, routeCreationBlockedReason,
-    offerNewChat, dismissPendingRoute, createRouteConversation, resetNewChatOffer,
+    offerNewChat, dismissPendingRoute, rememberOfferOrigin, createRouteConversation, resetNewChatOffer,
   } = useComposerNewChatOffer({
     conversation, latestTurn: latestKnownTurn ?? null, backendProfiles, message,
     composerRef, textareaRef, mountedRef, conversationIdRef, editorRevisionsRef, onCreateConversationForSelection, setConversationUpdateError,
     blockedReason: attachments.length > 0 || Boolean(promptContext) || previewContextSelected || fileReferences.length > 0 || contextPacketIds.length > 0
       ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
       : null,
+    scratchWorkspace,
     updateMessage: (next) => updateMessage(next),
   });
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
@@ -478,6 +482,14 @@ export const Composer = memo(function Composer({
       startNewChat();
       return;
     }
+    if (stopAndSendTurnId) {
+      await queueCurrentMessage(stopAndSendTurnId);
+      return;
+    }
+    if (followUpState === "stop-and-send" && queuedMessageCount > 0) {
+      setAttachmentError("Send or remove the queued message first.");
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -701,14 +713,22 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
-  const queueCurrentMessage = async (): Promise<void> => { if (!canQueue || conversationContext.isReferencing()) return;
+  const queuedMessageCount = useRuntimeQueueLength(conversation.id);
+  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
+  const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
+  const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
+    if (!canQueue || queueingRef.current || conversationContext.isReferencing()) return;
+    queueingRef.current = true;
+    try { await queueDraft(stopTurnId); } finally { queueingRef.current = false; }
+  };
+  const queueDraft = async (stopTurnId?: string): Promise<void> => {
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;
     const isCurrent = () => conversationIdRef.current === queuedConversationId && draftValueRef.current === queuedMessage && attachmentsRef.current === queuedAttachments;
     const { queueComposerDraft } = await import("./ComposerQueuedActions");
     if (!await queueComposerDraft(onQueueCommand, queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments, isCurrent,
-      (error) => { if (conversationIdRef.current === queuedConversationId) setAttachmentError(error); }) || !isCurrent()) return;
+      (error) => { if (conversationIdRef.current === queuedConversationId) setAttachmentError(error); }, stopTurnId) || !isCurrent()) return;
     attachmentsRef.current = []; setAttachments([]);
     setAttachmentError(null);
     pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
@@ -947,11 +967,17 @@ export const Composer = memo(function Composer({
     });
   };
   const conversationProvider = providers.find(({ id }) => id === conversation.providerId);
+  const openModelChooser = (origin: HTMLButtonElement): void => {
+    rememberOfferOrigin(origin);
+    const chip = composerRef.current?.querySelector<HTMLButtonElement>(".selected-model-chip");
+    if (chip?.getAttribute("aria-expanded") !== "true") chip?.click();
+  };
   const limitResetRow = onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
       providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}
-      onCommand={onLimitResetCommand} />
+      onCommand={onLimitResetCommand} onContinueElsewhere={onCreateConversationForSelection ? openModelChooser : undefined}
+      continueElsewhereDisabled={pendingRoute !== null} />
   </Suspense>;
   return (
     <div className="composer-shell">
@@ -1033,6 +1059,7 @@ export const Composer = memo(function Composer({
           canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
           running={running} imageInputUnavailable={imageInputUnavailableReason !== null}
+          stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
@@ -1144,7 +1171,7 @@ export const Composer = memo(function Composer({
           usageDisplayMode={usageDisplayMode}
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
-          primaryAction={primaryAction}
+          primaryAction={visiblePrimaryAction}
           canSendQueuedNow={!continuationRefusal && !disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
           queuedTurnId={latestKnownTurn?.id ?? null}
           queuedTurnStatus={latestKnownTurn?.status ?? null}

@@ -48,6 +48,7 @@ import {
   type DiffSelection,
 } from "./ChangesPanel";
 import { IconButton } from "./ui";
+import { projectPathContextMenu } from "../utils/contextMenu";
 import { CommitDialog } from "./CommitDialog";
 
 const PreMergeConfidenceLauncher = lazy(async () => {
@@ -91,6 +92,7 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
     commitReview?: boolean,
   ) => Promise<WorkspaceGitDiffSnapshot>;
   onOpenWorkspaceFile: (path: string) => void;
+  projectRoot?: string;
   projectId?: string;
   conversationId?: string;
   busyAction?: string | null;
@@ -205,6 +207,7 @@ export function WorkspaceChangesPanel({
   onRefresh,
   onLoadRepositoryDiff,
   onOpenWorkspaceFile,
+  projectRoot,
   projectId,
   conversationId,
   busyAction = null,
@@ -811,6 +814,15 @@ export function WorkspaceChangesPanel({
                 ? workspaceGitIdentity(effectiveSelection) === workspaceGitIdentity(identity)
                 : false;
               const { name, parent } = changedFilePathParts(file.path);
+              const menu = openPath !== null && projectId && projectRoot
+                ? projectPathContextMenu<HTMLButtonElement>("diff-file", {
+                    projectId,
+                    conversationId,
+                    projectRoot,
+                    relativePath: openPath,
+                    open: () => onOpenWorkspaceFile(openPath),
+                  })
+                : undefined;
               return (
                 <li key={file.path}>
                   <button
@@ -819,6 +831,8 @@ export function WorkspaceChangesPanel({
                     data-language-family={language.family}
                     aria-current={isSelected ? "true" : undefined}
                     onClick={() => setSelected(identity)}
+                    onContextMenu={menu?.onContextMenu}
+                    onKeyDown={menu?.onKeyDown}
                   >
                     <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
@@ -840,7 +854,7 @@ export function WorkspaceChangesPanel({
         {activeRepository.truncated && <p className="workspace-repository-warning">Status is truncated; some changed files are not shown.</p>}
       </nav>
     );
-  }, [activeRepository, effectiveSelection, onOpenWorkspaceFile, projectName, snapshot]);
+  }, [activeRepository, conversationId, effectiveSelection, onOpenWorkspaceFile, projectId, projectName, projectRoot, snapshot]);
 
   const compactNavigator = useMemo(() => {
     if (!snapshot || snapshot.files === 0 || !effectiveSelection) return undefined;

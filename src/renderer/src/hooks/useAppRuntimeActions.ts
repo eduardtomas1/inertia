@@ -21,6 +21,7 @@ import {
 } from "../lib/runtimeCommands";
 import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
+import { RUNTIME_QUEUE_CHANGED } from "../components/composer/runtimeQueueEvents";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "@shared/background-tasks";
 
 export type ConversationBackgroundTasksLoader = (
@@ -92,12 +93,13 @@ export function useAppRuntimeActions(options: {
     return event.result;
   }, [sendCommand]);
   const runQueueCommand = useCallback<QueueCommandRunner>(async (command) => {
-    const request = { ...command, requestId: command.type === "message.queue.enqueue" ? command.payload.id : crypto.randomUUID() };
-    const attachments = command.type === "message.queue.enqueue" ? command.payload.attachments : [];
+    const adds = command.type === "message.queue.enqueue" || command.type === "message.queue.stop-and-send";
+    const request = { ...command, requestId: adds ? command.payload.id : crypto.randomUUID() };
+    const attachments = adds ? command.payload.attachments : [];
     let handoff = false;
     let ambiguous = false;
     try {
-      if (command.type === "message.queue.enqueue") {
+      if (adds) {
         const known = await sendCommand(withRequestId({ type: "message.queue.get", payload: {
           conversationId: command.payload.conversationId, id: command.payload.id,
         } }));
@@ -193,6 +195,10 @@ export function useAppRuntimeActions(options: {
         && event.result.kind === "message.accepted"
       ) return event.result;
       if (event.type === "request.ok") return null;
+      if (event.type === "request.result" && event.result.kind === "message.queue") {
+        window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: targetConversationId }));
+        return null;
+      }
       throw new Error("The local service returned an unexpected message response.");
     } catch (error) {
       preserveAmbiguousHandoff = runtimeCommandDelivery(error) === "ambiguous";

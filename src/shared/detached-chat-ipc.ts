@@ -43,5 +43,6 @@ export type DetachedChatBridge = Pick<
   | "openAttachmentExternally"
   | "openProjectPath"
   | "openExternal"
+  | "showContextMenu"
   | "getPlatform"
 >;

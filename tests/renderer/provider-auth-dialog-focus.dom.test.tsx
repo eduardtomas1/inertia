@@ -206,6 +206,15 @@ describe("ProviderAuthDialog keyboard focus", () => {
     expect(handler(new KeyboardEvent("keydown", { ctrlKey: true, shiftKey: true, code: "KeyV", key: "V" }))).toBe(true);
   });
 
+  it.each(["linux", "win32"])("follows the keyboard layout for the paste key on %s", (platform) => {
+    renderDialog(platform);
+    const handler = keyHandlers.at(-1)!;
+
+    expect(handler(new KeyboardEvent("keydown", { ctrlKey: true, code: "Period", key: "v", keyCode: 86 }))).toBe(false);
+    expect(handler(new KeyboardEvent("keydown", { ctrlKey: true, code: "KeyV", key: "k", keyCode: 75 }))).toBe(true);
+    expect(handler(new KeyboardEvent("keydown", { ctrlKey: true, code: "KeyV", key: "м", keyCode: 86 }))).toBe(false);
+  });
+
   it("keeps Control+V as a terminal control character on macOS", () => {
     renderDialog("darwin");
     const handler = keyHandlers.at(-1)!;

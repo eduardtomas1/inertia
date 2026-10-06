@@ -12,9 +12,12 @@ export function ComposerSendActionsFallback({
   newChatReasonId?: string;
 }): React.JSX.Element {
   const stopping = primaryAction === "stop-pending";
+  const stopAndSend = primaryAction === "stop-and-send";
   const stop = primaryAction === "stop-ready" || stopping;
   const submitting = primaryAction === "submitting";
-  const primaryLabel = stop
+  const primaryLabel = stopAndSend
+    ? "Stop and send"
+    : stop
     ? stopping ? "Stopping agent" : "Stop agent"
     : submitting ? "Sending message" : newChatReasonId ? "Start a new chat" : "Send message";
   return (
@@ -22,16 +25,16 @@ export function ComposerSendActionsFallback({
         type="button"
         aria-label={primaryLabel}
         title={primaryLabel}
-        className={`icon-button send-button${stop ? " stop-button" : ""}${
+        className={`icon-button send-button${stop || stopAndSend ? " stop-button" : ""}${
           submitting ? " send-button-loading" : ""
         }`}
         data-composer-action-state={primaryAction}
         aria-busy={stopping || submitting}
-        aria-describedby={stop ? undefined : newChatReasonId}
+        aria-describedby={stop || stopAndSend ? undefined : newChatReasonId}
         onClick={() => void (stop ? onStop() : onSubmit())}
         disabled={stopping || submitting || (primaryAction === "send-disabled" && !newChatReasonId)}
       >
-        <span aria-hidden="true">{stop ? "■" : submitting ? "…" : "↑"}</span>
+        <span aria-hidden="true">{stop || stopAndSend ? "■" : submitting ? "…" : "↑"}</span>
     </button>
   );
 }

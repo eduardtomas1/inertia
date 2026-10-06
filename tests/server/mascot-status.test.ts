@@ -239,6 +239,20 @@ describe("mascot context", () => {
     expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
   });
 
+  it("does not describe the missing checkpoint notice as the chat's latest work", () => {
+    const publish = vi.fn();
+    const publisher = immediatePublisher(publish, () => conversation("chat", "running"));
+    publisher.replace([conversation("chat", "running")]);
+    const activity = { ...owner, id: "activity", title: "Run mascot_status tests", detail: null,
+      kind: "command" as const, status: "running" as const, createdAt: "2026-09-06T12:01:00.000Z" };
+    publisher.observe({ type: "agent.activity", activity });
+    publisher.observe({ type: "agent.activity", activity: { ...activity, id: "notice", kind: "status",
+      status: "completed", title: "No checkpoint for this turn", detail: "Checkpoint operation timed out.",
+      createdAt: "2026-09-06T12:02:00.000Z" } });
+    expect(publish.mock.lastCall?.[0].message).toBe("Run mascot_status tests");
+    expect(JSON.stringify(publish.mock.calls)).not.toContain("No checkpoint");
+  });
+
   it("keeps questions actionable through background updates and clears only the resolved request", () => {
     const publish = vi.fn();
     let shell = conversation("chat", "running");

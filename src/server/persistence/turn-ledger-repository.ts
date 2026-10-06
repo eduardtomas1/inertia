@@ -27,6 +27,12 @@ import {
   type PersistedTurnExecutionContext,
   type SanitizedTurnExecutionManifest,
 } from "../runtime/turns/request-context";
+import {
+  MAX_RUNTIME_INTERRUPTION_ENTRIES,
+  RUNTIME_INTERRUPTION_REASONS,
+  type RuntimeInterruption,
+} from "../runtime/turns/turn-runtime-interruption-note";
+import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import {
@@ -329,6 +335,38 @@ export class TurnLedgerRepository {
     })();
   }
 
+  runtimeInterruptionSource(conversationId: string): string | null {
+    const recent = this.context.database.prepare(`
+      SELECT id, status, terminal_reason FROM agent_turns
+      WHERE conversation_id = ?
+      ORDER BY requested_at DESC, id DESC
+      LIMIT ?
+    `).all(conversationId, MAX_RUNTIME_INTERRUPTION_ENTRIES) as Array<{ id: string; status: string; terminal_reason: string | null }>;
+    const reached = recent.find(({ terminal_reason }) => terminal_reason !== "turn-start-failed");
+    return reached?.status === "interrupted" && RUNTIME_INTERRUPTION_REASONS.includes(reached.terminal_reason ?? "")
+      ? reached.id
+      : null;
+  }
+
+  runtimeInterruption(turnId: string): RuntimeInterruption {
+    const request = this.context.database.prepare(`
+      SELECT substr(message.content, 1, 1000) AS content
+      FROM agent_turns AS turn JOIN messages AS message ON message.id = turn.user_message_id
+      WHERE turn.id = ?
+    `).get(turnId) as { content: string | null } | undefined;
+    const lost = this.context.database.prepare(`
+      SELECT substr(COALESCE(NULLIF(trim(description), ''), provider_name, provider_role, 'delegated task'), 1, 1000) AS label
+      FROM subagent_traces
+      WHERE turn_id = ? AND status = 'lost'
+      ORDER BY created_at ASC, id ASC
+      LIMIT ?
+    `).all(turnId, MAX_RUNTIME_INTERRUPTION_ENTRIES) as Array<{ label: string }>;
+    const { count } = this.context.database.prepare(
+      "SELECT COUNT(*) AS count FROM subagent_traces WHERE turn_id = ? AND status = 'lost'",
+    ).get(turnId) as { count: number };
+    return { request: request?.content ?? null, lostTasks: lost.map(({ label }) => label), lostTaskCount: count };
+  }
+
   savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {
     const attempts = this.context.database.prepare(`
       SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
@@ -341,12 +379,13 @@ export class TurnLedgerRepository {
           WHERE activities.conversation_id = turn.conversation_id
             AND activities.turn_id = turn.id
             AND activities.kind <> 'error'
+            AND NOT (activities.kind = 'status' AND activities.title = ?)
         ) AS progressed
       FROM agent_turns AS turn
       WHERE turn.conversation_id = ?
       ORDER BY turn.requested_at DESC, turn.id DESC
       LIMIT 2
-    `).all(conversationId) as Array<{
+    `).all(TURN_CHECKPOINT_UNAVAILABLE_TITLE, conversationId) as Array<{
       status: string;
       terminal_reason: string | null;
       provider_session_before: string | null;
@@ -422,8 +461,13 @@ export class TurnLedgerRepository {
       SELECT EXISTS(
         SELECT 1 FROM activities
         WHERE conversation_id = ? AND turn_id = ? AND kind <> 'error'
+          AND NOT (kind = 'status' AND title = ?)
       ) AS progressed
-    `).get(conversationId, turnId) as { progressed: 0 | 1 };
+    `).get(
+      conversationId,
+      turnId,
+      TURN_CHECKPOINT_UNAVAILABLE_TITLE,
+    ) as { progressed: 0 | 1 };
     return row.progressed === 1;
   }
 

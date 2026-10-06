@@ -1,7 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import { access, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags";
 import {
@@ -351,24 +351,36 @@ async function commonExecutableDirectories(
     ]);
   }
 
+  const pnpm = environmentValue(environment, "PNPM_HOME");
+  const bun = environmentValue(environment, "BUN_INSTALL");
+  const volta = environmentValue(environment, "VOLTA_HOME");
+  const fnm = environmentValue(environment, "FNM_DIR");
   return unique([
     join(home, ".local", "bin"),
     join(home, "bin"),
     join(home, ".npm-global", "bin"),
-    join(home, ".volta", "bin"),
-    join(home, ".bun", "bin"),
+    volta ? join(expandHomePath(volta), "bin") : join(home, ".volta", "bin"),
+    bun ? join(expandHomePath(bun), "bin") : join(home, ".bun", "bin"),
+    pnpm ? expandHomePath(pnpm) : "",
+    join(home, ".yarn", "bin"),
     join(home, ".asdf", "shims"),
     join(home, ".local", "share", "mise", "shims"),
     join(home, ".opencode", "bin"),
+    join(fnm ? expandHomePath(fnm) : join(home, ".local", "share", "fnm"), "aliases", "default", "bin"),
     ...await boundedNvmExecutableDirectories(
       home,
       environmentValue(environment, "NVM_BIN"),
     ),
-    join(home, "Library", "pnpm"),
+    process.platform === "darwin"
+      ? join(home, "Library", "pnpm")
+      : join(home, ".local", "share", "pnpm"),
     "/opt/homebrew/bin",
+    "/home/linuxbrew/.linuxbrew/bin",
+    join(home, ".linuxbrew", "bin"),
     "/usr/local/bin",
     "/usr/bin",
     "/bin",
+    "/snap/bin",
     ...(process.platform === "darwin" ? [
       "/Applications/ChatGPT.app/Contents/Resources",
       "/Applications/Cursor.app/Contents/Resources/app/bin",
@@ -419,11 +431,18 @@ export function providerEnvironment(refresh = false): Promise<ProviderEnvironmen
   return environmentPromise;
 }
 
+export const MULTIPLEXING_SHIMS: ReadonlySet<string> = new Set(["snap", "volta-shim"]);
+
 async function executableFile(path: string, platform: NodeJS.Platform): Promise<string | null> {
   try {
     if (platform !== "win32") await access(path, fsConstants.X_OK);
     const [details, canonical] = await Promise.all([stat(path), realpath(path).catch(() => path)]);
-    return details.isFile() ? canonical : null;
+    if (!details.isFile()) return null;
+    const shim = basename(canonical).replace(/\.exe$/iu, "").toLowerCase();
+    if (!MULTIPLEXING_SHIMS.has(shim) || basename(path) === basename(canonical)) {
+      return canonical;
+    }
+    return join(await realpath(dirname(path)).catch(() => dirname(path)), basename(path));
   } catch {
     return null;
   }

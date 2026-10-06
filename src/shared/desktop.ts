@@ -14,6 +14,8 @@ import type {
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./application-diagnostics";
 import type { CompletionSoundImport } from "./completion-sound";
+import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
+import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -227,7 +229,16 @@ export type DesktopNotificationKind =
   | "completed"
   | "approval"
   | "input"
-  | "failed";
+  | "failed"
+  | "usage-limited";
+
+export const DESKTOP_NOTIFICATION_COPY: Readonly<Record<DesktopNotificationKind, readonly [string, string]>> = {
+  completed: ["Inertia finished", "A coding task completed."],
+  approval: ["Inertia needs approval", "A coding task is waiting for approval."],
+  input: ["Inertia needs your input", "A coding task is waiting for your answer."],
+  failed: ["Inertia task failed", "A coding task needs attention."],
+  "usage-limited": ["Usage limit reached", "A coding task stopped at its usage limit."],
+};
 
 export interface DesktopNotificationRequest {
   conversationId: string;
@@ -326,9 +337,8 @@ export function parseDesktopNotificationRequest(
     || (value.onlyInBackground !== undefined && typeof value.onlyInBackground !== "boolean")
     || typeof value.conversationId !== "string"
     || !UUID_PATTERN.test(value.conversationId)
-    || !["completed", "approval", "input", "failed"].includes(
-      String(value.kind),
-    )
+    || typeof value.kind !== "string"
+    || !Object.hasOwn(DESKTOP_NOTIFICATION_COPY, value.kind)
   ) return null;
   return value as unknown as DesktopNotificationRequest;
 }
@@ -418,20 +428,6 @@ export function parseDetachedChatDraftAcknowledgement(
     conversationId: value.conversationId,
     handoffId: value.handoffId,
   };
-}
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
-function isProjectRelativePath(value: unknown): value is string {
-  if (
-    typeof value !== "string"
-    || value.length === 0
-    || value.length > 4_096
-    || /[\0\r\n]/u.test(value)
-    || /^[\\/]/u.test(value)
-    || /^[A-Za-z]:/u.test(value)
-  ) return false;
-  return !value.split(/[\\/]/u).some((segment) => segment === "..");
 }
 
 export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequest | null {
@@ -680,6 +676,7 @@ export interface DesktopBridge {
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   openExternal: (url: string) => Promise<void>;
+  showContextMenu: (request: ContextMenuRequest) => Promise<ContextMenuAction | null>;
   /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */
   showThreadNotification: (request: DesktopNotificationRequest) => Promise<boolean>;
   importCompletionSound: (keep: readonly string[]) => Promise<CompletionSoundImport>;

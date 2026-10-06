@@ -88,12 +88,12 @@ describe("TurnFollowUpCoordinator", () => {
     await flushPromises();
     expect(steer).toHaveBeenCalledTimes(1);
     acknowledgements[0]!(true);
-    await expect(first).resolves.toMatchObject({ content: "First follow-up" });
+    await expect(first).resolves.toMatchObject({ kind: "accepted", message: { content: "First follow-up" } });
     firstAdmission.release();
     await flushPromises();
     expect(steer).toHaveBeenCalledTimes(2);
     acknowledgements[1]!(true);
-    await expect(second).resolves.toMatchObject({ content: "Second follow-up" });
+    await expect(second).resolves.toMatchObject({ kind: "accepted", message: { content: "Second follow-up" } });
     secondAdmission.release();
     expect(persist.mock.calls.map(([, , content]) => content)).toEqual([
       "First follow-up",
@@ -130,10 +130,10 @@ describe("TurnFollowUpCoordinator", () => {
     expect(steer).not.toHaveBeenCalled();
     active.runState.setTransport("running");
 
-    await expect(pending).resolves.toMatchObject({
+    await expect(pending).resolves.toMatchObject({ kind: "accepted", message: {
       turnId: "turn-1",
       content: "Steer with this image.",
-    });
+    } });
     expect(steer).toHaveBeenCalledOnce();
     admission.release();
   });
@@ -161,7 +161,7 @@ describe("TurnFollowUpCoordinator", () => {
     if (ending === "abort") controller.abort();
     else active.runState.requestTerminal("cancelled", "test-cancelled");
 
-    await expect(pending).resolves.toBeNull();
+    await expect(pending).resolves.toEqual({ kind: ending === "abort" ? "unavailable" : "turn-ended" });
     expect(steer).not.toHaveBeenCalled();
     admission.release();
   });
@@ -193,7 +193,7 @@ describe("TurnFollowUpCoordinator", () => {
     controller.abort();
     blocker!.release();
 
-    await expect(pending).resolves.toBeNull();
+    await expect(pending).resolves.toEqual({ kind: "unavailable" });
     expect(steer).not.toHaveBeenCalled();
     cancelled!.release();
   });
@@ -233,10 +233,10 @@ describe("TurnFollowUpCoordinator", () => {
     controller.abort();
     accept(true);
 
-    await expect(pending).resolves.toMatchObject({
+    await expect(pending).resolves.toMatchObject({ kind: "accepted", message: {
       turnId: active.turn.id,
       content: "Keep the provider-accepted follow-up",
-    });
+    } });
     expect(acknowledged).toHaveBeenCalledOnce();
     expect(persist).toHaveBeenCalledOnce();
     admission.release();
@@ -275,7 +275,7 @@ describe("TurnFollowUpCoordinator", () => {
       await expect(pending).rejects.toMatchObject({ delivery: "ambiguous" });
       expect(acknowledged).toHaveBeenCalledOnce();
     } else {
-      await expect(pending).resolves.toBeNull();
+      await expect(pending).resolves.toEqual({ kind: "refused" });
       expect(acknowledged).not.toHaveBeenCalled();
     }
     expect(persist).not.toHaveBeenCalled();

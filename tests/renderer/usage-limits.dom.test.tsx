@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { limitTone, UsageAccountsHint, UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
+import { limitTone, UsageAccountsHint, UsageLimitsDialog, UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
 import { UsageLimitsProvider } from "../../src/renderer/src/components/usage-limits-context";
 import type { ServerEvent } from "../../src/shared/contracts";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
@@ -136,10 +136,47 @@ describe("Limits interface", () => {
     await act(async () => { resolve(prepared); await pending; });
     expect(screen.getByRole("button", { name: "Confirm reset" })).toBeVisible(); expect(moved).toHaveFocus();
   });
-  it("does not refresh from the composer until explicitly requested", async () => {
-    const f = fixture(); render(<UsageLimitsPanel status="online" request={f.request} compact />);
-    await waitFor(() => expect(f.request).toHaveBeenCalledOnce());
-    expect(f.request.mock.calls[0]?.[0]).toEqual({ type: "usage.limits.get", payload: { refresh: false, force: false } });
+  it("refreshes in the background when it becomes visible with a reading older than three minutes", async () => {
+    vi.useFakeTimers(); const f = fixture();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = render(<UsageLimitsPanel status="online" request={f.request} />);
+    await act(async () => { await Promise.resolve(); });
+    const toggle = async (state: DocumentVisibilityState): Promise<void> => {
+      visibility.mockReturnValue(state);
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await Promise.resolve(); });
+    };
+    await toggle("hidden");
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    await toggle("visible");
+    expect(f.request).toHaveBeenCalledOnce();
+    await toggle("hidden");
+    await act(async () => { await vi.advanceTimersByTimeAsync(130000); });
+    await toggle("visible");
+    await act(async () => { await Promise.resolve(); });
+    expect(f.request.mock.calls.map(([command]) => command)).toEqual([
+      { type: "usage.limits.get", payload: { refresh: true, force: false } },
+      { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
+    ]);
+    view.unmount();
+  });
+  it("says a passed reset is due without asking for a manual refresh", async () => {
+    const due = usageAccount({ windows: [window("codex:primary", "5-hour window", 0, new Date(Date.now() - 60000).toISOString(), 300)] });
+    render(<UsageLimitsPanel status="online" request={vi.fn(async () => limitsResult([due]))} />);
+    const region = await screen.findByRole("region", { name: "Codex limits" });
+    expect(region.querySelector(".limits-strip .limits-cell-reset")).toHaveTextContent(/^Stale · Reset due$/);
+    expect(screen.queryByText(/refresh to check/)).not.toBeInTheDocument();
+  });
+  it("refreshes the All provider limits dialog like the full page", async () => {
+    vi.useFakeTimers(); const f = fixture();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = render(<UsageLimitsProvider request={f.request} status="online"><UsageLimitsDialog onClose={() => undefined} /></UsageLimitsProvider>);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
+    expect(f.request.mock.calls.map(([command]) => command)).toEqual([
+      { type: "usage.limits.get", payload: { refresh: true, force: false } },
+      { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
+    ]);
+    view.unmount();
   });
   it("stops periodic work while hidden and after unmount", async () => {
     vi.useFakeTimers(); const f = fixture();
@@ -151,13 +188,15 @@ describe("Limits interface", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(600000); });
     expect(f.request).toHaveBeenCalledOnce();
     visibility.mockReturnValue("visible"); await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
     expect(f.request).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
+    expect(f.request).toHaveBeenCalledTimes(3);
     expect(f.request.mock.calls.map(([command]) => command)).toEqual([
       { type: "usage.limits.get", payload: { refresh: true, force: false } },
       { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
+      { type: "usage.limits.get", payload: { refresh: true, force: false, background: true } },
     ]);
-    view.unmount(); await vi.advanceTimersByTimeAsync(180000); expect(f.request).toHaveBeenCalledTimes(2);
+    view.unmount(); await vi.advanceTimersByTimeAsync(180000); expect(f.request).toHaveBeenCalledTimes(3);
   });
 });
 

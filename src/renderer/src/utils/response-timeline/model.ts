@@ -1,4 +1,5 @@
 import { agentRunStateForTurn, isAgentRunTerminalState } from "@shared/run-state";
+import { isTurnCheckpointUnavailableActivity } from "@shared/turn-checkpoint";
 import type {
   AgentActivity,
   AgentApprovalRequest,
@@ -33,6 +34,7 @@ export interface ResponseTurn {
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   checkpoint: CheckpointSummary | null;
+  checkpointUnavailableReason: string | null;
   gitArtifact: TurnGitArtifactSummary | null;
   requestedAt: string;
   startedAt: string | null;
@@ -192,10 +194,12 @@ function buildTurn(
   const commentaryMessages = assistantMessages.filter(({ id }) =>
     id !== terminalAssistantMessage?.id);
   const systemMessages = scopedMessages.filter(({ role }) => role === "system");
-  const activities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
+  const turnActivities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
     .filter((activity) =>
       activity.conversationId === agentTurn.conversationId)
     .sort(compareTimestamped);
+  const activities = turnActivities.filter((activity) =>
+    !isTurnCheckpointUnavailableActivity(activity));
   const reasonings = (indexes.reasoningsByTurn.get(agentTurn.id) ?? [])
     .filter((reasoning) =>
       reasoning.conversationId === agentTurn.conversationId)
@@ -236,6 +240,10 @@ function buildTurn(
     inputRequests: (indexes.inputRequestsByTurn.get(agentTurn.id) ?? [])
       .filter((request) => request.conversationId === agentTurn.conversationId),
     checkpoint,
+    checkpointUnavailableReason: checkpointUnavailableReason(
+      checkpoint,
+      turnActivities,
+    ),
     gitArtifact: indexes.gitArtifactByTurn.get(agentTurn.id) ?? null,
     requestedAt: agentTurn.requestedAt,
     startedAt: agentTurn.startedAt,
@@ -439,6 +447,15 @@ export function updateResponseTimelineForActivityDelta(
     item.id === turnId ? replacement : item);
 }
 
+function checkpointUnavailableReason(
+  checkpoint: CheckpointSummary | null,
+  activities: readonly AgentActivity[],
+): string | null {
+  if (checkpoint) return null;
+  const notice = activities.find(isTurnCheckpointUnavailableActivity);
+  return notice ? notice.detail ?? "" : null;
+}
+
 function sameReferences<T>(left: T[], right: T[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
 }
@@ -450,6 +467,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && left.userMessage === right.userMessage
     && left.terminalAssistantMessage === right.terminalAssistantMessage
     && left.checkpoint === right.checkpoint
+    && left.checkpointUnavailableReason === right.checkpointUnavailableReason
     && left.gitArtifact === right.gitArtifact
     && left.requestedAt === right.requestedAt
     && left.startedAt === right.startedAt

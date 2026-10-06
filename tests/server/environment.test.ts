@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -154,6 +154,63 @@ describe("provider environment discovery", { concurrent: false }, () => {
         environment,
         home,
       )).resolves.toEqual([realpathSync.native(nvmCommand)]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "searches pnpm, bun, Volta, yarn, fnm, Linuxbrew and snap directories on POSIX",
+    async () => {
+      const home = temporaryRoot();
+      const pnpmHome = join(home, "pnpm-home");
+      const bunHome = join(home, "bun-home");
+      const voltaHome = join(home, "volta-home");
+      setEnvironment({ HOME: home, PATH: "/usr/bin:/bin" });
+      process.env.PNPM_HOME = pnpmHome;
+      process.env.BUN_INSTALL = bunHome;
+      process.env.VOLTA_HOME = voltaHome;
+      try {
+        const environment = await providerEnvironment(true);
+        expect(environment.pathEntries).toEqual(expect.arrayContaining([
+          pnpmHome,
+          join(bunHome, "bin"),
+          join(voltaHome, "bin"),
+          join(home, ".yarn", "bin"),
+          join(home, ".local", "share", "fnm", "aliases", "default", "bin"),
+          "/home/linuxbrew/.linuxbrew/bin",
+          join(home, ".linuxbrew", "bin"),
+          "/snap/bin",
+        ]));
+        process.env.FNM_DIR = join(home, "fnm-dir");
+        delete process.env.PNPM_HOME;
+        const defaults = await providerEnvironment(true);
+        expect(defaults.pathEntries).toContain(join(home, "fnm-dir", "aliases", "default", "bin"));
+        expect(defaults.pathEntries).toContain(process.platform === "darwin"
+          ? join(home, "Library", "pnpm")
+          : join(home, ".local", "share", "pnpm"));
+      } finally {
+        for (const key of ["PNPM_HOME", "BUN_INSTALL", "VOLTA_HOME", "FNM_DIR"]) delete process.env[key];
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "keeps the command name of a multiplexing shim instead of its shared target",
+    async () => {
+      const home = temporaryRoot();
+      const voltaBin = join(home, ".volta", "bin");
+      mkdirSync(voltaBin, { recursive: true });
+      writeFileSync(join(voltaBin, "volta-shim"), "#!/bin/sh\n", { mode: 0o755 });
+      symlinkSync(join(voltaBin, "volta-shim"), join(voltaBin, "codex"));
+      const ordinary = join(home, "ordinary");
+      mkdirSync(ordinary);
+      writeFileSync(join(ordinary, "real-agent"), "#!/bin/sh\n", { mode: 0o755 });
+      symlinkSync(join(ordinary, "real-agent"), join(voltaBin, "agent"));
+      const environment = { env: {}, pathEntries: [voltaBin] };
+
+      await expect(executableCandidates("codex", environment, home))
+        .resolves.toEqual([join(realpathSync.native(voltaBin), "codex")]);
+      await expect(executableCandidates("agent", environment, home))
+        .resolves.toEqual([realpathSync.native(join(ordinary, "real-agent"))]);
     },
   );
 

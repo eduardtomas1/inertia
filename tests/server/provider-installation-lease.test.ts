@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1024,6 +1024,43 @@ describe("provider manager installation ownership", () => {
     );
   });
 
+  it.each([
+    ["kimi", "Kimi Code CLI", "kimi", "Kimi Code CLI found, but ACP is unavailable"],
+    ["antigravity", "Antigravity", "agy", "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'"],
+    ["codex", "Codex", "codex", "Codex App Server is unsupported; update the selected CLI"],
+  ] as const)("lets an identified but outdated %s installation update", async (providerId, name, command, statusMessage) => {
+    const executable = `/tools/${command}`;
+    let cleanupConfirmed = true;
+    let identified = true;
+    const manager = ProviderManager.createForTests({
+      commands: { [providerId]: executable },
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      detectProvider: async (): Promise<ProviderDetection> => ({
+        provider: { id: providerId, name, command },
+        available: true,
+        ...(identified ? { version: "1.1.0", executable } : {}),
+        installState: "installed",
+        authState: "unknown",
+        canRun: false,
+        cleanupConfirmed,
+        statusMessage,
+      }),
+    });
+
+    await manager.detect(providerId);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, true)).toBe(true);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, "/tools/other", true)).toBe(false);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, false)).toBe(false);
+    identified = false;
+    await manager.detect(providerId);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, true)).toBe(false);
+    identified = true;
+    cleanupConfirmed = false;
+    await manager.detect(providerId).catch(() => undefined);
+    expect(manager.providerMaintenanceCapabilityAvailable(providerId, executable, true)).toBe(false);
+    await manager.disposeAll().catch(() => undefined);
+  });
+
   it("negotiates maintenance only for the exact verified installation", async () => {
     const manager = ProviderManager.createForTests({
       commands: { claude: "/tools/claude" },
@@ -1062,6 +1099,43 @@ describe("provider manager installation ownership", () => {
       false,
     )).toBe(false);
     await manager.disposeAll();
+  });
+
+  it.skipIf(process.platform === "win32")("notices an outside Volta install behind the same shim", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "inertia-volta-identity-")));
+    const voltaBin = join(root, ".volta", "bin");
+    const image = join(root, ".volta", "tools", "image", "packages", "@openai", "codex");
+    mkdirSync(voltaBin, { recursive: true });
+    mkdirSync(image, { recursive: true });
+    writeFileSync(join(voltaBin, "volta-shim"), "shim");
+    symlinkSync(join(voltaBin, "volta-shim"), join(voltaBin, "codex"));
+    const executable = join(voltaBin, "codex");
+    const manager = ProviderManager.createForTests({
+      commands: { codex: executable },
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      detectProvider: async (): Promise<ProviderDetection> => ({
+        provider: { id: "codex", name: "Codex", command: "codex" },
+        available: true,
+        version: "1.0.0",
+        executable,
+        installState: "installed",
+        authState: "authenticated",
+        canRun: true,
+        cleanupConfirmed: true,
+      }),
+    });
+
+    try {
+      await manager.detect("codex");
+      expect(manager.providerInstallationState("codex")).toBe("current");
+      rmSync(image, { recursive: true });
+      mkdirSync(image, { recursive: true });
+      writeFileSync(join(image, "package.json"), "{\"version\":\"1.0.1\"}");
+      expect(manager.providerInstallationState("codex")).toBe("changed");
+      await manager.disposeAll();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("invalidates capability evidence when the verified executable file changes", async () => {

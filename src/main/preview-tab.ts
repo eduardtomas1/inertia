@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { WebContentsView, type WebContents } from "electron";
+import { WebContentsView, type BaseWindow, type WebContents } from "electron";
 
 import {
   forwardedKeyboardInput,
@@ -9,6 +9,7 @@ import {
 } from "./preview-keyboard.js";
 import { agentPageInputIsUser } from "./preview-agent-control.js";
 import { hardenDesktopSession } from "./preview-session.js";
+import { registerPreviewContextMenu, type PreviewNavigation } from "./preview-context-menu.js";
 
 export interface PreviewTab {
   id: string;
@@ -18,11 +19,12 @@ export interface PreviewTab {
   unregisterHealth(): void;
 }
 
-interface PreviewTabOptions {
+interface PreviewTabOptions extends PreviewNavigation {
   partition: string;
   pageNumber: number;
   captureLocked: WeakSet<WebContents>;
   registerHealthRenderer?(contents: WebContents): () => void;
+  ownerWindow(): BaseWindow | null | undefined;
   targetContents(): WebContents | null | undefined;
   guardNavigation(event: { preventDefault(): void }, url: string): void;
   publish(): void;
@@ -85,8 +87,20 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
   contents.on("will-prevent-unload", (event) => {
     if (options.allowUnload?.(tab) === true) event.preventDefault();
   });
+  let lastInputFromUser = false;
   contents.on("input-event", (_event, input) => {
-    if (agentPageInputIsUser(contents, input)) options.userInput?.(tab);
+    const fromUser = agentPageInputIsUser(contents, input);
+    if (input.type === "mouseDown" || input.type === "keyDown" || input.type === "rawKeyDown") {
+      lastInputFromUser = fromUser;
+    }
+    if (fromUser) options.userInput?.(tab);
+  });
+  registerPreviewContextMenu(view, {
+    captureLocked: options.captureLocked,
+    ownerWindow: options.ownerWindow,
+    lastInputFromUser: () => lastInputFromUser,
+    navigate: options.navigate,
+    agentBusy: options.agentBusy,
   });
   contents.on("before-mouse-event", (event) => {
     if (options.captureLocked.has(contents)) event.preventDefault();

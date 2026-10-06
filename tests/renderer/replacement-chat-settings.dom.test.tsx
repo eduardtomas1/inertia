@@ -82,7 +82,7 @@ function renderComposer(current: Conversation, overrides: Partial<ComposerProps>
 
 async function confirmNewChat(): Promise<HTMLElement> {
   const dialog = await screen.findByRole("alertdialog");
-  fireEvent.click(within(dialog).getByRole("button", { name: "New chat" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
   return dialog;
 }
 
@@ -100,6 +100,7 @@ describe("replacement chat settings", () => {
       selection: current.modelSelection,
       configuration: planSupervised,
       prefillText: "Keep planning.",
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });
@@ -118,6 +119,7 @@ describe("replacement chat settings", () => {
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: current.modelSelection,
       configuration: planSupervised,
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });
@@ -135,6 +137,7 @@ describe("replacement chat settings", () => {
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: current.modelSelection,
       configuration: planSupervised,
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });
@@ -154,6 +157,7 @@ describe("replacement chat settings", () => {
       selection: current.modelSelection,
       configuration: planSupervised,
       prefillText: "Continue.",
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });
@@ -173,6 +177,7 @@ describe("replacement chat settings", () => {
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: current.modelSelection,
       configuration: planSupervised,
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });
@@ -191,6 +196,7 @@ describe("replacement chat settings", () => {
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: { ...current.modelSelection, reasoningEffort: "high" },
       configuration: planSupervised,
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });
@@ -207,6 +213,7 @@ describe("replacement chat settings", () => {
     expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({
       selection: { harnessId: providerNativeModelSelection({ providerId: "claude" }).harnessId },
       configuration: planSupervised,
+      sourceConversationId: conversationId,
     });
   });
 
@@ -219,6 +226,7 @@ describe("replacement chat settings", () => {
     expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
       selection: current.modelSelection,
       configuration: { accessMode: "supervised", interactionMode: "build" },
+      sourceConversationId: conversationId,
       onCreated: expect.any(Function),
     }]);
   });

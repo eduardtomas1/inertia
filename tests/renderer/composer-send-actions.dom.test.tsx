@@ -31,6 +31,7 @@ describe("composer morphing send actions", () => {
   it.each([
     ["Send message", "send-ready"],
     ["Stop agent", "stop-ready"],
+    ["Stop and send", "stop-and-send"],
   ] as const)(
     "preserves focus on %s when the deferred action replaces its fallback",
     (label, primaryAction) => {

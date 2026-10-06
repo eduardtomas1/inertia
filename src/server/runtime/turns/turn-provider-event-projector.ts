@@ -129,14 +129,18 @@ export class TurnProviderEventProjector {
         if (event.kind !== "reasoning" || event.phase !== "started") {
           this.options.streams.flush(active, "reasoning");
         }
-        const activity = this.options.activities.record(
+        const recorded = this.options.activities.record(
           active,
           event,
           agentActivityKind(event),
           agentActivityStatus(event),
         );
-        this.options.hooks.broadcast({ type: "agent.activity", activity });
-        this.broadcastConversationShell(active);
+        if (!recorded) break;
+        this.options.hooks.broadcast({
+          type: "agent.activity",
+          activity: recorded.activity,
+        });
+        if (recorded.runsChanged) this.broadcastConversationShell(active);
         break;
       }
       case "status":
@@ -157,6 +161,7 @@ export class TurnProviderEventProjector {
         }
         break;
       case "approval":
+        this.options.activities.flushPending(active);
         this.options.interactions.openApproval(active, event.request);
         break;
       case "approval-resolved":
@@ -167,6 +172,7 @@ export class TurnProviderEventProjector {
         );
         break;
       case "input":
+        this.options.activities.flushPending(active);
         this.options.interactions.openInput(active, event.request);
         break;
       case "input-resolved":
@@ -175,6 +181,7 @@ export class TurnProviderEventProjector {
       case "plan": {
         this.options.streams.closeAssistantSegment(active);
         this.options.streams.flush(active, "reasoning");
+        this.options.activities.flushPending(active);
         const plan: AgentPlan = {
           conversationId: active.conversation.id,
           runId: active.turn.runId,

@@ -31,6 +31,7 @@ import {
 import {
   type AppHealthSnapshot,
   parseDesktopNotificationRequest,
+  DESKTOP_NOTIFICATION_COPY,
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
@@ -107,6 +108,7 @@ import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
+import { registerContextMenuIpc } from "./context-menu-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
 import { runtimeIssueEvidenceBroker } from "./runtime-issue-evidence-broker.js";
@@ -511,6 +513,13 @@ function registerIpcHandlers(): void {
   );
 
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
+  registerContextMenuIpc({
+    channel: IPC.showContextMenu, assertTrusted: assertTrustedChatIpc, isPackaged: () => app.isPackaged,
+    windowFor: (event, count, expected) => {
+      if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+      return detachedChatMain.windowForTrustedChatIpc(event, count, expected);
+    },
+  });
 
   registerAppUpdateIpc({
     ipcMain,
@@ -524,7 +533,7 @@ function registerIpcHandlers(): void {
     owner: (event, count) => {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
-    }, registry: attachmentRegistry, imports: rendererAttachmentImports,
+    }, mainWindow: () => mainWindow, focusMainWindow, registry: attachmentRegistry, imports: rendererAttachmentImports,
     onFailure: (diagnostic) => runtimeDiagnostics?.record("snapshot.failure", { ...diagnostic }),
   });
 
@@ -597,13 +606,7 @@ function registerIpcHandlers(): void {
     if (detachedChatMain?.isFocusedForNotification(request.conversationId)) return false;
     if (request.onlyInBackground && inertiaWindowInForeground(BrowserWindow.getAllWindows())) return false;
     if (!Notification.isSupported()) return false;
-    const copy = {
-      completed: ["Inertia finished", "A coding task completed."],
-      approval: ["Inertia needs approval", "A coding task is waiting for approval."],
-      input: ["Inertia needs your input", "A coding task is waiting for your answer."],
-      failed: ["Inertia task failed", "A coding task needs attention."],
-    } as const;
-    const [title, body] = copy[request.kind];
+    const [title, body] = DESKTOP_NOTIFICATION_COPY[request.kind];
     const notification = new Notification({ title, body });
     notification.once("click", () => {
       if (detachedChatMain?.focusForNotification(request.conversationId)) return;

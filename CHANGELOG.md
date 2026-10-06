@@ -21,10 +21,10 @@ instead of lost.
   while any such value is on the page.
 - The agent can scroll, go back, forward and reload, press Shift+Tab,
   Shift+Enter and Ctrl or Cmd+Enter, and reach controls below the visible part
-  of the page. It
-  also sees the page's alerts and confirmations, which Inertia answers safely
-  (a confirmation is dismissed unless the action asked to accept it), and
-  every page-changing action still needs your approval in Supervised mode.
+  of the page. It also sees the page's alerts and confirmations, which Inertia
+  answers safely (a confirmation is dismissed unless the action asked to accept
+  it), and every page-changing action still needs your approval in Supervised
+  mode.
 - Clicking or typing in the Browser pane takes over from the agent: its
   current command stops, and it is told you are in control until its next
   action. Leaving a page that asks for confirmation shows Inertia's own Stay or

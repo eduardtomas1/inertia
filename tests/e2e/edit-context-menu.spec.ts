@@ -136,9 +136,10 @@ function surfaceMenuCount(app: Awaited<ReturnType<typeof createAppFixture>>): Pr
 async function openSurfaceMenu(
   app: Awaited<ReturnType<typeof createAppFixture>>,
   target: Locator,
+  position?: { x: number; y: number },
 ): Promise<RecordedMenuItem[]> {
   const previous = await surfaceMenuCount(app);
-  await target.click({ button: "right" });
+  await target.click({ button: "right", ...(position ? { position } : {}) });
   await expect.poll(() => surfaceMenuCount(app)).toBe(previous + 1);
   return await app.electronApp.evaluate(() => {
     const menu = (Reflect.get(globalThis, "surfaceMenus") as Electron.Menu[]).at(-1)!;
@@ -227,11 +228,22 @@ test("pastes into the workspace shell from the terminal menu", async () => {
     const dock = await openTerminalDock(page);
     await expect(dock.locator(".terminal-panel[data-terminal-state=ready]")).toHaveCount(1);
     const output = join(app.workspaceDirectory, "terminal-menu-paste.txt");
+    const mount = dock.locator(".terminal-mount");
+    const box = (await mount.boundingBox())!;
+    const blankCell = { x: box.width - 8, y: box.height - 8 };
+    expect(visibleLabels(await openSurfaceMenu(app, mount, blankCell)))
+      .toEqual(["Copy (disabled)", "role:paste", "Select all", "Clear"]);
+    await chooseSurfaceItem(app, { label: "Select all" });
+    expect(visibleLabels(await openSurfaceMenu(app, mount, blankCell)))
+      .toEqual(["Copy", "role:paste", "Select all", "Clear"]);
+    await app.electronApp.evaluate(({ clipboard }) => clipboard.writeText("not-copied"));
+    await chooseSurfaceItem(app, { label: "Copy" });
+    await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .not.toBe("not-copied");
     await app.electronApp.evaluate(({ clipboard }, path) => clipboard.writeText(
       `printf 'pasted-through-menu' > '${path}'`,
     ), output);
-    const items = await openSurfaceMenu(app, dock.locator(".terminal-mount"));
-    expect(visibleLabels(items)).toEqual(["Copy (disabled)", "role:paste", "Select all", "Clear"]);
+    await openSurfaceMenu(app, mount, blankCell);
     await chooseSurfaceItem(app, { role: "paste" });
     await expect(dock.locator(".xterm-helper-textarea")).toBeFocused();
     await page.keyboard.press("Enter");

@@ -8,6 +8,7 @@ import {
   CLAUDE_PROTOCOL_SESSION_ID,
   claudeBackgroundTasks,
   claudeSuccessResult,
+  claudeSystem,
   fixtureClaudeQuery,
 } from "../helpers/claude-agent-sdk-protocol";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
@@ -54,6 +55,48 @@ describe("Claude exit after the parent resumed", () => {
       status: "failed",
       error: "Claude Agent SDK exited without a final result.",
       failure: { terminalEvent: "lifecycle/missing-result" },
+    });
+  });
+
+  it("keeps waiting when a watcher ends after the parent already resumed", async () => {
+    const root = portableFixtureRoot("Claude SDK watcher ends after parent resumed");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      terminalSubagentDrainTimeoutMs: 25,
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeBackgroundTasks(["shell-1", "monitor-1"]);
+          yield claudeSuccessResult("The build is running.", "completed");
+          yield claudeBackgroundTasks(["monitor-1"]);
+          yield claudeSystem("status", { status: "requesting" });
+          yield claudeBackgroundTasks([]);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          yield {
+            type: "assistant",
+            parent_tool_use_id: null,
+            session_id: CLAUDE_PROTOCOL_SESSION_ID,
+            uuid: "assistant-after-build",
+            message: { role: "assistant", content: [{ type: "text", text: "The update failed." }] },
+          } as unknown as SDKMessage;
+          yield claudeSuccessResult("The update failed.", "completed");
+        })(),
+      ),
+    });
+    const manager = ProviderManager.createForTests(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-watcher-ends-after-resume",
+      cwd: root,
+      prompt: "Run the build in the background and watch it",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "The update failed.",
     });
   });
 });

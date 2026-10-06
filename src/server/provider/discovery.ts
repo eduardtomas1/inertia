@@ -69,6 +69,9 @@ function cursorCandidateIsIdentified(
     || /\bcursor(?:[ -]agent)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
 }
 
+const KIMI_LEGACY_CLI = /kimi-cli is no longer maintained/iu;
+const KIMI_CODE_INSTALL_COMMAND = "npm install -g @moonshot-ai/kimi-code";
+
 function kimiCandidateIsIdentified(
   executable: string,
   versionOutput: string,
@@ -555,7 +558,8 @@ async function detectProviderRecordingCleanup(
       && /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
       && (providerId === "cursor"
         ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
-        : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output))
+        : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output)
+          && !KIMI_LEGACY_CLI.test(`${probe.output}\n${acpProbe.output}`))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, timeoutMs)
@@ -667,6 +671,8 @@ async function detectProviderRecordingCleanup(
         )
       : [];
     const providerWithoutPureServe = openCodeInstalls.length > 0;
+    const kimiLegacyCli = providerId === "kimi"
+      && versionProbes.some(({ probe }) => KIMI_LEGACY_CLI.test(probe.output));
     const identifiedInstall = cleanupUnconfirmed
       ? undefined
       : versionProbes
@@ -696,6 +702,8 @@ async function detectProviderRecordingCleanup(
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
         : antigravityInstall
           ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${ANTIGRAVITY_MINIMUM_HEADLESS_VERSION} or newer; run 'agy update'`
+        : kimiLegacyCli
+          ? `The old kimi-cli is no longer maintained; install Kimi Code with '${KIMI_CODE_INSTALL_COMMAND}'`
         : providerWithoutAcp
           ? `${providerShortName(provider.name)} CLI found, but ACP is unavailable`
           : openCodeTwoOnly

@@ -275,7 +275,7 @@ describe("provider maintenance on real installation layouts", () => {
     }]);
   });
 
-  posixIt("upgrades Kimi installed as a uv tool with uv from PATH", async () => {
+  posixIt("never upgrades the retired kimi-cli uv tool", async () => {
     const { root, home, record } = await layout();
     const tool = join(home, ".local/share/uv/tools/kimi-cli");
     const manifest = join(tool, "version.json");
@@ -283,15 +283,15 @@ describe("provider maintenance on real installation layouts", () => {
     const kimi = await file(join(tool, "bin/kimi"), "#!/bin/sh\n");
     await link(kimi, join(home, ".local/bin/kimi"));
     await fakeManager(join(root, "tools/uv"), record, bump(manifest));
-    const { terminal } = await runUpdate({
+    await expect(runUpdate({
       providerId: "kimi",
       home,
       pathEntries: [join(home, ".local/bin"), join(root, "tools")],
       executable: async () => kimi,
       version: async () => await versionOf(manifest),
-    });
-    expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
-    expect(await records(record)).toEqual([{ argv: ["tool", "upgrade", "kimi-cli"], env: { CI: "1" } }]);
+    })).rejects.toThrow("cannot be updated safely from Inertia");
+    expect(await records(record).catch(() => [])).toEqual([]);
+    expect(await versionOf(manifest)).toBe("1.0.0");
   });
 
   posixIt("updates a Volta package and keeps OpenCode on 1.x", async () => {

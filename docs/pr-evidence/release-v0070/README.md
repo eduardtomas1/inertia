@@ -58,6 +58,14 @@ initialization sequences, not `FALLBACK_READY`. No terminal code changed in
 v0.0.69 and the job passed for v0.0.68, so it was rerun with the Linux jobs
 and is not changed here.
 
+The Windows ARM64 rerun then failed two tests in
+`opencode-pure-isolation.test.ts`. "cancels only the proof owned by the
+matching runtime lifetime" waited for two concurrent proof starts with
+`vi.waitFor`'s default 1 s timeout and saw one. Its second proof was left
+running, so "invalidates successful proofs on executable identity or version
+changes" counted 12 starts instead of 10. This PR gives that wait a 10 s
+timeout.
+
 ## Verification
 
 On this branch with #587 applied, on Linux x64:
@@ -74,6 +82,7 @@ On this branch with #587 applied, on Linux x64:
 - `CHANGELOG.md`: the curated 0.0.70 section.
 - `tests/server/opencode-descendant-interactions.test.ts`: the inactivity
   window.
+- `tests/server/opencode-pure-isolation.test.ts`: the proof-start wait.
 - This release preparation evidence report.
 
 ## Publication boundary

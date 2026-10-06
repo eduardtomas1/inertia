@@ -26,6 +26,8 @@ finishes.
 - CI only: the OpenCode human-wait test allows 1 second of provider silence
   instead of 300 ms, so a loaded runner starting the test fixture no longer
   fails it.
+- CI only: the OpenCode isolation test waits up to 10 seconds, instead of
+  1 second, for both of its concurrent proofs to start on a slow runner.
 
 ## 0.0.69 — 2026-10-06
 

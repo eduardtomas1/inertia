@@ -13,7 +13,9 @@ import {
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-function backgroundTasks(...tasks: Array<{ task_id: string; ambient?: boolean }>): SDKMessage {
+function backgroundTasks(
+  ...tasks: Array<{ task_id: string; ambient?: boolean; task_type?: string }>
+): SDKMessage {
   return claudeSystem("background_tasks_changed", {
     tasks: tasks.map((task) => ({ task_type: "local_agent", description: task.task_id, ...task })),
   });
@@ -31,7 +33,7 @@ describe("Claude visible final answer settlement", () => {
       ({ state, numTurns, correlated, emptyResult: false, ambient: "none" }))));
   const emptyCases = (["queued", "started"] as const).map((state) =>
     ({ state, numTurns: 0, correlated: true, emptyResult: true, ambient: "none" }));
-  const ambientCases = ["watcher", "skip-transcript", "typed-agent"].map((ambient) =>
+  const ambientCases = ["watcher", "skip-transcript", "typed-agent", "background-shell"].map((ambient) =>
     ({ state: "started" as const, numTurns: 1, correlated: true, emptyResult: false, ambient }));
 
   it.each([...normalCases, ...emptyCases, ...ambientCases])(
@@ -55,10 +57,12 @@ describe("Claude visible final answer settlement", () => {
               uuid: "initial-state", session_id: CLAUDE_PROTOCOL_SESSION_ID } as unknown as SDKMessage;
           }
           if (ambient !== "none") {
-            yield backgroundTasks({ task_id: "ambient-task", ambient: true });
+            yield backgroundTasks(ambient === "background-shell"
+              ? { task_id: "ambient-task", task_type: "local_bash" }
+              : { task_id: "ambient-task", ambient: true });
             yield claudeSystem("task_started", {
               task_id: "ambient-task", description: "Persistent watcher",
-              task_type: ambient === "watcher" ? "local_bash" : "local_agent",
+              task_type: ambient === "watcher" || ambient === "background-shell" ? "local_bash" : "local_agent",
               ...(ambient === "skip-transcript" ? { skip_transcript: true } : {}),
               ...(ambient === "typed-agent" ? { ambient: true } : {}),
             });

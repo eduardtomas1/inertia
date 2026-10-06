@@ -1296,6 +1296,25 @@ setInterval(() => {}, 1000);
     });
   });
 
+  it("rejects the retired kimi-cli placeholder and points to Kimi Code", async () => {
+    const executable = join(temporaryRoot(), "kimi");
+    const retired = "kimi-cli is no longer maintained. Please use the new Kimi Code CLI.";
+    await expect(detectProvider("kimi", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => ({
+        exitCode: 0,
+        output: args[0] === "--version" ? `kimi, version 1.52.0\n${retired}` : retired,
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+      }),
+    })).resolves.toMatchObject({
+      installState: "installed",
+      canRun: false,
+      statusMessage: "The old kimi-cli is no longer maintained; install Kimi Code with 'npm install -g @moonshot-ai/kimi-code'",
+    });
+  });
+
   it("prefers the Cursor-specific executable and rejects an unrelated generic ACP agent", async () => {
     const root = temporaryRoot();
     const cursorAgent = join(root, "cursor-agent");

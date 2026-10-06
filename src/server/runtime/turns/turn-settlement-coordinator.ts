@@ -266,6 +266,7 @@ export class TurnSettlementCoordinator {
       try {
         this.options.hooks.reportIncident?.({ correlationId: active.turn.id,
           code: active.diagnosticFailureCode ?? (terminalReason === "turn-start-failed" ? "provider.start-failed"
+            : failure?.phase === "auth" ? "provider.auth-failed"
             : failure?.reason === "transport-closed" || failure?.reason === "rpc-timeout"
               ? "provider.connection-failed" : "turn.failed"),
           outcome: "failed", context: {

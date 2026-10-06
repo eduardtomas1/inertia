@@ -550,6 +550,13 @@ async function uvToolSource(context: InstallSourceContext): Promise<ProviderInst
   const toolDirectory = configured
     ?? context.join(context.env("XDG_DATA_HOME") ?? context.join(context.home, ".local", "share"), "uv", "tools");
   if (!context.under(context.real, context.join(toolDirectory, tool))) return null;
+  if (tool === "kimi-cli") {
+    return manual(
+      "uv-tool",
+      "kimi-cli is no longer maintained, and upgrading it installs a placeholder. Install Kimi Code instead.",
+      "npm install -g @moonshot-ai/kimi-code",
+    );
+  }
   const args = ["tool", "upgrade", tool];
   const manualCommand = ["uv", ...args].join(" ");
   const uv = (await context.candidates("uv", context.input.environment))[0];

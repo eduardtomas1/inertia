@@ -66,6 +66,21 @@ describe("terminal commitment survives downstream faults", () => {
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
   });
 
+  it("reports a provider authentication failure as an auth incident", async () => {
+    const reportIncident = vi.fn();
+    const runtime = await createTurnControllerTestRuntime({ reportIncident });
+    runtimes.push(runtime);
+    const queued = start(runtime);
+    runtime.provider.resolve({
+      status: "failed",
+      error: "Kimi Code is not authenticated.",
+      failure: { reason: "provider-error", message: "Kimi Code is not authenticated.", phase: "auth", terminalEvent: "session/prompt" },
+    });
+    await expect.poll(() => runtime.store.agentTurn(queued.turn.id).status).toBe("failed");
+    await runtime.controller.drainSettlementTasks();
+    expect(reportIncident.mock.calls[0]![0]).toMatchObject({ code: "provider.auth-failed", outcome: "failed" });
+  });
+
   it.each([
     { stage: "metadata", mode: "throw" },
     { stage: "runtime-settled", mode: "reject" },

@@ -389,21 +389,17 @@ describe("provider install source classification", () => {
     expect(capabilities).toMatchObject({ installMethod: "snap", manualCommand: "sudo snap refresh openai-codex" });
   });
 
-  posixIt("upgrades Kimi installed as a uv tool with uv", async () => {
+  posixIt("sends the retired kimi-cli uv tool to a manual Kimi Code install", async () => {
     const { root, home } = await layout();
     const toolDirectory = join(home, ".local/share/uv/tools");
     const executable = await file(join(toolDirectory, "kimi-cli/bin/kimi"));
     await link(executable, join(home, ".local/bin/kimi"));
-    const uv = await file(join(root, "tools/uv"));
+    await file(join(root, "tools/uv"));
     const capabilities = await classify("kimi", executable, home, environment([join(home, ".local/bin"), join(root, "tools")]));
     expect(capabilities).toMatchObject({
       installMethod: "uv-tool",
-      manualCommand: "uv tool upgrade kimi-cli",
-      update: {
-        executable: uv,
-        args: ["tool", "upgrade", "kimi-cli"],
-        lockKey: `uv-tool:${toolDirectory}`,
-      },
+      update: null,
+      manualCommand: "npm install -g @moonshot-ai/kimi-code",
     });
   });
 

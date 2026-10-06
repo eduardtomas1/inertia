@@ -419,6 +419,7 @@ function startClaudeRun(
       emitter.status("running");
       messageIterator = query[Symbol.asyncIterator]();
       let terminalDrainDeadline: number | null = null;
+      let parentResumedAfterProvisional = false;
       let announcedShortenedEvent = false;
       while (true) {
         const next = await nextClaudeMessage(
@@ -524,7 +525,11 @@ function startClaudeRun(
           emitter.session(sessionId);
         }
         const hadLiveTaskTrace = subagentTracker.hasLiveTasks();
-        if (claudeMessageResumesParent(message, prompt.uuid, pendingFollowUpIds)) terminalDrainDeadline = null;
+        if (claudeMessageResumesParent(message, prompt.uuid, pendingFollowUpIds)) {
+          terminalDrainDeadline = null;
+          if (delegateLifecycle.hasProvisionalResult()) parentResumedAfterProvisional = true;
+        }
+        if (message.type === "result") parentResumedAfterProvisional = false;
         const lifecycle = delegateLifecycle.observe(message, hadLiveTaskTrace);
         subagentTracker.observe(message);
         const hasLiveTaskTrace = subagentTracker.hasLiveTasks();
@@ -553,7 +558,7 @@ function startClaudeRun(
           // a later resumed result can provide the terminal text fallback.
           messageProjector.resetResultOutput();
         }
-        if (delegateLifecycle.shouldBoundParentResumeWait(
+        if (!parentResumedAfterProvisional && delegateLifecycle.shouldBoundParentResumeWait(
           message,
           hadLiveTaskTrace,
           hasLiveTaskTrace,

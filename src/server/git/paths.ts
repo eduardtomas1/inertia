@@ -12,10 +12,9 @@ import {
 } from "./constants";
 import {
   gitInspectionSettlementValues,
-  isGitProcessTreeTerminationFailure,
   runGitInspection,
 } from "./runner";
-import { GitError } from "./types";
+import { GitError, isGitProcessTreeTerminationFailure } from "./types";
 import { isBroadWorkspaceDirectory } from "../workspace-git-discovery-policy";
 
 export function isContained(root: string, target: string): boolean {

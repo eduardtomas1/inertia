@@ -2,7 +2,6 @@ import {
   isAgentTurnTerminalStatus,
   type AgentTurn,
   type AgentTurnUsageSnapshot,
-  type ProviderId,
   type ThreadUsageSnapshot,
 } from "../../../shared/contracts";
 import { staleProviderSessionDecision } from "../../../shared/continuation-policy";
@@ -14,6 +13,7 @@ import type {
   ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
+import { PROVIDER_INFO } from "../../provider/catalog";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -57,18 +57,6 @@ function publishTurnProjection(publish: () => void | Promise<void>): void {
     const publication = publish();
     if (publication) void Promise.resolve(publication).catch(failed);
   } catch { failed(); }
-}
-
-export function providerLabel(providerId: ProviderId): string {
-  return providerId === "codex"
-    ? "Codex"
-    : providerId === "claude"
-      ? "Claude"
-      : providerId === "cursor"
-        ? "Cursor"
-          : providerId === "kimi"
-            ? "Kimi Code"
-            : "OpenCode";
 }
 
 export function projectActionKind(name: string): "check" | "service" {
@@ -182,7 +170,7 @@ export function normalizedProviderRunFailure(
       : result.exitCode !== null
         ? "process-exit"
         : "provider-error");
-  const fallback = `${providerLabel(result.providerId)} could not complete the request.`;
+  const fallback = `${PROVIDER_INFO[result.providerId].name} could not complete the request.`;
   const message = reported?.sessionUnavailable === true
     ? sessionUnavailableMessage ?? staleProviderSessionDecision().reason
     : sanitizeProviderFailureSummary(

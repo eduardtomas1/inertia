@@ -20,9 +20,8 @@ import { canonicalDirectoryPath, isContained } from "../../git/paths";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
 import { resolveWorkspaceGitRepository } from "../../workspace-git";
-import {
-  assembleReadOnlyReviewRequest as assembleIsolatedReadOnlyReviewRequest,
-} from "../reviews/isolated-run-controller";
+
+export { assembleReadOnlyReviewRequest } from "../reviews/isolated-run-controller";
 
 const DEFAULT_DIFF_QUESTION =
   "Explain what this selected code does, why it changed, and any risks I should know about.";
@@ -43,14 +42,6 @@ export interface SelectedReviewContext {
   hunkId: string;
   hunkHeader: string;
   selectedLineCount: number;
-}
-
-export function assembleReadOnlyReviewRequest(
-  cwd: string,
-  visibleContent: string,
-  context: TurnRequestContext,
-) {
-  return assembleIsolatedReadOnlyReviewRequest(cwd, visibleContent, context);
 }
 
 export function reconcileReviews(

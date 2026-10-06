@@ -1,8 +1,6 @@
 import { GitError } from "../../git";
-import {
-  gitInspectionSettlementValues,
-  isGitProcessTreeTerminationFailure,
-} from "../../git/runner";
+import { gitInspectionSettlementValues } from "../../git/runner";
+import { isGitProcessTreeTerminationFailure } from "../../git/types";
 import { RestrictedCliError } from "../../restricted-cli-runner";
 
 export type SourceControlDeadlineKind = "read" | "workspace-discovery";

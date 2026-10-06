@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 import Database from "better-sqlite3";
 
@@ -32,8 +32,11 @@ import {
   removeInterruptedDatabaseFileFamily,
   waitForOperationOrAbort,
 } from "./database-backup-cancellation";
-import { cleanAutomaticBackupSidecars } from
-  "./database-backup-sidecar-cleanup";
+import {
+  cleanAutomaticBackupSidecars,
+  databaseBackupPattern,
+  safeDatabaseStem,
+} from "./database-backup-sidecar-cleanup";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 import {
   indexColumns,
@@ -133,22 +136,6 @@ export class DatabaseBackupCancelledError extends Error {
     super("The database backup was cancelled.");
     this.name = "DatabaseBackupCancelledError";
   }
-}
-
-function safeDatabaseStem(databasePath: string): string {
-  const raw = basename(databasePath, extname(databasePath));
-  return /^[A-Za-z0-9_-]{1,80}$/u.test(raw) ? raw : "inertia";
-}
-
-function escapedRegularExpression(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-function backupPattern(databasePath: string, partial = false): RegExp {
-  return new RegExp(
-    `^${escapedRegularExpression(safeDatabaseStem(databasePath))}-[0-9TZ]+(?:-[0-9]+)?\\.sqlite${partial ? "\\.partial" : ""}$`,
-    "u",
-  );
 }
 
 function ensureOwnedDirectory(path: string): void {
@@ -594,7 +581,7 @@ function listValidatedBackups(databasePath: string): {
   if (!existsSync(backupsDirectory)) {
     return { invalid: [], unsupported: [], valid: [] };
   }
-  const pattern = backupPattern(databasePath);
+  const pattern = databaseBackupPattern(databasePath, "complete");
   const invalid: string[] = [];
   const unsupported: string[] = [];
   const valid: ValidatedBackup[] = [];
@@ -627,7 +614,7 @@ function listValidatedBackups(databasePath: string): {
 function listBackupMetadata(databasePath: string): ValidatedBackup[] {
   const { backupsDirectory } = databaseRecoveryPaths(databasePath);
   if (!existsSync(backupsDirectory)) return [];
-  const pattern = backupPattern(databasePath);
+  const pattern = databaseBackupPattern(databasePath, "complete");
   const backups: ValidatedBackup[] = [];
   for (const filename of readdirSync(backupsDirectory)) {
     if (!pattern.test(filename)) continue;

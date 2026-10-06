@@ -16,7 +16,6 @@ import {
 } from "./paths";
 import {
   boundedInteger,
-  isGitProcessTreeTerminationFailure,
   runGit,
   runGitInspection,
   settleGitInspections,
@@ -28,6 +27,7 @@ import {
   type GitArtifactState,
   type GitDiffOptions,
   type GitSnapshotComparison,
+  isGitProcessTreeTerminationFailure,
 } from "./types";
 
 function validateArtifactRef(ref: string): string {

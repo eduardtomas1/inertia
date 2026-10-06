@@ -2,6 +2,31 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.70 — 2026-10-06
+
+Claude no longer fails a turn that is still answering after background work
+finishes.
+
+### Chats and turns
+
+- When Claude ends a reply while a background command and a watcher run, and
+  the command finishes first, Claude's answer to that result is kept. Before,
+  the watcher ending a moment later could stop Claude while it was still
+  preparing that answer, and the turn failed with **Claude Agent SDK exited
+  before the parent resumed after delegated work**.
+
+### Providers and dependencies
+
+- Codex 0.160.1, Claude Agent SDK 0.3.291, Cursor, Kimi Code 2.1.1, OpenCode
+  1.18.34 and Antigravity 1.3.0 need no change since 0.0.69. No dependency
+  update is due.
+
+### Fixes
+
+- CI only: the OpenCode human-wait test allows 1 second of provider silence
+  instead of 300 ms, so a loaded runner starting the test fixture no longer
+  fails it.
+
 ## 0.0.69 — 2026-10-06
 
 Kimi Code plan-mode chats keep working after a failed or interrupted turn, the

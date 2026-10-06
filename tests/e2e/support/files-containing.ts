@@ -6,6 +6,13 @@ const LOCKED_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
 const LOCKED_RETRIES = 3;
 const LOCKED_BACKOFF_MS = 100;
 const CHROMIUM_DATABASE_DIRECTORY = /(?:Storage|Cache)$|^IndexedDB$/u;
+const CHROMIUM_NETWORK_DATABASES = new Set([
+  "Cookies",
+  "Network Persistent State",
+  "TransportSecurity",
+  "Trust Tokens",
+  "Reporting and NEL",
+]);
 
 export interface FileScan {
   matches: string[];
@@ -20,6 +27,10 @@ interface FileScanOptions {
 export function isChromiumLockFile(path: string): boolean {
   const name = basename(path);
   if (name === "LOCK" || name === "lockfile") return true;
+  if (basename(dirname(path)) === "Network") {
+    const database = name.endsWith("-journal") ? name.slice(0, -"-journal".length) : name;
+    if (CHROMIUM_NETWORK_DATABASES.has(database)) return true;
+  }
   if (!name.endsWith(".ldb") && !name.endsWith(".log")) return false;
   return dirname(path).split(/[\\/]/u).some((segment) => CHROMIUM_DATABASE_DIRECTORY.test(segment));
 }

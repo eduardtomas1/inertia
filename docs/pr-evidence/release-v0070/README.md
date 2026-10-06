@@ -1,6 +1,6 @@
 # v0.0.70 release preparation
 
-This preparation integrates main with #587. It bumps the package and lockfile
+This preparation integrates main `22c3b07e` (#587). It bumps the package and lockfile
 root versions from 0.0.69 to 0.0.70, adds the curated 0.0.70 changelog
 section, fixes the cause of both Linux release runners' red unit suite on
 `v0.0.69`, and adds this report.

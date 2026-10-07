@@ -8099,6 +8099,7 @@ button.turn-agents-line:focus-visible {
   border: 1px solid var(--border-strong);
   border-radius: 16px;
   color: var(--text);
+  font-size: var(--ui-font-main);
   background: var(--surface-strong);
   box-shadow: var(--shadow), var(--glass-inset);
 }

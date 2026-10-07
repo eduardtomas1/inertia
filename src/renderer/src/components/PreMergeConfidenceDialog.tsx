@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   GitPreMergeConfidence,
@@ -235,7 +236,7 @@ export function PreMergeConfidenceDialog({
   const otherThreads = confidence?.reviewThreads.filter(({ codex }) => !codex) ?? [];
   const visibleFiles = confidence?.files.slice(0, 12) ?? [];
   const remainingFiles = confidence?.files.slice(12) ?? [];
-  return (
+  return createPortal(
     <div
       className="dialog-backdrop pre-merge-backdrop"
       role="presentation"
@@ -483,7 +484,8 @@ export function PreMergeConfidenceDialog({
           <button type="button" className="primary-button" onClick={onClose}>Done</button>
         </footer>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

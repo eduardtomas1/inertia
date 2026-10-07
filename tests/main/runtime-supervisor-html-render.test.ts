@@ -18,6 +18,10 @@ const render = {
 };
 let dataDirectory: string;
 
+const armProcessContainment = () => process.platform === "win32"
+  ? { kind: "windows-job-v1" as const, name: `Global\\InertiaRuntime-${"a".repeat(64)}` }
+  : null;
+
 class FakeUtilityProcess extends EventEmitter {
   pid: number | undefined = 12_345;
   readonly messages: RuntimeWorkerCommand[] = [];
@@ -70,6 +74,7 @@ function readySupervisor(): { supervisor: RuntimeSupervisor; children: FakeUtili
       return child as never;
     },
     recoverOwnedProcesses: () => true,
+    armProcessContainment,
   });
   supervisor.start();
   children[0]!.spawn();
@@ -101,6 +106,7 @@ describe("RuntimeSupervisor visual reply reads", () => {
       workerOptions: { dataDirectory, defaultWorkspacePath: dataDirectory, enableProviders: false },
       spawn: () => new FakeUtilityProcess() as never,
       recoverOwnedProcesses: () => true,
+      armProcessContainment,
     });
     await expect(supervisor.readHtmlRender(RENDER_ID)).rejects.toThrow();
   });

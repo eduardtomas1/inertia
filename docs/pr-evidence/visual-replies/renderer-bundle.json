@@ -1,0 +1,31 @@
+{
+  "feature": "visual-replies",
+  "platform": "linux-x64",
+  "node": "22.22.0",
+  "measured": {
+    "mainWorkbenchFirstLoadJavaScript": 875074,
+    "coreJavaScript": 2293275,
+    "transcriptJavaScript": "within budget",
+    "detachedChatFirstLoadJavaScript": "within budget"
+  },
+  "previousBudget": {
+    "mainWorkbenchFirstLoadJavaScript": 873776,
+    "coreJavaScript": 2281573
+  },
+  "allowance": {
+    "mainWorkbenchFirstLoadJavaScript": 1298,
+    "coreJavaScript": 11702
+  },
+  "headroomBytes": 256,
+  "eagerModules": [
+    "response-timeline/model.ts htmlRenders split",
+    "response-timeline/virtualization.ts frame height estimate",
+    "shared/html-render-reference.ts"
+  ],
+  "deferredModules": [
+    "response-timeline/html-render.tsx",
+    "response-timeline/html-render-bridge.ts",
+    "response-timeline/html-render-dialog.tsx",
+    "hooks/useHtmlRenderTheme.ts"
+  ]
+}

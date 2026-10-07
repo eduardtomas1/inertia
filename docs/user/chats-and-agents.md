@@ -20,6 +20,15 @@
 
 If a Claude provider update requires a fresh native session, Inertia supplies a bounded excerpt of this chat’s recent visible messages as historical reference. The execution context records any truncation. Recovery is omitted if it cannot fit alongside your selected context within the turn limits. Hidden provider state, attachment contents and tool output are not recovered; compatible native sessions continue normally.
 
+## Visual replies
+
+An agent can answer with a page as well as text: a chart, a table, a diagram or an interface mockup. Ask for it in plain words, for example *“Chart the test durations by package and explain the slowest ones.”* The page appears in the chat above the agent’s written reply for that turn and follows your light or dark mode and color theme.
+
+- Point at the page and choose **Open full size** (or Tab to the button) to view it in a larger dialog. Escape closes it.
+- Links in the page open in your default browser.
+- The page runs in a sandbox. It cannot reach the network, your files, the project or the rest of Inertia, so everything it shows must be inside the page itself.
+- Private Connect clients don’t show visual replies; they see the agent’s written reply only.
+
 ## Keep work organized
 
 Right-click a chat in the sidebar, or focus it and press Shift+F10 or the Menu key, to open its actions:

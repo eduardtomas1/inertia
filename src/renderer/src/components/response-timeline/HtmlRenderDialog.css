@@ -1,0 +1,54 @@
+.html-render-dialog {
+  display: grid;
+  width: min(1200px, 100%);
+  height: calc(100dvh - clamp(16px, 6vw, 56px));
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: clamp(12px, 2vw, 18px);
+  color: var(--text);
+  background: var(--conversation-canvas-surface);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
+}
+
+.html-render-dialog:focus {
+  outline: none;
+}
+
+.html-render-dialog-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: calc(var(--ui-font-main) + var(--platform-readability-adjustment));
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-render-dialog-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 16px clamp(12px, 3vw, 28px);
+  border: 0;
+  background: transparent;
+}
+
+.html-render-dialog-guard {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 560px) {
+  .html-render-dialog {
+    height: calc(100dvh - 16px);
+    border-radius: 12px;
+  }
+}

@@ -80,9 +80,13 @@ export function attachmentPreviewKind(
 
 export type AttachmentPreviewSource = Pick<ChatAttachment, "id" | "name" | "mimeType" | "size" | "snapshot">;
 
-export function attachmentPreviewUrl(attachment: Pick<ChatAttachment, "id">): string {
-  const scheme = globalThis.location?.protocol === "inertia-canary:"
+/** The privileged app protocol of this build: canary builds serve `inertia-canary:`. */
+export function appProtocolScheme(): "inertia" | "inertia-canary" {
+  return globalThis.location?.protocol === "inertia-canary:"
     ? "inertia-canary"
     : "inertia";
-  return `${scheme}://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
+}
+
+export function attachmentPreviewUrl(attachment: Pick<ChatAttachment, "id">): string {
+  return `${appProtocolScheme()}://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
 }

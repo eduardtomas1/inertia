@@ -1,3 +1,4 @@
+import { isHtmlRenderReference } from "@shared/html-render";
 import { agentRunStateForTurn, isAgentRunTerminalState } from "@shared/run-state";
 import { isTurnCheckpointUnavailableActivity } from "@shared/turn-checkpoint";
 import type {
@@ -27,6 +28,8 @@ export interface ResponseTurn {
   commentaryMessages: ChatMessage[];
   terminalAssistantMessage: ChatMessage | null;
   systemMessages: ChatMessage[];
+  /** Visual replies: turn-scoped system messages carrying a valid `htmlRender`, in message order. */
+  htmlRenders: ChatMessage[];
   activities: AgentActivity[];
   reasonings: AgentReasoning[];
   reasoning: AgentReasoning | null;
@@ -193,7 +196,12 @@ function buildTurn(
     : assistantMessages.find(({ id }) => id === agentTurn.terminalAssistantMessageId) ?? null;
   const commentaryMessages = assistantMessages.filter(({ id }) =>
     id !== terminalAssistantMessage?.id);
-  const systemMessages = scopedMessages.filter(({ role }) => role === "system");
+  // Visual replies are split out first so they never read as system notices
+  // or keep clean settled work from consolidating into Run details.
+  const htmlRenders = scopedMessages.filter(({ role, htmlRender }) =>
+    role === "system" && isHtmlRenderReference(htmlRender));
+  const systemMessages = scopedMessages.filter(({ role, htmlRender }) =>
+    role === "system" && !isHtmlRenderReference(htmlRender));
   const turnActivities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
     .filter((activity) =>
       activity.conversationId === agentTurn.conversationId)
@@ -231,6 +239,7 @@ function buildTurn(
     commentaryMessages,
     terminalAssistantMessage,
     systemMessages,
+    htmlRenders,
     activities,
     reasonings,
     reasoning: latestReasoning(reasonings),
@@ -309,6 +318,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     turn.followUpMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.assistantMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.systemMessages.forEach(({ id }) => claimedMessageIds.add(id));
+    turn.htmlRenders.forEach(({ id }) => claimedMessageIds.add(id));
     if (turn.checkpoint) claimedCheckpointIds.add(turn.checkpoint.id);
   }
 
@@ -478,6 +488,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && sameReferences(left.assistantMessages, right.assistantMessages)
     && sameReferences(left.commentaryMessages, right.commentaryMessages)
     && sameReferences(left.systemMessages, right.systemMessages)
+    && sameReferences(left.htmlRenders, right.htmlRenders)
     && sameReferences(left.activities, right.activities)
     && sameReferences(left.reasonings, right.reasonings)
     && sameReferences(left.plans, right.plans)

@@ -17,6 +17,7 @@ import {
   SupportingLedgerLayer,
   UserRequestLayer,
 } from "./layers";
+import { TurnHtmlRenders } from "./html-render";
 import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
@@ -142,6 +143,8 @@ function TurnTimelineComponent({
             onBeforeToggle={handleBeforeToggle}
             onAfterToggle={handleAfterToggle}
           />
+
+          <TurnHtmlRenders turn={turn} />
 
           <FinalAnswerDocument
             turn={turn}

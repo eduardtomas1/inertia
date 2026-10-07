@@ -219,20 +219,68 @@ describe("provider continuation policy", () => {
     });
   });
 
-  it("requires a new chat when an established harness belongs to another provider", () => {
+  it("hands an established chat to another provider in a fresh session", () => {
     expect(resolveContinuationDecision({
       previousIdentity: codexIdentity,
       nextIdentity: { ...codexIdentity, harnessId: "claude-agent-sdk" },
       previousModelId: codex.modelId,
       nextModelId: "claude-model",
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+    })).toEqual({
+      action: "start-session",
+      changeKind: "harness",
+      reasonCode: "harness-changed",
+      reason: "The provider changed. Earlier messages travel to the new provider as context. The next turn will start a fresh provider session and preserve this chat's history.",
+    });
+  });
+
+  it("keeps the generic harness wording for a same-provider harness change", () => {
+    expect(resolveContinuationDecision({
+      previousIdentity: codexIdentity,
+      nextIdentity: { ...codexIdentity, harnessId: "codex-cli" },
+      previousModelId: codex.modelId,
+      nextModelId: codex.modelId,
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+    })).toMatchObject({
+      action: "start-session",
+      changeKind: "harness",
+      reasonCode: "harness-changed",
+      reason: expect.stringMatching(/^The agent harness changed\./u),
+    });
+  });
+
+  it("recognizes a handoff from the previous turn's provider when no session identity survives", () => {
+    expect(resolveContinuationDecision({
+      previousProviderId: "codex",
+      previousIdentity: null,
+      nextIdentity: { ...codexIdentity, harnessId: "claude-agent-sdk" },
+      previousModelId: null,
+      nextModelId: "claude-model",
       hasProviderSession: false,
       hasTurns: true,
       allowsModelSwitchWithinSession: true,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
+      changeKind: "harness",
       reasonCode: "harness-changed",
-      reason: expect.stringContaining("Start a new chat to use a different provider."),
     });
+  });
+
+  it("lets an unused draft change provider as an ordinary first turn", () => {
+    expect(resolveContinuationDecision({
+      previousProviderId: "codex",
+      previousIdentity: null,
+      nextIdentity: { ...codexIdentity, harnessId: "claude-agent-sdk" },
+      previousModelId: null,
+      nextModelId: "claude-model",
+      hasProviderSession: false,
+      hasTurns: false,
+      allowsModelSwitchWithinSession: true,
+    })).toMatchObject({ action: "start-session", reasonCode: "first-turn" });
   });
 
   it.each([

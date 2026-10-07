@@ -235,7 +235,6 @@ function workspaceProps(
     onRespondToApproval: async () => undefined,
     onRespondToInput: async () => undefined,
     onUpdateConversation: async () => undefined,
-    onCreateConversationForSelection: async () => undefined,
     onChooseAttachments: async () => null,
     onImportAttachments: async () => null,
     onReleaseAttachment: async () => undefined,

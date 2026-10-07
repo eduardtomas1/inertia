@@ -1,4 +1,6 @@
+import { byteLength } from "./bounded-message-text";
 import { readContinuationHistory } from "./continuation-history";
+import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
@@ -54,7 +56,7 @@ export class TranscriptRepository {
     excludedMessageId?: string,
     route?: Parameters<typeof readContinuationHistory>[5],
   ): ReturnType<typeof readContinuationHistory> {
-    return readContinuationHistory(
+    const history = readContinuationHistory(
       this.context.database,
       conversationId,
       capacityBytes,
@@ -62,6 +64,13 @@ export class TranscriptRepository {
       excludedMessageId,
       route,
     );
+    if (route?.handoff === undefined || !history || history.blocks.length === 0) return history;
+    const files = providerHandoffFilesBlock(this.context.database, conversationId);
+    if (!files) return history;
+    const usedBytes = history.blocks.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0);
+    return usedBytes + providerHandoffBlockBytes(files) <= capacityBytes
+      ? { ...history, blocks: [...history.blocks, files] }
+      : history;
   }
 
   createMessage(

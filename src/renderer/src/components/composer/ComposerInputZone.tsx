@@ -2,6 +2,7 @@ import { PASTED_TEXT_ATTACHMENT_BYTES } from "@shared/attachments";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
+  ArrowLeftRight,
   Box,
   Check,
   CircleAlert,
@@ -38,8 +39,6 @@ import {
   RouteRepairIcon,
   routeRepairLabel,
 } from "./config";
-import { RouteChangeConfirmation } from "./RouteChangeConfirmation";
-import type { PendingModelRoute } from "./types";
 import type { ComposerCommandMenuItem } from "./ComposerCommandMenu";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
@@ -69,13 +68,6 @@ export interface ComposerInputZoneProps {
   attachmentsDisabled?: boolean;
   pendingAttachmentIds?: ReadonlySet<string>;
   onRemoveAttachment: (attachment: ChatAttachment) => void;
-  pendingRoute: PendingModelRoute | null;
-  creatingRouteConversation: boolean;
-  routeCancelRef: RefObject<HTMLButtonElement | null>;
-  canCreateRouteConversation: boolean;
-  routeCreationBlockedReason?: string | null;
-  onDismissPendingRoute: () => void;
-  onCreateRouteConversation: () => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   message: string;
   onMessageChange: (message: string) => void;
@@ -111,8 +103,8 @@ export interface ComposerInputZoneProps {
   slashMatch: RegExpExecArray | null;
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
-  continuationRefusal: string | null;
-  continuationNoticeId: string;
+  /** Announces that the next turn hands this chat's history to another provider. */
+  handoffNotice?: string | null;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -141,13 +133,6 @@ export function ComposerInputZone({
   attachmentsDisabled = false,
   pendingAttachmentIds,
   onRemoveAttachment,
-  pendingRoute,
-  creatingRouteConversation,
-  routeCancelRef,
-  canCreateRouteConversation,
-  routeCreationBlockedReason = null,
-  onDismissPendingRoute,
-  onCreateRouteConversation,
   textareaRef,
   message,
   onMessageChange,
@@ -182,8 +167,7 @@ export function ComposerInputZone({
   onCompactCommand,
   compactUnavailableReason,
   compactNotice,
-  continuationRefusal,
-  continuationNoticeId,
+  handoffNotice = null,
   goalAvailable,
   onOpenGoal,
   onOpenResume,
@@ -442,21 +426,11 @@ export function ComposerInputZone({
           pendingAttachmentIds={pendingAttachmentIds}
           onRemove={onRemoveAttachment}
         />
-        {continuationRefusal && (
-          <span id={continuationNoticeId} className="visually-hidden" data-continuation-refusal="">
-            {continuationRefusal}
-          </span>
-        )}
-        {pendingRoute && (
-          <RouteChangeConfirmation
-            pendingRoute={pendingRoute}
-            creating={creatingRouteConversation}
-            cancelRef={routeCancelRef}
-            canCreate={canCreateRouteConversation}
-            blockedReason={routeCreationBlockedReason}
-            onDismiss={onDismissPendingRoute}
-            onCreate={onCreateRouteConversation}
-          />
+        {handoffNotice && (
+          <div className="composer-handoff-notice" role="status">
+            <ArrowLeftRight size={13} aria-hidden="true" />
+            <span>{handoffNotice}</span>
+          </div>
         )}
         {compactNotice && (
           <div
@@ -603,10 +577,7 @@ export function ComposerInputZone({
               ? `${mentionListboxId}-${mentionOptions.indexOf(activeMention)}`
               : undefined}
           aria-label="Message"
-          aria-describedby={continuationRefusal ? continuationNoticeId : undefined}
-          placeholder={continuationRefusal
-            ? "This chat can't continue here. Start a new chat to keep working."
-            : stopsBeforeSending
+          placeholder={stopsBeforeSending
             ? "Enter stops and sends · Tab queues"
             : running
             ? "Enter sends · Tab queues"

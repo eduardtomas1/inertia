@@ -16,6 +16,7 @@ import {
   providerNativeModelSelection,
   type ModelSelection,
 } from "../../../shared/model-routing";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import { deleteCheckpoints } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import {
@@ -26,10 +27,7 @@ import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-res
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
-import {
-  ConversationCreationService,
-  type ConversationCreationDependencies,
-} from "../conversation-creation-service";
+import { ConversationCreationService } from "../conversation-creation-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -102,7 +100,6 @@ export interface ConversationCommandDependencies {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
   };
   creation?: ConversationCreationService;
-  turns?: ConversationCreationDependencies["turns"];
   contextRequests?: ConversationContextRequestCoordinator;
 }
 
@@ -114,7 +111,6 @@ export function createConversationCommandHandler(
   return defineRuntimeCommandHandler([
     "project.ensure-scratch",
     "conversation.create",
-    "conversation.continue",
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
@@ -158,22 +154,6 @@ export function createConversationCommandHandler(
           command.requestId,
         );
         if (command.payload.activate !== false) return "mutation";
-        dependencies.broadcastSnapshot();
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: {
-            kind: "conversation.created",
-            conversationId: conversation.id,
-          },
-        });
-        return "handled";
-      }
-      case "conversation.continue": {
-        const conversation = await creation.continueFrom(
-          command.payload,
-          command.requestId,
-        );
         dependencies.broadcastSnapshot();
         dependencies.send(socket, {
           type: "request.result",
@@ -404,6 +384,7 @@ export function createConversationCommandHandler(
         let canonicalSelection: ModelSelection | null = null;
         let canonicalProviderId: Conversation["providerId"] | null = null;
         let resetProviderSession = false;
+        let restoredProviderSession: Pick<Conversation, "providerSessionId" | "continuationIdentity"> | null = null;
         if (changesSelection) {
           const selection = dependencies.backendProfileController
             .validateSelection(
@@ -421,15 +402,19 @@ export function createConversationCommandHandler(
               "The selected provider does not match the verified model route.",
             );
           }
-          dependencies.store.assertConversationProvider(conversationId, route.providerId, true);
           canonicalSelection = selection;
           canonicalProviderId = route.providerId;
           const latestTurn = dependencies.store
             .latestAgentTurnForConversation(conversationId);
+          const savedSessionId = current.providerSessionId
+            ?? (latestTurn && isAgentTurnTerminalStatus(latestTurn.status)
+              ? latestTurn.providerSessionAfter
+              : null);
           const latestTurnMatchesSession = latestTurn !== null
-            && current.providerSessionId !== null
-            && latestTurn.providerSessionAfter === current.providerSessionId;
+            && savedSessionId !== null
+            && latestTurn.providerSessionAfter === savedSessionId;
           const decision = resolveContinuationDecision({
+            previousProviderId: latestTurn?.providerId ?? current.providerId,
             previousIdentity: latestTurn
               ? latestTurnMatchesSession
                 ? latestTurn.continuationIdentity
@@ -444,7 +429,7 @@ export function createConversationCommandHandler(
               ? current.modelSelection.modelId
               : null,
             nextModelId: selection.modelId,
-            hasProviderSession: current.providerSessionId !== null,
+            hasProviderSession: savedSessionId !== null,
             hasTurns: latestTurn !== null,
             allowsModelSwitchWithinSession:
               officiallyAllowsModelSwitchWithinSession(route.compatibility),
@@ -453,11 +438,16 @@ export function createConversationCommandHandler(
               && dependencies.backendProfileController
                 .supportsNativeFastModeControl(selection),
           });
-          if (decision.action === "new-conversation-required") {
-            throw new RuntimeRequestError(decision.reason);
-          }
           resetProviderSession = decision.action === "start-session"
             && (current.providerSessionId !== null || latestTurn !== null);
+          restoredProviderSession = decision.action === "resume-session"
+            && current.providerSessionId === null
+            && latestTurnMatchesSession
+            ? {
+                providerSessionId: savedSessionId,
+                continuationIdentity: latestTurn.continuationIdentity,
+              }
+            : null;
         }
         const changesRunConfiguration = (
           update.providerId !== undefined
@@ -508,7 +498,7 @@ export function createConversationCommandHandler(
                 providerSessionId: null,
                 continuationIdentity: null,
               }
-            : {}),
+            : restoredProviderSession ?? {}),
           pinnedAt: pinned === undefined
             ? current.pinnedAt ?? null
             : pinned ? new Date().toISOString() : null,

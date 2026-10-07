@@ -6595,7 +6595,6 @@ button.turn-agents-line:focus-visible {
 }
 
 .goal-panel-refusal { display: flex; align-items: center; gap: 8px; }
-.goal-panel-refusal button { flex: 0 0 auto; white-space: nowrap; }
 
 .goal-panel-error {
   display: flex;
@@ -9292,38 +9291,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .application-update-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
 .settings-card-note { margin: 10px 2px 0; color: var(--text-muted); font-size: 8.5px; }
 
-.composer-route-confirmation .primary-button {
-  min-height: 38px;
-  margin: 0;
-}
-
-.composer-route-confirmation {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 5px 0 5px 8px;
-  border: 0;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 52%, var(--border));
-  border-radius: 0;
-  color: var(--accent-strong);
-  background: transparent;
-}
-
-.composer-route-confirmation > span {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.composer-route-confirmation strong { overflow: hidden; color: var(--text); font-size: var(--ui-font-micro); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.composer-route-confirmation small { color: var(--text-muted); font-size: max(calc(var(--ui-font-micro) - 1px), 8px); line-height: 1.4; }
-.composer-route-confirmation .secondary-button,
-.composer-route-confirmation .primary-button { min-height: var(--control-height-small); flex: 0 0 auto; padding: 0 9px; font-size: var(--ui-font-micro); }
-.composer-route-confirmation .primary-button[aria-disabled="true"] { cursor: not-allowed; opacity: var(--disabled-opacity); }
-
 .provider-popover {
   width: min(390px, calc(100vw - 28px));
   max-height: min(560px, calc(100dvh - 220px));
@@ -9830,18 +9797,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
   .composer textarea {
     min-height: 48px;
-  }
-
-  .composer-route-confirmation {
-    flex-wrap: wrap;
-  }
-
-  .composer-route-confirmation > span {
-    flex-basis: calc(100% - 26px);
-  }
-
-  .composer-route-confirmation .secondary-button {
-    margin-left: auto;
   }
 }
 

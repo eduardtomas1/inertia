@@ -454,7 +454,7 @@ export class RuntimeStore {
     this.conversationRepository.select(conversationId);
   }
 
-  assertConversationProvider(conversationId: string, providerId: Conversation["providerId"], allowUnusedDraftChange = false): void { this.conversationRepository.assertProvider(conversationId, providerId, allowUnusedDraftChange); }
+  assertConversationProvider(conversationId: string, providerId: Conversation["providerId"]): void { this.conversationRepository.assertProvider(conversationId, providerId); }
   hasConversationMessages(conversationId: string): boolean {
     return this.conversationRepository.hasMessages(conversationId);
   }

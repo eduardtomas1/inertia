@@ -17,7 +17,7 @@ import { useSplitWorkspaceScene } from "./useSplitWorkspaceScene";
 
 type SharedPaneOptions = Omit<
   Parameters<typeof useSplitWorkspaceScene>[0],
-  "owner" | "splitConversation" | "visible" | "layout" | "onConversationCreated"
+  "owner" | "splitConversation" | "visible" | "layout"
 >;
 
 export function useSplitPaneScenes({
@@ -47,7 +47,6 @@ export function useSplitPaneScenes({
     splitConversation: pinned.secondary,
     visible: visible && visibleOwners.includes("secondary"),
     layout: secondaryLayout,
-    onConversationCreated: split.updateSplitConversationId,
   });
   const tertiaryLayout = useConversationPaneLayout(pinned.tertiary?.id ?? null);
   const tertiary = useSplitWorkspaceScene({
@@ -56,8 +55,6 @@ export function useSplitPaneScenes({
     splitConversation: pinned.tertiary,
     visible: visible && visibleOwners.includes("tertiary"),
     layout: tertiaryLayout,
-    onConversationCreated: (conversationId) =>
-      split.setPaneConversation("tertiary", conversationId),
   });
   const quaternaryLayout = useConversationPaneLayout(pinned.quaternary?.id ?? null);
   const quaternary = useSplitWorkspaceScene({
@@ -66,8 +63,6 @@ export function useSplitPaneScenes({
     splitConversation: pinned.quaternary,
     visible: visible && visibleOwners.includes("quaternary"),
     layout: quaternaryLayout,
-    onConversationCreated: (conversationId) =>
-      split.setPaneConversation("quaternary", conversationId),
   });
 
   const openWorkspaceRunPreview = useCallback((run: PreviewWorkspaceRun) => {

@@ -46,8 +46,6 @@ export function conversationWorkspaceOptions(input: {
   conversation: Conversation | null;
   project: Project | null;
   workspaceToolsUnavailable: boolean;
-  detailConversationId: string | null;
-  continuationRefusal: string | null;
 }): ConversationWorkspaceOptions {
   const { conversation, project, workspaceToolsUnavailable } = input;
   const contextSources: ConversationContextSourceOption[] = [];
@@ -87,23 +85,12 @@ export function conversationWorkspaceOptions(input: {
         projectName: candidateProject.name,
         conversationId: candidate.id,
         conversationTitle: candidate.title,
-        availability: chatResumeAvailability(
+        availability: providerTerminalResumeAvailability(
           candidate,
           input.providers.find(({ id }) => id === candidate.providerId),
-          candidate.id === input.detailConversationId ? input.continuationRefusal : null,
         ),
       });
     }
   }
   return { contextSources, resumeOptions };
-}
-
-export function chatResumeAvailability(
-  conversation: Parameters<typeof providerTerminalResumeAvailability>[0],
-  provider: Parameters<typeof providerTerminalResumeAvailability>[1],
-  continuationRefusal: string | null,
-): ReturnType<typeof providerTerminalResumeAvailability> {
-  return continuationRefusal
-    ? { kind: "unavailable", resume: null, reason: continuationRefusal }
-    : providerTerminalResumeAvailability(conversation, provider);
 }

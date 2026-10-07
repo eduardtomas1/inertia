@@ -64,7 +64,6 @@ export type ContinuationChangeKind = (typeof CONTINUATION_CHANGE_KINDS)[number];
 export const CONTINUATION_ACTIONS = [
   "start-session",
   "resume-session",
-  "new-conversation-required",
 ] as const;
 
 export type ContinuationAction = (typeof CONTINUATION_ACTIONS)[number];
@@ -76,23 +75,6 @@ export interface ContinuationDecision {
   reason: string;
 }
 
-export const CHAT_PROVIDER_CHANGE_MESSAGE =
-  "Start a new chat to use a different provider. This chat keeps its original provider and history.";
-
-export const MIXED_PROVIDER_HISTORY_MESSAGE =
-  "This chat's provider changed after some of its turns ran, so it can't continue here. Start a new chat to keep working; this chat keeps its history.";
-
-export function conversationContinuationRefusal(
-  conversation: { mixedProviderHistory?: boolean } | null | undefined,
-): string | null {
-  return conversation?.mixedProviderHistory === true ? MIXED_PROVIDER_HISTORY_MESSAGE : null;
-}
-
-export function isChatProviderRejection(error: unknown): error is Error {
-  return error instanceof Error && [CHAT_PROVIDER_CHANGE_MESSAGE, MIXED_PROVIDER_HISTORY_MESSAGE]
-    .some((message) => error.message.startsWith(message));
-}
-
 export function conversationHasHistory(conversation: { hasHistory?: boolean }): boolean {
   return conversation.hasHistory !== false;
 }
@@ -100,7 +82,6 @@ export function conversationHasHistory(conversation: { hasHistory?: boolean }): 
 export interface ContinuationDecisionInput {
   previousProviderId?: ProviderId;
   hasHistory?: boolean;
-  mixedProviderHistory?: boolean;
   previousIdentity: ContinuationIdentity | null;
   nextIdentity: ContinuationIdentity;
   previousModelId: string | null;
@@ -251,8 +232,10 @@ function startSessionDecision(
 
 /**
  * Decides whether provider-owned hidden state may be reused. The caller must
- * run this before persisting a new turn. Provider changes require a new chat;
- * same-provider session recovery keeps its existing continuation policy.
+ * run this before persisting a new turn. A provider change in an established
+ * chat is a handoff: the next turn starts a fresh session on the new provider
+ * and the chat's earlier messages are restored there as context.
+ * Same-provider session recovery keeps its existing continuation policy.
  */
 export function resolveContinuationDecision(
   input: ContinuationDecisionInput,
@@ -262,13 +245,15 @@ export function resolveContinuationDecision(
   const previousProviderId = input.previousProviderId
     ?? (input.previousIdentity ? providerIdForHarness(input.previousIdentity.harnessId) : null);
   const nextProviderId = providerIdForHarness(input.nextIdentity.harnessId);
-  if (input.mixedProviderHistory || (establishedConversation && previousProviderId && nextProviderId
-    && previousProviderId !== nextProviderId)) {
+  if (establishedConversation && previousProviderId && nextProviderId
+    && previousProviderId !== nextProviderId) {
     return {
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "harness",
       reasonCode: "harness-changed",
-      reason: input.mixedProviderHistory ? MIXED_PROVIDER_HISTORY_MESSAGE : CHAT_PROVIDER_CHANGE_MESSAGE,
+      reason: freshProviderSessionReason(
+        "The provider changed. Earlier messages travel to the new provider as context.",
+      ),
     };
   }
   if (!input.previousIdentity) {

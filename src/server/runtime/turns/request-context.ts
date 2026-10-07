@@ -22,6 +22,7 @@ import {
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
 } from "../../../shared/conversation-context";
+import { byteLength } from "../../persistence/bounded-message-text";
 import type { ConversationContextDelivery } from "../../persistence/conversation-context-transport";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
@@ -114,7 +115,7 @@ export interface AssembledTurnRequest {
 }
 
 export interface RestoredChatHistory {
-  blocks: readonly { label: string; content: string }[];
+  blocks: readonly { label: string; content: string; optional?: true }[];
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
@@ -158,10 +159,6 @@ const CONTEXT_KINDS = new Set<TurnExecutionContextKind>([
   "preview",
   "review-note",
 ]);
-
-function byteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
 
 function rejectUnsafeText(value: string, label: string): string {
   if (value.includes("\0")) throw new Error(`${label} contains an invalid null byte.`);
@@ -750,23 +747,33 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
     ));
     if (history) {
-      const restored = history.blocks.map((block) => providerContext({
-        kind: "attachment",
-        label: boundedLabel(block.label, "Restored history label"),
-        content: boundedText(block.content, "Restored history", MAX_EXECUTION_CONTEXT_BLOB_BYTES),
-        truncated: history.omittedMessageCount > 0,
-      }));
-      const candidate = buildPrompt([...providerContexts, ...restored]);
-      const candidateBytes = byteLength(candidate) + imageReferenceBytes;
-      const fits = restored.length > 0
-        && providerContexts.length + restored.length <= MAX_EXECUTION_CONTEXT_REFERENCES
-        && executionSegmentCount + restored.length <= MAX_EXECUTION_MESSAGE_SEGMENTS
-        && candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES;
-      if (fits) {
-        providerContexts.push(...restored);
-        executionPrompt = candidate;
-        assembledPayloadBytes = candidateBytes;
-        executionSegmentCount += restored.length;
+      const fitRestored = (blocks: RestoredChatHistory["blocks"]) => {
+        const restored = blocks.map((block) => providerContext({
+          kind: "attachment",
+          label: boundedLabel(block.label, "Restored history label"),
+          content: boundedText(block.content, "Restored history", MAX_EXECUTION_CONTEXT_BLOB_BYTES),
+          truncated: history.omittedMessageCount > 0,
+        }));
+        const candidate = buildPrompt([...providerContexts, ...restored]);
+        const candidateBytes = byteLength(candidate) + imageReferenceBytes;
+        return providerContexts.length + restored.length <= MAX_EXECUTION_CONTEXT_REFERENCES
+          && executionSegmentCount + restored.length <= MAX_EXECUTION_MESSAGE_SEGMENTS
+          && candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES
+          ? { restored, candidate, candidateBytes }
+          : null;
+      };
+      // Optional supplements never cost the restored messages their place.
+      const required = history.blocks.filter(({ optional }) => !optional);
+      const selected = required.length === 0
+        ? null
+        : fitRestored(history.blocks)
+          ?? (required.length < history.blocks.length ? fitRestored(required) : null);
+      const fits = selected !== null;
+      if (selected) {
+        providerContexts.push(...selected.restored);
+        executionPrompt = selected.candidate;
+        assembledPayloadBytes = selected.candidateBytes;
+        executionSegmentCount += selected.restored.length;
       }
       sessionRecovery = {
         ...(fits

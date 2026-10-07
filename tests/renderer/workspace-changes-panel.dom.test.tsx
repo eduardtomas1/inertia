@@ -158,16 +158,12 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(navigator.querySelectorAll(".workspace-repository-file")[1]).toHaveAttribute("aria-current", "true");
   });
 
-  it.each([
-    [false, true],
-    [true, false],
-  ])("offers agent revision only when the chat can continue (unavailable: %s)", async (agentRevisionUnavailable, offered) => {
+  it("offers agent revision for a selected workspace file", async () => {
     const files = [changedFile("app/README.md")];
     const onRequestRevision = vi.fn(async () => undefined);
     await act(async () => {
       render(<WorkspaceChangesPanel
         projectName="Subfolder"
-        agentRevisionUnavailable={agentRevisionUnavailable}
         snapshot={{ ...snapshot, repositories: [{ ...snapshot.repositories[0], workspacePrefix: "app", files }] }}
         summary={null}
         onRefresh={vi.fn()}
@@ -187,7 +183,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Open file" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "+ after" }));
     expect(screen.getByRole("button", { name: "Ask about" })).toBeEnabled();
-    expect(screen.queryAllByRole("button", { name: "Request revision" })).toHaveLength(offered ? 1 : 0);
+    expect(screen.queryAllByRole("button", { name: "Request revision" })).toHaveLength(1);
     expect(onRequestRevision).not.toHaveBeenCalled();
   });
 

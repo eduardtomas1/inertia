@@ -125,7 +125,6 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "conversation.create": gitMutation,
-  "conversation.continue": gitMutation,
   "conversation.context.create": shortMutation,
   "conversation.context.agent.respond": shortMutation,
   "conversation.background-tasks.get": shortRetrySafe,

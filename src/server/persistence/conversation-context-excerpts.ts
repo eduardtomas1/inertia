@@ -21,10 +21,7 @@ import {
   type ConversationContextSourceRow,
 } from "./conversation-context-source";
 import type { ConversationRow } from "./rows";
-
-function byteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
+import { byteLength } from "./bounded-message-text";
 
 export function conversationContextWorkspaceLabel(
   conversation: Pick<ConversationRow, "branch" | "worktree_path">,

@@ -50,8 +50,6 @@ export interface ChatGoalControlProps {
   onRetry: () => Promise<void>;
   onSetGoal: (input: GoalInput) => Promise<void>;
   onClearGoal: (source: AgentGoalSource) => Promise<void>;
-  continuationRefusal?: string | null;
-  onStartNewChat?: () => void;
 }
 
 export interface ChatGoalInlineProps extends ChatGoalControlProps {
@@ -86,8 +84,6 @@ export function ChatGoalControl({
   onRetry,
   onSetGoal,
   onClearGoal,
-  continuationRefusal = null,
-  onStartNewChat,
   open,
   onDismiss,
 }: ChatGoalInlineProps): React.JSX.Element | null {
@@ -102,8 +98,7 @@ export function ChatGoalControl({
   const [recoveryBudget, setRecoveryBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const capability = workflow?.goalCapability;
-  const refusal = continuationRefusal
-    ?? (capability?.kind === "unavailable" ? capability.reason : null);
+  const refusal = capability?.kind === "unavailable" ? capability.reason : null;
   const source = !refusal && capability?.available ? capability.kind : null;
   const nativeGoal = source === "codex-native";
   const goal = workflow ? currentRouteGoal(workflow) : null;
@@ -130,13 +125,6 @@ export function ChatGoalControl({
   useLayoutEffect(() => {
     if (!open) restoreActionFocus.current = false;
   }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !refusal) return;
-    const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
-    firstActionRef.current?.focus();
-  }, [open, refusal]);
 
   useLayoutEffect(() => {
     if (!open || !restoreActionFocus.current) return;
@@ -314,12 +302,6 @@ export function ChatGoalControl({
           {refusal ? (
             <div className="chat-goal-unavailable">
               <p role="status">{refusal}</p>
-              {onStartNewChat && (
-                <button ref={firstActionRef} type="button" onClick={onStartNewChat}>
-                  <Flag size={13} aria-hidden="true" />
-                  New chat
-                </button>
-              )}
             </div>
           ) : !workflow ? (
             <div className="chat-goal-unavailable">

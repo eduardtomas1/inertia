@@ -18,7 +18,7 @@ import {
   providerRunTerminal,
 } from "../../src/server/provider/contracts";
 import { ConversationProviderChangeError } from "../../src/server/persistence/errors";
-import { MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
+import { CONVERSATION_PROVIDER_MISMATCH_MESSAGE } from "../../src/server/persistence/conversation-provider-policy";
 import { nativeProviderRunFields } from "./model-route-fixture";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -105,13 +105,13 @@ function productionSources(directory: string): string[] {
 describe("conversation provider gate", () => {
   it("refuses a conversation run and compaction before the harness starts", () => {
     const events: string[] = [];
-    const { providers } = manager(events, MIXED_PROVIDER_HISTORY_MESSAGE);
+    const { providers } = manager(events, CONVERSATION_PROVIDER_MISMATCH_MESSAGE);
 
     expect(() => providers.run(input())).toThrow(ProviderRunRefusedError);
     expect(() => providers.compact(
       input({ runId: "run-2", turnId: "turn-2", sessionId: "thread-1" }),
       "Keep the plan",
-    )).toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+    )).toThrow(CONVERSATION_PROVIDER_MISMATCH_MESSAGE);
 
     expect(events).toEqual([`gate:${conversationId}:codex`, `gate:${conversationId}:codex`]);
   });
@@ -127,7 +127,7 @@ describe("conversation provider gate", () => {
 
   it("runs isolated review tasks without the conversation gate", async () => {
     const events: string[] = [];
-    const { providers, gate } = manager(events, MIXED_PROVIDER_HISTORY_MESSAGE);
+    const { providers, gate } = manager(events, CONVERSATION_PROVIDER_MISMATCH_MESSAGE);
     const isolatedId = isolatedProviderConversationId(conversationId, "task-1");
 
     await expect(providers.run(input({ conversationId: isolatedId }))).resolves.toMatchObject({ status: "completed" });
@@ -138,10 +138,10 @@ describe("conversation provider gate", () => {
 
   it("refuses a terminal resume before provider detection", async () => {
     const events: string[] = [];
-    const { providers, detectProvider } = manager(events, MIXED_PROVIDER_HISTORY_MESSAGE);
+    const { providers, detectProvider } = manager(events, CONVERSATION_PROVIDER_MISMATCH_MESSAGE);
 
     await expect(providers.terminalResumeLaunch(conversationId, "codex", "thread-1", "/workspace"))
-      .rejects.toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+      .rejects.toThrow(CONVERSATION_PROVIDER_MISMATCH_MESSAGE);
 
     expect(detectProvider).not.toHaveBeenCalled();
     expect(events).toEqual([`gate:${conversationId}:codex`]);

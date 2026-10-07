@@ -5,7 +5,7 @@ import type {
 import type { TurnGitArtifactRow } from "./rows";
 import type { StoredTurnGitArtifact } from "./types";
 
-function parseTurnGitArtifactFiles(value: string): TurnGitArtifactFile[] {
+export function parseTurnGitArtifactFiles(value: string): TurnGitArtifactFile[] {
   try {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];

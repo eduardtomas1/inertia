@@ -361,12 +361,11 @@ function conversationTurnSummary(
 }
 
 export function conversationDetailFromRow(
-  row: ConversationRow & { has_history: number; mixed_provider_history: number },
+  row: ConversationRow & { has_history: number },
 ): Conversation {
   return {
     ...conversationFromRow(row),
     hasHistory: row.has_history === 1,
-    mixedProviderHistory: row.mixed_provider_history === 1,
   };
 }
 

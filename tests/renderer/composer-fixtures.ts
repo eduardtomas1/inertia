@@ -119,7 +119,6 @@ export function composerProps(
     onSend: async () => undefined,
     onListSkills: async () => undefined,
     onUpdateConversation: () => Promise.resolve(),
-    onCreateConversationForSelection: async () => undefined,
     onChooseAttachments: async () => null,
     onImportAttachments: async () => null,
     onReleaseAttachment: async () => undefined,

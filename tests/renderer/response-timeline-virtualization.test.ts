@@ -291,6 +291,26 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     }))).toBe("Turn 1: Request");
   });
 
+  it("names and sizes a provider handoff divider from its full description", () => {
+    const handoff: ResponseTimelineItem = {
+      kind: "handoff",
+      id: "handoff:turn-b",
+      handoff: {
+        turnId: "turn-b",
+        requestedAt,
+        from: { providerId: "claude", backend: null, model: "claude-sonnet" },
+        to: { providerId: "codex", backend: null, model: null },
+        sessionRecovery: { restoredMessageCount: 1, omittedMessageCount: 0 },
+      },
+    };
+    expect(responseTimelineArticleLabel(handoff))
+      .toBe("Context handoff: Claude · claude-sonnet to Codex · 1 earlier message restored");
+    expect(responseTimelineArticleLabel(handoff, { codex: "Team Codex" }))
+      .toBe("Context handoff: Claude · claude-sonnet to Team Codex · 1 earlier message restored");
+    expect(estimateTimelineRowSize(handoff)).toBeLessThan(estimateTimelineRowSize(buildItem({ id: "sized" })));
+    expect(estimateTimelineRenderWeight([handoff])).toBe(1);
+  });
+
   it("virtualizes short histories with bounded input scans when content is heavy", () => {
     const turns = Array.from({ length: 36 }, (_, index) =>
       agentTurn(`weighted-${index}`));

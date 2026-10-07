@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
-import { conversationContinuationRefusal } from "@shared/continuation-policy";
 
 import {
   conversationWorkspaceOptions,
@@ -26,9 +25,6 @@ export function useConversationWorkspaceOptions(input: {
   const providers = connection.snapshot?.providers ?? EMPTY_LIST;
   const persistedConversation = projection.conversation;
   const persistedConversationId = persistedConversation?.id ?? null;
-  const detailConversation = projection.detail?.conversation;
-  const detailConversationId = detailConversation?.id ?? null;
-  const continuationRefusal = conversationContinuationRefusal(detailConversation);
   return useMemo(() => conversationWorkspaceOptions({
     conversations,
     projects,
@@ -37,12 +33,8 @@ export function useConversationWorkspaceOptions(input: {
     conversation: visibleWorkspaceConversation(persistedConversation, draftConversation),
     project,
     workspaceToolsUnavailable,
-    detailConversationId,
-    continuationRefusal,
   }), [
-    continuationRefusal,
     conversations,
-    detailConversationId,
     draftConversation,
     persistedConversation,
     persistedConversationId,

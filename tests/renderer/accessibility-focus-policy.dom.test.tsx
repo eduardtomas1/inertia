@@ -3,31 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelChooser } from "../../src/renderer/src/components/ModelChooser";
 import { UsageIndicator } from "../../src/renderer/src/components/UsageIndicator";
-import { Composer } from "../../src/renderer/src/components/Composer";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
-import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
-import { composerProps, conversation, deferred, provider } from "./composer-fixtures";
-
-vi.mock("../../src/renderer/src/utils/modelRouteTransition", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../src/renderer/src/utils/modelRouteTransition")>(),
-  resolveModelRouteTransition: (
-    context: { projectId: string },
-    candidate: { selection: ComposerModelRoute["selection"] },
-  ) => ({
-    projectId: context.projectId,
-    selection: candidate.selection,
-    changeKind: "model",
-    reasonCode: "model-boundary",
-    reason: "This route starts in a new chat.",
-    kind: "create-new-conversation",
-    providerSessionDisposition: "start-unbound",
-    continuationAction: "new-conversation-required",
-  }),
-}));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -172,134 +152,5 @@ describe("model search active descendant", () => {
     expect(screen.queryByRole("group", { name: "Model favorite actions" })).not.toBeInTheDocument();
     expect(within(results).getByRole("button", { name: /Add Team Alpha .* to favorites/u }))
       .toBeInTheDocument();
-  });
-});
-
-describe("route-change confirmation focus", () => {
-  function routeProviders(): ProviderInfo[] {
-    const catalogState = {
-      freshness: "fresh" as const,
-      provenance: "provider" as const,
-      updatedAt: "2026-08-01T00:00:00.000Z",
-      lastAttemptedAt: "2026-08-01T00:00:00.000Z",
-      refreshing: false,
-    };
-    const codex: ProviderInfo = {
-      ...provider,
-      models: [{
-        id: "codex-route",
-        label: "Codex Route",
-        description: "Current route",
-        isDefault: true,
-        inputModalities: ["text"],
-        reasoningOptions: [{ value: "high", label: "High", description: "" }],
-        defaultReasoningEffort: "high",
-      }],
-      metadataState: { models: catalogState, rateLimits: catalogState },
-    };
-    return [codex, {
-      ...codex,
-      id: "claude",
-      label: "Claude",
-      models: [{ ...codex.models[0]!, id: "claude-route", label: "Claude Route", description: "Destination route" }],
-    }];
-  }
-
-  function renderRouteComposer(onCreateConversationForSelection = vi.fn(async () => undefined)) {
-    const current = conversation("route-focus");
-    current.modelSelection = providerNativeModelSelection({
-      providerId: "codex",
-      modelId: "codex-route",
-      alias: "Codex Route",
-      reasoningEffort: "high",
-    });
-    current.model = "codex-route";
-    current.reasoningEffort = "high";
-    render(<Composer {...composerProps(current, {
-      providers: routeProviders(),
-      onCreateConversationForSelection,
-    })} />);
-    return onCreateConversationForSelection;
-  }
-
-  async function chooseClaudeRoute(): Promise<HTMLElement> {
-    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(await screen.findByRole("button", { name: "Claude, 2 models" }));
-    const claudeRoute = screen.getByTitle("Claude Route").closest("button");
-    if (!claudeRoute) throw new Error("Expected the Claude route action.");
-    fireEvent.click(claudeRoute);
-    return await screen.findByRole("alertdialog", { name: /Continue in a new chat with .*Claude Route\?/u });
-  }
-
-  it("focuses Cancel, leaves ordinary controls reachable, and restores the model chip on Escape", async () => {
-    renderRouteComposer();
-    const confirmation = await chooseClaudeRoute();
-    const cancel = within(confirmation).getByRole("button", { name: "Cancel" });
-
-    expect(confirmation).toHaveAttribute("aria-modal", "false");
-    await waitFor(() => expect(cancel).toHaveFocus());
-    const message = screen.getByRole("textbox", { name: "Message" });
-    message.focus();
-    expect(message).toHaveFocus();
-    expect(confirmation).toBeInTheDocument();
-
-    cancel.focus();
-    fireEvent.keyDown(cancel, { key: "Escape" });
-
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    await waitFor(() => expect(document.activeElement).toHaveClass("selected-model-chip"));
-  });
-
-  it("keeps the confirmation open and busy while its new chat is being created", async () => {
-    const creation = deferred<undefined>();
-    const create = renderRouteComposer(vi.fn(() => creation.promise));
-    const confirmation = await chooseClaudeRoute();
-
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Continue" }));
-
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(confirmation).toHaveAttribute("aria-busy", "true");
-    expect(within(confirmation).getByRole("button", { name: "Cancel" })).toBeDisabled();
-    fireEvent.keyDown(confirmation, { key: "Escape" });
-    expect(confirmation).toBeInTheDocument();
-
-    await act(async () => { creation.resolve(undefined); await creation.promise; });
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-  });
-
-  it("cancels its pending focus frame when dismissed before focus settles", async () => {
-    const frames = new Map<number, FrameRequestCallback>();
-    let nextFrame = 0;
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      frames.set(++nextFrame, callback);
-      return nextFrame;
-    });
-    const cancelFrame = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
-      frames.delete(id);
-    });
-    const flushFrames = (): number[] => {
-      const scheduledBefore = nextFrame;
-      act(() => {
-        for (const [id, callback] of Array.from(frames)) {
-          frames.delete(id);
-          callback(16);
-        }
-      });
-      return [...frames.keys()].filter((id) => id > scheduledBefore);
-    };
-    renderRouteComposer();
-    const confirmation = await chooseClaudeRoute();
-    const cancel = within(confirmation).getByRole("button", { name: "Cancel" });
-    const settleFrames = flushFrames();
-    expect(settleFrames.length).toBeGreaterThan(0);
-    expect(cancel).not.toHaveFocus();
-
-    fireEvent.keyDown(confirmation, { key: "Escape" });
-
-    expect(settleFrames.some((id) => cancelFrame.mock.calls.some(([cancelled]) => cancelled === id)))
-      .toBe(true);
-    flushFrames();
-    expect(cancel).not.toHaveFocus();
-    expect(document.activeElement).toHaveClass("selected-model-chip");
   });
 });

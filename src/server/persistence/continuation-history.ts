@@ -14,6 +14,8 @@ import { prepareConversationContextPacket } from "./conversation-context-transpo
 export interface ContinuationHistoryBlock {
   label: string;
   content: string;
+  /** Supplementary context dropped first when the restored history does not fit. */
+  optional?: true;
 }
 
 export interface ContinuationHistory {

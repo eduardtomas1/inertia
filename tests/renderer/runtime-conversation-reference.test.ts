@@ -160,29 +160,6 @@ describe("runtime conversation references", () => {
     expect(discard).toBeGreaterThan(createRequest);
   });
 
-  it("cancels judge handoff before route-created chat selection", () => {
-    const routeCreation = appSource.slice(
-      appSource.indexOf("const createConversationForSelection ="),
-      appSource.indexOf("const respondToApproval ="),
-    );
-    const generationAdvance = routeCreation.indexOf(
-      "conversationSelectionGenerationRef.current = selectionGeneration",
-    );
-    const createRequest = routeCreation.indexOf(
-      "await run(command.type, command)",
-    );
-    const selectionRequest = routeCreation.indexOf(
-      "await selectConversationCommand(",
-    );
-
-    expect(generationAdvance).toBeGreaterThan(-1);
-    expect(createRequest).toBeGreaterThan(generationAdvance);
-    expect(selectionRequest).toBeGreaterThan(createRequest);
-    expect(routeCreation.match(
-      /selectionGeneration !== conversationSelectionGenerationRef\.current/g,
-    )).toHaveLength(2);
-  });
-
   it("routes every user command that can replace active workspace authority", () => {
     const authorityCommands = appSource.slice(
       appSource.indexOf("export function commandMayChangeWorkspaceAuthority"),

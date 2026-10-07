@@ -151,7 +151,6 @@ function props(
     onSend: async () => undefined,
     onListSkills: async () => undefined,
     onUpdateConversation: async () => undefined,
-    onCreateConversationForSelection: async () => undefined,
     onChooseAttachments: async () => null,
     onImportAttachments: async () => null,
     onReleaseAttachment: async () => undefined,

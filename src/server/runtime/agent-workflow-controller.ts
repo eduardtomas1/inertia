@@ -15,7 +15,6 @@ import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
 import { boundedDisplayString, exactBoundedString, parseCodexGoal } from "./codex-goal-parsing";
 import { ConversationProviderContact } from "./conversation-provider-contact";
-import { ConversationProviderChangeError } from "../persistence/errors";
 import type { RuntimeStore } from "../database";
 import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
@@ -162,16 +161,6 @@ export class AgentWorkflowController {
     this.contact = new ConversationProviderContact(store, providers);
   }
 
-  private providerContactRefusal(conversationId: string): string | null {
-    try {
-      this.store.assertConversationProvider(conversationId, this.store.conversation(conversationId).providerId);
-      return null;
-    } catch (error) {
-      if (error instanceof ConversationProviderChangeError) return error.message;
-      throw error;
-    }
-  }
-
   attachNativeGoalRuntime(runtime: NativeGoalRuntime): void {
     if (this.nativeGoalRuntime) {
       throw new Error("The native goal runtime is already attached.");
@@ -192,7 +181,6 @@ export class AgentWorkflowController {
     const currentSkillDiscovery = this.skillDiscovery.get(conversationId);
     const nativeGoalRefreshWarning =
       this.nativeGoalRefreshWarnings.get(conversationId);
-    const contactRefusal = this.providerContactRefusal(conversationId);
     if (
       nativeGoalRefreshWarning
       && (
@@ -214,14 +202,7 @@ export class AgentWorkflowController {
     return {
       conversationId,
       goals,
-      goalCapability: contactRefusal
-        ? {
-            kind: "unavailable",
-            available: false,
-            label: "Goals unavailable",
-            reason: contactRefusal,
-          }
-        : native
+      goalCapability: native
         ? {
             kind: "codex-native",
             available: true,
@@ -241,14 +222,7 @@ export class AgentWorkflowController {
         .sort((left, right) =>
           left.scope.localeCompare(right.scope, "en")
           || left.name.localeCompare(right.name, "en")),
-      skillsCapability: contactRefusal
-        ? {
-            kind: "unavailable",
-            available: false,
-            label: "Skills unavailable",
-            reason: contactRefusal,
-          }
-        : native
+      skillsCapability: native
         ? {
             kind: "codex-native",
             available: true,
@@ -268,7 +242,6 @@ export class AgentWorkflowController {
               "This route does not expose safe structured skill invocation.",
           },
       goalRefreshWarning: native
-        && !contactRefusal
         && nativeGoalRefreshWarning?.providerSessionId
           === conversation.providerSessionId
           ? nativeGoalRefreshWarning.message
@@ -285,7 +258,6 @@ export class AgentWorkflowController {
     if (
       isNativeCodexConversation(conversation)
       && conversation.providerSessionId
-      && !this.providerContactRefusal(conversationId)
     ) {
       const providerSessionId = conversation.providerSessionId;
       await this.withNativeGoalOperation(

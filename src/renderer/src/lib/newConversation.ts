@@ -13,7 +13,6 @@ import {
 } from "../../../shared/model-routing";
 
 type ConversationCreateCommand = Extract<ClientCommand, { type: "conversation.create" }>;
-type ConversationContinueCommand = Extract<ClientCommand, { type: "conversation.continue" }>;
 
 export type NewConversationPayload = ConversationCreateCommand["payload"];
 
@@ -120,48 +119,6 @@ export function withNewConversationModelSelection(
       capabilities: selection.capabilities.map((capability) => ({
         ...capability,
       })),
-    },
-  };
-}
-
-export type ChatConfiguration = Pick<Conversation, "accessMode" | "interactionMode">;
-
-export interface ReplacementChatRequest {
-  selection: ModelSelection;
-  configuration: ChatConfiguration;
-  prefillText?: string;
-  sourceConversationId?: string;
-  onCreated?: (conversationId: string) => void;
-}
-
-export function replacementConversationPayload(
-  project: Project,
-  settings: AppSettings,
-  request: ReplacementChatRequest,
-): NewConversationPayload {
-  return {
-    ...withNewConversationModelSelection(buildNewConversationPayload(project, settings), request.selection),
-    ...request.configuration,
-    activate: false,
-  };
-}
-
-export function replacementConversationCommand(
-  project: Project,
-  settings: AppSettings,
-  request: ReplacementChatRequest,
-): Omit<ConversationCreateCommand, "requestId"> | Omit<ConversationContinueCommand, "requestId"> {
-  const payload = replacementConversationPayload(project, settings, request);
-  if (request.sourceConversationId === undefined) {
-    return { type: "conversation.create", payload };
-  }
-  return {
-    type: "conversation.continue",
-    payload: {
-      sourceConversationId: request.sourceConversationId,
-      modelSelection: payload.modelSelection!,
-      accessMode: request.configuration.accessMode,
-      interactionMode: request.configuration.interactionMode,
     },
   };
 }

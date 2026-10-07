@@ -8,13 +8,11 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import type { LimitResetResult } from "../../src/shared/limit-reset";
-import { MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
 import { providerNativeModelSelection, versionedContinuationIdentityForSelection } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { LimitResetBanner } from "../../src/renderer/src/components/composer/LimitResetBanner";
 import type { LimitResetCommandRunner } from "../../src/renderer/src/components/composer/limitResetClient";
 import type { ComposerProps } from "../../src/renderer/src/components/composer/types";
-import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { composerProps, conversation, provider } from "./composer-fixtures";
 
 const conversationId = "44444444-4444-4444-8444-444444444444";
@@ -85,100 +83,61 @@ const limited = (overrides: Partial<LimitResetResult> = {}): LimitResetResult =>
 });
 
 function renderComposer(current: Conversation, overrides: Partial<ComposerProps> = {}) {
-  const onCreateConversationForSelection = vi.fn<NonNullable<ComposerProps["onCreateConversationForSelection"]>>(async () => undefined);
-  render(<Composer {...composerProps(current, { providers, onCreateConversationForSelection, ...overrides })} />);
-  return onCreateConversationForSelection;
-}
-
-async function chooseClaudeRoute(): Promise<void> {
-  fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-  fireEvent.click(await screen.findByRole("button", { name: /^Claude, /u }));
-  const claudeRoute = screen.getByTitle("Claude Route").closest("button");
-  if (!claudeRoute) throw new Error("Expected the Claude route action.");
-  fireEvent.click(claudeRoute);
+  const onUpdateConversation = vi.fn<ComposerProps["onUpdateConversation"]>(async () => undefined);
+  render(<Composer {...composerProps(current, { providers, onUpdateConversation, ...overrides })} />);
+  return onUpdateConversation;
 }
 
 describe("continuing a chat with another model", () => {
-  it("offers to continue a chat with history in a new chat that carries it, with focus on Cancel", async () => {
-    const create = renderComposer(chat());
-    await chooseClaudeRoute();
-
-    const offer = await screen.findByRole("alertdialog", { name: /^Continue in a new chat with .*Claude Route\?$/u });
-    expect(offer).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
-    expect(offer).not.toHaveTextContent("different provider");
-    const cancel = within(offer).getByRole("button", { name: "Cancel" });
-    await waitFor(() => expect(cancel).toHaveFocus());
-    fireEvent.click(within(offer).getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => expect(create).toHaveBeenCalledOnce());
-    expect(create.mock.calls[0]![0]).toMatchObject({
-      selection: { harnessId: providerNativeModelSelection({ providerId: "claude" }).harnessId, modelId: "claude-route" },
-      configuration: { accessMode: "supervised", interactionMode: "build" },
-      sourceConversationId: conversationId,
-    });
-  });
-
-  it.each([
-    ["a chat without history", { hasHistory: false }, {}],
-    ["a chat without a project", {}, { scratchWorkspace: true }],
-  ] as const)("keeps a plain new chat for %s", async (_label, conversationOverrides, propOverrides) => {
-    const create = renderComposer(chat(conversationOverrides), {
-      ...propOverrides,
-      onSend: vi.fn<ComposerProps["onSend"]>(async () => {
-        throw new RuntimeCommandError(MIXED_PROVIDER_HISTORY_MESSAGE, "rejected");
-      }),
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Continue." } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-
-    const offer = await screen.findByRole("alertdialog", { name: /^Open a new chat for /u });
-    fireEvent.click(within(offer).getByRole("button", { name: "New chat" }));
-
-    await waitFor(() => expect(create).toHaveBeenCalledOnce());
-    expect(create.mock.calls[0]![0]).not.toHaveProperty("sourceConversationId");
-  });
-
-  it("opens the model chooser from the usage-limited row and continues from there", async () => {
+  it("opens the model chooser from the usage-limited row and switches this chat to another provider", async () => {
     const current = chat();
-    const onLimitResetCommand = vi.fn<LimitResetCommandRunner>(async () => limited());
-    const create = renderComposer(current, { latestTurnSummary: failedTurn(current), onLimitResetCommand });
+    const onUpdateConversation = renderComposer(current, {
+      latestTurnSummary: failedTurn(current),
+      onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()),
+    });
 
     fireEvent.click(await screen.findByRole("button", { name: "Continue with another model" }));
 
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Search models" })).toHaveFocus());
     fireEvent.click(await screen.findByRole("button", { name: /^Claude, /u }));
     fireEvent.click(screen.getByTitle("Claude Route").closest("button")!);
-    const offer = await screen.findByRole("alertdialog", { name: /^Continue in a new chat with .*Claude Route\?$/u });
-    fireEvent.click(within(offer).getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ sourceConversationId: conversationId })));
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
+    expect(onUpdateConversation.mock.calls[0]![0]).toMatchObject({
+      providerId: "claude",
+      modelSelection: { harnessId: providerNativeModelSelection({ providerId: "claude" }).harnessId, modelId: "claude-route" },
+    });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
-  it("returns focus to the row action on Cancel and keeps the action unavailable while the offer is open", async () => {
+  it("retires the usage-limited row once the chat has switched to another provider", async () => {
     const current = chat();
-    renderComposer(current, { latestTurnSummary: failedTurn(current), onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()) });
-    const action = await screen.findByRole("button", { name: "Continue with another model" });
-    action.focus();
-    fireEvent.click(action);
-    fireEvent.click(await screen.findByRole("button", { name: /^Claude, /u }));
-    fireEvent.click(screen.getByTitle("Claude Route").closest("button")!);
-    const offer = await screen.findByRole("alertdialog", { name: /^Continue in a new chat with /u });
+    const onLimitResetCommand = vi.fn<LimitResetCommandRunner>(async () => limited());
+    const props = composerProps(current, { providers, latestTurnSummary: failedTurn(current), onLimitResetCommand });
+    const view = render(<Composer {...props} />);
+    expect(await screen.findByRole("group", { name: "Usage limit" })).toBeInTheDocument();
 
-    expect(action).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(action);
-    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
+    const switched = chat({
+      providerId: "claude",
+      modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "claude-route" }),
+      model: "claude-route",
+    });
+    view.rerender(<Composer {...props} conversation={switched} />);
 
-    fireEvent.click(within(offer).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(action).toHaveFocus());
-    expect(action).not.toHaveAttribute("aria-disabled");
+    expect(await screen.findByText(
+      "Next message starts a new Claude session with this chat's earlier messages as context.",
+    )).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Usage limit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue with another model" })).not.toBeInTheDocument();
+
+    view.rerender(<Composer {...props} />);
+    expect(await screen.findByRole("group", { name: "Usage limit" })).toBeInTheDocument();
   });
 
-  it("switches in place without an offer when the row's chooser picks a model of the same provider", async () => {
+  it("switches in place when the row's chooser picks a model of the same provider", async () => {
     const current = chat();
-    const onUpdateConversation = vi.fn<ComposerProps["onUpdateConversation"]>(async () => undefined);
-    const create = renderComposer(current, {
+    const onUpdateConversation = renderComposer(current, {
       latestTurnSummary: failedTurn(current),
       onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()),
-      onUpdateConversation,
     });
     fireEvent.click(await screen.findByRole("button", { name: "Continue with another model" }));
     fireEvent.click(screen.getByTitle("Codex Next").closest("button")!);
@@ -187,7 +146,6 @@ describe("continuing a chat with another model", () => {
       modelSelection: expect.objectContaining({ modelId: "codex-next" }),
     })));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(create).not.toHaveBeenCalled();
   });
 
   it("marks the row action unavailable whenever the model chooser is", async () => {
@@ -205,18 +163,6 @@ describe("continuing a chat with another model", () => {
     expect(action).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(action);
     expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
-  });
-
-  it("leaves the usage-limited row without the offer where no new chat can be created", async () => {
-    const current = chat();
-    render(<Composer {...composerProps(current, {
-      providers,
-      latestTurnSummary: failedTurn(current),
-      onLimitResetCommand: vi.fn<LimitResetCommandRunner>(async () => limited()),
-      onCreateConversationForSelection: undefined,
-    })} />);
-    expect(await screen.findByRole("group", { name: "Usage limit" })).toHaveTextContent(/^Usage limit reached$/u);
-    expect(screen.queryByRole("button", { name: "Continue with another model" })).not.toBeInTheDocument();
   });
 });
 

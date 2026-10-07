@@ -165,14 +165,13 @@ it("starts empty, mutates, and persists a deterministic app snapshot", async () 
     requestId: crossProviderRequestId,
     payload: { conversationId: conversation?.id, providerId: "codex" },
   });
-  const rejected = await client.events.next(
-    (event): event is Extract<ServerEvent, { type: "request.error" }> =>
-      event.type === "request.error" && event.requestId === crossProviderRequestId,
+  await client.events.next(
+    (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+      event.type === "request.ok" && event.requestId === crossProviderRequestId,
   );
-  expect(rejected.message).toContain("Start a new chat to use a different provider.");
-  const unchanged = await loadConversationDetail(client.socket, client.events, conversation!.id);
-  expect(unchanged.conversation.providerId).toBe("claude");
-  expect(unchanged.messages).toEqual(messageDetail.messages);
+  const handedOff = await loadConversationDetail(client.socket, client.events, conversation!.id);
+  expect(handedOff.conversation).toMatchObject({ providerId: "codex", providerSessionId: null });
+  expect(handedOff.messages).toEqual(messageDetail.messages);
 
   client.socket.close();
   await runtime.close();
@@ -191,6 +190,6 @@ it("starts empty, mutates, and persists a deterministic app snapshot", async () 
     persistedClient.events,
     persisted.snapshot.activeConversationId!,
   );
-  expect(persistedDetail.conversation.providerId).toBe("claude");
+  expect(persistedDetail.conversation.providerId).toBe("codex");
   expect(persistedDetail.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
 });

@@ -175,8 +175,8 @@ export class ConversationRepository {
     ).get(conversationId) !== undefined;
   }
 
-  assertProvider(conversationId: string, providerId: Conversation["providerId"], allowUnusedDraftChange = false): void {
-    assertConversationProvider(this.context, conversationId, providerId, allowUnusedDraftChange);
+  assertProvider(conversationId: string, providerId: Conversation["providerId"]): void {
+    assertConversationProvider(this.context, conversationId, providerId);
   }
 
   update(
@@ -219,9 +219,6 @@ export class ConversationRepository {
     if (update.providerId && update.providerId !== selectedProviderId) {
       throw new Error("The legacy provider and model selection harness do not match.");
     }
-    if (legacySelectionChanged || update.modelSelection !== undefined) {
-      this.assertProvider(conversationId, selectedProviderId, true);
-    }
     const continuationBoundaryChanged = (
       modelSelection.harnessId !== current.modelSelection.harnessId
       || modelSelection.backendProfileId !== current.modelSelection.backendProfileId
@@ -234,18 +231,19 @@ export class ConversationRepository {
       ? Math.max(Date.now(), Number.isFinite(currentUpdatedTime) ? currentUpdatedTime + 1 : 0)
       : Date.now();
     const now = new Date(eventTime).toISOString();
+    const restoresSession = continuationBoundaryChanged && typeof update.providerSessionId === "string";
     const next = {
       ...current,
       ...update,
       providerId: selectedProviderId,
       modelSelection,
-      providerSessionId: continuationBoundaryChanged
+      providerSessionId: continuationBoundaryChanged && !restoresSession
         ? null
         : update.providerSessionId === undefined
           ? current.providerSessionId
           : update.providerSessionId,
       continuationIdentity: continuationBoundaryChanged
-        ? null
+        ? restoresSession ? update.continuationIdentity ?? null : null
         : update.providerSessionId === null
           ? null
           : (update.continuationIdentity ?? current.continuationIdentity),

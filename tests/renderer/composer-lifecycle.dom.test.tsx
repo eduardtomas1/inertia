@@ -1105,7 +1105,7 @@ describe("composer asynchronous ownership", () => {
     });
   });
 
-  it("keeps the original chat and offers a new chat when choosing another provider", async () => {
+  it("keeps the draft and switches the chat in place when choosing another provider", async () => {
     const current = conversation("route-source");
     current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
@@ -1153,10 +1153,7 @@ describe("composer asynchronous ownership", () => {
         description: "Destination route",
       }],
     };
-    const onUpdateConversation = vi.fn();
-    const onCreateConversationForSelection = vi.fn()
-      .mockRejectedValueOnce(new Error("New chat failed safely."))
-      .mockResolvedValueOnce(undefined);
+    const onUpdateConversation = vi.fn<(update: unknown) => Promise<void>>(async () => undefined);
     render(<Composer {...composerProps(current, {
       providers: [codexProvider, claudeProvider],
       latestTurnSummary: {
@@ -1177,7 +1174,6 @@ describe("composer asynchronous ownership", () => {
         updatedAt: current.updatedAt,
       },
       onUpdateConversation,
-      onCreateConversationForSelection,
     })} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Carry this exact text." },
@@ -1188,25 +1184,13 @@ describe("composer asynchronous ownership", () => {
     if (!claudeRoute) throw new Error("Expected the Claude route action.");
     fireEvent.click(claudeRoute);
 
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
-    expect(onUpdateConversation).not.toHaveBeenCalled();
-    expect(onCreateConversationForSelection).not.toHaveBeenCalled();
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
+    expect(onUpdateConversation).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: "claude",
+      modelSelection: expect.objectContaining({ harnessId: "claude-agent-sdk", modelId: "claude-route" }),
+    }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Carry this exact text.");
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(dialog).toHaveTextContent("New chat failed safely."));
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Carry this exact text.");
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledTimes(2));
-    expect(onCreateConversationForSelection.mock.calls[1]).toEqual([{
-      selection: expect.objectContaining({ harnessId: "claude-agent-sdk", modelId: "claude-route" }),
-      configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
-      prefillText: "Carry this exact text.",
-      sourceConversationId: current.id,
-      onCreated: expect.any(Function),
-    }]);
-    expect(onUpdateConversation).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   });
 
   it("makes the leading draft durable, bounds trailing loss, and flushes ownership boundaries", async () => {

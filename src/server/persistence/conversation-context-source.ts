@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 
+import type { ProviderId } from "../../shared/contracts";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES } from "../../shared/conversation-context";
 import type { MessageRow } from "./rows";
 import { readBoundedMessageTail, readBoundedMessageText } from "./bounded-message-text";
@@ -17,6 +18,13 @@ export interface ContinuationRouteFilter {
   backendProfileId: string;
   endpointIdentity: string | null;
   includeUnattributed: boolean;
+  /**
+   * A provider handoff to this route carried the chat's earlier messages
+   * across. Messages other providers produced up to that handoff's request
+   * time stay eligible; the target provider's own messages from other
+   * endpoints and later messages from other routes remain withheld.
+   */
+  handoff?: { before: string; providerId: ProviderId };
 }
 
 export function continuationRouteSql(route?: ContinuationRouteFilter): {
@@ -24,6 +32,16 @@ export function continuationRouteSql(route?: ContinuationRouteFilter): {
   parameters: Array<string | null>;
 } {
   if (!route) return { sql: "", parameters: [] };
+  const handoff = route.handoff === undefined
+    ? ""
+    : `
+      OR (messages.turn_id IS NULL AND messages.created_at <= ?)
+      OR EXISTS (
+        SELECT 1 FROM agent_turns AS handoff_turn
+        WHERE handoff_turn.id = messages.turn_id
+          AND handoff_turn.requested_at <= ?
+          AND handoff_turn.provider_id <> ?
+      )`;
   return {
     sql: `AND (${route.includeUnattributed ? "messages.turn_id IS NULL OR " : ""}EXISTS (
       SELECT 1 FROM agent_turns AS route_turn
@@ -32,8 +50,14 @@ export function continuationRouteSql(route?: ContinuationRouteFilter): {
         AND (CASE WHEN json_valid(route_turn.continuation_identity_json)
           THEN json_extract(route_turn.continuation_identity_json, '$.endpointIdentity')
         END) IS ?
-    ))`,
-    parameters: [route.backendProfileId, route.endpointIdentity],
+    )${handoff})`,
+    parameters: [
+      route.backendProfileId,
+      route.endpointIdentity,
+      ...(route.handoff === undefined
+        ? []
+        : [route.handoff.before, route.handoff.before, route.handoff.providerId]),
+    ],
   };
 }
 

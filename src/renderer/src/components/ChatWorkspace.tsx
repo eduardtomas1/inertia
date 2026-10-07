@@ -55,7 +55,6 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
-import type { ReplacementChatRequest } from "../lib/newConversation";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
@@ -225,7 +224,6 @@ type ChatWorkspaceProps = {
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
-  onCreateConversationForSelection?: (request: ReplacementChatRequest) => Promise<void>;
   onChooseAttachments: (
     mode?: import("@shared/desktop").AttachmentPickerMode,
   ) => Promise<ComposerAttachmentImportLease | null>;
@@ -328,7 +326,6 @@ export function ChatWorkspace({
   onRespondToApproval,
   onRespondToInput,
   onUpdateConversation,
-  onCreateConversationForSelection,
   onChooseAttachments,
   onImportAttachments,
   onReleaseAttachment,
@@ -1124,7 +1121,6 @@ export function ChatWorkspace({
           promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
           onUpdateConversation={onUpdateConversation}
-          onCreateConversationForSelection={onCreateConversationForSelection}
           onChooseAttachments={onChooseAttachments}
           onImportAttachments={onImportAttachments}
           onReleaseAttachment={onReleaseAttachment}

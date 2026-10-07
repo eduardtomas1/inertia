@@ -60,16 +60,7 @@ export class LimitResetScheduler {
       const turn = this.store.latestAgentTurnForConversation(plan.conversationId);
       return matchesFailedNativeTurn(conversation, turn)
         && turn?.id === plan.failedTurnId
-        && queuedRouteIdentity(conversation) === plan.routeIdentity
-        && this.providerOwned(conversation);
-    } catch {
-      return false;
-    }
-  }
-  private providerOwned(conversation: Conversation): boolean {
-    try {
-      this.store.assertConversationProvider(conversation.id, conversation.providerId);
-      return true;
+        && queuedRouteIdentity(conversation) === plan.routeIdentity;
     } catch {
       return false;
     }
@@ -95,7 +86,7 @@ export class LimitResetScheduler {
     const conversation = this.store.conversation(conversationId);
     const turn = this.store.latestAgentTurnForConversation(conversationId);
     if (!turn || !matchesFailedNativeTurn(conversation, turn)) return null;
-    if (!this.providerOwned(conversation) || this.dependencies.busy(conversationId)) return null;
+    if (this.dependencies.busy(conversationId)) return null;
     const route = queuedRouteIdentity(conversation);
     const cwd = this.store.conversationPath(conversationId);
     const automatic = mode === "automatic";
@@ -119,6 +110,19 @@ export class LimitResetScheduler {
         : accountIdentity ? null : account.resumeUnavailable ?? ACCOUNT_UNCONFIRMED,
     };
   }
+  /** A deliberate provider handoff retires the plan; other drift needs attention. */
+  private settleChangedChat(plan: StoredLimitResetPlan): void {
+    if (this.handedOff(plan)) this.store.limitResets.settle(plan, "cancelled", null);
+    else this.store.limitResets.settle(plan, "blocked", CHAT_CHANGED);
+  }
+  private handedOff(plan: StoredLimitResetPlan): boolean {
+    try {
+      return this.store.conversation(plan.conversationId).providerId
+        !== this.store.agentTurn(plan.failedTurnId).providerId;
+    } catch {
+      return false;
+    }
+  }
   private retireStalePlan(conversationId: string): StoredLimitResetPlan | null {
     let plan = this.store.limitResets.get(conversationId);
     const latestTurnId = this.store.latestAgentTurnForConversation(conversationId)?.id;
@@ -128,7 +132,7 @@ export class LimitResetScheduler {
       plan = this.store.limitResets.get(conversationId);
     }
     if (plan && ["waiting", "dispatching", "missed"].includes(plan.state) && !this.current(plan)) {
-      this.store.limitResets.settle(plan, "blocked", CHAT_CHANGED);
+      this.settleChangedChat(plan);
       this.dependencies.changed(conversationId);
       plan = this.store.limitResets.get(conversationId);
     }
@@ -306,7 +310,7 @@ export class LimitResetScheduler {
   }
   private async advance(plan: StoredLimitResetPlan): Promise<void> {
     if (!this.current(plan)) {
-      this.store.limitResets.settle(plan, "blocked", CHAT_CHANGED);
+      this.settleChangedChat(plan);
       this.dependencies.changed(plan.conversationId);
       return;
     }

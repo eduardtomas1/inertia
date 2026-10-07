@@ -122,7 +122,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Provider sessions",
-        detail: "A chat stays with the provider it started on; choosing another provider offers to continue in a new chat on the same checkout, with this chat attached as context you can preview or remove before sending. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
+        detail: "Choosing another provider keeps the chat: the next message starts a new session on that provider with this chat's earlier messages as context, and the timeline marks the switch with a Context handoff divider. If the provider can no longer open the saved session, the turn restarts once in a new one and shows a New provider session note.",
       },
     ],
     jumps: [

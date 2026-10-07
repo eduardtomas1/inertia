@@ -34,13 +34,3 @@ export const conversationCreateCommandSchema = z
   })
   .strict();
 
-export const conversationContinueCommandSchema = z.strictObject({
-  ...requestBase,
-  type: z.literal("conversation.continue"),
-  payload: z.strictObject({
-    sourceConversationId: z.string().uuid(),
-    modelSelection: modelSelectionSchema,
-    interactionMode: interactionModeSchema,
-    accessMode: accessModeSchema,
-  }),
-});

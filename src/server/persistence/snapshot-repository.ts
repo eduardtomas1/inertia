@@ -49,7 +49,7 @@ import type {
   WorkspaceRunRow,
 } from "./rows";
 import type { RuntimeStoreSnapshot } from "./types";
-import { CONVERSATION_HAS_HISTORY_SQL, CONVERSATION_MIXED_PROVIDER_SQL } from "./conversation-provider-policy";
+import { CONVERSATION_HAS_HISTORY_SQL } from "./conversation-provider-policy";
 import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryRequest } from "../../shared/conversation-history";
 import {
   conversationStoredBytes,
@@ -70,7 +70,6 @@ import {
 } from "./stream-text-storage";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
-type ConversationDetailRow = ConversationShellRow & { mixed_provider_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number };
 const TURN_USAGE_LIMITED_SQL = "EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id)";
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
@@ -194,14 +193,6 @@ export class SnapshotRepository {
     `).get(conversationId) as ConversationShellRow | undefined;
   }
 
-  private conversationDetailRow(conversationId: string): ConversationDetailRow | undefined {
-    return this.context.database.prepare(`
-      SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history,
-        ${CONVERSATION_MIXED_PROVIDER_SQL} AS mixed_provider_history
-      FROM conversations WHERE id = ?
-    `).get(conversationId) as ConversationDetailRow | undefined;
-  }
-
   conversationShell(conversationId: string): ConversationShell | null {
     const row = this.conversationRow(conversationId);
     if (!row) return null;
@@ -219,7 +210,7 @@ export class SnapshotRepository {
   }
 
   conversationHistory(conversationId: string, request: ConversationHistoryRequest = {}): ConversationDetail | null {
-    const conversationRow = this.conversationDetailRow(conversationId);
+    const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     const scope = selectConversationHistory(this.context.database, conversationId, request);
     const latest = !request.before && !request.messageId && !request.turnId;
@@ -260,7 +251,7 @@ export class SnapshotRepository {
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
-    const conversationRow = this.conversationDetailRow(conversationId);
+    const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     return {
       conversation: conversationDetailFromRow(conversationRow),
@@ -270,7 +261,7 @@ export class SnapshotRepository {
   }
 
   recentConversationDetail(conversationId: string, limits: RecentConversationLimits): ConversationDetail | null {
-    const conversationRow = this.conversationDetailRow(conversationId);
+    const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     const newest = <T>(sql: string, ...parameters: (string | number)[]) =>
       (this.context.database.prepare(sql).all(...parameters) as T[]).reverse();

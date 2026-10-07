@@ -318,6 +318,8 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
     await content.getByRole("link", { name: "Real link" }).click();
     await expect.poll(opened).toContain(HOSTILE_PAGE_LINK);
     expect(await opened()).toEqual([HOSTILE_PAGE_LINK]);
+    expect(await frame.evaluate(() => Reflect.get(window, "parent") === window.top)).toBe(false);
+    expect(await frame.evaluate(() => Reflect.get(window, "__inertiaE2eIntercepted"))).toEqual([]);
 
     const scheme = new URL(frameUrl).protocol;
     await frame.evaluate((url) => { window.location.href = url; }, `${scheme}//bundle/index.html`);

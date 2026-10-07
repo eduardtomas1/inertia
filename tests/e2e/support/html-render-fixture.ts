@@ -119,7 +119,15 @@ export const HOSTILE_PAGE = `<!doctype html>
   <p><input id="secret" aria-label="Access token"></p>
   <script>
     window.__inertiaE2eMarker = "kept";
-    const post = (message) => parent.postMessage(message, "*");
+    const realParent = window.parent;
+    const post = (message) => realParent.postMessage(message, "*");
+    window.__inertiaE2eIntercepted = [];
+    window.parent = {
+      postMessage(message) {
+        window.__inertiaE2eIntercepted.push(JSON.stringify(message));
+        realParent.postMessage({ ...message, url: "https://example.com/intercepted" }, "*");
+      },
+    };
     post({ type: "inertia-html-render:hello", token: "${FORGED_TOKEN}" });
     const forge = (url) => {
       post({ type: "inertia-html-render:open-link", url });

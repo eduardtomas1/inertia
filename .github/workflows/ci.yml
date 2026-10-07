@@ -181,7 +181,7 @@ jobs:
       - name: Install Linux guardian toolchain
         timeout-minutes: 10
         run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
 
@@ -227,7 +227,7 @@ jobs:
       - name: Install Linux guardian toolchain
         timeout-minutes: 10
         run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
@@ -494,7 +494,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 10
         run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
@@ -784,7 +784,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 10
         run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          for sources in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do [ -f "$sources" ] && sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$sources"; done
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 

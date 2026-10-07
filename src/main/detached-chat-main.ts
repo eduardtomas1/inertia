@@ -33,6 +33,7 @@ import {
   DETACHED_CHAT_MIN_BOUNDS,
   DetachedChatWindowStateStore,
 } from "./detached-chat-window-state.js";
+import { guardSubframeNavigation } from "./frame-navigation-policy.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -490,6 +491,10 @@ export class DetachedChatMain {
     window.webContents.on("will-attach-webview", (event) => {
       event.preventDefault();
     });
+    guardSubframeNavigation(
+      window.webContents,
+      this.#options.applicationScheme ?? "inertia",
+    );
     let unregisterHealth = (): void => undefined;
     try {
       this.#options.registerRendererProtocol(

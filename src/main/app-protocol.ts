@@ -3,12 +3,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { net, protocol, type Protocol } from "electron";
 
+import { HTML_RENDER_PROTOCOL_HOST, isHtmlRenderId } from "../shared/html-render.js";
 import { parseWorkspaceImagePreviewUrl } from "../shared/workspace-image-preview.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import {
   resolveAttachmentPreviewResponse,
   type ConversationAttachmentAccess,
 } from "./conversation-attachment-access.js";
+import { htmlRenderDocumentResponse } from "./html-render-document.js";
 import type { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { resolveWorkspaceImagePreviewResponse } from "./workspace-image-preview.js";
 
@@ -21,18 +23,52 @@ function isContained(root: string, target: string): boolean {
     || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
+/** `<scheme>://render/<renderId>`; a fragment never reaches the handler in practice and is ignored. */
+function parseHtmlRenderUrl(url: URL): string | null {
+  if (
+    url.hostname !== HTML_RENDER_PROTOCOL_HOST
+    || url.port
+    || url.username
+    || url.password
+    || url.search
+  ) return null;
+  const renderId = url.pathname.slice(1);
+  return url.pathname.startsWith("/") && isHtmlRenderId(renderId) ? renderId : null;
+}
+
+async function resolveHtmlRenderResponse(
+  runtimeSupervisor: RuntimeSupervisor | null,
+  renderId: string,
+  conversationScope: string | undefined,
+): Promise<Response | null> {
+  if (!runtimeSupervisor) return null;
+  const render = await runtimeSupervisor.readHtmlRender(renderId);
+  if (!render) return null;
+  // A detached window may only show pages from the conversation it was opened for.
+  if (conversationScope && render.conversationId !== conversationScope) return null;
+  return htmlRenderDocumentResponse(render.html);
+}
+
 export function registerAppProtocol(options: {
   scheme?: string;
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
   runtimeSupervisor: () => RuntimeSupervisor | null;
   mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
-  workspaceImageConversationId?: string;
+  conversationScope?: string;
 }, target: Pick<Protocol, "handle"> = protocol): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
   target.handle(options.scheme ?? APP_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
+      if (url.hostname === HTML_RENDER_PROTOCOL_HOST) {
+        const renderId = parseHtmlRenderUrl(url);
+        const response = renderId
+          ? await resolveHtmlRenderResponse(options.runtimeSupervisor(), renderId, options.conversationScope)
+          : null;
+        if (!response) throw new Error();
+        return response;
+      }
       if (
         url.hostname !== APP_HOST
         || url.username
@@ -65,9 +101,9 @@ export function registerAppProtocol(options: {
       const workspaceImageRequest = parseWorkspaceImagePreviewUrl(url);
       if (workspaceImageRequest) {
         if (
-          options.workspaceImageConversationId
+          options.conversationScope
           && workspaceImageRequest.conversationId
-            !== options.workspaceImageConversationId
+            !== options.conversationScope
         ) throw new Error();
         const runtimeSupervisor = options.runtimeSupervisor();
         if (!runtimeSupervisor) throw new Error();
@@ -119,7 +155,7 @@ export function createAppProtocolRegistrar(options: {
     }
     registerAppProtocol({
       ...options,
-      workspaceImageConversationId: conversationId,
+      conversationScope: conversationId,
     }, target);
     registrations.set(target, scope);
   };

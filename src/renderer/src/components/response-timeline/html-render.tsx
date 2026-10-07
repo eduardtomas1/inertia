@@ -11,7 +11,7 @@ import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspensi
 import { htmlRenderUrl } from "../../utils/htmlRenderUrl";
 import type { ResponseTurn } from "../../utils/responseTimeline";
 import { IconButton } from "../ui";
-import { useHtmlRenderFrameBridge, useHtmlRenderLinkOpener } from "./html-render-bridge";
+import { useHtmlRenderFrameBridge, useHtmlRenderLinkOpener, useReportedFrameHeight } from "./html-render-bridge";
 import "./HtmlRender.css";
 
 /** A page that never reports its size is still shown after this delay. */
@@ -71,23 +71,22 @@ export function HtmlRenderFrame({
   // The fragment themes first paint; later changes arrive as messages so the
   // page is never reloaded.
   const [src] = useState(() => htmlRenderUrl(reference.renderId) + htmlRenderThemeFragment(theme));
-  const [height, setHeight] = useState(() => clampHtmlRenderHeight(reference.height));
-  const [revealed, setRevealed] = useState(false);
+  const [reportedHeight, reportHeight] = useReportedFrameHeight();
+  const [fallbackElapsed, setFallbackElapsed] = useState(false);
+  // The page is shown with its first measured height, or after the fallback.
+  const revealed = reportedHeight !== null || fallbackElapsed;
+  const height = reportedHeight ?? clampHtmlRenderHeight(reference.height);
   const openLink = useHtmlRenderLinkOpener(frameRef);
   const receive = useCallback((message: HtmlRenderFrameMessage) => {
-    if (message.type === "size") {
-      setHeight(clampHtmlRenderHeight(message.height));
-      setRevealed(true);
-    } else if (message.type === "open-link") {
-      openLink(message.url);
-    }
+    if (message.type === "size") reportHeight(clampHtmlRenderHeight(message.height));
+    else if (message.type === "open-link") openLink(message.url);
     // `escape` only closes the full-size dialog.
-  }, [openLink]);
+  }, [openLink, reportHeight]);
   const handleLoad = useHtmlRenderFrameBridge(frameRef, theme, receive);
 
   useEffect(() => {
     if (revealed) return;
-    const timer = window.setTimeout(() => setRevealed(true), HTML_RENDER_REVEAL_FALLBACK_MS);
+    const timer = window.setTimeout(() => setFallbackElapsed(true), HTML_RENDER_REVEAL_FALLBACK_MS);
     return () => window.clearTimeout(timer);
   }, [revealed]);
 

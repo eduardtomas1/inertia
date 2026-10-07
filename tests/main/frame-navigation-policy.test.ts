@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import type { WebContents } from "electron";
 import { describe, expect, it, vi } from "vitest";
 
-import { allowedSubframeUrl, guardSubframeNavigation } from "../../src/main/frame-navigation-policy";
+import { allowedSubframeUrl, guardFramedPages } from "../../src/main/frame-navigation-policy";
 
 const RENDER_ID = "55555555-5555-4555-8555-555555555555";
 
@@ -39,8 +39,8 @@ describe("subframe navigation policy", () => {
   });
 
   it("prevents denied subframe navigations and leaves the main frame alone", () => {
-    const contents = new EventEmitter();
-    guardSubframeNavigation(contents as unknown as WebContents, "inertia");
+    const contents = Object.assign(new EventEmitter(), { setWebRTCIPHandlingPolicy: vi.fn() });
+    guardFramedPages(contents as unknown as WebContents, "inertia");
     const navigate = (url: string, isMainFrame: boolean) => {
       const details = { url, isMainFrame, preventDefault: vi.fn() };
       contents.emit("will-frame-navigate", details);
@@ -50,5 +50,11 @@ describe("subframe navigation policy", () => {
     expect(navigate("https://example.com/", false)).toHaveBeenCalledOnce();
     expect(navigate("inertia://bundle/index.html", false)).toHaveBeenCalledOnce();
     expect(navigate("https://example.com/", true)).not.toHaveBeenCalled();
+  });
+
+  it("keeps WebRTC from opening direct UDP connections", () => {
+    const contents = Object.assign(new EventEmitter(), { setWebRTCIPHandlingPolicy: vi.fn() });
+    guardFramedPages(contents as unknown as WebContents, "inertia");
+    expect(contents.setWebRTCIPHandlingPolicy).toHaveBeenCalledExactlyOnceWith("disable_non_proxied_udp");
   });
 });

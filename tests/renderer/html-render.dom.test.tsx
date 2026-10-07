@@ -183,6 +183,28 @@ function postedThemes(frameWindow: FakeFrameWindow): HtmlRenderTheme[] {
     .map(({ theme }) => theme);
 }
 
+/** Queues animation frames so a test decides when one runs. */
+function queueAnimationFrames(): { pending: () => number; flush: () => void } {
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextId = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    nextId += 1;
+    frames.set(nextId, callback);
+    return nextId;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+    frames.delete(id);
+  });
+  return {
+    pending: () => frames.size,
+    flush: () => act(() => {
+      const queued = [...frames.values()];
+      frames.clear();
+      for (const callback of queued) callback(performance.now());
+    }),
+  };
+}
+
 const openExternal = vi.fn(async (_url: string) => undefined);
 
 function userActivation(isActive: boolean): void {
@@ -202,6 +224,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   const root = document.documentElement;
   delete root.dataset.theme;
   root.removeAttribute("style");
@@ -272,29 +295,71 @@ describe("visual replies in the response timeline", () => {
   });
 
   it("fits the frame to clamped size reports from its own window only", () => {
+    const frames = queueAnimationFrames();
     render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
     const frame = inlineFrame();
     const frameWindow = attachFrameWindow(frame);
     const figure = screen.getByRole("figure", { name: title });
     expect(figure).toHaveAttribute("data-html-render-state", "pending");
+    const report = (height: unknown, source: unknown = frameWindow, origin?: string) => {
+      postFromFrame(source, { type: `${MESSAGE}size`, height }, origin);
+      frames.flush();
+    };
 
-    postFromFrame({ postMessage: vi.fn() }, { type: `${MESSAGE}size`, height: 640 });
-    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 640 }, "inertia://render");
+    report(640, { postMessage: vi.fn() });
+    report(640, frameWindow, "inertia://render");
     expect(frame.style.height).toBe("360px");
     expect(figure).toHaveAttribute("data-html-render-state", "pending");
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 5_000 });
+    report(5_000);
     expect(frame.style.height).toBe("2000px");
     expect(figure).toHaveAttribute("data-html-render-state", "ready");
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 12 });
+    report(12);
     expect(frame.style.height).toBe("80px");
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 412.4 });
+    report(412.4);
     expect(frame.style.height).toBe("412px");
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: "900" });
+    report("900");
     expect(frame.style.height).toBe("412px");
+  });
+
+  it("applies only the latest size report once per animation frame", async () => {
+    const frames = queueAnimationFrames();
+    const { unmount } = render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    const figure = screen.getByRole("figure", { name: title });
+    const heights: string[] = [];
+    const observer = new MutationObserver(() => heights.push(frame.style.height));
+    observer.observe(frame, { attributes: true, attributeFilter: ["style"] });
+
+    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 500 });
+    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 640 });
+    expect(frames.pending()).toBe(1);
+    // Nothing changes, and the page stays hidden, until the frame runs.
+    expect(frame.style.height).toBe("360px");
+    expect(figure).toHaveAttribute("data-html-render-state", "pending");
+
+    frames.flush();
+    await Promise.resolve();
+    expect(frame.style.height).toBe("640px");
+    expect(figure).toHaveAttribute("data-html-render-state", "ready");
+    expect(heights).toEqual(["640px"]);
+
+    // A report that rounds to the current height schedules a frame but changes nothing.
+    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 640.3 });
+    frames.flush();
+    await Promise.resolve();
+    expect(heights).toEqual(["640px"]);
+    observer.disconnect();
+
+    // A report still waiting for its frame is dropped on unmount.
+    postFromFrame(frameWindow, { type: `${MESSAGE}size`, height: 700 });
+    expect(frames.pending()).toBe(1);
+    unmount();
+    expect(frames.pending()).toBe(0);
   });
 
   it("reveals a page that never reports its size after the fallback delay", () => {
@@ -425,5 +490,33 @@ describe("visual replies in the response timeline", () => {
     expect(trigger).toHaveFocus();
     window.removeEventListener(NATIVE_PREVIEW_OVERLAY_OPENED, opened);
     window.removeEventListener(NATIVE_PREVIEW_OVERLAY_CLOSED, closed);
+  });
+
+  it("shrink-wraps the full-size dialog to the height its own frame reports", async () => {
+    const user = userEvent.setup();
+    render(<ResponseTimeline {...timelineProps([renderMessage({ renderId, title, height: 300 })])} />);
+    await user.click(screen.getByRole("button", { name: `Open ${title} full size` }));
+    await screen.findByRole("dialog", { name: title }, { timeout: 10_000 });
+    const frames = queueAnimationFrames();
+    const dialogFrame = screen.getByTestId("html-render-dialog-frame") as HTMLIFrameElement;
+    const contentHeight = () => dialogFrame.style.getPropertyValue("--html-render-content-height");
+    const dialogWindow = attachFrameWindow(dialogFrame);
+    // Until the page measures itself, the agent's requested height stands in.
+    expect(contentHeight()).toBe("300px");
+
+    // The inline frame's report sizes only the inline frame.
+    postFromFrame(attachFrameWindow(inlineFrame()), { type: `${MESSAGE}size`, height: 900 });
+    frames.flush();
+    expect(contentHeight()).toBe("300px");
+
+    postFromFrame(dialogWindow, { type: `${MESSAGE}size`, height: 150 });
+    postFromFrame(dialogWindow, { type: `${MESSAGE}size`, height: 180.2 });
+    frames.flush();
+    expect(contentHeight()).toBe("181px");
+
+    // Taller than the inline cap: the stylesheet caps the dialog and the page scrolls inside it.
+    postFromFrame(dialogWindow, { type: `${MESSAGE}size`, height: 4_800 });
+    frames.flush();
+    expect(contentHeight()).toBe("4800px");
   });
 });

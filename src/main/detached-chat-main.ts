@@ -33,7 +33,7 @@ import {
   DETACHED_CHAT_MIN_BOUNDS,
   DetachedChatWindowStateStore,
 } from "./detached-chat-window-state.js";
-import { guardSubframeNavigation } from "./frame-navigation-policy.js";
+import { guardFramedPages } from "./frame-navigation-policy.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -491,7 +491,7 @@ export class DetachedChatMain {
     window.webContents.on("will-attach-webview", (event) => {
       event.preventDefault();
     });
-    guardSubframeNavigation(
+    guardFramedPages(
       window.webContents,
       this.#options.applicationScheme ?? "inertia",
     );

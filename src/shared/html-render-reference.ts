@@ -13,6 +13,8 @@ export const HTML_RENDER_MAX_TITLE_LENGTH = 120;
 export const HTML_RENDER_MIN_HEIGHT = 80;
 export const HTML_RENDER_MAX_HEIGHT = 2_000;
 export const HTML_RENDER_DEFAULT_HEIGHT = 360;
+/** Pages one agent turn may publish; further calls are refused. */
+export const HTML_RENDER_MAX_PER_TURN = 8;
 
 /** Host of the privileged protocol route that serves a page: `inertia://render/<renderId>`. */
 export const HTML_RENDER_PROTOCOL_HOST = "render";

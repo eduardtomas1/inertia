@@ -9,10 +9,14 @@ import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { htmlRendersMigration } from "../../src/server/persistence/migrations/html-renders";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
-import { HtmlRenderRepository, HtmlRenderTurnInactiveError } from "../../src/server/persistence/html-render-repository";
+import {
+  HtmlRenderLimitReachedError,
+  HtmlRenderRepository,
+  HtmlRenderTurnInactiveError,
+} from "../../src/server/persistence/html-render-repository";
 import { messageFromRow } from "../../src/server/persistence/codecs";
 import { chatMessageSchema } from "../../src/shared/contracts/chat-message-schema";
-import { HTML_RENDER_MAX_HTML_BYTES, htmlRenderPlaceholderText } from "../../src/shared/html-render";
+import { HTML_RENDER_MAX_HTML_BYTES, HTML_RENDER_MAX_PER_TURN, htmlRenderPlaceholderText } from "../../src/shared/html-render";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const directories: string[] = [];
@@ -251,6 +255,37 @@ describe("html render persistence", () => {
         ...input, conversationId: conversation.id, html: "é".repeat(HTML_RENDER_MAX_HTML_BYTES / 2 + 1),
       })).toThrow("Invalid rendered page size.");
       expect(store.conversationDetail(conversation.id)?.messages.some(({ role }) => role === "system")).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("caps each turn at eight pages without affecting other turns", async () => {
+    const { workspacePath, databasePath } = await workspace();
+    const store = openStore(databasePath, workspacePath);
+    try {
+      const { project, conversation, turn } = seed(store, workspacePath);
+      expect(HTML_RENDER_MAX_PER_TURN).toBe(8);
+      const page = (conversationId: string, source: { runId: string; id: string }, index: number) => ({
+        conversationId, runId: source.runId, turnId: source.id, title: `Chart ${index}`, html: `<p>${index}</p>`, height: 360,
+      });
+      for (let index = 1; index <= HTML_RENDER_MAX_PER_TURN; index += 1) {
+        store.htmlRenders.create(page(conversation.id, turn, index));
+      }
+      expect(() => store.htmlRenders.create(page(conversation.id, turn, 9))).toThrow(HtmlRenderLimitReachedError);
+      const renderMessages = () => store.conversationDetail(conversation.id)!.messages.filter(({ htmlRender }) => htmlRender);
+      expect(renderMessages()).toHaveLength(HTML_RENDER_MAX_PER_TURN);
+      expect(renderMessages().map(({ htmlRender }) => htmlRender!.title)).not.toContain("Chart 9");
+
+      // The next turn in the same conversation, and a turn elsewhere, start from zero.
+      settle(store, turn.id, "completed");
+      const next = beginTurn(store, conversation.id, "run-render-next");
+      expect(store.htmlRenders.create(page(conversation.id, next, 1)).renderId).toEqual(expect.any(String));
+      const other = store.createConversation(project.id, "Other", {
+        modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }),
+      });
+      const otherTurn = beginTurn(store, other.id, "run-render-other");
+      expect(store.htmlRenders.create(page(other.id, otherTurn, 1)).renderId).toEqual(expect.any(String));
     } finally {
       store.close();
     }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
   htmlRenderThemeMessage,
   readHtmlRenderFrameMessage,
@@ -48,6 +48,37 @@ export function useHtmlRenderFrameBridge(
     loadedRef.current = true;
     frameRef.current?.contentWindow?.postMessage(htmlRenderThemeMessage(themeRef.current), "*");
   }, [frameRef]);
+}
+
+/**
+ * The content height a frame's page last reported, or null before its first
+ * report. A page can report many times while it lays out, so reports are
+ * applied at most once per animation frame using only the latest one, and a
+ * change of less than a pixel is ignored. Returns the height and the reporter.
+ */
+export function useReportedFrameHeight(): readonly [number | null, (height: number) => void] {
+  const [height, setHeight] = useState<number | null>(null);
+  const latestRef = useRef<number | null>(null);
+  const scheduledRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (scheduledRef.current !== null) window.cancelAnimationFrame(scheduledRef.current);
+    scheduledRef.current = null;
+  }, []);
+
+  const report = useCallback((next: number) => {
+    latestRef.current = next;
+    if (scheduledRef.current !== null) return;
+    scheduledRef.current = window.requestAnimationFrame(() => {
+      scheduledRef.current = null;
+      const latest = latestRef.current;
+      latestRef.current = null;
+      if (latest === null) return;
+      setHeight((current) => (current !== null && Math.abs(latest - current) < 1 ? current : latest));
+    });
+  }, []);
+
+  return [height, report] as const;
 }
 
 /**

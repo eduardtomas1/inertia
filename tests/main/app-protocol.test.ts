@@ -117,6 +117,7 @@ describe("visual reply protocol route", () => {
       "content-length": String(Buffer.byteLength(body)),
       "content-security-policy": HTML_RENDER_CONTENT_SECURITY_POLICY,
       "x-content-type-options": "nosniff",
+      "x-dns-prefetch-control": "off",
       "referrer-policy": "no-referrer",
       "cache-control": "no-store",
       "permissions-policy": "camera=(), microphone=(), geolocation=(), display-capture=(), fullscreen=()",
@@ -157,10 +158,23 @@ describe("visual reply protocol route", () => {
     expect(vi.mocked(net.fetch).mock.calls.at(-1)?.[0]).toMatch(/^file:.*\/render\/55555555-5555-4555-8555-555555555555$/u);
   });
 
-  it("returns 404 for an unknown render, a runtime rejection, and an unavailable runtime", async () => {
-    expect((await serveRenders(async () => null).serve(`inertia://render/${renderId}`)).status).toBe(404);
+  async function expectUnavailablePage(response: Response): Promise<void> {
+    expect(response.status).toBe(404);
+    expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("Content-Security-Policy")).toBe(HTML_RENDER_CONTENT_SECURITY_POLICY);
+    expect(response.headers.get("X-DNS-Prefetch-Control")).toBe("off");
+    const body = await response.text();
+    expect(body).toContain(`<style id="${HTML_RENDER_THEME_STYLE_ID}">`);
+    expect(body).toContain("This page is no longer available.");
+    expect(body).not.toContain("Not found");
+  }
+
+  it("serves the themed unavailable page for an unknown render, a runtime rejection, and an unavailable runtime", async () => {
+    await expectUnavailablePage(await serveRenders(async () => null).serve(`inertia://render/${renderId}`));
     const rejected = serveRenders(() => Promise.reject(new Error("The visual reply request timed out.")));
-    expect((await rejected.serve(`inertia://render/${renderId}`)).status).toBe(404);
+    await expectUnavailablePage(await rejected.serve(`inertia://render/${renderId}`));
+    const thrown = serveRenders(() => { throw new Error("The runtime is restarting."); });
+    await expectUnavailablePage(await thrown.serve(`inertia://render/${renderId}`));
 
     const register = createAppProtocolRegistrar({
       scheme: "inertia", attachmentRegistry: () => null, conversationAttachments: () => null, runtimeSupervisor: () => null,
@@ -168,8 +182,9 @@ describe("visual reply protocol route", () => {
     const { target, handle } = protocolTarget();
     register(target);
     const handler = handle.mock.calls[0]![1] as (request: Request) => Promise<Response>;
-    const response = await handler({ url: `inertia://render/${renderId}`, signal: new AbortController().signal } as Request);
-    expect(response.status).toBe(404);
+    await expectUnavailablePage(
+      await handler({ url: `inertia://render/${renderId}`, signal: new AbortController().signal } as Request),
+    );
   });
 
   it("serves a detached window only pages from its own conversation", async () => {
@@ -177,7 +192,7 @@ describe("visual reply protocol route", () => {
     expect((await matching.serve(`inertia://render/${renderId}`)).status).toBe(200);
     const foreign = serveRenders(async () => page, "33333333-3333-4333-8333-333333333333");
     const response = await foreign.serve(`inertia://render/${renderId}`);
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe("Not found");
+    // Indistinguishable from a page that does not exist.
+    await expectUnavailablePage(response);
   });
 });

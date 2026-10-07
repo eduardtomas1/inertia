@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import {
+  clampHtmlRenderHeight,
   htmlRenderThemeFragment,
   type HtmlRenderFrameMessage,
   type HtmlRenderReference,
@@ -10,7 +11,7 @@ import { useHtmlRenderTheme } from "../../hooks/useHtmlRenderTheme";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../../utils/modalFocus";
 import { htmlRenderUrl } from "../../utils/htmlRenderUrl";
-import { useHtmlRenderFrameBridge, useHtmlRenderLinkOpener } from "./html-render-bridge";
+import { useHtmlRenderFrameBridge, useHtmlRenderLinkOpener, useReportedFrameHeight } from "./html-render-bridge";
 import "./HtmlRenderDialog.css";
 
 /** Full-size view of a visual reply: a second frame of the same page. */
@@ -27,12 +28,17 @@ export function HtmlRenderDialog({
   const theme = useHtmlRenderTheme();
   const [src] = useState(() => htmlRenderUrl(reference.renderId) + htmlRenderThemeFragment(theme));
   const openLink = useHtmlRenderLinkOpener(frameRef);
+  // The dialog shrink-wraps the page as this frame measures it; the stylesheet
+  // applies the minimum and the viewport cap, past which the page scrolls.
+  const [reportedHeight, reportHeight] = useReportedFrameHeight();
+  const contentHeight = reportedHeight ?? clampHtmlRenderHeight(reference.height);
   useNativePreviewSuspension(true);
 
   const receive = useCallback((message: HtmlRenderFrameMessage) => {
     if (message.type === "escape") onClose();
     else if (message.type === "open-link") openLink(message.url);
-  }, [onClose, openLink]);
+    else if (message.type === "size") reportHeight(Math.ceil(message.height));
+  }, [onClose, openLink, reportHeight]);
   const handleLoad = useHtmlRenderFrameBridge(frameRef, theme, receive);
 
   useEffect(() => {
@@ -95,7 +101,10 @@ export function HtmlRenderDialog({
           sandbox="allow-scripts"
           referrerPolicy="no-referrer"
           allow=""
-          style={{ colorScheme: theme.scheme }}
+          style={{
+            colorScheme: theme.scheme,
+            "--html-render-content-height": `${contentHeight}px`,
+          } as CSSProperties}
           onLoad={handleLoad}
         />
       </section>

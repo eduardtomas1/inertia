@@ -27,6 +27,7 @@ import { chatMessageSchema } from "../../src/shared/contracts/chat-message-schem
 import {
   HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_MAX_HTML_BYTES,
+  HTML_RENDER_MAX_PER_TURN,
   HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
   htmlRenderPlaceholderText,
@@ -120,6 +121,7 @@ describe("inertia_render_html definition", () => {
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_LAYOUT_GUIDE);
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_THEME_GUIDE);
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("call it before writing that reply");
+    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(`at most ${HTML_RENDER_MAX_PER_TURN} pages`);
     expect(HTML_RENDER_TOOL_DEFINITION.description.length).toBeLessThanOrEqual(2_000);
     expect(HTML_RENDER_TOOL_DEFINITION.inputSchema).toMatchObject({
       type: "object",
@@ -392,6 +394,28 @@ describe("inertia_render_html handler", () => {
       expect(result.success).toBe(false);
       expect(error(result.text)).toEqual({ code: "turn_not_active", message: new HtmlRenderTurnInactiveError().message });
       expect(renderCount()).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reports render_limit_reached once the turn holds the maximum number of pages", async () => {
+    const { store, bridge, broadcast, renderCount } = await runtime();
+    try {
+      for (let index = 1; index <= HTML_RENDER_MAX_PER_TURN; index += 1) {
+        expect((await bridge.invoke(call({ html: PAGE, title: `Chart ${index}` }))).success).toBe(true);
+      }
+      broadcast.mockClear();
+      const result = await bridge.invoke(call({ html: PAGE, title: "One too many" }));
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text)).toEqual({
+        error: {
+          code: "render_limit_reached",
+          message: "This turn already has 8 rendered pages. Update one of them in your reply instead of adding more.",
+        },
+      });
+      expect(renderCount()).toBe(HTML_RENDER_MAX_PER_TURN);
+      expect(broadcast).not.toHaveBeenCalled();
     } finally {
       store.close();
     }

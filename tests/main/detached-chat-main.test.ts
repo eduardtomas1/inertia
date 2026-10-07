@@ -83,8 +83,13 @@ class FakeWebContents extends EventEmitter {
   readonly sent: Array<{ channel: string; args: unknown[] }> = [];
   destroyed = false;
   windowOpenHandler: (() => unknown) | null = null;
+  webRtcIpHandlingPolicy: string | null = null;
 
   isDestroyed(): boolean { return this.destroyed; }
+
+  setWebRTCIPHandlingPolicy(policy: string): void {
+    this.webRtcIpHandlingPolicy = policy;
+  }
 
   send(channel: string, ...args: unknown[]): void {
     this.sent.push({ channel, args });
@@ -373,6 +378,7 @@ describe("detached chat main-process boundary", () => {
       expect(subframe("https://example.com/")).toHaveBeenCalledOnce();
       // Main-frame navigation stays with the will-navigate guard.
       expect(subframe("https://example.com/", true)).not.toHaveBeenCalled();
+      expect(popup.webContents.webRtcIpHandlingPolicy).toBe("disable_non_proxied_udp");
 
       expect(await value.ipc.invoke(
         DETACHED_CHAT_IPC.getWindowContext,

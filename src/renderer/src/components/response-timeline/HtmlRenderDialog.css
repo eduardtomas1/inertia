@@ -1,9 +1,12 @@
+/* The dialog shrink-wraps the page: the header plus the frame, whose height
+   follows the page's reported content height (at least 240px) and shrinks to
+   the viewport cap, past which the page scrolls inside the frame. */
 .html-render-dialog {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   width: min(1200px, 100%);
-  height: calc(100dvh - clamp(16px, 6vw, 56px));
+  max-height: min(90dvh, calc(100dvh - clamp(16px, 6vw, 56px)));
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: clamp(12px, 2vw, 18px);
@@ -14,6 +17,10 @@
 
 .html-render-dialog:focus {
   outline: none;
+}
+
+.html-render-dialog > .attachment-preview-header {
+  flex: none;
 }
 
 .html-render-dialog-title {
@@ -28,8 +35,10 @@
 
 .html-render-dialog-frame {
   display: block;
+  flex: 0 1 auto;
   width: 100%;
-  height: 100%;
+  /* Content plus the 16px top and bottom padding. */
+  height: max(240px, calc(var(--html-render-content-height, 360px) + 32px));
   min-height: 0;
   box-sizing: border-box;
   padding: 16px clamp(12px, 3vw, 28px);
@@ -48,7 +57,6 @@
 
 @media (max-width: 560px) {
   .html-render-dialog {
-    height: calc(100dvh - 16px);
     border-radius: 12px;
   }
 }

@@ -94,20 +94,24 @@ guidance, including the CSS custom properties Inertia injects, so the pack adds
 no private instruction text. The tool is read-only and non-destructive: it
 changes nothing in the workspace and never asks for approval.
 
-A call is accepted only from the exact active source turn. In one database
-transaction Inertia stores the page in `html_renders` and a turn-scoped system
+A call is accepted only from the exact active source turn, and a turn holds at
+most eight pages. In one database transaction Inertia checks that limit, then
+stores the page in `html_renders` and a turn-scoped system
 message whose `htmlRender` reference holds the render id, title, and height;
 the message text is a plain placeholder for older clients. The message reaches
 clients through the ordinary `conversation.message.persisted` event, and the
 model receives `{ rendered, renderId, title, message }`, where `message` tells
 it not to describe the page in its reply. Arguments that fail validation, an
-oversized page, a settled or cancelled turn, and a storage failure each return
-`{ error: { code, message } }` with `invalid_arguments`, `html_too_large`,
-`turn_not_active` (or the shared `host_tool_failed` when the turn had already
-settled before dispatch), `call_cancelled`, or `render_not_saved`.
+oversized page, a settled or cancelled turn, a turn already at its page limit,
+and a storage failure each return `{ error: { code, message } }` with
+`invalid_arguments`, `html_too_large`, `turn_not_active` (or the shared
+`host_tool_failed` when the turn had already settled before dispatch),
+`call_cancelled`, `render_limit_reached`, or `render_not_saved`.
 
 The page is served only by the main process from the stored row, inside a
-sandboxed frame without network access. System messages stay out of provider
+sandboxed frame without network access; windows that show pages also disable
+non-proxied WebRTC UDP and the page response turns off DNS prefetching. A page
+that no longer exists is served as a themed "no longer available" notice. System messages stay out of provider
 context excerpts, message search, and Private Connect, so a rendered page is
 never replayed to a model and Private Connect shows nothing for it. Deleting a
 chat deletes its pages. The provider MCP HTTP bridge and the stdio proxy accept

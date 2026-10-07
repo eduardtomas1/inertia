@@ -6,13 +6,14 @@ import {
   HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_MAX_HEIGHT,
   HTML_RENDER_MAX_HTML_BYTES,
+  HTML_RENDER_MAX_PER_TURN,
   HTML_RENDER_MAX_TITLE_LENGTH,
   HTML_RENDER_MIN_HEIGHT,
   HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
 } from "../../shared/html-render";
 import type { RuntimeStore } from "../database";
-import { HtmlRenderTurnInactiveError } from "../persistence/html-render-repository";
+import { HtmlRenderLimitReachedError, HtmlRenderTurnInactiveError } from "../persistence/html-render-repository";
 import type {
   ProviderHostToolCall,
   ProviderHostToolDefinition,
@@ -52,6 +53,7 @@ const DESCRIPTION = [
   "Show a finished HTML page (chart, table, diagram, collage, mockup) inline in this chat, above your final text reply; call it before writing that reply.",
   "The reader already sees the page, so the reply should not announce it, say where it is, or restate it: add only what the page doesn't say.",
   "Pass one complete, self-contained HTML document of at most 256 KiB and a short title. Scripts run in a sandbox without network access.",
+  `A turn can show at most ${HTML_RENDER_MAX_PER_TURN} pages.`,
   HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_THEME_GUIDE,
 ].join(" ");
@@ -160,6 +162,12 @@ export class HtmlRenderHostTool {
       });
     } catch (error) {
       if (error instanceof HtmlRenderTurnInactiveError) return failure("turn_not_active", error.message);
+      if (error instanceof HtmlRenderLimitReachedError) {
+        return failure(
+          "render_limit_reached",
+          `This turn already has ${HTML_RENDER_MAX_PER_TURN} rendered pages. Update one of them in your reply instead of adding more.`,
+        );
+      }
       return failure("render_not_saved", "Inertia could not save the page. Reply in text instead.");
     }
     try {

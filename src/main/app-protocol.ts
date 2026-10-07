@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { net, protocol, type Protocol } from "electron";
 
+import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { HTML_RENDER_PROTOCOL_HOST, isHtmlRenderId } from "../shared/html-render.js";
 import { parseWorkspaceImagePreviewUrl } from "../shared/workspace-image-preview.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
@@ -10,7 +11,7 @@ import {
   resolveAttachmentPreviewResponse,
   type ConversationAttachmentAccess,
 } from "./conversation-attachment-access.js";
-import { htmlRenderDocumentResponse } from "./html-render-document.js";
+import { htmlRenderDocumentResponse, htmlRenderUnavailableResponse } from "./html-render-document.js";
 import type { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { resolveWorkspaceImagePreviewResponse } from "./workspace-image-preview.js";
 
@@ -36,16 +37,26 @@ function parseHtmlRenderUrl(url: URL): string | null {
   return url.pathname.startsWith("/") && isHtmlRenderId(renderId) ? renderId : null;
 }
 
+/**
+ * A well-formed id that cannot be shown (unknown, from another conversation's
+ * window, or unreadable) gets the same themed 404, so a frame neither shows
+ * raw text nor learns whether a page exists elsewhere.
+ */
 async function resolveHtmlRenderResponse(
   runtimeSupervisor: RuntimeSupervisor | null,
   renderId: string,
   conversationScope: string | undefined,
-): Promise<Response | null> {
-  if (!runtimeSupervisor) return null;
-  const render = await runtimeSupervisor.readHtmlRender(renderId);
-  if (!render) return null;
+): Promise<Response> {
+  let render: RuntimeHtmlRenderDocument | null | undefined;
+  try {
+    render = await runtimeSupervisor?.readHtmlRender(renderId);
+  } catch {
+    render = null;
+  }
   // A detached window may only show pages from the conversation it was opened for.
-  if (conversationScope && render.conversationId !== conversationScope) return null;
+  if (!render || (conversationScope && render.conversationId !== conversationScope)) {
+    return htmlRenderUnavailableResponse();
+  }
   return htmlRenderDocumentResponse(render.html);
 }
 
@@ -63,11 +74,8 @@ export function registerAppProtocol(options: {
       const url = new URL(request.url);
       if (url.hostname === HTML_RENDER_PROTOCOL_HOST) {
         const renderId = parseHtmlRenderUrl(url);
-        const response = renderId
-          ? await resolveHtmlRenderResponse(options.runtimeSupervisor(), renderId, options.conversationScope)
-          : null;
-        if (!response) throw new Error();
-        return response;
+        if (!renderId) throw new Error();
+        return await resolveHtmlRenderResponse(options.runtimeSupervisor(), renderId, options.conversationScope);
       }
       if (
         url.hostname !== APP_HOST

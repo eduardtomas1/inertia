@@ -132,6 +132,13 @@ test("shows a sandboxed, themed visual reply above the answer and keeps it acros
     await expect(page.frameLocator('[data-testid="html-render-dialog-frame"]')
       .getByRole("heading", { name: HTML_RENDER_HEADING })).toBeVisible();
     await expect(dialog.getByRole("button", { name: `Close ${HTML_RENDER_TITLE}`, exact: true })).toBeFocused();
+    // The dialog shrink-wraps the page (plus the frame's 16 px vertical padding) instead of filling the window.
+    const dialogFrameElement = dialog.getByTestId("html-render-dialog-frame");
+    const dialogFrame = await (await dialogFrameElement.elementHandle())?.contentFrame();
+    const dialogContentHeight = await dialogFrame!.evaluate(() => Math.ceil(document.documentElement.getBoundingClientRect().height));
+    await expect.poll(async () => Math.round((await dialogFrameElement.boundingBox())!.height))
+      .toBe(Math.max(240, dialogContentHeight + 32));
+    expect((await dialog.boundingBox())!.height).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight * 0.9));
     await capture(page, info, "full-size-dialog-dark.png", "Visual reply full size · dark");
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();

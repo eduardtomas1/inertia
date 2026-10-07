@@ -21,7 +21,6 @@ import type {
   TurnRequestContext,
 } from "@shared/contracts";
 import { providerTerminalResumeAvailability } from "@shared/provider-terminal-resume";
-import { conversationContinuationRefusal } from "@shared/continuation-policy";
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
@@ -44,8 +43,7 @@ import {
 } from "../../hooks/useWorkspaceLayout";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
-import type { NewConversationLocation, ReplacementChatRequest } from "../../lib/newConversation";
-import { replacementChatRequest } from "../../utils/modelRouteTransition";
+import type { NewConversationLocation } from "../../lib/newConversation";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { SettingsViewProps } from "../settings/settingsTypes";
 import {
@@ -125,24 +123,12 @@ export function visibleWorkspaceConversation(
 
 export function planActionsAvailable(
   conversation: Pick<Conversation, "status"> | null,
-  continuationRefusal: string | null,
 ): boolean {
   return Boolean(
     conversation
-    && !continuationRefusal
     && conversation.status !== "running"
     && conversation.status !== "needs-input",
   );
-}
-
-export function chatResumeAvailability(
-  conversation: Parameters<typeof providerTerminalResumeAvailability>[0],
-  provider: Parameters<typeof providerTerminalResumeAvailability>[1],
-  continuationRefusal: string | null,
-): ReturnType<typeof providerTerminalResumeAvailability> {
-  return continuationRefusal
-    ? { kind: "unavailable", resume: null, reason: continuationRefusal }
-    : providerTerminalResumeAvailability(conversation, provider);
 }
 
 type SettingsSaveRunner = (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
@@ -158,17 +144,6 @@ export function settingsSaveActions(run: SettingsSaveRunner): Pick<SettingsViewP
     onSetDefaultModel: (payload) => save({ type: "settings.default-model.set", payload }),
     onRestoreDefaults: () => save({ type: "settings.restore-defaults", payload: {} }),
   };
-}
-
-export function replacementChatStarter(
-  conversation: Parameters<typeof replacementChatRequest>[0] | null | undefined,
-  continuationRefusal: string | null,
-  create: (request: ReplacementChatRequest) => Promise<void>,
-  onError: (message: string) => void,
-): (() => void) | undefined {
-  if (!continuationRefusal || !conversation) return undefined;
-  return () => void create(replacementChatRequest(conversation)).catch((error) =>
-    onError(error instanceof Error ? error.message : "The new chat could not be created."));
 }
 
 export function visibleChatConversation(
@@ -226,7 +201,6 @@ export interface WorkspaceSceneActions {
     targetProject?: Project | null,
     location?: NewConversationLocation,
   ) => void;
-  createConversationForSelection: (request: ReplacementChatRequest) => Promise<void>;
   sendMessage: (
     content: string,
     attachments: ChatAttachment[],
@@ -367,7 +341,6 @@ export function createWorkspaceSceneModel({
     detailState,
     refreshDetail,
   } = projection;
-  const continuationRefusal = conversationContinuationRefusal(detail?.conversation);
   const conversation = visibleWorkspaceConversation(
     persistedConversation,
     draftConversation,
@@ -440,12 +413,11 @@ export function createWorkspaceSceneModel({
           projectName: candidateProject.name,
           conversationId: candidate.id,
           conversationTitle: candidate.title,
-          availability: chatResumeAvailability(
+          availability: providerTerminalResumeAvailability(
             candidate,
             connection.snapshot?.providers.find(
               ({ id }) => id === candidate.providerId,
             ),
-            candidate.id === detail?.conversation.id ? continuationRefusal : null,
           ),
         });
       }
@@ -539,7 +511,7 @@ export function createWorkspaceSceneModel({
     usageIdentity,
     usageQuotaSource,
   });
-  const canUpdatePlan = planActionsAvailable(conversation, continuationRefusal);
+  const canUpdatePlan = planActionsAvailable(conversation);
   const latestPlan = projection.plans.at(-1) ?? null;
   const planSummary = conversation?.interactionMode === "plan"
     ? "The latest agent response is reflected as a working plan."
@@ -768,7 +740,6 @@ export function createWorkspaceSceneModel({
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,
       onUpdateConversation: actions.updateConversation,
-      onCreateConversationForSelection: actions.createConversationForSelection,
       onChooseAttachments: desktopTools.chooseComposerAttachments,
       onImportAttachments: desktopTools.importComposerAttachments,
       onReleaseAttachment: desktopTools.releaseComposerAttachment,
@@ -935,7 +906,6 @@ export function createWorkspaceSceneModel({
       } : null,
       changes: {
         projectName: project.name,
-        agentRevisionUnavailable: continuationRefusal !== null,
         projectRoot: conversation?.worktreePath ?? project.normalizedPath,
         projectId: project.id,
         conversationId: persistedConversation?.id,
@@ -1076,8 +1046,6 @@ export function createWorkspaceSceneModel({
               : "Skills could not be refreshed.",
           ));
         },
-        continuationRefusal,
-        onStartNewChat: replacementChatStarter(detail?.conversation, continuationRefusal, actions.createConversationForSelection, setActionError),
         canFollowUpSubagent: canGuideParent,
         onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {

@@ -25,7 +25,8 @@ import {
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
 } from "./request-context";
-import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { previousTurnBoundaryUsage, providerLabel } from "./turn-controller-support";
+import { RuntimeRequestError } from "../../runtime-errors";
 import {
   runtimeInterruptionInstruction,
   sharesInterruptionEndpoint,
@@ -169,6 +170,15 @@ export function resolveTurnRequest(
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
+  if (
+    request.goalStart !== undefined
+    && latestTurn !== null
+    && latestTurn.providerId !== route.providerId
+  ) {
+    throw new RuntimeRequestError(
+      `Send a message first so ${providerLabel(route.providerId)} receives this chat's earlier messages.`,
+    );
+  }
   const latestTurnOwnsProviderSession = latestTurn !== null
     && conversation.providerSessionId !== null
     && latestTurn.providerSessionAfter === conversation.providerSessionId;
@@ -185,6 +195,7 @@ export function resolveTurnRequest(
         : routeSelection.modelId
     : null;
   const resolvedContinuation = resolveContinuationDecision({
+    ...(latestTurn ? { previousProviderId: latestTurn.providerId } : {}),
     previousIdentity: previousContinuationIdentity,
     nextIdentity: route.continuationIdentity,
     previousModelId: previousContinuationModelId,
@@ -197,9 +208,6 @@ export function resolveTurnRequest(
       officiallyAllowsFastModeSwitchWithinSession(route.compatibility)
       && supportedFastMode !== null,
   });
-  if (resolvedContinuation.action === "new-conversation-required") {
-    throw new Error(resolvedContinuation.reason);
-  }
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) === null
@@ -258,6 +266,28 @@ export function resolveTurnRequest(
       ? shell.backendProfileId === backendProfileId && shell.endpointIdentity === endpointIdentity
       : turns.turnCount > 0);
   };
+  // A provider handoff carries the chat's earlier messages to the new
+  // provider. Later fresh sessions on that route keep what the handoff carried,
+  // but messages produced afterwards on other routes stay withheld.
+  const providerHandoff = continuation.reasonCode === "harness-changed"
+    && latestTurn !== null
+    && latestTurn.providerId !== route.providerId;
+  const restoredHistoryRoute = () => {
+    const { backendProfileId, endpointIdentity } = route.continuationIdentity;
+    const handoffBefore = providerHandoff
+      ? requestedAt
+      : dependencies.store.turnLedgerRepository.latestProviderHandoffOnRoute(
+          conversation.id,
+          backendProfileId,
+          endpointIdentity,
+        )?.requestedAt;
+    return {
+      backendProfileId,
+      endpointIdentity,
+      includeUnattributed: unattributedHistoryOnRoute(),
+      ...(handoffBefore === undefined ? {} : { handoffBefore }),
+    };
+  };
   const assembleOnFreshSession = (excludedMessageId?: string) => {
     const fresh = assembleTurnRequest({
       ...assemblyInput,
@@ -270,11 +300,7 @@ export function resolveTurnRequest(
                 : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES),
               requestedAt,
               excludedMessageId,
-              {
-                backendProfileId: route.continuationIdentity.backendProfileId,
-                endpointIdentity: route.continuationIdentity.endpointIdentity,
-                includeUnattributed: unattributedHistoryOnRoute(),
-              },
+              restoredHistoryRoute(),
             ),
           }
         : {}),

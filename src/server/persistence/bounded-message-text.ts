@@ -1,5 +1,9 @@
 import { StringDecoder } from "node:string_decoder";
 
+export function byteLength(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
 /** BLOB prefixes preserve NULs; join chunks before redaction or UTF-8 decoding. */
 export function readBoundedMessageText(
   prefix: Buffer,

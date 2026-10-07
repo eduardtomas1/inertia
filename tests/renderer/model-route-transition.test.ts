@@ -18,7 +18,6 @@ import {
   type ModelRouteTransitionContext,
 } from "../../src/renderer/src/utils/modelRouteTransition";
 
-const projectId = "11111111-1111-4111-8111-111111111111";
 const compatibilityToken = "a".repeat(64);
 
 function nativeCandidate(
@@ -53,7 +52,6 @@ function context(
   update: Partial<ModelRouteTransitionContext> = {},
 ): ModelRouteTransitionContext {
   return {
-    projectId,
     providerId: providerIdForHarness(selection.harnessId) ?? "codex",
     selection,
     continuationIdentity: candidate.continuationIdentity,
@@ -63,7 +61,6 @@ function context(
     },
     hasProviderSession: true,
     hasHistory: true,
-    mixedProviderHistory: false,
     ...update,
   };
 }
@@ -141,11 +138,8 @@ describe("model route transition policy", () => {
       context(currentSelection, currentCandidate),
       nextCandidate,
     )).toMatchObject({
-      kind: "update-current-conversation",
-      projectId,
       changeKind: "model",
       reasonCode: "supported-model-switch",
-      providerSessionDisposition: "retain-current-conversation",
       continuationAction: "resume-session",
     });
   });
@@ -163,10 +157,8 @@ describe("model route transition policy", () => {
       context(fast, currentCandidate),
       unsupportedStandard,
     )).toMatchObject({
-      kind: "update-current-conversation",
       changeKind: "performance-mode",
       reasonCode: "incompatible-performance-mode-changed",
-      providerSessionDisposition: "retain-current-conversation",
       continuationAction: "start-session",
     });
 
@@ -174,7 +166,6 @@ describe("model route transition policy", () => {
       context(fast, currentCandidate),
       { ...unsupportedStandard, supportsNativeFastModeControl: true },
     )).toMatchObject({
-      kind: "update-current-conversation",
       changeKind: "performance-mode",
       reasonCode: "supported-performance-mode-switch",
     });
@@ -186,10 +177,8 @@ describe("model route transition policy", () => {
       context(route.selection, route.candidate),
       route.candidate,
     )).toMatchObject({
-      kind: "update-current-conversation",
       changeKind: "none",
       reasonCode: "same-continuation",
-      providerSessionDisposition: "retain-current-conversation",
     });
   });
 
@@ -213,10 +202,8 @@ describe("model route transition policy", () => {
       context(route.selection, route.candidate),
       nextCandidate,
     )).toMatchObject({
-      kind: "update-current-conversation",
       changeKind: "model",
       reasonCode: "incompatible-model-changed",
-      providerSessionDisposition: "retain-current-conversation",
       continuationAction: "start-session",
     });
   });
@@ -240,10 +227,8 @@ describe("model route transition policy", () => {
       context(currentSelection, currentCandidate),
       nextCandidate,
     )).toMatchObject({
-      kind: "update-current-conversation",
       changeKind: "model",
       reasonCode: "incompatible-model-changed",
-      providerSessionDisposition: "retain-current-conversation",
       continuationAction: "start-session",
     });
   });
@@ -284,10 +269,8 @@ describe("model route transition policy", () => {
         nextCandidate,
       );
       expect(transition).toMatchObject({
-        kind: "update-current-conversation",
         changeKind,
         reasonCode,
-        providerSessionDisposition: "retain-current-conversation",
         continuationAction: "start-session",
       });
       expect(transition.reason).toContain(truthfulReason);
@@ -295,7 +278,7 @@ describe("model route transition policy", () => {
   );
 
   it.each(["session", "turn", "restored-history", "unused-draft"] as const)(
-    "requires a new chat for another provider unless this is an unused draft: %s",
+    "hands another provider this chat's history unless this is an unused draft: %s",
     (evidence) => {
       const selection = providerNativeModelSelection({ providerId: "codex" });
       const current = nativeCandidate(selection);
@@ -307,12 +290,13 @@ describe("model route transition policy", () => {
         hasHistory: evidence === "restored-history",
       }), next);
       expect(transition).toMatchObject(evidence === "unused-draft" ? {
-        kind: "update-current-conversation",
         reasonCode: "first-turn",
       } : {
-        kind: "create-new-conversation",
-        continuationAction: "new-conversation-required",
-        reason: expect.stringContaining("Start a new chat to use a different provider."),
+        continuationAction: "start-session",
+        changeKind: "harness",
+        reasonCode: "harness-changed",
+        selection: next.selection,
+        reason: expect.stringContaining("Earlier messages travel to the new provider as context."),
       });
     },
   );
@@ -324,19 +308,16 @@ describe("model route transition policy", () => {
       const selection = { ...native, harnessId: "historical:retired-codex" };
       const identity = { ...nativeCandidate(native).continuationIdentity, harnessId: selection.harnessId };
       const transition = resolveModelRouteTransition({
-        projectId,
         providerId: "codex",
         selection,
         continuationIdentity: evidence === "session" ? identity : null,
         latestTurn: evidence === "turn" ? { selection, continuationIdentity: identity } : null,
         hasProviderSession: evidence === "session",
         hasHistory: evidence === "history",
-        mixedProviderHistory: false,
       }, nativeCandidate(providerNativeModelSelection({ providerId: "claude" })));
       expect(transition).toMatchObject({
-        kind: "create-new-conversation",
-        continuationAction: "new-conversation-required",
-        reason: expect.stringContaining("Start a new chat to use a different provider."),
+        continuationAction: "start-session",
+        reasonCode: "harness-changed",
       });
     },
   );
@@ -353,7 +334,6 @@ describe("model route transition policy", () => {
       context(route.selection, route.candidate),
       other.candidate,
     )).toMatchObject({
-      kind: "update-current-conversation",
       changeKind: "backend-profile",
       reasonCode: "backend-profile-changed",
     });
@@ -376,7 +356,6 @@ describe("model route transition policy", () => {
       },
     }, next);
     expect(transition).toMatchObject({
-      kind: "update-current-conversation",
       reasonCode: "supported-model-switch",
     });
   });
@@ -395,11 +374,8 @@ describe("model route transition policy", () => {
       changedInstallation,
     );
     expect(transition).toMatchObject({
-      kind: "update-current-conversation",
-      projectId,
       changeKind: "provider-installation",
       reasonCode: "provider-installation-changed",
-      providerSessionDisposition: "retain-current-conversation",
       continuationAction: "start-session",
     });
   });
@@ -422,7 +398,6 @@ describe("model route transition policy", () => {
       hasProviderSession: false,
       hasHistory: false,
     }, nextCandidate)).toMatchObject({
-      kind: "update-current-conversation",
       reasonCode: "first-turn",
       continuationAction: "start-session",
     });

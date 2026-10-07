@@ -1,9 +1,10 @@
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
   defaultSettings,
   type AppSnapshot,
+  type Conversation,
   type ConversationShell,
   type ProviderInfo,
   type ServerEvent,
@@ -54,50 +55,51 @@ const claudeProvider: ProviderInfo = {
   models: [{ ...model, id: "claude-route", label: "Claude Route", description: "Destination route" }],
 };
 
+/** Chooses the Claude route, then shows the chat as the runtime reports it after the update. */
+async function chooseClaudeInPlace(
+  view: ReturnType<typeof render>,
+  current: Conversation,
+  props: Partial<ComposerProps>,
+  onUpdateConversation: Mock<ComposerProps["onUpdateConversation"]>,
+): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Claude, / }));
+  const claudeRoute = screen.getByTitle("Claude Route").closest("button");
+  if (!claudeRoute) throw new Error("Expected the Claude route action.");
+  fireEvent.click(claudeRoute);
+  await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
+  const update = onUpdateConversation.mock.calls[0]![0];
+  expect(update).toMatchObject({ providerId: "claude" });
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  view.rerender(<Composer {...composerProps({ ...current, ...update }, props)} />);
+}
+
 describe("composer provider history", () => {
   it.each([
-    ["published history that is not loaded", { hasHistory: true }, true],
-    ["a shell from before history was published", {}, true],
-    ["an unused draft", { hasHistory: false }, false],
-  ] as const)("uses the published history fact for %s", async (_case, published, established) => {
+    ["published history that is not loaded", { hasHistory: true }],
+    ["a shell from before history was published", {}],
+    ["an unused draft", { hasHistory: false }],
+  ] as const)("switches the provider in place with the published history fact for %s", async (_case, published) => {
     const onUpdateConversation = vi.fn<ComposerProps["onUpdateConversation"]>(async () => undefined);
-    const onCreateConversationForSelection = vi.fn(async () => undefined);
-    render(<Composer {...composerProps({ ...conversation("published-history"), ...published }, {
-      providers: [codexProvider, claudeProvider],
-      hasVisibleHistory: false,
-      onUpdateConversation,
-      onCreateConversationForSelection,
-    })} />);
-    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Claude, / }));
-    const claudeRoute = screen.getByTitle("Claude Route").closest("button");
-    if (!claudeRoute) throw new Error("Expected the Claude route action.");
-    fireEvent.click(claudeRoute);
+    const current = { ...conversation("published-history"), ...published };
+    const props = { providers: [codexProvider, claudeProvider], hasVisibleHistory: false, onUpdateConversation };
+    const view = render(<Composer {...composerProps(current, props)} />);
 
-    if (established) {
-      expect(await screen.findByRole("alertdialog"))
-        .toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
-      expect(onUpdateConversation).not.toHaveBeenCalled();
-    } else {
-      await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
-      expect(onUpdateConversation.mock.calls[0]?.[0]).toMatchObject({ providerId: "claude" });
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    }
-    expect(onCreateConversationForSelection).not.toHaveBeenCalled();
+    await chooseClaudeInPlace(view, current, props, onUpdateConversation);
   });
 
   it.each([
-    ["a cleanly rejected first send", () => Promise.reject(new RuntimeCommandError("Provider unavailable", "rejected")), false],
-    ["an undelivered first send", () => Promise.reject(new RuntimeCommandError("Reconnecting", "not-sent")), false],
+    ["a cleanly rejected first send", () => Promise.reject(new RuntimeCommandError("Provider unavailable", "rejected"))],
+    ["an undelivered first send", () => Promise.reject(new RuntimeCommandError("Reconnecting", "not-sent"))],
     ["an accepted first send", () => Promise.resolve({
       kind: "message.accepted" as const,
       conversationId: savedConversationId,
       turnId: "turn-1",
       userMessageId: "message-1",
       disposition: "new-turn" as const,
-    }), true],
-    ["an ambiguous first send", () => Promise.reject(new RuntimeCommandError("Disconnected", "ambiguous")), true],
-  ] as const)("uses the first send outcome of a saved draft for %s", async (_case, send, established) => {
+    })],
+    ["an ambiguous first send", () => Promise.reject(new RuntimeCommandError("Disconnected", "ambiguous"))],
+  ] as const)("switches the provider in place after the first send of a saved draft: %s", async (_case, send) => {
     const run = vi.fn(async (): Promise<ServerEvent> => ({
       type: "request.result",
       requestId: "create",
@@ -116,32 +118,18 @@ describe("composer provider history", () => {
     await act(async () => {
       await draft.result.current.sendFromComposer("First message", []).catch(() => undefined);
     });
-    const onCreateConversationForSelection = vi.fn(async () => undefined);
-    render(<Composer {...composerProps(draft.result.current.conversation!, {
-      providers: [codexProvider, claudeProvider],
-      hasVisibleHistory: false,
-      onUpdateConversation: draft.result.current.updateConversation,
-      onCreateConversationForSelection,
-    })} />);
-    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Claude, / }));
-    const claudeRoute = screen.getByTitle("Claude Route").closest("button");
-    if (!claudeRoute) throw new Error("Expected the Claude route action.");
-    fireEvent.click(claudeRoute);
+    const onUpdateConversation = vi.fn<ComposerProps["onUpdateConversation"]>(
+      (update) => draft.result.current.updateConversation(update),
+    );
+    const current = draft.result.current.conversation!;
+    const props = { providers: [codexProvider, claudeProvider], hasVisibleHistory: false, onUpdateConversation };
+    const view = render(<Composer {...composerProps(current, props)} />);
 
-    if (established) {
-      expect(await screen.findByRole("alertdialog"))
-        .toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
-      expect(updatePersistedConversation).not.toHaveBeenCalled();
-    } else {
-      await waitFor(() => expect(updatePersistedConversation).toHaveBeenCalledOnce());
-      expect(updatePersistedConversation).toHaveBeenCalledWith(
-        savedConversationId,
-        expect.objectContaining({ providerId: "claude" }),
-      );
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    }
-    expect(onCreateConversationForSelection).not.toHaveBeenCalled();
+    await chooseClaudeInPlace(view, current, props, onUpdateConversation);
+    expect(updatePersistedConversation).toHaveBeenCalledWith(
+      savedConversationId,
+      expect.objectContaining({ providerId: "claude" }),
+    );
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -199,32 +187,9 @@ describe("composer provider history", () => {
       : visibleChatConversation(null, detail?.conversation ?? null, shellConversation);
     expect(conversationHasHistory(visible!)).toBe(hasHistory);
     const onUpdateConversation = vi.fn<ComposerProps["onUpdateConversation"]>(async () => undefined);
-    const onCreateConversationForSelection = vi.fn(async () => undefined);
-    render(<Composer {...composerProps(visible!, {
-      providers: [codexProvider, claudeProvider],
-      hasVisibleHistory: false,
-      onUpdateConversation,
-      onCreateConversationForSelection: surface === "detached window" ? undefined : onCreateConversationForSelection,
-    })} />);
-    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Claude, / }));
-    const claudeRoute = screen.getByTitle("Claude Route").closest("button");
-    if (!claudeRoute) throw new Error("Expected the Claude route action.");
-    fireEvent.click(claudeRoute);
+    const props = { providers: [codexProvider, claudeProvider], hasVisibleHistory: false, onUpdateConversation };
+    const view = render(<Composer {...composerProps(visible!, props)} />);
 
-    if (!hasHistory) {
-      await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
-      expect(onUpdateConversation.mock.calls[0]?.[0]).toMatchObject({ providerId: "claude" });
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-      expect(screen.queryByText(/Return this chat to the main window/u)).not.toBeInTheDocument();
-    } else if (surface === "detached window") {
-      expect(await screen.findByText(/Return this chat to the main window/u)).toBeInTheDocument();
-      expect(onUpdateConversation).not.toHaveBeenCalled();
-    } else {
-      expect(await screen.findByRole("alertdialog"))
-        .toHaveTextContent("The new chat uses the same checkout and gets this chat as context.");
-      expect(onUpdateConversation).not.toHaveBeenCalled();
-    }
-    expect(onCreateConversationForSelection).not.toHaveBeenCalled();
+    await chooseClaudeInPlace(view, visible!, props, onUpdateConversation);
   });
 });

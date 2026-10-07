@@ -26,10 +26,7 @@ import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-res
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
-import {
-  ConversationCreationService,
-  type ConversationCreationDependencies,
-} from "../conversation-creation-service";
+import { ConversationCreationService } from "../conversation-creation-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -102,7 +99,6 @@ export interface ConversationCommandDependencies {
     afterIsolatedWorktreeCreate?: () => void | Promise<void>;
   };
   creation?: ConversationCreationService;
-  turns?: ConversationCreationDependencies["turns"];
   contextRequests?: ConversationContextRequestCoordinator;
 }
 
@@ -114,7 +110,6 @@ export function createConversationCommandHandler(
   return defineRuntimeCommandHandler([
     "project.ensure-scratch",
     "conversation.create",
-    "conversation.continue",
     "conversation.select",
     "conversation.detail.load",
     "conversation.detail.subscription",
@@ -158,22 +153,6 @@ export function createConversationCommandHandler(
           command.requestId,
         );
         if (command.payload.activate !== false) return "mutation";
-        dependencies.broadcastSnapshot();
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: {
-            kind: "conversation.created",
-            conversationId: conversation.id,
-          },
-        });
-        return "handled";
-      }
-      case "conversation.continue": {
-        const conversation = await creation.continueFrom(
-          command.payload,
-          command.requestId,
-        );
         dependencies.broadcastSnapshot();
         dependencies.send(socket, {
           type: "request.result",
@@ -421,7 +400,6 @@ export function createConversationCommandHandler(
               "The selected provider does not match the verified model route.",
             );
           }
-          dependencies.store.assertConversationProvider(conversationId, route.providerId, true);
           canonicalSelection = selection;
           canonicalProviderId = route.providerId;
           const latestTurn = dependencies.store
@@ -430,6 +408,7 @@ export function createConversationCommandHandler(
             && current.providerSessionId !== null
             && latestTurn.providerSessionAfter === current.providerSessionId;
           const decision = resolveContinuationDecision({
+            previousProviderId: latestTurn?.providerId ?? current.providerId,
             previousIdentity: latestTurn
               ? latestTurnMatchesSession
                 ? latestTurn.continuationIdentity
@@ -453,9 +432,6 @@ export function createConversationCommandHandler(
               && dependencies.backendProfileController
                 .supportsNativeFastModeControl(selection),
           });
-          if (decision.action === "new-conversation-required") {
-            throw new RuntimeRequestError(decision.reason);
-          }
           resetProviderSession = decision.action === "start-session"
             && (current.providerSessionId !== null || latestTurn !== null);
         }

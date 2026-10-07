@@ -1,19 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
 import { AppStatusOverlays } from "../../src/renderer/src/components/AppStatusOverlays";
 import { ProviderAuthDialog } from "../../src/renderer/src/components/ProviderAuthDialog";
-import { RouteChangeConfirmation } from "../../src/renderer/src/components/composer/RouteChangeConfirmation";
 import {
   nativePreviewSuspended,
 } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
-import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
@@ -379,44 +376,6 @@ describe("trusted overlay native preview suspension", () => {
     await expectSuspended();
 
     view.rerender(<CommandPalette open={false} {...props} />);
-    await expectRestored();
-  });
-
-  it("suspends for the mounted route-change confirmation", async () => {
-    const view = render(
-      <RouteChangeConfirmation
-        pendingRoute={{
-          selection: providerNativeModelSelection({
-            providerId: "codex",
-            modelId: "gpt-5.6",
-          }),
-          configuration: { accessMode: "supervised", interactionMode: "build" },
-          label: "GPT-5.6",
-          reason: "The active session cannot switch models.",
-          carriesContext: false,
-          sourceConversationId: "conversation-1",
-          sourceProjectId: "project-1",
-          sourceSelectionKey: "source-selection",
-          sourceConfigurationKey: "supervised:build",
-          sourceContinuationKey: "source-continuation",
-          sourceLatestTurnId: "turn-1",
-          sourceLatestTurnKey: "latest-turn",
-          destinationRevision: 1,
-        }}
-        creating={false}
-        cancelRef={createRef<HTMLButtonElement>()}
-        canCreate
-        onDismiss={vi.fn()}
-        onCreate={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("alertdialog", {
-      name: "Open a new chat for GPT-5.6?",
-    })).toBeInTheDocument();
-    await expectSuspended();
-
-    view.unmount();
     await expectRestored();
   });
 });

@@ -448,6 +448,42 @@ export class TurnLedgerRepository {
     return { turnCount: row.turn_count, stayed: row.crossed === 0 };
   }
 
+  /**
+   * The most recent provider handoff that restored history onto this route.
+   * A genuine handoff directly follows a turn on another provider; later
+   * same-provider harness changes never count.
+   */
+  latestProviderHandoffOnRoute(
+    conversationId: string,
+    backendProfileId: string,
+    endpointIdentity: string | null,
+  ): { requestedAt: string } | null {
+    const row = this.context.database.prepare(`
+      SELECT handoff.requested_at FROM agent_turns AS handoff
+      WHERE handoff.conversation_id = @conversationId
+        AND handoff.continuation_reason_code = 'harness-changed'
+        AND handoff.session_recovery_json IS NOT NULL
+        AND handoff.backend_profile_id = @backendProfileId
+        AND (CASE WHEN json_valid(handoff.continuation_identity_json)
+          THEN json_extract(handoff.continuation_identity_json, '$.endpointIdentity')
+        END) IS @endpointIdentity
+        AND (
+          SELECT previous.provider_id FROM agent_turns AS previous
+          WHERE previous.conversation_id = handoff.conversation_id
+            AND (
+              previous.requested_at < handoff.requested_at
+              OR (previous.requested_at = handoff.requested_at AND previous.id < handoff.id)
+            )
+          ORDER BY previous.requested_at DESC, previous.id DESC
+          LIMIT 1
+        ) <> handoff.provider_id
+      ORDER BY handoff.requested_at DESC, handoff.id DESC
+      LIMIT 1
+    `).get({ conversationId, backendProfileId, endpointIdentity }) as
+      { requested_at: string } | undefined;
+    return row ? { requestedAt: row.requested_at } : null;
+  }
+
   recordRejectedResume(turnId: string, sessionId: string): void {
     this.context.database.prepare(`
       UPDATE agent_turns

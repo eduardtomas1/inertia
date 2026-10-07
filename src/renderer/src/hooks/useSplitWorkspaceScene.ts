@@ -25,16 +25,10 @@ import {
 } from "../components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "../components/workspace-scene/createWorkspaceTurnActions";
 import {
-  replacementConversationCommand,
-  type ReplacementChatRequest,
-} from "../lib/newConversation";
-import {
   commandRefreshesConversationDetail,
-  resultEvent,
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { persistComposerDraft } from "../utils/composerDraftPersistence";
 import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
@@ -136,7 +130,6 @@ interface UseSplitWorkspaceSceneOptions {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   actions: SplitWorkspaceActions;
   sendingConversationIds: ReadonlySet<string>;
-  onConversationCreated: (conversationId: string) => void;
   onTerminal: () => void;
 }
 
@@ -163,7 +156,6 @@ export function useSplitWorkspaceScene({
   request,
   actions,
   sendingConversationIds,
-  onConversationCreated,
   onTerminal,
 }: UseSplitWorkspaceSceneOptions): SplitWorkspaceSceneController {
   const busyPrefix = `split:${owner}:`;
@@ -304,21 +296,6 @@ export function useSplitWorkspaceScene({
   ]);
   const sceneActions = useStableActions({
     ...actions,
-    createConversationForSelection: async (request: ReplacementChatRequest) => {
-      if (!splitProject) {
-        throw new Error("The split project is no longer available.");
-      }
-      const command = replacementConversationCommand(splitProject, settings, request);
-      const event = resultEvent(await run(command.type, command));
-      if (event.result.kind !== "conversation.created") {
-        throw new Error("The new split chat could not be identified.");
-      }
-      if (request.prefillText) {
-        persistComposerDraft(event.result.conversationId, request.prefillText);
-      }
-      request.onCreated?.(event.result.conversationId);
-      onConversationCreated(event.result.conversationId);
-    },
     sendMessage: async (
       content: string,
       attachments: ChatAttachment[],

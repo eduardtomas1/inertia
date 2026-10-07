@@ -39,6 +39,7 @@ import {
 } from "../../utils/responseTimeline";
 import { LiveElapsed } from "./activity";
 import { ContextCompactionRow, PendingContextCompaction } from "./ContextCompactionRow";
+import { ProviderHandoffRow } from "./ProviderHandoffRow";
 import { responseTimelineArticleLabel } from "./row-label";
 export { responseTimelineArticleLabel } from "./row-label";
 import { CompatibilityTimeline } from "./compatibility";
@@ -1168,7 +1169,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         onAfterToggle={restoreExpansionAnchor}
       />
     )
-    : item.kind === "compaction" ? <ContextCompactionRow message={item.message} /> : (
+    : item.kind === "compaction" ? <ContextCompactionRow message={item.message} />
+    : item.kind === "handoff" ? (
+      <ProviderHandoffRow id={item.id} handoff={item.handoff} providerIdentityLabels={props.providerIdentityLabels} />
+    ) : (
       <CompatibilityTimeline
         key={props.conversationId}
         compatibility={item.compatibility}
@@ -1207,7 +1211,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
                   data-index={virtualItem.index}
                   aria-posinset={virtualItem.index + 1}
                   aria-setsize={timeline.length}
-                  aria-label={responseTimelineArticleLabel(item)}
+                  aria-label={responseTimelineArticleLabel(item, props.providerIdentityLabels)}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >

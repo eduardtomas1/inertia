@@ -17,6 +17,12 @@ export interface ContinuationRouteFilter {
   backendProfileId: string;
   endpointIdentity: string | null;
   includeUnattributed: boolean;
+  /**
+   * A provider handoff to this route carried the chat's earlier messages
+   * across. Messages up to that handoff's request time stay eligible; later
+   * messages from other routes remain withheld.
+   */
+  handoffBefore?: string;
 }
 
 export function continuationRouteSql(route?: ContinuationRouteFilter): {
@@ -24,6 +30,15 @@ export function continuationRouteSql(route?: ContinuationRouteFilter): {
   parameters: Array<string | null>;
 } {
   if (!route) return { sql: "", parameters: [] };
+  const handoff = route.handoffBefore === undefined
+    ? ""
+    : `
+      OR (messages.turn_id IS NULL AND messages.created_at <= ?)
+      OR EXISTS (
+        SELECT 1 FROM agent_turns AS handoff_turn
+        WHERE handoff_turn.id = messages.turn_id
+          AND handoff_turn.requested_at <= ?
+      )`;
   return {
     sql: `AND (${route.includeUnattributed ? "messages.turn_id IS NULL OR " : ""}EXISTS (
       SELECT 1 FROM agent_turns AS route_turn
@@ -32,8 +47,12 @@ export function continuationRouteSql(route?: ContinuationRouteFilter): {
         AND (CASE WHEN json_valid(route_turn.continuation_identity_json)
           THEN json_extract(route_turn.continuation_identity_json, '$.endpointIdentity')
         END) IS ?
-    ))`,
-    parameters: [route.backendProfileId, route.endpointIdentity],
+    )${handoff})`,
+    parameters: [
+      route.backendProfileId,
+      route.endpointIdentity,
+      ...(route.handoffBefore === undefined ? [] : [route.handoffBefore, route.handoffBefore]),
+    ],
   };
 }
 

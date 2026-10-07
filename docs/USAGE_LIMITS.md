@@ -54,23 +54,20 @@ cannot be confirmed without asking you, stops the resume for your attention.
 
 **Continue with another model** in the same row opens the model chooser. It is
 not offered while a resume is scheduled; cancel the resume first. Choosing a
-model from another provider asks **Continue in a new chat with** that model.
-**Continue** creates the new chat on the same checkout and branch as the
-limited chat (its worktree, if it has one) and attaches the whole limited chat
-as context: up to 256 KiB of its visible messages are stored, each excerpt at
-most 8 KiB. Pattern-matched secrets are redacted; review the preview before
-sending. The first message carries at most 192 KiB of context (three 64 KiB
-blocks, shared with any other chat you attach), so in a longer chat the oldest
-messages are left out of what is sent and counted as omitted. The context shows
-above the composer of the new chat, where you can preview or remove it before
-the first message. The limited chat keeps its history and its resume offer.
-Inertia refuses while the limited chat still has a turn in progress or a
-message being prepared, when the project checkout has since moved to another
-branch, and for chats without a project, whose folder belongs to that chat.
-Until the new chat's first message is sent, deleting the limited chat is
-refused, because its context would be lost; send the first message or remove
-the context first. After that, deleting it leaves the worktree with the new
-chat.
+model from another provider keeps working in the same chat: the composer notes
+that the next message starts a new session on that provider with the chat's
+earlier messages as context, and any reset offer from the previous provider is
+retired. That message carries the chat's earlier visible messages, up to 192
+KiB (three 64 KiB blocks, each message excerpt at most 8 KiB, oldest messages
+left out first and counted as omitted), with pattern-matched secrets redacted,
+plus a list of the files the chat's turns changed (paths and line counts only,
+up to 200 files and 8 KiB). Tool output, file contents and hidden provider
+state are not carried over. The timeline marks the switch with a **Context
+handoff** divider showing both providers and how many earlier messages were
+restored. Start a goal only after that first message, so the new provider has
+the chat's history. Later fresh sessions on the same provider route keep the
+messages from before the handoff; messages written afterwards on a different
+account or endpoint stay withheld, as in any chat.
 
 ## Accounts and averages
 

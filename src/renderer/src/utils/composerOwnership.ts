@@ -2,7 +2,6 @@ import { readComposerDraft } from "./composerDraftPersistence";
 
 export type ComposerDetachmentBlocker =
   | "mutation-in-flight"
-  | "pending-model-route"
   | "attachments"
   | "file-references"
   | "prompt-context"

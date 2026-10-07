@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import Database from "better-sqlite3";
 import { describe, expect, it, type Mock, vi } from "vitest";
 
 import type {
@@ -21,8 +20,7 @@ import type {
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 import { RuntimeStore } from "../../src/server/database";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
-import { MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
-import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { CONVERSATION_PROVIDER_MISMATCH_MESSAGE } from "../../src/server/persistence/conversation-provider-policy";
 import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
@@ -1047,42 +1045,21 @@ describe("message attachment ownership transfer", () => {
     expect(queue).toHaveBeenCalledOnce();
   });
 
-  it("explains a mixed-provider history instead of a generic send failure", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "inertia-mixed-send-"));
+  it("explains a provider mismatch instead of a generic send failure", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-provider-mismatch-send-"));
     const store = new RuntimeStore(join(directory, "runtime.sqlite"), directory, { recoverInterruptedRuns: false });
     try {
-      const project = store.createProject("Mixed history", directory);
-      const conversation = store.createConversation(project.id, "Legacy mixed chat", { providerId: "codex" });
-      for (const runId of ["legacy-run", "current-run"]) {
-        store.beginAgentTurn({
-          conversationId: conversation.id,
-          runId,
-          content: "Historical request",
-          providerId: "codex",
-          modelSelection: providerNativeModelSelection({ providerId: "codex" }),
-          reasoningEffort: "",
-          interactionMode: "build",
-          accessMode: "supervised",
-          configurationRevision: 0,
-          association: "authoritative",
-        });
-      }
-      store.close();
-      const database = new Database(join(directory, "runtime.sqlite"));
-      database.prepare("UPDATE agent_turns SET provider_id = 'claude' WHERE run_id = 'legacy-run'").run();
-      database.close();
-      const reopened = new RuntimeStore(join(directory, "runtime.sqlite"), directory, { recoverInterruptedRuns: false });
-      const queue = vi.fn(() => reopened.assertConversationProvider(conversation.id, "codex"));
-      try {
-        await expect(createTurnInteractionCommandHandler(dependencies({
-          queue,
-          relinquishAll: vi.fn(async () => undefined),
-        }))({} as never, messageCommand())).rejects.toThrow(new RuntimeRequestError(MIXED_PROVIDER_HISTORY_MESSAGE));
-      } finally {
-        reopened.close();
-      }
+      const project = store.createProject("Provider mismatch", directory);
+      const conversation = store.createConversation(project.id, "Handed-off chat", { providerId: "codex" });
+      store.updateConversation(conversation.id, { providerId: "claude" });
+      const queue = vi.fn(() => store.assertConversationProvider(conversation.id, "codex"));
+      await expect(createTurnInteractionCommandHandler(dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+      }))({} as never, messageCommand())).rejects.toThrow(new RuntimeRequestError(CONVERSATION_PROVIDER_MISMATCH_MESSAGE));
       expect(queue).toHaveBeenCalledOnce();
     } finally {
+      store.close();
       await rm(directory, { recursive: true, force: true });
     }
   });

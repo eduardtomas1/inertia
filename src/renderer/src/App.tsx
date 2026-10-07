@@ -55,7 +55,7 @@ import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { useSnapshotQueue } from "./hooks/useSnapshotQueue";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
-import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationCommand } from "./lib/newConversation";
+import { type NewConversationLocation } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
@@ -71,7 +71,6 @@ import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
-import { persistComposerDraft } from "./utils/composerDraftPersistence";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
@@ -701,35 +700,6 @@ export default function App(): React.JSX.Element {
     show: () => { navigateToView("workspace"); setSidebarOpen(false); },
     start: () => createConversation(),
   });
-  const createConversationForSelection = async (request: ReplacementChatRequest): Promise<void> => {
-    if (!request.sourceConversationId && draftConversation.chooseModel(request.selection, request.configuration)) return;
-    if (!project) throw new Error("Select a project before creating a chat.");
-    const selectionGeneration =
-      conversationSelectionGenerationRef.current + 1;
-    conversationSelectionGenerationRef.current = selectionGeneration;
-    const command = replacementConversationCommand(project, settings, request);
-    const event = await run(command.type, command);
-    if (
-      event.type !== "request.result"
-      || event.result.kind !== "conversation.created"
-    ) throw new Error("The new chat could not be identified.");
-    if (request.prefillText) {
-      persistComposerDraft(event.result.conversationId, request.prefillText);
-    }
-    request.onCreated?.(event.result.conversationId);
-    if (
-      selectionGeneration !== conversationSelectionGenerationRef.current
-    ) return;
-    await selectConversationCommand(
-      "conversation.select",
-      event.result.conversationId,
-    );
-    if (
-      selectionGeneration !== conversationSelectionGenerationRef.current
-    ) return;
-    setView("workspace");
-    setSidebarOpen(false);
-  };
   const respondToApproval = async (request: AgentApprovalRequest, decision: AgentApprovalDecision) => {
     await run("agent.approval.respond", {
       type: "agent.approval.respond",
@@ -803,7 +773,6 @@ export default function App(): React.JSX.Element {
       importProject,
       selectGlobalChatProject,
       createConversation,
-      createConversationForSelection,
       sendMessage,
       compactConversation: async (instruction?: string) => {
         if (!conversation) {

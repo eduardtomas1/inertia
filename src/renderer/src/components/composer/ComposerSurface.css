@@ -209,6 +209,19 @@
   color: inherit;
   font-weight: 500;
 }
+.composer-handoff-notice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 1px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+.composer-handoff-notice > svg {
+  flex: 0 0 auto;
+  color: var(--text-soft);
+}
 @container (max-width: 480px) {
   .composer-shell .composer {
     --composer-drawer-inset: 12px;

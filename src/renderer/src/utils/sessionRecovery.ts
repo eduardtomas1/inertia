@@ -11,8 +11,13 @@ const REASONS: Partial<Record<NonNullable<AgentTurn["continuationReasonCode"]>, 
   "backend-endpoint-changed": "Model backend endpoint changed",
 };
 
+/**
+ * `harness-changed` covers both a real provider handoff and a same-provider
+ * harness switch, so the caller says which one the timeline observed.
+ */
 export function sessionRecoveryDetail(
   turn: Pick<AgentTurn, "continuationReasonCode" | "sessionRecovery">,
+  providerChanged = false,
 ): string | null {
   const recovery = turn.sessionRecovery;
   if (!recovery) return null;
@@ -25,9 +30,11 @@ export function sessionRecoveryDetail(
     : omitted > 0
       ? "Earlier messages did not fit and were not restored"
       : withheld || "Earlier messages were not restored automatically";
-  const reason = turn.continuationReasonCode
-    ? REASONS[turn.continuationReasonCode]
-    : undefined;
+  const reason = turn.continuationReasonCode === "harness-changed"
+    ? providerChanged ? "Provider changed" : "Agent harness changed"
+    : turn.continuationReasonCode
+      ? REASONS[turn.continuationReasonCode]
+      : undefined;
   const detail = withheld && outcome !== withheld ? `${outcome} · ${withheld}` : outcome;
   return reason ? `${reason} · ${detail}` : detail;
 }

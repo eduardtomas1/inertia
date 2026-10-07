@@ -666,24 +666,20 @@ describe("ChatGoalControl", () => {
     await waitFor(() => expect(onRetry).toHaveBeenCalledTimes(1));
   });
 
-  it("keeps an open goal control open and offers New chat when the chat becomes unable to continue", () => {
-    const onDismiss = vi.fn();
-    const onStartNewChat = vi.fn();
-    const state = workflow(nativeCapability, [goal("codex-native", "Ship it")]);
-    const view = render(
-      <ChatGoalControl {...props(state, { onStartNewChat })} {...openProps(onDismiss)} />,
-    );
-    expect(screen.getByRole("button", { name: "Pause" })).toHaveFocus();
-
-    view.rerender(
+  it("explains an unavailable goal capability without offering another chat", () => {
+    render(
       <ChatGoalControl
-        {...props(state, { onStartNewChat, continuationRefusal: "This chat cannot continue." })}
-        {...openProps(onDismiss)}
+        {...props(workflow({
+          kind: "unavailable",
+          available: false,
+          label: "Goals unavailable",
+          reason: "Goals are unavailable for this chat.",
+        }, [goal("codex-native", "Ship it")]))}
+        {...openProps()}
       />,
     );
 
-    expect(onDismiss).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent("This chat cannot continue.");
-    expect(screen.getByRole("button", { name: "New chat" })).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("Goals are unavailable for this chat.");
+    expect(screen.queryByRole("button", { name: /New chat|Pause/u })).not.toBeInTheDocument();
   });
 });

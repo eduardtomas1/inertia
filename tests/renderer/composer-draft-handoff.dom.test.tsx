@@ -9,6 +9,7 @@ import { MAX_CHAT_MESSAGE_CHARS } from "../../src/shared/diff-review";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { useDetachedChatWindows } from "../../src/renderer/src/hooks/useDetachedChatWindows";
 import {
+  clearPersistedComposerDraft,
   MAX_UNSTORED_COMPOSER_DRAFTS,
   persistComposerDraft,
   readComposerDraft,
@@ -174,6 +175,20 @@ describe("composer draft persistence", () => {
     view.unmount();
     render(<Composer {...composerProps(current)} />);
     expect(message()).toHaveValue("");
+  });
+
+  it("clears an unstored draft only when the cleared draft matches it", () => {
+    rejectStorageWrites();
+    persistComposerDraft("unstored-sent", "Handed-off text");
+    persistComposerDraft("unstored-kept", "Handed-off text");
+
+    clearPersistedComposerDraft("unstored-sent", "Handed-off text");
+    clearPersistedComposerDraft("unstored-kept", "A different draft");
+    expect(readComposerDraft("unstored-sent")).toBe("");
+    expect(readComposerDraft("unstored-kept")).toBe("Handed-off text");
+
+    persistComposerDraft("unstored-kept", "");
+    expect(readComposerDraft("unstored-kept")).toBe("");
   });
 
   it("bounds the unstored drafts by count and size", () => {

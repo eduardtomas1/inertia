@@ -9,7 +9,9 @@ import type {
   AgentTurn,
   ChatMessage,
   CheckpointSummary,
+  ProviderId,
   TurnGitArtifact,
+  TurnSessionRecovery,
 } from "@shared/contracts";
 import { activityNeedsAttention } from "./activity-attention";
 
@@ -43,6 +45,8 @@ export interface ResponseTurn {
   toolCallCount: number;
   importantActivities: AgentActivity[];
   foldableActivities: AgentActivity[];
+  /** Set when the previous authoritative turn ran on another provider. */
+  providerChanged?: true;
 }
 
 /**
@@ -81,8 +85,21 @@ export interface ResponseTimelineCompatibility {
   checkpoints: CheckpointSummary[];
 }
 
+/**
+ * A provider change between two authoritative turns. It is derived from the
+ * immutable turn identities, so it needs no event or persisted record.
+ */
+export interface ProviderHandoffItem {
+  turnId: string;
+  requestedAt: string;
+  from: { providerId: ProviderId; model: string | null };
+  to: { providerId: ProviderId; model: string | null };
+  sessionRecovery: TurnSessionRecovery | null;
+}
+
 export type ResponseTimelineItem =
   | { kind: "compaction"; id: string; message: ChatMessage }
+  | { kind: "handoff"; id: string; handoff: ProviderHandoffItem }
   | { kind: "turn"; id: string; turn: ResponseTurn }
   | {
       kind: "compatibility";
@@ -353,8 +370,39 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
           compatibility,
         }]
       : []),
-    ...ordered,
+    ...withProviderHandoffs(ordered),
   ];
+}
+
+function turnModelLabel(turn: AgentTurn): string | null {
+  if (turn.modelAlias) return turn.modelAlias;
+  if (turn.model) return turn.model;
+  const { modelId } = turn.modelSelection;
+  return modelId && modelId !== "provider-default" ? modelId : null;
+}
+
+/** Places a handoff divider immediately before each turn that changed provider. */
+function withProviderHandoffs(ordered: ResponseTimelineItem[]): ResponseTimelineItem[] {
+  let previous: AgentTurn | null = null;
+  return ordered.flatMap((item): ResponseTimelineItem[] => {
+    if (item.kind !== "turn") return [item];
+    const turn = item.turn.agentTurn;
+    const from = previous;
+    previous = turn;
+    if (!from || from.providerId === turn.providerId) return [item];
+    const changed: ResponseTimelineItem = { ...item, turn: { ...item.turn, providerChanged: true } };
+    return [{
+      kind: "handoff",
+      id: `handoff:${turn.id}`,
+      handoff: {
+        turnId: turn.id,
+        requestedAt: turn.requestedAt,
+        from: { providerId: from.providerId, model: turnModelLabel(from) },
+        to: { providerId: turn.providerId, model: turnModelLabel(turn) },
+        sessionRecovery: turn.sessionRecovery ?? null,
+      },
+    }, changed];
+  });
 }
 
 /**
@@ -441,6 +489,7 @@ export function updateResponseTimelineForActivityDelta(
     turn: {
       ...rebuilt.turn,
       index: previousItem.turn.index,
+      ...(previousItem.turn.providerChanged ? { providerChanged: true as const } : {}),
     },
   };
   return previousTimeline.map((item) =>
@@ -473,6 +522,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && left.startedAt === right.startedAt
     && left.completedAt === right.completedAt
     && left.isActive === right.isActive
+    && left.providerChanged === right.providerChanged
     && left.toolCallCount === right.toolCallCount
     && sameReferences(left.followUpMessages, right.followUpMessages)
     && sameReferences(left.assistantMessages, right.assistantMessages)
@@ -489,6 +539,18 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
 
 function stabilizeTurn(left: ResponseTurn | undefined, right: ResponseTurn): ResponseTurn {
   return left && sameResponseTurn(left, right) ? left : right;
+}
+
+function sameHandoff(left: ProviderHandoffItem, right: ProviderHandoffItem): boolean {
+  return left.turnId === right.turnId
+    && left.requestedAt === right.requestedAt
+    && left.from.providerId === right.from.providerId
+    && left.from.model === right.from.model
+    && left.to.providerId === right.to.providerId
+    && left.to.model === right.to.model
+    && left.sessionRecovery?.restoredMessageCount === right.sessionRecovery?.restoredMessageCount
+    && left.sessionRecovery?.omittedMessageCount === right.sessionRecovery?.omittedMessageCount
+    && left.sessionRecovery?.withheldMessageCount === right.sessionRecovery?.withheldMessageCount;
 }
 
 function sameCompatibility(
@@ -527,6 +589,11 @@ export function stabilizeResponseTimeline(
 
     if (item.kind === "compaction") {
       const stable = prior?.kind === "compaction" && prior.message === item.message ? prior : item;
+      if (stable !== previous[index]) changed = true;
+      return stable;
+    }
+    if (item.kind === "handoff") {
+      const stable = prior?.kind === "handoff" && sameHandoff(prior.handoff, item.handoff) ? prior : item;
       if (stable !== previous[index]) changed = true;
       return stable;
     }

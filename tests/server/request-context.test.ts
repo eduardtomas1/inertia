@@ -542,6 +542,44 @@ describe("restored history respects the selected request's capacity", () => {
     expect(assembleTurnRequest({ ...request, restoredHistory: () => null })).toEqual(assembleTurnRequest(request));
   });
 
+  it("drops an optional restored block before giving up the restored messages", async () => {
+    const cwd = await workspace();
+    await writeFile(join(cwd, "source.ts"), "export const answer = 42;");
+    const parts = [1, 2, 3].map((part) => ({
+      label: `Earlier messages restored for a new session · 9 messages · part ${part} of 3`,
+      content: JSON.stringify({ part }),
+    }));
+    const files = { label: "Files changed earlier in this chat", content: JSON.stringify({ files: [] }), optional: true as const };
+    const request: AssembleTurnRequestInput = {
+      cwd, visibleContent: "Continue on the new provider.",
+      context: {
+        fileReferences: Array.from({ length: 16 }, () => ({ path: "source.ts" })),
+        diffSelections: Array.from({ length: 8 }, () => ({ path: "source.ts", hunkHeader: "@@ -1 +1 @@", content: "+answer = 42", selectedLineCount: 1 })),
+        terminalContexts: Array.from({ length: 5 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Tests", lineStart: 1, lineEnd: 1, content: `output-${i}` })),
+      },
+    };
+    expect(assembleTurnRequest(request).persistence.manifest.contextReferenceCount).toBe(29);
+    const assembled = assembleTurnRequest({
+      ...request,
+      restoredHistory: () => ({ blocks: [...parts, files], messageCount: 9, omittedMessageCount: 0 }),
+    });
+    expect(assembled.sessionRecovery).toEqual({ restoredMessageCount: 9, omittedMessageCount: 0 });
+    const labels = assembled.persistence.manifest.references.map(({ label }) => label);
+    expect(labels).toHaveLength(32);
+    expect(labels.slice(-3)).toEqual(parts.map(({ label }) => label));
+    expect(labels).not.toContain(files.label);
+
+    const roomy = assembleTurnRequest({
+      cwd, visibleContent: "Continue on the new provider.",
+      restoredHistory: () => ({ blocks: [...parts, files], messageCount: 9, omittedMessageCount: 0 }),
+    });
+    expect(roomy.persistence.manifest.references.map(({ label }) => label).at(-1)).toBe(files.label);
+    expect(assembleTurnRequest({
+      cwd, visibleContent: "Continue.",
+      restoredHistory: () => ({ blocks: [files], messageCount: 0, omittedMessageCount: 0 }),
+    }).persistence.manifest.contextReferenceCount).toBe(0);
+  });
+
   it("offers only the capacity left beside a large selected request", async () => {
     const cwd = await workspace();
     const capacities: number[] = [];

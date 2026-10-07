@@ -6,14 +6,12 @@ import type {
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
-import type { PendingModelRoute } from "../components/composer/types";
-import type { ChatConfiguration, ReplacementChatRequest } from "../lib/newConversation";
 import {
-  conversationContinuationRefusal,
   conversationHasHistory,
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
+  type ContinuationAction,
   type ContinuationChangeKind,
   type ContinuationReasonCode,
 } from "../../../shared/continuation-policy";
@@ -24,8 +22,6 @@ type TransitionCompatibility = Pick<
 >;
 
 export interface ModelRouteTransitionContext {
-  /** The selected project is carried across a required new-conversation path. */
-  projectId: string;
   providerId: ProviderId;
   selection: ModelSelection;
   continuationIdentity: ContinuationIdentity | null;
@@ -36,7 +32,6 @@ export interface ModelRouteTransitionContext {
   /** Only session presence is accepted; session identifiers never enter this policy. */
   hasProviderSession: boolean;
   hasHistory: boolean;
-  mixedProviderHistory: boolean;
 }
 
 export interface ModelRouteTransitionCandidate {
@@ -47,32 +42,23 @@ export interface ModelRouteTransitionCandidate {
   supportsNativeFastModeControl?: boolean;
 }
 
-interface ModelRouteTransitionBase {
-  projectId: string;
+/**
+ * A route change always stays in the current chat. A provider change starts a
+ * fresh provider session that receives the chat's earlier messages as context.
+ */
+export interface ModelRouteTransition {
   selection: ModelSelection;
+  continuationAction: ContinuationAction;
   changeKind: ContinuationChangeKind;
   reasonCode: ContinuationReasonCode;
   reason: string;
 }
-
-export type ModelRouteTransition =
-  | (ModelRouteTransitionBase & {
-      kind: "update-current-conversation";
-      providerSessionDisposition: "retain-current-conversation";
-      continuationAction: "start-session" | "resume-session";
-    })
-  | (ModelRouteTransitionBase & {
-      kind: "create-new-conversation";
-      providerSessionDisposition: "start-unbound";
-      continuationAction: "new-conversation-required";
-    });
 
 export function modelRouteTransitionContext(
   conversation: Conversation,
   latestTurn: { modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
 ): ModelRouteTransitionContext {
   return {
-    projectId: conversation.projectId,
     providerId: conversation.providerId,
     selection: conversation.modelSelection,
     continuationIdentity: conversation.continuationIdentity,
@@ -81,55 +67,6 @@ export function modelRouteTransitionContext(
       : null,
     hasProviderSession: Boolean(conversation.providerSessionId),
     hasHistory: conversationHasHistory(conversation),
-    mixedProviderHistory: conversationContinuationRefusal(conversation) !== null,
-  };
-}
-
-export function replacementChatRequest(
-  conversation: Pick<Conversation, "modelSelection" | "accessMode" | "interactionMode">,
-  choice: {
-    selection?: ModelSelection;
-    configuration?: ChatConfiguration;
-    prefillText?: string;
-    sourceConversationId?: string;
-  } = {},
-): ReplacementChatRequest {
-  return {
-    selection: choice.selection ?? conversation.modelSelection,
-    configuration: choice.configuration
-      ?? { accessMode: conversation.accessMode, interactionMode: conversation.interactionMode },
-    ...(choice.prefillText ? { prefillText: choice.prefillText } : {}),
-    ...(choice.sourceConversationId ? { sourceConversationId: choice.sourceConversationId } : {}),
-  };
-}
-
-export function pendingModelRoute(
-  conversation: Conversation,
-  latestTurn: { id: string; modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
-  { selection, configuration, sourceConversationId }: ReplacementChatRequest,
-  label: string,
-  reason: string,
-): PendingModelRoute {
-  return {
-    selection,
-    configuration,
-    label,
-    reason,
-    carriesContext: sourceConversationId === conversation.id,
-    sourceConversationId: conversation.id,
-    sourceProjectId: conversation.projectId,
-    sourceSelectionKey: JSON.stringify(conversation.modelSelection),
-    sourceConfigurationKey: `${conversation.accessMode}:${conversation.interactionMode}`,
-    sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
-    sourceLatestTurnId: latestTurn?.id ?? null,
-    sourceLatestTurnKey: JSON.stringify(latestTurn
-      ? {
-          id: latestTurn.id,
-          modelSelection: latestTurn.modelSelection,
-          continuationIdentity: latestTurn.continuationIdentity,
-        }
-      : null),
-    destinationRevision: selection.backendConfigurationRevision,
   };
 }
 
@@ -150,7 +87,6 @@ export function resolveModelRouteTransition(
       context.latestTurn?.selection.harnessId ?? context.selection.harnessId,
     ) ?? context.providerId,
     hasHistory: context.hasHistory,
-    mixedProviderHistory: context.mixedProviderHistory,
     previousIdentity,
     nextIdentity: candidate.continuationIdentity,
     previousModelId,
@@ -166,27 +102,11 @@ export function resolveModelRouteTransition(
         harnessId: candidate.selection.harnessId,
       }) && candidate.supportsNativeFastModeControl === true,
   });
-  const base: ModelRouteTransitionBase = {
-    projectId: context.projectId,
+  return {
     selection: candidate.selection,
+    continuationAction: decision.action,
     changeKind: decision.changeKind,
     reasonCode: decision.reasonCode,
     reason: decision.reason,
-  };
-
-  if (decision.action === "new-conversation-required") {
-    return {
-      ...base,
-      kind: "create-new-conversation",
-      providerSessionDisposition: "start-unbound",
-      continuationAction: decision.action,
-    };
-  }
-
-  return {
-    ...base,
-    kind: "update-current-conversation",
-    providerSessionDisposition: "retain-current-conversation",
-    continuationAction: decision.action,
   };
 }

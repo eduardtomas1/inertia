@@ -171,22 +171,34 @@ describe("quota reset actions", () => {
     expect(dependencies.dispatch).toHaveBeenCalledOnce();
   });
 
-  it("does not offer or send a resume in a chat whose history mixes providers", async () => {
+  it("retires a waiting resume when the chat hands off to another provider", async () => {
+    await schedule();
+    store.updateConversation(conversationId, { providerId: "claude" });
+    expect((await scheduler.get(conversationId)).plan).toMatchObject({ state: "cancelled" });
+    expect((await scheduler.get(conversationId)).offer).toBeNull();
+    await expect(schedule()).rejects.toThrow("limit changed");
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    await scheduler.tick();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("asks for attention when the same-provider chat settings drift under a waiting resume", async () => {
+    await schedule();
+    store.updateConversation(conversationId, { accessMode: "full" });
+    expect((await scheduler.get(conversationId)).plan).toMatchObject({ state: "blocked" });
+  });
+
+  it("still offers a resume when only earlier turns ran on another provider", async () => {
     const earlier = failedTurnId;
     vi.setSystemTime(instant + 1_000);
     const turn = begin(); failedTurnId = turn.id;
     store.updateAgentTurnLifecycle(turn.id, { status: "failed", completedAt: new Date().toISOString() });
     store.limitResets.markUsageLimited(turn.id);
     store.updateWorkspaceRun(turn.runId, { status: "failed", finishedAt: new Date().toISOString() });
-    await schedule();
     const database = new Database(join(directory, "inertia.sqlite"));
     try { database.prepare("UPDATE agent_turns SET provider_id = 'claude' WHERE id = ?").run(earlier); } finally { database.close(); }
-    expect((await scheduler.get(conversationId)).plan).toMatchObject({ state: "blocked" });
-    expect((await scheduler.get(conversationId)).offer).toBeNull();
-    await expect(schedule()).rejects.toThrow("limit changed");
-    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
-    await scheduler.tick();
-    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    await schedule();
+    expect((await scheduler.get(conversationId)).plan).toMatchObject({ state: "waiting" });
   });
 
   it("drops a pending resume with its deleted chat", async () => {

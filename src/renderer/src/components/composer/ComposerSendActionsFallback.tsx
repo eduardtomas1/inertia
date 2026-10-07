@@ -4,12 +4,10 @@ export function ComposerSendActionsFallback({
   primaryAction,
   onSubmit,
   onStop,
-  newChatReasonId,
 }: {
   primaryAction: ComposerPrimaryActionState;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
-  newChatReasonId?: string;
 }): React.JSX.Element {
   const stopping = primaryAction === "stop-pending";
   const stopAndSend = primaryAction === "stop-and-send";
@@ -19,7 +17,7 @@ export function ComposerSendActionsFallback({
     ? "Stop and send"
     : stop
     ? stopping ? "Stopping agent" : "Stop agent"
-    : submitting ? "Sending message" : newChatReasonId ? "Start a new chat" : "Send message";
+    : submitting ? "Sending message" : "Send message";
   return (
     <button
         type="button"
@@ -30,9 +28,8 @@ export function ComposerSendActionsFallback({
         }`}
         data-composer-action-state={primaryAction}
         aria-busy={stopping || submitting}
-        aria-describedby={stop || stopAndSend ? undefined : newChatReasonId}
         onClick={() => void (stop ? onStop() : onSubmit())}
-        disabled={stopping || submitting || (primaryAction === "send-disabled" && !newChatReasonId)}
+        disabled={stopping || submitting || primaryAction === "send-disabled"}
       >
         <span aria-hidden="true">{stop || stopAndSend ? "■" : submitting ? "…" : "↑"}</span>
     </button>

@@ -28,6 +28,7 @@ import {
   stabilizeResponseTimeline,
   turnExecutionElapsedMs,
   turnTimingLabels,
+  updateResponseTimelineForActivityDelta,
   workSummaryLabel,
   type ResponseTurn,
   type TurnGitArtifactSummary,
@@ -1333,5 +1334,119 @@ describe("authoritative response timeline", () => {
     expect(formatElapsed(42_000)).toBe("42s");
     expect(formatElapsed(125_000)).toBe("2m 5s");
     expect(formatElapsed(3_720_000)).toBe("1h 2m");
+  });
+});
+
+describe("provider handoff divider", () => {
+  const claudeSelection = {
+    harnessId: "claude-agent-sdk",
+    backendProfileId: "native:claude:agent-sdk",
+    backendProfileDisplayName: "Claude Agent SDK",
+    modelId: "claude-sonnet",
+    alias: null,
+    reasoningEffort: null,
+    contextWindowOverride: null,
+    providerOptions: {},
+    capabilities: [],
+    backendConfigurationRevision: 1,
+  } as AgentTurn["modelSelection"];
+
+  function handoffTurns(): { turns: AgentTurn[]; messages: ChatMessage[] } {
+    const first = agentTurn("turn-a", "user-a", {
+      providerId: "claude",
+      modelSelection: claudeSelection,
+      model: "claude-sonnet",
+      modelAlias: null,
+      requestedAt: "2026-07-23T10:00:00.000Z",
+    });
+    const second = agentTurn("turn-b", "user-b", {
+      providerId: "claude",
+      modelSelection: claudeSelection,
+      model: "claude-sonnet",
+      modelAlias: null,
+      requestedAt: "2026-07-23T10:01:00.000Z",
+    });
+    const third = agentTurn("turn-c", "user-c", {
+      requestedAt: "2026-07-23T10:02:00.000Z",
+      continuationReasonCode: "harness-changed",
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 1 },
+    });
+    const fourth = agentTurn("turn-d", "user-d", {
+      model: "",
+      modelAlias: null,
+      modelSelection: { ...agentTurn("x", "y").modelSelection, modelId: "gpt-fallback" },
+      requestedAt: "2026-07-23T10:03:00.000Z",
+    });
+    const turns = [fourth, second, third, first];
+    return {
+      turns,
+      messages: turns.map((turn) => message(turn.userMessageId, turn.id, "user", turn.id, turn.requestedAt)),
+    };
+  }
+
+  it("derives one divider immediately before each turn that changed provider", () => {
+    const timeline = buildResponseTimeline({ ...handoffTurns(), activities: [], reasonings: [], checkpoints: [] });
+
+    expect(timeline.map(({ id }) => id)).toEqual(["turn-a", "turn-b", "handoff:turn-c", "turn-c", "turn-d"]);
+    const handoff = timeline[2];
+    expect(handoff?.kind).toBe("handoff");
+    if (handoff?.kind !== "handoff") throw new Error("Expected the handoff item.");
+    expect(handoff.handoff).toEqual({
+      turnId: "turn-c",
+      requestedAt: "2026-07-23T10:02:00.000Z",
+      from: { providerId: "claude", model: "claude-sonnet" },
+      to: { providerId: "codex", model: "latest" },
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 1 },
+    });
+    expect(timeline.flatMap((item) => item.kind === "turn" && item.turn.providerChanged ? [item.id] : []))
+      .toEqual(["turn-c"]);
+  });
+
+  it("keeps the provider change on a turn rebuilt from an activity update", () => {
+    const base = { ...handoffTurns(), activities: [] as AgentActivity[], reasonings: [], checkpoints: [] };
+    const previous = buildResponseTimeline(base);
+    const next = updateResponseTimelineForActivityDelta(
+      { ...base, activities: [activity("live", "turn-c")] },
+      base.activities,
+      previous,
+    );
+    expect(next).not.toBeNull();
+    expect(timelineTurn(next!, "turn-c")).toMatchObject({ providerChanged: true, activities: [{ id: "live" }] });
+    expect(next!.map(({ id }) => id)).toEqual(previous.map(({ id }) => id));
+  });
+
+  it("adds no divider for a chat that stays on one provider or has a single turn", () => {
+    const { turns, messages } = handoffTurns();
+    const sameProvider = turns.filter(({ providerId }) => providerId === "codex");
+    expect(buildResponseTimeline({ turns: sameProvider, messages, activities: [], reasonings: [], checkpoints: [] })
+      .some(({ kind }) => kind === "handoff")).toBe(false);
+    expect(buildResponseTimeline({ turns: turns.slice(0, 1), messages, activities: [], reasonings: [], checkpoints: [] })
+      .some(({ kind }) => kind === "handoff")).toBe(false);
+  });
+
+  it("prefers the model alias, falls back to the model id, and keeps the divider identity across rebuilds", () => {
+    const { turns, messages } = handoffTurns();
+    const back = agentTurn("turn-e", "user-e", {
+      providerId: "claude",
+      modelSelection: { ...claudeSelection, modelId: "provider-default" },
+      model: "",
+      modelAlias: null,
+      requestedAt: "2026-07-23T10:04:00.000Z",
+    });
+    const input = {
+      turns: [...turns, back],
+      messages: [...messages, message("user-e", back.id, "user", "Back", back.requestedAt)],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    };
+    const first = stabilizeResponseTimeline(buildResponseTimeline(input), []);
+    const handoffs = first.flatMap((item) => item.kind === "handoff" ? [item.handoff] : []);
+    expect(handoffs.map(({ turnId, from, to }) => [turnId, from.model, to.model])).toEqual([
+      ["turn-c", "claude-sonnet", "latest"],
+      ["turn-e", "gpt-fallback", null],
+    ]);
+    const rebuilt = stabilizeResponseTimeline(buildResponseTimeline(input), first);
+    expect(rebuilt).toBe(first);
   });
 });

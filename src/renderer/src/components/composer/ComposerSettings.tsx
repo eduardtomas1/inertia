@@ -52,8 +52,6 @@ export interface ComposerSettingsProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
-  continuationRefusal?: string | null;
-  continuationNoticeId?: string;
 }
 
 export function ComposerSettings({
@@ -69,8 +67,6 @@ export function ComposerSettings({
   onUpdateFastMode,
   onUpdateConversation,
   conversationUpdatePending,
-  continuationRefusal = null,
-  continuationNoticeId,
 }: ComposerSettingsProps): React.JSX.Element {
   const {
     menu,
@@ -112,16 +108,10 @@ export function ComposerSettings({
             aria-haspopup="menu"
             aria-controls={menuId("reasoning")}
             aria-expanded={menu === "reasoning"}
-            aria-disabled={continuationRefusal ? true : undefined}
-            aria-describedby={continuationRefusal ? continuationNoticeId : undefined}
             disabled={disabled || running || conversationUpdatePending}
             data-composer-setting="reasoning"
-            onClick={() => {
-              if (!continuationRefusal) toggleMenu("reasoning");
-            }}
-            onKeyDown={(event) => {
-              if (!continuationRefusal) handleComposerMenuTriggerKeyDown("reasoning", event);
-            }}
+            onClick={() => toggleMenu("reasoning")}
+            onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
           >
             <Brain
               className="composer-setting-icon"
@@ -191,16 +181,10 @@ export function ComposerSettings({
             aria-haspopup="menu"
             aria-controls={menuId("speed")}
             aria-expanded={menu === "speed"}
-            aria-disabled={continuationRefusal ? true : undefined}
-            aria-describedby={continuationRefusal ? continuationNoticeId : undefined}
             disabled={disabled || running || conversationUpdatePending}
             data-composer-setting="speed"
-            onClick={() => {
-              if (!continuationRefusal) toggleMenu("speed");
-            }}
-            onKeyDown={(event) => {
-              if (!continuationRefusal) handleComposerMenuTriggerKeyDown("speed", event);
-            }}
+            onClick={() => toggleMenu("speed")}
+            onKeyDown={(event) => handleComposerMenuTriggerKeyDown("speed", event)}
           >
             <ChevronRight
               className="composer-setting-icon"

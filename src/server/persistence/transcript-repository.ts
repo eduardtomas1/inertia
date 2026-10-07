@@ -1,4 +1,5 @@
 import { readContinuationHistory } from "./continuation-history";
+import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
@@ -53,14 +54,23 @@ export class TranscriptRepository {
     excludedMessageId?: string,
     route?: Parameters<typeof readContinuationHistory>[5],
   ): ReturnType<typeof readContinuationHistory> {
-    return readContinuationHistory(
+    // Paths only: the workspace is shared by every route, unlike provider replies.
+    const files = route?.handoffBefore !== undefined
+      ? providerHandoffFilesBlock(this.context.database, conversationId)
+      : null;
+    const reservedBytes = files ? providerHandoffBlockBytes(files) : 0;
+    const filesFit = files !== null && reservedBytes < capacityBytes;
+    const history = readContinuationHistory(
       this.context.database,
       conversationId,
-      capacityBytes,
+      filesFit ? capacityBytes - reservedBytes : capacityBytes,
       capturedAt,
       excludedMessageId,
       route,
     );
+    return filesFit && history && history.blocks.length > 0
+      ? { ...history, blocks: [...history.blocks, files] }
+      : history;
   }
 
   createMessage(

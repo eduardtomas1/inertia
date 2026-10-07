@@ -10,7 +10,6 @@ export interface ComposerDetachmentState {
   conversationContextPending: boolean;
   fileReferenceCount: number;
   mutationInFlight: boolean;
-  pendingModelRoute: boolean;
   previewContextSelected: boolean;
   promptContextSelected: boolean;
 }
@@ -31,14 +30,6 @@ function prepareDetachment(
       status: "blocked",
       blocker: "mutation-in-flight",
       reason: "Wait for the current composer action to finish before moving this chat to a window.",
-      draft,
-    };
-  }
-  if (state.pendingModelRoute) {
-    return {
-      status: "blocked",
-      blocker: "pending-model-route",
-      reason: "Finish or cancel the pending model change before moving this chat to a window.",
       draft,
     };
   }

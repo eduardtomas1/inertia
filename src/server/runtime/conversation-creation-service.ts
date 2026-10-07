@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 
 import type { Conversation, ClientCommand, ProviderInfo } from "../../shared/contracts";
 import { effectiveDefaultProviderId } from "../../shared/default-provider";
-import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import {
   providerNativeModelSelection,
   type ModelSelection,
@@ -19,7 +18,6 @@ import type { ProviderManager } from "../providers";
 import { normalizeIdentityPath } from "../project-identity";
 import { RuntimeRequestError } from "../runtime-errors";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
-import type { TurnController } from "./turns/turn-controller";
 import type { WorkspaceRunController } from "./workspace-run-controller";
 import { ScratchWorkspace } from "./scratch-workspace";
 import {
@@ -32,16 +30,6 @@ export type ConversationCreatePayload = Extract<
   { type: "conversation.create" }
 >["payload"];
 
-export type ConversationContinuePayload = Extract<
-  ClientCommand,
-  { type: "conversation.continue" }
->["payload"];
-
-type ConversationInsertion = (insert: () => Conversation) => Conversation;
-
-const CONTINUATION_ADMISSION_TIMEOUT_MS = 1_000;
-const SOURCE_BUSY = "Wait for this chat's turn to finish before continuing in a new chat.";
-
 export interface ConversationCreationDependencies {
   store: RuntimeStore;
   providers: ProviderManager;
@@ -51,7 +39,6 @@ export interface ConversationCreationDependencies {
     "trackSourceControl"
   >;
   dataDirectory: string;
-  turns?: Pick<TurnController, "acquireTurnAdmission">;
   providerInfo?(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   testHooks?: {
@@ -107,76 +94,17 @@ export class ConversationCreationService {
     return { providerId, selection };
   }
 
-  async continueFrom(
-    payload: ConversationContinuePayload,
-    requestId: string,
-  ): Promise<Conversation> {
-    const { store } = this.dependencies;
-    const source = store.conversation(payload.sourceConversationId);
-    if (store.project(source.projectId).workspaceKind === "scratch") {
-      throw new RuntimeRequestError("A chat without a project cannot continue in a new chat.");
-    }
-    const admission = await this.dependencies.turns?.acquireTurnAdmission(
-      source.id,
-      CONTINUATION_ADMISSION_TIMEOUT_MS,
-    );
-    if (!admission) throw new RuntimeRequestError(SOURCE_BUSY);
-    try {
-      return await this.continueWithAdmission(source, payload, requestId);
-    } finally {
-      admission.release();
-    }
-  }
-
-  private async continueWithAdmission(
-    source: Conversation,
-    payload: ConversationContinuePayload,
-    requestId: string,
-  ): Promise<Conversation> {
-    const { store } = this.dependencies;
-    this.assertIdle(source.id);
-    return await this.create({
-      projectId: source.projectId,
-      title: "New chat",
-      modelSelection: payload.modelSelection,
-      interactionMode: payload.interactionMode,
-      accessMode: payload.accessMode,
-      activate: false,
-      useWorktree: false,
-      branch: source.branch,
-      worktreePath: source.worktreePath,
-    }, requestId, (insert) => store.contextPackets.createTargetWithPacket(source.id, () => {
-      this.assertIdle(source.id);
-      return insert();
-    }));
-  }
-
-  private assertIdle(conversationId: string): void {
-    const { store, providers } = this.dependencies;
-    const latest = store.latestAgentTurnForConversation(conversationId);
-    if (
-      (latest && !isAgentTurnTerminalStatus(latest.status))
-      || providers.isRunning(conversationId)
-      || store.providerRunOwnership.forConversation(conversationId).length > 0
-    ) {
-      throw new RuntimeRequestError(SOURCE_BUSY);
-    }
-  }
-
   private insert(
     projectId: string,
     title: string,
     options: NewConversationOptions,
-    insertion?: ConversationInsertion,
   ): Conversation {
-    const insert = () => this.dependencies.store.createConversation(projectId, title, options);
-    return insertion ? insertion(insert) : insert();
+    return this.dependencies.store.createConversation(projectId, title, options);
   }
 
   async create(
     payload: ConversationCreatePayload,
     requestId: string,
-    insertion?: ConversationInsertion,
   ): Promise<Conversation> {
     if (payload.accessMode === undefined) {
       const accessMode = this.dependencies.store.project(payload.projectId).preferences?.defaultAccessMode;
@@ -246,7 +174,6 @@ export class ConversationCreationService {
           branch: status.branch,
           worktreePath: status.root,
         },
-        insertion,
       );
     }
 
@@ -280,7 +207,6 @@ export class ConversationCreationService {
         branch: projectStatus?.branch ?? null,
         worktreePath: null,
       },
-      insertion,
     );
     if (!payload.useWorktree) return conversation;
 

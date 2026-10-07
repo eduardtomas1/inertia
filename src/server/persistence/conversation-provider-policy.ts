@@ -1,5 +1,4 @@
 import type { ProviderId } from "../../shared/contracts";
-import { CHAT_PROVIDER_CHANGE_MESSAGE, MIXED_PROVIDER_HISTORY_MESSAGE } from "../../shared/continuation-policy";
 import type { PersistenceContext } from "./context";
 import { ConversationProviderChangeError } from "./errors";
 
@@ -10,33 +9,21 @@ export const CONVERSATION_HAS_HISTORY_SQL = `(
   OR EXISTS (SELECT 1 FROM agent_turns WHERE agent_turns.conversation_id = conversations.id)
 )`;
 
-export const CONVERSATION_MIXED_PROVIDER_SQL = `EXISTS (
-  SELECT 1 FROM agent_turns
-  WHERE agent_turns.conversation_id = conversations.id
-    AND agent_turns.provider_id <> conversations.provider_id
-)`;
+export const CONVERSATION_PROVIDER_MISMATCH_MESSAGE =
+  "The model route does not match this chat's provider.";
 
-/** Check durable ownership before changing a selection or admitting a turn. */
+/**
+ * Checks that a turn or provider contact uses the chat's current provider.
+ * Changing the provider itself is a conversation update; earlier turns on
+ * another provider are a handoff, not a conflict.
+ */
 export function assertConversationProvider(
-  context: Pick<PersistenceContext, "database" | "requireConversation">,
+  context: Pick<PersistenceContext, "requireConversation">,
   conversationId: string,
   providerId: ProviderId,
-  allowUnusedDraftChange = false,
 ): void {
   const current = context.requireConversation(conversationId);
-  const conflictingTurn = context.database.prepare(`
-    SELECT 1 FROM agent_turns WHERE conversation_id = ? AND provider_id <> ? LIMIT 1
-  `).get(conversationId, providerId);
-  if (conflictingTurn) {
-    throw new ConversationProviderChangeError(
-      current.provider_id === providerId ? MIXED_PROVIDER_HISTORY_MESSAGE : CHAT_PROVIDER_CHANGE_MESSAGE,
-    );
-  }
-  if (current.provider_id === providerId) return;
-  const { has_history: hasHistory } = context.database.prepare(
-    `SELECT ${CONVERSATION_HAS_HISTORY_SQL} AS has_history FROM conversations WHERE id = ?`,
-  ).get(conversationId) as { has_history: number };
-  if (!allowUnusedDraftChange || hasHistory === 1) {
-    throw new ConversationProviderChangeError(CHAT_PROVIDER_CHANGE_MESSAGE);
+  if (current.provider_id !== providerId) {
+    throw new ConversationProviderChangeError(CONVERSATION_PROVIDER_MISMATCH_MESSAGE);
   }
 }

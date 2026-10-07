@@ -320,7 +320,7 @@ describe("provider handoff files block", () => {
     expect(f.filesBlock()).toBeNull();
   });
 
-  it("deduplicates paths newest-first, sums line counts, and keeps the latest status", async () => {
+  it("deduplicates paths newest-first, sums line counts, and keeps a file added earlier as added", async () => {
     const f = await fixture();
     f.seedClaudeHistory();
     const failedCapture = f.begin("Rename the exporter.");
@@ -331,11 +331,38 @@ describe("provider handoff files block", () => {
       kind: "inertia-provider-handoff-files",
       about: "Files this chat's earlier turns changed, from the local Git records; paths only, no contents.",
       files: [
-        { path: "src/export.ts", status: "modified", insertions: 43, deletions: 1 },
+        { path: "src/export.ts", status: "added", insertions: 43, deletions: 1 },
         { path: "src/legacy-export.ts", status: "modified", insertions: 2, deletions: 5 },
       ],
       omittedFileCount: 0,
     });
+  });
+
+  it("reports a file added and later deleted as deleted, and one re-added after a deletion as added", async () => {
+    const f = await fixture();
+    const created = f.begin("Create the scratch files.");
+    f.complete(created.queued.turn.id, "Created them.", "claude-session", [
+      changedFile("src/scratch.ts", "added", 5, 0),
+      changedFile("src/restored.ts", "added", 4, 0),
+    ]);
+    const removed = f.begin("Remove them.");
+    f.complete(removed.queued.turn.id, "Removed them.", "claude-session", [
+      changedFile("src/scratch.ts", "deleted", 0, 5),
+      changedFile("src/restored.ts", "deleted", 0, 4),
+    ]);
+    const restored = f.begin("Bring one back and edit it.");
+    f.complete(restored.queued.turn.id, "Restored it.", "claude-session", [
+      changedFile("src/restored.ts", "added", 4, 0),
+    ]);
+    const edited = f.begin("Edit the restored file.");
+    f.complete(edited.queued.turn.id, "Edited it.", "claude-session", [
+      changedFile("src/restored.ts", "modified", 1, 1),
+    ]);
+    const parsed = JSON.parse(f.filesBlock()!.content) as { files: Array<{ path: string; status: string }> };
+    expect(parsed.files.map(({ path, status }) => ({ path, status }))).toEqual([
+      { path: "src/restored.ts", status: "added" },
+      { path: "src/scratch.ts", status: "deleted" },
+    ]);
   });
 
   it("caps the list by entry count and bytes and reports what it left out", async () => {

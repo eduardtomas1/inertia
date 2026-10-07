@@ -30,7 +30,10 @@ function filesContent(files: ProviderHandoffFile[], omittedFileCount: number): s
   });
 }
 
-/** Newest status wins; line counts add up across every recorded turn. */
+/**
+ * Newest status wins, except that a file added earlier stays added unless a
+ * later turn deleted it. Line counts add up across every recorded turn.
+ */
 function changedFilesNewestFirst(
   database: Database.Database,
   conversationId: string,
@@ -45,12 +48,14 @@ function changedFilesNewestFirst(
     LIMIT ?
   `).all(conversationId, MAX_PROVIDER_HANDOFF_ARTIFACTS) as Array<{ files_json: string }>;
   const files = new Map<string, ProviderHandoffFile>();
+  const deletedLater = new Set<string>();
   for (const row of rows) {
     for (const file of parseTurnGitArtifactFiles(row.files_json)) {
       const seen = files.get(file.path);
       if (seen) {
         seen.insertions += file.insertions;
         seen.deletions += file.deletions;
+        if (file.status === "added" && !deletedLater.has(file.path)) seen.status = "added";
       } else {
         files.set(file.path, {
           path: file.path,
@@ -59,6 +64,7 @@ function changedFilesNewestFirst(
           deletions: file.deletions,
         });
       }
+      if (file.status === "deleted") deletedLater.add(file.path);
     }
   }
   return [...files.values()];

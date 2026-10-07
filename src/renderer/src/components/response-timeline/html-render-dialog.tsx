@@ -26,7 +26,7 @@ export function HtmlRenderDialog({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const theme = useHtmlRenderTheme();
   const [src] = useState(() => htmlRenderUrl(reference.renderId) + htmlRenderThemeFragment(theme));
-  const openLink = useHtmlRenderLinkOpener();
+  const openLink = useHtmlRenderLinkOpener(frameRef);
   useNativePreviewSuspension(true);
 
   const receive = useCallback((message: HtmlRenderFrameMessage) => {

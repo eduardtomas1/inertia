@@ -73,7 +73,7 @@ export function HtmlRenderFrame({
   const [src] = useState(() => htmlRenderUrl(reference.renderId) + htmlRenderThemeFragment(theme));
   const [height, setHeight] = useState(() => clampHtmlRenderHeight(reference.height));
   const [revealed, setRevealed] = useState(false);
-  const openLink = useHtmlRenderLinkOpener();
+  const openLink = useHtmlRenderLinkOpener(frameRef);
   const receive = useCallback((message: HtmlRenderFrameMessage) => {
     if (message.type === "size") {
       setHeight(clampHtmlRenderHeight(message.height));

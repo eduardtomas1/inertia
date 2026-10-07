@@ -185,6 +185,13 @@ function postedThemes(frameWindow: FakeFrameWindow): HtmlRenderTheme[] {
 
 const openExternal = vi.fn(async (_url: string) => undefined);
 
+function userActivation(isActive: boolean): void {
+  Object.defineProperty(navigator, "userActivation", {
+    configurable: true,
+    value: { isActive, hasBeenActive: isActive },
+  });
+}
+
 beforeEach(() => {
   openExternal.mockClear();
   Object.defineProperty(window, "inertia", {
@@ -304,8 +311,11 @@ describe("visual replies in the response timeline", () => {
   });
 
   it("opens only http(s) links through the external-link bridge", () => {
+    userActivation(true);
     render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
-    const frameWindow = attachFrameWindow(inlineFrame());
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    act(() => frame.focus());
 
     postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "javascript:alert(1)" });
     postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "file:///etc/passwd" });
@@ -325,12 +335,36 @@ describe("visual replies in the response timeline", () => {
   });
 
   it("ignores link requests that arrive without a user gesture", () => {
-    Object.defineProperty(navigator, "userActivation", {
-      configurable: true,
-      value: { isActive: false, hasBeenActive: false },
-    });
+    userActivation(false);
+    render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    act(() => frame.focus());
+
+    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/" });
+
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("ignores link requests while the user is interacting with the app outside the frame", () => {
+    userActivation(true);
     render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
     const frameWindow = attachFrameWindow(inlineFrame());
+    const elsewhere = screen.getByRole("button", { name: `Open ${title} full size` });
+    act(() => elsewhere.focus());
+
+    // Typing or clicking elsewhere activates the app window too; it is not a gesture in the page.
+    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/" });
+
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the user activation state is unavailable", () => {
+    render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    act(() => frame.focus());
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: undefined });
 
     postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/" });
 

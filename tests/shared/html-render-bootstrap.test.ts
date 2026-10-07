@@ -73,4 +73,26 @@ describe("visual reply bootstrap injection", () => {
     const commented = injectHtmlRenderBootstrap("<html><head><!-- <meta charset=\"latin1\"> --></head></html>");
     expect(commented).toContain(CHARSET);
   });
+
+  it.each(["<head ", "<html ", "<meta ", "<meta name="])(
+    "scans a maximum page of unterminated %j openings in linear time",
+    (unit) => {
+      // The main process injects on every load; a backtracking tag pattern took seconds here.
+      const html = unit.repeat(Math.floor(256 * 1024 / unit.length));
+      const started = performance.now();
+      const result = injectHtmlRenderBootstrap(html);
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(bootstrapCount(result)).toBe(1);
+      expect(result.endsWith(`</head>${html}`)).toBe(true);
+    },
+  );
+
+  it("finds a viewport meta after an unterminated or nested meta opening", () => {
+    expect(injectHtmlRenderBootstrap('<head><meta <meta name="viewport" content="width=600"></head>'))
+      .not.toContain(VIEWPORT);
+    expect(injectHtmlRenderBootstrap('<head><meta charset="utf-8"><meta name=viewport content="width=600"></head>'))
+      .not.toContain(VIEWPORT);
+    expect(injectHtmlRenderBootstrap('<head><meta name="description" content="viewport"></head>'))
+      .toContain(VIEWPORT);
+  });
 });

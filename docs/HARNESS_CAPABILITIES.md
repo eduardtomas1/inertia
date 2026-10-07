@@ -111,8 +111,9 @@ sandboxed frame without network access. System messages stay out of provider
 context excerpts, message search, and Private Connect, so a rendered page is
 never replayed to a model and Private Connect shows nothing for it. Deleting a
 chat deletes its pages. The provider MCP HTTP bridge and the stdio proxy accept
-request bodies and lines up to 512 KiB, so a maximum page fits after JSON
-escaping on every transport.
+request bodies and lines up to 512 KiB, which leaves room for a maximum page
+of ordinary markup after JSON escaping. A body over that bound is refused
+before the tool runs: the HTTP bridge answers 413, and the stdio proxy exits.
 
 Codex App Server registers dynamic tools only when a thread starts, and Inertia
 has no capability epoch that would restart an existing thread for a new tool.

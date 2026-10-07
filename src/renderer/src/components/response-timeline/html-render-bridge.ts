@@ -53,17 +53,23 @@ export function useHtmlRenderFrameBridge(
 /**
  * Opens a page's link through the same external-link bridge as chat links.
  * The page's own scripts can post `open-link` at will, so a request needs a
- * fresh user gesture (activation propagates up from the frame) and is
- * limited to one per interval for each frame.
+ * fresh user gesture and is limited to one per interval for each frame.
+ * Activation also comes from typing or clicking anywhere else in the app, so
+ * the gesture only counts while this frame holds focus, which clicking in the
+ * page or tabbing into it gives it.
  */
-export function useHtmlRenderLinkOpener(): (url: string) => void {
+export function useHtmlRenderLinkOpener(
+  frameRef: RefObject<HTMLIFrameElement | null>,
+): (url: string) => void {
   const lastOpenedAt = useRef(Number.NEGATIVE_INFINITY);
   return useCallback((url: string) => {
+    const frame = frameRef.current;
+    if (!frame || frame.ownerDocument.activeElement !== frame) return;
     const activation = navigator.userActivation as UserActivation | undefined;
-    if (activation && !activation.isActive) return;
+    if (!activation?.isActive) return;
     const now = Date.now();
     if (now - lastOpenedAt.current < LINK_OPEN_INTERVAL_MS) return;
     lastOpenedAt.current = now;
     void window.inertia.openExternal(url).catch(() => undefined);
-  }, []);
+  }, [frameRef]);
 }

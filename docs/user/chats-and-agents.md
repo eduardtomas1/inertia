@@ -25,7 +25,7 @@ If a Claude provider update requires a fresh native session, Inertia supplies a 
 An agent can answer with a page as well as text: a chart, a table, a diagram or an interface mockup. Ask for it in plain words, for example *“Chart the test durations by package and explain the slowest ones.”* The page appears in the chat above the agent’s written reply for that turn and follows your light or dark mode and color theme.
 
 - Point at the page and choose **Open full size** (or Tab to the button) to view it in a larger dialog. Escape closes it.
-- Links in the page open in your default browser.
+- HTTPS links in the page open in your default browser when you click them.
 - The page runs in a sandbox. It cannot reach the network, your files, the project or the rest of Inertia, so everything it shows must be inside the page itself.
 - Private Connect clients don’t show visual replies; they see the agent’s written reply only.
 

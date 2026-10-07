@@ -213,6 +213,31 @@ const BOOTSTRAP_SCRIPT = /* @__PURE__ */ [
   "})();",
 ].join("");
 
+// The page is untrusted and up to 256 KiB, and the main process scans it on
+// every load, so tag lookups stay linear: a pattern such as `<head\s[^>]*>`
+// backtracks quadratically over thousands of unterminated `<head ` openings.
+
+/** Where the first `<name>` or `<name ...>` start tag ends. A tag left unterminated means no later one can end either. */
+function firstStartTagEnd(scan: string, name: "head" | "html"): number | null {
+  const open = new RegExp(`<${name}(?=[\\s>])`, "iu").exec(scan);
+  if (!open) return null;
+  const close = scan.indexOf(">", open.index);
+  return close < 0 ? null : close + 1;
+}
+
+function hasViewportMeta(scan: string): boolean {
+  const meta = /<meta\s/giu;
+  for (let match = meta.exec(scan); match; match = meta.exec(scan)) {
+    const close = scan.indexOf(">", match.index);
+    const tag = scan.slice(match.index, close < 0 ? scan.length : close);
+    if (/name\s*=\s*["']?viewport/iu.test(tag)) return true;
+    if (close < 0) return false;
+    // A `<meta` inside this tag's own text was already covered by `tag`.
+    meta.lastIndex = close + 1;
+  }
+  return false;
+}
+
 function bootstrapMarkup(scan: string): string {
   const light = rootRule(DEFAULT_THEMES.light);
   const dark = rootRule(DEFAULT_THEMES.dark);
@@ -220,7 +245,7 @@ function bootstrapMarkup(scan: string): string {
   const defaultCss = `${light}@media (prefers-color-scheme: dark){${dark}}${BASE_CSS}`;
   return [
     /<meta\s[^>]*charset/iu.test(scan.slice(0, 4_096)) ? "" : '<meta charset="utf-8">',
-    /<meta\s[^>]*name\s*=\s*["']?viewport/iu.test(scan) ? "" : '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    hasViewportMeta(scan) ? "" : '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style id="${HTML_RENDER_THEME_STYLE_ID}">${defaultCss}</style>`,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
   ].join("");
@@ -239,15 +264,13 @@ function blankNonMarkup(html: string): string {
 export function injectHtmlRenderBootstrap(html: string): string {
   const scan = blankNonMarkup(html);
   const markup = bootstrapMarkup(scan);
-  const headOpen = /<head(?:\s[^>]*)?>/iu.exec(scan);
-  if (headOpen) {
-    const at = headOpen.index + headOpen[0].length;
-    return html.slice(0, at) + markup + html.slice(at);
+  const headEnd = firstStartTagEnd(scan, "head");
+  if (headEnd !== null) {
+    return html.slice(0, headEnd) + markup + html.slice(headEnd);
   }
-  const htmlOpen = /<html(?:\s[^>]*)?>/iu.exec(scan);
-  if (htmlOpen) {
-    const at = htmlOpen.index + htmlOpen[0].length;
-    return `${html.slice(0, at)}<head>${markup}</head>${html.slice(at)}`;
+  const htmlEnd = firstStartTagEnd(scan, "html");
+  if (htmlEnd !== null) {
+    return `${html.slice(0, htmlEnd)}<head>${markup}</head>${html.slice(htmlEnd)}`;
   }
   const doctype = /^\s*<!doctype[^>]*>/iu.exec(html);
   if (doctype) {

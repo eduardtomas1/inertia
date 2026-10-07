@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Maximize2 } from "lucide-react";
 import {
   clampHtmlRenderHeight,
@@ -12,6 +12,7 @@ import { htmlRenderUrl } from "../../utils/htmlRenderUrl";
 import type { ResponseTurn } from "../../utils/responseTimeline";
 import { IconButton } from "../ui";
 import { useHtmlRenderFrameBridge, useHtmlRenderLinkOpener, useReportedFrameHeight } from "./html-render-bridge";
+import { HtmlRenderRuntimeStatusContext } from "./html-render-runtime";
 import "./HtmlRender.css";
 
 /** A page that never reports its size is still shown after this delay. */
@@ -59,13 +60,32 @@ export function TurnHtmlRenders({
   );
 }
 
-export function HtmlRenderFrame({
-  reference,
-  onOpenFullSize,
-}: {
+interface HtmlRenderFrameProps {
   reference: HtmlRenderReference;
   onOpenFullSize: (reference: HtmlRenderReference) => void;
-}): React.JSX.Element {
+}
+
+export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element {
+  const runtimeStatus = useContext(HtmlRenderRuntimeStatusContext);
+  const [seenStatus, setSeenStatus] = useState(runtimeStatus);
+  const [unavailable, setUnavailable] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  if (runtimeStatus !== seenStatus) {
+    setSeenStatus(runtimeStatus);
+    if (runtimeStatus === "online" && unavailable) {
+      setUnavailable(false);
+      setAttempt((value) => value + 1);
+    }
+  }
+  const markUnavailable = useCallback(() => setUnavailable(true), []);
+  return <HtmlRenderDocumentFrame key={attempt} {...props} onUnavailable={markUnavailable} />;
+}
+
+function HtmlRenderDocumentFrame({
+  reference,
+  onOpenFullSize,
+  onUnavailable,
+}: HtmlRenderFrameProps & { onUnavailable: () => void }): React.JSX.Element {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   // The fragment themes first paint; later changes arrive as messages so the
@@ -80,8 +100,9 @@ export function HtmlRenderFrame({
   const receive = useCallback((message: HtmlRenderFrameMessage) => {
     if (message.type === "size") reportHeight(clampHtmlRenderHeight(message.height));
     else if (message.type === "open-link") openLink(message.url);
+    else if (message.type === "unavailable") onUnavailable();
     // `escape` only closes the full-size dialog.
-  }, [openLink, reportHeight]);
+  }, [onUnavailable, openLink, reportHeight]);
   const handleLoad = useHtmlRenderFrameBridge(frameRef, theme, receive);
 
   useEffect(() => {

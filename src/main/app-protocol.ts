@@ -11,7 +11,11 @@ import {
   resolveAttachmentPreviewResponse,
   type ConversationAttachmentAccess,
 } from "./conversation-attachment-access.js";
-import { htmlRenderDocumentResponse, htmlRenderUnavailableResponse } from "./html-render-document.js";
+import {
+  htmlRenderDocumentResponse,
+  htmlRenderTemporarilyUnavailableResponse,
+  htmlRenderUnavailableResponse,
+} from "./html-render-document.js";
 import type { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { resolveWorkspaceImagePreviewResponse } from "./workspace-image-preview.js";
 
@@ -38,20 +42,22 @@ function parseHtmlRenderUrl(url: URL): string | null {
 }
 
 /**
- * A well-formed id that cannot be shown (unknown, from another conversation's
- * window, or unreadable) gets the same themed 404, so a frame neither shows
- * raw text nor learns whether a page exists elsewhere.
+ * A well-formed id that cannot be shown (unknown or from another conversation's
+ * window) gets the same themed 404, so a frame neither shows raw text nor
+ * learns whether a page exists elsewhere. A runtime that is not running or
+ * cannot answer gets a themed 503 instead, which its frame retries.
  */
 async function resolveHtmlRenderResponse(
   runtimeSupervisor: RuntimeSupervisor | null,
   renderId: string,
   conversationScope: string | undefined,
 ): Promise<Response> {
-  let render: RuntimeHtmlRenderDocument | null | undefined;
+  if (!runtimeSupervisor) return htmlRenderTemporarilyUnavailableResponse();
+  let render: RuntimeHtmlRenderDocument | null;
   try {
-    render = await runtimeSupervisor?.readHtmlRender(renderId);
+    render = await runtimeSupervisor.readHtmlRender(renderId);
   } catch {
-    render = null;
+    return htmlRenderTemporarilyUnavailableResponse();
   }
   // A detached window may only show pages from the conversation it was opened for.
   if (!render || (conversationScope && render.conversationId !== conversationScope)) {

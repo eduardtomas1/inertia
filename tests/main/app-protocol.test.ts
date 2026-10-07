@@ -169,12 +169,27 @@ describe("visual reply protocol route", () => {
     expect(body).not.toContain("Not found");
   }
 
-  it("serves the themed unavailable page for an unknown render, a runtime rejection, and an unavailable runtime", async () => {
+  async function expectTemporarilyUnavailablePage(response: Response): Promise<void> {
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("Content-Security-Policy")).toBe(HTML_RENDER_CONTENT_SECURITY_POLICY);
+    const body = await response.text();
+    expect(body).toContain(`<style id="${HTML_RENDER_THEME_STYLE_ID}">`);
+    expect(body).toContain("This page is temporarily unavailable.");
+    expect(body).not.toContain("no longer available");
+  }
+
+  it("serves the themed unavailable page for an unknown render", async () => {
     await expectUnavailablePage(await serveRenders(async () => null).serve(`inertia://render/${renderId}`));
+  });
+
+  it("serves a temporary notice when the runtime rejects, times out, or is not running", async () => {
     const rejected = serveRenders(() => Promise.reject(new Error("The visual reply request timed out.")));
-    await expectUnavailablePage(await rejected.serve(`inertia://render/${renderId}`));
+    await expectTemporarilyUnavailablePage(await rejected.serve(`inertia://render/${renderId}`));
     const thrown = serveRenders(() => { throw new Error("The runtime is restarting."); });
-    await expectUnavailablePage(await thrown.serve(`inertia://render/${renderId}`));
+    await expectTemporarilyUnavailablePage(await thrown.serve(`inertia://render/${renderId}`));
+    const foreignScope = serveRenders(() => Promise.reject(new Error("timed out")), "33333333-3333-4333-8333-333333333333");
+    await expectTemporarilyUnavailablePage(await foreignScope.serve(`inertia://render/${renderId}`));
 
     const register = createAppProtocolRegistrar({
       scheme: "inertia", attachmentRegistry: () => null, conversationAttachments: () => null, runtimeSupervisor: () => null,
@@ -182,7 +197,7 @@ describe("visual reply protocol route", () => {
     const { target, handle } = protocolTarget();
     register(target);
     const handler = handle.mock.calls[0]![1] as (request: Request) => Promise<Response>;
-    await expectUnavailablePage(
+    await expectTemporarilyUnavailablePage(
       await handler({ url: `inertia://render/${renderId}`, signal: new AbortController().signal } as Request),
     );
   });

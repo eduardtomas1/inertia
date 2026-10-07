@@ -66,6 +66,7 @@ import { applyInterfaceScale } from "./utils/interfaceScale";
 import { cachedAppSettings } from "./utils/cachedSettings";
 import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
+import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 
 type DetachedWindowContext = Extract<
   DesktopWindowContext,
@@ -506,6 +507,7 @@ export default function DetachedChatApp({
   const visibleConversation = projection.detail?.conversation ?? conversation;
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
+    <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <div
       className="detached-chat-shell"
       data-interface-scale={settings.interfaceScale}
@@ -670,6 +672,7 @@ export default function DetachedChatApp({
         </div>
       )}
     </div>
+    </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
   );
 }

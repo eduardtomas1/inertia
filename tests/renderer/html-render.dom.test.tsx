@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
 import { HTML_RENDER_REVEAL_FALLBACK_MS } from "../../src/renderer/src/components/response-timeline/html-render";
+import { HtmlRenderRuntimeStatusContext } from "../../src/renderer/src/components/response-timeline/html-render-runtime";
+import type { ConnectionStatus } from "../../src/renderer/src/hooks/useInertiaConnection";
 import {
   NATIVE_PREVIEW_OVERLAY_CLOSED,
   NATIVE_PREVIEW_OVERLAY_OPENED,
@@ -491,6 +493,34 @@ describe("visual replies in the response timeline", () => {
     requestLink(frameWindow, "https://example.com/");
 
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("reloads a page that was temporarily unavailable once the runtime is back", () => {
+    const timeline = (status: ConnectionStatus) => (
+      <HtmlRenderRuntimeStatusContext.Provider value={status}>
+        <ResponseTimeline {...timelineProps([renderMessage()])} />
+      </HtmlRenderRuntimeStatusContext.Provider>
+    );
+    const { rerender } = render(timeline("online"));
+    const first = inlineFrame();
+    const src = first.getAttribute("src");
+    const firstWindow = attachFrameWindow(first);
+
+    rerender(timeline("connecting"));
+    rerender(timeline("online"));
+    expect(inlineFrame()).toBe(first);
+
+    postFromFrame(firstWindow, { type: `${MESSAGE}unavailable` });
+    rerender(timeline("connecting"));
+    expect(inlineFrame()).toBe(first);
+    rerender(timeline("online"));
+    const second = inlineFrame();
+    expect(second).not.toBe(first);
+    expect(second.getAttribute("src")).toBe(src);
+
+    rerender(timeline("offline"));
+    rerender(timeline("online"));
+    expect(inlineFrame()).toBe(second);
   });
 
   it("opens a focus-trapped full-size dialog that closes on Escape and on the page's escape", async () => {

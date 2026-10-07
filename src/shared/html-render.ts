@@ -137,7 +137,8 @@ export type HtmlRenderFrameMessage =
   | { type: "hello"; token: string }
   | { type: "size"; height: number }
   | { type: "open-link"; url: string; token: string }
-  | { type: "escape" };
+  | { type: "escape" }
+  | { type: "unavailable" };
 
 const MAX_LINK_LENGTH = 2_048;
 const FRAME_TOKEN = /^[0-9a-f]{32}$/u;
@@ -168,6 +169,7 @@ export function readHtmlRenderFrameMessage(data: unknown): HtmlRenderFrameMessag
     return null;
   }
   if (type === "escape" && keys === 1) return { type: "escape" };
+  if (type === "unavailable" && keys === 1) return { type: "unavailable" };
   return null;
 }
 

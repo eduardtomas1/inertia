@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HTML_RENDER_CONTENT_SECURITY_POLICY,
   htmlRenderDocumentResponse,
+  htmlRenderTemporarilyUnavailableResponse,
   htmlRenderUnavailableResponse,
 } from "../../src/main/html-render-document";
 import { HTML_RENDER_THEME_STYLE_ID } from "../../src/shared/html-render";
@@ -55,6 +56,19 @@ describe("visual reply document", () => {
     expect(text).toContain(`<style id="${HTML_RENDER_THEME_STYLE_ID}">`);
     expect(text).toContain("<p>This page is no longer available.</p>");
     expect(text).toContain("var(--muted-foreground)");
+    expect(text).not.toMatch(/https?:/u);
+  });
+
+  it("serves a themed 503 that tells its frame to retry once the runtime is back", async () => {
+    const response = htmlRenderTemporarilyUnavailableResponse();
+    const body = new Uint8Array(await response.clone().arrayBuffer());
+    const text = new TextDecoder().decode(body);
+
+    expect(response.status).toBe(503);
+    expect(Object.fromEntries(response.headers.entries())).toEqual(EXPECTED_HEADERS(body.byteLength));
+    expect(text).toContain(`<style id="${HTML_RENDER_THEME_STYLE_ID}">`);
+    expect(text).toContain("<p>This page is temporarily unavailable.</p>");
+    expect(text).toContain('{type:"inertia-html-render:unavailable"}');
     expect(text).not.toMatch(/https?:/u);
   });
 });

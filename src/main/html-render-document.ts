@@ -25,13 +25,22 @@ export const HTML_RENDER_CONTENT_SECURITY_POLICY = [
 export const HTML_RENDER_PERMISSIONS_POLICY =
   "camera=(), microphone=(), geolocation=(), display-capture=(), fullscreen=()";
 
+const NOTICE_STYLE = "<style>p{margin:0;padding:24px 16px;color:var(--muted-foreground);text-align:center}</style>";
+
 const UNAVAILABLE_PAGE = [
   "<!doctype html><html><head><title>Page unavailable</title>",
-  "<style>p{margin:0;padding:24px 16px;color:var(--muted-foreground);text-align:center}</style>",
+  NOTICE_STYLE,
   "</head><body><p>This page is no longer available.</p></body></html>",
 ].join("");
 
-function htmlRenderResponse(html: string, status: 200 | 404): Response {
+const TEMPORARILY_UNAVAILABLE_PAGE = [
+  "<!doctype html><html><head><title>Page unavailable</title>",
+  NOTICE_STYLE,
+  '<script>if(window.parent!==window)window.parent.postMessage({type:"inertia-html-render:unavailable"},"*");</script>',
+  "</head><body><p>This page is temporarily unavailable.</p></body></html>",
+].join("");
+
+function htmlRenderResponse(html: string, status: 200 | 404 | 503): Response {
   const body = new TextEncoder().encode(injectHtmlRenderBootstrap(html));
   return new Response(body, {
     status,
@@ -56,4 +65,8 @@ export function htmlRenderDocumentResponse(html: string): Response {
 /** A themed 404 for a well-formed render id with no page to show, under the same policy as a page. */
 export function htmlRenderUnavailableResponse(): Response {
   return htmlRenderResponse(UNAVAILABLE_PAGE, 404);
+}
+
+export function htmlRenderTemporarilyUnavailableResponse(): Response {
+  return htmlRenderResponse(TEMPORARILY_UNAVAILABLE_PAGE, 503);
 }

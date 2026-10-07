@@ -113,7 +113,10 @@ and a storage failure each return `{ error: { code, message } }` with
 The page is served only by the main process from the stored row, inside a
 sandboxed frame without network access; windows that show pages also disable
 non-proxied WebRTC UDP and the page response turns off DNS prefetching. A page
-that no longer exists is served as a themed "no longer available" notice. The
+that no longer exists is served as a themed "no longer available" notice (404).
+When the runtime is not running or does not answer in time, the page is served
+as a themed "temporarily unavailable" notice (503), and the chat reloads that
+frame the next time it reconnects to the runtime. The
 page itself is never replayed to a model. Shared chat context, continuation
 history for another model or a fresh native session, and Private Connect carry
 a visual reply only as a one-line `[page: <title>]` entry in the assistant's

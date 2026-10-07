@@ -1420,12 +1420,12 @@ describe("provider handoff divider", () => {
       .some(({ kind }) => kind === "handoff")).toBe(false);
   });
 
-  it("prefers the model alias, falls back to the model id, and keeps the divider identity across rebuilds", () => {
+  it("prefers the model alias, falls back to the model id, omits the provider default, and keeps the divider identity across rebuilds", () => {
     const { turns, messages } = handoffTurns();
     const back = agentTurn("turn-e", "user-e", {
       providerId: "claude",
       modelSelection: { ...claudeSelection, modelId: "provider-default" },
-      model: "",
+      model: "provider-default",
       modelAlias: null,
       requestedAt: "2026-07-23T10:04:00.000Z",
     });

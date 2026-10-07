@@ -383,8 +383,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
 
 function turnModelLabel(turn: AgentTurn): string | null {
   if (turn.modelAlias) return turn.modelAlias;
-  if (turn.model) return turn.model;
-  const { modelId } = turn.modelSelection;
+  const modelId = turn.model || turn.modelSelection.modelId;
   return modelId && modelId !== "provider-default" ? modelId : null;
 }
 

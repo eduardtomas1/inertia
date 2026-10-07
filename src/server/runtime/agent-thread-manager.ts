@@ -50,7 +50,8 @@ import {
   type HarnessCapabilityRegistry,
 } from "./harness-capabilities";
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
-import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render"; import { HtmlRenderHostTool } from "./html-render-host-tool";
+import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
+import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
 import type { HiddenProviderInstruction } from "./turns/request-context";

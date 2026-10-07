@@ -4,7 +4,7 @@ import type {
   RuntimeHtmlRenderDocument,
   RuntimeHtmlRenderEvent,
 } from "../node/runtime-html-render-protocol.js";
-import type { RuntimeWorkerCommand } from "../node/runtime-process-protocol.js";
+import type { RuntimeWorkerCommand, RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
 import { drainRuntimeRecordRequests } from "./runtime-supervisor-process-record.js";
 import type {
   RuntimeProcessRecord,
@@ -22,7 +22,12 @@ interface RuntimeHtmlRenderCoordinatorOptions {
   requestTimeoutMs: number;
   setTimer: typeof setTimeout;
   clearTimer: typeof clearTimeout;
+  readyRecord: () => RuntimeProcessRecord | Error;
   post: (record: RuntimeProcessRecord, command: RuntimeWorkerCommand) => boolean;
+}
+
+function isHtmlRenderEvent(event: RuntimeWorkerEvent): event is RuntimeHtmlRenderEvent {
+  return event.type === "runtime.html-render-resolved" || event.type === "runtime.html-render-rejected";
 }
 
 /** Correlates main's reads of stored visual replies with the runtime that owns the database. */
@@ -31,7 +36,9 @@ export class RuntimeHtmlRenderCoordinator {
 
   constructor(private readonly options: RuntimeHtmlRenderCoordinatorOptions) {}
 
-  request(record: RuntimeProcessRecord, renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
+  read(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
+    const record = this.options.readyRecord();
+    if (record instanceof Error) return Promise.reject(record);
     const requestId = randomUUID();
     return new Promise<RuntimeHtmlRenderDocument | null>((resolve, reject) => {
       const timer = this.options.setTimer(() => {
@@ -43,13 +50,15 @@ export class RuntimeHtmlRenderCoordinator {
     });
   }
 
-  handle(record: RuntimeProcessRecord, event: RuntimeHtmlRenderEvent): void {
+  handle(record: RuntimeProcessRecord, event: RuntimeWorkerEvent): event is RuntimeHtmlRenderEvent {
+    if (!isHtmlRenderEvent(event)) return false;
     const pending = this.pending.get(event.requestId);
-    if (!pending || pending.record !== record) return;
+    if (!pending || pending.record !== record) return true;
     this.pending.delete(event.requestId);
     this.options.clearTimer(pending.timer);
     if (event.type === "runtime.html-render-resolved") pending.resolve(event.render);
     else pending.reject(new Error(event.message));
+    return true;
   }
 
   reject(record: RuntimeProcessRecord | null, message: string): void {

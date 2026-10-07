@@ -92,7 +92,8 @@ control characters, and an optional initial frame height from 80 to 2000 CSS
 pixels (default 360). The tool description carries the layout and theme
 guidance, including the CSS custom properties Inertia injects, so the pack adds
 no private instruction text. The tool is read-only and non-destructive: it
-changes nothing in the workspace and never asks for approval.
+changes nothing in the workspace and never asks for approval. It is not
+advertised as idempotent, because every call stores another page.
 
 A call is accepted only from the exact active source turn, and a turn holds at
 most eight pages. In one database transaction Inertia checks that limit, then
@@ -115,9 +116,14 @@ that no longer exists is served as a themed "no longer available" notice. System
 context excerpts, message search, and Private Connect, so a rendered page is
 never replayed to a model and Private Connect shows nothing for it. Deleting a
 chat deletes its pages. The provider MCP HTTP bridge and the stdio proxy accept
-request bodies and lines up to 512 KiB, which leaves room for a maximum page
-of ordinary markup after JSON escaping. A body over that bound is refused
-before the tool runs: the HTTP bridge answers 413, and the stdio proxy exits.
+request bodies and lines up to 1,600 KiB: every JSON encoder writes a control
+character as a six-byte `\u00XX` escape, so a maximum page can reach six times
+its size on the wire, and 64 KiB more covers the title and the JSON-RPC
+envelope. A body over that bound fails only its own call, before the tool runs:
+the HTTP bridge answers 413, and the stdio proxy answers with a JSON-RPC error
+when the request id is among the line's leading `jsonrpc`, `method`, and `id`
+members (otherwise it drops the line unanswered) and keeps serving the turn's
+other calls.
 
 Codex App Server registers dynamic tools only when a thread starts, and Inertia
 has no capability epoch that would restart an existing thread for a new tool.

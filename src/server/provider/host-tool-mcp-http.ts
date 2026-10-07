@@ -6,11 +6,19 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import { HTML_RENDER_MAX_HTML_BYTES } from "../../shared/html-render";
 import { handleProviderMcpBody, type ProviderMcpToolOptions } from "./host-tool-mcp-protocol";
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 
-/** Fits one maximum visual-reply page after JSON-RPC escaping, for every provider transport. */
-export const MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES = 512 * 1024;
+/**
+ * Fits one maximum visual-reply page however the provider encodes it. Every
+ * JSON encoder writes a control character as a six-byte `\u00XX` escape, so a
+ * page can reach six times its size on the wire; 64 KiB more covers its title
+ * and the JSON-RPC envelope.
+ */
+export const MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES = 6 * HTML_RENDER_MAX_HTML_BYTES + 64 * 1024;
+export const PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE =
+  `MCP request body exceeds the ${MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES / 1024} KiB limit.`;
 const MCP_BODY_TIMEOUT_MS = 10_000;
 const MAX_CONCURRENT_MCP_REQUESTS = 8;
 
@@ -205,7 +213,7 @@ export function createProviderHostToolMcpSession(
           json(response, 413, {
             jsonrpc: "2.0",
             id: null,
-            error: { code: -32600, message: "MCP request body exceeds the 512 KiB limit." },
+            error: { code: -32600, message: PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE },
           });
           return;
         }

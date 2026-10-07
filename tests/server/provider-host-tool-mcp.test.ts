@@ -116,6 +116,29 @@ function paddedCall(id: number, bytes: number) {
   return body;
 }
 
+const BODY_LIMIT = 6 * 256 * 1024 + 64 * 1024;
+const WORST_CASE_PAGE = "\u0001".repeat(256 * 1024);
+
+function stdioProxy(connection: Awaited<ReturnType<typeof started>>["connection"]) {
+  const fallback = acpHostMcpServers(connection, false)[0]!;
+  if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
+  const child = spawn(fallback.command, fallback.args, {
+    env: {
+      ...process.env,
+      ...Object.fromEntries(fallback.env.map(({ name, value }) => [name, value])),
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+  const closed = once(child, "close") as Promise<[number | null, NodeJS.Signals | null]>;
+  return {
+    child,
+    closed,
+    responses: () => stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>),
+  };
+}
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
@@ -323,7 +346,7 @@ describe("provider host-tool MCP transport", () => {
     })).rejects.toThrow();
   });
 
-  it("bounds request bodies at 512 KiB and closes an oversized keep-alive request", async () => {
+  it("bounds request bodies at six times a maximum page plus 64 KiB and closes an oversized keep-alive request", async () => {
     const received: number[] = [];
     const { post } = await started({
       invoke: async (call) => {
@@ -331,16 +354,80 @@ describe("provider host-tool MCP transport", () => {
         return { success: true, text: "ok" };
       },
     });
-    const accepted = await post(paddedCall(10, 512 * 1024));
+    const accepted = await post(paddedCall(10, BODY_LIMIT));
     expect(accepted.status).toBe(200);
     expect(await accepted.json()).toMatchObject({ id: 10, result: { content: [{ type: "text", text: "ok" }] } });
     expect(received).toHaveLength(1);
 
-    const response = await post(paddedCall(11, 512 * 1024 + 1));
+    const response = await post(paddedCall(11, BODY_LIMIT + 1));
     expect(response.status).toBe(413);
     expect(response.headers.get("connection")).toBe("close");
-    expect(await response.json()).toMatchObject({ error: { message: "MCP request body exceeds the 512 KiB limit." } });
+    expect(await response.json()).toMatchObject({ error: { message: "MCP request body exceeds the 1600 KiB limit." } });
     expect(received).toHaveLength(1);
+  });
+
+  it("accepts a maximum page that every JSON encoder escapes to six times its size", async () => {
+    let received = "";
+    const { connection, post } = await started({
+      invoke: async (call) => {
+        received = (call.arguments as { padding: string }).padding;
+        return { success: true, text: "rendered" };
+      },
+    });
+    const call = (id: string) => ({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name: "inertia_list_conversations", arguments: { padding: WORST_CASE_PAGE } },
+    });
+    const line = JSON.stringify(call("stdio-worst"));
+    expect(Buffer.byteLength(line, "utf8")).toBeGreaterThan(6 * 256 * 1024);
+    expect(Buffer.byteLength(line, "utf8")).toBeLessThanOrEqual(BODY_LIMIT);
+
+    const http = await post(call("http-worst"));
+    expect(http.status).toBe(200);
+    expect(received).toBe(WORST_CASE_PAGE);
+    received = "";
+
+    const proxy = stdioProxy(connection);
+    proxy.child.stdin.end(`${line}\n`);
+    const [code] = await proxy.closed;
+    expect(code).toBe(0);
+    expect(proxy.responses()).toEqual([
+      expect.objectContaining({ id: "stdio-worst", result: { content: [{ type: "text", text: "rendered" }] } }),
+    ]);
+    expect(received).toBe(WORST_CASE_PAGE);
+  });
+
+  it("fails only an over-bound stdio request and keeps serving the run's other calls", async () => {
+    const { connection } = await started();
+    const proxy = stdioProxy(connection);
+    const oversized = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 41,
+      method: "tools/call",
+      params: { name: "inertia_list_conversations", arguments: { padding: "x".repeat(BODY_LIMIT) } },
+    });
+    const withoutId = JSON.stringify({
+      method: "tools/call",
+      params: { name: "inertia_list_conversations", arguments: { padding: "x".repeat(BODY_LIMIT) } },
+      jsonrpc: "2.0",
+      id: 42,
+    });
+    const half = Math.floor(oversized.length / 2);
+    proxy.child.stdin.write(oversized.slice(0, half));
+    proxy.child.stdin.write(`${oversized.slice(half)}\n${withoutId}\n`);
+    proxy.child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: "after", method: "tools/list" })}\n`);
+    const [code] = await proxy.closed;
+    expect(code).toBe(0);
+    const responses = proxy.responses();
+    expect(responses).toHaveLength(2);
+    expect(responses).toContainEqual({
+      jsonrpc: "2.0",
+      id: 41,
+      error: { code: -32600, message: "MCP request body exceeds the 1600 KiB limit." },
+    });
+    expect(responses).toContainEqual(expect.objectContaining({ id: "after", result: { tools: expect.any(Array) } }));
   });
 
   it("carries a maximum visual-reply page through Cursor and Kimi's stdio fallback", async () => {

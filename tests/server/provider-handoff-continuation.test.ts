@@ -341,6 +341,42 @@ describe("provider handoff continuation", () => {
     expect(moved.providerInput.prompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
   });
 
+  it("resumes the original session when the chat switches back before any message was sent", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    const claudeIdentity = f.store.conversation(f.conversation.id).continuationIdentity;
+    expect(claudeIdentity).not.toBeNull();
+
+    await f.switchProvider("codex");
+    expect(f.store.conversation(f.conversation.id)).toMatchObject({ providerSessionId: null, continuationIdentity: null });
+    await f.switchProvider("claude");
+    expect(f.store.conversation(f.conversation.id)).toMatchObject({
+      providerId: "claude",
+      providerSessionId: "claude-session",
+      continuationIdentity: claudeIdentity,
+    });
+
+    const next = f.begin("Carry on with the export.");
+    expect(next.providerInput.sessionId).toBe("claude-session");
+    expect(next.queued.turn).toMatchObject({
+      providerId: "claude",
+      continuationReasonCode: "same-continuation",
+      providerSessionBefore: "claude-session",
+      sessionRecovery: null,
+    });
+    expect(next.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
+  });
+
+  it("does not resume a session the latest turn never finished", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    const running = f.begin("Keep going.");
+    await f.switchProvider("codex");
+    await f.switchProvider("claude");
+    expect(f.store.agentTurn(running.queued.turn.id).status).not.toBe("completed");
+    expect(f.store.conversation(f.conversation.id)).toMatchObject({ providerSessionId: null, continuationIdentity: null });
+  });
+
   it("hands the chat back to the original provider with the full history", async () => {
     const f = await fixture();
     f.seedClaudeHistory();

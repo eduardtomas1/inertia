@@ -16,6 +16,7 @@ import {
   providerNativeModelSelection,
   type ModelSelection,
 } from "../../../shared/model-routing";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import { deleteCheckpoints } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import {
@@ -383,6 +384,7 @@ export function createConversationCommandHandler(
         let canonicalSelection: ModelSelection | null = null;
         let canonicalProviderId: Conversation["providerId"] | null = null;
         let resetProviderSession = false;
+        let restoredProviderSession: Pick<Conversation, "providerSessionId" | "continuationIdentity"> | null = null;
         if (changesSelection) {
           const selection = dependencies.backendProfileController
             .validateSelection(
@@ -404,9 +406,13 @@ export function createConversationCommandHandler(
           canonicalProviderId = route.providerId;
           const latestTurn = dependencies.store
             .latestAgentTurnForConversation(conversationId);
+          const savedSessionId = current.providerSessionId
+            ?? (latestTurn && isAgentTurnTerminalStatus(latestTurn.status)
+              ? latestTurn.providerSessionAfter
+              : null);
           const latestTurnMatchesSession = latestTurn !== null
-            && current.providerSessionId !== null
-            && latestTurn.providerSessionAfter === current.providerSessionId;
+            && savedSessionId !== null
+            && latestTurn.providerSessionAfter === savedSessionId;
           const decision = resolveContinuationDecision({
             previousProviderId: latestTurn?.providerId ?? current.providerId,
             previousIdentity: latestTurn
@@ -423,7 +429,7 @@ export function createConversationCommandHandler(
               ? current.modelSelection.modelId
               : null,
             nextModelId: selection.modelId,
-            hasProviderSession: current.providerSessionId !== null,
+            hasProviderSession: savedSessionId !== null,
             hasTurns: latestTurn !== null,
             allowsModelSwitchWithinSession:
               officiallyAllowsModelSwitchWithinSession(route.compatibility),
@@ -434,6 +440,14 @@ export function createConversationCommandHandler(
           });
           resetProviderSession = decision.action === "start-session"
             && (current.providerSessionId !== null || latestTurn !== null);
+          restoredProviderSession = decision.action === "resume-session"
+            && current.providerSessionId === null
+            && latestTurnMatchesSession
+            ? {
+                providerSessionId: savedSessionId,
+                continuationIdentity: latestTurn.continuationIdentity,
+              }
+            : null;
         }
         const changesRunConfiguration = (
           update.providerId !== undefined
@@ -484,7 +498,7 @@ export function createConversationCommandHandler(
                 providerSessionId: null,
                 continuationIdentity: null,
               }
-            : {}),
+            : restoredProviderSession ?? {}),
           pinnedAt: pinned === undefined
             ? current.pinnedAt ?? null
             : pinned ? new Date().toISOString() : null,

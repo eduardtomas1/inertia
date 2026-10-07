@@ -231,18 +231,19 @@ export class ConversationRepository {
       ? Math.max(Date.now(), Number.isFinite(currentUpdatedTime) ? currentUpdatedTime + 1 : 0)
       : Date.now();
     const now = new Date(eventTime).toISOString();
+    const restoresSession = continuationBoundaryChanged && typeof update.providerSessionId === "string";
     const next = {
       ...current,
       ...update,
       providerId: selectedProviderId,
       modelSelection,
-      providerSessionId: continuationBoundaryChanged
+      providerSessionId: continuationBoundaryChanged && !restoresSession
         ? null
         : update.providerSessionId === undefined
           ? current.providerSessionId
           : update.providerSessionId,
       continuationIdentity: continuationBoundaryChanged
-        ? null
+        ? restoresSession ? update.continuationIdentity ?? null : null
         : update.providerSessionId === null
           ? null
           : (update.continuationIdentity ?? current.continuationIdentity),

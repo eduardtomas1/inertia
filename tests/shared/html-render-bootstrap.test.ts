@@ -11,20 +11,20 @@ function bootstrapCount(html: string): number {
 }
 
 describe("visual reply bootstrap injection", () => {
-  it("inserts at the start of an existing head, ahead of the page's own styles", () => {
-    const html = '<!doctype html><html lang="en"><head data-x="1"><style>p{color:red}</style></head><body><p>hi</p></body></html>';
-    const result = injectHtmlRenderBootstrap(html);
-    expect(result.startsWith('<!doctype html><html lang="en"><head data-x="1"><meta charset="utf-8">')).toBe(true);
+  it("adds a head right after the doctype, ahead of the page's own head and styles", () => {
+    const page = '<html lang="en"><head data-x="1"><style>p{color:red}</style></head><body><p>hi</p></body></html>';
+    const result = injectHtmlRenderBootstrap(`<!doctype html>${page}`);
+    expect(result.startsWith(`<!doctype html><head>${CHARSET}${VIEWPORT}${STYLE_OPEN}`)).toBe(true);
+    expect(result.endsWith(`</script></head>${page}`)).toBe(true);
     expect(bootstrapCount(result)).toBe(1);
     expect(result.indexOf(STYLE_OPEN)).toBeLessThan(result.indexOf("<style>p{color:red}"));
-    expect(result.indexOf("<script>")).toBeLessThan(result.indexOf("</head>"));
-    expect(result.endsWith("<body><p>hi</p></body></html>")).toBe(true);
   });
 
-  it("adds a head right after <html> when the page has none", () => {
-    const result = injectHtmlRenderBootstrap("<html><body><p>hi</p></body></html>");
-    expect(result.startsWith(`<html><head>${CHARSET}`)).toBe(true);
-    expect(result).toMatch(/<\/script><\/head><body><p>hi<\/p><\/body><\/html>$/u);
+  it("adds a doctype and a head ahead of a page without a doctype", () => {
+    const html = "<html><body><p>hi</p></body></html>";
+    const result = injectHtmlRenderBootstrap(html);
+    expect(result.startsWith(`<!doctype html><head>${CHARSET}`)).toBe(true);
+    expect(result.endsWith(`</script></head>${html}`)).toBe(true);
     expect(bootstrapCount(result)).toBe(1);
   });
 
@@ -52,29 +52,35 @@ describe("visual reply bootstrap injection", () => {
   it("ignores a <head> inside a script string", () => {
     const html = '<html><body><script>var tag = "<head>";</script></body></html>';
     const result = injectHtmlRenderBootstrap(html);
-    expect(result.startsWith(`<html><head>${CHARSET}`)).toBe(true);
-    expect(result).toContain('<script>var tag = "<head>";</script>');
+    expect(result.startsWith(`<!doctype html><head>${CHARSET}`)).toBe(true);
+    expect(result.endsWith(`</head>${html}`)).toBe(true);
     expect(result.indexOf(STYLE_OPEN)).toBeLessThan(result.indexOf("var tag"));
     expect(bootstrapCount(result)).toBe(1);
   });
 
-  it("adds charset and viewport only when the page lacks them", () => {
-    const authored = '<html><head><meta charset="utf-8"><meta name="viewport" content="width=600"></head><body></body></html>';
-    const result = injectHtmlRenderBootstrap(authored);
-    expect(result.split("charset").length - 1).toBe(1);
-    expect(result).not.toContain(VIEWPORT);
-    expect(result).toContain('<meta name="viewport" content="width=600">');
-
-    const bare = injectHtmlRenderBootstrap("<html><head></head><body></body></html>");
-    expect(bare).toContain(CHARSET);
-    expect(bare).toContain(VIEWPORT);
-
-    // A commented-out meta does not count as present.
-    const commented = injectHtmlRenderBootstrap("<html><head><!-- <meta charset=\"latin1\"> --></head></html>");
-    expect(commented).toContain(CHARSET);
+  it("leaves a <head> inside an attribute value untouched", () => {
+    const html = '<div data-x="<head>"><p>hi</p></div>';
+    const result = injectHtmlRenderBootstrap(html);
+    expect(result.endsWith(html)).toBe(true);
+    expect(bootstrapCount(result)).toBe(1);
   });
 
-  it.each(["<head ", "<html ", "<meta ", "<meta name="])(
+  it("puts the bootstrap ahead of a page script that precedes the head", () => {
+    const html = "<!doctype html><script>window.first = 1</script><html><head></head><body></body></html>";
+    const result = injectHtmlRenderBootstrap(html);
+    expect(result.indexOf(STYLE_OPEN)).toBeLessThan(result.indexOf("window.first"));
+    expect(result.indexOf("<script>(function(){")).toBeLessThan(result.indexOf("window.first"));
+  });
+
+  it("declares UTF-8 and a viewport ahead of the page's own declarations", () => {
+    const authored = '<html><head><meta charset="utf-8"><meta name="viewport" content="width=600"></head><body></body></html>';
+    const result = injectHtmlRenderBootstrap(authored);
+    expect(result.indexOf(CHARSET)).toBeLessThan(result.indexOf(authored));
+    expect(result.indexOf(VIEWPORT)).toBeLessThan(result.indexOf(authored));
+    expect(result.endsWith(`</head>${authored}`)).toBe(true);
+  });
+
+  it.each(["<head ", "<html ", "<meta ", "<meta name=", "<!doctype ", " "])(
     "scans a maximum page of unterminated %j openings in linear time",
     (unit) => {
       // The main process injects on every load; a backtracking tag pattern took seconds here.
@@ -86,13 +92,4 @@ describe("visual reply bootstrap injection", () => {
       expect(result.endsWith(`</head>${html}`)).toBe(true);
     },
   );
-
-  it("finds a viewport meta after an unterminated or nested meta opening", () => {
-    expect(injectHtmlRenderBootstrap('<head><meta <meta name="viewport" content="width=600"></head>'))
-      .not.toContain(VIEWPORT);
-    expect(injectHtmlRenderBootstrap('<head><meta charset="utf-8"><meta name=viewport content="width=600"></head>'))
-      .not.toContain(VIEWPORT);
-    expect(injectHtmlRenderBootstrap('<head><meta name="description" content="viewport"></head>'))
-      .toContain(VIEWPORT);
-  });
 });

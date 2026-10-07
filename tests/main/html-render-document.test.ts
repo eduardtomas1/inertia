@@ -51,7 +51,7 @@ describe("visual reply document", () => {
 
     expect(response.status).toBe(404);
     expect(Object.fromEntries(response.headers.entries())).toEqual(EXPECTED_HEADERS(body.byteLength));
-    expect(text).toMatch(/^<!doctype html><html><head><meta charset="utf-8">/u);
+    expect(text).toMatch(/^<!doctype html><head><meta charset="utf-8">/u);
     expect(text).toContain(`<style id="${HTML_RENDER_THEME_STYLE_ID}">`);
     expect(text).toContain("<p>This page is no longer available.</p>");
     expect(text).toContain("var(--muted-foreground)");

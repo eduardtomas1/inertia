@@ -213,69 +213,24 @@ const BOOTSTRAP_SCRIPT = /* @__PURE__ */ [
   "})();",
 ].join("");
 
-// The page is untrusted and up to 256 KiB, and the main process scans it on
-// every load, so tag lookups stay linear: a pattern such as `<head\s[^>]*>`
-// backtracks quadratically over thousands of unterminated `<head ` openings.
-
-/** Where the first `<name>` or `<name ...>` start tag ends. A tag left unterminated means no later one can end either. */
-function firstStartTagEnd(scan: string, name: "head" | "html"): number | null {
-  const open = new RegExp(`<${name}(?=[\\s>])`, "iu").exec(scan);
-  if (!open) return null;
-  const close = scan.indexOf(">", open.index);
-  return close < 0 ? null : close + 1;
-}
-
-function hasViewportMeta(scan: string): boolean {
-  const meta = /<meta\s/giu;
-  for (let match = meta.exec(scan); match; match = meta.exec(scan)) {
-    const close = scan.indexOf(">", match.index);
-    const tag = scan.slice(match.index, close < 0 ? scan.length : close);
-    if (/name\s*=\s*["']?viewport/iu.test(tag)) return true;
-    if (close < 0) return false;
-    // A `<meta` inside this tag's own text was already covered by `tag`.
-    meta.lastIndex = close + 1;
-  }
-  return false;
-}
-
-function bootstrapMarkup(scan: string): string {
+function bootstrapMarkup(): string {
   const light = rootRule(DEFAULT_THEMES.light);
   const dark = rootRule(DEFAULT_THEMES.dark);
-  // Without a client-provided theme (a saved copy, a direct open) the page follows the OS appearance.
-  const defaultCss = `${light}@media (prefers-color-scheme: dark){${dark}}${BASE_CSS}`;
   return [
-    /<meta\s[^>]*charset/iu.test(scan.slice(0, 4_096)) ? "" : '<meta charset="utf-8">',
-    hasViewportMeta(scan) ? "" : '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<style id="${HTML_RENDER_THEME_STYLE_ID}">${defaultCss}</style>`,
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<style id="${HTML_RENDER_THEME_STYLE_ID}">${light}@media (prefers-color-scheme: dark){${dark}}${BASE_CSS}</style>`,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
   ].join("");
 }
 
-// Comments and raw-text elements are blanked to the same length, so offsets
-// still line up and a `<head>` inside a script string cannot receive the bootstrap.
-function blankNonMarkup(html: string): string {
-  return html.replace(
-    /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|template|xmp|noscript)\b[\s\S]*?(?:<\/\1\s*>|$)/giu,
-    (match) => " ".repeat(match.length),
-  );
-}
-
-/** Inserts the theme bootstrap at the start of the document head, ahead of the page's own styles and scripts. */
+/**
+ * Puts the theme bootstrap in a head ahead of all of the page's own markup, so
+ * it runs before any page script. The parser still moves the page's head
+ * elements into that head and its `<html>` attributes onto the root element.
+ */
 export function injectHtmlRenderBootstrap(html: string): string {
-  const scan = blankNonMarkup(html);
-  const markup = bootstrapMarkup(scan);
-  const headEnd = firstStartTagEnd(scan, "head");
-  if (headEnd !== null) {
-    return html.slice(0, headEnd) + markup + html.slice(headEnd);
-  }
-  const htmlEnd = firstStartTagEnd(scan, "html");
-  if (htmlEnd !== null) {
-    return `${html.slice(0, htmlEnd)}<head>${markup}</head>${html.slice(htmlEnd)}`;
-  }
   const doctype = /^\s*<!doctype[^>]*>/iu.exec(html);
-  if (doctype) {
-    const at = doctype[0].length;
-    return `${html.slice(0, at)}<head>${markup}</head>${html.slice(at)}`;
-  }
-  return `<!doctype html><head>${markup}</head>${html}`;
+  const at = doctype ? doctype[0].length : 0;
+  return `${doctype ? html.slice(0, at) : "<!doctype html>"}<head>${bootstrapMarkup()}</head>${html.slice(at)}`;
 }

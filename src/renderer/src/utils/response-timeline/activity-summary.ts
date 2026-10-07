@@ -249,9 +249,12 @@ export function activitySummaryParts(
   }];
 }
 
-// Providers report an Inertia host tool by its wire name, with or without a
-// transport prefix. The few tools a reader sees in the work log get plain words.
-const HOST_TOOL_TITLE = /^(?:Tool\s*·\s*|mcp__inertia-chat-manager__)?(inertia_[a-z0-9_]+)$/u;
+// Providers report an Inertia host tool by its wire name, bare, qualified by
+// the MCP server name (`mcp__inertia-chat-manager__` for Claude,
+// `inertia-chat-manager_` for OpenCode), or followed by an argument summary.
+// The few tools a reader sees in the work log get plain words.
+const HOST_TOOL_TITLE =
+  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
 const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string]>> = {
   inertia_render_html: ["Rendering a page", "Rendered a page"],
 };

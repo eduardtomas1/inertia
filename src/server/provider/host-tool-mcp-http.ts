@@ -71,9 +71,26 @@ function empty(response: ServerResponse, status: number): void {
 function closeUnreadRequest(
   request: IncomingMessage,
   response: ServerResponse,
-): void {
+): Promise<void> {
   response.setHeader("Connection", "close");
-  request.resume();
+  return new Promise((resolve) => {
+    if (request.readableEnded || request.destroyed) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      request.destroy();
+      done();
+    }, MCP_BODY_TIMEOUT_MS);
+    timer.unref();
+    request.once("end", done);
+    request.once("close", done);
+    request.resume();
+  });
 }
 
 function equalBearer(header: string | undefined, token: string): boolean {
@@ -172,7 +189,7 @@ export function createProviderHostToolMcpSession(
         || request.headers.origin !== undefined
         || !equalBearer(request.headers.authorization, token)
       ) {
-        closeUnreadRequest(request, response);
+        void closeUnreadRequest(request, response);
         json(response, 401, {
           jsonrpc: "2.0",
           id: null,
@@ -181,13 +198,13 @@ export function createProviderHostToolMcpSession(
         return;
       }
       if (request.method !== "POST") {
-        closeUnreadRequest(request, response);
+        void closeUnreadRequest(request, response);
         response.setHeader("Allow", "POST");
         empty(response, 405);
         return;
       }
       if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
-        closeUnreadRequest(request, response);
+        void closeUnreadRequest(request, response);
         json(response, 415, {
           jsonrpc: "2.0",
           id: null,
@@ -196,7 +213,7 @@ export function createProviderHostToolMcpSession(
         return;
       }
       if (active >= MAX_CONCURRENT_MCP_REQUESTS) {
-        closeUnreadRequest(request, response);
+        await closeUnreadRequest(request, response);
         json(response, 429, {
           jsonrpc: "2.0",
           id: null,
@@ -209,7 +226,7 @@ export function createProviderHostToolMcpSession(
         const body = await readBody(request, controller.signal);
         if (body.kind === "cancelled") return;
         if (body.kind === "too-large") {
-          closeUnreadRequest(request, response);
+          await closeUnreadRequest(request, response);
           json(response, 413, {
             jsonrpc: "2.0",
             id: null,
@@ -218,7 +235,7 @@ export function createProviderHostToolMcpSession(
           return;
         }
         if (body.kind === "timeout") {
-          closeUnreadRequest(request, response);
+          void closeUnreadRequest(request, response);
           json(response, 408, {
             jsonrpc: "2.0",
             id: null,

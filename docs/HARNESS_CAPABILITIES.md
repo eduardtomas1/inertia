@@ -111,8 +111,18 @@ and a storage failure each return `{ error: { code, message } }` with
 `call_cancelled`, `render_limit_reached`, or `render_not_saved`.
 
 The page is served only by the main process from the stored row, inside a
-sandboxed frame without network access; windows that show pages also disable
-non-proxied WebRTC UDP and the page response turns off DNS prefetching. A page
+sandboxed frame whose policy blocks fetches, remote resources, frames, workers
+and forms. The frame cannot navigate away: the window's own policy refuses
+other schemes and the main process refuses any subframe navigation but a visual
+reply. Windows that show pages disable non-proxied WebRTC UDP and the page
+response turns off DNS prefetching. WebRTC over TCP is not blocked: a page
+script can still reach a TURN relay at any address, which the Electron
+scenario shows against a local listener (a `<link rel="preconnect">` to the
+same kind of listener does not connect). A link opens in the system browser
+only for a click the frame's bootstrap saw on a link, at most once per second,
+while the frame has focus and a user gesture; the bootstrap runs before any
+page script and proves itself with a token the page cannot read. A page
+that no longer exists is served as a themed "no longer available" notice (404).
 that no longer exists is served as a themed "no longer available" notice (404).
 When the runtime is not running or does not answer in time, the page is served
 as a themed "temporarily unavailable" notice (503), and the chat reloads that

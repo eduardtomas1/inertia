@@ -52,7 +52,7 @@ export const htmlRenderInputSchema = z.object({
 const DESCRIPTION = [
   "Show a finished HTML page (chart, table, diagram, collage, mockup) inline in this chat, above your final text reply; call it before writing that reply.",
   "The reader sees the page above the reply, but some clients and later turns see only text: in the reply, say in one sentence what the page shows, then add only what the page doesn't say, without restating its details or saying where it is.",
-  "Pass one complete, self-contained HTML document of at most 256 KiB and a short title. Scripts run in a sandbox without network access.",
+  "Pass one complete, self-contained HTML document of at most 256 KiB and a short title. Scripts run in a sandbox that cannot fetch or load anything remote.",
   `A turn can show at most ${HTML_RENDER_MAX_PER_TURN} pages.`,
   HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_THEME_GUIDE,

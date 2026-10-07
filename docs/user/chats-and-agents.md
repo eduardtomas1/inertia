@@ -26,7 +26,7 @@ An agent can answer with a page as well as text: a chart, a table, a diagram or 
 
 - Point at the page and choose **Open full size** (or Tab to the button) to view it in a larger dialog. Escape closes it.
 - HTTPS links in the page open in your default browser when you click them.
-- The page runs in a sandbox. It cannot reach the network, your files, the project or the rest of Inertia, so everything it shows must be inside the page itself.
+- The page runs in a sandbox. It cannot fetch from the network, load remote content, or reach your files, the project or the rest of Inertia, so everything it shows must be inside the page itself. A script in the page can still open a WebRTC connection through a relay server over TCP.
 - Private Connect clients, chats you share as context, and another model continuing the chat see only a one-line *[page: title]* note in its place, so the agent’s reply also says in one sentence what the page shows.
 
 ## Keep work organized

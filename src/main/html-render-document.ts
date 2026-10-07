@@ -4,6 +4,7 @@ import { injectHtmlRenderBootstrap } from "../shared/html-render.js";
  * Policy for a served visual reply. The document runs in an opaque-origin
  * sandbox with inline script and style only: it cannot fetch, frame, open
  * workers, submit forms, or load anything from the app scheme or the network.
+ * WebRTC is outside this policy.
  */
 export const HTML_RENDER_CONTENT_SECURITY_POLICY = [
   "sandbox allow-scripts",

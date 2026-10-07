@@ -58,12 +58,31 @@ the emulated OS scheme flips from dark to light while the page stays mounted.
   - In the parent, a message posted by the frame arrives with
     `event.origin === "null"` and is applied.
 
+## Hostile page and detached window scenarios
+
+`keeps a hostile page inside its frame` seeds a page that announces a forged
+bootstrap token and posts its own `open-link` requests:
+
+- A click on a button, Enter in a fake "Access token" field and the page's own
+  posts open nothing; a real click on its link opens exactly that link once.
+- Navigating the frame to `inertia://bundle/index.html` reaches the main
+  process's guard and is refused; the page and its state stay.
+- `location.href` and a `<meta http-equiv="refresh">` to a local listener are
+  refused by the window's `frame-src` policy (the frame shows Chromium's error
+  page) and the listener receives no connection.
+- A `<link rel="preconnect">` to a local listener does not connect. A WebRTC
+  peer connection with a `turn:…?transport=tcp` server does connect to a local
+  listener, so WebRTC over TCP is a remaining egress path.
+- A four-second busy loop in the page blocks only the frame: the app answers a
+  script call in milliseconds and the composer accepts typing meanwhile.
+
+`html-render-detached.spec.ts` opens the chat in its own window and shows that
+the window serves its own chat's page while a page from another chat gets the
+"no longer available" notice, which the main window serves normally.
+
 ## Not exercised here
 
 - macOS and Windows. A packaged or signed build.
 - A real provider calling `inertia_render_html`.
-- Detached chat windows: the route's conversation-scope check is covered only
-  by `tests/main/app-protocol.test.ts` ("serves a detached window only pages
-  from its own conversation").
 - Custom color palettes beyond the default light and dark tokens.
 - Pages near the 256 KiB or 2000 px limits.

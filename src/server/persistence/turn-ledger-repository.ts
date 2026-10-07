@@ -449,7 +449,8 @@ export class TurnLedgerRepository {
   }
 
   /**
-   * The most recent provider handoff that restored history onto this route.
+   * The most recent provider handoff that restored at least one earlier
+   * message onto this route.
    * A genuine handoff directly follows a turn on another provider; later
    * same-provider harness changes never count.
    */
@@ -462,7 +463,9 @@ export class TurnLedgerRepository {
       SELECT handoff.requested_at FROM agent_turns AS handoff
       WHERE handoff.conversation_id = @conversationId
         AND handoff.continuation_reason_code = 'harness-changed'
-        AND handoff.session_recovery_json IS NOT NULL
+        AND (CASE WHEN json_valid(handoff.session_recovery_json)
+          THEN json_extract(handoff.session_recovery_json, '$.restoredMessageCount')
+        END) > 0
         AND handoff.backend_profile_id = @backendProfileId
         AND (CASE WHEN json_valid(handoff.continuation_identity_json)
           THEN json_extract(handoff.continuation_identity_json, '$.endpointIdentity')

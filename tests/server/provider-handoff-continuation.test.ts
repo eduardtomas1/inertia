@@ -252,6 +252,27 @@ describe("provider handoff continuation", () => {
     expect(stale.queued.turn.sessionRecovery).toMatchObject({ withheldMessageCount: 6 });
   });
 
+  it("does not let a handoff that restored nothing admit the earlier provider's messages later", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    await f.switchProvider("codex");
+    const resolved = f.resolve({ content: "Continue on Codex." });
+    expect(resolved.input.continuationReasonCode).toBe("harness-changed");
+    const handoff = f.store.beginAgentTurn({
+      ...resolved.input,
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 4 },
+    });
+    f.complete(handoff.turn.id, "CODEX_DEFAULT_REPLY", "codex-session");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: null, continuationIdentity: null });
+
+    const fresh = f.begin("Pick the export back up.");
+    expect(fresh.queued.turn.continuationReasonCode).toBe("missing-continuation-identity");
+    expect(fresh.providerInput.prompt).toContain("CODEX_DEFAULT_REPLY");
+    expect(fresh.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
+    expect(fresh.providerInput.prompt).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(fresh.queued.turn.sessionRecovery).toMatchObject({ withheldMessageCount: 4 });
+  });
+
   it("refuses a native goal start until a message carries the history to the new provider", async () => {
     const f = await fixture();
     f.seedClaudeHistory();

@@ -373,7 +373,7 @@ describe("application update install coordination", () => {
     expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
-  it("retains one Linux retry requested while normal cleanup is in flight", async () => {
+  it("retains one retry requested while normal cleanup is in flight", async () => {
     let resolveFirstCleanup!: (confirmed: boolean) => void;
     const cleanup = vi.fn()
       .mockImplementationOnce(() => new Promise<boolean>((resolve) => {
@@ -396,7 +396,7 @@ describe("application update install coordination", () => {
     expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
-  it("drops an in-flight Linux retry request after successful cleanup", async () => {
+  it("drops an in-flight retry request after successful cleanup", async () => {
     let resolveCleanup!: (confirmed: boolean) => void;
     const cleanup = vi.fn(() => new Promise<boolean>((resolve) => {
       resolveCleanup = resolve;
@@ -782,7 +782,6 @@ describe("privileged updater cleanup", () => {
       .mockResolvedValueOnce(undefined);
     const closeDurableAttachments = vi.fn(async () => undefined);
     const cleanup = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: true,
       runtime: { stop: stopRuntime },
       privateConnect: { shutdown: shutdownPrivateConnect },
       onRuntimeStopped: vi.fn(),
@@ -810,7 +809,6 @@ describe("privileged updater cleanup", () => {
       .mockRejectedValueOnce(new Error("busy"))
       .mockResolvedValueOnce(undefined);
     const cleanup = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: true,
       runtime: { stop: stopRuntime },
       privateConnect: { shutdown: shutdownPrivateConnect },
       onRuntimeStopped: vi.fn(), onRuntimeError: vi.fn(),
@@ -834,7 +832,6 @@ describe("privileged updater cleanup", () => {
       .mockRejectedValueOnce(new Error("attachment helper pending"))
       .mockResolvedValueOnce(undefined);
     const cleanup = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: true,
       runtime: { stop: stopRuntime },
       privateConnect: { shutdown: shutdownPrivateConnect },
       onRuntimeStopped: vi.fn(), onRuntimeError: vi.fn(),
@@ -849,25 +846,5 @@ describe("privileged updater cleanup", () => {
     expect(stopRuntime).toHaveBeenCalledOnce();
     expect(shutdownPrivateConnect).toHaveBeenCalledOnce();
     expect(closeDurableAttachments).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not enable owner retries when the platform did not opt in", async () => {
-    const stopRuntime = vi.fn()
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
-    const cleanup = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: false,
-      runtime: { stop: stopRuntime }, privateConnect: null,
-      onRuntimeStopped: vi.fn(), onRuntimeError: vi.fn(),
-      onPrivateConnectStopped: vi.fn(), onPrivateConnectError: vi.fn(),
-      disposeTemporaryAttachments: vi.fn(async () => undefined),
-      closeDurableAttachments: vi.fn(async () => undefined),
-      onDurableAttachmentsClosed: vi.fn(), onTemporaryAttachmentError: vi.fn(),
-      onUnconfirmedRuntimeExit: vi.fn(),
-    });
-
-    await expect(cleanup.cleanup()).resolves.toBe(false);
-    await expect(cleanup.cleanup()).resolves.toBe(false);
-    expect(stopRuntime).toHaveBeenCalledOnce();
   });
 });

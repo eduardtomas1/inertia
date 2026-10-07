@@ -610,6 +610,7 @@ function registerIpcHandlers(): void {
     const [title, body] = DESKTOP_NOTIFICATION_COPY[request.kind];
     const notification = new Notification({ title, body });
     shownNotifications.add(notification);
+    if (shownNotifications.size > 32) shownNotifications.delete(shownNotifications.values().next().value!);
     const forget = (): void => { shownNotifications.delete(notification); };
     notification.once("close", forget);
     notification.once("failed", forget);
@@ -863,7 +864,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
     systemSuspendDelivery?.close(); systemSuspendDelivery = null; if (mainWindow) saveWindowState(mainWindow);
     const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectShutdownOwner = privateConnectHostToStop;
     const retainedAttachments = conversationAttachments; privilegedCleanupOwners = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: true, runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) },
+      runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) },
       privateConnect: privateConnectHostToStop && { shutdown: () => testCleanupOwners.observe("privateConnect", () => privateConnectHostToStop.shutdown()) },
       onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
       onRuntimeError: (error) => {

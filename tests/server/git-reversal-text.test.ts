@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { reversalText } from "../../src/server/git/reversal";
+import { alignedLineEndings } from "../../src/server/git/reversal-files";
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
 
 const patch = [
@@ -36,5 +37,18 @@ describe("selected line reversal text", () => {
 
     expect(() => reversalText(current, [line], new Map([[line.id, "beta"]]), original))
       .toThrow(/no longer match/iu);
+  });
+});
+
+describe("committed content line-ending alignment", () => {
+  it("converts an LF-only committed file to CRLF when the working copy is CRLF throughout", () => {
+    expect(alignedLineEndings(Buffer.from("a\nb\n"), Buffer.from("a\r\nc\r\n")).toString()).toBe("a\r\nb\r\n");
+  });
+
+  it("leaves mixed, CRLF or binary-free committed content alone", () => {
+    expect(alignedLineEndings(Buffer.from("a\nb\n"), Buffer.from("a\r\nb\nc\r\n")).toString()).toBe("a\nb\n");
+    expect(alignedLineEndings(Buffer.from("a\r\nb\n"), Buffer.from("a\r\nc\r\n")).toString()).toBe("a\r\nb\n");
+    expect(alignedLineEndings(Buffer.from("a\nb\n"), Buffer.from("a\nc\n")).toString()).toBe("a\nb\n");
+    expect(alignedLineEndings(Buffer.from("no newline"), Buffer.from("a\r\n")).toString()).toBe("no newline");
   });
 });

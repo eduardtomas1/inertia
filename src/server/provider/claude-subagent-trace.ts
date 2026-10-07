@@ -42,14 +42,12 @@ interface ClaudeTaskState extends ClaudeAgentTool {
 
 const SUBAGENT_TASK_TYPES = new Set([
   "agent",
+  "in_process_teammate",
   "local_agent",
   "local_workflow",
   "remote_agent",
   "subagent",
 ]);
-export function isClaudeSubagentTaskType(taskType: string): boolean {
-  return SUBAGENT_TASK_TYPES.has(taskType);
-}
 export const MAX_CLAUDE_LIVE_SUBAGENT_TASKS = 1_024;
 export const MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS = 256;
 export const MAX_CLAUDE_PENDING_SUBAGENT_TOOLS = 1_024;

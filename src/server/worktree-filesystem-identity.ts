@@ -68,7 +68,9 @@ export function isWorktreeFilesystemReceipt(
   ])
     && value.version === 1
     && isWorktreeFilesystemIdentity(value.worktreesDirectory)
-    && isWorktreeFilesystemIdentity(value.adminDirectory);
+    && isPositiveDecimal(value.worktreesDirectory.birthtimeNs)
+    && isWorktreeFilesystemIdentity(value.adminDirectory)
+    && isPositiveDecimal(value.adminDirectory.birthtimeNs);
 }
 
 function canonicalWorktreeFilesystemReceipt(

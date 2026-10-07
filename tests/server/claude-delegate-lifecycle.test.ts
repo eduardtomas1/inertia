@@ -284,40 +284,27 @@ describe("Claude delegated lifecycle", () => {
     expect(lifecycle.hasProvisionalResult()).toBe(false);
   });
 
-  it("does not hold the parent result for a background shell in the roster", () => {
+  it("holds the parent result while a background shell is still in the roster", () => {
     const lifecycle = new ClaudeDelegateLifecycle();
     lifecycle.observe(claudeSystem("background_tasks_changed", {
       tasks: [
-        { task_id: "dev-server", task_type: "local_bash", description: "npm run dev" },
+        { task_id: "build", task_type: "local_bash", description: "npm run build" },
         { task_id: "watcher", task_type: "monitor_ws", description: "Watch logs" },
       ],
     }));
 
     expect(lifecycle.observe(
-      claudeSuccessResult("Started the dev server.", "completed"),
+      claudeSuccessResult("The build is running.", "completed"),
+    )).toEqual({ turnEnded: false });
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: "delegates-abandoned" });
+
+    expect(lifecycle.observe(claudeBackgroundTasks([]))).toEqual({ turnEnded: false });
+    expect(lifecycle.observe(
+      claudeSuccessResult("The update failed.", "completed"),
     )).toEqual({ turnEnded: true });
-    expect(lifecycle.hasProvisionalResult()).toBe(false);
     expect(lifecycle.complete()).toMatchObject({
       kind: "result",
-      result: { result: "Started the dev server." },
-    });
-  });
-
-  it("still holds the parent result when an agent shares the roster with a shell", () => {
-    const lifecycle = new ClaudeDelegateLifecycle();
-    lifecycle.observe(claudeSystem("background_tasks_changed", {
-      tasks: [
-        { task_id: "dev-server", task_type: "local_bash", description: "npm run dev" },
-        { task_id: "agent-1", task_type: "local_agent", description: "Review" },
-      ],
-    }));
-
-    expect(lifecycle.observe(
-      claudeSuccessResult("Waiting for the reviewer", "completed"),
-    )).toEqual({ turnEnded: false });
-    expect(lifecycle.complete()).toEqual({
-      kind: "incomplete",
-      reason: "delegates-abandoned",
+      result: { result: "The update failed." },
     });
   });
 

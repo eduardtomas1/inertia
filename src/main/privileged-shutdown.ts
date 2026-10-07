@@ -30,7 +30,6 @@ export function finishNormalShutdownAfterCleanup(options: {
 }
 
 export interface RetryablePrivilegedCleanupOptions {
-  retryUnconfirmed?: boolean;
   runtime: { stop(): Promise<boolean> } | null;
   privateConnect: { shutdown(): Promise<void> } | null;
   onRuntimeStopped(): void;
@@ -60,17 +59,10 @@ export class RetryablePrivilegedCleanup {
   cleanup(): Promise<boolean> {
     if (this.attempt) return this.attempt;
     const attempt = this.run().then((confirmed) => {
-      if (
-        !confirmed
-        && this.options.retryUnconfirmed === true
-        && this.attempt === attempt
-      ) this.attempt = null;
+      if (!confirmed && this.attempt === attempt) this.attempt = null;
       return confirmed;
     }, (error: unknown) => {
-      if (
-        this.options.retryUnconfirmed === true
-        && this.attempt === attempt
-      ) this.attempt = null;
+      if (this.attempt === attempt) this.attempt = null;
       throw error;
     });
     this.attempt = attempt;

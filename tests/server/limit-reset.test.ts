@@ -683,7 +683,7 @@ describe("resume identity across credential renewal", () => {
     accessToken = jwt({ iss: "https://auth.kimi.com", sub: "account-one" }, "before");
     let remaining = "0";
     const config = `default_model = "k"\n[models.k]\nmodel = "k"\nprovider = "managed:kimi-code"\n[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\n[providers."managed:kimi-code".oauth]\nstorage = "file"\nkey = "oauth/kimi-code"\n`;
-    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_SHARE_DIR: "/k" }), accountKey: async () => "per-install-identity-key",
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_CODE_HOME: "/k" }), accountKey: async () => "per-install-identity-key",
       readFile: async (path) => path.endsWith("config.toml") ? config : path.endsWith("kimi-code.json")
         ? JSON.stringify({ access_token: accessToken, expires_at: Date.now() / 1000 + 3600 }) : null,
       fetch: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ usage: { limit: "100", remaining, resetAt: reset } }))) });

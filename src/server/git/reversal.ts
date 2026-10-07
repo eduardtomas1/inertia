@@ -38,6 +38,7 @@ import {
   type IndexEntry,
   readIndexEntry,
   restoreIndexEntry,
+  alignedLineEndings,
   textBuffer,
   updateIndexEntry,
   writeAtomic,
@@ -271,16 +272,9 @@ export function reversalText(
   return Buffer.from(next, "utf8");
 }
 
-async function headFileContent(
-  root: string,
-  path: string,
-  layer: "index" | "worktree" = "index",
-): Promise<Buffer> {
+async function headFileContent(root: string, path: string): Promise<Buffer> {
   try {
-    const args = layer === "worktree"
-      ? ["cat-file", "--filters", `HEAD:${path}`]
-      : ["show", `HEAD:${path}`];
-    return (await runGit(root, args, {
+    return (await runGit(root, ["show", `HEAD:${path}`], {
       maxOutputBytes: MAX_DIFF_BYTES,
       failureMessage: "Unable to inspect the committed file.",
     })).stdout;
@@ -387,13 +381,13 @@ async function buildReversalState(
     MAX_DIFF_BYTES,
   );
 
-  const [index, stagedPatch, headContent, headWorktreeContent] = await Promise.all([
+  const [index, stagedPatch, headContent] = await Promise.all([
     readIndexEntry(root, file.path),
     completeLayerPatch(root, "index", file.path, selection.ignoreWhitespace),
     headFileContent(root, file.path),
-    headFileContent(root, file.path, "worktree"),
   ]);
   const worktreeContent = worktree.content;
+  const headWorktreeContent = alignedLineEndings(headContent, worktreeContent);
   textBuffer(worktreeContent);
   textBuffer(index.content);
   const stagedFile = parseUnifiedDiff(stagedPatch).files.find((candidate) => candidate.path === file.path);

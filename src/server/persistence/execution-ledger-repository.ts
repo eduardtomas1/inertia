@@ -256,8 +256,8 @@ export class ExecutionLedgerRepository {
       )
     ) {
       // A known terminal outcome is durable historical truth. Later matching
-      // patches may enrich its detail, and terminal unknown may be clarified,
-      // but contradictory or revived edges are necessarily out of order.
+      // patches may enrich its detail, terminal unknown may be clarified, and
+      // only a provider-authored new turn may revive it.
       return { trace: subagentTraceFromRow(existing), changed: false };
     }
     if (

@@ -798,7 +798,7 @@ export class CodexSubagentLifecycle {
       this.emitChildLifecycle(threadId, "running", "turn", {
         providerStatus: boundedText(objectValue(params.turn)?.status, 200)
           ?? "inProgress",
-        revived: projection !== undefined && !projection.isLive,
+        revived: projection !== undefined && !projection.isLive && !this.host.cancelRequested(),
       });
       return true;
     }

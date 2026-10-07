@@ -5,7 +5,6 @@ import type {
 
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
 import { claudeCommandLifecycleMessage, claudeObjectValue } from "./claude-message-projector-support";
-import { isClaudeSubagentTaskType } from "./claude-subagent-trace";
 
 export type ClaudeDelegateCompletion =
   | { kind: "result"; result: SDKResultMessage }
@@ -116,7 +115,7 @@ export class ClaudeDelegateLifecycle {
       // guaranteed by the SDK. Ambient watchers are explicitly not activity.
       this.liveBackgroundTaskIds = new Set(
         message.tasks
-          .filter((task) => task.ambient !== true && isClaudeSubagentTaskType(task.task_type))
+          .filter((task) => task.ambient !== true)
           .map((task) => task.task_id)
           .filter((taskId) => taskId.length > 0),
       );

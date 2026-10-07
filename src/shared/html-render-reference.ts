@@ -60,7 +60,6 @@ export function isHtmlRenderReference(value: unknown): value is HtmlRenderRefere
     && row.height <= HTML_RENDER_MAX_HEIGHT;
 }
 
-/** How a page appears where only text travels: shared context, another model, Private Connect. */
 export function htmlRenderContextLine(title: string): string {
   return `[page: ${title}]`;
 }

@@ -52,7 +52,7 @@ it("appends origin metadata to schema 74 without rewriting old messages or linea
     migrateRuntimeDatabase(database);
     expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 74 ORDER BY version").all()).toEqual(history);
     expect(database.prepare("SELECT * FROM messages").all())
-      .toEqual(messages.map((message) => ({ ...message, private_connect_device_id: null })));
+      .toEqual(messages.map((message) => ({ ...message, html_render_json: null, private_connect_device_id: null })));
     expect(database.pragma("foreign_key_check")).toEqual([]);
   } finally { database.close(); }
 });

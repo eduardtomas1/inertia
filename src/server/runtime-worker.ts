@@ -34,6 +34,7 @@ import {
   RuntimeWorkerStartupPreflightError,
 } from "./runtime-worker-startup-preflight.js";
 import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
+import { answerRuntimeHtmlRenderRead } from "./runtime-html-render-reads.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -363,6 +364,10 @@ parentPort.on("message", (messageEvent) => {
         });
       },
     );
+    return;
+  }
+  if (command.type === "runtime.read-html-render") {
+    post(answerRuntimeHtmlRenderRead(stopping ? null : runtime, command));
     return;
   }
   if (command.type === "runtime.database-recovery-cancel") {

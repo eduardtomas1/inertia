@@ -1,4 +1,5 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import { HtmlRenderRepository } from "./persistence/html-render-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -138,6 +139,7 @@ export class RuntimeStore {
   readonly transcriptRepository: TranscriptRepository;
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
+  readonly htmlRenders: HtmlRenderRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
@@ -188,6 +190,7 @@ export class RuntimeStore {
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.limitResets = new LimitResetRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
+    this.htmlRenders = new HtmlRenderRepository(this.database, this);
     this.projectRepository = new ProjectRepository({
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),

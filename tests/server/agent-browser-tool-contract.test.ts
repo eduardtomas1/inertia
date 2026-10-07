@@ -122,7 +122,7 @@ describe("agent browser tool contract", () => {
     try {
       const listed = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
       expect([...listed.keys()].sort())
-        .toEqual(AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name }) => name).sort());
+        .toEqual([...AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name }) => name), "inertia_render_html"].sort());
       for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {
         const advertised = listed.get(definition.name)!.inputSchema;
         expect(Object.keys(advertised.properties ?? {}).sort(), definition.name)

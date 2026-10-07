@@ -151,6 +151,8 @@ describe("notification preference recovery", () => {
     store.close();
     const legacy = new Database(join(databaseRecoveryPaths(databasePath).backupsDirectory, backup.filename));
     legacy.exec(`
+      DROP TABLE html_renders;
+      ALTER TABLE messages DROP COLUMN html_render_json;
       DROP TABLE cli_conversation_imports;
       DROP INDEX agent_turns_provider_session_before_idx;
       DROP INDEX agent_turns_provider_session_after_idx;

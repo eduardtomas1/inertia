@@ -104,6 +104,18 @@ async function started(input: Parameters<typeof runtime>[0] = {}) {
   return { ...state, connection, post, session };
 }
 
+function paddedCall(id: number, bytes: number) {
+  const body = {
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name: "inertia_list_conversations", arguments: { padding: "" } },
+  };
+  body.params.arguments.padding = "x".repeat(bytes - Buffer.byteLength(JSON.stringify(body), "utf8"));
+  expect(Buffer.byteLength(JSON.stringify(body), "utf8")).toBe(bytes);
+  return body;
+}
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
@@ -311,19 +323,63 @@ describe("provider host-tool MCP transport", () => {
     })).rejects.toThrow();
   });
 
-  it("bounds request bodies and closes an oversized keep-alive request", async () => {
-    const { post } = await started();
-    const response = await post({
-      jsonrpc: "2.0",
-      id: 10,
-      method: "tools/call",
-      params: {
-        name: "inertia_list_conversations",
-        arguments: { padding: "x".repeat(128 * 1024) },
+  it("bounds request bodies at 512 KiB and closes an oversized keep-alive request", async () => {
+    const received: number[] = [];
+    const { post } = await started({
+      invoke: async (call) => {
+        received.push(((call.arguments as { padding: string }).padding).length);
+        return { success: true, text: "ok" };
       },
     });
+    const accepted = await post(paddedCall(10, 512 * 1024));
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ id: 10, result: { content: [{ type: "text", text: "ok" }] } });
+    expect(received).toHaveLength(1);
+
+    const response = await post(paddedCall(11, 512 * 1024 + 1));
     expect(response.status).toBe(413);
     expect(response.headers.get("connection")).toBe("close");
+    expect(await response.json()).toMatchObject({ error: { message: "MCP request body exceeds the 512 KiB limit." } });
+    expect(received).toHaveLength(1);
+  });
+
+  it("carries a maximum visual-reply page through Cursor and Kimi's stdio fallback", async () => {
+    const unit = "<div class=\"cell\">é</div>\n";
+    const page = unit.repeat(Math.floor(256 * 1024 / Buffer.byteLength(unit, "utf8")));
+    expect(Buffer.byteLength(page, "utf8")).toBeLessThanOrEqual(256 * 1024);
+    let received = "";
+    const { connection } = await started({
+      invoke: async (call) => {
+        received = (call.arguments as { padding: string }).padding;
+        return { success: true, text: "rendered" };
+      },
+    });
+    const fallback = acpHostMcpServers(connection, false)[0]!;
+    if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
+    const child = spawn(fallback.command, fallback.args, {
+      env: {
+        ...process.env,
+        ...Object.fromEntries(fallback.env.map(({ name, value }) => [name, value])),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    const line = JSON.stringify({
+      jsonrpc: "2.0",
+      id: "stdio-page",
+      method: "tools/call",
+      params: { name: "inertia_list_conversations", arguments: { padding: page } },
+    });
+    expect(Buffer.byteLength(line, "utf8")).toBeGreaterThan(256 * 1024);
+    child.stdin.end(`${line}\n`);
+    const [code] = await once(child, "close") as [number | null, NodeJS.Signals | null];
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.trim())).toMatchObject({
+      id: "stdio-page",
+      result: { content: [{ type: "text", text: "rendered" }] },
+    });
+    expect(received).toBe(page);
   });
 
   it("lets Cursor's stdio proxy drain a valid in-flight request after stdin EOF", async () => {

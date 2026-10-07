@@ -325,7 +325,10 @@ export class ConversationRepository {
 
   delete(conversationId: string): void {
     const conversation = this.context.requireConversation(conversationId);
-    this.context.database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+    this.context.database.transaction(() => {
+      this.context.database.prepare("DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);
+      this.context.database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+    })();
     if (this.context.state().active_conversation_id === null) {
       this.context.selectProject(conversation.project_id);
     }

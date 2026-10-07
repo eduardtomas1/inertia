@@ -1022,6 +1022,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),
     releaseUpdatePreparation: (operationId) =>
       updatePreparation.release(operationId),
+    readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));

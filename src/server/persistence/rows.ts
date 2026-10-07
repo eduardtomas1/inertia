@@ -201,6 +201,7 @@ export interface TurnGitArtifactRow {
 export interface MessageRow {
   private_connect_device_id?: string | null;
   compaction_json?: string | null;
+  html_render_json?: string | null;
   id: string;
   conversation_id: string;
   turn_id: string | null;

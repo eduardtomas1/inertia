@@ -4,6 +4,7 @@ import type { IncidentSink } from "../node/application-incidents.js";
 import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-profiles.js";
 import type { AgentTurn } from "../shared/contracts.js";
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
+import type { RuntimeHtmlRenderReader } from "./runtime-html-render-reads.js";
 import type {
   PrivateConnectRuntimeAuthorization,
   PrivateConnectRuntimeRequest,
@@ -90,7 +91,7 @@ export interface RuntimeBackendCredentialBroker {
   forget(secretReference: string, signal?: AbortSignal): Promise<boolean>;
 }
 
-export interface RunningRuntime {
+export interface RunningRuntime extends RuntimeHtmlRenderReader {
   runPackageSmokeImage?: (
     inputPath: string,
     resultPath: string,

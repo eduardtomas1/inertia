@@ -9,7 +9,8 @@ import {
 import { handleProviderMcpBody, type ProviderMcpToolOptions } from "./host-tool-mcp-protocol";
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 
-const MAX_MCP_BODY_BYTES = 128 * 1024;
+/** Fits one maximum visual-reply page after JSON-RPC escaping, for every provider transport. */
+export const MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES = 512 * 1024;
 const MCP_BODY_TIMEOUT_MS = 10_000;
 const MAX_CONCURRENT_MCP_REQUESTS = 8;
 
@@ -81,7 +82,7 @@ async function readBody(
   signal: AbortSignal,
 ): Promise<BodyResult> {
   const declared = Number.parseInt(request.headers["content-length"] ?? "", 10);
-  if (Number.isFinite(declared) && declared > MAX_MCP_BODY_BYTES) {
+  if (Number.isFinite(declared) && declared > MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES) {
     return { kind: "too-large" };
   }
   if (signal.aborted) return { kind: "cancelled" };
@@ -101,7 +102,7 @@ async function readBody(
     };
     const onData = (chunk: Buffer): void => {
       size += chunk.byteLength;
-      if (size > MAX_MCP_BODY_BYTES) {
+      if (size > MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES) {
         finish({ kind: "too-large" });
         request.resume();
         return;
@@ -204,7 +205,7 @@ export function createProviderHostToolMcpSession(
           json(response, 413, {
             jsonrpc: "2.0",
             id: null,
-            error: { code: -32600, message: "MCP request body exceeds the 128 KiB limit." },
+            error: { code: -32600, message: "MCP request body exceeds the 512 KiB limit." },
           });
           return;
         }

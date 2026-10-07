@@ -717,6 +717,11 @@
       "version": 92,
       "name": "CliConversationImports",
       "digest": "e9ad5cbbf02ece421497df3809b900bacd540f661dabf857e54d15e013ad8006"
+    },
+    {
+      "version": 93,
+      "name": "PersistHtmlRenders",
+      "digest": "8b1ff3342a0c9d1614d9d7c011b519e2a6b4ba196db254d81954d84bb61c7b14"
     }
   ]
 }

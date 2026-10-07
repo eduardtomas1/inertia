@@ -22,6 +22,7 @@ const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold"
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 93) database.exec("DROP TABLE html_renders; ALTER TABLE messages DROP COLUMN html_render_json");
   if (version < 92) database.exec("DROP TABLE cli_conversation_imports; DROP INDEX agent_turns_provider_session_before_idx; DROP INDEX agent_turns_provider_session_after_idx; ALTER TABLE agent_turns DROP COLUMN origin");
   if (version < 91) database.exec("ALTER TABLE app_state DROP COLUMN muted_custom_colors");
   if (version < 90) {
@@ -74,13 +75,16 @@ describe("database health check for settings and subagent columns", () => {
     { version: 92, sql: "ALTER TABLE agent_turns DROP COLUMN origin" },
     { version: 92, sql: "DROP INDEX agent_turns_provider_session_before_idx" },
     { version: 92, sql: "DROP INDEX agent_turns_provider_session_after_idx" },
+    { version: 93, sql: "DROP TABLE html_renders" },
+    { version: 93, sql: "ALTER TABLE messages DROP COLUMN html_render_json" },
+    { version: 93, sql: "DROP INDEX html_renders_conversation_idx" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

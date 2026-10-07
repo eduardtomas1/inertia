@@ -41,6 +41,7 @@ function runtimeWithClose(
     prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
     releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),
+    readHtmlRender: vi.fn(() => null),
     privateConnectRequest: vi.fn(async () => {
       throw new Error("unused");
     }),

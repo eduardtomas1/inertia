@@ -1,7 +1,7 @@
 import type { McpServer } from "@agentclientprotocol/sdk";
 import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 
-import type { ProviderHostToolMcpConnection } from "./host-tool-mcp-http";
+import { MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES, type ProviderHostToolMcpConnection } from "./host-tool-mcp-http";
 
 export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
@@ -15,7 +15,7 @@ const token=process.env.INERTIA_HOST_MCP_TOKEN;
 delete process.env.INERTIA_HOST_MCP_URL;
 delete process.env.INERTIA_HOST_MCP_TOKEN;
 if(!url||!token)process.exit(1);
-const MAX_LINE=131072,MAX_QUEUE=8,MAX_RESPONSE=${MAX_STDIO_PROXY_RESPONSE_BYTES};
+const MAX_LINE=${MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES},MAX_QUEUE=8,MAX_RESPONSE=${MAX_STDIO_PROXY_RESPONSE_BYTES};
 let pending=Buffer.alloc(0),queue=[],running=false;
 async function pump(){
  if(running)return;running=true;

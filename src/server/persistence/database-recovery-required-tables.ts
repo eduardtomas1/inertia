@@ -79,5 +79,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [92, "agent_turns_provider_session_before_idx"],
     [92, "agent_turns_provider_session_after_idx"],
     [93, "html_renders_conversation_idx"],
+    [93, "html_renders_turn_idx"],
   ],
 };

@@ -78,6 +78,7 @@ describe("database health check for settings and subagent columns", () => {
     { version: 93, sql: "DROP TABLE html_renders" },
     { version: 93, sql: "ALTER TABLE messages DROP COLUMN html_render_json" },
     { version: 93, sql: "DROP INDEX html_renders_conversation_idx" },
+    { version: 93, sql: "DROP INDEX html_renders_turn_idx" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });

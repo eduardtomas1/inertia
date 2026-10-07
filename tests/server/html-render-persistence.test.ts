@@ -124,6 +124,10 @@ describe("html render migration", () => {
       expect(columns(upgraded, "messages")).toContain("html_render_json");
       expect(columns(upgraded, "html_renders")).toEqual(["id", "conversation_id", "turn_id", "title", "html", "created_at"]);
       expect(tables(upgraded)).toContain("html_renders_conversation_idx");
+      expect(upgraded.prepare("PRAGMA index_info(html_renders_turn_idx)").all())
+        .toEqual([expect.objectContaining({ seqno: 0, name: "turn_id" })]);
+      expect(upgraded.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*) FROM html_renders WHERE turn_id = ?").all("turn"))
+        .toEqual([expect.objectContaining({ detail: expect.stringContaining("INDEX html_renders_turn_idx (turn_id=?)") })]);
       const before = { messages: columns(upgraded, "messages"), renders: columns(upgraded, "html_renders"), tables: tables(upgraded) };
       upgraded.transaction(() => runMigrationAgain(upgraded))();
       expect({ messages: columns(upgraded, "messages"), renders: columns(upgraded, "html_renders"), tables: tables(upgraded) })

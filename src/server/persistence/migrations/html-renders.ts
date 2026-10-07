@@ -26,6 +26,7 @@ export const htmlRendersMigration: DatabaseMigrationDefinition = {
       html TEXT NOT NULL CHECK (length(CAST(html AS BLOB)) BETWEEN 1 AND 262144),
       created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS html_renders_conversation_idx ON html_renders(conversation_id);`);
+    CREATE INDEX IF NOT EXISTS html_renders_conversation_idx ON html_renders(conversation_id);
+    CREATE INDEX IF NOT EXISTS html_renders_turn_idx ON html_renders(turn_id);`);
   },
 };

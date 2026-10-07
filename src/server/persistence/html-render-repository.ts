@@ -78,10 +78,9 @@ export class HtmlRenderRepository {
     return this.database.transaction((): CreatedHtmlRender => {
       const turn = this.store.assertAgentTurnIdentity(input.conversationId, input.runId, input.turnId);
       if (isAgentTurnTerminalStatus(turn.status)) throw new HtmlRenderTurnInactiveError();
-      // Scoped by conversation as well so the lookup uses its index.
       const { count } = this.database.prepare(
-        "SELECT COUNT(*) AS count FROM html_renders WHERE conversation_id = ? AND turn_id = ?",
-      ).get(input.conversationId, input.turnId) as { count: number };
+        "SELECT COUNT(*) AS count FROM html_renders WHERE turn_id = ?",
+      ).get(input.turnId) as { count: number };
       if (count >= HTML_RENDER_MAX_PER_TURN) throw new HtmlRenderLimitReachedError();
       const renderId = randomUUID();
       this.database.prepare(`INSERT INTO html_renders (id, conversation_id, turn_id, title, html, created_at)

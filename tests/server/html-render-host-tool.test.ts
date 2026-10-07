@@ -251,7 +251,9 @@ describe("every schema-valid render input is accepted by the runtime and by the 
       await client.connect(clientTransport);
       const listed = (await client.listTools()).tools.find(({ name }) => name === HTML_RENDER_TOOL_NAME)!;
       expect(listed.inputSchema).toEqual(HTML_RENDER_TOOL_DEFINITION.inputSchema);
-      expect(listed.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+      expect(listed.annotations).toEqual({
+        readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false,
+      });
       expect(divergences(listed.inputSchema as Schema)).toEqual([KNOWN_MULTIBYTE]);
       const result = await client.callTool({ name: HTML_RENDER_TOOL_NAME, arguments: { html: PAGE, title: "Chart" } });
       expect(result.isError).toBeFalsy();
@@ -274,6 +276,9 @@ describe("every schema-valid render input is accepted by the runtime and by the 
       const listed = ListToolsResultSchema.parse(((await response.json()) as { result: unknown }).result)
         .tools.find(({ name }) => name === HTML_RENDER_TOOL_NAME)!;
       expect(listed.inputSchema).toEqual(HTML_RENDER_TOOL_DEFINITION.inputSchema);
+      expect(listed.annotations).toEqual({
+        readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false,
+      });
       expect(divergences(listed.inputSchema as Schema)).toEqual([KNOWN_MULTIBYTE]);
     } finally {
       await session.close();

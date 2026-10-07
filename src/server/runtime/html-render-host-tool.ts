@@ -91,6 +91,7 @@ export const HTML_RENDER_TOOL_DEFINITION: ProviderHostToolDefinition = {
   inputValidator: htmlRenderInputSchema,
   readOnly: true,
   destructive: false,
+  idempotent: false,
 };
 
 export interface HtmlRenderHostToolDependencies {

@@ -1,10 +1,10 @@
 {
   "feature": "visual-replies",
-  "platform": "linux-x64",
-  "node": "22.22.0",
+  "platform": "darwin-arm64, matching the earlier linux-x64 measurement byte for byte",
+  "node": "22.23.2",
   "measured": {
-    "mainWorkbenchFirstLoadJavaScript": 875074,
-    "coreJavaScript": 2293275,
+    "mainWorkbenchFirstLoadJavaScript": 875212,
+    "coreJavaScript": 2294025,
     "transcriptJavaScript": "within budget",
     "detachedChatFirstLoadJavaScript": "within budget"
   },
@@ -13,14 +13,18 @@
     "coreJavaScript": 2281573
   },
   "allowance": {
-    "mainWorkbenchFirstLoadJavaScript": 1298,
-    "coreJavaScript": 11702
+    "mainWorkbenchFirstLoadJavaScript": 1436,
+    "coreJavaScript": 12452
   },
-  "headroomBytes": 256,
+  "headroomBytes": {
+    "mainWorkbenchFirstLoadJavaScript": 118,
+    "coreJavaScript": 256
+  },
   "eagerModules": [
     "response-timeline/model.ts htmlRenders split",
     "response-timeline/virtualization.ts frame height estimate",
-    "shared/html-render-reference.ts"
+    "shared/html-render-reference.ts",
+    "response-timeline/html-render-runtime.ts"
   ],
   "deferredModules": [
     "response-timeline/html-render.tsx",

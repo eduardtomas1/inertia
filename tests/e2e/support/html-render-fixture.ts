@@ -251,12 +251,12 @@ export function seedScopedHtmlRenderConversations({
   try {
     const conversationId = activeConversationId(store);
     const projectId = store.conversation(conversationId).projectId;
-    const [scopedRenderId] = seedTurnWithPages(store, conversationId, "html-render-scoped-run", [
-      { title: SCOPED_PAGE_TITLE, html: simplePage(SCOPED_PAGE_TITLE), height: 160 },
-    ], HTML_RENDER_ANSWER);
     const other = store.createConversation(projectId, "Other chat", { activate: false });
     const [foreignRenderId] = seedTurnWithPages(store, other.id, "html-render-foreign-run", [
       { title: FOREIGN_PAGE_TITLE, html: simplePage(FOREIGN_PAGE_TITLE), height: 160 },
+    ], HTML_RENDER_ANSWER);
+    const [scopedRenderId] = seedTurnWithPages(store, conversationId, "html-render-scoped-run", [
+      { title: SCOPED_PAGE_TITLE, html: simplePage(SCOPED_PAGE_TITLE), height: 160 },
     ], HTML_RENDER_ANSWER);
     return { scopedRenderId: scopedRenderId!, foreignRenderId: foreignRenderId! };
   } finally {

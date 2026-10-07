@@ -199,20 +199,34 @@ test("continues a usage-limited Claude chat on Codex in place with its earlier m
   expect(prompt).toContain(FOLLOW_UP);
   expect(prompt).toContain(REQUEST);
   expect(prompt).toContain(ANSWER);
-  const store = openStore();
-  try {
-    const turns = store.conversationDetail(limitedChatId)!.agentTurns;
-    expect(turns).toHaveLength(2);
-    expect(turns.find(({ providerId }) => providerId === "codex")).toMatchObject({
+  await expect.poll(() => {
+    const store = openStore();
+    try {
+      const turns = store.conversationDetail(limitedChatId)!.agentTurns;
+      const handoff = turns.find(({ providerId }) => providerId === "codex");
+      return {
+        turnCount: turns.length,
+        conversationCount: store.snapshot().conversations.length,
+        handoff: handoff && {
+          status: handoff.status,
+          continuationReasonCode: handoff.continuationReasonCode,
+          providerSessionBefore: handoff.providerSessionBefore,
+          sessionRecovery: handoff.sessionRecovery,
+        },
+      };
+    } finally {
+      store.close();
+    }
+  }).toEqual({
+    turnCount: 2,
+    conversationCount,
+    handoff: {
       status: "completed",
       continuationReasonCode: "harness-changed",
       providerSessionBefore: null,
       sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 0 },
-    });
-    expect(store.snapshot().conversations).toHaveLength(conversationCount);
-  } finally {
-    store.close();
-  }
+    },
+  });
   await separator.scrollIntoViewIfNeeded();
   await capture(info, "continuation-handoff-divider");
   expect(app.rendererErrors).toEqual([]);

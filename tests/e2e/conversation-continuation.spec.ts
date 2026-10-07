@@ -147,7 +147,7 @@ test("continues a usage-limited Claude chat on Codex in place with its earlier m
   await expect(notice).toBeVisible();
   await expect(row).toHaveCount(0);
   await expect(page.getByText(REQUEST, { exact: true })).toBeVisible();
-  await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Usage limit reached after /u)).toBeVisible();
   await expect.poll(() => {
     const store = openStore();
     try {
@@ -184,13 +184,13 @@ test("continues a usage-limited Claude chat on Codex in place with its earlier m
   await expect(page.getByText(CODEX_REPLY, { exact: true })).toBeVisible();
 
   const separator = page.getByRole("separator", {
-    name: /^Context handoff: Claude · claude-sonnet-4-6 to Codex(?: · [^·]+)? · 2 earlier messages restored$/u,
+    name: "Context handoff: Claude · claude-sonnet-4-6 to Codex · 2 earlier messages restored",
   });
   await expect(separator).toBeVisible();
-  const answerBox = await page.getByText(ANSWER, { exact: true }).boundingBox();
+  const requestBox = await page.getByText(REQUEST, { exact: true }).boundingBox();
   const dividerBox = await separator.boundingBox();
   const followUpBox = await page.getByText(FOLLOW_UP, { exact: true }).boundingBox();
-  expect(answerBox!.y).toBeLessThan(dividerBox!.y);
+  expect(requestBox!.y).toBeLessThan(dividerBox!.y);
   expect(dividerBox!.y).toBeLessThan(followUpBox!.y);
   await expect(page.getByText(/Provider changed · 2 earlier messages restored/u)).toBeVisible();
   await expect(composer.getByText(/Next message starts a new/u)).toHaveCount(0);

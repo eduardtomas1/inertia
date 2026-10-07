@@ -285,7 +285,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     harnessId: "claude-agent-sdk",
     implementationRevision: 1,
     protocolRevision: "claude-agent-sdk/messages-v1",
-    bundledSdkVersion: "0.3.291",
+    bundledSdkVersion: "0.3.292",
     requiresConfiguration: ["custom-backend", "endpoint-selection"],
     support: {
       ...CORE_NATIVE,
@@ -336,8 +336,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "opencode",
     harnessId: "opencode-sdk",
     implementationRevision: 2,
-    protocolRevision: "opencode-owned-server/sdk-1.18.34",
-    bundledSdkVersion: "1.18.34",
+    protocolRevision: "opencode-owned-server/sdk-1.18.35",
+    bundledSdkVersion: "1.18.35",
     support: {
       ...CORE_NATIVE,
       "follow-up-steer": "native",

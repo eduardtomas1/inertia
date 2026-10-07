@@ -1,5 +1,6 @@
 import { constants as fsConstants, type BigIntStats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
+import { extname } from "node:path";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import {
   MAX_IMAGE_ATTACHMENT_BYTES as MAX_IMAGE_FILE_BYTES,
@@ -27,6 +28,24 @@ export function providerImageRequestLimitError(
     && images.reduce((total, { size }) => total + size, 0) > MAX_PROVIDER_REQUEST_IMAGE_BYTES
     ? `${name} accepts at most 20 MiB of images per message. Remove some images and send again.`
     : null;
+}
+
+export function imageMediaType(
+  path: string,
+): "image/jpeg" | "image/png" | "image/gif" | "image/webp" | undefined {
+  switch (extname(path).toLowerCase()) {
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    default:
+      return undefined;
+  }
 }
 
 const IMAGE_READ_CHUNK_BYTES = 64 * 1024;

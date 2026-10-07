@@ -356,6 +356,8 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
   status: SubagentTraceStatus;
   /** Whether the provider still considers this delegated work live. */
   isLive: boolean;
+  /** The provider started a new turn on work it had already settled. */
+  revived?: boolean;
   description: string | null;
   progress: string | null;
   result: string | null;

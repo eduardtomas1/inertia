@@ -85,7 +85,7 @@ import {
 } from "./cursor-acp-permissions";
 import { emitCursorMetadata } from "./cursor-acp-metadata";
 import { CursorInbandErrors } from "./cursor-acp-inband-errors";
-import { readBoundedProviderImage } from "./provider-image-read";
+import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
 import { configureCursorSession } from "./cursor-acp-session";
 export { findCursorAdvertisedConfigValue } from "./cursor-acp-session";
 
@@ -1130,15 +1130,6 @@ function failedCursorRun(
   };
 }
 
-function imageMediaType(path: string): string | undefined {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg": case ".jpeg": return "image/jpeg";
-    case ".png": return "image/png";
-    case ".gif": return "image/gif";
-    case ".webp": return "image/webp";
-    default: return undefined;
-  }
-}
 function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
 function boundedToolStateText(value: string): string { return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS); }
 function boundedToolActivityId(value: unknown): string {

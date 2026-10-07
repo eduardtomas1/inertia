@@ -20,11 +20,6 @@ function exactBoundedText(
   return value;
 }
 
-function nonEmptyObjective(value: unknown): string | null {
-  const objective = exactBoundedText(value, 4_000);
-  return objective?.trim() ? objective : null;
-}
-
 function boundedInteger(
   value: unknown,
   minimum: number,
@@ -56,13 +51,10 @@ function timestamp(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-export function parseCodexGoalUpdatedNotification(
-  params: JsonObject,
-): CodexGoalUpdatedNotification | null {
-  const threadId = exactBoundedText(params.threadId, 512);
-  const goal = objectValue(params.goal);
-  const goalThreadId = exactBoundedText(goal?.threadId, 512);
-  const objective = nonEmptyObjective(goal?.objective);
+export function parseCodexGoalSnapshot(
+  goal: JsonObject | undefined,
+): ProviderGoalSnapshot | null {
+  const objective = exactBoundedText(goal?.objective, 4_000)?.trim();
   const status = goalStatus(goal?.status);
   const tokensUsed = boundedInteger(
     goal?.tokensUsed,
@@ -82,9 +74,7 @@ export function parseCodexGoalUpdatedNotification(
     ? null
     : boundedInteger(goal?.tokenBudget, 1, 1_000_000_000);
   if (
-    !threadId
-    || goalThreadId !== threadId
-    || !objective
+    !objective
     || !status
     || tokensUsed === null
     || timeUsedSeconds === null
@@ -94,17 +84,24 @@ export function parseCodexGoalUpdatedNotification(
     || (hasTokenBudget && tokenBudget === null)
   ) return null;
   return {
-    threadId,
-    goal: {
-      objective,
-      status,
-      tokenBudget,
-      tokensUsed,
-      timeUsedSeconds,
-      createdAt,
-      updatedAt,
-    },
+    objective,
+    status,
+    tokenBudget,
+    tokensUsed,
+    timeUsedSeconds,
+    createdAt,
+    updatedAt,
   };
+}
+
+export function parseCodexGoalUpdatedNotification(
+  params: JsonObject,
+): CodexGoalUpdatedNotification | null {
+  const threadId = exactBoundedText(params.threadId, 512);
+  const goal = objectValue(params.goal);
+  const snapshot = parseCodexGoalSnapshot(goal);
+  if (!threadId || exactBoundedText(goal?.threadId, 512) !== threadId || !snapshot) return null;
+  return { threadId, goal: snapshot };
 }
 
 export function parseCodexGoalClearedNotification(

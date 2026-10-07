@@ -60,7 +60,7 @@ describe("runtime secure file broker client", () => {
     client.close();
   });
 
-  it("fails closed when the filesystem exposes no stable creation identity", async () => {
+  it("authorizes a root whose filesystem reports no creation time", async () => {
     const root = await mkdtemp(
       join(tmpdir(), "inertia-secure-client-no-identity-"),
     );
@@ -78,9 +78,9 @@ describe("runtime secure file broker client", () => {
       }) as typeof actual,
     );
 
-    await expect(client.authorizeRoot(root)).rejects.toMatchObject({
-      code: "unsafe",
-    });
+    const authority = await client.authorizeRoot(root);
+    expect(authority.birthtimeNs).toBe("0");
+    await expect(client.verifyRoot(authority)).resolves.toBeUndefined();
     client.close();
   });
 

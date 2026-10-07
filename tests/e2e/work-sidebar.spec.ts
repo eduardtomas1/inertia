@@ -183,12 +183,9 @@ test("keeps three-line Work sidebar geometry", async ({
       '.provider-brand-icon[data-provider-id="codex"] .provider-brand-icon-source',
     ).first()).toHaveCSS("filter", "invert(1)");
     await expect(sidebar.locator(
-      '.provider-brand-icon[data-provider-id="kimi"] .provider-brand-icon-source',
-    ).first()).toHaveCSS("filter", "invert(1)");
-    await expect(sidebar.locator(
       '.provider-brand-icon[data-provider-id="claude"]',
     ).first()).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    for (const providerId of ["cursor", "opencode"]) {
+    for (const providerId of ["cursor", "kimi", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"]`,
       ).first();

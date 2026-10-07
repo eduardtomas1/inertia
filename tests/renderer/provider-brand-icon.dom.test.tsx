@@ -46,9 +46,14 @@ describe("ProviderBrandIcon", () => {
     expect(kimi).toHaveAttribute("data-provider-brand", "kimi");
     expect(kimi).toHaveAttribute("data-provider-icon-kind", "official");
     expect(kimi).toHaveStyle("--provider-icon-size: 13px");
-    expect(kimi).toHaveClass("is-dark-invert");
-    expect(kimi.querySelector("img"))
-      .toHaveAttribute("src", expect.stringMatching(/kimi\.svg(?:\?|$)/u));
+    expect(kimi).toHaveClass("has-dark-source");
+    expect(kimi).not.toHaveClass("is-dark-invert");
+    const kimiSources = kimi.querySelectorAll("img");
+    expect(kimiSources).toHaveLength(2);
+    expect(kimiSources[0])
+      .toHaveAttribute("src", expect.stringMatching(/kimi-light\.svg(?:\?|$)/u));
+    expect(kimiSources[1])
+      .toHaveAttribute("src", expect.stringMatching(/kimi-dark\.svg(?:\?|$)/u));
     expect(screen.getByRole("img", { name: "OpenCode icon" }).querySelectorAll("img"))
       .toHaveLength(2);
     const antigravity = screen.getByRole("img", { name: "Antigravity icon" });

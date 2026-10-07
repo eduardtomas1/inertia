@@ -14,10 +14,10 @@ vi.mock("../../src/server/provider/kimi-auth-probe", () => ({ probeKimiAuthentic
 
 const roots: string[] = [];
 afterEach(() => { vi.resetAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture() {
+function fixture(executableName = "selected-kimi") {
   const cwd = mkdtempSync(join(tmpdir(), "inertia-auth-handoff-"));
   roots.push(cwd);
-  const executable = join(cwd, "selected-kimi");
+  const executable = join(cwd, executableName);
   writeFileSync(executable, "synthetic installed identity");
   const leases = new ProviderInstallationLeaseCoordinator();
   const invalidateEvidence = vi.fn();
@@ -89,6 +89,13 @@ it("refuses replacement of the exact installation during authentication negotiat
   await expect(prepareProviderAuthLaunch(f.options)).rejects.toThrow("installation changed");
   expect(f.leases.hasProviderAuthority("kimi")).toBe(true);
   expect(f.authority.uncertain).toBe(true);
+});
+
+it("signs in through the Cursor agent subcommand when the editor launcher is configured", async () => {
+  const f = fixture("cursor");
+  const launch = await prepareProviderAuthLaunch({ ...f.options, providerId: "cursor" });
+  expect(launch.args).toEqual(["agent", "login"]);
+  expect(probeKimiAuthentication).not.toHaveBeenCalled();
 });
 
 it.each(["codex", "claude"] as const)("preserves %s sign-in without an ACP probe", async (providerId) => {

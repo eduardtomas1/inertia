@@ -12,10 +12,9 @@ import {
 } from "./constants";
 import {
   gitInspectionSettlementValues,
-  isGitProcessTreeTerminationFailure,
   runGitInspection,
 } from "./runner";
-import { GitError } from "./types";
+import { GitError, isGitProcessTreeTerminationFailure } from "./types";
 import { isBroadWorkspaceDirectory } from "../workspace-git-discovery-policy";
 
 export function isContained(root: string, target: string): boolean {
@@ -297,7 +296,6 @@ export async function repositoryMetadataMarkerIdentity(
         !info.isDirectory()
         || info.isSymbolicLink()
         || info.ino <= 0n
-        || info.birthtimeNs <= 0n
       ) {
         throw new Error();
       }

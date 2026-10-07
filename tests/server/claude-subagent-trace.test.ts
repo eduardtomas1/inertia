@@ -253,6 +253,23 @@ describe("Claude delegated-agent projection", () => {
     });
   });
 
+  it("traces an in-process teammate like the other agent task types", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "teammate-task",
+      task_type: "in_process_teammate",
+      description: "Review the migration",
+    }));
+    expect(updates).toEqual([
+      expect.objectContaining({ providerTaskId: "teammate-task", status: "spawned" }),
+    ]);
+  });
+
   it("covers the SDK's exact local workflow and remote agent task variants", () => {
     const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
     const tracker = new ClaudeSubagentTraceTracker((event) => {

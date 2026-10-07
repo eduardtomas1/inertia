@@ -1,5 +1,3 @@
-import { Image } from "@napi-rs/canvas";
-
 import type { ImageAttachmentMimeType } from "../shared/attachments.js";
 
 // The per-side cap stays just above the 8000 px per-side image limit that
@@ -591,6 +589,7 @@ function inspectWebp(bytes: Buffer): ImageMetadata {
 
 export async function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata): Promise<boolean> {
   try {
+    const { Image } = await import("@napi-rs/canvas");
     const image = new Image();
     image.src = bytes;
     await image.decode();

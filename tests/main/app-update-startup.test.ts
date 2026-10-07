@@ -445,7 +445,7 @@ describe("app update startup coordinator", () => {
     expect(application.exit).not.toHaveBeenCalled();
   });
 
-  it("lets a Linux second instance retry only a retained normal shutdown", async () => {
+  it("lets a second instance retry only a retained normal shutdown", async () => {
     const order: string[] = [];
     const application = applicationFixture(true, order);
     const focusMainWindow = vi.fn();
@@ -474,7 +474,7 @@ describe("app update startup coordinator", () => {
     expect(retryUnconfirmedNormalShutdown).toHaveBeenCalledOnce();
   });
 
-  it("only focuses a second instance outside Linux", async () => {
+  it("retries a retained normal shutdown from a second instance on every platform", async () => {
     const application = applicationFixture(true, []);
     const focusMainWindow = vi.fn();
     const retryUnconfirmedNormalShutdown = vi.fn(() => true);
@@ -498,7 +498,7 @@ describe("app update startup coordinator", () => {
     expect(secondInstance).toBeTypeOf("function");
     secondInstance?.();
     expect(focusMainWindow).toHaveBeenCalledOnce();
-    expect(retryUnconfirmedNormalShutdown).not.toHaveBeenCalled();
+    expect(retryUnconfirmedNormalShutdown).toHaveBeenCalledOnce();
   });
 
   it("lets only the exact installed Windows candidate commit ownership transfer", async () => {

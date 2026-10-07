@@ -3,49 +3,31 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  reconcileStoppedRuntimeQuarantine,
   runtimeStopAttemptState,
   trackRuntimeStopAttempt,
 } from "../../src/main/runtime-supervisor-stop-recovery";
 
-describe("Linux stopped-runtime recovery admission", () => {
-  it("makes only an unsuccessful Linux stop retryable", async () => {
-    const linux = runtimeStopAttemptState(true);
-    await expect(trackRuntimeStopAttempt(linux, Promise.resolve(false)))
-      .resolves.toBe(false);
-    expect(linux).toMatchObject({ promise: null, retryEligible: true });
+describe("stopped-runtime recovery admission", () => {
+  it("makes only an unsuccessful stop retryable", async () => {
+    const state = runtimeStopAttemptState();
+    const confirmed = trackRuntimeStopAttempt(state, Promise.resolve(true));
+    await expect(confirmed).resolves.toBe(true);
+    expect(state.promise).toBe(confirmed);
+    expect(state.retryEligible).toBe(false);
 
-    const darwin = runtimeStopAttemptState(false);
-    const stopped = trackRuntimeStopAttempt(darwin, Promise.resolve(false));
-    await expect(stopped).resolves.toBe(false);
-    expect(darwin.promise).toBe(stopped);
-    expect(darwin.retryEligible).toBe(false);
+    const failed = runtimeStopAttemptState();
+    await expect(trackRuntimeStopAttempt(failed, Promise.resolve(false)))
+      .resolves.toBe(false);
+    expect(failed).toMatchObject({ promise: null, retryEligible: true });
   });
 
-  it("releases a rejected Linux stop attempt without hiding its error", async () => {
-    const state = runtimeStopAttemptState(true);
+  it("releases a rejected stop attempt without hiding its error", async () => {
+    const state = runtimeStopAttemptState();
     const tracked = trackRuntimeStopAttempt(
       state,
       Promise.reject(new Error("shutdown rejected")),
     );
     await expect(tracked).rejects.toThrow("shutdown rejected");
     expect(state).toMatchObject({ promise: null, retryEligible: true });
-  });
-
-  it("defensively refuses quarantine reconciliation outside Linux", async () => {
-    const result = reconcileStoppedRuntimeQuarantine({
-      enabled: false,
-      records: new Set(),
-      drain: async () => true,
-      recoverOwnedProcesses: () => true,
-      systemBootId: "test:00000000-0000-4000-8000-000000000001",
-      recoveryWaitMs: 1,
-      cleanupReceipts: {} as never,
-      runtimeGenerationLeases: {} as never,
-      runtimeOwnedProcesses: {} as never,
-      onPersistenceFailure: () => undefined,
-      clear: () => undefined,
-    });
-    await expect(result).resolves.toBe(false);
   });
 });

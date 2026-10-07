@@ -76,13 +76,7 @@ function missingPath(error: unknown): boolean {
 }
 
 function stableBirthtimeNs(birthtimeNs: bigint): string {
-  if (birthtimeNs <= 0n) {
-    throw new SecureFileError(
-      "unsafe",
-      "The secure file root does not expose a stable creation identity.",
-    );
-  }
-  return birthtimeNs.toString(10);
+  return birthtimeNs > 0n ? birthtimeNs.toString(10) : "0";
 }
 
 export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {

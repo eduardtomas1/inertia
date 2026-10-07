@@ -244,13 +244,14 @@ with, sponsorship by, or endorsement by Google.
    END OF TERMS AND CONDITIONS
 
 Kimi Code mark
-Source: agentclientprotocol/registry at commit
-bb1b44abe4f035ff75f4adfba18537b5470bd000, file kimi/icon.svg, included with
-the Moonshot-contributed Kimi agent entry (PR #28).
-Source URL: https://github.com/agentclientprotocol/registry/pull/28
-Registry license: Apache License 2.0 (text reproduced above).
-The Kimi name and mark belong to Moonshot AI. They are used only to identify
-the Kimi provider in Inertia and do not imply any affiliation with,
+Source: MoonshotAI/Branding-Guide at commit
+67b20b1315f96d05f3192b24050635745abd3d90, files
+scenarios/04-k-only/k-only-light.svg and scenarios/04-k-only/k-only-dark.svg.
+Official brand guide: https://github.com/MoonshotAI/Branding-Guide
+Copyright Moonshot AI. The brand guide does not state an open-source license;
+the unmodified official marks are used under Moonshot's published brand
+guidance. The Kimi name and mark belong to Moonshot AI. They are used only to
+identify the Kimi provider in Inertia and do not imply any affiliation with,
 sponsorship by, or endorsement by Moonshot AI.
 
 OpenCode mark

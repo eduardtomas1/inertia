@@ -77,6 +77,12 @@ describe("provider environment discovery", { concurrent: false }, () => {
     await expect(executableCandidates("npx.cmd", environment, root, "win32")).resolves.toEqual([
       realpathSync(join(root, "npx.cmd")),
     ]);
+    await expect(executableCandidates(join(root, "npx"), environment, root, "win32")).resolves.toEqual([
+      realpathSync(join(root, "npx.exe")), realpathSync(join(root, "npx.cmd")),
+    ]);
+    await expect(executableCandidates(join(root, "npx.cmd"), environment, root, "win32")).resolves.toEqual([
+      realpathSync(join(root, "npx.cmd")),
+    ]);
     if (process.platform !== "win32") {
       await expect(executableCandidates("npx", environment, root, "linux")).resolves.toEqual([
         realpathSync(join(root, "npx")),
@@ -116,7 +122,7 @@ describe("provider environment discovery", { concurrent: false }, () => {
 
   it("searches known per-user CLI directories when the shell PATH is minimal", async () => {
     const home = temporaryRoot();
-    const localBin = process.platform === "win32" ? join(home, "npm") : join(home, ".local", "bin");
+    const localBin = join(home, ".local", "bin");
     mkdirSync(localBin, { recursive: true });
     const command = executable(localBin, "known-path-agent");
 
@@ -125,6 +131,8 @@ describe("provider environment discovery", { concurrent: false }, () => {
     const candidates = await executableCandidates("known-path-agent", environment, home);
 
     expect(environment.pathEntries).toContain(localBin);
+    expect(environment.pathEntries).toContain(join(home, ".opencode", "bin"));
+    if (process.platform === "win32") expect(environment.pathEntries).toContain(join(home, "npm"));
     expect(candidates).toEqual([realpathSync.native(command)]);
   });
 

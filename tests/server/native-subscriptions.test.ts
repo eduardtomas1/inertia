@@ -110,10 +110,12 @@ describe("native subscription adapters", () => {
   it("resolves the selected Kimi model from TOML and gives its OAuth credential precedence", async () => {
     const config = `default_model = "kimi-code/k2"\n[models."kimi-code/k2"]\nmodel = "k2"\nprovider = "managed:kimi-code"\n[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\napi_key = "stored-key"\n[providers."managed:kimi-code".oauth]\nstorage = "file"\nkey = "oauth/kimi-code"\n`;
     const request = fetcher({ usage: { limit: "100", remaining: "0", resetAt: reset } });
-    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_SHARE_DIR: "/kimi", KIMI_API_KEY: "env-key" }), fetch: request,
-      readFile: async (path) => path.endsWith("config.toml") ? config : JSON.stringify({ access_token: "oauth-key", expires_at: Date.now() / 1000 + 3600 }) });
+    const paths: string[] = [];
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_CODE_HOME: "/kimi-code", KIMI_API_KEY: "env-key" }), fetch: request,
+      readFile: async (path) => { paths.push(path); return path.endsWith("config.toml") ? config : JSON.stringify({ access_token: "oauth-key", expires_at: Date.now() / 1000 + 3600 }); } });
     const result = await read(reader, "kimi", "k2");
     expect(result.status).toBe("ready"); expect(result.windows[0]).toMatchObject({ remainingPercent: 0, resetsAt: reset });
+    expect(paths.slice(0, 2)).toEqual([join("/kimi-code", "config.toml"), join("/kimi-code", "credentials", "kimi-code.json")]);
     expect(request.mock.calls[0]).toMatchObject(["https://api.kimi.com/coding/v1/usages", { headers: { Authorization: "Bearer oauth-key" } }]);
     expect((await read(reader, "kimi", "kimi-code/k2,thinking")).status).toBe("ready");
     expect((await read(reader, "kimi", "another-model")).status).toBe("unsupported");
@@ -216,7 +218,7 @@ describe("stable resume identity", () => {
   });
   it("keeps API keys as stable identities", async () => {
     const config = `default_model = "k"\n[models.k]\nmodel = "k"\nprovider = "managed:kimi-code"\n[providers."managed:kimi-code"]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\napi_key = "kimi-api-key"\n`;
-    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_SHARE_DIR: "/kimi" }), accountKey: async () => "per-install-key",
+    const reader = new NativeSubscriptionReader({ environment: async () => ({ KIMI_CODE_HOME: "/kimi-code" }), accountKey: async () => "per-install-key",
       fetch: fetcher({ usage: { limit: 100, remaining: 0, resetAt: reset } }), readFile: async (path) => path.endsWith("config.toml") ? config : null });
     const first = await read(reader, "kimi", "k");
     expect(resumeAccountIdentity(first)).toMatch(/^[0-9a-f]{64}$/u);

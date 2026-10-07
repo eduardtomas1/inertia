@@ -306,6 +306,7 @@ export class TurnProviderEventProjector {
       providerStatus: event.providerStatus ?? null,
       status: event.status,
       isLive: event.isLive,
+      revived: event.revived === true,
       description: event.description,
       progress: event.progress,
       result: event.result,

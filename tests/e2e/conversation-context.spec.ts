@@ -120,13 +120,13 @@ test.beforeAll(async () => {
         terminalReason: "provider-completed",
         updatedAt: answer.createdAt,
       });
-      targetWorkspace = snapshot.projects.find(({ id }) => id === snapshot.activeProjectId)!.normalizedPath;
+      targetWorkspace = snapshot.projects.find(({ id }) => id === snapshot.activeProjectId)!.path;
       const otherPath = join(testDirectory, "reference-source");
       mkdirSync(otherPath, { recursive: true });
       // Seed the same canonical identity the runtime publishes on startup,
       // including Windows case folding and path separators.
       const otherProject = store.createProject("Another workspace", otherPath, await inspectProjectIdentity(otherPath));
-      sourceWorkspace = otherProject.normalizedPath;
+      sourceWorkspace = otherProject.path;
       const otherSource = store.createConversation(otherProject.id, "External research", { activate: false });
       store.createMessage(otherSource.id, "Share this note only after confirming the workspace boundary.", "assistant");
       const rollout = store.createConversation(snapshot.activeProjectId, "Importer rollout", { activate: false });

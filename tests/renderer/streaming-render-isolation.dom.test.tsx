@@ -289,56 +289,61 @@ async function renderReadyTranscript(ui: React.ReactNode) {
   return view;
 }
 
+const STREAMING_TIMERS = [
+  "setInterval",
+  "clearInterval",
+  "setTimeout",
+  "clearTimeout",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+] as const;
+
+async function mountQuietApp() {
+  const { default: App } = await import("../../src/renderer/src/App");
+  const counter = { commits: 0 };
+  const rootFlush = { current: () => undefined as void };
+  function RootFlusher({ children }: { children: React.ReactNode }): React.JSX.Element {
+    const [, setTick] = useState(0);
+    useLayoutEffect(() => {
+      rootFlush.current = () => setTick((tick) => tick + 1);
+    }, []);
+    return <>{children}</>;
+  }
+  function CountedApp(): React.JSX.Element {
+    counting.renders.App = (counting.renders.App ?? 0) + 1;
+    return App();
+  }
+  const view = render(
+    <Profiler id="app" onRender={() => { counter.commits += 1; }}>
+      <RootFlusher><CountedApp /></RootFlusher>
+    </Profiler>,
+  );
+  let quietCycles = 0;
+  for (let cycle = 0; cycle < 200 && quietCycles < 3; cycle += 1) {
+    const commitsBefore = counter.commits;
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const mounted = COUNTED_SHELL.every((name) => (counting.renders[name] ?? 0) > 0)
+      && view.container.querySelector(`[data-turn-id="${turn.id}"]`) !== null;
+    quietCycles = mounted && counter.commits === commitsBefore ? quietCycles + 1 : 0;
+  }
+  expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
+  expect(quietCycles).toBe(3);
+
+  act(() => rootFlush.current());
+  for (const name of Object.keys(counting.renders)) counting.renders[name] = 0;
+  counter.commits = 0;
+  return { view, counter };
+}
+
 describe("streamed agent text", () => {
   it("re-renders only the transcript for each token", async () => {
     // LiveElapsed ticks independently of token delivery. Keep its clock fixed
     // while counting token commits, including on slower Windows workers.
-    vi.useFakeTimers({
-      toFake: [
-        "setInterval",
-        "clearInterval",
-        "setTimeout",
-        "clearTimeout",
-        "requestAnimationFrame",
-        "cancelAnimationFrame",
-      ],
-    });
-    const { default: App } = await import("../../src/renderer/src/App");
-    let commits = 0;
-    const rootFlush = { current: () => undefined as void };
-    function RootFlusher({ children }: { children: React.ReactNode }): React.JSX.Element {
-      const [, setTick] = useState(0);
-      useLayoutEffect(() => {
-        rootFlush.current = () => setTick((tick) => tick + 1);
-      }, []);
-      return <>{children}</>;
-    }
-    function CountedApp(): React.JSX.Element {
-      counting.renders.App = (counting.renders.App ?? 0) + 1;
-      return App();
-    }
-    const view = render(
-      <Profiler id="app" onRender={() => { commits += 1; }}>
-        <RootFlusher><CountedApp /></RootFlusher>
-      </Profiler>,
-    );
-    let quietCycles = 0;
-    for (let cycle = 0; cycle < 200 && quietCycles < 3; cycle += 1) {
-      const commitsBefore = commits;
-      await act(async () => {
-        await vi.dynamicImportSettled();
-        await vi.advanceTimersByTimeAsync(50);
-      });
-      const mounted = COUNTED_SHELL.every((name) => (counting.renders[name] ?? 0) > 0)
-        && view.container.querySelector(`[data-turn-id="${turn.id}"]`) !== null;
-      quietCycles = mounted && commits === commitsBefore ? quietCycles + 1 : 0;
-    }
-    expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
-    expect(quietCycles).toBe(3);
-
-    act(() => rootFlush.current());
-    for (const name of Object.keys(counting.renders)) counting.renders[name] = 0;
-    commits = 0;
+    vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
+    const { view, counter } = await mountQuietApp();
     for (let index = 0; index < TOKENS; index += 1) {
       act(() => {
         emit({
@@ -350,7 +355,7 @@ describe("streamed agent text", () => {
         });
       });
     }
-    expect({ commits, ...counting.renders }).toEqual({
+    expect({ commits: counter.commits, ...counting.renders }).toEqual({
       commits: TOKENS,
       App: 0,
       AppLayout: 0,
@@ -365,6 +370,34 @@ describe("streamed agent text", () => {
     vi.useRealTimers();
     await waitFor(() => expect(view.container.textContent)
       .toContain(`token${TOKENS - 1}`));
+  });
+
+  it("keeps the composer and sidebar still while tool activity streams", async () => {
+    vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
+    const { counter } = await mountQuietApp();
+    const EVENTS = 20;
+    for (let index = 0; index < EVENTS; index += 1) {
+      act(() => {
+        emit({
+          type: "agent.activity",
+          activity: {
+            id: `activity-${index}`,
+            conversationId,
+            runId: turn.runId,
+            turnId: turn.id,
+            kind: "tool",
+            title: `Read file ${index}`,
+            detail: null,
+            status: "running",
+            createdAt: now,
+          },
+        });
+      });
+    }
+    expect(counter.commits).toBeGreaterThan(0);
+    expect({ Sidebar: counting.renders.Sidebar ?? 0, Composer: counting.renders.Composer ?? 0 })
+      .toEqual({ Sidebar: 0, Composer: 0 });
+    vi.useRealTimers();
   });
 
   it("opens the prefetched command palette without re-rendering the background transcript", async () => {

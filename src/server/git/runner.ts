@@ -21,7 +21,7 @@ import { withGitScanProcessSlot } from "./scan-coordinator";
 import {
   GIT_PROCESS_TREE_TERMINATION_FAILURE,
   GitError,
-  isGitProcessTreeTerminationFailure as isProcessTreeTerminationFailure,
+  isGitProcessTreeTerminationFailure,
 } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
@@ -91,12 +91,6 @@ export interface PreparedGitRefUpdateContext {
  * a failed process-tree termination over an ordinary sibling cancellation or
  * command failure when either inspection rejects.
  */
-export function isGitProcessTreeTerminationFailure(
-  error: unknown,
-): error is GitError {
-  return isProcessTreeTerminationFailure(error);
-}
-
 export function gitInspectionSettlementValues<First, Second>(
   results: readonly [
     PromiseSettledResult<First>,

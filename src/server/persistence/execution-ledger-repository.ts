@@ -240,9 +240,13 @@ export class ExecutionLedgerRepository {
     if (existing && input.sequence <= existing.sequence) {
       return { trace: subagentTraceFromRow(existing), changed: false };
     }
+    const revived = input.revived === true
+      && input.isLive
+      && !isTerminalSubagentStatus(input.status);
     if (
       existing
       && existing.is_live === 0
+      && !revived
       && (
         input.isLive
         || (
@@ -354,8 +358,8 @@ export class ExecutionLedgerRepository {
             status = @status,
             is_live = @isLive,
             description = COALESCE(@description, description),
-            progress = COALESCE(@progress, progress),
-            result = COALESCE(@result, result),
+            progress = CASE WHEN @revived = 1 THEN @progress ELSE COALESCE(@progress, progress) END,
+            result = CASE WHEN @revived = 1 THEN @result ELSE COALESCE(@result, result) END,
             model = COALESCE(@model, model),
             activity = CASE
               WHEN @isLive = 1 AND @status = status THEN COALESCE(@activity, activity)
@@ -377,6 +381,7 @@ export class ExecutionLedgerRepository {
         )),
         status: input.status,
         isLive: input.isLive ? 1 : 0,
+        revived: revived ? 1 : 0,
         sequence: input.sequence,
         updatedAt: now < existing.updated_at ? existing.updated_at : now,
       });

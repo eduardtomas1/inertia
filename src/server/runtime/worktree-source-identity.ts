@@ -2,6 +2,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 
 import { GitError } from "../git";
+import { birthtimesMatch } from "../worktree-filesystem-identity";
 import {
   repositoryMetadataMarkerIdentity,
   repositoryRoot,
@@ -52,10 +53,10 @@ export function worktreeSourceIdentitiesEqual(
 ): boolean {
   return left.workspaceDevice === right.workspaceDevice
     && left.workspaceInode === right.workspaceInode
-    && left.workspaceBirthtimeNs === right.workspaceBirthtimeNs
+    && birthtimesMatch(left.workspaceBirthtimeNs, right.workspaceBirthtimeNs)
     && left.rootDevice === right.rootDevice
     && left.rootInode === right.rootInode
-    && left.rootBirthtimeNs === right.rootBirthtimeNs
+    && birthtimesMatch(left.rootBirthtimeNs, right.rootBirthtimeNs)
     && metadataMarkerIdentitiesEqual(
       left.metadataMarkerIdentity,
       right.metadataMarkerIdentity,
@@ -153,11 +154,9 @@ async function inspectWorktreeSource(
       !workspaceInfo.isDirectory()
       || workspaceInfo.isSymbolicLink()
       || workspaceInfo.ino <= 0n
-      || workspaceInfo.birthtimeNs <= 0n
       || !rootInfo.isDirectory()
       || rootInfo.isSymbolicLink()
       || rootInfo.ino <= 0n
-      || rootInfo.birthtimeNs <= 0n
     ) {
       throw changedSourceError();
     }

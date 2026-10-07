@@ -296,7 +296,6 @@ export async function repositoryMetadataMarkerIdentity(
         !info.isDirectory()
         || info.isSymbolicLink()
         || info.ino <= 0n
-        || info.birthtimeNs <= 0n
       ) {
         throw new Error();
       }

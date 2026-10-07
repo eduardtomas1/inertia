@@ -10,6 +10,7 @@ import {
   type CodexSubagentUpdate,
 } from "../../src/server/codex/app-server-subagents";
 import type { JsonObject } from "../../src/server/codex/protocol";
+import { shouldAcceptCodexSubagentProjection } from "../../src/server/codex/app-server-subagent-projection";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
 import {
   portableFixtureRoot,
@@ -722,6 +723,48 @@ describe("Codex delegated-agent lifecycle", () => {
       ),
     }, "started", ROOT_THREAD_ID);
     expect(rejectMalformed).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Codex delegated-agent revival", () => {
+  it("revives a settled child when sendInput starts a new turn on it", () => {
+    const accepted: CodexSubagentUpdate[] = [];
+    const projections = new Map<string, CodexSubagentProjection>();
+    let sequence = 0;
+    const lifecycle = new CodexSubagentLifecycle({
+      rootThreadId: () => ROOT_THREAD_ID,
+      rootTurnId: () => ROOT_TURN_ID,
+      cancelRequested: () => false,
+      emitSubagent: (update, authority, isLive = true) => {
+        const id = update.providerAgentId!;
+        if (!shouldAcceptCodexSubagentProjection(projections.get(id), update, authority, isLive)) return;
+        projections.set(id, { status: update.status, authority, isLive });
+        sequence += 1;
+        accepted.push({ sequence, ...update, isLive });
+      },
+      projection: (id) => projections.get(id),
+      rejectMalformed: vi.fn(),
+    });
+    lifecycle.handleItem({
+      type: "collabAgentToolCall", id: "spawn", tool: "spawnAgent", senderThreadId: ROOT_THREAD_ID,
+      receiverThreadIds: ["child"], agentsStates: { child: { status: "running" } },
+    }, "completed", ROOT_THREAD_ID);
+    childTurn(lifecycle, "turn/started", "child", "t1", "inProgress");
+    childTurn(lifecycle, "turn/completed", "child", "t1", "completed");
+    expect(projections.get("child")).toMatchObject({ status: "completed", isLive: false });
+
+    lifecycle.handleItem({
+      type: "collabAgentToolCall", id: "send", tool: "sendInput", senderThreadId: ROOT_THREAD_ID,
+      receiverThreadIds: ["child"], agentsStates: { child: { status: "running" } },
+    }, "completed", ROOT_THREAD_ID);
+    childTurn(lifecycle, "turn/started", "child", "t2", "inProgress");
+
+    expect(lifecycle.interruptibleTurns()).toEqual([{ threadId: "child", turnId: "t2" }]);
+    expect(projections.get("child")).toMatchObject({ status: "running", isLive: true, authority: "turn" });
+    expect(accepted.at(-1)).toMatchObject({ status: "running", isLive: true, revived: true });
+
+    childTurn(lifecycle, "turn/completed", "child", "t2", "completed");
+    expect(projections.get("child")).toMatchObject({ status: "completed", isLive: false });
   });
 });
 

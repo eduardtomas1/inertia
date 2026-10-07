@@ -35,11 +35,12 @@ export function isLiveCodexSubagentStatus(
 
 export function shouldAcceptCodexSubagentProjection(
   current: CodexSubagentProjection | undefined,
-  update: Pick<CodexSubagentUpdate, "status">,
+  update: Pick<CodexSubagentUpdate, "status" | "revived">,
   authority: CodexSubagentAuthority,
   isLive: boolean,
 ): boolean {
   if (!current) return true;
+  if (update.revived === true && isLive && authority === "turn") return true;
   const weaker =
     SUBAGENT_AUTHORITY[authority] < SUBAGENT_AUTHORITY[current.authority];
   const stronger =

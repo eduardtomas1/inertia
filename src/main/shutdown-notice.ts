@@ -1,8 +1,7 @@
 import type { App, Dialog, MessageBoxOptions } from "electron";
 import type { LinuxSingletonContention } from "./linux-singleton-launch.js";
 
-interface LinuxShutdownNoticeOptions {
-  platform: NodeJS.Platform;
+interface ShutdownNoticeOptions {
   automated: boolean;
   version: string;
   showMessageBox(options: MessageBoxOptions): Promise<{ response: number }>;
@@ -12,16 +11,14 @@ interface LinuxShutdownNoticeOptions {
   reportError(error: unknown): void;
 }
 
-/** Keeps an unconfirmed Linux quit visible without bypassing cleanup authority. */
-export class LinuxShutdownNotice {
+/** Keeps an unconfirmed quit visible without bypassing cleanup authority. */
+export class ShutdownNotice {
   private pending: Promise<void> | null = null;
 
-  constructor(private readonly options: LinuxShutdownNoticeOptions) {}
+  constructor(private readonly options: ShutdownNoticeOptions) {}
 
   show(): Promise<void> {
-    if (this.options.platform !== "linux" || this.options.automated) {
-      return Promise.resolve();
-    }
+    if (this.options.automated) return Promise.resolve();
     if (this.pending) return this.pending;
     const pending = Promise.resolve().then(async () => {
       const canFocusWindow = this.options.canFocusWindow();
@@ -53,14 +50,13 @@ export class LinuxShutdownNotice {
   }
 }
 
-export function createLinuxLifecycleNotices(
+export function createLifecycleNotices(
   application: Pick<App, "getVersion" | "whenReady" | "quit">,
   nativeDialog: Pick<Dialog, "showMessageBox">,
   focusWindow: () => void,
   canFocusWindow: () => boolean,
 ) {
-  const notice = new LinuxShutdownNotice({
-    platform: process.platform,
+  const notice = new ShutdownNotice({
     automated: process.env.NODE_ENV === "test",
     version: application.getVersion(),
     showMessageBox: async (options) => {

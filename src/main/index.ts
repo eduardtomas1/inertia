@@ -40,7 +40,7 @@ import { inertiaWindowInForeground } from "./desktop-notification-gate.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
-import { cleanupWithSnapshots, SnapshotCleanupUnconfirmedError } from "./snapshot-shutdown.js";
+import { cleanupWithSnapshots } from "./snapshot-shutdown.js";
 import { attachmentImportRunner } from "./attachment-import-desktop-runner.js";
 import {
   registerRendererAttachmentImportIpc,
@@ -135,7 +135,7 @@ import {
 import { MAIN_WINDOW_DEFAULT_STATE, mainWindowStateSnapshot, restoreMainWindowState,
   type MainWindowState } from "./main-window-state.js";
 import { handleStartupFailure } from "./startup-failure.js";
-import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
+import { createLifecycleNotices } from "./shutdown-notice.js";
 import { testCleanupOwners, createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 import { installedUpdateTestFixture } from "./test-installed-update.js";
 import { disableShutdownBlockingProfileFeatures } from "./chromium-profile-features.js";
@@ -172,7 +172,7 @@ let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
 let privilegedCleanupOwners: RetryablePrivilegedCleanup | null = null;
-const linuxLifecycleNotices = createLinuxLifecycleNotices(app, dialog, focusMainWindow,
+const lifecycleNotices = createLifecycleNotices(app, dialog, focusMainWindow,
   () => mainWindow !== null && !mainWindow.isDestroyed());
 let packageSmokeFilePath: string | null = null;
 let packageSmokeOwnerToken: string | null = null;
@@ -863,7 +863,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
     systemSuspendDelivery?.close(); systemSuspendDelivery = null; if (mainWindow) saveWindowState(mainWindow);
     const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectShutdownOwner = privateConnectHostToStop;
     const retainedAttachments = conversationAttachments; privilegedCleanupOwners = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: process.platform === "linux", runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) },
+      retryUnconfirmed: true, runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) },
       privateConnect: privateConnectHostToStop && { shutdown: () => testCleanupOwners.observe("privateConnect", () => privateConnectHostToStop.shutdown()) },
       onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
       onRuntimeError: (error) => {
@@ -884,9 +884,8 @@ function runPrivilegedCleanup(): Promise<boolean> {
     await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
     previewBroker.close(); runtimeDiagnostics?.record("app.stop"); return await owners.cleanup();
   } finally { await disposeWindowsRuntimeJobExecutableLock(); } });
-  const tracked = cleanup.then((confirmed) => { if (!confirmed && process.platform === "linux"
-      && privilegedCleanup === tracked) privilegedCleanup = null; return confirmed;
-  }, (error: unknown) => { if ((process.platform === "linux" || error instanceof SnapshotCleanupUnconfirmedError) && privilegedCleanup === tracked) privilegedCleanup = null;
+  const tracked = cleanup.then((confirmed) => { if (!confirmed && privilegedCleanup === tracked) privilegedCleanup = null; return confirmed;
+  }, (error: unknown) => { if (privilegedCleanup === tracked) privilegedCleanup = null;
     throw error; });
   privilegedCleanup = tracked; return tracked;
 }
@@ -936,7 +935,7 @@ async function bootstrap(): Promise<void> {
       runtimeSupervisor?.updateHandoffIdentity(), runtimeDataDirectory,
       app.getPath("userData")),
     finishNormalShutdown: finishQuitAfterCleanup,
-    onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
+    onUnconfirmedShutdown: lifecycleNotices.reportUnconfirmedShutdown,
     reportError: (error) => reportMainFailure("app-update-preparation-failed", "Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
@@ -1032,7 +1031,7 @@ async function bootstrap(): Promise<void> {
     },
     credentialBroker: runtimeCredentialBroker(() => credentialVault!),
     secureFileBroker: new SecureFileBroker({
-      retryUnconfirmedShutdown: process.platform === "linux",
+      retryUnconfirmedShutdown: true,
       spawn: (parent) => utilityProcess.fork(
         fileURLToPath(new URL("./secure-file-worker.js", import.meta.url)),
         [],
@@ -1191,8 +1190,8 @@ void startApplicationWithUpdateHandoff({
   recordBeforeQuit: () => recordPackageSmokeStage("before-quit"),
   cleanupBeforeQuit: runPrivilegedCleanup,
   finishNormalShutdown: finishQuitAfterCleanup,
-  onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
-  reportSingletonContention: linuxLifecycleNotices.reportSingletonContention,
+  onUnconfirmedShutdown: lifecycleNotices.reportUnconfirmedShutdown,
+  reportSingletonContention: lifecycleNotices.reportSingletonContention,
   reportCleanupFailure: (error) => reportMainFailure("privileged-shutdown-failed", "Failed to finish privileged shutdown", error),
   validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
   bootstrap,

@@ -1,6 +1,5 @@
-import type { ModelSelection, ProviderId } from "@shared/contracts";
+import type { ProviderId } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
-import { providerNativeBackendProfile } from "../../../shared/model-routing";
 import type { ProviderHandoffItem } from "./response-timeline/model";
 import { MODEL_SOURCE_PROVIDER_LABELS } from "./modelSourceRail";
 
@@ -12,15 +11,6 @@ export interface ProviderHandoffText {
   detail: string | null;
   /** The complete accessible description of the divider. */
   label: string;
-}
-
-export function providerBackendName(
-  providerId: ProviderId,
-  selection: Pick<ModelSelection, "backendProfileId" | "backendProfileDisplayName">,
-): string | null {
-  return selection.backendProfileId === providerNativeBackendProfile(providerId).id
-    ? null
-    : selection.backendProfileDisplayName;
 }
 
 export function providerRouteLabel(

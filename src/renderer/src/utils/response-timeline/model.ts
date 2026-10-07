@@ -14,7 +14,7 @@ import type {
   TurnSessionRecovery,
 } from "@shared/contracts";
 import { activityNeedsAttention } from "./activity-attention";
-import { providerBackendName } from "../providerHandoff";
+import { providerBackendName } from "../providerBackendName";
 
 /** Current workspace status is intentionally not accepted by the timeline. */
 export type TurnGitArtifactSummary = TurnGitArtifact;

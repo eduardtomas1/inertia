@@ -14,7 +14,8 @@ import {
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
-import { providerBackendName, providerRouteLabel } from "../../utils/providerHandoff";
+import { providerBackendName } from "../../utils/providerBackendName";
+import { providerRouteLabel } from "../../utils/providerHandoff";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,

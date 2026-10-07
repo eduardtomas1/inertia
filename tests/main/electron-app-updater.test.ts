@@ -83,6 +83,9 @@ import {
   loadElectronAppUpdater,
   type WindowsUpdateSupervisorLauncher,
 } from "../../src/main/electron-app-updater";
+import { AppUpdateService } from "../../src/main/app-update";
+import { finalizeAppImageUpdate } from "../../src/main/appimage-installed-identity";
+import { startApplicationWithUpdateHandoff } from "../../src/main/app-update-startup";
 import {
   launchWindowsUpdateSupervisor,
   WindowsUpdateSupervisorCleanupError,
@@ -219,7 +222,7 @@ async function preparedWindowsAdapterFixture(options: {
   };
 }
 
-async function preparedLinuxAdapterFixture() {
+async function preparedLinuxAdapterFixture(activeName = "Inertia-1.2.3.AppImage") {
   const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-linux-"));
   roots.push(root);
   const cache = join(root, "cache");
@@ -230,7 +233,7 @@ async function preparedLinuxAdapterFixture() {
     mkdir(data, { mode: 0o700 }),
     mkdir(profile, { mode: 0o700 }),
   ]);
-  const active = join(root, "Inertia-1.2.3.AppImage");
+  const active = join(root, activeName);
   const downloaded = join(cache, "Inertia-1.3.0.AppImage");
   await Promise.all([
     writeFile(active, "old", { mode: 0o755 }),
@@ -286,12 +289,37 @@ async function preparedLinuxAdapterFixture() {
   })).resolves.toBe(true);
   const journal = new AppUpdateHandoffJournal(data);
   return {
+    root,
+    active,
+    data,
+    profile,
     abort,
     adapter,
     candidatePath,
     journal,
     prepared: journal.current()!,
   };
+}
+
+async function admittedLinuxAdapterFixture(phase: "candidate-admitted" | "completed") {
+  const fixture = await preparedLinuxAdapterFixture("Inertia.AppImage");
+  await expect(fixture.adapter.quitAndInstall()).resolves.toBe("handoff-confirmed");
+  const admitted = fixture.journal.transition(
+    appUpdateHandoffOwner(fixture.journal.current()!),
+    "candidate-admitted",
+  )!;
+  const snapshot = phase === "completed"
+    ? fixture.journal.transition(appUpdateHandoffOwner(admitted), "completed")!
+    : admitted;
+  const paths = [
+    fixture.active,
+    join(fixture.root, ".Inertia.AppImage.inertia-update-backup"),
+    join(fixture.root, ".Inertia.AppImage.inertia-update.json"),
+    join(fixture.data, ".app-update-handoff.json"),
+  ];
+  const readTransaction = async () => await Promise.all(paths.map(async (path) =>
+    await readFile(path)));
+  return { ...fixture, snapshot, readTransaction };
 }
 
 beforeEach(() => {
@@ -316,6 +344,96 @@ afterEach(async () => {
 });
 
 describe("electron updater adapter", () => {
+  it.skipIf(process.platform === "win32").each([
+    "candidate-admitted", "completed",
+  ] as const)(
+    "keeps a background check read-only while Linux handoff is %s",
+    async (phase) => {
+      const fixture = await admittedLinuxAdapterFixture(phase);
+      const before = await fixture.readTransaction();
+      const environment = { APPIMAGE: fixture.active };
+      updaterFixture.updater.checkForUpdates.mockResolvedValueOnce({
+        isUpdateAvailable: false, updateInfo: { version: "1.3.0" },
+      });
+      const service = new AppUpdateService({
+        currentVersion: "1.3.0",
+        capability: { delivery: "in-app" },
+        fetch: vi.fn(),
+        loadUpdater: () => loadElectronAppUpdater("stable", {
+          platform: "linux", environment,
+        }),
+      });
+
+      await expect(service.check(false)).resolves.toMatchObject({ state: "current" });
+
+      await expect(fixture.readTransaction()).resolves.toEqual(before);
+      expect(fixture.journal.current()).toEqual(fixture.snapshot);
+      expect(environment.APPIMAGE).toBe(fixture.active);
+      const completed = phase === "completed" ? fixture.snapshot
+        : fixture.journal.transition(
+            appUpdateHandoffOwner(fixture.snapshot), "completed",
+          )!;
+      await finalizeAppImageUpdate({
+        channel: "stable", operationId: completed.operationId,
+        stablePath: fixture.active,
+        artifactDigest: completed.candidateArtifactDigest,
+        executableIdentityDigest: completed.candidateExecutableIdentityDigest,
+      });
+      expect(fixture.journal.retire(appUpdateHandoffOwner(completed))).toBe(true);
+
+      const bootstrap = vi.fn(async () => undefined);
+      await startApplicationWithUpdateHandoff({
+        platform: "linux", channel: "stable", version: "1.3.0", environment,
+        executablePath: fixture.active, dataDirectory: fixture.data,
+        profileDirectory: fixture.profile,
+        application: {
+          requestSingleInstanceLock: () => true, on: vi.fn(),
+          exit: vi.fn(), quit: vi.fn(), whenReady: async () => undefined,
+        } as unknown as Parameters<typeof startApplicationWithUpdateHandoff>[0]["application"],
+        focusMainWindow: vi.fn(), updateInstallCoordinator: () => null,
+        recordBeforeQuit: vi.fn(), cleanupBeforeQuit: async () => true,
+        finishNormalShutdown: vi.fn(), onUnconfirmedShutdown: vi.fn(),
+        reportCleanupFailure: vi.fn(), validateCandidateBootstrap: async () => undefined,
+        bootstrap, awaitCandidateReadiness: async () => undefined,
+        cleanupFailedCandidate: async () => true, reportCandidateFailure: vi.fn(),
+      });
+      expect(bootstrap).toHaveBeenCalledOnce();
+      expect(fixture.journal.current()).toBeNull();
+      await expect(readFile(fixture.active, "utf8")).resolves.toBe("new");
+    },
+  );
+
+  it.skipIf(process.platform === "win32").each([
+    "candidate-admitted", "completed",
+  ] as const)(
+    "rejects another Linux install while the existing handoff is %s",
+    async (phase) => {
+      const fixture = await admittedLinuxAdapterFixture(phase);
+      const before = await fixture.readTransaction();
+      const nextDownload = join(fixture.root, "next.AppImage");
+      await writeFile(nextDownload, "next", { mode: 0o755 });
+      const launchRestrictedCandidate = vi.fn();
+      const adapter = await loadElectronAppUpdater("stable", {
+        platform: "linux", environment: { APPIMAGE: fixture.active },
+        launchRestrictedCandidate,
+      });
+      updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([nextDownload]);
+      await adapter.download({ onProgress: vi.fn(), onCancelled: vi.fn() }).promise;
+
+      await expect(adapter.prepareInstall?.({
+        currentVersion: "1.3.0", newVersion: "1.4.0",
+        handoffDirectory: fixture.data, dataDirectory: fixture.data,
+        profileDirectory: fixture.profile,
+        oldRuntimeGenerationId: fixture.snapshot.oldRuntimeGenerationId,
+        systemBootId: fixture.snapshot.systemBootId,
+      })).resolves.toBe(false);
+
+      expect(launchRestrictedCandidate).not.toHaveBeenCalled();
+      expect(fixture.journal.current()).toEqual(fixture.snapshot);
+      await expect(fixture.readTransaction()).resolves.toEqual(before);
+    },
+  );
+
   it("applies the exact safe stable configuration without overriding the feed", async () => {
     const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     expect(updaterFixture.updater).toMatchObject({
@@ -1091,10 +1209,10 @@ describe("electron updater adapter", () => {
       ]);
       await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
       updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
-      const environment = { APPIMAGE: active };
+      const environment = { APPIMAGE: await realpath(active) };
       const adapter = await loadElectronAppUpdater("stable", {
         platform: "linux",
-        activeAppImagePath: active,
+        activeAppImagePath: environment.APPIMAGE,
         environment,
       });
       await adapter.download({

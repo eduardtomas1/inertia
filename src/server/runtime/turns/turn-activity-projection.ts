@@ -5,10 +5,10 @@ import {
   mergeProviderActivityOutputWithinTurnBudget,
 } from "../../provider/activity-detail";
 import type { ProviderActivityEvent } from "../../provider/contracts";
+import { PROVIDER_INFO } from "../../provider/catalog";
 import {
   broadcastTurnConversationShell,
   projectActionKind,
-  providerLabel,
 } from "./turn-controller-support";
 import type {
   ActiveTurn,
@@ -282,7 +282,7 @@ export class TurnActivityProjection {
       projectId: active.conversation.projectId,
       conversationId: active.conversation.id,
       label,
-      detail: `${providerLabel(active.turn.providerId)} · ${active.conversation.title}`,
+      detail: `${PROVIDER_INFO[active.turn.providerId].name} · ${active.conversation.title}`,
       status: "running",
       port: null,
     });

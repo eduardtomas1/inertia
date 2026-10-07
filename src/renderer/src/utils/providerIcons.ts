@@ -2,7 +2,8 @@ import anthropicIcon from "../assets/provider-icons/anthropic.svg?no-inline";
 import antigravityIcon from "../assets/provider-icons/antigravity.svg?no-inline";
 import cursorDarkIcon from "../assets/provider-icons/cursor-dark.svg?no-inline";
 import cursorLightIcon from "../assets/provider-icons/cursor-light.svg?no-inline";
-import kimiIcon from "../assets/provider-icons/kimi.svg?no-inline";
+import kimiDarkIcon from "../assets/provider-icons/kimi-dark.svg?no-inline";
+import kimiLightIcon from "../assets/provider-icons/kimi-light.svg?no-inline";
 import openaiIcon from "../assets/provider-icons/openai.svg?no-inline";
 import opencodeDarkIcon from "../assets/provider-icons/opencode-dark.svg?no-inline";
 import opencodeLightIcon from "../assets/provider-icons/opencode-light.svg?no-inline";
@@ -43,8 +44,8 @@ const providerIconDefinitions: Readonly<Record<ProviderId, ProviderIconDefinitio
     providerId: "kimi",
     brand: "kimi",
     label: "Kimi Code",
-    lightSrc: kimiIcon,
-    invertInDark: true,
+    lightSrc: kimiLightIcon,
+    darkSrc: kimiDarkIcon,
   },
   opencode: {
     providerId: "opencode",

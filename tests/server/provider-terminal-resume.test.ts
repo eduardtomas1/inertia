@@ -210,6 +210,23 @@ describe("provider terminal resume mapping", () => {
     });
     expect(launch.args).not.toContain("never-render-this-secret");
   });
+
+  it("routes Cursor resume through the agent subcommand when the editor launcher is configured", () => {
+    expect(providerTerminalResumeLaunch(
+      "/usr/local/bin/cursor",
+      "cursor",
+      sessionIds.cursor,
+      {},
+      "darwin",
+    ).args).toEqual(["agent", "--resume", sessionIds.cursor]);
+    expect(providerTerminalResumeLaunch(
+      "/usr/local/bin/cursor-agent",
+      "cursor",
+      sessionIds.cursor,
+      {},
+      "darwin",
+    ).args).toEqual(["--resume", sessionIds.cursor]);
+  });
 });
 
 describe("provider terminal resume availability", () => {

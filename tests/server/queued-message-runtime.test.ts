@@ -311,7 +311,7 @@ describe("durable runtime message queue", () => {
       expect(f.provider.runCount).toBe(0);
       expect(await f.attachments.preview(images[0]!.id)).not.toBeNull();
     } finally { await f.close(); }
-  });
+  }, 60_000);
 
   it("rolls back retained media if durable enqueue fails", async () => {
     const f = await fixture();

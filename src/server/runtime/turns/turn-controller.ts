@@ -24,6 +24,7 @@ import {
   type ProviderRunResult,
   type ProviderSteerInput,
 } from "../../provider/contracts";
+import { PROVIDER_INFO } from "../../provider/catalog";
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
@@ -43,7 +44,6 @@ import {
   DEFAULT_TURN_MAX_LIFETIME_MS,
   DEFAULT_TURN_TIMEOUT_MS,
   normalizedProviderRunFailure,
-  providerLabel,
   providerPromiseFailure,
   publicTurnError,
   updateActiveTurnProviderSession,
@@ -731,8 +731,8 @@ export class TurnController {
       projectId: active.conversation.projectId,
       conversationId: active.conversation.id,
       label: active.conversation.model
-        ? `${providerLabel(active.turn.providerId)} · ${active.conversation.model}`
-        : providerLabel(active.turn.providerId),
+        ? `${PROVIDER_INFO[active.turn.providerId].name} · ${active.conversation.model}`
+        : PROVIDER_INFO[active.turn.providerId].name,
       detail: active.conversation.title,
       status: "running",
       port: null,

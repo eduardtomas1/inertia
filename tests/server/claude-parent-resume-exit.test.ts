@@ -65,9 +65,9 @@ describe("Claude exit after the parent resumed", () => {
       terminalSubagentDrainTimeoutMs: 25,
       createQuery: () => fixtureClaudeQuery(
         (async function* (): AsyncGenerator<SDKMessage> {
-          yield claudeBackgroundTasks(["shell-1", "monitor-1"]);
+          yield claudeBackgroundTasks(["shell-1", "monitor-1"], "local_bash");
           yield claudeSuccessResult("The build is running.", "completed");
-          yield claudeBackgroundTasks(["monitor-1"]);
+          yield claudeBackgroundTasks(["monitor-1"], "local_bash");
           yield claudeSystem("status", { status: "requesting" });
           yield claudeBackgroundTasks([]);
           await new Promise((resolve) => setTimeout(resolve, 150));

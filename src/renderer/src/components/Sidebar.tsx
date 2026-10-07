@@ -112,13 +112,20 @@ function groupingLabel(mode: ProjectGroupingMode): string {
 }
 
 function workRepositoryLabel(project: Project | undefined): string | null {
-  const repositoryName = project?.repositoryRoot
-    ?.split(/[\\/]/u)
-    .filter(Boolean)
-    .at(-1);
-  if (!repositoryName || !project) return null;
-  if (project.repositoryRelativePath && project.repositoryRelativePath !== ".") {
-    return `${repositoryName}/${project.repositoryRelativePath}`;
+  if (!project?.repositoryRoot) return null;
+  const relativeSegments = project.repositoryRelativePath && project.repositoryRelativePath !== "."
+    ? project.repositoryRelativePath.split("/").filter(Boolean)
+    : [];
+  const pathSegments = project.path.split(/[\\/]/u).filter(Boolean);
+  const tail = pathSegments.slice(pathSegments.length - relativeSegments.length - 1);
+  const aligned = tail.length === relativeSegments.length + 1
+    && tail.slice(1).join("/").toLocaleLowerCase() === relativeSegments.join("/").toLocaleLowerCase();
+  const repositoryName = aligned
+    ? tail[0]
+    : project.repositoryRoot.split(/[\\/]/u).filter(Boolean).at(-1);
+  if (!repositoryName) return null;
+  if (relativeSegments.length > 0) {
+    return `${repositoryName}/${(aligned ? tail.slice(1) : relativeSegments).join("/")}`;
   }
   return repositoryName.toLocaleLowerCase() !== project.name.toLocaleLowerCase()
     ? repositoryName

@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
+import Database from "better-sqlite3";
 import { RuntimeStore } from "../../src/server/database";
+import { historyPredicate } from "../../src/server/persistence/conversation-history";
 import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryCursor } from "../../src/shared/conversation-history";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 import { sendRuntimeEvent, MAX_QUEUED_RUNTIME_EVENT_BYTES } from "../../src/server/runtime-protocol";
@@ -16,7 +18,7 @@ function fixture() {
   fixtures.push({ directory, store });
   const project = store.createProject("History", directory);
   const conversation = store.createConversation(project.id, "Large chat");
-  return { store, conversation };
+  return { store, conversation, databasePath: join(directory, "test.sqlite") };
 }
 afterEach(() => {
   for (const { directory, store } of fixtures.splice(0)) { store.close(); rmSync(directory, { recursive: true, force: true }); }
@@ -39,6 +41,22 @@ function result(detail: ConversationDetail): ServerEvent {
 }
 
 describe("bounded conversation history", () => {
+  it("scopes legacy history rows through the conversation-turn index instead of scanning the chat", () => {
+    const { conversation, databasePath } = fixture();
+    const at = "2030-01-01T00:00:30.000Z";
+    const scope = { units: [{ kind: "turn" as const, id: "turn-1", at }], older: null, upper: at };
+    const where = historyPredicate("activities", scope, conversation.id);
+    const database = new Database(databasePath, { readonly: true });
+    try {
+      const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT * FROM activities WHERE ${where.sql}`)
+        .all(...where.parameters) as { detail: string }[];
+      expect(plan.map(({ detail }) => detail).join("\n")).toContain("activities_conversation_turn_created_idx");
+      expect(plan.map(({ detail }) => detail).join("\n")).not.toContain("activities_conversation_created_idx");
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps the newest 60 unique gallery attachments across unloaded pages without exposing bodies or paths", () => {
     const { store, conversation } = fixture();
     const attachment = (index: number) => ({ id: `image-${index}`, name: `image-${index}.png`,

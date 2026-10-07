@@ -20,7 +20,6 @@ import {
   type HarnessBackendCompatibility,
   type ModelBackendProfile,
 } from "../../../shared/model-routing";
-import { backendEndpointIdentity } from "../../../shared/backend-endpoint-identity";
 import type { ProviderId, ProviderInfo } from "../../../shared/contracts";
 import type { StoredModelBackendProfile } from "../../database";
 import { BackendProfileControllerError } from "./backend-profile-types";
@@ -67,10 +66,6 @@ export function normalizedBaseUrl(
     );
   }
   return url.toString().replace(/\/$/u, "");
-}
-
-export function endpointIdentity(baseUrl: string): string {
-  return backendEndpointIdentity(baseUrl);
 }
 
 function nativeModelDefinitions(

@@ -2,7 +2,7 @@ import type { RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
 import type { RuntimeShutdownUnconfirmedReason } from
   "../node/runtime-process-protocol.js";
 import type { RunningRuntime } from "./index.js";
-import { isGitProcessTreeTerminationFailure } from "./git/runner.js";
+import { isGitProcessTreeTerminationFailure } from "./git/types.js";
 import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "./runtime-shutdown.js";
 
 interface RuntimeWorkerShutdownOptions {

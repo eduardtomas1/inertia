@@ -740,10 +740,12 @@ export class CodexSubagentLifecycle {
       progress?: string | null;
       result?: string | null;
       isLive?: boolean;
+      revived?: boolean;
       telemetry?: CodexChildTelemetry;
     } = {},
   ): void {
     this.host.emitSubagent({
+      ...(options.revived ? { revived: true } : {}),
       providerTaskId: null,
       providerAgentId: threadId,
       parentProviderAgentId:
@@ -792,9 +794,11 @@ export class CodexSubagentLifecycle {
         this.childResults.delete(threadId);
       }
       this.childActiveTurns.set(threadId, turnId);
+      const projection = this.host.projection(threadId);
       this.emitChildLifecycle(threadId, "running", "turn", {
         providerStatus: boundedText(objectValue(params.turn)?.status, 200)
           ?? "inProgress",
+        revived: projection !== undefined && !projection.isLive && !this.host.cancelRequested(),
       });
       return true;
     }

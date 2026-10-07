@@ -83,14 +83,12 @@ export interface AppUpdateStartupOptions {
 
 export function registerApplicationLifecycle(options: AppUpdateStartupOptions): void {
   const application = options.application;
-  application.on("second-instance", () => {
+  const focusOrRetryShutdown = (): void => {
     options.focusMainWindow();
-    if (options.platform === "linux") {
-      options.updateInstallCoordinator()
-        ?.retryUnconfirmedNormalShutdown?.();
-    }
-  });
-  application.on("activate", options.focusMainWindow);
+    options.updateInstallCoordinator()?.retryUnconfirmedNormalShutdown?.();
+  };
+  application.on("second-instance", focusOrRetryShutdown);
+  application.on("activate", focusOrRetryShutdown);
   application.on("window-all-closed", () => {
     if (options.platform !== "darwin") application.quit();
   });

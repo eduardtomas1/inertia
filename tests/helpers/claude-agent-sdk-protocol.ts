@@ -77,11 +77,12 @@ export function claudeModelUsage(overrides: Partial<ModelUsage> = {}): ModelUsag
 
 export function claudeBackgroundTasks(
   taskIds: readonly string[],
+  taskType = "local_agent",
 ): SDKMessage {
   return claudeSystem("background_tasks_changed", {
     tasks: taskIds.map((taskId) => ({
       task_id: taskId,
-      task_type: "local_agent",
+      task_type: taskType,
       description: `Delegate ${taskId}`,
     })),
   });

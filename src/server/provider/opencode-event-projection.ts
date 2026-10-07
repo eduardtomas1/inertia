@@ -1,8 +1,8 @@
 import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { CappedProviderBuffer } from "./io";
+import { bounded, finite, objectValue, stringValue } from "./opencode-sdk-support";
 
-const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_TRACKED_MESSAGES = 2_048;
 const MAX_TRACKED_PARTS = 4_096;
 const MAX_ACTIVITY_LABEL_CHARS = 1_024;
@@ -685,22 +685,3 @@ function appendSettledText(
   if (available > 0) state.settledText += value.slice(0, available);
 }
 
-function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
-}
-
-function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function finite(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
-    : null;
-}

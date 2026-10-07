@@ -25,7 +25,8 @@ import {
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
 } from "./request-context";
-import { previousTurnBoundaryUsage, providerLabel } from "./turn-controller-support";
+import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
   runtimeInterruptionInstruction,
@@ -176,7 +177,7 @@ export function resolveTurnRequest(
     && latestTurn.providerId !== route.providerId
   ) {
     throw new RuntimeRequestError(
-      `Send a message first so ${providerLabel(route.providerId)} receives this chat's earlier messages.`,
+      `Send a message first so ${PROVIDER_INFO[route.providerId].name} receives this chat's earlier messages.`,
     );
   }
   const latestTurnOwnsProviderSession = latestTurn !== null

@@ -388,7 +388,7 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Help", exact: true }).click();
   await expect(page.getByRole("heading", { level: 3, name: "Diagnostics", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
-  await expect(page.getByText("Support summary copied", { exact: false })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Support summary copied" })).toBeVisible();
   const supportSummary = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
   expect(supportSummary).toContain("Inertia support summary");
   expect(supportSummary).toContain("Privacy: prompts, source, project paths");

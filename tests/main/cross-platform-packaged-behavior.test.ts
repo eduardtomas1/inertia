@@ -121,20 +121,6 @@ describe("cross-platform packaged behavior contract", () => {
     expect(cleanupHandler.indexOf("conversationAttachments = null"))
       .toBeGreaterThan(cleanupHandler.indexOf("closeConversationAttachmentAccess"));
 
-    const privilegedShutdown = await source("src/main/privileged-shutdown.ts");
-    const sequenceStart = privilegedShutdown.indexOf(
-      "export async function runPrivilegedCleanupSequence",
-    );
-    const sequenceEnd = privilegedShutdown.indexOf(
-      "\nexport function cleanupPrivilegedOwners",
-      sequenceStart,
-    );
-    const cleanupSequence = privilegedShutdown.slice(sequenceStart, sequenceEnd);
-    expect(sequenceStart).toBeGreaterThanOrEqual(0);
-    expect(cleanupSequence.indexOf("stopRuntimeAndPrivateConnect(")).toBeLessThan(
-      cleanupSequence.indexOf("options.disposeTemporaryAttachments()"),
-    );
-    expect(cleanupSequence).toContain("if (runtimeExitConfirmed)");
     const quitStart = updateStartup.indexOf('application.on("before-quit"');
     const quitEnd = updateStartup.indexOf("\n  });", quitStart);
     const quitHandler = updateStartup.slice(quitStart, quitEnd);

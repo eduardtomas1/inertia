@@ -303,6 +303,7 @@ export class TranscriptRepository {
       ? this.context.database.prepare(`
           SELECT messages.attachments_json
           FROM messages
+          WHERE messages.attachments_json <> '[]'
           ORDER BY messages.created_at ASC, messages.id ASC
         `).all()
       : this.context.database.prepare(`

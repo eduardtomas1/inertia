@@ -8,13 +8,10 @@ import type { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes
 export interface RuntimeStopAttemptState {
   promise: Promise<boolean> | null;
   retryEligible: boolean;
-  readonly retryEnabled: boolean;
 }
 
-export function runtimeStopAttemptState(
-  retryEnabled: boolean,
-): RuntimeStopAttemptState {
-  return { promise: null, retryEligible: false, retryEnabled };
+export function runtimeStopAttemptState(): RuntimeStopAttemptState {
+  return { promise: null, retryEligible: false };
 }
 
 export function trackRuntimeStopAttempt(
@@ -22,7 +19,7 @@ export function trackRuntimeStopAttempt(
   attempt: Promise<boolean>,
 ): Promise<boolean> {
   const reset = (): void => {
-    if (state.retryEnabled && state.promise === tracked) {
+    if (state.promise === tracked) {
       state.retryEligible = true;
       state.promise = null;
     }
@@ -39,7 +36,6 @@ export function trackRuntimeStopAttempt(
 }
 
 export async function reconcileStoppedRuntimeQuarantine(options: {
-  readonly enabled: boolean;
   readonly records: Set<RuntimeProcessRecord>;
   readonly drain: (record: RuntimeProcessRecord) => Promise<boolean>;
   readonly recoverOwnedProcesses: NonNullable<
@@ -53,7 +49,6 @@ export async function reconcileStoppedRuntimeQuarantine(options: {
   readonly onPersistenceFailure: () => void;
   readonly clear: (record: RuntimeProcessRecord) => void;
 }): Promise<boolean> {
-  if (!options.enabled) return false;
   for (const record of options.records) {
     if (!await options.drain(record)) return false;
     if (record.processTreeTermination && !record.processTreeTerminationSettled) {

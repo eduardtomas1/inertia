@@ -20,13 +20,15 @@ import type {
   SubagentTrace,
   TurnRequestContext,
 } from "@shared/contracts";
-import { providerTerminalResumeAvailability } from "@shared/provider-terminal-resume";
+import {
+  visibleWorkspaceConversation,
+  type ConversationWorkspaceOptions,
+} from "./conversationWorkspaceOptions";
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
-import type { ConversationContextCommandRunner, ConversationContextSourceOption } from "../conversation-context/types";
+import type { ConversationContextCommandRunner } from "../conversation-context/types";
 import type { QueueCommandRunner } from "../composer/runtimeQueueClient";
-import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 import type { useActivityActions } from "../../hooks/useActivityActions";
 import type { useAppUpdate } from "../../hooks/useAppUpdate";
 import type { useBackendProfiles } from "../../hooks/useBackendProfiles";
@@ -67,23 +69,7 @@ import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
-
-export function workspaceDirectoryIdentity(path: string): string {
-  const normalized = path.replaceAll("\\", "/").replace(/\/+$/u, "");
-  return /^[a-z]:\//iu.test(normalized) || normalized.startsWith("//")
-    ? normalized.toLocaleLowerCase("en-US")
-    : normalized;
-}
-
-export function terminalResumeDirectory(
-  conversation: Pick<Conversation, "worktreePath"> | null,
-  project: Pick<Project, "normalizedPath"> | null,
-): string | null {
-  if (!conversation || !project) return null;
-  return workspaceDirectoryIdentity(
-    conversation.worktreePath ?? project.normalizedPath,
-  );
-}
+const EMPTY_LIST: never[] = [];
 
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type ConversationProjection = ReturnType<typeof useConversationProjection>;
@@ -113,13 +99,6 @@ type DesktopTools = ReturnType<typeof useDesktopTools>;
 type ActivityActions = ReturnType<typeof useActivityActions>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 type PlanSteps = ComponentProps<typeof PlanPanel>["steps"];
-
-export function visibleWorkspaceConversation(
-  persisted: Conversation | null,
-  draft: Conversation | null,
-): Conversation | null {
-  return draft ?? persisted;
-}
 
 export function planActionsAvailable(
   conversation: Pick<Conversation, "status"> | null,
@@ -238,6 +217,8 @@ export interface WorkspaceSceneActions {
     >>,
   ) => Promise<void>;
   updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
+  setUsageDisplayMode: (usageDisplayMode: AppSettings["usageDisplayMode"]) => void;
+  clearPromptContext: () => void;
   chooseCodexBinary: () => Promise<void>;
   refreshProvider: (providerId?: ProviderId) => void;
   connectProvider: (providerId: ProviderId) => void;
@@ -295,6 +276,7 @@ export interface WorkspaceSceneModelInput {
   detailLoading: boolean;
   selectedMaintenanceStatus: WorkspaceSceneProps["chat"]["maintenanceStatus"];
   selectedMaintenanceOperation: WorkspaceSceneProps["chat"]["maintenanceOperation"];
+  workspaceOptions: ConversationWorkspaceOptions;
   actions: WorkspaceSceneActions;
   setActionError: Dispatch<SetStateAction<string | null>>;
   setLatestContentVisible: Dispatch<SetStateAction<boolean>>;
@@ -331,6 +313,7 @@ export function createWorkspaceSceneModel({
   detailLoading,
   selectedMaintenanceStatus,
   selectedMaintenanceOperation,
+  workspaceOptions,
   actions,
   setActionError,
   setLatestContentVisible,
@@ -376,53 +359,6 @@ export function createWorkspaceSceneModel({
   );
   const snapshotProjects = connection.snapshot?.projects ?? [];
   const snapshotConversations = connection.snapshot?.conversations ?? [];
-  const projectById = new Map(snapshotProjects.map((entry) => [entry.id, entry]));
-  const activeDirectory = terminalResumeDirectory(conversation, project);
-  const contextSources: ConversationContextSourceOption[] = [];
-  const terminalResumeOptions: ProviderTerminalResumeOption[] = [];
-  if (activeDirectory) {
-    const candidates = [...snapshotConversations].sort((left, right) => {
-      if (left.id === persistedConversation?.id) return -1;
-      if (right.id === persistedConversation?.id) return 1;
-      return right.updatedAt.localeCompare(left.updatedAt, "en");
-    });
-    for (const candidate of candidates) {
-      const candidateProject = projectById.get(candidate.projectId);
-      if (!candidateProject) continue;
-      const sameWorkspace = workspaceDirectoryIdentity(
-        candidate.worktreePath ?? candidateProject.normalizedPath,
-      ) === activeDirectory;
-      if (conversation && candidate.id !== conversation.id) {
-        contextSources.push({
-          conversationId: candidate.id,
-          conversationTitle: candidate.title,
-          projectName: candidateProject.name,
-          workspaceLabel: candidate.worktreePath ?? candidateProject.normalizedPath,
-          targetWorkspaceLabel: workspaceToolsUnavailable
-            ? `New isolated worktree for ${project?.name ?? "this project"}`
-            : conversation.worktreePath ?? project?.normalizedPath ?? activeDirectory,
-          workspaceRelation: sameWorkspace && !workspaceToolsUnavailable
-            ? "same-workspace"
-            : "different-workspace",
-          archived: candidate.archivedAt !== null,
-        });
-      }
-      if (sameWorkspace) {
-        terminalResumeOptions.push({
-          projectId: candidateProject.id,
-          projectName: candidateProject.name,
-          conversationId: candidate.id,
-          conversationTitle: candidate.title,
-          availability: providerTerminalResumeAvailability(
-            candidate,
-            connection.snapshot?.providers.find(
-              ({ id }) => id === candidate.providerId,
-            ),
-          ),
-        });
-      }
-    }
-  }
   const {
     activeTool,
     setActiveTool,
@@ -487,22 +423,15 @@ export function createWorkspaceSceneModel({
     : null;
   const environmentSummary = buildWorkspaceSurfaceSummary({
     projectId: project?.id ?? null,
-    projectName: project?.name ?? null,
     conversationId: conversation?.id ?? null,
     connectionStatus: connection.status,
-    gitStatus: workspaceTools.gitStatus,
     workspaceGitStatus: workspaceTools.workspaceGitStatus,
     runs: connection.snapshot?.runs ?? [],
-    subagents: projection.subagents,
     messages: projection.messages,
     liveMessages: projection.liveMessages,
     attachmentGallery: detailState?.state === "ready" && detailState.conversationId === conversation?.id
       ? detailState.detail.attachmentGallery : undefined,
-    projectPath: project?.normalizedPath ?? null,
-    worktreePath: conversation?.worktreePath ?? null,
-    gitLoading: workspaceTools.gitLoading,
     gitError: workspaceTools.gitError,
-    gitBusy: Boolean(busyAction?.startsWith("git.")),
     projects: snapshotProjects,
     conversations: snapshotConversations,
     usage: projection.usage,
@@ -687,11 +616,11 @@ export function createWorkspaceSceneModel({
       streaming: chatProjection.streaming,
       terminalProjections: chatProjection.terminalProjections,
       usage: chatProjection.usage,
-      skills: currentWorkflow?.skills ?? [],
+      skills: currentWorkflow?.skills ?? EMPTY_LIST,
       skillsCapability: currentWorkflow?.skillsCapability ?? null,
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
-      promptPresets: connection.snapshot?.promptPresets ?? [],
+      promptPresets: connection.snapshot?.promptPresets ?? EMPTY_LIST,
       goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,
         executionStatus: currentGoalExecution,
@@ -719,7 +648,7 @@ export function createWorkspaceSceneModel({
       showChangedFileSummaries: settings.showChangedFileSummaries,
       autoScrollToFinalAnswer: settings.autoScrollToFinalAnswer,
       promptContext: workspaceTools.pendingDiffContext,
-      contextSources,
+      contextSources: workspaceOptions.contextSources,
       contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onQueueCommand: actions.runQueueCommand,
@@ -750,11 +679,9 @@ export function createWorkspaceSceneModel({
       onOpenProviderSetup: actions.openProviderSetup,
       onOpenBackendSetup: actions.openBackendSetup,
       onOpenResume: openTerminal,
-      resumeOptions: terminalResumeOptions,
+      resumeOptions: workspaceOptions.resumeOptions,
       onResumeConversation: activityActions.requestProviderResume,
-      onProbeBackendProfile: async (profileId, modelId) => {
-        await backendProfileActions.probeBackendProfile(profileId, modelId);
-      },
+      onProbeBackendProfile: backendProfileActions.probeBackendProfile,
       onRefreshProviderMaintenance: () => {
         const providerId = conversation?.providerId as
           | ProviderMaintenanceProviderId
@@ -775,11 +702,8 @@ export function createWorkspaceSceneModel({
       onOpenProviderUpdateInstructions: (url) => {
         void window.inertia.openExternal(url).catch(() => undefined);
       },
-      onUsageDisplayModeChange: (usageDisplayMode) => {
-        void actions.updateSettings({ usageDisplayMode })
-          .catch(() => undefined);
-      },
-      onClearPromptContext: () => workspaceTools.setPendingDiffContext(null),
+      onUsageDisplayModeChange: actions.setUsageDisplayMode,
+      onClearPromptContext: actions.clearPromptContext,
       onLatestContentVisibilityChange: setLatestContentVisible,
       onOpenTurnDiff: actions.openTurnDiff,
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
@@ -1012,7 +936,7 @@ export function createWorkspaceSceneModel({
         darkColorTheme: settings.darkColorTheme,
         sendCommand: connection.sendCommand,
         subscribe: connection.subscribe,
-        providerResumes: terminalResumeOptions,
+        providerResumes: workspaceOptions.resumeOptions,
         actionId: activityActions.pendingActionId,
         onActionStarted: activityActions.clearPendingAction,
         resumeRequestConversationId: activityActions.pendingResumeConversationId,

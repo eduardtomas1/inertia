@@ -110,7 +110,7 @@ export class RuntimeSupervisor {
   private readonly testRecycle = new RuntimeSupervisorRecycle();
   constructor(options: RuntimeSupervisorOptions) {
     this.platform = options.platform ?? process.platform;
-    this.stopAttempt = runtimeStopAttemptState(this.platform === "linux");
+    this.stopAttempt = runtimeStopAttemptState();
     this.spawnProcess = options.spawn;
     const { manualModernDarwinRecovery, ...workerOptions } =
       options.workerOptions;
@@ -188,7 +188,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
     });
     this.secureFiles = new RuntimeSecureFileCoordinator({
-      retryUnconfirmedShutdown: this.stopAttempt.retryEnabled, broker: options.secureFileBroker,
+      retryUnconfirmedShutdown: true, broker: options.secureFileBroker,
       conversationAttachmentStoreRunner:
         options.conversationAttachmentStoreRunner,
       documentPreparationRunner: options.documentPreparationRunner,
@@ -498,8 +498,7 @@ export class RuntimeSupervisor {
         .then(async ([confirmed, recovered]) => {
           this.phase = "stopped";
           const reconciled = confirmed && recovered && retrying
-            ? await reconcileStoppedRuntimeQuarantine({ enabled: this.stopAttempt.retryEnabled,
-              records: this.quarantined, drain: async (record) => await this.secureFiles.drain(record, true),
+            ? await reconcileStoppedRuntimeQuarantine({ records: this.quarantined, drain: async (record) => await this.secureFiles.drain(record, true),
               recoverOwnedProcesses: this.recoverOwnedProcesses, systemBootId: this.systemBootId,
               recoveryWaitMs: this.recoveryWaitMs, cleanupReceipts: this.cleanupReceipts,
               runtimeGenerationLeases: this.runtimeGenerationLeases, runtimeOwnedProcesses: this.runtimeOwnedProcesses,

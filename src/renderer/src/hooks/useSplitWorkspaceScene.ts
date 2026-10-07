@@ -45,6 +45,7 @@ import type {
   ConversationPaneLayout,
 } from "./useConversationPaneLayout";
 import { useConversationProjection } from "./useConversationProjection";
+import { useConversationWorkspaceOptions } from "./useConversationWorkspaceOptions";
 import { usePlanSteps } from "./usePlanSteps";
 import { useDesktopTools } from "./useDesktopTools";
 import type { useInertiaConnection } from "./useInertiaConnection";
@@ -296,6 +297,10 @@ export function useSplitWorkspaceScene({
   ]);
   const sceneActions = useStableActions({
     ...actions,
+    setUsageDisplayMode: (usageDisplayMode: AppSettings["usageDisplayMode"]) => {
+      void actions.updateSettings({ usageDisplayMode }).catch(() => undefined);
+    },
+    clearPromptContext: () => tools.setPendingDiffContext(null),
     sendMessage: async (
       content: string,
       attachments: ChatAttachment[],
@@ -350,6 +355,13 @@ export function useSplitWorkspaceScene({
     runLimitResetCommand: actions.runLimitResetCommand ?? unavailableLimitReset,
     loadBackgroundTasks: actions.loadBackgroundTasks ?? unavailableBackgroundTasks,
   });
+  const workspaceOptions = useConversationWorkspaceOptions({
+    connection,
+    projection,
+    draftConversation: null,
+    project: splitProject,
+    workspaceToolsUnavailable: false,
+  });
   const model = useMemo(() => createWorkspaceSceneModel({
     view: "workspace",
     settingsTarget: null,
@@ -389,6 +401,7 @@ export function useSplitWorkspaceScene({
           splitConversation.providerId as ProviderMaintenanceProviderId,
         ) ?? null
       : null,
+    workspaceOptions,
     actions: sceneActions,
     setActionError,
     setLatestContentVisible: ignoreLatestContentVisibility,
@@ -396,6 +409,7 @@ export function useSplitWorkspaceScene({
     activityActions,
     appUpdate,
     backendProfileActions,
+    workspaceOptions,
     busyAction,
     busyPrefix,
     connection,

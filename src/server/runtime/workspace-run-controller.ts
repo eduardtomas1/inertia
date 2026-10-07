@@ -3,10 +3,10 @@ import { realpathSync, statSync } from "node:fs";
 
 import type {
   Conversation,
-  ProviderInfo,
   WorkspaceRun,
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
+import { PROVIDER_INFO } from "../provider/catalog";
 import { executableCandidates, providerEnvironment } from "../environment";
 import { gitProcessEnvironment } from "../git/environment";
 import { providerProcessInvocation, providerPtyArguments } from "../provider/process";
@@ -124,18 +124,6 @@ export interface StartWorkspaceActionInput<Owner> {
   replacementRequestId?: string;
 }
 
-export function providerDisplayName(providerId: ProviderInfo["id"]): string {
-  return providerId === "codex"
-    ? "Codex"
-    : providerId === "claude"
-      ? "Claude"
-      : providerId === "cursor"
-        ? "Cursor"
-          : providerId === "kimi"
-            ? "Kimi Code"
-            : "OpenCode";
-}
-
 export function workspaceActionKind(
   name: string,
   command: string,
@@ -155,7 +143,7 @@ export function workspaceServicePort(output: string): number | null {
 }
 
 function conversationDetail(conversation: Pick<Conversation, "providerId" | "title">): string {
-  return `${providerDisplayName(conversation.providerId)} · ${conversation.title}`;
+  return `${PROVIDER_INFO[conversation.providerId].name} · ${conversation.title}`;
 }
 
 /**

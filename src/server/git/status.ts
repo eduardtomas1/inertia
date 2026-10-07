@@ -7,7 +7,6 @@ import {
 } from "./scan-coordinator";
 import {
   gitInspectionSettlementValues,
-  isGitProcessTreeTerminationFailure,
   runGitInspection,
 } from "./runner";
 import {
@@ -15,6 +14,7 @@ import {
   type GitChangedFile,
   type GitFileStatus,
   type GitRepositoryStatus,
+  isGitProcessTreeTerminationFailure,
 } from "./types";
 
 interface ParsedStatus {

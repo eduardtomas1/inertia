@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAIN_WINDOW_DEFAULT_STATE,
+  mainWindowStateSnapshot,
   restoreMainWindowState,
 } from "../../src/main/main-window-state";
 
@@ -10,6 +11,18 @@ const displays = [{
 }];
 
 describe("main window state", () => {
+  it("saves the normal bounds of a fullscreen or maximized window", () => {
+    const normal = { x: 120, y: 80, width: 1_200, height: 760 };
+    expect(mainWindowStateSnapshot({
+      isMaximized: () => false,
+      getNormalBounds: () => normal,
+    })).toEqual({ ...normal, maximized: false });
+    expect(mainWindowStateSnapshot({
+      isMaximized: () => true,
+      getNormalBounds: () => normal,
+    })).toEqual({ ...normal, maximized: true });
+  });
+
   it("restores a reachable title bar in device-independent work-area bounds", () => {
     expect(restoreMainWindowState({
       x: -40,

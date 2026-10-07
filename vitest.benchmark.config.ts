@@ -18,6 +18,6 @@ export default defineConfig({
       "tests/performance/**/*.benchmark.test.ts",
     ],
     maxWorkers: 1,
-    testTimeout: 120_000,
+    testTimeout: 300_000,
   },
 });

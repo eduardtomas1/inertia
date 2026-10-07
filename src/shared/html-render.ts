@@ -128,13 +128,19 @@ export const HTML_RENDER_LAYOUT_GUIDE = [
 
 const MESSAGE_PREFIX = "inertia-html-render:";
 
-/** Messages a framed page posts to its client. */
+/**
+ * Messages a framed page posts to its client. The bootstrap announces a random
+ * token before any page script runs and sends it only with links the user
+ * clicked, so a page script cannot ask for a link to open.
+ */
 export type HtmlRenderFrameMessage =
+  | { type: "hello"; token: string }
   | { type: "size"; height: number }
-  | { type: "open-link"; url: string }
+  | { type: "open-link"; url: string; token: string }
   | { type: "escape" };
 
 const MAX_LINK_LENGTH = 2_048;
+const FRAME_TOKEN = /^[0-9a-f]{32}$/u;
 
 /** Parses untrusted `postMessage` data from a frame; anything unexpected is dropped. */
 export function readHtmlRenderFrameMessage(data: unknown): HtmlRenderFrameMessage | null {
@@ -146,10 +152,16 @@ export function readHtmlRenderFrameMessage(data: unknown): HtmlRenderFrameMessag
   if (type === "size" && keys === 2 && typeof row.height === "number" && Number.isFinite(row.height) && row.height > 0) {
     return { type: "size", height: row.height };
   }
-  if (type === "open-link" && keys === 2 && typeof row.url === "string" && row.url.length <= MAX_LINK_LENGTH) {
+  if (type === "hello" && keys === 2 && typeof row.token === "string" && FRAME_TOKEN.test(row.token)) {
+    return { type: "hello", token: row.token };
+  }
+  if (
+    type === "open-link" && keys === 3 && typeof row.token === "string" && FRAME_TOKEN.test(row.token)
+    && typeof row.url === "string" && row.url.length <= MAX_LINK_LENGTH
+  ) {
     try {
       const url = new URL(row.url);
-      if (url.protocol === "http:" || url.protocol === "https:") return { type: "open-link", url: url.href };
+      if (url.protocol === "http:" || url.protocol === "https:") return { type: "open-link", url: url.href, token: row.token };
     } catch {
       return null;
     }
@@ -200,12 +212,14 @@ const BOOTSTRAP_SCRIPT = /* @__PURE__ */ [
   "for(var k in t.variables){if(/^--[a-z0-9-]{1,64}$/.test(k)&&typeof t.variables[k]==='string')c+=k+':'+t.variables[k].replace(/[;{}<>]/g,'').slice(0,512)+';';}",
   "s.textContent=c+'}'+b;}",
   `try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){apply(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,'',location.pathname+location.search);}}catch(e){}`,
-  "function post(d){if(parent)parent.postMessage(d,'*');}",
+  "var C=Function.prototype.call,B=Function.prototype.bind,path=B.call(C,Event.prototype.composedPath),is=B.call(C,Element.prototype.matches);",
+  "var r=new Uint32Array(4),k='';crypto.getRandomValues(r);for(var i=0;i<4;i++)k+=('0000000'+r[i].toString(16)).slice(-8);",
+  "function post(d){if(parent)parent.postMessage(d,'*');}post({type:P+'hello',token:k});",
   "window.addEventListener('message',function(e){if(!parent||e.source!==parent)return;var d=e.data;if(d&&d.type===P+'theme')apply(d.theme);});",
-  "document.addEventListener('click',function(e){if(!e.isTrusted)return;var a=e.composedPath().find(function(n){return n&&n.matches&&n.matches('a[href]');});if(!a)return;",
+  "document.addEventListener('click',function(e){if(!e.isTrusted)return;var p=path(e),a=null;for(var j=0;j<p.length&&!a;j++){try{if(is(p[j],'a[href]'))a=p[j];}catch(x){}}if(!a)return;",
   "var u;try{u=new URL(a.getAttribute('href'),document.baseURI);}catch(x){e.preventDefault();return;}",
   "if(u.href.split('#')[0]===location.href.split('#')[0])return;e.preventDefault();",
-  "if(/^https?:$/.test(u.protocol))post({type:P+'open-link',url:u.href});},true);",
+  "if(/^https?:$/.test(u.protocol))post({type:P+'open-link',url:u.href,token:k});},true);",
   "document.addEventListener('keydown',function(e){if(e.key==='Escape')post({type:P+'escape'});},true);",
   "var h=0;function size(){var r=document.documentElement;var v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h||v<=0)return;h=v;post({type:P+'size',height:v});}",
   "if(window.ResizeObserver){var o=new ResizeObserver(size);o.observe(document.documentElement);document.addEventListener('DOMContentLoaded',function(){if(document.body)o.observe(document.body);size();});}",

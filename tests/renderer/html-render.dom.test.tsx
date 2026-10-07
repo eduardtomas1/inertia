@@ -28,6 +28,7 @@ const runId = "run-visual-reply";
 const renderId = "7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const title = "Quarterly revenue chart";
 const MESSAGE = "inertia-html-render:";
+const TOKEN = "0123456789abcdef0123456789abcdef";
 
 function at(seconds: number): string {
   return `2030-03-01T10:00:${String(seconds).padStart(2, "0")}.000Z`;
@@ -168,6 +169,16 @@ function postFromFrame(source: unknown, data: unknown, origin = "null"): void {
       source: source as MessageEventSource,
     }));
   });
+}
+
+function announce(source: unknown, token = TOKEN): void {
+  postFromFrame(source, { type: `${MESSAGE}hello`, token });
+}
+
+function requestLink(source: unknown, url: string, token: string | null = TOKEN): void {
+  postFromFrame(source, token === null
+    ? { type: `${MESSAGE}open-link`, url }
+    : { type: `${MESSAGE}open-link`, url, token });
 }
 
 function inlineFrame(): HTMLIFrameElement {
@@ -381,17 +392,17 @@ describe("visual replies in the response timeline", () => {
     const frame = inlineFrame();
     const frameWindow = attachFrameWindow(frame);
     act(() => frame.focus());
+    announce(frameWindow);
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "javascript:alert(1)" });
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "file:///etc/passwd" });
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "inertia://bundle/index.html" });
+    requestLink(frameWindow, "javascript:alert(1)");
+    requestLink(frameWindow, "file:///etc/passwd");
+    requestLink(frameWindow, "inertia://bundle/index.html");
     expect(openExternal).not.toHaveBeenCalled();
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/report?q=1" });
+    requestLink(frameWindow, "https://example.com/report?q=1");
     expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com/report?q=1");
 
-    // A page script repeating the request cannot open a burst of windows.
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/again" });
+    requestLink(frameWindow, "https://example.com/again");
     expect(openExternal).toHaveBeenCalledOnce();
 
     // Escape is meaningful only to the full-size dialog.
@@ -405,10 +416,54 @@ describe("visual replies in the response timeline", () => {
     const frame = inlineFrame();
     const frameWindow = attachFrameWindow(frame);
     act(() => frame.focus());
+    announce(frameWindow);
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/" });
+    requestLink(frameWindow, "https://example.com/");
 
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("opens nothing for a link request a page script posts without the bootstrap's token", () => {
+    vi.useFakeTimers();
+    userActivation(true);
+    render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    act(() => frame.focus());
+
+    requestLink(frameWindow, "https://example.com/before-hello");
+    announce(frameWindow);
+    requestLink(frameWindow, "https://example.com/no-token", null);
+    requestLink(frameWindow, "https://example.com/forged", "f".repeat(32));
+    requestLink(frameWindow, "https://example.com/short", "abc");
+    expect(openExternal).not.toHaveBeenCalled();
+
+    requestLink(frameWindow, "https://example.com/clicked");
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com/clicked");
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    requestLink(frameWindow, "https://example.com/same-activation", null);
+    requestLink(frameWindow, "https://example.com/same-activation", "f".repeat(32));
+    expect(openExternal).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the token the frame announced first", () => {
+    userActivation(true);
+    render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    act(() => frame.focus());
+    const replacement = "a".repeat(32);
+
+    announce(frameWindow);
+    announce(frameWindow, replacement);
+    requestLink(frameWindow, "https://example.com/replaced", replacement);
+    expect(openExternal).not.toHaveBeenCalled();
+
+    requestLink(frameWindow, "https://example.com/first");
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com/first");
   });
 
   it("ignores link requests while the user is interacting with the app outside the frame", () => {
@@ -417,9 +472,10 @@ describe("visual replies in the response timeline", () => {
     const frameWindow = attachFrameWindow(inlineFrame());
     const elsewhere = screen.getByRole("button", { name: `Open ${title} full size` });
     act(() => elsewhere.focus());
+    announce(frameWindow);
 
     // Typing or clicking elsewhere activates the app window too; it is not a gesture in the page.
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/" });
+    requestLink(frameWindow, "https://example.com/");
 
     expect(openExternal).not.toHaveBeenCalled();
   });
@@ -429,9 +485,10 @@ describe("visual replies in the response timeline", () => {
     const frame = inlineFrame();
     const frameWindow = attachFrameWindow(frame);
     act(() => frame.focus());
+    announce(frameWindow);
     Object.defineProperty(navigator, "userActivation", { configurable: true, value: undefined });
 
-    postFromFrame(frameWindow, { type: `${MESSAGE}open-link`, url: "https://example.com/" });
+    requestLink(frameWindow, "https://example.com/");
 
     expect(openExternal).not.toHaveBeenCalled();
   });

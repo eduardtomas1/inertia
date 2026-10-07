@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
   htmlRenderThemeMessage,
   readHtmlRenderFrameMessage,
@@ -12,7 +12,9 @@ const LINK_OPEN_INTERVAL_MS = 1_000;
  * Connects one sandboxed visual-reply frame to the renderer. Messages are
  * accepted only from that frame's own window with an opaque origin and are
  * parsed as untrusted data; the theme is pushed on load and on every change.
- * Returns the frame's `load` handler.
+ * The first token the frame announces is its bootstrap's, which runs before
+ * any page script, and a link request without it is dropped. Returns the
+ * frame's `load` handler.
  */
 export function useHtmlRenderFrameBridge(
   frameRef: RefObject<HTMLIFrameElement | null>,
@@ -22,6 +24,7 @@ export function useHtmlRenderFrameBridge(
   const themeRef = useRef(theme);
   const loadedRef = useRef(false);
   const onMessageRef = useRef(onMessage);
+  const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -33,12 +36,18 @@ export function useHtmlRenderFrameBridge(
     frameRef.current?.contentWindow?.postMessage(htmlRenderThemeMessage(theme), "*");
   }, [frameRef, theme]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const receive = (event: MessageEvent): void => {
       const source = frameRef.current?.contentWindow;
       if (!source || event.source !== source || event.origin !== "null") return;
       const message = readHtmlRenderFrameMessage(event.data);
-      if (message) onMessageRef.current(message);
+      if (!message) return;
+      if (message.type === "hello") {
+        tokenRef.current ??= message.token;
+        return;
+      }
+      if (message.type === "open-link" && message.token !== tokenRef.current) return;
+      onMessageRef.current(message);
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
@@ -83,8 +92,9 @@ export function useReportedFrameHeight(): readonly [number | null, (height: numb
 
 /**
  * Opens a page's link through the same external-link bridge as chat links.
- * The page's own scripts can post `open-link` at will, so a request needs a
- * fresh user gesture and is limited to one per interval for each frame.
+ * A request arrives only with the bootstrap's token, which it sends for one
+ * trusted click on a link; it still needs a fresh user gesture and is limited
+ * to one per interval for each frame.
  * Activation also comes from typing or clicking anywhere else in the app, so
  * the gesture only counts while this frame holds focus, which clicking in the
  * page or tabbing into it gives it.

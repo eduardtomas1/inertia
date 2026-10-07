@@ -23,6 +23,7 @@ import {
   workspaceRunFromRow,
 } from "./codecs";
 import type { PersistenceContext } from "./context";
+import { CONVERSATION_CONTEXT_MESSAGE_SQL } from "./conversation-context-source";
 import { turnGitArtifactFromRow } from "./git-artifact-codecs";
 import {
   reviewNoteFromRow,
@@ -278,9 +279,9 @@ export class SnapshotRepository {
       ...EMPTY_CONVERSATION_RECORDS,
       conversation: conversationDetailFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
-          attachments_json, compaction_json, private_connect_device_id, created_at
+          attachments_json, compaction_json, html_render_json, private_connect_device_id, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
-          WHERE messages.conversation_id = ? AND messages.role IN ('user', 'assistant')
+          WHERE messages.conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
           ORDER BY messages.created_at DESC, messages.id DESC LIMIT ?)`,
       limits.contentCharacters, conversationId, limits.messages).map(messageFromRow),
       activities: newest<ActivityRow>(`SELECT id, conversation_id, run_id, turn_id, kind, title, NULL AS detail,

@@ -21,6 +21,7 @@ import {
 } from "../../shared/private-connect/questions";
 import { privateConnectRuntimeGrantAllowsConversation } from "../../shared/private-connect/runtime-grants";
 import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
+import { htmlRenderContextLine } from "../../shared/html-render-reference";
 import {
   privateConnectPromptSafetyIsUsable,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
@@ -244,16 +245,16 @@ export class PrivateConnectRuntimeGateway {
           generatedAt: this.now().toISOString(),
           conversation: projectedConversation,
           messages: detail.messages
-            .filter(({ role }) => role === "user" || role === "assistant")
+            .filter(({ role, htmlRender }) => role === "user" || role === "assistant" || htmlRender)
             .slice(-PRIVATE_CONNECT_RUNTIME_LIMITS.transcriptMessages)
             .map((message) => ({
               id: message.id,
               turnId: message.turnId,
-              role: message.role as "user" | "assistant",
+              role: message.htmlRender ? "assistant" as const : message.role as "user" | "assistant",
               content: this.transcriptCache.content(
                 request.conversationId,
                 message.id,
-                message.content,
+                message.htmlRender ? htmlRenderContextLine(message.htmlRender.title) : message.content,
               ),
               createdAt: message.createdAt,
             })),

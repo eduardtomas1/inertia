@@ -121,6 +121,7 @@ describe("inertia_render_html definition", () => {
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_LAYOUT_GUIDE);
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(HTML_RENDER_THEME_GUIDE);
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("call it before writing that reply");
+    expect(HTML_RENDER_TOOL_DEFINITION.description).toContain("say in one sentence what the page shows");
     expect(HTML_RENDER_TOOL_DEFINITION.description).toContain(`at most ${HTML_RENDER_MAX_PER_TURN} pages`);
     expect(HTML_RENDER_TOOL_DEFINITION.description.length).toBeLessThanOrEqual(2_000);
     expect(HTML_RENDER_TOOL_DEFINITION.inputSchema).toMatchObject({
@@ -287,7 +288,7 @@ describe("every schema-valid render input is accepted by the runtime and by the 
 });
 
 describe("inertia_render_html handler", () => {
-  it("stores the page and its system message, broadcasts it, and tells the model not to describe it", async () => {
+  it("stores the page and its system message, broadcasts it, and asks the model for a one-sentence summary", async () => {
     const { store, conversation, turn, broadcast, bridge } = await runtime();
     try {
       const result = await bridge.invoke(call({ html: PAGE, title: "  Benchmark chart ", height: 420 }));
@@ -300,7 +301,7 @@ describe("inertia_render_html handler", () => {
         message: HTML_RENDER_RESULT_MESSAGE,
       });
       expect(HTML_RENDER_RESULT_MESSAGE).toBe(
-        "Shown to the reader above your reply. Don't mention or describe the page; reply with only what it doesn't already say.",
+        "Shown to the reader above your reply. Some clients and later turns see only your text, so say in one sentence what the page shows, then add only what it doesn't already say; don't restate its details or say where it is.",
       );
       expect(store.htmlRenders.read(body.renderId as string)).toEqual({
         conversationId: conversation.id, title: "Benchmark chart", html: PAGE,

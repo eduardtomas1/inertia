@@ -101,8 +101,9 @@ stores the page in `html_renders` and a turn-scoped system
 message whose `htmlRender` reference holds the render id, title, and height;
 the message text is a plain placeholder for older clients. The message reaches
 clients through the ordinary `conversation.message.persisted` event, and the
-model receives `{ rendered, renderId, title, message }`, where `message` tells
-it not to describe the page in its reply. Arguments that fail validation, an
+model receives `{ rendered, renderId, title, message }`, where `message` asks
+it to say in one sentence what the page shows, because some clients and later
+turns see only text, and otherwise to add only what the page does not say. Arguments that fail validation, an
 oversized page, a settled or cancelled turn, a turn already at its page limit,
 and a storage failure each return `{ error: { code, message } }` with
 `invalid_arguments`, `html_too_large`, `turn_not_active` (or the shared
@@ -112,9 +113,11 @@ and a storage failure each return `{ error: { code, message } }` with
 The page is served only by the main process from the stored row, inside a
 sandboxed frame without network access; windows that show pages also disable
 non-proxied WebRTC UDP and the page response turns off DNS prefetching. A page
-that no longer exists is served as a themed "no longer available" notice. System messages stay out of provider
-context excerpts, message search, and Private Connect, so a rendered page is
-never replayed to a model and Private Connect shows nothing for it. Deleting a
+that no longer exists is served as a themed "no longer available" notice. The
+page itself is never replayed to a model. Shared chat context, continuation
+history for another model or a fresh native session, and Private Connect carry
+a visual reply only as a one-line `[page: <title>]` entry in the assistant's
+place; message search leaves it out like other system messages. Deleting a
 chat deletes its pages. The provider MCP HTTP bridge and the stdio proxy accept
 request bodies and lines up to 1,600 KiB: every JSON encoder writes a control
 character as a six-byte `\u00XX` escape, so a maximum page can reach six times

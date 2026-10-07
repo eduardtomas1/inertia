@@ -13,6 +13,7 @@ import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText, truncateUtf8 } from "../runtime/untrusted-agent-text";
 import { parseStoredAttachments as parseAttachments } from "./codecs";
 import {
+  CONVERSATION_CONTEXT_MESSAGE_SQL,
   continuationRouteSql,
   conversationContextOpeningRow,
   conversationContextSourceRows,
@@ -158,7 +159,7 @@ export function collectConversationContextExcerpts(
 ): CollectedConversationContextExcerpts | null {
   const countEligible = (routed: ReturnType<typeof continuationRouteSql>) => (database.prepare(`
     SELECT COUNT(*) AS count FROM messages
-    WHERE conversation_id = ? AND role IN ('user', 'assistant')
+    WHERE conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
       ${selectedIds ? `AND id IN (${selectedIds.map(() => "?").join(", ")})` : ""}
       ${excludedMessageId ? "AND id <> ?" : ""}
       ${routed.sql}

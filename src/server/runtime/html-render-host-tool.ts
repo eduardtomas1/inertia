@@ -21,7 +21,7 @@ import type {
 } from "../provider/contracts";
 
 export const HTML_RENDER_RESULT_MESSAGE =
-  "Shown to the reader above your reply. Don't mention or describe the page; reply with only what it doesn't already say.";
+  "Shown to the reader above your reply. Some clients and later turns see only your text, so say in one sentence what the page shows, then add only what it doesn't already say; don't restate its details or say where it is.";
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
 // No control characters, and at least one character that survives trimming.
@@ -51,7 +51,7 @@ export const htmlRenderInputSchema = z.object({
 
 const DESCRIPTION = [
   "Show a finished HTML page (chart, table, diagram, collage, mockup) inline in this chat, above your final text reply; call it before writing that reply.",
-  "The reader already sees the page, so the reply should not announce it, say where it is, or restate it: add only what the page doesn't say.",
+  "The reader sees the page above the reply, but some clients and later turns see only text: in the reply, say in one sentence what the page shows, then add only what the page doesn't say, without restating its details or saying where it is.",
   "Pass one complete, self-contained HTML document of at most 256 KiB and a short title. Scripts run in a sandbox without network access.",
   `A turn can show at most ${HTML_RENDER_MAX_PER_TURN} pages.`,
   HTML_RENDER_LAYOUT_GUIDE,

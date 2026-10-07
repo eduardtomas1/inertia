@@ -478,7 +478,9 @@ export function useConversationProjection({
       if (!existing) return current;
       const remaining = existing.filter((trace) => {
         const stored = authoritativeSubagents.get(trace.id);
-        return !stored || stored.sequence < trace.sequence;
+        return !stored
+          || stored.sequence < trace.sequence
+          || (stored.sequence === trace.sequence && stored.updatedAt < trace.updatedAt);
       });
       if (remaining.length === existing.length) return current;
       const next = { ...current };

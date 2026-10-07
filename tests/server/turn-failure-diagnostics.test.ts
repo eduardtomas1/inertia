@@ -36,6 +36,25 @@ describe("turn failure diagnostics", () => {
     expect(failure.technicalDetail).not.toContain("/home/alice/project");
   });
 
+  it("names every provider in the fallback failure summary", () => {
+    const failure = (providerId: "antigravity" | "opencode") => normalizedProviderRunFailure(activeTurn(), {
+      providerId,
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "failed",
+      terminalReason: { outcome: "failed", reason: "provider-error" },
+      text: "",
+      textTruncated: false,
+      exitCode: null,
+      signal: null,
+      cleanupConfirmed: true,
+    }).message;
+
+    expect(failure("antigravity")).toBe("Antigravity could not complete the request.");
+    expect(failure("opencode")).toBe("OpenCode could not complete the request.");
+  });
+
   it("preserves a scrubbed provider error as summary and technical cause", () => {
     const failure = normalizedProviderRunFailure(activeTurn(), {
       providerId: "codex",

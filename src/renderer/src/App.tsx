@@ -11,6 +11,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AppSettingsUpdate,
+  type UsageDisplayMode,
   type Conversation,
   type Project,
   type ProviderId,
@@ -71,6 +72,7 @@ import { forgetWorkspaceBoundLastTool } from "./utils/workspaceStartup";
 import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
+import { useConversationWorkspaceOptions } from "./hooks/useConversationWorkspaceOptions";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { persistComposerDraft } from "./utils/composerDraftPersistence";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
@@ -819,6 +821,10 @@ export default function App(): React.JSX.Element {
       respondToInput,
       updateConversation,
       updateSettings,
+      setUsageDisplayMode: (usageDisplayMode: UsageDisplayMode) => {
+        void updateSettings({ usageDisplayMode }).catch(() => undefined);
+      },
+      clearPromptContext: () => workspaceTools.setPendingDiffContext(null),
       chooseCodexBinary,
       refreshProvider,
       connectProvider,
@@ -856,6 +862,13 @@ export default function App(): React.JSX.Element {
       runLimitResetCommand,
       loadBackgroundTasks,
   });
+  const workspaceOptions = useConversationWorkspaceOptions({
+    connection,
+    projection: conversationProjection,
+    draftConversation: draftConversation.conversation,
+    project: composerProject,
+    workspaceToolsUnavailable,
+  });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view: view === "settings" ? "settings" : "workspace",
     settingsTarget: settingsMode.settingsTarget,
@@ -881,6 +894,7 @@ export default function App(): React.JSX.Element {
     detailLoading,
     selectedMaintenanceStatus,
     selectedMaintenanceOperation,
+    workspaceOptions,
     actions: workspaceSceneActions,
     setActionError,
     setLatestContentVisible,
@@ -888,6 +902,7 @@ export default function App(): React.JSX.Element {
     activityActions,
     appUpdate,
     backendProfileActions,
+    workspaceOptions,
     busyAction,
     connection,
     conversationProjection,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
 import { agentRequestProviderName, buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
 
@@ -81,7 +81,6 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
   const [busy, setBusy] = useState(false);
   const descriptionId = `input-${request.id}-description`;
 
-  useEffect(() => { setAnswers({}); setActiveQuestionIndex(0); }, [request.id]);
   const hasAnswer = (id: string) => (answers[id] ?? []).some((value) => Boolean(value.trim()));
   const complete = request.questions.every(({ id }) => hasAnswer(id));
   const lastQuestion = activeQuestionIndex === request.questions.length - 1;

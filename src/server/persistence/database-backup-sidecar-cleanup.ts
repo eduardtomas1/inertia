@@ -6,7 +6,7 @@ import {
   removeInterruptedDatabaseFileFamily,
 } from "./database-backup-cancellation";
 
-function safeDatabaseStem(databasePath: string): string {
+export function safeDatabaseStem(databasePath: string): string {
   const raw = basename(databasePath, extname(databasePath));
   return /^[A-Za-z0-9_-]{1,80}$/u.test(raw) ? raw : "inertia";
 }
@@ -15,12 +15,12 @@ function escapedRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function backupFamilyPattern(
+export function databaseBackupPattern(
   databasePath: string,
-  kind: "partial" | "partial-sidecar" | "complete-sidecar",
+  kind: "complete" | "partial" | "partial-sidecar" | "complete-sidecar",
 ): RegExp {
   const partial = kind === "partial" || kind === "partial-sidecar";
-  const sidecar = kind !== "partial";
+  const sidecar = kind === "partial-sidecar" || kind === "complete-sidecar";
   return new RegExp(
     `^${escapedRegularExpression(safeDatabaseStem(databasePath))}-[0-9TZ]+(?:-[0-9]+)?\\.sqlite${partial ? "\\.partial" : ""}${sidecar ? "-(?:wal|shm)" : ""}$`,
     "u",
@@ -55,12 +55,12 @@ export function cleanAutomaticBackupSidecars(
   backupsDirectory: string,
 ): void {
   if (!existsSync(backupsDirectory)) return;
-  const partialPattern = backupFamilyPattern(databasePath, "partial");
-  const partialSidecarPattern = backupFamilyPattern(
+  const partialPattern = databaseBackupPattern(databasePath, "partial");
+  const partialSidecarPattern = databaseBackupPattern(
     databasePath,
     "partial-sidecar",
   );
-  const completeSidecarPattern = backupFamilyPattern(
+  const completeSidecarPattern = databaseBackupPattern(
     databasePath,
     "complete-sidecar",
   );

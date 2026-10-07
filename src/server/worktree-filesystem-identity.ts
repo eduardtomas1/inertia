@@ -33,10 +33,16 @@ function isPlainRecordWithExactKeys(
     && expectedKeys.every((key) => Object.hasOwn(value, key));
 }
 
+function isDecimal(value: unknown): value is string {
+  return typeof value === "string" && DECIMAL_IDENTITY.test(value);
+}
+
 function isPositiveDecimal(value: unknown): value is string {
-  return typeof value === "string"
-    && DECIMAL_IDENTITY.test(value)
-    && BigInt(value) > 0n;
+  return isDecimal(value) && BigInt(value) > 0n;
+}
+
+export function birthtimesMatch(left: string, right: string): boolean {
+  return left === right || left === "0" || right === "0";
 }
 
 export function isWorktreeFilesystemIdentity(
@@ -49,7 +55,7 @@ export function isWorktreeFilesystemIdentity(
   ])
     && isPositiveDecimal(value.device)
     && isPositiveDecimal(value.inode)
-    && isPositiveDecimal(value.birthtimeNs);
+    && isDecimal(value.birthtimeNs);
 }
 
 export function isWorktreeFilesystemReceipt(
@@ -62,7 +68,9 @@ export function isWorktreeFilesystemReceipt(
   ])
     && value.version === 1
     && isWorktreeFilesystemIdentity(value.worktreesDirectory)
-    && isWorktreeFilesystemIdentity(value.adminDirectory);
+    && isPositiveDecimal(value.worktreesDirectory.birthtimeNs)
+    && isWorktreeFilesystemIdentity(value.adminDirectory)
+    && isPositiveDecimal(value.adminDirectory.birthtimeNs);
 }
 
 function canonicalWorktreeFilesystemReceipt(
@@ -118,5 +126,5 @@ export function worktreeFilesystemIdentitiesEqual(
 ): boolean {
   return left.device === right.device
     && left.inode === right.inode
-    && left.birthtimeNs === right.birthtimeNs;
+    && birthtimesMatch(left.birthtimeNs, right.birthtimeNs);
 }

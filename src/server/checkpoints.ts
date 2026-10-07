@@ -12,10 +12,9 @@ import { isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
-  isGitProcessTreeTerminationFailure,
   runGit as runBoundedGit,
 } from "./git/runner";
-import { GitError } from "./git/types";
+import { GitError, isGitProcessTreeTerminationFailure } from "./git/types";
 import { headCommit } from "./git/status";
 
 export class CheckpointError extends Error {}

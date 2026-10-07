@@ -1,7 +1,6 @@
 import type {
   ChatMessage,
   Conversation,
-  GitStatusSnapshot,
   Project,
   ProviderInfo,
   ProviderRateLimit,
@@ -15,7 +14,6 @@ import { workspaceRunAttentionView } from "../../../shared/attention";
 import { CONVERSATION_ATTACHMENT_GALLERY_LIMIT } from "@shared/conversation-attachment-gallery";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import {
-  headerGitActions,
   type HeaderGitAction,
 } from "./headerGitActions";
 import {
@@ -134,21 +132,14 @@ export interface EnvironmentSummarySnapshot {
 
 interface EnvironmentSummaryInput {
   projectId: string | null;
-  projectName: string | null;
   conversationId: string | null;
   connectionStatus: ConnectionStatus;
-  gitStatus: GitStatusSnapshot | null;
   workspaceGitStatus: WorkspaceGitSnapshot | null;
   runs: readonly WorkspaceRun[];
-  subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
   liveMessages?: readonly ChatMessage[];
   attachmentGallery?: EnvironmentSummarySnapshot["attachments"];
-  projectPath?: string | null;
-  worktreePath?: string | null;
-  gitLoading?: boolean;
   gitError?: string | null;
-  gitBusy?: boolean;
   projects?: readonly Pick<Project, "id" | "name" | "path">[];
   conversations?: readonly Pick<
     Conversation,
@@ -168,11 +159,6 @@ interface EnvironmentSummaryInput {
   usageQuotaSource?: UsageQuotaSource;
 }
 
-function pathName(path: string): string {
-  const normalized = path.replaceAll("\\", "/").replace(/\/+$/u, "");
-  return normalized.split("/").filter(Boolean).at(-1) ?? path;
-}
-
 function conversationRunOwnerLabel(
   conversation: Pick<Conversation, "title" | "branch" | "worktreePath">,
 ): string {
@@ -183,149 +169,6 @@ function conversationRunOwnerLabel(
   return worktreeLabel ? `${title} (${worktreeLabel})` : title;
 }
 
-function branchSummary(
-  gitStatus: GitStatusSnapshot | null,
-  workspaceGitStatus: WorkspaceGitSnapshot | null,
-): EnvironmentSummarySnapshot["branch"] {
-  const readyRepositories = workspaceGitStatus?.repositories
-    .filter(({ state }) => state === "ready")
-    ?? [];
-  if (readyRepositories.length > 1) {
-    return {
-      label: "Branches",
-      value: `${readyRepositories.length} repositories`,
-    };
-  }
-  if (gitStatus?.isRepository) {
-    return {
-      label: "Branch",
-      value: gitStatus.branch ?? "Detached HEAD",
-    };
-  }
-  if (readyRepositories.length === 1) {
-    return {
-      label: "Branch",
-      value: readyRepositories[0]!.branch ?? "Detached HEAD",
-    };
-  }
-  return null;
-}
-
-function changesSummary(
-  gitStatus: GitStatusSnapshot | null,
-  workspaceGitStatus: WorkspaceGitSnapshot | null,
-): EnvironmentSummarySnapshot["changes"] {
-  if (workspaceGitStatus) {
-    const readyRepositories = workspaceGitStatus.repositories.filter(
-      ({ state }) => state === "ready",
-    ).length;
-    if (readyRepositories > 0) {
-      return {
-        files: workspaceGitStatus.files,
-        insertions: workspaceGitStatus.insertions,
-        deletions: workspaceGitStatus.deletions,
-        repositories: readyRepositories,
-      };
-    }
-  }
-  if (!gitStatus?.isRepository) return null;
-  return {
-    files: gitStatus.files.length,
-    insertions: gitStatus.insertions,
-    deletions: gitStatus.deletions,
-    repositories: 1,
-  };
-}
-
-function repositorySummaries(
-  gitStatus: GitStatusSnapshot | null,
-  workspaceGitStatus: WorkspaceGitSnapshot | null,
-  busy: boolean,
-  mutationUnavailableDetail: string | null,
-): EnvironmentRepositorySummary[] {
-  const mutationAction = (
-    actions: readonly HeaderGitAction[],
-    id: "commit" | "push",
-    authorityRef: string | null | undefined,
-  ): HeaderGitAction | null => {
-    const action = actions.find((candidate) => candidate.id === id) ?? null;
-    if (!action) return null;
-    if (mutationUnavailableDetail) {
-      return {
-        ...action,
-        disabled: true,
-        detail: mutationUnavailableDetail,
-      };
-    }
-    if (authorityRef) return action;
-    return {
-      ...action,
-      disabled: true,
-      detail: "Scoped Git access is unavailable. Refresh the workspace before changing this repository.",
-    };
-  };
-  if (workspaceGitStatus) {
-    return workspaceGitStatus.repositories.map((repository) => {
-      const actions = headerGitActions(repository.state === "ready" ? {
-        isRepository: true,
-        truncated: repository.truncated,
-        authorityRef: repository.authorityRef,
-        root: null,
-        branch: repository.branch,
-        upstream: repository.upstream,
-        ahead: repository.ahead,
-        behind: repository.behind,
-        hasRemote: repository.hasRemote,
-        pullRequest: repository.pullRequest,
-        files: repository.files,
-        insertions: repository.insertions,
-        deletions: repository.deletions,
-      } : null, busy);
-      return {
-        repositoryPath: repository.repositoryPath,
-        state: repository.state,
-        error: repository.error,
-        branch: repository.branch,
-        upstream: repository.upstream,
-        ahead: repository.ahead,
-        behind: repository.behind,
-        hasRemote: repository.hasRemote,
-        pullRequest: repository.pullRequest,
-        files: repository.files.length,
-        insertions: repository.insertions,
-        deletions: repository.deletions,
-        clean: repository.clean,
-        truncated: repository.truncated,
-        authorityRef: repository.authorityRef ?? null,
-        commitAction: mutationAction(actions, "commit", repository.authorityRef),
-        pushAction: mutationAction(actions, "push", repository.authorityRef),
-      };
-    });
-  }
-  if (!gitStatus?.isRepository) return [];
-  const actions = headerGitActions(gitStatus, busy);
-  return [{
-    repositoryPath: ".",
-    state: "ready",
-    error: null,
-    branch: gitStatus.branch,
-    upstream: gitStatus.upstream,
-    ahead: gitStatus.ahead,
-    behind: gitStatus.behind,
-    hasRemote: gitStatus.hasRemote,
-    pullRequest: gitStatus.pullRequest,
-    files: gitStatus.files.length,
-    insertions: gitStatus.insertions,
-    deletions: gitStatus.deletions,
-    clean: gitStatus.files.length === 0 && !gitStatus.truncated,
-    truncated: gitStatus.truncated ?? false,
-    authorityRef: gitStatus.authorityRef ?? null,
-    commitAction: mutationAction(actions, "commit", gitStatus.authorityRef),
-    pushAction: mutationAction(actions, "push", gitStatus.authorityRef),
-  }];
-}
-
-/** Upper bound on the attachment surface gallery, newest first. */
 export const ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT = CONVERSATION_ATTACHMENT_GALLERY_LIMIT;
 
 // Collecting the whole gallery costs a scan of the transcript, and the scene
@@ -565,74 +408,5 @@ export function buildWorkspaceSurfaceSummary({
     localServers,
     usage: usageSummary(usage, latestTurnId, usageProvider, usageIdentity, usageQuotaSource),
     attachments: attachmentGallery ? galleryWithLiveAttachments(attachmentGallery, liveMessages) : recentAttachments(messages),
-  };
-}
-
-export function buildEnvironmentSummary(input: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
-  const {
-    projectName, conversationId, gitStatus, workspaceGitStatus, subagents,
-    projectPath = null, worktreePath = null, gitLoading = false, gitError = null, gitBusy = false,
-  } = input;
-  const surfaces = buildWorkspaceSurfaceSummary(input);
-  const activeSubagents = conversationId
-    ? subagents
-      .filter((trace) =>
-        trace.conversationId === conversationId
-        && trace.isLive)
-      .slice(-3)
-      .map(({ id, providerName, providerRole, status }) => ({
-        id,
-        providerName,
-        providerRole,
-        status,
-      }))
-    : [];
-
-  const changes = changesSummary(gitStatus, workspaceGitStatus);
-  const workspaceScanIncomplete = Boolean(
-    workspaceGitStatus?.partial || workspaceGitStatus?.truncated,
-  );
-  const gitFailed = Boolean(
-    workspaceScanIncomplete
-    || workspaceGitStatus?.issues.length
-    || workspaceGitStatus?.repositories.some(({ state }) => state === "error"),
-  );
-  const gitState: EnvironmentSummarySnapshot["gitState"] = gitLoading
-    ? "loading"
-    : gitError || (gitFailed && !changes)
-      ? "error"
-      : changes
-        ? "ready"
-        : gitStatus || workspaceGitStatus
-          ? "unavailable"
-          : "unknown";
-  const repositories = repositorySummaries(
-    gitStatus,
-    workspaceGitStatus,
-    gitBusy,
-    gitLoading
-      ? "Git data is refreshing. Wait for the current repository scan to finish."
-      : gitError
-        ? "Git data is unavailable. Refresh the workspace before changing this repository."
-        : null,
-  );
-  const workspacePath = worktreePath ?? projectPath;
-  return {
-    projectName,
-    workspace: workspacePath ? {
-      label: worktreePath ? "Worktree" : "Project directory",
-      value: pathName(workspacePath),
-      path: workspacePath,
-    } : null,
-    openTarget: workspacePath ? {
-      name: projectName ?? pathName(workspacePath),
-      path: workspacePath,
-    } : null,
-    ...surfaces,
-    changes,
-    gitState,
-    branch: branchSummary(gitStatus, workspaceGitStatus),
-    repositories,
-    subagents: activeSubagents,
   };
 }

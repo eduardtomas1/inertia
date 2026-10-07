@@ -251,6 +251,7 @@ export interface UpsertSubagentTraceInput {
   providerStatus?: string | null;
   status: SubagentTraceStatus;
   isLive: boolean;
+  revived?: boolean;
   description: string | null;
   progress: string | null;
   result: string | null;

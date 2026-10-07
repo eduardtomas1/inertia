@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  chatResumeAvailability,
   planActionsAvailable,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
+import {
+  chatResumeAvailability,
+} from "../../src/renderer/src/components/workspace-scene/conversationWorkspaceOptions";
 import {
   conversationContinuationRefusal,
   MIXED_PROVIDER_HISTORY_MESSAGE,

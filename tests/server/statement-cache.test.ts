@@ -146,12 +146,30 @@ describe("per-connection prepared statement cache", () => {
       store.appendReasoningContent(reasoning.id, "r");
       store.assertAgentTurnIdentity(conversation.id, turn.runId, turn.id);
     };
+    const command = (): void => {
+      const activity = store.addActivity({
+        conversationId: conversation.id, runId: turn.runId, turnId: turn.id,
+        kind: "command", title: "npm test", detail: null, status: "running",
+      });
+      store.updateActivity(activity.id, { status: "completed" });
+      const run = store.createWorkspaceRun({
+        kind: "agent", projectId: project.id, conversationId: conversation.id,
+        label: "Test", detail: null, status: "running", port: null,
+      });
+      store.updateWorkspaceRun(run.id, { status: "succeeded" });
+      store.workspaceRunsForConversation(conversation.id);
+      store.conversationShell(conversation.id);
+    };
     stream();
+    command();
     store.usageForConversation(conversation.id);
     store.createConversation(project.id, "Warm project guard");
 
     const prepare = vi.spyOn(Database.prototype, "prepare");
-    for (let index = 0; index < 5; index += 1) stream();
+    for (let index = 0; index < 5; index += 1) {
+      stream();
+      command();
+    }
     expect(prepare).not.toHaveBeenCalled();
     store.usageForConversation(conversation.id);
     store.createConversation(project.id, "Cached project guard");

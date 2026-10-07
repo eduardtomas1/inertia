@@ -22,15 +22,17 @@ property of their respective owners.
   `9fdd4824d3c1e1c533a72359dd6c5f285ae9fc63`, files
   `packages/identity/mark-light.svg` and `packages/identity/mark.svg` (MIT
   repository license).
-- `kimi.svg`: Kimi's mark from `agentclientprotocol/registry` at commit
-  `bb1b44abe4f035ff75f4adfba18537b5470bd000`, file `kimi/icon.svg`, included
-  with the Moonshot-contributed Kimi agent entry in
-  <https://github.com/agentclientprotocol/registry/pull/28> (Apache-2.0
-  repository license). The SVG bytes are unchanged; local SHA-256
-  `e3354675d761f2b27651dce3afda0fcf7351c174bc19ecffe6c907b7121165d5`.
-  The 24×24 monochrome geometry scales through the shared provider icon
-  component and inverts in dark themes. The mark belongs to Moonshot AI and
-  identifies Kimi without implying affiliation or endorsement.
+- `kimi-light.svg` and `kimi-dark.svg`: the "K only" light/dark marks from
+  Moonshot's official brand guide `MoonshotAI/Branding-Guide` at commit
+  `67b20b1315f96d05f3192b24050635745abd3d90`, files
+  `scenarios/04-k-only/k-only-light.svg` and
+  `scenarios/04-k-only/k-only-dark.svg`. The SVG bytes are unchanged; local
+  SHA-256 `937616746780d0c7c4bda92820db39f503f6a3e9b7cfebe438a5fb61b62d3991`
+  (light) and `3821ae593eebce6940992f56e2fee3f55a08bbbba78713303c23ea714d44c5f9`
+  (dark). The K keeps its `#1783FF` dot in both variants, so the component
+  swaps the vendor light/dark files instead of inverting. The brand guide
+  states no open-source license; the marks belong to Moonshot AI and identify
+  Kimi without implying affiliation or endorsement.
 - `antigravity.svg`: the Google Antigravity mark from
   `agentclientprotocol/registry` at commit
   `a3d294f480dee2e506a1c51f802455d4d49783a2`, file `antigravity-acp/icon.svg`.

@@ -2,6 +2,7 @@ import { providerChildEnvironment } from "../environment";
 import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { providerAuthLaunchEnvironment, providerAuthLoginArgs } from "./auth";
+import { cursorAgentCommandArgs } from "./cursor-command";
 import { ProviderRuntimeError, type ProviderAuthLaunch, type ProviderId } from "./contracts";
 import { sameProviderInstallationIdentity } from "./installation-lease";
 import { kimiAcpProcessInvocation } from "./kimi-acp-harness";
@@ -47,7 +48,13 @@ export async function prepareProviderAuthLaunch(options: {
     const childEnvironment = terminalMethod ? { ...environment, ...terminalMethod.env } : environment;
     const invocation = terminalMethod
       ? kimiAcpProcessInvocation(executable, childEnvironment, process.platform, terminalMethod.args)
-      : providerProcessInvocation(executable, providerAuthLoginArgs(providerId), childEnvironment);
+      : providerProcessInvocation(
+        executable,
+        providerId === "cursor"
+          ? cursorAgentCommandArgs(executable, providerAuthLoginArgs(providerId))
+          : providerAuthLoginArgs(providerId),
+        childEnvironment,
+      );
     return {
       executable: invocation.command,
       args: providerPtyArguments(invocation),

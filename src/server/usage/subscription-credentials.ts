@@ -70,7 +70,7 @@ export async function cursorCredential(source: CredentialSource): Promise<Subscr
 export async function kimiCredential(source: CredentialSource, model: string | undefined): Promise<SubscriptionCredential | null> {
   const { env, platform, read } = source;
   const home = (platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
-  const share = env.KIMI_SHARE_DIR || join(home, ".kimi");
+  const share = env.KIMI_CODE_HOME || join(home, ".kimi-code");
   const toml = await read(join(share, "config.toml"));
   const legacy = toml === null ? await read(join(share, "config.json")) : null;
   if (toml === null && legacy === null) return null;

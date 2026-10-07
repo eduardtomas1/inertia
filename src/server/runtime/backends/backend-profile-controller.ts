@@ -26,6 +26,7 @@ import {
   routeSupportsNativeFastModeIdentity,
   type ModelSelection,
 } from "../../../shared/model-routing";
+import { backendEndpointIdentity } from "../../../shared/backend-endpoint-identity";
 import type { ProviderInfo } from "../../../shared/contracts";
 import {
   RecordNotFoundError,
@@ -39,7 +40,6 @@ import { probeBackendCompatibility } from "./backend-compatibility-probe";
 import {
   PROVIDER_IDS,
   backendProbeForModel,
-  endpointIdentity,
   isUsableCompatibility,
   nativeProfile,
   normalizedBaseUrl,
@@ -200,7 +200,7 @@ export class BackendProfileController {
       source: "custom",
       enabled: false,
       configurationRevision: 1,
-      endpointIdentity: endpointIdentity(baseUrl),
+      endpointIdentity: backendEndpointIdentity(baseUrl),
       preset: "custom",
       baseUrl,
       allowInsecureLocalhost: draft.allowInsecureLocalhost,
@@ -251,7 +251,7 @@ export class BackendProfileController {
       baseUrl,
       endpointIdentity: baseUrl === stored.profile.baseUrl
         ? stored.profile.endpointIdentity
-        : endpointIdentity(baseUrl!),
+        : backendEndpointIdentity(baseUrl!),
       configurationRevision: stored.profile.configurationRevision,
       enabled: update.enabled ?? stored.profile.enabled,
       updatedAt: stored.profile.updatedAt,

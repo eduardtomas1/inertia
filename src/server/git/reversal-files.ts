@@ -25,6 +25,21 @@ export function bufferHash(content: Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function crlfOnly(content: Buffer): boolean {
+  let crlf = false;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] !== 0x0a) continue;
+    if (index === 0 || content[index - 1] !== 0x0d) return false;
+    crlf = true;
+  }
+  return crlf;
+}
+
+export function alignedLineEndings(original: Buffer, current: Buffer): Buffer {
+  if (!crlfOnly(current) || !original.includes(0x0a) || original.includes(0x0d)) return original;
+  return Buffer.from(original.toString("latin1").replaceAll("\n", "\r\n"), "latin1");
+}
+
 export function textBuffer(content: Buffer): string {
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);

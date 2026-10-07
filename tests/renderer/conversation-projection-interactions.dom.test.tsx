@@ -203,6 +203,89 @@ function renderProjection(
   );
 }
 
+describe("useConversationProjection delegated task reconciliation", () => {
+  it("keeps a newer live stop over a stale detail copy at the same sequence", async () => {
+    const source = createEventSource();
+    const base = {
+      id: "trace-1",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      providerId: "codex" as const,
+      providerTaskId: "task-1",
+      providerAgentId: null,
+      parentTraceId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: null,
+      providerRole: null,
+      providerName: null,
+      providerStatus: null,
+      description: "Review the patch",
+      progress: null,
+      result: null,
+      model: null,
+      activity: null,
+      usage: null,
+      toolUseCount: null,
+      durationMs: null,
+      sequence: 3,
+      createdAt: "2026-07-28T12:00:40.000Z",
+    };
+    let resolveDetail!: (event: ServerEvent) => void;
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> =>
+      command.type === "conversation.detail.load"
+        ? await new Promise<ServerEvent>((resolve) => { resolveDetail = resolve; })
+        : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+
+    source.emit({
+      type: "agent.subagent.updated",
+      trace: { ...base, status: "cancelled", isLive: false, updatedAt: "2026-07-28T12:00:50.000Z" },
+    });
+    act(() => {
+      resolveDetail({
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "conversation.detail",
+          conversationId: primaryId,
+          state: "ready",
+          detail: {
+            conversation: conversation(primaryId),
+            agentTurns: [runningTurn()],
+            turnGitArtifacts: [],
+            messages: [],
+            activities: [],
+            subagents: [{ ...base, status: "running", isLive: true, updatedAt: "2026-07-28T12:00:45.000Z" }],
+            reasonings: [],
+            usage: [],
+            plans: [],
+            goals: [],
+            checkpoints: [],
+            reviewSummaries: [],
+            reviewStates: [],
+            reviewNotes: [],
+          },
+        },
+      } as unknown as ServerEvent);
+    });
+
+    await waitFor(() => expect(hook.result.current.subagents).toHaveLength(1));
+    expect(hook.result.current.subagents[0]).toMatchObject({ status: "cancelled", isLive: false });
+  });
+});
+
 describe("useConversationProjection pending interactions", () => {
   it("keeps the runtime listener stable across unrelated shell refreshes", () => {
     const source = createEventSource();

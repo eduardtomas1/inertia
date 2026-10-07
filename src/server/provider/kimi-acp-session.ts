@@ -8,7 +8,7 @@ import type {
   SessionModeState,
 } from "@agentclientprotocol/sdk";
 
-import { readBoundedProviderImage } from "./provider-image-read";
+import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
 import { assertAcpConfigSelection } from "./acp-config-options";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -204,17 +204,6 @@ export async function kimiPrompt(
   }
   blocks.push({ type: "text", text: prompt });
   return blocks;
-}
-
-function imageMediaType(path: string): string | undefined {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg":
-    case ".jpeg": return "image/jpeg";
-    case ".png": return "image/png";
-    case ".gif": return "image/gif";
-    case ".webp": return "image/webp";
-    default: return undefined;
-  }
 }
 
 function bounded(value: string): string {

@@ -31,7 +31,7 @@ import {
   compareGitSnapshots,
   GitError,
 } from "./git";
-import { isGitProcessTreeTerminationFailure } from "./git/runner";
+import { isGitProcessTreeTerminationFailure } from "./git/types";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;

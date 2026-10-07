@@ -337,6 +337,23 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("button", { name: "Daily work" })).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("keeps the repository label in the original path case for Windows projects", () => {
+    const windowsProject: Project = {
+      ...project,
+      id: "project-web",
+      name: "Web",
+      path: "C:\\Src\\MyMonorepo\\packages\\Web",
+      normalizedPath: "c:/src/mymonorepo/packages/web",
+      repositoryIdentity: "git:c:/src/mymonorepo/.git",
+      repositoryRoot: "c:/src/mymonorepo",
+      repositoryRelativePath: "packages/web",
+    };
+    const row = conversation("web", "Ship the web app", new Date(), { projectId: windowsProject.id });
+    renderSidebar([row], undefined, [], { projects: [windowsProject] });
+    expect(screen.getByRole("button", { name: /^Ship the web app,/ }).querySelector(".work-thread-meta"))
+      .toHaveTextContent("MyMonorepo/packages/Web");
+  });
+
   it("shows chronological rows with provider, project, repository, and branch metadata", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

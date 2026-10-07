@@ -42,6 +42,7 @@ interface ClaudeTaskState extends ClaudeAgentTool {
 
 const SUBAGENT_TASK_TYPES = new Set([
   "agent",
+  "in_process_teammate",
   "local_agent",
   "local_workflow",
   "remote_agent",

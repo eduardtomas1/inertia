@@ -38,6 +38,7 @@ import {
   type IndexEntry,
   readIndexEntry,
   restoreIndexEntry,
+  alignedLineEndings,
   textBuffer,
   updateIndexEntry,
   writeAtomic,
@@ -58,6 +59,7 @@ interface ReversalState {
   root: string;
   plan: DiffReversalPlan;
   headContent: Buffer;
+  headWorktreeContent: Buffer;
   worktreeMode: number;
   worktreeContent: Buffer;
   index: IndexEntry;
@@ -385,6 +387,7 @@ async function buildReversalState(
     headFileContent(root, file.path),
   ]);
   const worktreeContent = worktree.content;
+  const headWorktreeContent = alignedLineEndings(headContent, worktreeContent);
   textBuffer(worktreeContent);
   textBuffer(index.content);
   const stagedFile = parseUnifiedDiff(stagedPatch).files.find((candidate) => candidate.path === file.path);
@@ -428,7 +431,7 @@ async function buildReversalState(
   const worktreeAnchors = deletionAnchors(file.hunks);
   const indexAnchors = deletionAnchors(stagedFile?.hunks ?? []);
   // Validate both transformations before exposing the plan.
-  reversalText(worktreeContent, selectedWorktreeLines, worktreeAnchors, headContent);
+  reversalText(worktreeContent, selectedWorktreeLines, worktreeAnchors, headWorktreeContent);
   if (selectedIndexLines.length > 0) {
     reversalText(index.content, selectedIndexLines, indexAnchors, headContent);
   }
@@ -458,6 +461,7 @@ async function buildReversalState(
   return {
     root,
     headContent,
+    headWorktreeContent,
     worktreeMode: worktree.mode,
     worktreeContent,
     index,
@@ -599,7 +603,7 @@ async function revertDiffSelectionLocked(
     state.worktreeContent,
     state.selectedWorktreeLines,
     state.worktreeAnchors,
-    state.headContent,
+    state.headWorktreeContent,
   );
   const nextIndex = state.selectedIndexLines.length > 0
     ? reversalText(

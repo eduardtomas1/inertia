@@ -3,6 +3,7 @@ import type {
   ProviderInstallationUseTransfer,
 } from "./contracts";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
+import { cursorAgentCommandArgs } from "./cursor-command";
 import {
   providerProcessInvocation,
   providerPtyArguments,
@@ -127,9 +128,10 @@ export function providerTerminalResumeProcessInvocation(
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
 ): ProviderProcessInvocation {
+  const args = providerTerminalResumeArguments(providerId, sessionId);
   return providerProcessInvocation(
     executable,
-    providerTerminalResumeArguments(providerId, sessionId),
+    providerId === "cursor" ? cursorAgentCommandArgs(executable, args) : args,
     environment,
     platform,
   );

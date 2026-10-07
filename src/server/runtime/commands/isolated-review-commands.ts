@@ -9,6 +9,7 @@ import {
   parseUnifiedDiff,
 } from "../../../shared/diff-review";
 import type { RuntimeStore } from "../../database";
+import { PROVIDER_INFO } from "../../provider/catalog";
 import { getUnifiedDiff, GitError } from "../../git";
 import {
   buildReviewSummaryPrompt,
@@ -34,18 +35,6 @@ import {
   reconcileReviews,
   selectedReviewContext,
 } from "./review-support";
-
-function providerLabel(providerId: ProviderInfo["id"]): string {
-  return providerId === "codex"
-    ? "Codex"
-    : providerId === "claude"
-      ? "Claude"
-      : providerId === "cursor"
-        ? "Cursor"
-          : providerId === "kimi"
-            ? "Kimi Code"
-            : "OpenCode";
-}
 
 export interface IsolatedReviewCommandDependencies {
   store: RuntimeStore;
@@ -139,7 +128,7 @@ export function createIsolatedReviewCommandHandler(
               executionPrompt: assembled.executionPrompt,
             },
             label:
-              `${providerLabel(conversation.providerId)} · read-only question`,
+              `${PROVIDER_INFO[conversation.providerId].name} · read-only question`,
             detail:
               `${context.filePath} · ${context.selectedLineCount} selected lines`,
             successDetail:
@@ -458,7 +447,7 @@ export function createIsolatedReviewCommandHandler(
               executionPrompt: prompt,
             },
             label:
-              `${providerLabel(conversation.providerId)} · read-only diff summary${conversation.model ? ` · ${conversation.model}` : ""}`,
+              `${PROVIDER_INFO[conversation.providerId].name} · read-only diff summary${conversation.model ? ` · ${conversation.model}` : ""}`,
             detail:
               `${structured.files.length} ${structured.files.length === 1 ? "file" : "files"} · isolated session`,
             successDetail:

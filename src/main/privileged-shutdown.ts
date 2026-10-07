@@ -1,5 +1,3 @@
-import { stopRuntimeAndPrivateConnect } from "./runtime-shutdown-coordination.js";
-
 interface DestroyableWindow {
   isDestroyed(): boolean;
   destroy(): void;
@@ -31,66 +29,7 @@ export function finishNormalShutdownAfterCleanup(options: {
   return true;
 }
 
-export async function runPrivilegedCleanupSequence(options: {
-  stopRuntime(): Promise<boolean>;
-  stopPrivateConnect(): Promise<void>;
-  disposeTemporaryAttachments(): Promise<void>;
-  closeDurableAttachments(): Promise<void>;
-  onTemporaryAttachmentError(error: unknown): void;
-  onUnconfirmedRuntimeExit(): void;
-}): Promise<boolean> {
-  const runtimeExitConfirmed = await stopRuntimeAndPrivateConnect(
-    options.stopRuntime,
-    options.stopPrivateConnect,
-  );
-  if (runtimeExitConfirmed) {
-    await options.disposeTemporaryAttachments().catch(
-      options.onTemporaryAttachmentError,
-    );
-  } else {
-    options.onUnconfirmedRuntimeExit();
-  }
-  await options.closeDurableAttachments();
-  return runtimeExitConfirmed;
-}
-
-export function cleanupPrivilegedOwners(options: {
-  runtime: { stop(): Promise<boolean> } | null;
-  privateConnect: { shutdown(): Promise<void> } | null;
-  onRuntimeStopped(): void;
-  onRuntimeError(error: unknown): void;
-  onPrivateConnectError(error: unknown): void;
-  disposeTemporaryAttachments(): Promise<void>;
-  closeDurableAttachments(): Promise<void>;
-  onTemporaryAttachmentError(error: unknown): void;
-  onUnconfirmedRuntimeExit(): void;
-}): Promise<boolean> {
-  let privateConnectExitConfirmed = true;
-  return runPrivilegedCleanupSequence({
-    stopRuntime: async () => {
-      if (!options.runtime) return true;
-      const confirmed = await options.runtime.stop().catch((error: unknown) => {
-        options.onRuntimeError(error);
-        return false;
-      });
-      if (confirmed) options.onRuntimeStopped();
-      return confirmed;
-    },
-    stopPrivateConnect: async () => {
-      await options.privateConnect?.shutdown().catch((error: unknown) => {
-        privateConnectExitConfirmed = false;
-        options.onPrivateConnectError(error);
-      });
-    },
-    disposeTemporaryAttachments: options.disposeTemporaryAttachments,
-    closeDurableAttachments: options.closeDurableAttachments,
-    onTemporaryAttachmentError: options.onTemporaryAttachmentError,
-    onUnconfirmedRuntimeExit: options.onUnconfirmedRuntimeExit,
-  }).then((runtimeExitConfirmed) => runtimeExitConfirmed && privateConnectExitConfirmed);
-}
-
 export interface RetryablePrivilegedCleanupOptions {
-  retryUnconfirmed?: boolean;
   runtime: { stop(): Promise<boolean> } | null;
   privateConnect: { shutdown(): Promise<void> } | null;
   onRuntimeStopped(): void;
@@ -120,17 +59,10 @@ export class RetryablePrivilegedCleanup {
   cleanup(): Promise<boolean> {
     if (this.attempt) return this.attempt;
     const attempt = this.run().then((confirmed) => {
-      if (
-        !confirmed
-        && this.options.retryUnconfirmed === true
-        && this.attempt === attempt
-      ) this.attempt = null;
+      if (!confirmed && this.attempt === attempt) this.attempt = null;
       return confirmed;
     }, (error: unknown) => {
-      if (
-        this.options.retryUnconfirmed === true
-        && this.attempt === attempt
-      ) this.attempt = null;
+      if (this.attempt === attempt) this.attempt = null;
       throw error;
     });
     this.attempt = attempt;

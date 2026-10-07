@@ -5,6 +5,7 @@ import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderSteerInput } from "./contracts";
 import {
   MAX_PROVIDER_REQUEST_IMAGE_BYTES as MAX_IMAGE_BYTES,
+  imageMediaType,
   readBoundedProviderImage,
   throwIfProviderImageAborted,
 } from "./provider-image-read";
@@ -71,20 +72,3 @@ export function claudePromptReservationBytes(
     + PROMPT_RESERVATION_OVERHEAD_BYTES;
 }
 
-function imageMediaType(
-  path: string,
-): "image/jpeg" | "image/png" | "image/gif" | "image/webp" | undefined {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".gif":
-      return "image/gif";
-    case ".webp":
-      return "image/webp";
-    default:
-      return undefined;
-  }
-}

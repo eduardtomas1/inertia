@@ -15,9 +15,9 @@ import {
   type GitHubPullRequestDependencies,
 } from "./github-pull-request";
 import { inspectGitRemoteRouting } from "./remote-routing";
-import { isGitProcessTreeTerminationFailure, runGitInspection, settleGitInspections } from "./runner";
+import { runGitInspection, settleGitInspections } from "./runner";
 import { getRepositoryStatus } from "./status";
-import { GitError, type GitRepositoryStatus } from "./types";
+import { GitError, isGitProcessTreeTerminationFailure, type GitRepositoryStatus } from "./types";
 
 const MAX_GITHUB_OUTPUT_BYTES = 1024 * 1024;
 const MAX_LOCAL_FILES = 100;

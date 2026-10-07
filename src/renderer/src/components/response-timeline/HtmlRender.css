@@ -1,0 +1,81 @@
+/* Visual replies sit in the answer column, borderless on the chat's own
+   background, so a page reads as part of the reply rather than an embed. */
+.response-turn > .turn-html-renders {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--answer-max-width);
+  gap: var(--response-block-gap);
+  margin: 0 auto var(--response-block-gap);
+}
+
+.response-turn:not(.is-active) > .turn-html-renders {
+  margin-bottom: var(--settled-layer-spacing);
+}
+
+.response-turn > .turn-html-renders:last-child {
+  margin-bottom: 0;
+}
+
+.html-render {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+}
+
+.html-render-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+/* Hidden, not removed, so the page lays out and can report its height. */
+.html-render[data-html-render-state="pending"] > .html-render-frame {
+  opacity: 0;
+}
+
+.html-render-open {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+.html-render:hover > .html-render-open,
+.html-render:focus-within > .html-render-open {
+  opacity: 1;
+}
+
+.html-render-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .html-render-open {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .html-render-frame,
+  .html-render-open {
+    transition: none;
+  }
+}
+
+@container response-transcript (max-width: 760px) {
+  .response-turn > .turn-html-renders {
+    max-width: 100%;
+  }
+}

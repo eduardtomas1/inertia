@@ -83,8 +83,13 @@ class FakeWebContents extends EventEmitter {
   readonly sent: Array<{ channel: string; args: unknown[] }> = [];
   destroyed = false;
   windowOpenHandler: (() => unknown) | null = null;
+  webRtcIpHandlingPolicy: string | null = null;
 
   isDestroyed(): boolean { return this.destroyed; }
+
+  setWebRTCIPHandlingPolicy(policy: string): void {
+    this.webRtcIpHandlingPolicy = policy;
+  }
 
   send(channel: string, ...args: unknown[]): void {
     this.sent.push({ channel, args });
@@ -363,6 +368,17 @@ describe("detached chat main-process boundary", () => {
       const webview = { preventDefault: vi.fn() };
       popup.webContents.emit("will-attach-webview", webview);
       expect(webview.preventDefault).toHaveBeenCalledOnce();
+      const subframe = (url: string, isMainFrame = false) => {
+        const details = { url, isMainFrame, preventDefault: vi.fn() };
+        popup.webContents.emit("will-frame-navigate", details);
+        return details.preventDefault;
+      };
+      expect(subframe("inertia://render/55555555-5555-4555-8555-555555555555")).not.toHaveBeenCalled();
+      expect(subframe("inertia://bundle/index.html")).toHaveBeenCalledOnce();
+      expect(subframe("https://example.com/")).toHaveBeenCalledOnce();
+      // Main-frame navigation stays with the will-navigate guard.
+      expect(subframe("https://example.com/", true)).not.toHaveBeenCalled();
+      expect(popup.webContents.webRtcIpHandlingPolicy).toBe("disable_non_proxied_udp");
 
       expect(await value.ipc.invoke(
         DETACHED_CHAT_IPC.getWindowContext,

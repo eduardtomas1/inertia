@@ -342,6 +342,7 @@ describe("AgentThreadManager", () => {
         packs: [
           expect.objectContaining({ id: "inertia.frontend-workbench" }),
           expect.objectContaining({ id: "inertia.orchestration" }),
+          expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
         ],
       });
       expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
@@ -368,6 +369,7 @@ describe("AgentThreadManager", () => {
       expect(route?.properties?.providerId?.enum).toContain("kimi");
       expect(manager.capabilityManifest().packs.map(({ id }) => id)).toEqual([
         "inertia.orchestration",
+        "inertia.visual-replies",
       ]);
       expect(definition?.inputValidator?.safeParse({
         title: "Kimi verifier",

@@ -1,6 +1,7 @@
 import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
+import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SettingsSection } from "./lib/settingsTarget";
 import { useSettingsMode } from "./hooks/useSettingsMode";
@@ -1075,6 +1076,7 @@ export default function App(): React.JSX.Element {
   return (
     <UsageLimitsProvider request={request} status={connection.status}>
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
+    <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
     <AppLayout
       platform={platform}
@@ -1116,6 +1118,7 @@ export default function App(): React.JSX.Element {
       providerAuth={layoutProviderAuth}
       actions={layoutActions}
     />
+    </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>
   );

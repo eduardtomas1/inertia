@@ -16,6 +16,7 @@ export {
   activitySummaryParts,
   activityWorkKind,
   commandDisplayText,
+  hostToolActivityTitle,
   latestFailureIndex,
   resolveActivityGroupWindow,
   summarizeActivities,

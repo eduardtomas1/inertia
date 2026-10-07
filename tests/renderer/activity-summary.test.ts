@@ -8,6 +8,7 @@ import {
   activitySummaryParts,
   activityWorkKind,
   commandDisplayText,
+  hostToolActivityTitle,
   resolveActivityGroupWindow,
   summarizeActivities,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -193,5 +194,34 @@ describe("activity group summaries", () => {
     const next = resolveActivityGroupWindow(activities, { expanded: false, settled: false });
     expect(next.some(({ activity: row }) => row.id === "row-0")).toBe(false);
     expect(next.find(({ activity: row }) => row.id === "row-4")?.folded).toBe(false);
+  });
+});
+
+describe("hostToolActivityTitle", () => {
+  it("names a visual reply call in plain words however the provider reports it", () => {
+    const titles = [
+      "inertia_render_html",
+      "Tool · inertia_render_html",
+      "mcp__inertia-chat-manager__inertia_render_html",
+      "inertia-chat-manager_inertia_render_html",
+      "mcp_inertia-chat-manager_inertia_render_html",
+      "inertia-chat-manager: inertia_render_html",
+      "inertia_render_html: Weekly chart",
+    ];
+    for (const title of titles) {
+      expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "completed" })))
+        .toBe("Rendered a page");
+      expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "running" })))
+        .toBe("Rendering a page");
+    }
+  });
+
+  it("keeps the provider's title for anything else", () => {
+    expect(hostToolActivityTitle(activity("a", { kind: "tool", title: "inertia_browser_tabs" }))).toBeNull();
+    expect(hostToolActivityTitle(activity("a", { kind: "tool", title: "Read src/index.ts" }))).toBeNull();
+    expect(hostToolActivityTitle(activity("a", { kind: "command", title: "inertia_render_html" }))).toBeNull();
+    expect(hostToolActivityTitle(activity("a", { kind: "tool", title: "mcp__other__inertia_render_html" }))).toBeNull();
+    expect(hostToolActivityTitle(activity("a", { kind: "tool", title: "other_inertia_render_html" }))).toBeNull();
+    expect(hostToolActivityTitle(activity("a", { kind: "tool", title: "inertia-chat-manager_inertia_browser_tabs" }))).toBeNull();
   });
 });

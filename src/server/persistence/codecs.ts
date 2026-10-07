@@ -2,6 +2,7 @@ import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
+import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import {
   AGENT_RUN_STATES,
@@ -758,10 +759,13 @@ export function rendererSafeAttachments(
 export function messageFromRow(row: MessageRow): ChatMessage {
   let compaction: unknown;
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
+  let htmlRender: unknown;
+  try { htmlRender = row.role === "system" && row.html_render_json ? JSON.parse(row.html_render_json) : undefined; } catch { /* Malformed optional metadata stays unprojected. */ }
   return {
     ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
+    ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     turnId: row.turn_id,

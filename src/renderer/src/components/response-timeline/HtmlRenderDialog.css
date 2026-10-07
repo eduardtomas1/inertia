@@ -1,0 +1,62 @@
+/* The dialog shrink-wraps the page: the header plus the frame, whose height
+   follows the page's reported content height (at least 240px) and shrinks to
+   the viewport cap, past which the page scrolls inside the frame. */
+.html-render-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 100%);
+  max-height: min(90dvh, calc(100dvh - clamp(16px, 6vw, 56px)));
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: clamp(12px, 2vw, 18px);
+  color: var(--text);
+  background: var(--conversation-canvas-surface);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
+}
+
+.html-render-dialog:focus {
+  outline: none;
+}
+
+.html-render-dialog > .attachment-preview-header {
+  flex: none;
+}
+
+.html-render-dialog-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: calc(var(--ui-font-main) + var(--platform-readability-adjustment));
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-render-dialog-frame {
+  display: block;
+  flex: 0 1 auto;
+  width: 100%;
+  /* Content plus the 16px top and bottom padding. */
+  height: max(240px, calc(var(--html-render-content-height, 360px) + 32px));
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 16px clamp(12px, 3vw, 28px);
+  border: 0;
+  background: transparent;
+}
+
+.html-render-dialog-guard {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 560px) {
+  .html-render-dialog {
+    border-radius: 12px;
+  }
+}

@@ -226,6 +226,8 @@ export interface ChatMessage {
   privateConnectDeviceId?: string;
   /** Confirmed manual compaction, scoped to this conversation without a fabricated turn. */
   compaction?: import("../context-compaction").ContextCompaction;
+  /** A visual reply the agent published in this turn; system role, always turn-scoped. */
+  htmlRender?: import("../html-render").HtmlRenderReference;
   id: string;
   conversationId: string;
   /** System messages may be conversation-scoped; user/assistant turn messages are explicit. */

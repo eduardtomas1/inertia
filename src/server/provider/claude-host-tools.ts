@@ -59,7 +59,7 @@ export function createClaudeHostTools(
         annotations: {
           readOnlyHint: definition.readOnly,
           destructiveHint: definition.destructive === true,
-          idempotentHint: definition.readOnly,
+          idempotentHint: definition.idempotent ?? definition.readOnly,
           openWorldHint: false,
         },
       },

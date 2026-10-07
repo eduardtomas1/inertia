@@ -50,6 +50,8 @@ import {
   type HarnessCapabilityRegistry,
 } from "./harness-capabilities";
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
+import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
+import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
 import type { HiddenProviderInstruction } from "./turns/request-context";
@@ -359,12 +361,14 @@ export class AgentThreadManager {
   private readonly mutations = new ManagedMutationQueue();
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
   private readonly capabilities: HarnessCapabilityRegistry;
+  private readonly htmlRenders: HtmlRenderHostTool;
 
   constructor(private readonly dependencies: AgentThreadManagerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.agentBrowser = dependencies.agentBrowser
       ? new AgentBrowserHostTools(dependencies.agentBrowser)
       : undefined;
+    this.htmlRenders = new HtmlRenderHostTool(dependencies);
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
@@ -419,6 +423,7 @@ export class AgentThreadManager {
     try {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
+      if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
           return failure("browser_disabled", "Agent browser access is disabled in this project's settings.");

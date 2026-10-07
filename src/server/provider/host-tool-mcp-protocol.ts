@@ -33,7 +33,7 @@ export function providerMcpTools(
   definitions: readonly ProviderHostToolDefinition[],
   options: ProviderMcpToolOptions = {},
 ): Tool[] {
-  return definitions.map(({ name, description, inputSchema, readOnly, destructive }) => {
+  return definitions.map(({ name, description, inputSchema, readOnly, destructive, idempotent }) => {
     if (inputSchema.type !== "object") {
       throw new Error(`Inertia host tool '${name}' must accept an object.`);
     }
@@ -44,7 +44,7 @@ export function providerMcpTools(
       annotations: {
         readOnlyHint: readOnly,
         destructiveHint: options.destructiveHints === true && destructive === true,
-        idempotentHint: readOnly,
+        idempotentHint: idempotent ?? readOnly,
         openWorldHint: false,
       },
     };

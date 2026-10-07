@@ -45,6 +45,7 @@ import {
   activityWorkKind,
   buildTurnExecutionStream,
   formatElapsed,
+  hostToolActivityTitle,
   isInterruptedActivity,
   resolveActivityGroupWindow,
   summarizeActivities,
@@ -291,12 +292,13 @@ export const ActivityRow = memo(function ActivityRow({
     && usesActivityOrbs(indicator)
     ? resolveOrbMotion(indicator, orbMotionForActivity(activity, executionCategory))
     : null;
+  const readableTitle = hostToolActivityTitle(activity) ?? activity.title;
   const { leadingTarget, verb, trailingTarget } = commandLine
     ? { leadingTarget: "", verb: commandLine.verb, trailingTarget: commandLine.target }
-    : splitActivityTitle(activity.title, severity);
+    : splitActivityTitle(readableTitle, severity);
   const visibleTitle = commandLine
     ? `${commandLine.verb} ${commandLine.target}`
-    : activity.title;
+    : readableTitle;
   const spokenState = interrupted
     ? "Interrupted"
     : severity === "failure"

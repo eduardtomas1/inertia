@@ -249,6 +249,27 @@ export function activitySummaryParts(
   }];
 }
 
+// Providers report an Inertia host tool by its wire name, bare, qualified by
+// the MCP server name (`mcp__inertia-chat-manager__` for Claude,
+// `inertia-chat-manager_` for OpenCode), or followed by an argument summary.
+// The few tools a reader sees in the work log get plain words.
+const HOST_TOOL_TITLE =
+  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
+const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string]>> = {
+  inertia_render_html: ["Rendering a page", "Rendered a page"],
+};
+
+/** A readable title for a known Inertia host tool call, or null to keep the provider's title. */
+export function hostToolActivityTitle(
+  activity: Pick<AgentActivity, "kind" | "title" | "status">,
+): string | null {
+  if (activity.kind !== "tool") return null;
+  const name = HOST_TOOL_TITLE.exec(activity.title.trim())?.[1];
+  const labels = name === undefined ? undefined : HOST_TOOL_LABELS[name];
+  if (!labels) return null;
+  return activity.status === "running" ? labels[0] : labels[1];
+}
+
 export function activitySummaryLabel(parts: readonly ActivitySummaryPart[]): string {
   return parts.map(({ count, label }) => `${count} ${label}`).join(", ");
 }

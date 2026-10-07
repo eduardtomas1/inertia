@@ -28,6 +28,8 @@ import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.j
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator, type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
+import { RuntimeHtmlRenderCoordinator } from "./runtime-html-render-coordinator.js";
+import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
@@ -98,6 +100,7 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: RuntimeSupervisorTimer | null = null;
   private readonly startupRecovery: RuntimeSupervisorStartupRecovery;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
+  private readonly htmlRenders: RuntimeHtmlRenderCoordinator;
   private readonly privateConnectRequests: RuntimePrivateConnectRequestCoordinator;
   private readonly databaseRecoveryRequests: RuntimeDatabaseRecoveryCoordinator;
   private readonly updatePreparation: RuntimeUpdatePreparationCoordinator;
@@ -235,6 +238,13 @@ export class RuntimeSupervisor {
       clearTimer: this.clearTimer,
       post: (record, command) => this.post(record.child, command),
     });
+    this.htmlRenders = new RuntimeHtmlRenderCoordinator({
+      requestTimeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      readyRecord: () => this.readyRuntimeRecord(),
+      post: (record, command) => this.post(record.child, command),
+    });
     this.updatePreparation = new RuntimeUpdatePreparationCoordinator({
       timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
       setTimer: this.setTimer,
@@ -333,6 +343,10 @@ export class RuntimeSupervisor {
       this.post(record.child, { type: "runtime.resolve-project-path", requestId, request });
     });
   }
+  /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */
+  readHtmlRender(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
+    return this.htmlRenders.read(renderId);
+  }
   prepareForUpdate(): Promise<RuntimeUpdatePreparationResult> {
     return this.updatePreparation.prepareCurrent();
   }
@@ -378,7 +392,7 @@ export class RuntimeSupervisor {
     subject: PrivateConnectRuntimeAuthorization,
     request: PrivateConnectPromptRequest,
   ): Promise<RuntimePrivateConnectPromptPreparation | PrivateConnectRuntimeResponse> {
-    const record = this.privateConnectPromptRecord();
+    const record = this.readyRuntimeRecord();
     return record instanceof Error
       ? Promise.reject(record)
       : this.privateConnectPrompts.prepare(record, subject, request);
@@ -399,7 +413,7 @@ export class RuntimeSupervisor {
     preparationId: string,
     onPosted?: () => void,
   ): Promise<PrivateConnectRuntimeResponse> {
-    const record = this.privateConnectPromptRecord();
+    const record = this.readyRuntimeRecord();
     return record instanceof Error
       ? Promise.reject(record)
       : this.privateConnectPrompts.commit(
@@ -410,7 +424,7 @@ export class RuntimeSupervisor {
           onPosted,
         );
   }
-  private privateConnectPromptRecord(): RuntimeProcessRecord | Error {
+  private readyRuntimeRecord(): RuntimeProcessRecord | Error {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
       return runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode);
@@ -683,6 +697,7 @@ export class RuntimeSupervisor {
       else pending.reject(new Error(event.message));
       return;
     }
+    if (this.htmlRenders.handle(record, event)) return;
     if (event.type === "runtime.private-connect-response") {
       this.privateConnectRequests.handle(record, event);
       return;
@@ -1170,6 +1185,7 @@ export class RuntimeSupervisor {
       this.clearTimer(pending.timer);
       pending.reject(new Error(message));
     });
+    this.htmlRenders.reject(record, message);
   }
   private rejectPrivateConnectRuntimeRequests(
     record: RuntimeProcessRecord | null,

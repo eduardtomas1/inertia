@@ -1,5 +1,6 @@
 import { snapshotSourceSchema } from "../snapshots";
 import { isContextCompaction } from "../context-compaction";
+import { isHtmlRenderReference } from "../html-render-reference";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES } from "../attachments";
 import type { ChatMessage } from "./agent";
 
@@ -44,6 +45,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
   )) return false;
 
   return (value.compaction === undefined || (value.role === "system" && value.turnId === null && isContextCompaction(value.compaction)))
+    && (value.htmlRender === undefined
+      || (value.role === "system" && typeof value.turnId === "string" && isHtmlRenderReference(value.htmlRender)))
     && (value.privateConnectDeviceId === undefined
       || (value.role === "user" && isMessageOriginDeviceId(value.privateConnectDeviceId)))
     && (value.turnId === null || stringField(value, "turnId"))

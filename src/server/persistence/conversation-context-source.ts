@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import type { ProviderId } from "../../shared/contracts";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES } from "../../shared/conversation-context";
+import { htmlRenderContextLine, isHtmlRenderTitle } from "../../shared/html-render-reference";
 import type { MessageRow } from "./rows";
 import { readBoundedMessageTail, readBoundedMessageText } from "./bounded-message-text";
 
@@ -13,6 +14,9 @@ const MAX_SOURCE_TAIL_BYTES = MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
 export type ConversationContextSourceRow = Pick<
   MessageRow, "id" | "turn_id" | "role" | "created_at" | "attachments_json" | "content"
 > & { contentTruncated: boolean; tail: string | null };
+
+export const CONVERSATION_CONTEXT_MESSAGE_SQL = `(messages.role IN ('user', 'assistant')
+  OR (messages.role = 'system' AND messages.html_render_json IS NOT NULL AND messages.turn_id IS NOT NULL))`;
 
 export interface ContinuationRouteFilter {
   backendProfileId: string;
@@ -63,7 +67,18 @@ export function continuationRouteSql(route?: ContinuationRouteFilter): {
 
 type StoredSourceRow = Omit<ConversationContextSourceRow, "content" | "contentTruncated" | "tail"> & {
   content: Buffer;
+  page_title?: unknown;
 };
+
+function pageRow({ page_title: title, ...row }: StoredSourceRow): ConversationContextSourceRow {
+  return {
+    ...row,
+    role: "assistant",
+    content: isHtmlRenderTitle(title) ? htmlRenderContextLine(title) : "[page]",
+    contentTruncated: false,
+    tail: null,
+  };
+}
 
 function sourceRowReader(database: Database.Database): (row: StoredSourceRow) => ConversationContextSourceRow {
   const chunks = database.prepare(`
@@ -108,9 +123,10 @@ export function* conversationContextSourceRows(
   const routed = continuationRouteSql(route);
   const rows = database.prepare(`
     SELECT id, turn_id, role, created_at, attachments_json,
-      COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content
+      COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content,
+      CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title
     FROM messages
-    WHERE conversation_id = ? AND role IN ('user', 'assistant')
+    WHERE conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
       ${messageIds ? `AND id IN (${messageIds.map(() => "?").join(", ")})` : ""}
       ${excludedMessageId ? "AND id <> ?" : ""}
       ${routed.sql}
@@ -125,7 +141,7 @@ export function* conversationContextSourceRows(
     limit,
   ) as Iterable<StoredSourceRow>;
   const read = sourceRowReader(database);
-  for (const row of rows) yield read(row);
+  for (const row of rows) yield row.role === "system" ? pageRow(row) : read(row);
 }
 
 export function conversationContextOpeningRow(

@@ -85,6 +85,68 @@ not currently visible to the provider model. The pack tells the model this
 directly so it cannot quietly convert “capture succeeded” into a visual claim.
 The current Browser also has no agent-owned viewport-resize command.
 
+`inertia.visual-replies` adds one tool, `inertia_render_html`, for every
+provider that has Inertia host tools. The agent passes one self-contained HTML
+document (at most 256 KiB of UTF-8), a title of at most 120 characters without
+control characters, and an optional initial frame height from 80 to 2000 CSS
+pixels (default 360). The tool description carries the layout and theme
+guidance, including the CSS custom properties Inertia injects, so the pack adds
+no private instruction text. The tool is read-only and non-destructive: it
+changes nothing in the workspace and never asks for approval. It is not
+advertised as idempotent, because every call stores another page.
+
+A call is accepted only from the exact active source turn, and a turn holds at
+most eight pages. In one database transaction Inertia checks that limit, then
+stores the page in `html_renders` and a turn-scoped system
+message whose `htmlRender` reference holds the render id, title, and height;
+the message text is a plain placeholder for older clients. The message reaches
+clients through the ordinary `conversation.message.persisted` event, and the
+model receives `{ rendered, renderId, title, message }`, where `message` asks
+it to say in one sentence what the page shows, because some clients and later
+turns see only text, and otherwise to add only what the page does not say. Arguments that fail validation, an
+oversized page, a settled or cancelled turn, a turn already at its page limit,
+and a storage failure each return `{ error: { code, message } }` with
+`invalid_arguments`, `html_too_large`, `turn_not_active` (or the shared
+`host_tool_failed` when the turn had already settled before dispatch),
+`call_cancelled`, `render_limit_reached`, or `render_not_saved`.
+
+The page is served only by the main process from the stored row, inside a
+sandboxed frame whose policy blocks fetches, remote resources, frames, workers
+and forms. The frame cannot navigate away: the window's own policy refuses
+other schemes and the main process refuses any subframe navigation but a visual
+reply. Windows that show pages disable non-proxied WebRTC UDP and the page
+response turns off DNS prefetching. WebRTC over TCP is not blocked: a page
+script can still reach a TURN relay at any address, which the Electron
+scenario shows against a local listener (a `<link rel="preconnect">` to the
+same kind of listener does not connect). A link opens in the system browser
+only for a click the frame's bootstrap saw on a link, at most once per second,
+while the frame has focus and a user gesture; the bootstrap runs before any
+page script and proves itself with a token the page cannot read. A page
+that no longer exists is served as a themed "no longer available" notice (404).
+that no longer exists is served as a themed "no longer available" notice (404).
+When the runtime is not running or does not answer in time, the page is served
+as a themed "temporarily unavailable" notice (503), and the chat reloads that
+frame the next time it reconnects to the runtime. The
+page itself is never replayed to a model. Shared chat context, continuation
+history for another model or a fresh native session, and Private Connect carry
+a visual reply only as a one-line `[page: <title>]` entry in the assistant's
+place; message search leaves it out like other system messages. Deleting a
+chat deletes its pages. The provider MCP HTTP bridge and the stdio proxy accept
+request bodies and lines up to 1,600 KiB: every JSON encoder writes a control
+character as a six-byte `\u00XX` escape, so a maximum page can reach six times
+its size on the wire, and 64 KiB more covers the title and the JSON-RPC
+envelope. A body over that bound fails only its own call, before the tool runs:
+the HTTP bridge answers 413, and the stdio proxy answers with a JSON-RPC error
+when the request id is among the line's leading `jsonrpc`, `method`, and `id`
+members (otherwise it drops the line unanswered) and keeps serving the turn's
+other calls.
+
+Codex App Server registers dynamic tools only when a thread starts, and Inertia
+has no capability epoch that would restart an existing thread for a new tool.
+Codex chats created before this pack therefore see `inertia_render_html` from
+their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
+tools for each turn and see it from their next turn.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider

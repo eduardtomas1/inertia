@@ -5,6 +5,7 @@ import {
   AGENT_BROWSER_TOOL_DEFINITIONS,
   RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "./agent-browser-host-tools";
+import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
 import {
   HarnessCapabilityRegistry,
   type HarnessCapabilityTool,
@@ -87,6 +88,19 @@ export function createInertiaHarnessCapabilities(
         "semantic-browser-loop",
         "current-viewport-regression",
       ],
+    },
+  });
+  packs.push({
+    id: "inertia.visual-replies",
+    revision: 1,
+    title: "Inertia visual replies",
+    summary: "One sandboxed, self-contained HTML page per call, shown inline above the turn's written reply.",
+    instructions: [],
+    tools: [{ definition: HTML_RENDER_TOOL_DEFINITION, invoke: input.invoke }],
+    evaluation: {
+      tags: ["frontend", "visual-replies"],
+      evidenceKinds: ["host-tool-result"],
+      scenarioIds: ["inline-rendered-page", "exact-turn-render"],
     },
   });
   return new HarnessCapabilityRegistry(packs);

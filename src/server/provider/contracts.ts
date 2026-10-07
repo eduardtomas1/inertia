@@ -419,6 +419,7 @@ export interface ProviderHostToolDefinition {
   inputValidator?: ZodType<Record<string, unknown>>;
   readOnly: boolean;
   destructive?: boolean;
+  idempotent?: boolean;
 }
 
 export interface ProviderHostToolApprovalRequest {

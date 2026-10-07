@@ -6,10 +6,19 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import { HTML_RENDER_MAX_HTML_BYTES } from "../../shared/html-render";
 import { handleProviderMcpBody, type ProviderMcpToolOptions } from "./host-tool-mcp-protocol";
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 
-const MAX_MCP_BODY_BYTES = 128 * 1024;
+/**
+ * Fits one maximum visual-reply page however the provider encodes it. Every
+ * JSON encoder writes a control character as a six-byte `\u00XX` escape, so a
+ * page can reach six times its size on the wire; 64 KiB more covers its title
+ * and the JSON-RPC envelope.
+ */
+export const MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES = 6 * HTML_RENDER_MAX_HTML_BYTES + 64 * 1024;
+export const PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE =
+  `MCP request body exceeds the ${MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES / 1024} KiB limit.`;
 const MCP_BODY_TIMEOUT_MS = 10_000;
 const MAX_CONCURRENT_MCP_REQUESTS = 8;
 
@@ -62,9 +71,26 @@ function empty(response: ServerResponse, status: number): void {
 function closeUnreadRequest(
   request: IncomingMessage,
   response: ServerResponse,
-): void {
+): Promise<void> {
   response.setHeader("Connection", "close");
-  request.resume();
+  return new Promise((resolve) => {
+    if (request.readableEnded || request.destroyed) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      request.destroy();
+      done();
+    }, MCP_BODY_TIMEOUT_MS);
+    timer.unref();
+    request.once("end", done);
+    request.once("close", done);
+    request.resume();
+  });
 }
 
 function equalBearer(header: string | undefined, token: string): boolean {
@@ -81,7 +107,7 @@ async function readBody(
   signal: AbortSignal,
 ): Promise<BodyResult> {
   const declared = Number.parseInt(request.headers["content-length"] ?? "", 10);
-  if (Number.isFinite(declared) && declared > MAX_MCP_BODY_BYTES) {
+  if (Number.isFinite(declared) && declared > MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES) {
     return { kind: "too-large" };
   }
   if (signal.aborted) return { kind: "cancelled" };
@@ -101,7 +127,7 @@ async function readBody(
     };
     const onData = (chunk: Buffer): void => {
       size += chunk.byteLength;
-      if (size > MAX_MCP_BODY_BYTES) {
+      if (size > MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES) {
         finish({ kind: "too-large" });
         request.resume();
         return;
@@ -163,7 +189,7 @@ export function createProviderHostToolMcpSession(
         || request.headers.origin !== undefined
         || !equalBearer(request.headers.authorization, token)
       ) {
-        closeUnreadRequest(request, response);
+        void closeUnreadRequest(request, response);
         json(response, 401, {
           jsonrpc: "2.0",
           id: null,
@@ -172,13 +198,13 @@ export function createProviderHostToolMcpSession(
         return;
       }
       if (request.method !== "POST") {
-        closeUnreadRequest(request, response);
+        void closeUnreadRequest(request, response);
         response.setHeader("Allow", "POST");
         empty(response, 405);
         return;
       }
       if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
-        closeUnreadRequest(request, response);
+        void closeUnreadRequest(request, response);
         json(response, 415, {
           jsonrpc: "2.0",
           id: null,
@@ -187,7 +213,7 @@ export function createProviderHostToolMcpSession(
         return;
       }
       if (active >= MAX_CONCURRENT_MCP_REQUESTS) {
-        closeUnreadRequest(request, response);
+        await closeUnreadRequest(request, response);
         json(response, 429, {
           jsonrpc: "2.0",
           id: null,
@@ -200,16 +226,16 @@ export function createProviderHostToolMcpSession(
         const body = await readBody(request, controller.signal);
         if (body.kind === "cancelled") return;
         if (body.kind === "too-large") {
-          closeUnreadRequest(request, response);
+          await closeUnreadRequest(request, response);
           json(response, 413, {
             jsonrpc: "2.0",
             id: null,
-            error: { code: -32600, message: "MCP request body exceeds the 128 KiB limit." },
+            error: { code: -32600, message: PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE },
           });
           return;
         }
         if (body.kind === "timeout") {
-          closeUnreadRequest(request, response);
+          void closeUnreadRequest(request, response);
           json(response, 408, {
             jsonrpc: "2.0",
             id: null,

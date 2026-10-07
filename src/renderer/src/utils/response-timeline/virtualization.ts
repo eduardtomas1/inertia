@@ -118,6 +118,7 @@ function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
   return 1
     + turn.assistantMessages.length / 8
     + turn.activities.length / 24
+    + turn.htmlRenders.length / 4
     + messageChars / 40_000
     + detailChars / 50_000;
 }
@@ -523,6 +524,9 @@ function estimateTurnRowSize(
 
   const systemHeight = turn.systemMessages.reduce((total, message) =>
     total + 35 + estimatedWrappedLines(message.content, answerColumns) * 20, 0);
+  // Frames are sized in CSS pixels, so they stay outside the typography scale.
+  const htmlRenderHeight = turn.htmlRenders.reduce((total, message, index) =>
+    total + (message.htmlRender?.height ?? 0) + (index > 0 ? 12 : 0), 0);
   const answerContent = turn.terminalAssistantMessage?.content ?? "";
   const answerHeight = answerContent
     ? 26 + estimateMarkdownHeight(answerContent, answerColumns)
@@ -567,6 +571,7 @@ function estimateTurnRowSize(
   const orderedSections = [
     { kind: "request", height: requestHeight },
     { kind: "execution", height: executionSectionHeight },
+    { kind: "html-renders", height: htmlRenderHeight },
     { kind: "answer", height: answerHeight },
     {
       kind: "metadata",
@@ -601,7 +606,7 @@ function estimateTurnRowSize(
     + sectionSpacing;
   return Math.max(
     Math.ceil((190 - 36) * typographyScale + virtualRowGap),
-    Math.ceil(contentHeight * typographyScale + virtualRowGap),
+    Math.ceil(contentHeight * typographyScale + htmlRenderHeight + virtualRowGap),
   );
 }
 

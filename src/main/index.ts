@@ -119,6 +119,7 @@ import { SecureFileBroker } from "./secure-file-broker.js";
 import { initialPackageSmokeEnvironment, writePackageSmokeStage } from "./package-smoke-environment.js";
 import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
 import { APP_HOST, createAppProtocolRegistrar } from "./app-protocol.js";
+import { guardFramedPages } from "./frame-navigation-policy.js";
 import { initializeInertiaReleaseChannel, releaseRuntimeOverride, temporaryAttachmentRoot } from "./release-channel.js";
 import {
   activateThreadNotification,
@@ -803,6 +804,7 @@ async function createMainWindow(): Promise<void> {
     }
   });
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  guardFramedPages(window.webContents, releaseChannel.protocolScheme);
   window.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces();
   });

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { AppUpdater, ProgressInfo, UpdateCheckResult } from "electron-updater";
 import {
   prepareAppImageUpdate,
-  recoverAppImageUpdate,
   type PreparedAppImageUpdate,
 } from "./appimage-installed-identity.js";
 import {
@@ -146,13 +145,12 @@ export async function loadElectronAppUpdater(
 ): Promise<AppUpdaterAdapter> {
   const platform = options.platform ?? process.platform;
   const environment = options.environment ?? process.env;
-  let activeAppImagePath = options.activeAppImagePath ?? environment.APPIMAGE;
+  const activeAppImagePath = options.activeAppImagePath ?? environment.APPIMAGE;
   if (platform === "linux") {
     if (!activeAppImagePath) throw new Error("The active AppImage path is unavailable.");
-    activeAppImagePath = await recoverAppImageUpdate({
-      channel,
-      activePath: activeAppImagePath,
-    });
+    // Startup owns AppImage recovery under the singleton lock. This lazy load
+    // can run during candidate admission, before its transaction is finalized;
+    // a background check must never roll that live candidate back.
     environment.APPIMAGE = activeAppImagePath;
   }
   const [moduleNamespace, electron] = await Promise.all([
@@ -303,13 +301,16 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     let expectedPreparation: AppUpdateHandoffPreparation | null = null;
     let snapshot: AppUpdateHandoffSnapshot | null = null;
     try {
+      // An admitted candidate can still be finalizing its previous update.
+      // Its handoff owns recovery; staging another download must not undo it.
+      journal = new AppUpdateHandoffJournal(context.handoffDirectory);
+      if (journal.current()) return false;
       transaction = await prepareAppImageUpdate({
         channel: this.channel,
         activePath: this.activeAppImagePath,
         downloadedPath: this.downloadedInstallerPath,
         operationId,
       });
-      journal = new AppUpdateHandoffJournal(context.handoffDirectory);
       const now = Date.now();
       expectedPreparation = {
         operationId,

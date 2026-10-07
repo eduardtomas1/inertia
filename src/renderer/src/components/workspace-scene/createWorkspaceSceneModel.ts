@@ -440,22 +440,15 @@ export function createWorkspaceSceneModel({
     : null;
   const environmentSummary = buildWorkspaceSurfaceSummary({
     projectId: project?.id ?? null,
-    projectName: project?.name ?? null,
     conversationId: conversation?.id ?? null,
     connectionStatus: connection.status,
-    gitStatus: workspaceTools.gitStatus,
     workspaceGitStatus: workspaceTools.workspaceGitStatus,
     runs: connection.snapshot?.runs ?? [],
-    subagents: projection.subagents,
     messages: projection.messages,
     liveMessages: projection.liveMessages,
     attachmentGallery: detailState?.state === "ready" && detailState.conversationId === conversation?.id
       ? detailState.detail.attachmentGallery : undefined,
-    projectPath: project?.normalizedPath ?? null,
-    worktreePath: conversation?.worktreePath ?? null,
-    gitLoading: workspaceTools.gitLoading,
     gitError: workspaceTools.gitError,
-    gitBusy: Boolean(busyAction?.startsWith("git.")),
     projects: snapshotProjects,
     conversations: snapshotConversations,
     usage: projection.usage,

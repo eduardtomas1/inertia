@@ -116,7 +116,6 @@ describe("runtime conversation references", () => {
     expect(sceneSource).toContain(
       `"Available after the first message creates this chat's workspace."`,
     );
-    expect(sceneSource).toContain("gitLoading: workspaceTools.gitLoading");
     expect(sceneSource).toContain("gitError: workspaceTools.gitError");
   });
 

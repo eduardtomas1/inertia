@@ -1,19 +1,24 @@
 // @inertia-e2e-resource isolated
+import { createServer, type AddressInfo, type Server } from "node:net";
+
 import { expect, test, type Frame, type Page, type TestInfo } from "@playwright/test";
-import { createAppFixture } from "./support/app-fixture";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
+  HOSTILE_PAGE_LINK,
+  HOSTILE_PAGE_TITLE,
   HTML_RENDER_ANSWER,
   HTML_RENDER_HEADING,
   HTML_RENDER_LINK,
   HTML_RENDER_TABLE_TITLE,
   HTML_RENDER_TITLE,
+  seedHostileHtmlRenderConversation,
   seedHtmlRenderConversation,
 } from "./support/html-render-fixture";
 
 const INLINE_FRAME = `[data-testid="html-render-frame"][title="${HTML_RENDER_TITLE}"]`;
 
-async function inlineFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(INLINE_FRAME).elementHandle();
+async function inlineFrame(page: Page, selector = INLINE_FRAME): Promise<Frame> {
+  const handle = await page.locator(selector).elementHandle();
   const frame = await handle?.contentFrame();
   await handle?.dispose();
   if (!frame) throw new Error("The visual reply frame has no document.");
@@ -241,6 +246,144 @@ test("shows a sandboxed, themed visual reply above the answer and keeps it acros
     expect(await app.electronApp.evaluate(() =>
       Reflect.get(globalThis, "__inertiaHtmlRenderOpened") as string[])).toEqual([HTML_RENDER_LINK]);
   } finally {
+    await app.close();
+  }
+});
+
+async function captureOpenedLinks(app: AppFixture): Promise<() => Promise<string[]>> {
+  await app.electronApp.evaluate(({ shell }) => {
+    const opened: string[] = [];
+    Reflect.set(globalThis, "__inertiaHtmlRenderOpened", opened);
+    Reflect.set(shell, "openExternal", async (url: string) => { opened.push(url); });
+  });
+  return async () => await app.electronApp.evaluate(() =>
+    [...Reflect.get(globalThis, "__inertiaHtmlRenderOpened") as string[]]);
+}
+
+async function captureFrameNavigations(app: AppFixture): Promise<() => Promise<string[]>> {
+  await app.electronApp.evaluate(({ BrowserWindow }) => {
+    const attempts: string[] = [];
+    Reflect.set(globalThis, "__inertiaFrameNavigations", attempts);
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.on("will-frame-navigate", (details) => {
+        if (!details.isMainFrame) attempts.push(details.url);
+      });
+    }
+  });
+  return async () => await app.electronApp.evaluate(() =>
+    [...Reflect.get(globalThis, "__inertiaFrameNavigations") as string[]]);
+}
+
+async function listener(): Promise<{ server: Server; port: number; connections: () => number }> {
+  let connections = 0;
+  const server = createServer((socket) => {
+    connections += 1;
+    socket.destroy();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { server, port: (server.address() as AddressInfo).port, connections: () => connections };
+}
+
+async function timed(work: Promise<unknown>): Promise<number> {
+  const started = Date.now();
+  await work;
+  return Date.now() - started;
+}
+
+test("keeps a hostile page inside its frame", async ({ browserName: _browserName }) => {
+  test.setTimeout(180_000);
+  const app = await createAppFixture({
+    name: "html-render-hostile",
+    initialState: "conversation",
+    beforeLaunch: seedHostileHtmlRenderConversation,
+  });
+  const { page } = app;
+  const preconnect = await listener();
+  const turn = await listener();
+  const navigation = await listener();
+  try {
+    const opened = await captureOpenedLinks(app);
+    const navigations = await captureFrameNavigations(app);
+    const selector = `[data-testid="html-render-frame"][title="${HOSTILE_PAGE_TITLE}"]`;
+    await expect(page.getByRole("figure", { name: HOSTILE_PAGE_TITLE, exact: true }))
+      .toHaveAttribute("data-html-render-state", "ready");
+    const content = page.frameLocator(selector);
+    await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
+    const frame = await inlineFrame(page, selector);
+    const frameUrl = frame.url();
+
+    await content.getByRole("button", { name: "Not a link" }).click();
+    await content.getByRole("textbox", { name: "Access token" }).fill("secret-token");
+    await content.getByRole("textbox", { name: "Access token" }).press("Enter");
+    await content.getByRole("link", { name: "Real link" }).click();
+    await expect.poll(opened).toContain(HOSTILE_PAGE_LINK);
+    expect(await opened()).toEqual([HOSTILE_PAGE_LINK]);
+
+    const scheme = new URL(frameUrl).protocol;
+    await frame.evaluate((url) => { window.location.href = url; }, `${scheme}//bundle/index.html`);
+    await expect.poll(navigations).toContain(`${scheme}//bundle/index.html`);
+    await page.waitForTimeout(500);
+    expect(frame.url()).toBe(frameUrl);
+    expect(await frame.evaluate(() => Reflect.get(window, "__inertiaE2eMarker"))).toBe("kept");
+
+    const peer = await frame.evaluate(async ([preconnectPort, turnPort]) => {
+      const link = document.createElement("link");
+      link.rel = "preconnect";
+      link.href = `http://127.0.0.1:${preconnectPort}/`;
+      document.head.append(link);
+      if (typeof RTCPeerConnection !== "function") return "unavailable";
+      const connection = new RTCPeerConnection({
+        iceServers: [{ urls: `turn:127.0.0.1:${turnPort}?transport=tcp`, username: "probe", credential: "probe" }],
+      });
+      connection.createDataChannel("probe");
+      await connection.setLocalDescription(await connection.createOffer());
+      Reflect.set(window, "__inertiaE2ePeer", connection);
+      return "created";
+    }, [preconnect.port, turn.port] as const);
+    expect(peer).toBe("created");
+    await expect.poll(() => turn.connections()).toBeGreaterThan(0);
+    expect(preconnect.connections()).toBe(0);
+
+    await frame.evaluate(() => {
+      setTimeout(() => {
+        const until = Date.now() + 4_000;
+        while (Date.now() < until) Math.random();
+      }, 0);
+    });
+    const [frameDelay, appDelay, typingDelay] = await Promise.all([
+      timed(frame.evaluate(() => 1)),
+      timed(page.evaluate(() => 1)),
+      timed(page.getByRole("textbox", { name: "Message" }).fill("Typed while the page is busy")),
+    ]);
+    expect(frameDelay).toBeGreaterThanOrEqual(3_000);
+    expect(appDelay).toBeLessThan(1_000);
+    expect(typingDelay).toBeLessThan(1_000);
+    await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue("Typed while the page is busy");
+
+    for (const [how, path] of [["refresh", "refreshed"], ["location", "navigated"]] as const) {
+      const target = `http://127.0.0.1:${navigation.port}/${path}?data=secret`;
+      if (frame.url() !== frameUrl) await frame.goto(frameUrl);
+      await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
+      await frame.evaluate(([kind, url]) => {
+        if (kind === "location") {
+          window.location.href = url;
+          return;
+        }
+        const meta = document.createElement("meta");
+        meta.httpEquiv = "refresh";
+        meta.content = `0;url=${url}`;
+        document.head.append(meta);
+      }, [how, target] as const);
+      await expect.poll(() => frame.url()).toBe("chrome-error://chromewebdata/");
+    }
+    expect(navigation.connections()).toBe(0);
+    const blockedFraming = `Framing 'http://127.0.0.1:${navigation.port}/' violates the following Content Security Policy directive`;
+    expect(app.rendererErrors.length).toBeGreaterThan(0);
+    expect(app.rendererErrors.filter((error) => !error.startsWith(blockedFraming))).toEqual([]);
+  } finally {
+    preconnect.server.close();
+    turn.server.close();
+    navigation.server.close();
     await app.close();
   }
 });

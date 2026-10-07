@@ -109,6 +109,30 @@ describe("continuing a chat with another model", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
+  it("retires the usage-limited row once the chat has switched to another provider", async () => {
+    const current = chat();
+    const onLimitResetCommand = vi.fn<LimitResetCommandRunner>(async () => limited());
+    const props = composerProps(current, { providers, latestTurnSummary: failedTurn(current), onLimitResetCommand });
+    const view = render(<Composer {...props} />);
+    expect(await screen.findByRole("group", { name: "Usage limit" })).toBeInTheDocument();
+
+    const switched = chat({
+      providerId: "claude",
+      modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "claude-route" }),
+      model: "claude-route",
+    });
+    view.rerender(<Composer {...props} conversation={switched} />);
+
+    expect(await screen.findByText(
+      "Next message starts a new Claude session with this chat's earlier messages as context.",
+    )).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Usage limit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue with another model" })).not.toBeInTheDocument();
+
+    view.rerender(<Composer {...props} />);
+    expect(await screen.findByRole("group", { name: "Usage limit" })).toBeInTheDocument();
+  });
+
   it("switches in place when the row's chooser picks a model of the same provider", async () => {
     const current = chat();
     const onUpdateConversation = renderComposer(current, {

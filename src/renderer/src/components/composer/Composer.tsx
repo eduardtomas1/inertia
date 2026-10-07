@@ -816,7 +816,8 @@ export const Composer = memo(function Composer({
   };
   // Derived from durable facts so it survives reloads, other windows, and
   // every send path: the next turn hands this chat to the chat's provider.
-  const handoffNotice = latestKnownTurn && latestKnownTurn.providerId !== conversation.providerId
+  const providerHandoffPending = Boolean(latestKnownTurn && latestKnownTurn.providerId !== conversation.providerId);
+  const handoffNotice = providerHandoffPending
     ? `Next message starts a new ${providerRouteLabel(
       conversation.providerId,
       providerBackendName(conversation.providerId, conversation.modelSelection),
@@ -925,7 +926,7 @@ export const Composer = memo(function Composer({
     const chip = composerRef.current?.querySelector<HTMLButtonElement>(".selected-model-chip");
     if (chip?.getAttribute("aria-expanded") !== "true") chip?.click();
   };
-  const limitResetRow = onLimitResetCommand && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
+  const limitResetRow = onLimitResetCommand && !providerHandoffPending && (latestTurn?.status === "failed" || latestTurnSummary?.status === "failed") && <Suspense fallback={null}>
     <LimitResetBanner conversationId={conversation.id} latestTurnId={latestTurn?.id ?? latestTurnSummary?.id ?? null}
       snoozedUntil={conversation.snoozedUntil ?? null} disabled={disabled || running}
       providerState={`${conversationProvider?.canRun ?? false}:${conversationProvider?.metadataState.rateLimits.updatedAt ?? ""}`}

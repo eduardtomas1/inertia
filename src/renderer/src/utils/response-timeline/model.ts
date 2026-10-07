@@ -14,6 +14,7 @@ import type {
   TurnSessionRecovery,
 } from "@shared/contracts";
 import { activityNeedsAttention } from "./activity-attention";
+import { providerBackendName } from "../providerHandoff";
 
 /** Current workspace status is intentionally not accepted by the timeline. */
 export type TurnGitArtifactSummary = TurnGitArtifact;
@@ -89,11 +90,17 @@ export interface ResponseTimelineCompatibility {
  * A provider change between two authoritative turns. It is derived from the
  * immutable turn identities, so it needs no event or persisted record.
  */
+export interface ProviderHandoffRoute {
+  providerId: ProviderId;
+  backend: string | null;
+  model: string | null;
+}
+
 export interface ProviderHandoffItem {
   turnId: string;
   requestedAt: string;
-  from: { providerId: ProviderId; model: string | null };
-  to: { providerId: ProviderId; model: string | null };
+  from: ProviderHandoffRoute;
+  to: ProviderHandoffRoute;
   sessionRecovery: TurnSessionRecovery | null;
 }
 
@@ -381,6 +388,14 @@ function turnModelLabel(turn: AgentTurn): string | null {
   return modelId && modelId !== "provider-default" ? modelId : null;
 }
 
+function handoffRoute(turn: AgentTurn): ProviderHandoffRoute {
+  return {
+    providerId: turn.providerId,
+    backend: providerBackendName(turn.providerId, turn.modelSelection),
+    model: turnModelLabel(turn),
+  };
+}
+
 /** Places a handoff divider immediately before each turn that changed provider. */
 function withProviderHandoffs(ordered: ResponseTimelineItem[]): ResponseTimelineItem[] {
   let previous: AgentTurn | null = null;
@@ -397,8 +412,8 @@ function withProviderHandoffs(ordered: ResponseTimelineItem[]): ResponseTimeline
       handoff: {
         turnId: turn.id,
         requestedAt: turn.requestedAt,
-        from: { providerId: from.providerId, model: turnModelLabel(from) },
-        to: { providerId: turn.providerId, model: turnModelLabel(turn) },
+        from: handoffRoute(from),
+        to: handoffRoute(turn),
         sessionRecovery: turn.sessionRecovery ?? null,
       },
     }, changed];
@@ -541,13 +556,17 @@ function stabilizeTurn(left: ResponseTurn | undefined, right: ResponseTurn): Res
   return left && sameResponseTurn(left, right) ? left : right;
 }
 
+function sameHandoffRoute(left: ProviderHandoffRoute, right: ProviderHandoffRoute): boolean {
+  return left.providerId === right.providerId
+    && left.backend === right.backend
+    && left.model === right.model;
+}
+
 function sameHandoff(left: ProviderHandoffItem, right: ProviderHandoffItem): boolean {
   return left.turnId === right.turnId
     && left.requestedAt === right.requestedAt
-    && left.from.providerId === right.from.providerId
-    && left.from.model === right.from.model
-    && left.to.providerId === right.to.providerId
-    && left.to.model === right.to.model
+    && sameHandoffRoute(left.from, right.from)
+    && sameHandoffRoute(left.to, right.to)
     && left.sessionRecovery?.restoredMessageCount === right.sessionRecovery?.restoredMessageCount
     && left.sessionRecovery?.omittedMessageCount === right.sessionRecovery?.omittedMessageCount
     && left.sessionRecovery?.withheldMessageCount === right.sessionRecovery?.withheldMessageCount;

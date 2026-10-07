@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import { providerNativeBackendProfile } from "../../src/shared/model-routing";
 
 const conversationId = "44444444-4444-4444-8444-444444444444";
 
@@ -13,7 +14,7 @@ function turn(
   update: Partial<AgentTurn> = {},
 ): AgentTurn {
   const harnessId = providerId === "claude" ? "claude-agent-sdk" : "codex-app-server";
-  const backendProfileId = providerId === "claude" ? "native:claude:agent-sdk" : "native:codex:app-server";
+  const backendProfileId = providerNativeBackendProfile(providerId).id;
   const model = providerId === "claude" ? "claude-sonnet-4-6" : "gpt-5.6";
   return {
     id,
@@ -25,7 +26,7 @@ function turn(
     modelSelection: {
       harnessId,
       backendProfileId,
-      backendProfileDisplayName: providerId === "claude" ? "Claude" : "Codex",
+      backendProfileDisplayName: providerNativeBackendProfile(providerId).displayName,
       modelId: model,
       alias: null,
       reasoningEffort: null,
@@ -157,6 +158,33 @@ describe("provider handoff divider", () => {
     const receiving = document.querySelector<HTMLElement>('[data-turn-id="turn-claude-2"]')!;
     expect(within(receiving).getByText(/Agent harness changed · 2 earlier messages restored/u)).toBeInTheDocument();
     expect(screen.queryByText(/Provider changed/u)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["the Kimi route on the Claude harness", "builtin:kimi-code", "Kimi", "Claude · Kimi"],
+    ["a custom Claude-compatible backend", "custom-team-proxy", "Team Proxy", "Claude · Team Proxy"],
+  ])("names the backend for %s on both sides of the divider", (_route, backendProfileId, backendProfileDisplayName, label) => {
+    const onBackend = (agentTurn: AgentTurn, id: string, requestedAt: string): AgentTurn => ({
+      ...agentTurn,
+      id,
+      userMessageId: `user-${id}`,
+      terminalAssistantMessageId: `assistant-${id}`,
+      requestedAt,
+      backendProfileId,
+      model: "k3",
+      modelSelection: { ...agentTurn.modelSelection, backendProfileId, backendProfileDisplayName, modelId: "k3" },
+    });
+    const handedBack = turn("turn-codex-2", "codex", "2026-09-01T10:15:00.000Z", {
+      continuationReasonCode: "harness-changed",
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
+    });
+    timeline([codex, onBackend(claude, "turn-claude-backend", "2026-09-01T10:10:00.000Z"), handedBack]);
+
+    const into = screen.getByRole("separator", { name: `Context handoff: Codex · gpt-5.6 to ${label} · k3` });
+    expect(into.querySelector(".provider-handoff-marker")).toHaveTextContent(`${label} · k3`);
+    expect(screen.getByRole("separator", {
+      name: `Context handoff: ${label} · k3 to Codex · gpt-5.6 · 4 earlier messages restored`,
+    })).toBeInTheDocument();
   });
 
   it("labels each route with its model alias when the turn recorded one", () => {

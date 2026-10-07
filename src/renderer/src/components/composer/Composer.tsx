@@ -14,6 +14,7 @@ import {
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
+import { providerBackendName, providerRouteLabel } from "../../utils/providerHandoff";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,
@@ -816,9 +817,11 @@ export const Composer = memo(function Composer({
   // Derived from durable facts so it survives reloads, other windows, and
   // every send path: the next turn hands this chat to the chat's provider.
   const handoffNotice = latestKnownTurn && latestKnownTurn.providerId !== conversation.providerId
-    ? `Next message starts a new ${providerIdentityLabels?.[conversation.providerId]
-      ?? providers.find(({ id }) => id === conversation.providerId)?.label
-      ?? conversation.providerId} session with this chat's earlier messages as context.`
+    ? `Next message starts a new ${providerRouteLabel(
+      conversation.providerId,
+      providerBackendName(conversation.providerId, conversation.modelSelection),
+      providerIdentityLabels,
+    )} session with this chat's earlier messages as context.`
     : null;
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],

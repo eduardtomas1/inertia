@@ -298,8 +298,8 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       handoff: {
         turnId: "turn-b",
         requestedAt,
-        from: { providerId: "claude", model: "claude-sonnet" },
-        to: { providerId: "codex", model: null },
+        from: { providerId: "claude", backend: null, model: "claude-sonnet" },
+        to: { providerId: "codex", backend: null, model: null },
         sessionRecovery: { restoredMessageCount: 1, omittedMessageCount: 0 },
       },
     };

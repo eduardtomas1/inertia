@@ -146,6 +146,27 @@ describe("composer provider handoff", () => {
     expect(screen.getByText(claudeNotice).closest("[role='status']")).not.toBeNull();
   });
 
+  it.each([
+    ["the Kimi route on the Claude harness", "builtin:kimi-code", "Kimi", "Claude · Kimi"],
+    ["a custom Claude-compatible backend", "custom-team-proxy", "Team Proxy", "Claude · Team Proxy"],
+  ])("names the backend for %s in the notice", (_route, backendProfileId, backendProfileDisplayName, label) => {
+    const claudeChat: Conversation = {
+      ...conversation(conversationId),
+      hasHistory: true,
+      providerId: "claude",
+      modelSelection: {
+        ...providerNativeModelSelection({ providerId: "claude", modelId: "k3" }),
+        backendProfileId,
+        backendProfileDisplayName,
+      },
+    };
+    render(<Composer {...composerProps(claudeChat, { providers, latestTurnSummary: latestTurn("codex") })} />);
+
+    expect(screen.getByText(
+      `Next message starts a new ${label} session with this chat's earlier messages as context.`,
+    ).closest("[role='status']")).not.toBeNull();
+  });
+
   it("clears the notice when the chat returns to its original provider", async () => {
     const { onUpdateConversation } = renderChat();
     await chooseRoute("Claude Route", "Claude");

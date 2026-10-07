@@ -9,6 +9,7 @@ import type {
   ChatMessage,
   CheckpointSummary,
 } from "../../src/shared/contracts";
+import { providerNativeBackendProfile, providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   ResponseTimeline,
   turnGitArtifactCompletenessWarning,
@@ -1338,18 +1339,8 @@ describe("authoritative response timeline", () => {
 });
 
 describe("provider handoff divider", () => {
-  const claudeSelection = {
-    harnessId: "claude-agent-sdk",
-    backendProfileId: "native:claude:agent-sdk",
-    backendProfileDisplayName: "Claude Agent SDK",
-    modelId: "claude-sonnet",
-    alias: null,
-    reasoningEffort: null,
-    contextWindowOverride: null,
-    providerOptions: {},
-    capabilities: [],
-    backendConfigurationRevision: 1,
-  } as AgentTurn["modelSelection"];
+  const claudeSelection = providerNativeModelSelection({ providerId: "claude", modelId: "claude-sonnet" });
+  const codexBackend = providerNativeBackendProfile("codex");
 
   function handoffTurns(): { turns: AgentTurn[]; messages: ChatMessage[] } {
     const first = agentTurn("turn-a", "user-a", {
@@ -1367,6 +1358,11 @@ describe("provider handoff divider", () => {
       requestedAt: "2026-07-23T10:01:00.000Z",
     });
     const third = agentTurn("turn-c", "user-c", {
+      modelSelection: {
+        ...agentTurn("x", "y").modelSelection,
+        backendProfileId: codexBackend.id,
+        backendProfileDisplayName: codexBackend.displayName,
+      },
       requestedAt: "2026-07-23T10:02:00.000Z",
       continuationReasonCode: "harness-changed",
       sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 1 },
@@ -1394,8 +1390,8 @@ describe("provider handoff divider", () => {
     expect(handoff.handoff).toEqual({
       turnId: "turn-c",
       requestedAt: "2026-07-23T10:02:00.000Z",
-      from: { providerId: "claude", model: "claude-sonnet" },
-      to: { providerId: "codex", model: "latest" },
+      from: { providerId: "claude", backend: null, model: "claude-sonnet" },
+      to: { providerId: "codex", backend: null, model: "latest" },
       sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 1 },
     });
     expect(timeline.flatMap((item) => item.kind === "turn" && item.turn.providerChanged ? [item.id] : []))

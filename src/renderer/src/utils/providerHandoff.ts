@@ -1,4 +1,6 @@
+import type { ModelSelection, ProviderId } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import { providerNativeBackendProfile } from "../../../shared/model-routing";
 import type { ProviderHandoffItem } from "./response-timeline/model";
 import { MODEL_SOURCE_PROVIDER_LABELS } from "./modelSourceRail";
 
@@ -12,13 +14,31 @@ export interface ProviderHandoffText {
   label: string;
 }
 
+export function providerBackendName(
+  providerId: ProviderId,
+  selection: Pick<ModelSelection, "backendProfileId" | "backendProfileDisplayName">,
+): string | null {
+  return selection.backendProfileId === providerNativeBackendProfile(providerId).id
+    ? null
+    : selection.backendProfileDisplayName;
+}
+
+export function providerRouteLabel(
+  providerId: ProviderId,
+  backend: string | null,
+  labels?: ProviderIdentityLabels,
+): string {
+  const provider = labels?.[providerId]
+    ?? MODEL_SOURCE_PROVIDER_LABELS[providerId]
+    ?? providerId;
+  return backend ? `${provider} · ${backend}` : provider;
+}
+
 function routeLabel(
   route: ProviderHandoffItem["from"],
   labels: ProviderIdentityLabels | undefined,
 ): string {
-  const provider = labels?.[route.providerId]
-    ?? MODEL_SOURCE_PROVIDER_LABELS[route.providerId]
-    ?? route.providerId;
+  const provider = providerRouteLabel(route.providerId, route.backend, labels);
   return route.model ? `${provider} · ${route.model}` : provider;
 }
 

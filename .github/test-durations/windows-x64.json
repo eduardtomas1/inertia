@@ -463,7 +463,6 @@
     "tests/renderer/model-chooser.dom.test.tsx": 756,
     "tests/renderer/model-chooser.test.ts": 27,
     "tests/renderer/model-favorites.test.ts": 12,
-    "tests/renderer/model-route-transition.test.ts": 12,
     "tests/renderer/model-search.test.ts": 6,
     "tests/renderer/model-shortcuts.test.ts": 12,
     "tests/renderer/model-source-rail.test.ts": 42,

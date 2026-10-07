@@ -66,8 +66,9 @@ state are not carried over. The timeline marks the switch with a **Context
 handoff** divider showing both providers and how many earlier messages were
 restored. Start a goal only after that first message, so the new provider has
 the chat's history. Later fresh sessions on the same provider route keep the
-messages from before the handoff; messages written afterwards on a different
-account or endpoint stay withheld, as in any chat.
+messages from before the handoff. Messages the new provider itself wrote on a
+different account or endpoint stay withheld, before or after the handoff, as in
+any chat.
 
 ## Accounts and averages
 

@@ -179,9 +179,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Linux guardian toolchain
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -223,9 +224,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Linux guardian toolchain
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -488,9 +490,10 @@ jobs:
 
       - name: Install Linux guardian toolchain
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -776,9 +779,10 @@ jobs:
 
       - name: Install Linux guardian toolchain
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o DPkg::Lock::Timeout=300 install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies

@@ -63,7 +63,7 @@ export class TranscriptRepository {
       excludedMessageId,
       route,
     );
-    if (route?.handoffBefore === undefined || !history || history.blocks.length === 0) return history;
+    if (route?.handoff === undefined || !history || history.blocks.length === 0) return history;
     const files = providerHandoffFilesBlock(this.context.database, conversationId);
     if (!files) return history;
     const usedBytes = history.blocks.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0);

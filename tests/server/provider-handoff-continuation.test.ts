@@ -222,6 +222,34 @@ describe("provider handoff continuation", () => {
     expect(back.providerInput.prompt).not.toContain("Continue on another Codex account.");
   });
 
+  it("keeps the endpoint rule for the target provider's own history across a handoff hop", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    await f.switchProvider("codex");
+    const handoff = f.begin("Continue on Codex.");
+    f.complete(handoff.queued.turn.id, "CODEX_REPLY_SENTINEL: header added.", "codex-session");
+    await f.switchProvider("claude");
+
+    const hop = f.begin("Continue on the other Claude endpoint.", "endpoint-x");
+    expect(hop.queued.turn).toMatchObject({
+      providerId: "claude",
+      continuationReasonCode: "harness-changed",
+      sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 0, withheldMessageCount: 4 },
+    });
+    expect(hop.providerInput.prompt).toContain("CODEX_REPLY_SENTINEL: header added.");
+    expect(hop.providerInput.prompt).toContain("Continue on Codex.");
+    expect(hop.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
+    expect(hop.providerInput.prompt).not.toContain("Export the customer list as UTF-8.");
+    f.complete(hop.queued.turn.id, "ENDPOINT_X_REPLY", "claude-x-session");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: null, continuationIdentity: null });
+
+    const fresh = f.begin("Pick it back up on the other endpoint.", "endpoint-x");
+    expect(fresh.queued.turn.continuationReasonCode).toBe("missing-continuation-identity");
+    expect(fresh.providerInput.prompt).toContain("CODEX_REPLY_SENTINEL: header added.");
+    expect(fresh.providerInput.prompt).toContain("ENDPOINT_X_REPLY");
+    expect(fresh.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
+  });
+
   it("does not treat a later same-provider harness change as a handoff", async () => {
     const f = await fixture();
     f.seedClaudeHistory();
@@ -397,7 +425,7 @@ describe("provider handoff files block", () => {
       backendProfileId: "builtin:codex",
       endpointIdentity: null,
       includeUnattributed: true,
-      handoffBefore: "2100-01-01T00:00:00.000Z",
+      handoff: { before: "2100-01-01T00:00:00.000Z", providerId: "codex" as const },
     };
     const plain = (capacity: number) => f.store.continuationHistory(f.conversation.id, capacity, capturedAt)!;
     const handoff = (capacity: number) => f.store.continuationHistory(f.conversation.id, capacity, capturedAt, undefined, handoffRoute)!;

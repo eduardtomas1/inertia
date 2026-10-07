@@ -285,7 +285,9 @@ export function resolveTurnRequest(
       backendProfileId,
       endpointIdentity,
       includeUnattributed: unattributedHistoryOnRoute(),
-      ...(handoffBefore === undefined ? {} : { handoffBefore }),
+      ...(handoffBefore === undefined
+        ? {}
+        : { handoff: { before: handoffBefore, providerId: route.providerId } }),
     };
   };
   const assembleOnFreshSession = (excludedMessageId?: string) => {

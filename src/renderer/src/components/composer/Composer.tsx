@@ -13,7 +13,6 @@ import {
   selectedModelSearchRoute,
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
-import { modelRouteTransitionContext, resolveModelRouteTransition } from "../../utils/modelRouteTransition";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
@@ -803,15 +802,11 @@ export const Composer = memo(function Composer({
     conversation.modelSelection,
   ), [conversation.modelSelection, modelRoutes]);
   const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
-    const transition = resolveModelRouteTransition(
-      modelRouteTransitionContext(conversation, latestKnownTurn ?? null),
-      route,
-    );
     const providerId = route.providerId
       ?? providerIdForHarness(route.selection.harnessId);
     await updateConversation({
       ...(providerId ? { providerId } : {}),
-      modelSelection: transition.selection,
+      modelSelection: route.selection,
       ...(route.configuration && {
         accessMode: route.configuration.accessMode,
         interactionMode: route.configuration.interactionMode,

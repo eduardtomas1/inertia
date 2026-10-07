@@ -14,7 +14,11 @@ import { ConversationProviderChangeError } from "../../src/server/persistence/er
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { resolveTurnRequest, type PrepareTurnRequestDependencies } from "../../src/server/runtime/turns/turn-request-preparation";
-import { modelRouteTransitionContext, resolveModelRouteTransition } from "../../src/renderer/src/utils/modelRouteTransition";
+import {
+  conversationHasHistory,
+  officiallyAllowsModelSwitchWithinSession,
+  resolveContinuationDecision,
+} from "../../src/shared/continuation-policy";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
@@ -259,13 +263,23 @@ describe("chat provider handoff", () => {
       recentDetail: established,
     });
     const claudeSelection = providerNativeModelSelection({ providerId: "claude" });
-    const transition = resolveModelRouteTransition(modelRouteTransitionContext(shell, shell.latestTurn), {
-      selection: claudeSelection,
-      continuationIdentity: continuationIdentityForSelection(claudeSelection),
-      compatibility: resolveHarnessBackendCompatibility("claude-agent-sdk", providerNativeBackendProfile("claude")),
+    const previousIdentity = shell.latestTurn?.continuationIdentity ?? shell.continuationIdentity;
+    const decision = resolveContinuationDecision({
+      previousProviderId: shell.latestTurn?.providerId ?? shell.providerId,
+      hasHistory: conversationHasHistory(shell),
+      previousIdentity,
+      nextIdentity: continuationIdentityForSelection(claudeSelection),
+      previousModelId: previousIdentity ? shell.modelSelection.modelId : null,
+      nextModelId: claudeSelection.modelId,
+      hasProviderSession: Boolean(shell.providerSessionId),
+      hasTurns: shell.latestTurn !== null,
+      allowsModelSwitchWithinSession: officiallyAllowsModelSwitchWithinSession(
+        resolveHarnessBackendCompatibility("claude-agent-sdk", providerNativeBackendProfile("claude")),
+      ),
+      allowsPerformanceModeSwitchWithinSession: false,
     });
-    expect(transition).toMatchObject({
-      continuationAction: "start-session",
+    expect(decision).toMatchObject({
+      action: "start-session",
       reasonCode: established ? "harness-changed" : "first-turn",
     });
   });

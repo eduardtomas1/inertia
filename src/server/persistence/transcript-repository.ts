@@ -1,3 +1,4 @@
+import { byteLength } from "./bounded-message-text";
 import { readContinuationHistory } from "./continuation-history";
 import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
 import type { MessageSearchTarget } from "../../shared/message-search";
@@ -54,21 +55,19 @@ export class TranscriptRepository {
     excludedMessageId?: string,
     route?: Parameters<typeof readContinuationHistory>[5],
   ): ReturnType<typeof readContinuationHistory> {
-    // Paths only: the workspace is shared by every route, unlike provider replies.
-    const files = route?.handoffBefore !== undefined
-      ? providerHandoffFilesBlock(this.context.database, conversationId)
-      : null;
-    const reservedBytes = files ? providerHandoffBlockBytes(files) : 0;
-    const filesFit = files !== null && reservedBytes < capacityBytes;
     const history = readContinuationHistory(
       this.context.database,
       conversationId,
-      filesFit ? capacityBytes - reservedBytes : capacityBytes,
+      capacityBytes,
       capturedAt,
       excludedMessageId,
       route,
     );
-    return filesFit && history && history.blocks.length > 0
+    if (route?.handoffBefore === undefined || !history || history.blocks.length === 0) return history;
+    const files = providerHandoffFilesBlock(this.context.database, conversationId);
+    if (!files) return history;
+    const usedBytes = history.blocks.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0);
+    return usedBytes + providerHandoffBlockBytes(files) <= capacityBytes
       ? { ...history, blocks: [...history.blocks, files] }
       : history;
   }

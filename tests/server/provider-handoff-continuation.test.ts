@@ -150,7 +150,7 @@ async function fixture() {
       database.close();
     }
   };
-  return { store, conversation, resolve, begin, complete, fail, switchProvider, seedClaudeHistory, filesBlock };
+  return { store, conversation, tick, resolve, begin, complete, fail, switchProvider, seedClaudeHistory, filesBlock };
 }
 
 describe("provider handoff continuation", () => {
@@ -363,6 +363,34 @@ describe("provider handoff files block", () => {
       { path: "src/restored.ts", status: "added" },
       { path: "src/scratch.ts", status: "deleted" },
     ]);
+  });
+
+  it("never costs the restored messages their place and joins only in the room they leave", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    for (let index = 0; index < 40; index += 1) {
+      f.store.createMessage(f.conversation.id, `Message ${index}: ${"detail ".repeat(50)}`, "user", [], null, f.tick());
+    }
+    const capturedAt = f.tick();
+    const handoffRoute = {
+      backendProfileId: "builtin:codex",
+      endpointIdentity: null,
+      includeUnattributed: true,
+      handoffBefore: "2100-01-01T00:00:00.000Z",
+    };
+    const plain = (capacity: number) => f.store.continuationHistory(f.conversation.id, capacity, capturedAt)!;
+    const handoff = (capacity: number) => f.store.continuationHistory(f.conversation.id, capacity, capturedAt, undefined, handoffRoute)!;
+    const labels = (history: ReturnType<typeof handoff>) => history.blocks.map(({ label }) => label);
+
+    const tight = 12_000;
+    expect(plain(tight).messageCount).toBeLessThan(44);
+    expect(handoff(tight).messageCount).toBe(plain(tight).messageCount);
+    expect(handoff(tight).omittedMessageCount).toBe(plain(tight).omittedMessageCount);
+    expect(labels(handoff(tight))).not.toContain(PROVIDER_HANDOFF_FILES_LABEL);
+
+    const roomy = 200_000;
+    expect(handoff(roomy).messageCount).toBe(44);
+    expect(labels(handoff(roomy))).toContain(PROVIDER_HANDOFF_FILES_LABEL);
   });
 
   it("caps the list by entry count and bytes and reports what it left out", async () => {

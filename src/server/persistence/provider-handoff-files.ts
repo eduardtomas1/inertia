@@ -96,7 +96,7 @@ export function providerHandoffFilesBlock(
   };
 }
 
-/** Prompt bytes to reserve so the block fits beside the restored messages. */
+/** Prompt bytes the block needs in the room the restored messages leave. */
 export function providerHandoffBlockBytes(block: ContinuationHistoryBlock): number {
   return byteLength(JSON.stringify(block.content))
     + byteLength(block.label)

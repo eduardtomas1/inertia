@@ -89,7 +89,7 @@
 
 .multi-spawn-prompt-zone > label small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
@@ -170,7 +170,7 @@
 
 .multi-spawn-side > header small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .multi-spawn-side-number {
@@ -182,7 +182,7 @@
   border-radius: 7px;
   color: var(--accent-strong);
   background: color-mix(in srgb, var(--accent-soft) 74%, var(--surface-strong));
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 750;
 }
 
@@ -203,7 +203,7 @@
   align-items: center;
   gap: 4px;
   color: var(--warning);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 650;
 }
 
@@ -227,7 +227,7 @@
   min-width: 0;
   gap: 5px;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 650;
 }
 
@@ -266,7 +266,7 @@
   min-width: 0;
   gap: 5px;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 650;
 }
 
@@ -325,7 +325,7 @@
 
 .multi-spawn-route-warning small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.35;
 }
 
@@ -335,7 +335,7 @@
   border-radius: 6px;
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 10%, transparent);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 680;
 }
 
@@ -697,7 +697,7 @@
 
 .multi-spawn-preset-toggle small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .multi-spawn-dialog-footer > div {

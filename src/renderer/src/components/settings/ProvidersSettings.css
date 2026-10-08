@@ -98,7 +98,7 @@
   align-items: center;
   gap: 4px;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
 }
@@ -161,7 +161,7 @@
 
 .provider-settings-editor-copy > small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -211,7 +211,7 @@
 
 .provider-settings-tabs button small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -254,7 +254,7 @@
   margin: 0;
   padding: 12px 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -292,14 +292,14 @@
 }
 
 .provider-settings-maintenance .provider-maintenance-notice small {
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
 .provider-settings-maintenance .provider-maintenance-command {
   color: var(--text-soft);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
   user-select: text;
@@ -348,7 +348,7 @@
 .provider-settings-privacy-note {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -385,20 +385,20 @@
 .provider-settings-model-row > span small,
 .provider-settings-model-row > small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .provider-settings-model-row code {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
 .provider-settings-model-row p {
   margin: 0;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 

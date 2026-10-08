@@ -68,7 +68,7 @@
 .working-indicator-option-label {
   max-width: 100%;
   overflow: hidden;
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 560;
   text-overflow: ellipsis;
   white-space: nowrap;

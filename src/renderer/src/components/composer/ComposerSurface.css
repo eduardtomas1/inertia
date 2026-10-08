@@ -216,7 +216,7 @@
   gap: 7px;
   padding: 2px 1px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 .composer-handoff-notice > svg {
   flex: 0 0 auto;

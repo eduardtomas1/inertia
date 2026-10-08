@@ -196,30 +196,6 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   const brand = page.getByRole("button", { name: "Start a new chat" });
   await expect(shell).toHaveClass(new RegExp(`platform-${process.platform}`));
 
-  // The aurora spans the sidebar top behind the brand, takes no input, and
-  // drifts on its coarse timer while focused; reduced motion removes it.
-  const aurora = page.locator(".sidebar-aurora");
-  await expect(aurora).toHaveAttribute("aria-hidden", "true");
-  expect(await page.evaluate(() => {
-    const sidebar = document.querySelector("aside.sidebar")!.getBoundingClientRect();
-    const layer = document.querySelector(".sidebar-aurora")!;
-    const bounds = layer.getBoundingClientRect();
-    const lockup = document.querySelector(".brand-lockup")!.getBoundingClientRect();
-    const hit = document.elementFromPoint(lockup.left + lockup.width / 2, lockup.top + lockup.height / 2);
-    return {
-      left: bounds.left - sidebar.left, top: bounds.top - sidebar.top, width: bounds.width - sidebar.width,
-      pointerEvents: getComputedStyle(layer).pointerEvents, brandOnTop: Boolean(hit?.closest(".brand-lockup")),
-    };
-  })).toEqual({ left: 0, top: 0, width: 0, pointerEvents: "none", brandOnTop: true });
-  const auroraTimes = () => aurora.evaluate((element) =>
-    element.getAnimations({ subtree: true }).map((animation) => Number(animation.currentTime)));
-  const initialAuroraTimes = await auroraTimes();
-  expect(initialAuroraTimes).toHaveLength(3);
-  await expect.poll(async () => (await auroraTimes())[0]! - initialAuroraTimes[0]!).toBeGreaterThan(500);
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect.poll(async () => (await auroraTimes()).length).toBe(0);
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-
   if (process.platform === "darwin") {
     const geometry = await page.evaluate(() => {
       const row = document.querySelector(".sidebar-brand")?.getBoundingClientRect();

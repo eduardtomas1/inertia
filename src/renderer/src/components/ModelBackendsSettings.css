@@ -87,7 +87,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -98,7 +98,7 @@
   align-items: center;
   gap: 4px;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -149,7 +149,7 @@
 
 .backend-profile-header-copy > small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -253,7 +253,7 @@
 .backend-model-list code {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
@@ -261,7 +261,7 @@
   min-width: 0;
   flex: 1 1 200px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
   text-align: right;
@@ -299,7 +299,7 @@
 .backend-capability-note {
   margin: 0 0 8px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .backend-profile-details + .setting-row {
@@ -403,7 +403,7 @@
 
 .backend-choice-grid small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .backend-choice-grid > button > svg {

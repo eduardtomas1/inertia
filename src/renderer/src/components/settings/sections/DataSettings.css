@@ -30,7 +30,7 @@
 .attachment-storage-confirm small,
 .restore-defaults-confirm small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -61,7 +61,7 @@
 .archived-chats-empty {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .archive-list {
@@ -100,7 +100,7 @@
 
 .archived-chats-footer small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 

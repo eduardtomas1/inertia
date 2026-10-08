@@ -5,7 +5,7 @@
 .syntax-textarea-mirror code, .syntax-textarea-mirror span { font: inherit; letter-spacing: inherit; }
 .file-editor-dialog .syntax-textarea.is-highlighted textarea { color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); background: transparent; }
 .file-editor-dialog .syntax-textarea.is-highlighted textarea::selection { background: var(--selection-bg, Highlight); -webkit-text-fill-color: var(--text); }
-.syntax-textarea-mode { position: absolute; bottom: 16px; right: 18px; pointer-events: none; padding: 3px 6px; background: var(--surface-strong); color: var(--text-muted); font-size: var(--ui-font-micro); }
+.syntax-textarea-mode { position: absolute; bottom: 16px; right: 18px; pointer-events: none; padding: 3px 6px; background: var(--surface-strong); color: var(--text-muted); font-size: var(--text-xs); }
 @media (forced-colors: active) {
   .syntax-textarea-mirror { display: none; }
   .file-editor-dialog .syntax-textarea.is-highlighted textarea { color: CanvasText; -webkit-text-fill-color: CanvasText; caret-color: CanvasText; background: Canvas; }

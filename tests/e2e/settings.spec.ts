@@ -75,7 +75,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
     themeSource: nativeTheme.themeSource,
   }));
   expect(nativeAppearance.themeSource).toBe("dark");
-  expect(nativeAppearance.background).toMatch(/^#050507(?:ff)?$/iu);
+  expect(nativeAppearance.background).toMatch(/^#18181b(?:ff)?$/iu);
   await page.getByRole("radiogroup", { name: "Interface scale" }).getByRole("radio", { name: "Comfortable" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Text density" }).getByRole("radio", { name: "Comfortable" }).click();
@@ -666,9 +666,9 @@ test("applies every interface scale live and remains usable at common Linux disp
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
-    ["Compact", "compact", "13px", "30px"],
-    ["Default", "default", "14px", "32px"],
-    ["Comfortable", "comfortable", "15px", "35px"],
+    ["Compact", "compact", "13.5px", "30px"],
+    ["Default", "default", "14.5px", "32px"],
+    ["Comfortable", "comfortable", "15.5px", "35px"],
     ["Large", "large", "16.5px", "38px"],
   ] as const;
 

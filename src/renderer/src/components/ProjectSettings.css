@@ -136,7 +136,7 @@
 .project-actions-list code {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
@@ -170,7 +170,7 @@
 
 .project-action-form small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -241,7 +241,7 @@
 
 .project-remove-confirm small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 

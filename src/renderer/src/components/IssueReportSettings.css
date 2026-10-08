@@ -36,7 +36,7 @@
 .issue-report-field .issue-report-body {
   height: clamp(200px, 45vh, 420px);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.6;
 }
 
@@ -88,7 +88,7 @@
 
 .issue-report-check small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 450;
 }
 
@@ -131,7 +131,7 @@
 .issue-report-confirm p {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -149,7 +149,7 @@
 .issue-report-messages p {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -164,7 +164,7 @@
   gap: 6px;
   margin: 0 0 14px;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -174,7 +174,7 @@
   gap: 6px;
   margin: 0;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -188,7 +188,7 @@
 .issue-report-error {
   margin-top: -8px;
   color: var(--danger);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 .issue-report-github svg {

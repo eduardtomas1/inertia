@@ -11,7 +11,7 @@
 .mascot-settings-controls small {
   flex-basis: 100%;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
@@ -57,12 +57,12 @@
   border-radius: var(--radius-medium);
   color: var(--text-muted);
   background: color-mix(in srgb, var(--text) 5%, transparent);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .mascot-sprite-preview small {
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 560;
 }
 
@@ -77,7 +77,7 @@
 
 .mascot-sprite-guide {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -154,7 +154,7 @@
   column-gap: 12px;
   padding: 6px 0;
   color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .mascot-sprite-files li + li {
@@ -175,7 +175,7 @@
 .mascot-sprite-preview code {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
@@ -186,7 +186,7 @@
 .mascot-sprites-error {
   margin: 0;
   color: var(--danger);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 

@@ -15,7 +15,6 @@ interface FamilySpec {
   neutralHue: number;
   accentHue: number;
   neutralTint: number;
-  auroraHues: readonly number[];
   chromaScale?: number;
   mute?: number;
   seed?: { l: number; c: number };
@@ -113,14 +112,10 @@ export const ARCHITECTURE = {
     activeChromaScale: 0.55,
     ultraSweepL: 0.560,
     ultraSweepChroma: 0.100,
-    auroraL: 0.780,
-    auroraChroma: 0.130,
     borderAlpha: 0.15,
     borderStrongAlpha: 0.25,
     panelBorderAlpha: 0.21,
     codeBorderAlpha: 0.20,
-    glassChromeAlpha: 0.78,
-    glassFloatAlpha: 0.88,
   },
   dark: {
     ladder: {
@@ -163,25 +158,19 @@ export const ARCHITECTURE = {
     activeChromaScale: 0.55,
     ultraSweepL: 0.800,
     ultraSweepChroma: 0.090,
-    auroraL: 0.640,
-    auroraChroma: 0.160,
     borderAlpha: 0.10,
     borderStrongAlpha: 0.17,
     panelBorderAlpha: 0.13,
     codeBorderAlpha: 0.14,
-    glassChromeAlpha: 0.88,
-    glassFloatAlpha: 0.94,
   },
 };
 
-// Aurora hues start at the family accent and add two analogous neighbours, so
-// the sidebar light reads as the theme itself rather than a fixed rainbow.
 export const FAMILY_SPECS = {
-  inertia: { neutralHue: 286, accentHue: 283, neutralTint: 1.0, auroraHues: [283, 236, 322] },
-  grove: { neutralHue: 152, accentHue: 157, neutralTint: 3.2, auroraHues: [157, 192, 132] },
-  ocean: { neutralHue: 232, accentHue: 235, neutralTint: 3.2, auroraHues: [235, 266, 198] },
-  ember: { neutralHue: 44, accentHue: 32, neutralTint: 3.2, auroraHues: [32, 58, 356] },
-  iris: { neutralHue: 294, accentHue: 292, neutralTint: 3.2, auroraHues: [292, 262, 332] },
+  inertia: { neutralHue: 286, accentHue: 283, neutralTint: 1.0 },
+  grove: { neutralHue: 152, accentHue: 157, neutralTint: 3.2 },
+  ocean: { neutralHue: 232, accentHue: 235, neutralTint: 3.2 },
+  ember: { neutralHue: 44, accentHue: 32, neutralTint: 3.2 },
+  iris: { neutralHue: 294, accentHue: 292, neutralTint: 3.2 },
 };
 
 export const BASE_NEUTRAL_CHROMA = { light: 0.004, dark: 0.005 };
@@ -327,11 +316,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     })],
     ["accent-text", accents.accentText],
     ["accent-strong", accents.accentStrong],
-    ["message-action", oklchToHex({
-      l: arch.accentL,
-      c: muted(arch.accentL, (arch.accentChroma * chromaScale) * 0.9, (spec.accentHue + 50) % 360),
-      h: (spec.accentHue + 50) % 360,
-    })],
     ["code-surface", codeSurface],
     ["code-header-surface", neutral(arch.codeHeaderL)],
     ["code-border", rgba(text, arch.codeBorderAlpha)],
@@ -343,11 +327,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
       c: muted(arch.terminalSelectionL, arch.terminalSelectionChroma * chromaScale, spec.accentHue),
       h: spec.accentHue,
     })],
-    ["glass-chrome", rgba(
-      appearance === "light" ? surfaces.surface : surfaces["sidebar-bg"],
-      arch.glassChromeAlpha,
-    )],
-    ["glass-float", rgba(surfaces["surface-strong"], arch.glassFloatAlpha)],
     ["active-work-text-rest", activeRest],
     ["active-work-text-highlight", activeHighlight],
     ["syntax-keyword", syntaxOn(spec.accentHue, arch.syntaxChroma * 1.25 * tint)],
@@ -384,13 +363,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
       c: maxChromaAt(arch.ultraSweepL, SEMANTIC_HUES.info, arch.ultraSweepChroma),
       h: SEMANTIC_HUES.info,
     })],
-    // One OKLCH lightness for all three hues keeps the drifting light even:
-    // no hue flares brighter or sinks muddier than its neighbours.
-    ...spec.auroraHues.map((auroraHue, index): readonly [string, string] => [`aurora-${index + 1}`, oklchToHex({
-      l: arch.auroraL,
-      c: maxChromaAt(arch.auroraL, auroraHue, (arch.auroraChroma * chromaScale)) * mute,
-      h: auroraHue,
-    })]),
   ];
 }
 
@@ -408,6 +380,5 @@ export function buildCustomPaletteTokens(hex: string, appearance: PaletteAppeara
     chromaScale,
     mute,
     seed: { l, c: c < 0.004 ? 0 : c },
-    auroraHues: [h, (h + 325) % 360, (h + 35) % 360],
   }, appearance);
 }

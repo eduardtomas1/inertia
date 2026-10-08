@@ -27,7 +27,7 @@ describe("custom appearance palettes", () => {
   it.each(modes)("keeps grayscale choices neutral in %s mode", (mode) => {
     for (const color of ["#000000", "#ffffff", "#808080"]) {
       const palette = Object.fromEntries(buildCustomPaletteTokens(color, mode));
-      for (const role of ["app-bg", "accent", "accent-soft", "message-action", "aurora-1"]) {
+      for (const role of ["app-bg", "accent", "accent-soft"]) {
         expect(hexToOklch(palette[role]!).c).toBeLessThan(0.001);
       }
     }
@@ -36,9 +36,9 @@ describe("custom appearance palettes", () => {
   it("keeps the preset palettes byte-identical and pins the vivid custom palettes", () => {
     const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
     expect(digest(PALETTE_FAMILIES.flatMap((family) => modes.map((mode) => [family, mode, buildPaletteTokens(family, mode)]))))
-      .toBe("5e888df5b571fb4c5d686f8bffedd73c2307619344e5b81fb99fc83ac391dbef");
+      .toBe("affd00b9d4e5464cc3300f9f5588a4038d55804434cde1c9d75e95b2e201af94");
     expect(digest([...colors, "#0d9488", "#f97316"].flatMap((color) => modes.map((mode) => [color, mode, buildCustomPaletteTokens(color, mode)]))))
-      .toBe("586bd35d799541be0f4de82b2ee78a76ad3960837f4ffd4520ba1ab865339a6b");
+      .toBe("9afe0c56ce0f1500943cd059bc6fd34c25a6f96f72db58e57745ba5bf751191a");
   });
 
   it.each(modes)("uses the picked colour as the %s accent and moves it only as far as contrast requires", (mode) => {
@@ -81,7 +81,7 @@ describe("custom appearance palettes", () => {
       for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "accent-soft", "terminal-bg"]) {
         expect(Math.abs(hexToOklch(muted[role]!).l - hexToOklch(vivid[role]!).l), `${color} ${role} lightness`).toBeLessThan(0.006);
       }
-      for (const role of ["app-bg", "surface", "accent-soft", "message-action", "terminal-selection", "aurora-1"]) {
+      for (const role of ["app-bg", "surface", "accent-soft", "terminal-selection"]) {
         expect(hexToOklch(muted[role]!).c, `${color} ${role} chroma`).toBeLessThanOrEqual(hexToOklch(vivid[role]!).c * 0.55 + 0.002);
       }
       for (const role of ["accent", "accent-hover", "accent-strong"]) {

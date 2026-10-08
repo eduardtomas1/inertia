@@ -40,7 +40,6 @@ export function CustomThemeColor({ mode, value, muted = false, disabled, onChang
       "--theme-preview-surface": tokens["surface-strong"],
       "--theme-preview-accent": tokens.accent,
       "--theme-preview-accent-soft": tokens["accent-soft"],
-      "--theme-preview-message-action": tokens["message-action"],
     } as CSSProperties;
   }, [color, mode, muted]);
   const commit = (): void => {

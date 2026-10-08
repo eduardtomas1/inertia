@@ -21,10 +21,8 @@
   gap: 12px;
   padding: 7px 8px 7px 14px;
   border-bottom: 1px solid var(--panel-border);
-  background: var(--glass-chrome);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  box-shadow: var(--glass-inset);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .detached-chat-title {
@@ -38,7 +36,7 @@
 .detached-chat-title > span {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 680;
   letter-spacing: .07em;
   line-height: 1.1;
@@ -160,6 +158,6 @@
   border-radius: var(--radius-small);
   color: var(--danger);
   background: color-mix(in srgb, var(--surface-strong) 78%, transparent);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 650;
 }

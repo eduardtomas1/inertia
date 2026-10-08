@@ -109,7 +109,7 @@
 .limits-dialog { position: relative; width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 32px; border: 1px solid var(--border); border-radius: 12px; background: var(--conversation-canvas-surface); }
 .limits-dialog-close { position: absolute; top: 8px; right: 8px; min-width: 30px; min-height: 30px; border: 0; background: transparent; color: var(--text); }
 
-.usage-accounts-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 10px 0 0; padding-top: 9px; border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent); color: var(--text-soft, var(--text-muted)); font-size: var(--ui-font-micro); }
+.usage-accounts-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 10px 0 0; padding-top: 9px; border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent); color: var(--text-soft, var(--text-muted)); font-size: var(--text-xs); }
 .usage-accounts-hint b { margin-left: auto; color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
 .usage-accounts-hint small { flex-basis: 100%; color: var(--text-muted); text-align: right; }
 

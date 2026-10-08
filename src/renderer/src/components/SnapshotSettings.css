@@ -34,12 +34,12 @@
   border-radius: var(--radius-small);
   background: var(--surface-muted);
   font-family: inherit;
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .snapshot-settings-note {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }

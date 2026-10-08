@@ -11,12 +11,9 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--text) 10%, var(--border));
   border-radius: 20px;
-  background: var(--glass-float);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
+  background: var(--surface-raised);
   box-shadow:
-    0 16px 40px -18px color-mix(in srgb, var(--text) 55%, transparent),
-    var(--glass-inset);
+    0 16px 40px -18px color-mix(in srgb, var(--text) 55%, transparent);
 }
 
 .composer-command-list {
@@ -34,7 +31,7 @@
 .composer-command-group-label {
   padding: 2px 8px 5px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 650;
   letter-spacing: 0.08em;
   line-height: 1.2;
@@ -99,7 +96,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -127,7 +124,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   padding: 2px 1px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .composer-compact-notice-icon {

@@ -105,7 +105,7 @@
   gap: 18px;
   margin-bottom: 31px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .usage-toolbar > span { white-space: nowrap; }
@@ -125,7 +125,7 @@
   border: 0;
   color: var(--text-muted);
   background: transparent;
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 620;
   line-height: 1;
   transition: color var(--motion-base) var(--motion-ease), background var(--motion-base) var(--motion-ease);
@@ -252,7 +252,7 @@
   justify-content: space-between;
   gap: 12px;
   color: var(--text);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .usage-provider-summary article > div > span {
@@ -264,7 +264,7 @@
 }
 
 .usage-provider-summary article > div > strong {
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 620;
 }
 
@@ -306,7 +306,7 @@
 .usage-breakdown-heading h2 {
   margin: 0;
   color: var(--text);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 630;
   letter-spacing: -0.01em;
 }
@@ -641,8 +641,8 @@
 .usage-error > svg { flex: 0 0 auto; }
 .usage-error span { display: grid; min-width: 0; gap: 2px; }
 .usage-error strong { color: var(--text); font-size: var(--ui-font-secondary); }
-.usage-error small { color: var(--text-muted); font-size: var(--ui-font-micro); }
-.usage-error button { margin-left: auto; padding: 5px 8px; border-bottom: 1px solid var(--text); color: var(--text); background: transparent; font-size: var(--ui-font-micro); }
+.usage-error small { color: var(--text-muted); font-size: var(--text-xs); }
+.usage-error button { margin-left: auto; padding: 5px 8px; border-bottom: 1px solid var(--text); color: var(--text); background: transparent; font-size: var(--text-xs); }
 
 .usage-skeleton { position: relative; }
 .usage-skeleton > [role="status"],

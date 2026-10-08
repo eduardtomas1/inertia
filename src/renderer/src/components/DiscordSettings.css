@@ -30,7 +30,7 @@
 .discord-note {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -55,7 +55,7 @@
 
 .discord-post-confirm small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 

@@ -487,7 +487,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     // subpixel rounding.
     const scaleAnchorTolerance = await page.locator("html").evaluate((element) => {
       const mainFontSize = Number.parseFloat(
-        getComputedStyle(element).getPropertyValue("--ui-font-main"),
+        getComputedStyle(element).getPropertyValue("--text-base"),
       );
       return Math.ceil(mainFontSize / 2) + 1;
     });

@@ -30,7 +30,6 @@ export function buildSwatchTokens(family, appearance) {
     ["theme-preview-surface", tokens["surface-strong"]],
     ["theme-preview-accent", tokens.accent],
     ["theme-preview-accent-soft", tokens["accent-soft"]],
-    ["theme-preview-message-action", tokens["message-action"]],
   ];
 }
 
@@ -81,7 +80,7 @@ export function renderFiles(read) {
 }
 
 export function windowBackground(appearance) {
-  return Object.fromEntries(buildPaletteTokens("inertia", appearance))["app-bg"];
+  return Object.fromEntries(buildPaletteTokens("inertia", appearance))["surface-strong"];
 }
 
 function main() {

@@ -70,7 +70,6 @@ import { IconButton, LoadingMark } from "./ui";
 import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
-import { SidebarAurora } from "./sidebar/SidebarAurora";
 import { SidebarHelpButton } from "./sidebar/SidebarHelpButton";
 import "./sidebar/workspace-navigation.css";
 import type { SidebarProps } from "./sidebar/SidebarProps";
@@ -938,7 +937,6 @@ function SidebarView({
           workFocusIndexRef.current = identityIndex >= 0 ? identityIndex : null;
         }}
       >
-        <SidebarAurora moving={!reducedMotion && (!mobile || open)} />
         <div className="sidebar-brand drag-region">
           {preview.preview}
           <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>

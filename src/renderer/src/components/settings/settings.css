@@ -153,7 +153,7 @@
 .settings-card-heading p {
   margin: 2px 0 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
@@ -200,7 +200,7 @@
 .setting-copy small,
 .response-density-setting > span > small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
@@ -330,7 +330,7 @@
 .setting-status,
 .setting-note-status {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
@@ -345,7 +345,7 @@
 }
 
 .setting-note-status:empty {
-  min-height: calc(var(--ui-font-micro) * 1.4);
+  min-height: calc(var(--text-xs) * 1.4);
 }
 
 .setting-note-status:empty:has(+ .setting-note-status.is-error) {
@@ -435,7 +435,7 @@
   color: var(--text-soft);
   background: transparent;
   font-family: inherit;
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 560;
   line-height: 1.5;
   text-align: center;
@@ -475,7 +475,7 @@
 
 .setting-field-control .setting-field-error {
   color: var(--danger);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -527,7 +527,7 @@
 }
 
 .setting-action-row small {
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 

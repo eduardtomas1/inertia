@@ -1,7 +1,7 @@
 .private-connect-note {
   margin: 12px 0 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -88,7 +88,7 @@
   min-width: 0;
   gap: 6px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .private-connect-device-fields .setting-select {
@@ -109,7 +109,7 @@
   margin-bottom: 8px;
   padding: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .private-connect-projects label {
@@ -181,7 +181,7 @@
 .private-connect-audit-list small,
 .private-connect-audit-list time {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .private-connect-audit-list time {

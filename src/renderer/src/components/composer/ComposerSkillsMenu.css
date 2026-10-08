@@ -63,7 +63,7 @@
   margin: 0;
   padding: 9px 7px;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 

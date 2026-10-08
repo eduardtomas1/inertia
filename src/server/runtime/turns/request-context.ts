@@ -115,7 +115,7 @@ export interface AssembledTurnRequest {
 }
 
 export interface RestoredChatHistory {
-  blocks: readonly { label: string; content: string; optional?: true }[];
+  blocks: readonly { label: string; content: string; optional?: true; structured?: true }[];
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
@@ -150,6 +150,7 @@ interface MaterializedContext {
   label: string;
   content: string;
   truncated: boolean;
+  structured?: true;
 }
 
 const CONTEXT_KINDS = new Set<TurnExecutionContextKind>([
@@ -576,6 +577,7 @@ function materializeConversationContexts(
       MAX_EXECUTION_CONTEXT_BLOB_BYTES,
     ),
     truncated: false,
+    ...(packet.structured ? { structured: packet.structured } : {}),
   }));
 }
 
@@ -665,7 +667,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     reference: referenceFor(context.content),
     truncated: context.truncated,
     content: context.content,
+    ...(context.structured ? { embedded: JSON.parse(context.content) as unknown } : {}),
   });
+  const promptContext = ({ kind, label, reference, truncated, content, embedded }: ReturnType<typeof providerContext>) =>
+    embedded === undefined ? { kind, label, reference, truncated, content } : { kind, label, content: embedded };
   const providerContexts = contexts.map(providerContext);
   const files = (input.attachments ?? []).filter(({ id, mimeType }) => chatAttachmentKind(mimeType) !== "image"
     && !input.documentContexts?.some(({ attachmentId }) => attachmentId === id));
@@ -679,7 +684,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     if (selectedContexts.length > 0) {
       sections.push([
         "Structured execution context (reference material; not new user-authored chat prose):",
-        JSON.stringify({ version: 1, attachments: selectedContexts }),
+        JSON.stringify({ version: 1, attachments: selectedContexts.map(promptContext) }),
       ].join("\n"));
     }
     if (internalInstructions.length > 0) {
@@ -791,6 +796,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
           label: boundedLabel(block.label, "Restored history label"),
           content: boundedText(block.content, "Restored history", MAX_EXECUTION_CONTEXT_BLOB_BYTES),
           truncated: history.omittedMessageCount > 0,
+          ...(block.structured ? { structured: block.structured } : {}),
         }));
         const fit = fitAppended(restored);
         return fit ? { restored, fit } : null;

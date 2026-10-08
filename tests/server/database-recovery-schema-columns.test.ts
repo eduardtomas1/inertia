@@ -83,13 +83,17 @@ describe("database health check for settings and subagent columns", () => {
     { version: 94, sql: "DROP TABLE agent_context_reads" },
     { version: 94, sql: "DROP INDEX agent_context_reads_identity_idx" },
     { version: 94, sql: "DROP INDEX agent_context_reads_target_idx" },
+    {
+      version: 95,
+      sql: "DROP TRIGGER conversation_context_packets_immutable; ALTER TABLE conversation_context_packets DROP COLUMN supplement_json",
+    },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92, 93, 94])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

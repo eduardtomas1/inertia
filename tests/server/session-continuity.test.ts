@@ -133,7 +133,7 @@ describe("provider session continuity", () => {
     expect(input.prompt).toContain("The export must preserve accented names.");
     expect(input.prompt).toContain("I will use UTF-8 and verify café.");
     expect(input.prompt).toContain("Continue the export.");
-    expect(input.prompt).toContain("restored automatically");
+    expect(input.prompt).toContain("restored because this provider session does not have them");
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: "missing-continuation-identity",
@@ -177,7 +177,7 @@ describe("provider session continuity", () => {
     const input = resolved.adopt(queued).active.providerInput;
     expect(input.sessionId).toBeUndefined();
     expect(input.prompt).not.toContain("The export must preserve accented names.");
-    expect(input.prompt).not.toContain("restored automatically");
+    expect(input.prompt).not.toContain("restored because this provider session does not have them");
     expect(input.prompt).toContain("Continue the export.");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: reason,
@@ -684,10 +684,10 @@ describe("restored chat history", () => {
     expect(content).toContain("The export must preserve accented names.");
     expect(content).toContain("message-59:");
     expect(content).not.toContain("message-0:");
-    expect(JSON.parse(history.blocks[0]!.content)).toMatchObject({
-      reference: "this-chat",
-      source: { conversationId: f.conversation.id, capturedAt },
-    });
+    const [first, ...later] = history.blocks.map((block) => JSON.parse(block.content) as Record<string, unknown>);
+    expect(first).toMatchObject({ source: { conversationId: f.conversation.id }, part: 1 });
+    expect(later.map((block) => Object.keys(block))).toEqual(later.map(() => ["part", "messages"]));
+    expect(later.map(({ part }) => part)).toEqual(later.map((_block, index) => index + 2));
   });
 
   it("shrinks to the capacity it is given and reports when nothing fits", async () => {

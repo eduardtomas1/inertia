@@ -99,7 +99,7 @@ test("a rejected saved session is replaced inside the turn with the chat's histo
   expect(turns[2]!.prompt).toContain("What constraint did I give you?");
   expect(turns[2]!.prompt).toContain("Keep the public API unchanged while you refactor.");
   expect(turns[2]!.prompt).toContain("Answered on continuity-thread-1.");
-  expect(turns[2]!.prompt).toContain("restored automatically");
+  expect(turns[2]!.prompt).toContain("restored because this provider session does not have them");
   expect(turns[2]!.prompt.split("What constraint did I give you?")).toHaveLength(2);
 
   await rm(join(app.workspaceDirectory, rejectionMarker));

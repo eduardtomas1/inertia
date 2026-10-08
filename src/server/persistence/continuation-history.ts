@@ -9,7 +9,6 @@ import {
   type ConversationContextExcerpt,
   type ConversationContextPacket,
 } from "../../shared/conversation-context";
-import { byteLength } from "./bounded-message-text";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel,
@@ -21,13 +20,15 @@ import {
   type SentConversationContextReference,
 } from "./conversation-context-packet-repository";
 import { prepareConversationContextPacket } from "./conversation-context-transport";
-import { providerHandoffBlockBytes } from "./provider-handoff-files";
+import { contextBlockPromptBytes, providerHandoffBlockBytes } from "./provider-handoff-files";
+import { finalTurnCommands, providerHandoffReason } from "./turn-context-facts";
 
 export interface ContinuationHistoryBlock {
   label: string;
   content: string;
   /** Supplementary context dropped first when the restored history does not fit. */
   optional?: true;
+  structured?: true;
 }
 
 export interface ContinuationHistory {
@@ -63,8 +64,8 @@ function sentReferenceBlocks(
     .slice(-MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN)
     .reverse();
   for (const reference of newest) {
-    const blocks = reference.sentBlocks()?.map(({ label, content }) => ({
-      label, content, optional: true as const,
+    const blocks = reference.sentBlocks()?.map(({ label, content, structured }) => ({
+      label, content, optional: true as const, ...(structured ? { structured } : {}),
     }));
     if (!blocks) continue;
     const bytes = blocks.reduce((total, block) => total + providerHandoffBlockBytes(block), 0);
@@ -123,6 +124,14 @@ export function readContinuationHistory(
   if (excerpts.length === 0) {
     return { blocks: [], messageCount: 0, omittedMessageCount: 0, ...withheld };
   }
+  const commands = finalTurnCommands(database, excerpts);
+  const moved = route?.handoff
+    ? providerHandoffReason(database, source.id, route.handoff.before, route.handoff.providerId)
+    : null;
+  const supplement = {
+    ...(commands.length > 0 ? { commands } : {}),
+    ...(moved ? { moved } : {}),
+  };
   const workspaceLabel = scrubConversationContextMetadata(
     conversationContextWorkspaceLabel(source),
     "Workspace",
@@ -148,6 +157,7 @@ export function readContinuationHistory(
     consumedAt: null,
     sourceState: "available",
     excerpts,
+    ...(Object.keys(supplement).length > 0 ? { supplement } : {}),
   };
   const unavailable: ContinuationHistory = {
     blocks: [],
@@ -158,12 +168,14 @@ export function readContinuationHistory(
   if (capacityBytes <= 0) return unavailable;
   try {
     const prepared = prepareConversationContextPacket(packet, capacityBytes, "prompt", true);
-    const restored = prepared.blocks.map(({ label, content }) => ({ label, content }));
+    const restored = prepared.blocks.map(({ label, content, structured }) => ({
+      label, content, ...(structured ? { structured } : {}),
+    }));
     return {
       blocks: [...restored, ...sentReferenceBlocks(
         references,
         new Set(prepared.packet.excerpts.map(({ sourceMessageId }) => sourceMessageId)),
-        capacityBytes - restored.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0),
+        capacityBytes - restored.reduce((total, block) => total + contextBlockPromptBytes(block), 0),
       )],
       messageCount: prepared.packet.messageCount,
       omittedMessageCount: prepared.packet.droppedMessageCount,

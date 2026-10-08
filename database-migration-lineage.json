@@ -727,6 +727,11 @@
       "version": 94,
       "name": "RecordAgentContextReads",
       "digest": "3e116ddc1f5f346beb9d4212e78341b8df3181f07a79554a980d1eab63d2b81f"
+    },
+    {
+      "version": 95,
+      "name": "CompactConversationContextTransport",
+      "digest": "ff0863535df859b5deb5dacbfd6fcdd8d491415bfcf6a3c85eb1c40bebbbfe1b"
     }
   ]
 }

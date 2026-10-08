@@ -1,7 +1,6 @@
-import { byteLength } from "./bounded-message-text";
 import { readContinuationHistory, type ContinuationHistory } from "./continuation-history";
 import type { ContinuationRouteFilter } from "./conversation-context-source";
-import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
+import { contextBlockPromptBytes, providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
@@ -88,7 +87,7 @@ export class TranscriptRepository {
     if (!files) return history;
     const usedBytes = history.blocks.reduce((total, block) => total + (block.optional
       ? providerHandoffBlockBytes(block)
-      : byteLength(JSON.stringify(block.content))), 0);
+      : contextBlockPromptBytes(block)), 0);
     return usedBytes + providerHandoffBlockBytes(files) <= capacityBytes
       ? { ...history, blocks: [...history.blocks, files] }
       : history;

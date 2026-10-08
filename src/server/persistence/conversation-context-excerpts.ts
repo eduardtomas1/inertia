@@ -24,6 +24,9 @@ import {
 } from "./conversation-context-source";
 import type { ConversationRow } from "./rows";
 import { byteLength } from "./bounded-message-text";
+import { turnContextFactsReader } from "./turn-context-facts";
+
+const TURN_MARKER_BYTES = byteLength(`,${JSON.stringify("turn")}:${JSON.stringify("cancelled")}`);
 
 export function conversationContextWorkspaceLabel(
   conversation: Pick<ConversationRow, "branch" | "worktree_path">,
@@ -197,11 +200,17 @@ export function collectConversationContextExcerpts(
     final ? finalAnswerBytes : MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
     shareBytes,
   );
+  const facts = turnContextFactsReader(database);
+  const withAgent = (excerpt: ConversationContextExcerpt): ConversationContextExcerpt => {
+    const agent = excerpt.role === "assistant" ? facts(excerpt.sourceTurnId)?.agent : undefined;
+    return agent ? { ...excerpt, agent } : excerpt;
+  };
   let retainedBytes = 0;
   let retainedJsonBytes = 2;
   const retain = (excerpt: ConversationContextExcerpt): boolean => {
     const bytes = byteLength(excerpt.content);
-    const jsonBytes = byteLength(JSON.stringify(excerpt)) + 1;
+    const jsonBytes = byteLength(JSON.stringify(excerpt)) + 1
+      + (facts(excerpt.sourceTurnId)?.state ? TURN_MARKER_BYTES : 0);
     if (
       retainedBytes + bytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
       || retainedJsonBytes + jsonBytes > MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES
@@ -213,7 +222,7 @@ export function collectConversationContextExcerpts(
   const openingRow = selectedIds
     ? null
     : conversationContextOpeningRow(database, sourceConversationId, excludedMessageId, route);
-  let opening = openingRow ? scrubAndBoundExcerpt(openingRow, excerptBytes(false)) : null;
+  let opening = openingRow ? withAgent(scrubAndBoundExcerpt(openingRow, excerptBytes(false))) : null;
   if (opening && !retain(opening)) opening = null;
   const window: ConversationContextExcerpt[] = [];
   for (const row of conversationContextSourceRows(
@@ -231,11 +240,17 @@ export function collectConversationContextExcerpts(
       opening = null;
       continue;
     }
-    const excerpt = scrubAndBoundExcerpt(row, excerptBytes(row.final));
+    const excerpt = withAgent(scrubAndBoundExcerpt(row, excerptBytes(row.final)));
     if (!retain(excerpt)) break;
     window.push(excerpt);
   }
-  const excerpts = [...(opening ? [opening] : []), ...window.reverse()];
+  const marked = new Set<string>();
+  const excerpts = [...(opening ? [opening] : []), ...window.reverse()].reverse().map((excerpt) => {
+    const state = facts(excerpt.sourceTurnId)?.state;
+    if (!state || marked.has(excerpt.sourceTurnId!)) return excerpt;
+    marked.add(excerpt.sourceTurnId!);
+    return { ...excerpt, turn: state };
+  }).reverse();
   if (excerpts.length < 1) {
     throw new Error("The selected chat context exceeds the shared size limit.");
   }

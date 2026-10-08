@@ -29,6 +29,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   [91, "app_state", ["muted_custom_colors"]],
   [92, "agent_turns", ["origin"]],
   [93, "messages", ["html_render_json"]],
+  [95, "conversation_context_packets", ["supplement_json"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

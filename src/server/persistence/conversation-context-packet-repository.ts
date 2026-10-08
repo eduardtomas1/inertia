@@ -4,16 +4,12 @@ import { resolve } from "node:path";
 import type Database from "better-sqlite3";
 
 import {
-  MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE,
-  MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
   MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES,
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
   MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES,
-  MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
-  type ConversationContextExcerpt,
   type ConversationContextPacket,
   type ConversationContextPacketSummary,
   type ConversationContextSourceTranscript,
@@ -43,6 +39,9 @@ import {
   type ConversationContextTransport,
 } from "./conversation-context-transport";
 import { ConversationContextTurnReads } from "./conversation-context-turn-reads";
+import { parseExcerpts, parseSupplement } from "./conversation-context-packet-codec";
+import { changedFileLines } from "./provider-handoff-files";
+import { finalTurnCommands } from "./turn-context-facts";
 import type { CreateMessageOptions } from "./types";
 
 interface ConversationContextPacketRow {
@@ -65,7 +64,8 @@ interface ConversationContextPacketRow {
   consumed_request_id: string | null;
   consumed_at: string | null;
   dropped_message_count: number;
-  transport_version: 1 | 2;
+  transport_version: 1 | 2 | 3;
+  supplement_json: string | null;
   delivered_budget_bytes: number | null;
   delivered_message_count: number | null;
   delivered_character_count: number | null;
@@ -78,6 +78,7 @@ type ConversationContextPacketListRow = Omit<ConversationContextPacketRow, "exce
 };
 
 const AGENT_CONTEXT_RESULT_BUDGET_BYTES = 28 * 1024;
+const REFERENCE_FILES_BYTES = 2 * 1024;
 const UNREACHED_TURN_LOOKBACK = 16;
 
 export type ConversationContextReplay =
@@ -158,110 +159,6 @@ function byteLength(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-const ATTACHMENT_REFERENCE_KEYS = ["id", "mimeType", "name", "size"]
-  .sort()
-  .join("\0");
-
-function isAttachmentReferenceList(value: unknown): boolean {
-  if (
-    !Array.isArray(value)
-    || value.length < 1
-    || value.length > MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE
-  ) return false;
-  const ids = new Set<string>();
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-    const attachment = entry as Record<string, unknown>;
-    if (
-      Object.keys(attachment).sort().join("\0") !== ATTACHMENT_REFERENCE_KEYS
-      || typeof attachment.id !== "string"
-      || attachment.id.length < 1
-      || ids.has(attachment.id)
-      || typeof attachment.name !== "string"
-      || attachment.name.length < 1
-      || typeof attachment.mimeType !== "string"
-      || attachment.mimeType.length < 1
-      || typeof attachment.size !== "number"
-      || !Number.isSafeInteger(attachment.size)
-      || attachment.size < 1
-    ) return false;
-    ids.add(attachment.id);
-  }
-  return true;
-}
-
-function parseExcerpts(row: ConversationContextPacketRow): ConversationContextExcerpt[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(row.excerpts_json);
-  } catch {
-    throw new Error("The saved chat context is malformed.");
-  }
-  if (!Array.isArray(parsed) || parsed.length !== row.message_count) {
-    throw new Error("The saved chat context no longer matches its provenance.");
-  }
-  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-  let totalBytes = 0;
-  let totalCharacters = 0;
-  const messageIds = new Set<string>();
-  for (const value of parsed) {
-    if (
-      !value
-      || typeof value !== "object"
-      || Array.isArray(value)
-    ) {
-      throw new Error("The saved chat context contains a malformed excerpt.");
-    }
-    const excerpt = value as Record<string, unknown>;
-    const keys = Object.keys(excerpt).sort();
-    const expectedKeys = [
-      "content",
-      "createdAt",
-      "role",
-      "sourceMessageId",
-      "sourceTurnId",
-      "truncated",
-      ...(excerpt.attachments === undefined ? [] : ["attachments"]),
-    ];
-    if (
-      keys.join("\0") !== expectedKeys.sort().join("\0")
-      || (
-        excerpt.attachments !== undefined
-        && !isAttachmentReferenceList(excerpt.attachments)
-      )
-      || typeof excerpt.sourceMessageId !== "string"
-      || !uuid.test(excerpt.sourceMessageId)
-      || messageIds.has(excerpt.sourceMessageId)
-      || (
-        excerpt.sourceTurnId !== null
-        && (typeof excerpt.sourceTurnId !== "string" || !uuid.test(excerpt.sourceTurnId))
-      )
-      || (excerpt.role !== "user" && excerpt.role !== "assistant")
-      || typeof excerpt.content !== "string"
-      || excerpt.content.length < 1
-      || typeof excerpt.truncated !== "boolean"
-      || typeof excerpt.createdAt !== "string"
-      || !Number.isFinite(Date.parse(excerpt.createdAt))
-    ) {
-      throw new Error("The saved chat context contains a malformed excerpt.");
-    }
-    const excerptBytes = byteLength(excerpt.content);
-    if (excerptBytes > MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES) {
-      throw new Error("The saved chat context exceeds the excerpt size limit.");
-    }
-    messageIds.add(excerpt.sourceMessageId);
-    totalBytes += excerptBytes;
-    totalCharacters += excerpt.content.length;
-  }
-  if (
-    totalBytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
-    || totalCharacters !== row.character_count
-  ) {
-    throw new Error("The saved chat context no longer matches its size provenance.");
-  }
-  return parsed as ConversationContextExcerpt[];
-}
-
 function summaryFromRow(
   row: Omit<ConversationContextPacketRow, "excerpts_json">,
   sourceAvailable: boolean,
@@ -292,7 +189,12 @@ function packetFromRow(
   row: ConversationContextPacketRow,
   sourceAvailable: boolean,
 ): ConversationContextPacket {
-  return { ...summaryFromRow(row, sourceAvailable), excerpts: parseExcerpts(row) };
+  const supplement = parseSupplement(row);
+  return {
+    ...summaryFromRow(row, sourceAvailable),
+    excerpts: parseExcerpts(row),
+    ...(supplement ? { supplement } : {}),
+  };
 }
 
 function deliveredSummary(
@@ -337,12 +239,12 @@ const PACKET_SUMMARY_COLUMNS = `
   packet.consumed_request_id, packet.consumed_at, packet.dropped_message_count,
   packet.transport_version, packet.delivered_budget_bytes,
   packet.delivered_message_count, packet.delivered_character_count,
-  packet.delivered_omitted_count`;
+  packet.delivered_omitted_count, packet.supplement_json`;
 
 function summaryFromPacket(
   packet: ConversationContextPacket,
 ): ConversationContextPacketSummary {
-  const { excerpts: _excerpts, omissions: _omissions, ...summary } = packet;
+  const { excerpts: _excerpts, omissions: _omissions, supplement: _supplement, ...summary } = packet;
   return summary;
 }
 
@@ -444,6 +346,8 @@ function sentCopy(
       packet,
       row.delivered_budget_bytes ?? 0,
       agentRequested ? "tool-result" : "prompt",
+      false,
+      row.transport_version,
     );
     const expected = deliveredSummary(row, row.source_available === 1);
     if (
@@ -637,6 +541,12 @@ export class ConversationContextPacketRepository {
       (total, excerpt) => total + excerpt.content.length,
       0,
     );
+    const files = ownConversation || selectedIds
+      ? null
+      : changedFileLines(this.context.database, source.id, null, REFERENCE_FILES_BYTES);
+    const commands = finalTurnCommands(this.context.database, excerpts);
+    const supplement = { ...files, ...(commands.length > 0 ? { commands } : {}) };
+    const supplementJson = Object.keys(supplement).length > 0 ? JSON.stringify(supplement) : null;
     const packet: ConversationContextPacket = {
       id,
       sourceConversationId: source.id,
@@ -657,6 +567,7 @@ export class ConversationContextPacketRepository {
       consumedAt: consumption?.consumedAt ?? null,
       sourceState: "available",
       excerpts,
+      ...(supplementJson === null ? {} : { supplement }),
     };
     const delivery = consumption
       ? deliveryFor(
@@ -678,8 +589,8 @@ export class ConversationContextPacketRepository {
         consumed_message_id, consumed_request_id, consumed_at,
         dropped_message_count, transport_version, delivered_budget_bytes,
         delivered_message_count, delivered_character_count,
-        delivered_omitted_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        delivered_omitted_count, supplement_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       packet.sourceConversationId,
@@ -705,6 +616,7 @@ export class ConversationContextPacketRepository {
       delivery?.messageCount ?? null,
       delivery?.characterCount ?? null,
       delivery?.omittedMessageCount ?? null,
+      supplementJson,
     );
     return this.get(id, target.id);
   }

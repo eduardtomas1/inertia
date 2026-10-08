@@ -24,6 +24,8 @@ export interface ConversationContextAttachmentReference {
   size: number;
 }
 
+export type UnfinishedTurnState = "failed" | "cancelled" | "running";
+
 export interface ConversationContextExcerpt {
   sourceMessageId: string;
   sourceTurnId: string | null;
@@ -32,6 +34,15 @@ export interface ConversationContextExcerpt {
   truncated: boolean;
   createdAt: string;
   attachments?: ConversationContextAttachmentReference[];
+  agent?: string;
+  turn?: UnfinishedTurnState;
+}
+
+export interface ConversationContextSupplement {
+  files?: string[];
+  omittedFiles?: number;
+  commands?: string[];
+  moved?: string;
 }
 
 export interface ConversationContextPacketSummary {
@@ -65,6 +76,7 @@ export interface ConversationContextPacket
   extends ConversationContextPacketSummary {
   excerpts: ConversationContextExcerpt[];
   omissions?: ConversationContextOmissions;
+  supplement?: ConversationContextSupplement;
 }
 
 export interface ConversationContextSourceTranscript {
@@ -117,6 +129,7 @@ export interface MaterializedConversationContext {
   content: string;
   blockIndex: number;
   blockCount: number;
+  structured?: true;
 }
 
 export function conversationWorkspaceLabel(

@@ -438,8 +438,9 @@ textarea {
   min-height: 0;
   flex-direction: column;
   padding: 12px 10px 10px;
-  border-right: 1px solid var(--line-soft);
+  border-right: 0;
   background: var(--surface);
+  box-shadow: inset -1px 0 0 var(--line-soft);
   grid-column: 1;
   grid-row: 1;
 }
@@ -5781,8 +5782,9 @@ button.turn-agents-line:focus-visible {
   min-height: 0;
   flex: 0 0 auto;
   flex-direction: column;
-  border-left: 1px solid var(--line-soft);
+  border-left: 0;
   background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--line-soft);
   container-type: inline-size;
 }
 

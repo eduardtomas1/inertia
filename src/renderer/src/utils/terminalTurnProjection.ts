@@ -292,41 +292,24 @@ export function withProvisionalLatestTurn(
   const latest = conversation?.latestTurn;
   if (!conversation || !latest || turns.some(({ id }) => id === latest.id)) return turns;
   const userMessage = liveMessages.find((message) =>
-    message.role === "user"
-    && message.turnId === latest.id
-    && message.conversationId === conversation.id);
+    message.role === "user" && message.turnId === latest.id);
   if (!userMessage) return turns;
+  const { usageLimited: _usageLimited, ...summary } = latest;
   return [...turns, {
-    id: latest.id,
+    ...summary,
     conversationId: conversation.id,
-    runId: latest.runId,
     userMessageId: userMessage.id,
     terminalAssistantMessageId: null,
-    providerId: latest.providerId,
-    modelSelection: latest.modelSelection,
-    continuationIdentity: latest.continuationIdentity,
-    continuationReasonCode: latest.continuationReasonCode ?? null,
-    harnessId: latest.harnessId,
-    backendProfileId: latest.backendProfileId,
-    model: latest.model,
     modelAlias: latest.modelSelection.alias,
-    reasoningEffort: latest.reasoningEffort,
     interactionMode: conversation.interactionMode,
     accessMode: conversation.accessMode,
     providerSessionBefore: null,
     providerSessionAfter: null,
-    requestedAt: latest.requestedAt,
-    startedAt: latest.startedAt,
-    completedAt: latest.completedAt,
-    status: latest.status,
-    runState: latest.runState,
-    terminalReason: latest.terminalReason,
     checkpointId: null,
     usageAtStart: null,
     usageAtCompletion: null,
     configurationRevision: latest.modelSelection.backendConfigurationRevision,
     association: "authoritative",
     createdAt: latest.requestedAt,
-    updatedAt: latest.updatedAt,
   }];
 }

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { scrubCommandSecrets } from "../../src/server/provider/command-secrets";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import {
   ConversationContextRequestCoordinator,
@@ -575,7 +576,7 @@ describe("inertia_request_context", () => {
     }
   });
 
-  it("redacts secret assignments in command lines", async () => {
+  it("redacts command lines with the shared command secret scrubber", async () => {
     const context = await fixture();
     const { begin, bridgeFor, settle, store, target } = context;
     try {
@@ -589,6 +590,7 @@ describe("inertia_request_context", () => {
       const current = begin(target, "What ran?");
       const result = parsed(await bridgeFor(current).invoke(call({ conversationId: target.id, turnId: turn.id })));
       const command = result.entries.find(({ kind }: { kind: string }) => kind === "command");
+      expect(command.command).toBe(scrubCommandSecrets("DEPLOY_TOKEN=abc123secret ./deploy.sh --verbose"));
       expect(command.command).toBe("DEPLOY_TOKEN=[redacted] ./deploy.sh --verbose");
       expect(JSON.stringify(result)).not.toContain("abc123secret");
     } finally {

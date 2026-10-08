@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentActivity, AgentApprovalRequest, AgentInputRequest, ChatMessage } from "../../src/shared/contracts/agent";
 import { AGENT_RUN_STATES } from "../../src/shared/run-state";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
 import { mascotFeedViolation } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
+import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
 
 const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
 const MINUTE = 60_000;
@@ -449,6 +450,17 @@ describe("mascot bubble words", () => {
     publisher.update(conversation("late", "failed"));
     clock.advance(8 * 24 * 60 * MINUTE);
     expect(publish).toHaveBeenCalledTimes(published);
+    expect(clock.pending()).toBe(0);
+  });
+
+  it("does not arm a timer from a flush that was already queued when it closed", async () => {
+    const publish = vi.fn();
+    const clock = mascotTestClock();
+    const publisher = new MascotStatusPublisher(publish, undefined, undefined, undefined, clock);
+    publisher.replace([conversation("done", "completed")]);
+    publisher.close();
+    await Promise.resolve();
+    expect(publish).not.toHaveBeenCalled();
     expect(clock.pending()).toBe(0);
   });
 

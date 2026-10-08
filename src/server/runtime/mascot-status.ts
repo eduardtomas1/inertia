@@ -290,6 +290,7 @@ export class MascotStatusPublisher {
   }
 
   private flush(): void {
+    if (this.closed) return;
     const now = this.clock.now();
     this.nextWake = Number.POSITIVE_INFINITY;
     let activeCount = 0;

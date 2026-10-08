@@ -35,8 +35,9 @@ export interface TooltipTriggerHandlers<T extends HTMLElement> {
 export function useTooltip<T extends HTMLElement>(
   triggerRef: RefObject<T | null>,
   handlers: Partial<TooltipTriggerHandlers<T>>,
-): { open: boolean; handlers: TooltipTriggerHandlers<T>; close: () => void } {
-  const [open, setOpen] = useState(false);
+): { open: boolean; layer: HTMLElement | null; handlers: TooltipTriggerHandlers<T>; close: () => void } {
+  const [layer, setLayer] = useState<HTMLElement | null>(null);
+  const open = layer !== null;
   const timer = useRef<number | undefined>(undefined);
   const openRef = useRef(false);
 
@@ -49,16 +50,17 @@ export function useTooltip<T extends HTMLElement>(
     clearTimer();
     if (openRef.current) warmUntil = Date.now() + TOOLTIP_WARM_MS;
     openRef.current = false;
-    setOpen(false);
+    setLayer(null);
   }, [clearTimer]);
 
   const show = useCallback(() => {
     clearTimer();
     const reveal = () => {
       timer.current = undefined;
-      if (!triggerRef.current?.isConnected) return;
+      const trigger = triggerRef.current;
+      if (!trigger?.isConnected) return;
       openRef.current = true;
-      setOpen(true);
+      setLayer(trigger.closest<HTMLElement>("[popover], dialog") ?? trigger.ownerDocument.body);
     };
     if (Date.now() < warmUntil) reveal();
     else timer.current = window.setTimeout(reveal, TOOLTIP_DELAY_MS);
@@ -81,6 +83,7 @@ export function useTooltip<T extends HTMLElement>(
 
   return {
     open,
+    layer,
     close,
     handlers: {
       onPointerEnter: (event) => {
@@ -115,10 +118,12 @@ export function useTooltip<T extends HTMLElement>(
 
 export function Tooltip({
   anchor,
+  layer,
   label,
   shortcut,
 }: {
   anchor: RefObject<HTMLElement | null>;
+  layer: HTMLElement;
   label: string;
   shortcut?: string;
 }): React.JSX.Element | null {
@@ -155,6 +160,6 @@ export function Tooltip({
       {label}
       {shortcut && <kbd>{shortcut}</kbd>}
     </div>,
-    document.body,
+    layer,
   );
 }

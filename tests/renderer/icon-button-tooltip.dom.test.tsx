@@ -137,4 +137,16 @@ describe("icon button tooltip", () => {
     fireEvent.keyDown(button, { key: "Escape" });
     expect(dialogEscape).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["a popover", (children: React.ReactNode) => <div popover="auto" data-testid="layer">{children}</div>],
+    ["a dialog", (children: React.ReactNode) => <dialog open data-testid="layer">{children}</dialog>],
+  ] as const)("renders the tooltip inside %s so the top layer does not hide it", (_name, wrap) => {
+    render(wrap(<IconButton label="Pin project">P</IconButton>));
+    hover(screen.getByRole("button", { name: "Pin project" }));
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(tooltip()?.parentElement).toBe(screen.getByTestId("layer"));
+  });
 });

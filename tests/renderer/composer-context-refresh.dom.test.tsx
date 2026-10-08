@@ -52,6 +52,21 @@ function created(packet: ConversationContextPacketSummary): ServerEvent {
   } as unknown as ServerEvent;
 }
 
+function sourceLoaded(
+  relation: ConversationContextSourceOption["workspaceRelation"] = "same-workspace",
+  sourceConversationId = source.conversationId,
+): ServerEvent {
+  return {
+    type: "request.result",
+    requestId: "source",
+    result: { kind: "conversation.context.source", source: {
+      conversationId: sourceConversationId, projectId: "project", conversationTitle: source.conversationTitle,
+      projectName: source.projectName, workspaceLabel: "Project checkout · main", targetConversationId: target,
+      targetProjectId: "project", targetWorkspaceLabel: "Project checkout · main", workspaceRelation: relation, messages: [],
+    } },
+  } as unknown as ServerEvent;
+}
+
 type Props = Parameters<typeof useComposerConversationContext>[0];
 
 function setup(initial: Partial<Props>, onCommand: NonNullable<Props["onCommand"]>) {
@@ -78,7 +93,9 @@ describe("stale chat reference drafts", () => {
     const creation = deferred<ServerEvent>();
     const onCommand = vi.fn(async (type: string) => type === "conversation.context.create"
       ? creation.promise
-      : { type: "request.ok", requestId: "remove" } as ServerEvent);
+      : type === "conversation.context.source.load"
+        ? sourceLoaded()
+        : { type: "request.ok", requestId: "remove" } as ServerEvent);
     const { props, view } = setup({}, onCommand);
     expect(onCommand).not.toHaveBeenCalled();
 
@@ -87,12 +104,18 @@ describe("stale chat reference drafts", () => {
     await act(async () => {});
     expect(view.result.current.referencing).toBe(true);
     expect(view.result.current.isReferencing()).toBe(true);
-    expect(onCommand.mock.calls.map(([type]) => type)).toEqual(["conversation.context.remove", "conversation.context.create"]);
-    expect(onCommand).toHaveBeenNthCalledWith(1, "conversation.context.remove", {
+    expect(onCommand.mock.calls.map(([type]) => type)).toEqual([
+      "conversation.context.source.load", "conversation.context.remove", "conversation.context.create",
+    ]);
+    expect(onCommand).toHaveBeenNthCalledWith(1, "conversation.context.source.load", {
+      type: "conversation.context.source.load",
+      payload: { sourceConversationId: source.conversationId, targetConversationId: target },
+    });
+    expect(onCommand).toHaveBeenNthCalledWith(2, "conversation.context.remove", {
       type: "conversation.context.remove",
       payload: { packetId: draft().id, targetConversationId: target },
     });
-    expect(onCommand).toHaveBeenNthCalledWith(2, "conversation.context.create", {
+    expect(onCommand).toHaveBeenNthCalledWith(3, "conversation.context.create", {
       type: "conversation.context.create",
       payload: { sourceConversationId: source.conversationId, targetConversationId: target, acknowledgedWorkspaceDifference: false },
     });
@@ -105,7 +128,7 @@ describe("stale chat reference drafts", () => {
     expect(view.result.current.referencing).toBe(false);
     expect(view.result.current.contextPacketIds).toEqual([refreshed.id]);
     expect(view.result.current.confirmation).toBeNull();
-    expect(onCommand).toHaveBeenCalledTimes(2);
+    expect(onCommand).toHaveBeenCalledTimes(3);
   });
 
   it("leaves a reference alone when the source turn finished before the copy", async () => {
@@ -119,7 +142,9 @@ describe("stale chat reference drafts", () => {
   it("waits while the message is being sent or this chat is still running", async () => {
     const onCommand = vi.fn(async (type: string) => type === "conversation.context.create"
       ? created(draft({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", createdAt: "2026-10-08T10:05:01.000Z" }))
-      : { type: "request.ok", requestId: "remove" } as ServerEvent);
+      : type === "conversation.context.source.load"
+        ? sourceLoaded()
+        : { type: "request.ok", requestId: "remove" } as ServerEvent);
     const { props, view } = setup({ paused: true }, onCommand);
     const finished = { ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] };
     view.rerender(finished);
@@ -127,7 +152,9 @@ describe("stale chat reference drafts", () => {
     expect(onCommand).not.toHaveBeenCalled();
     view.rerender({ ...finished, paused: false });
     await act(async () => {});
-    expect(onCommand.mock.calls.map(([type]) => type)).toEqual(["conversation.context.remove", "conversation.context.create"]);
+    expect(onCommand.mock.calls.map(([type]) => type)).toEqual([
+      "conversation.context.source.load", "conversation.context.remove", "conversation.context.create",
+    ]);
   });
 
   it("recopies this chat's earlier messages once its own running turn finishes", async () => {
@@ -138,6 +165,7 @@ describe("stale chat reference drafts", () => {
     const { props, view } = setup({ contextPackets: [own], paused: true }, onCommand);
     view.rerender({ ...props, paused: false, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" });
     await act(async () => {});
+    expect(onCommand.mock.calls.map(([type]) => type)).toEqual(["conversation.context.remove", "conversation.context.create"]);
     expect(onCommand).toHaveBeenLastCalledWith("conversation.context.create", {
       type: "conversation.context.create",
       payload: { sourceConversationId: target, targetConversationId: target, acknowledgedWorkspaceDifference: false },
@@ -148,7 +176,9 @@ describe("stale chat reference drafts", () => {
     const other = { ...source, workspaceRelation: "different-workspace" as const };
     const onCommand = vi.fn(async (type: string) => type === "conversation.context.create"
       ? created(draft({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", workspaceRelation: "different-workspace", createdAt: "2026-10-08T10:05:01.000Z" }))
-      : { type: "request.ok", requestId: "remove" } as ServerEvent);
+      : type === "conversation.context.source.load"
+        ? sourceLoaded("different-workspace")
+        : { type: "request.ok", requestId: "remove" } as ServerEvent);
     const { props, view } = setup({
       contextSources: [other],
       contextPackets: [draft({ workspaceRelation: "different-workspace" })],
@@ -162,11 +192,69 @@ describe("stale chat reference drafts", () => {
   });
 
   it("does not recreate a reference it could not remove", async () => {
-    const onCommand = vi.fn(async (_type: string): Promise<ServerEvent> => { throw new Error("already sent"); });
+    const onCommand = vi.fn(async (type: string): Promise<ServerEvent> => {
+      if (type === "conversation.context.source.load") return sourceLoaded();
+      throw new Error("already sent");
+    });
     const { props, view } = setup({}, onCommand);
     view.rerender({ ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] });
     await act(async () => {});
-    expect(onCommand.mock.calls.map(([type]) => type)).toEqual(["conversation.context.remove"]);
+    expect(onCommand.mock.calls.map(([type]) => type)).toEqual(["conversation.context.source.load", "conversation.context.remove"]);
+    expect(view.result.current.referencing).toBe(false);
+  });
+
+  it.each([
+    ["the source moved to another workspace", async () => sourceLoaded("different-workspace")],
+    ["the source cannot be read", async (): Promise<ServerEvent> => { throw new Error("disconnected"); }],
+    ["the reply names another chat", async () => sourceLoaded("same-workspace", "someone-else")],
+  ])("keeps the copy the user confirmed when %s", async (_case, load) => {
+    const onCommand = vi.fn(async (type: string): Promise<ServerEvent> => type === "conversation.context.source.load"
+      ? load()
+      : { type: "request.ok", requestId: "unexpected" } as ServerEvent);
+    const { props, view } = setup({}, onCommand);
+    const finished = { ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] };
+    view.rerender(finished);
+    await act(async () => {});
+    view.rerender({ ...finished, hasVisibleHistory: false });
+    await act(async () => {});
+    expect(onCommand.mock.calls.map(([type]) => type)).toEqual(["conversation.context.source.load"]);
+    expect(view.result.current.contextPacketIds).toEqual([draft().id]);
+    expect(view.result.current.referencing).toBe(false);
+    expect(view.result.current.error).toBeNull();
+  });
+
+  it("tries the copy once more when creating it fails after the old copy was removed", async () => {
+    const refreshed = draft({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", createdAt: "2026-10-08T10:05:01.000Z" });
+    let creates = 0;
+    const onCommand = vi.fn(async (type: string): Promise<ServerEvent> => {
+      if (type === "conversation.context.source.load") return sourceLoaded();
+      if (type === "conversation.context.remove") return { type: "request.ok", requestId: "remove" } as ServerEvent;
+      creates += 1;
+      if (creates === 1) throw new Error("disconnected");
+      return created(refreshed);
+    });
+    const { props, view } = setup({}, onCommand);
+    view.rerender({ ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] });
+    await act(async () => {});
+    expect(onCommand.mock.calls.map(([type]) => type)).toEqual([
+      "conversation.context.source.load", "conversation.context.remove",
+      "conversation.context.create", "conversation.context.create",
+    ]);
+    expect(view.result.current.error).toBeNull();
+    expect(view.result.current.isReferencing()).toBe(true);
+  });
+
+  it("names the reference that could not be copied again when both attempts fail", async () => {
+    const onCommand = vi.fn(async (type: string): Promise<ServerEvent> => {
+      if (type === "conversation.context.source.load") return sourceLoaded();
+      if (type === "conversation.context.remove") return { type: "request.ok", requestId: "remove" } as ServerEvent;
+      throw new Error("disconnected");
+    });
+    const { props, view } = setup({}, onCommand);
+    view.rerender({ ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] });
+    await act(async () => {});
+    expect(onCommand.mock.calls.filter(([type]) => type === "conversation.context.create")).toHaveLength(2);
+    expect(view.result.current.error).toBe("Architecture decisions could not be referenced.");
     expect(view.result.current.referencing).toBe(false);
   });
 });

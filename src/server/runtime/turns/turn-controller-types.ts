@@ -175,7 +175,10 @@ export interface TurnControllerHooks {
     kind: "assistant" | "reasoning";
     recordId: string;
   }): void;
-  createTurnCheckpoint?(turn: AgentTurn): Promise<TurnCheckpointCapture>;
+  createTurnCheckpoint?(
+    turn: AgentTurn,
+    signal: AbortSignal,
+  ): Promise<TurnCheckpointCapture>;
   captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
   /** Optional metadata; failure cannot change a committed provider outcome. */
@@ -323,7 +326,7 @@ export interface ActiveTurn {
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
   followUpBoundary: { at: string; text: string; messageId: string | null } | null;
-  pendingFollowUpBoundaryAt: string | null;
+  pendingFollowUpBoundary: { at: string; messageId: string | null } | null;
   assistantStream: TurnStreamChannel;
   reasoningText: string;
   reasoningPendingHighSurrogate: string;

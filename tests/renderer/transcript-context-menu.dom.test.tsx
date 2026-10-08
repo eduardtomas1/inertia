@@ -27,6 +27,56 @@ const answer: ChatMessage = {
   ].join("\n"),
   attachments: [], createdAt: at,
 };
+const clientAnswer = [
+  "Hi Ana,",
+  "",
+  "> The release ships on **Friday** with the new export.",
+  "",
+  "---",
+  "",
+  "| Item | Status |",
+  "| --- | --- |",
+  "| Export | Done |",
+  "| Import | *Next week* |",
+  "",
+  "```sh",
+  "npm run export",
+  "```",
+  "",
+  "## Next steps",
+  "",
+  "- Review the [export docs](https://example.com/docs) and `config.json`",
+  "- Read <https://example.com/faq>",
+  "- Confirm the date",
+  "  - nested detail",
+  "    1. deeper step",
+  "",
+  "3. Third",
+  "4. Fourth",
+].join("\n");
+const clientAnswerText = [
+  "Hi Ana,",
+  "",
+  "The release ships on Friday with the new export.",
+  "",
+  "Item\tStatus",
+  "Export\tDone",
+  "Import\tNext week",
+  "",
+  "npm run export",
+  "",
+  "Next steps",
+  "",
+  "- Review the export docs (https://example.com/docs) and config.json",
+  "- Read https://example.com/faq",
+  "- Confirm the date",
+  "  - nested detail",
+  "    1. deeper step",
+  "",
+  "3. Third",
+  "4. Fourth",
+].join("\n");
+
 const turn: AgentTurn = {
   id: "turn-1", conversationId, runId: "run-1", userMessageId: request.id,
   terminalAssistantMessageId: answer.id, providerId: "codex",
@@ -58,11 +108,11 @@ const bridge = {
   getPlatform: () => "darwin" as NodeJS.Platform,
 };
 
-function renderTimeline(onOpenTurnFile = vi.fn()) {
+function renderTimeline(onOpenTurnFile = vi.fn(), content = answer.content) {
   render(
     <div ref={createRef<HTMLDivElement>()}>
       <ResponseTimeline
-        turns={[turn]} messages={[request, answer]}
+        turns={[turn]} messages={[request, { ...answer, content }]}
         activities={[]} reasonings={[]} plans={[]} checkpoints={[]}
         projectRoot="/workspace/app" projectId={projectId} conversationId={conversationId}
         streamingText="" streamingReasoning="" approvals={[]} inputRequests={[]}
@@ -109,8 +159,21 @@ describe("transcript context menus", () => {
     expect(JSON.stringify(lastRequest())).not.toContain("build");
     await settleMenu();
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith(
-      "The build passes.\n\nSee the entry point and the docs.\n\nconst value = 1;",
+      "The build passes.\n\nSee the entry point (src/index.ts) and the docs (https://example.com/docs).\n\nconst value = 1;",
     );
+  });
+
+  it("copies a client-ready answer without Markdown syntax from the menu and the Copy button", async () => {
+    renderTimeline(vi.fn(), clientAnswer);
+    bridge.showContextMenu.mockResolvedValueOnce("copy-message");
+    fireEvent.contextMenu(finalAnswer().querySelector("p")!);
+    await settleMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Copy final answer" }));
+    await settleMenu();
+    expect(bridge.copyText.mock.calls).toEqual([[clientAnswerText], [clientAnswerText]]);
+    for (const marker of ["> ", "---", "|", "```", "**", "*", "`"]) {
+      expect(clientAnswerText).not.toContain(marker);
+    }
   });
 
   it("copies the answer as Markdown", async () => {

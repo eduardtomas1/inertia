@@ -24,6 +24,9 @@ import {
 } from "./conversation-context-source";
 import type { ConversationRow } from "./rows";
 import { byteLength } from "./bounded-message-text";
+import { turnContextFactsReader } from "./turn-context-facts";
+
+const TURN_MARKER_BYTES = byteLength(`,${JSON.stringify("turn")}:${JSON.stringify("cancelled")}`);
 
 export function conversationContextWorkspaceLabel(
   conversation: Pick<ConversationRow, "branch" | "worktree_path">,
@@ -61,6 +64,7 @@ function attachmentReferences(
 }
 
 const SHORTENED_MIDDLE = "…\n\n[middle of message omitted]\n\n";
+const OMITTED_EXCERPT = "[Message excerpt omitted]";
 const MAX_EXCERPT_ESCAPED_BYTES = 40 * 1024;
 
 function cleanExcerptText(value: string): string | null {
@@ -126,7 +130,7 @@ export function scrubAndBoundExcerpt(
   const tail = row.contentTruncated ? cleanExcerptText(row.tail ?? "") ?? "" : head ?? "";
   const boundTo = (limit: number) => head === null
     ? truncateUtf8(
-        row.contentTruncated ? "[Message excerpt omitted]" : "[Empty message omitted]",
+        row.contentTruncated ? OMITTED_EXCERPT : "[Empty message omitted]",
         limit,
       )
     : !row.contentTruncated && byteLength(head) <= limit
@@ -135,9 +139,13 @@ export function scrubAndBoundExcerpt(
   let limit = Math.min(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, remainingBytes);
   let bounded = boundTo(limit);
   while (limit > 0 && escapedBytes(bounded.text) > MAX_EXCERPT_ESCAPED_BYTES) {
-    limit -= escapedBytes(bounded.text) - MAX_EXCERPT_ESCAPED_BYTES;
+    limit = Math.min(
+      limit - 1,
+      Math.floor(limit * MAX_EXCERPT_ESCAPED_BYTES / escapedBytes(bounded.text)),
+    );
     bounded = boundTo(limit);
   }
+  if (!bounded.text) bounded = { text: OMITTED_EXCERPT, truncated: true };
   const attachments = attachmentReferences(row.attachments_json);
   return {
     sourceMessageId: row.id,
@@ -148,6 +156,13 @@ export function scrubAndBoundExcerpt(
     createdAt: row.created_at,
     ...(attachments.length > 0 ? { attachments } : {}),
   };
+}
+
+export function finalAnswerExcerptBytes(capacityBytes: number): number {
+  return Math.min(
+    MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+    Math.max(MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, Math.floor(capacityBytes / 4)),
+  );
 }
 
 export interface CollectedConversationContextExcerpts {
@@ -197,11 +212,17 @@ export function collectConversationContextExcerpts(
     final ? finalAnswerBytes : MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
     shareBytes,
   );
+  const facts = turnContextFactsReader(database);
+  const withAgent = (excerpt: ConversationContextExcerpt): ConversationContextExcerpt => {
+    const agent = excerpt.role === "assistant" ? facts(excerpt.sourceTurnId)?.agent : undefined;
+    return agent ? { ...excerpt, agent } : excerpt;
+  };
   let retainedBytes = 0;
   let retainedJsonBytes = 2;
   const retain = (excerpt: ConversationContextExcerpt): boolean => {
     const bytes = byteLength(excerpt.content);
-    const jsonBytes = byteLength(JSON.stringify(excerpt)) + 1;
+    const jsonBytes = byteLength(JSON.stringify(excerpt)) + 1
+      + (facts(excerpt.sourceTurnId)?.state ? TURN_MARKER_BYTES : 0);
     if (
       retainedBytes + bytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
       || retainedJsonBytes + jsonBytes > MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES
@@ -213,7 +234,7 @@ export function collectConversationContextExcerpts(
   const openingRow = selectedIds
     ? null
     : conversationContextOpeningRow(database, sourceConversationId, excludedMessageId, route);
-  let opening = openingRow ? scrubAndBoundExcerpt(openingRow, excerptBytes(false)) : null;
+  let opening = openingRow ? withAgent(scrubAndBoundExcerpt(openingRow, excerptBytes(false))) : null;
   if (opening && !retain(opening)) opening = null;
   const window: ConversationContextExcerpt[] = [];
   for (const row of conversationContextSourceRows(
@@ -231,11 +252,17 @@ export function collectConversationContextExcerpts(
       opening = null;
       continue;
     }
-    const excerpt = scrubAndBoundExcerpt(row, excerptBytes(row.final));
+    const excerpt = withAgent(scrubAndBoundExcerpt(row, excerptBytes(row.final)));
     if (!retain(excerpt)) break;
     window.push(excerpt);
   }
-  const excerpts = [...(opening ? [opening] : []), ...window.reverse()];
+  const marked = new Set<string>();
+  const excerpts = [...(opening ? [opening] : []), ...window.reverse()].reverse().map((excerpt) => {
+    const state = facts(excerpt.sourceTurnId)?.state;
+    if (!state || marked.has(excerpt.sourceTurnId!)) return excerpt;
+    marked.add(excerpt.sourceTurnId!);
+    return { ...excerpt, turn: state };
+  }).reverse();
   if (excerpts.length < 1) {
     throw new Error("The selected chat context exceeds the shared size limit.");
   }

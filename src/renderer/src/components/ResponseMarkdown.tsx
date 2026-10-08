@@ -18,7 +18,7 @@ import {
   Table2,
   WrapText,
 } from "lucide-react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type ExtraProps } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -426,7 +426,7 @@ export function tableAsMarkdown(rows: string[][]): string {
   ].join("\n");
 }
 
-function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.JSX.Element {
+function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"table"> & ExtraProps): React.JSX.Element {
   const { announceCopyFeedback } = useMarkdownRenderContext();
   const rows = useMemo(() => tableRowsFromNode(children), [children]);
   const markdownCopy = useCopiedState();
@@ -675,6 +675,7 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
     <a {...props} href={url}
       className={[props.className, "response-project-file-link"].filter(Boolean).join(" ")}
       data-language-family={language.family}
+      data-link-path={path}
       title={props.title ?? "Open local file"}
       onClick={(event) => {
         event.preventDefault();
@@ -691,8 +692,9 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
 function MarkdownLink({
   href = "",
   children,
+  node: _node,
   ...props
-}: ComponentProps<"a">): React.JSX.Element {
+}: ComponentProps<"a"> & ExtraProps): React.JSX.Element {
   const {
     projectRoot,
     projectId,
@@ -791,6 +793,7 @@ function MarkdownLink({
         {...props}
         className={projectLinkClass}
         data-language-family={language.family}
+        data-link-path={target.relativePath}
         href={href}
         onClick={(event) => {
           event.preventDefault();
@@ -852,6 +855,14 @@ function MarkdownImage({
       }, applicationRendererScheme(globalThis.location?.protocol))
     : null;
   const schedule = useMarkdownImageSchedule(trustedSource);
+  const copyAttributes = {
+    "data-markdown-image-alt": unavailableAlt,
+    "data-markdown-image-source": target.kind === "external"
+      ? target.url
+      : target.kind === "project"
+        ? target.relativePath
+        : target.kind === "local" ? target.path : "",
+  };
   const placeholder = (reason: string, overflow = false): React.JSX.Element => {
     const message = unavailableAlt
       ? `${unavailableAlt} (${reason})`
@@ -863,6 +874,7 @@ function MarkdownImage({
         aria-label={unavailableAlt}
         data-markdown-image-overflow={overflow ? "true" : undefined}
         title={title}
+        {...copyAttributes}
       >
         {message}
       </span>
@@ -872,6 +884,7 @@ function MarkdownImage({
         aria-hidden="true"
         data-markdown-image-overflow={overflow ? "true" : undefined}
         title={title}
+        {...copyAttributes}
       >
         {message}
       </span>
@@ -885,6 +898,7 @@ function MarkdownImage({
       ref={schedule.shellRef}
       className="response-markdown-image-shell"
       data-markdown-image-state={schedule.state}
+      {...copyAttributes}
     >
       {schedule.state === "loading" || schedule.state === "loaded" ? (
         <img
@@ -906,7 +920,7 @@ function MarkdownImage({
   );
 }
 
-function MarkdownParagraph(props: ComponentProps<"p">): React.JSX.Element {
+function MarkdownParagraph({ node: _node, ...props }: ComponentProps<"p"> & ExtraProps): React.JSX.Element {
   const { streaming } = useMarkdownRenderContext();
   return <p {...props}>{streaming
     ? Children.map(props.children, (child) => typeof child === "string"
@@ -938,8 +952,9 @@ function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Eleme
 
 function MarkdownDetails({
   children,
+  node: _node,
   ...props
-}: ComponentProps<"details">): React.JSX.Element {
+}: ComponentProps<"details"> & ExtraProps): React.JSX.Element {
   return <details {...props} className="response-details">{children}</details>;
 }
 

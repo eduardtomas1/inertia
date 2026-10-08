@@ -15,7 +15,11 @@ import { normalizeIdentityPath } from "../project-identity";
 import { readBoundedMessageText } from "./bounded-message-text";
 import { parseStoredAttachments } from "./codecs";
 import { scrubConversationContextMetadata as scrubMetadata } from "./conversation-context-excerpts";
-import { CONVERSATION_CONTEXT_MESSAGE_SQL } from "./conversation-context-source";
+import {
+  CONVERSATION_CONTEXT_MESSAGE_SQL,
+  continuationRouteTurnSql,
+  type ContinuationRouteFilter,
+} from "./conversation-context-source";
 import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
 import type { ConversationRow } from "./rows";
 
@@ -96,6 +100,15 @@ interface ReadRecord {
 
 const TURN_COLUMNS = `id, user_message_id, provider_id, model, status,
   requested_at, started_at, completed_at`;
+
+function routeTurnSql(route: ContinuationRouteFilter | undefined): {
+  sql: string;
+  parameters: Array<string | null>;
+} {
+  if (!route) return { sql: "", parameters: [] };
+  const routed = continuationRouteTurnSql("turn", route);
+  return { sql: `AND ${routed.sql}`, parameters: routed.parameters };
+}
 
 function turnFromRecord(row: TurnRowRecord): ConversationContextTurnRow {
   return {
@@ -183,9 +196,11 @@ export class ConversationContextTurnReads {
     conversationId: string,
     limit: number,
     beforeTurnId?: string,
+    route?: ContinuationRouteFilter,
   ): ConversationContextTurnListRow[] {
-    const before = beforeTurnId ? this.turn(conversationId, beforeTurnId) : null;
+    const before = beforeTurnId ? this.turn(conversationId, beforeTurnId, route) : null;
     if (beforeTurnId && !before) throw new Error("That turn cursor is not part of this chat.");
+    const routed = routeTurnSql(route);
     const rows = this.context.database.prepare(`
       SELECT ${TURN_COLUMNS},
         COALESCE((
@@ -195,22 +210,38 @@ export class ConversationContextTurnReads {
       FROM agent_turns turn
       WHERE turn.conversation_id = ?
         ${before ? "AND (turn.requested_at, turn.id) < (?, ?)" : ""}
+        ${routed.sql}
       ORDER BY turn.requested_at DESC, turn.id DESC
       LIMIT ?
     `).all(
       MAX_REQUEST_HEAD_BYTES,
       conversationId,
       ...(before ? [before.requestedAt, before.id] : []),
+      ...routed.parameters,
       limit,
     ) as Array<TurnRowRecord & { request_head: Buffer }>;
     return rows.map((row) => ({ ...turnFromRecord(row), requestHead: row.request_head }));
   }
 
-  turn(conversationId: string, turnId: string): ConversationContextTurnRow | null {
+  turn(
+    conversationId: string,
+    turnId: string,
+    route?: ContinuationRouteFilter,
+  ): ConversationContextTurnRow | null {
+    const routed = routeTurnSql(route);
     const row = this.context.database.prepare(`
-      SELECT ${TURN_COLUMNS} FROM agent_turns WHERE id = ? AND conversation_id = ?
-    `).get(turnId, conversationId) as TurnRowRecord | undefined;
+      SELECT ${TURN_COLUMNS} FROM agent_turns turn
+      WHERE turn.id = ? AND turn.conversation_id = ? ${routed.sql}
+    `).get(turnId, conversationId, ...routed.parameters) as TurnRowRecord | undefined;
     return row ? turnFromRecord(row) : null;
+  }
+
+  withheldTurnCount(conversationId: string, route: ContinuationRouteFilter): number {
+    const routed = continuationRouteTurnSql("turn", route);
+    return (this.context.database.prepare(`
+      SELECT COUNT(*) AS count FROM agent_turns turn
+      WHERE turn.conversation_id = ? AND NOT ${routed.sql}
+    `).get(conversationId, ...routed.parameters) as { count: number }).count;
   }
 
   entries(conversationId: string, turn: ConversationContextTurnRow): {

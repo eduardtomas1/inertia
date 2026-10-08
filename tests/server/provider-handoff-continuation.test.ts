@@ -215,8 +215,8 @@ describe("provider handoff continuation", () => {
     expect(prompt).toContain("CLAUDE_REPLY_SENTINEL: the exporter now writes UTF-8.");
     expect(prompt).toContain("Continue on Codex.");
     expect(prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
-    expect(prompt).toContain("inertia-provider-handoff-files");
-    expect(prompt).toContain("src/legacy-export.ts");
+    expect(prompt).toContain('"content":{"files":["A src/export.ts +43 -1","M src/legacy-export.ts +2 -5"]}');
+    expect(prompt).toContain('"moved":"from Claude by the user\'s choice"');
     expect(f.store.turnExecutionManifest(handoff.queued.turn.id)?.references.map(({ label }) => label))
       .toContain(PROVIDER_HANDOFF_FILES_LABEL);
   });
@@ -551,14 +551,9 @@ describe("provider handoff files block", () => {
     f.store.createTurnGitArtifact({ turnId: failedCapture.queued.turn.id, status: "failed" });
     const block = f.filesBlock()!;
     expect(block.label).toBe(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(block.structured).toBe(true);
     expect(JSON.parse(block.content)).toEqual({
-      kind: "inertia-provider-handoff-files",
-      about: "Files this chat's earlier turns changed, from the local Git records; paths only, no contents.",
-      files: [
-        { path: "src/export.ts", status: "added", insertions: 43, deletions: 1 },
-        { path: "src/legacy-export.ts", status: "modified", insertions: 2, deletions: 5 },
-      ],
-      omittedFileCount: 0,
+      files: ["A src/export.ts +43 -1", "M src/legacy-export.ts +2 -5"],
     });
   });
 
@@ -582,11 +577,8 @@ describe("provider handoff files block", () => {
     f.complete(edited.queued.turn.id, "Edited it.", "claude-session", [
       changedFile("src/restored.ts", "modified", 1, 1),
     ]);
-    const parsed = JSON.parse(f.filesBlock()!.content) as { files: Array<{ path: string; status: string }> };
-    expect(parsed.files.map(({ path, status }) => ({ path, status }))).toEqual([
-      { path: "src/restored.ts", status: "added" },
-      { path: "src/scratch.ts", status: "deleted" },
-    ]);
+    const parsed = JSON.parse(f.filesBlock()!.content) as { files: string[] };
+    expect(parsed.files).toEqual(["A src/restored.ts +9 -5", "D src/scratch.ts +5 -5"]);
   });
 
   it("never costs the restored messages their place and joins only in the room they leave", async () => {
@@ -624,11 +616,11 @@ describe("provider handoff files block", () => {
       changedFile(`src/generated/${"nested/".repeat(8)}file-${index}.ts`, "added", 1, 0));
     f.complete(turn.queued.turn.id, "Generated the files.", "claude-session", many);
     const block = f.filesBlock()!;
-    const parsed = JSON.parse(block.content) as { files: unknown[]; omittedFileCount: number };
+    const parsed = JSON.parse(block.content) as { files: unknown[]; omittedFiles: number };
     expect(Buffer.byteLength(block.content)).toBeLessThanOrEqual(MAX_PROVIDER_HANDOFF_FILES_BYTES);
     expect(parsed.files.length).toBeGreaterThan(0);
     expect(parsed.files.length).toBeLessThan(MAX_PROVIDER_HANDOFF_FILES);
-    expect(parsed.files.length + parsed.omittedFileCount).toBe(MAX_PROVIDER_HANDOFF_FILES);
+    expect(parsed.files.length + parsed.omittedFiles).toBe(MAX_PROVIDER_HANDOFF_FILES);
   });
 
   describe("usage-limit snooze", () => {

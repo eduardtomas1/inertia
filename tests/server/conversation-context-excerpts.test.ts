@@ -2,9 +2,24 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { neutralizeUntrustedAgentText } from "../../src/server/runtime/untrusted-agent-text";
+
+const corruption = vi.hoisted(() => ({ emptyContent: false }));
+vi.mock("../../src/server/persistence/conversation-context-excerpts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/server/persistence/conversation-context-excerpts")>();
+  return {
+    ...actual,
+    collectConversationContextExcerpts: (...args: Parameters<typeof actual.collectConversationContextExcerpts>) => {
+      const collected = actual.collectConversationContextExcerpts(...args);
+      return collected && corruption.emptyContent
+        ? { ...collected, excerpts: collected.excerpts.map((excerpt) => ({ ...excerpt, content: "" })) }
+        : collected;
+    },
+  };
+});
 
 const SHORTENED_MIDDLE = "…\n\n[middle of message omitted]\n\n";
 const capturedAt = "2030-01-01T01:00:00.000Z";
@@ -128,6 +143,39 @@ describe("conversation context excerpt bounds", () => {
     expect(Buffer.byteLength(JSON.stringify(answer.content))).toBeLessThanOrEqual(40 * 1024 + 2);
   });
 
+  it.each([
+    ["terminal colour codes", "\x1b[0m".repeat(9_000)],
+    ["coloured lines", "\x1b[1m\x1b[31mE\x1b[0m\n".repeat(3_000)],
+    ["control characters between words", "a\x01 ".repeat(12_000)],
+    ["control characters only", "\x01\x02 ".repeat(12_000)],
+  ])("keeps a bounded head of an answer dense with %s", (_name, answer) => {
+    const f = fixture();
+    f.say("Show the raw log.", "user");
+    f.say(answer, "assistant");
+
+    const packet = f.packet();
+    const excerpt = packet.excerpts[1]!;
+    expect(excerpt.content.length).toBeGreaterThan(1_000);
+    expect(excerpt.truncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(excerpt.content))).toBeLessThanOrEqual(40 * 1024 + 2);
+    expect(neutralizeUntrustedAgentText(excerpt.content)).toBe(excerpt.content);
+    expect(f.store.contextPackets.get(packet.id, f.target.id).excerpts).toEqual(packet.excerpts);
+    expect(f.store.contextPackets.list(f.target.id)).toHaveLength(1);
+  });
+
+  it("rejects an excerpt that would not read back before it stores the draft", () => {
+    const f = fixture();
+    f.say("Keep the retry limit at three.", "user");
+    corruption.emptyContent = true;
+    try {
+      expect(() => f.packet()).toThrow("The saved chat context contains a malformed excerpt.");
+    } finally {
+      corruption.emptyContent = false;
+    }
+    expect(f.store.contextPackets.list(f.target.id)).toEqual([]);
+    expect(f.packet().excerpts.map(({ content }) => content)).toEqual(["Keep the retry limit at three."]);
+  });
+
   it("restores the newest turn with its long answer into a small custom-backend budget", () => {
     const f = fixture();
     for (let index = 0; index < 4; index += 1) {
@@ -216,8 +264,8 @@ describe("conversation context notes", () => {
       .toContain("[page: Exports by night] (rendered page; content not available here)");
     const { blocks } = f.store.contextPackets.materialize(f.target.id, [packet.id]);
     const format = (JSON.parse(blocks[0]!.content) as { format: string }).format;
-    expect(format).toContain("details.attachments");
-    expect(format).toContain("not available here");
+    expect(format).toContain("attached files are named but not available here");
+    expect(format).toContain("[page: title] is a rendered page whose content is not included");
     const restored = JSON.parse(f.restored().history.blocks[0]!.content) as { format: string };
     expect(restored.format).toBe(format);
   });

@@ -86,9 +86,8 @@ export class TurnStreamProjection {
    */
   closeAssistantSegment(active: ActiveTurn): boolean {
     const closed = this.closeOpenAssistantSegment(active);
-    if (active.pendingFollowUpBoundaryAt) {
-      this.commitFollowUpBoundary(active, active.pendingFollowUpBoundaryAt);
-    }
+    const pending = active.pendingFollowUpBoundary;
+    if (pending) this.commitFollowUpBoundary(active, pending.at, pending.messageId);
     return closed;
   }
 
@@ -105,7 +104,7 @@ export class TurnStreamProjection {
     const after = [
       latest,
       active.followUpBoundary?.at,
-      active.pendingFollowUpBoundaryAt,
+      active.pendingFollowUpBoundary?.at,
     ].reduce<string | null>((current, value) =>
       value && (!current || Date.parse(value) > Date.parse(current))
         ? value
@@ -114,17 +113,37 @@ export class TurnStreamProjection {
   }
 
   recordFollowUp(active: ActiveTurn, createdAt: string, deferred: boolean): void {
-    if (deferred) active.pendingFollowUpBoundaryAt = createdAt;
-    else this.commitFollowUpBoundary(active, createdAt);
+    if (deferred) {
+      active.pendingFollowUpBoundary = {
+        at: createdAt,
+        messageId: active.latestAssistantMessageId,
+      };
+    } else {
+      this.commitFollowUpBoundary(active, createdAt, active.latestAssistantMessageId);
+    }
   }
 
-  private commitFollowUpBoundary(active: ActiveTurn, at: string): void {
-    active.pendingFollowUpBoundaryAt = null;
-    active.followUpBoundary = {
-      at,
-      text: active.assistantText,
-      messageId: active.latestAssistantMessageId,
-    };
+  private commitFollowUpBoundary(
+    active: ActiveTurn,
+    at: string,
+    messageId: string | null,
+  ): void {
+    active.pendingFollowUpBoundary = null;
+    active.followUpBoundary = { at, text: active.assistantText, messageId };
+  }
+
+  private rebasedOnFollowUp(active: ActiveTurn, text: string): string {
+    const preserved = active.followUpBoundary?.text;
+    if (!preserved || text.startsWith(preserved)) return text;
+    let common = 0;
+    while (
+      common < preserved.length
+      && common < text.length
+      && preserved.charCodeAt(common) === text.charCodeAt(common)
+    ) common += 1;
+    const last = text.charCodeAt(common - 1);
+    if (common > 0 && last >= 0xd800 && last <= 0xdbff) common -= 1;
+    return `${preserved}${text.slice(common)}`;
   }
 
   private closeOpenAssistantSegment(active: ActiveTurn): boolean {
@@ -174,7 +193,10 @@ export class TurnStreamProjection {
     const normalizedResult = normalizeStreamText(result.text);
     active.assistantPendingHighSurrogate = "";
     if (normalizedResult === active.assistantText) return;
-    const finalText = normalizedPrefix(normalizedResult, MAX_ASSISTANT_TEXT);
+    const finalText = normalizedPrefix(
+      this.rebasedOnFollowUp(active, normalizedResult),
+      MAX_ASSISTANT_TEXT,
+    );
     if (finalText.startsWith(active.assistantText)) {
       this.appendNormalizedAssistant(
         active,
@@ -211,15 +233,17 @@ export class TurnStreamProjection {
    * consolidated transactionally before any active or renderer state moves.
    */
   replaceAssistantSnapshot(active: ActiveTurn, text: string): ReturnType<RuntimeStore["message"]> | null {
+    const normalizedText = normalizeStreamText(text);
+    if (!normalizedText && active.pendingFollowUpBoundary) {
+      this.closeAssistantSegment(active);
+    }
     const snapshotText = normalizedPrefix(
-      normalizeStreamText(text),
+      this.rebasedOnFollowUp(active, normalizedText),
       MAX_ASSISTANT_TEXT,
     );
     const boundary = active.followUpBoundary ?? null;
     const preservedText = boundary?.text ?? "";
-    const finalText = boundary && snapshotText.startsWith(preservedText)
-      ? snapshotText.slice(preservedText.length)
-      : snapshotText;
+    const finalText = snapshotText.slice(preservedText.length);
     const latestAfterBoundary = active.latestAssistantMessageId !== boundary?.messageId
       ? active.latestAssistantMessageId
       : null;

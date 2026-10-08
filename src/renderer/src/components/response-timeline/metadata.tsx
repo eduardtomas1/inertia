@@ -13,6 +13,7 @@ import type {
 } from "@shared/contracts";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { useCopiedState } from "../../hooks/useCopiedState";
+import { renderedAnswerText } from "../../utils/answerPlainText";
 import {
   formatElapsed,
   turnExecutionElapsedMs,
@@ -28,9 +29,11 @@ import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
 
 export function CopyAnswerButton({
   content,
+  answerId,
   ariaLabel = "Copy answer",
 }: {
   content: string;
+  answerId: string;
   ariaLabel?: string;
 }): React.JSX.Element {
   const { copied, error, copy } = useCopiedState();
@@ -43,7 +46,12 @@ export function CopyAnswerButton({
         className="turn-action"
         title={copied ? "Answer copied" : label}
         aria-label={copied ? copiedAriaLabel : label}
-        onClick={() => void copy(content)}
+        onClick={(event) => {
+          const article = [...event.currentTarget.closest(".response-turn")
+            ?.querySelectorAll<HTMLElement>("article[data-terminal-answer-id]") ?? []]
+            .find((candidate) => candidate.dataset.terminalAnswerId === answerId);
+          void copy(article ? renderedAnswerText(article, content) : content);
+        }}
       >
         <InertiaMorphIcon
           icon={copied ? checkMorphIcon : copyMorphIcon}
@@ -218,7 +226,7 @@ export function TurnMetadata({
     <footer className="turn-meta" aria-label="Final answer actions and run metadata">
       <div className="turn-meta-primary">
         {terminalAnswer && (
-          <CopyAnswerButton content={terminalAnswer.content} ariaLabel="Copy final answer" />
+          <CopyAnswerButton content={terminalAnswer.content} answerId={terminalAnswer.id} ariaLabel="Copy final answer" />
         )}
         {showTimestamp && terminalAnswer && (
           <time dateTime={terminalAnswer.createdAt} title={formatFullDateTime(terminalAnswer.createdAt)}>{formatMessageTime(terminalAnswer.createdAt)}</time>

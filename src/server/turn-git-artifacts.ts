@@ -193,15 +193,18 @@ export class TurnGitArtifactManager {
     };
   }
 
-  async createTurnCheckpoint(turn: AgentTurn): Promise<TurnCheckpointCapture> {
+  async createTurnCheckpoint(
+    turn: AgentTurn,
+    signal?: AbortSignal,
+  ): Promise<TurnCheckpointCapture> {
     try {
       const repositoryPath = this.store.conversationPath(turn.conversationId);
       if (!await mayBeInsideGitRepository(
         repositoryPath,
-        this.#operationOptions(this.#preCaptureTimeoutMs),
+        this.#operationOptions(this.#preCaptureTimeoutMs, { signal }),
       )) return { checkpointId: null, failure: null };
       return {
-        checkpointId: await this.#createTurnCheckpoint(turn, repositoryPath),
+        checkpointId: await this.#createTurnCheckpoint(turn, repositoryPath, signal),
         failure: null,
       };
     } catch (error) {
@@ -273,8 +276,10 @@ export class TurnGitArtifactManager {
   async #createTurnCheckpoint(
     turn: AgentTurn,
     repositoryPath: string,
+    signal: AbortSignal | undefined,
   ): Promise<string> {
-    const operation = this.#operationOptions(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+    const operation = this.#operationOptions(MESSAGE_SEND_PREPARATION_TIMEOUT_MS, { signal });
+    const turnIndex = this.store.checkpointCount(turn.conversationId) + 1;
     const [counts, captured] = await Promise.allSettled([
       repositoryChangeCounts(repositoryPath, operation),
       createCheckpoint(
@@ -284,13 +289,14 @@ export class TurnGitArtifactManager {
         operation,
       ),
     ]);
-    if (captured.status === "fulfilled" && counts.status === "rejected") {
+    const stopped = operation.signal.aborted;
+    if (captured.status === "fulfilled" && (counts.status === "rejected" || stopped)) {
       await deleteCheckpoint(repositoryPath, captured.value.ref, turn.conversationId)
         .catch(() => undefined);
     }
     const [changes, checkpoint] = gitInspectionSettlementValues([counts, captured]);
+    if (stopped) throw new TurnGitArtifactError("The turn stopped before its checkpoint was saved.");
     try {
-      const turnIndex = this.store.checkpointCount(turn.conversationId) + 1;
       return this.store.addCheckpoint({
         conversationId: turn.conversationId,
         turnId: turn.id,

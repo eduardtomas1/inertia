@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 
+import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { continuationRouteTurnSql, type ContinuationRouteFilter } from "./conversation-context-source";
 import { byteLength } from "./bounded-message-text";
 import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
@@ -11,13 +12,20 @@ export const MAX_PROVIDER_HANDOFF_FILES_BYTES = 8 * 1_024;
 const MAX_PROVIDER_HANDOFF_ARTIFACTS = 100;
 // Room for the block's label, reference, and JSON framing in the prompt.
 const PROVIDER_HANDOFF_BLOCK_OVERHEAD_BYTES = 512;
-const PROVIDER_HANDOFF_FILES_ABOUT =
-  "Files this chat's earlier turns changed, from the local Git records; paths only, no contents.";
+const FILE_STATUS_LETTERS: Readonly<Record<string, string>> = {
+  added: "A",
+  untracked: "A",
+  modified: "M",
+  deleted: "D",
+  renamed: "R",
+  copied: "C",
+};
 
 interface ProviderHandoffBlock {
   label: string;
   content: string;
   optional?: true;
+  structured?: true;
 }
 
 interface ProviderHandoffFile {
@@ -27,13 +35,9 @@ interface ProviderHandoffFile {
   deletions: number;
 }
 
-function filesContent(files: ProviderHandoffFile[], omittedFileCount: number): string {
-  return JSON.stringify({
-    kind: "inertia-provider-handoff-files",
-    about: PROVIDER_HANDOFF_FILES_ABOUT,
-    files,
-    omittedFileCount,
-  });
+export interface ChangedFileLines {
+  files: string[];
+  omittedFiles?: number;
 }
 
 /**
@@ -43,9 +47,9 @@ function filesContent(files: ProviderHandoffFile[], omittedFileCount: number): s
 function changedFilesNewestFirst(
   database: Database.Database,
   conversationId: string,
-  route: ContinuationRouteFilter,
+  route: ContinuationRouteFilter | null,
 ): ProviderHandoffFile[] {
-  const routed = continuationRouteTurnSql("turn", route);
+  const routed = route ? continuationRouteTurnSql("turn", route) : { sql: "1", parameters: [] };
   const rows = database.prepare(`
     SELECT artifact.files_json FROM turn_git_artifacts AS artifact
     JOIN agent_turns AS turn ON turn.id = artifact.turn_id
@@ -79,6 +83,34 @@ function changedFilesNewestFirst(
   return [...files.values()];
 }
 
+function fileLine({ path, status, insertions, deletions }: ProviderHandoffFile): string {
+  return neutralizeUntrustedAgentText(
+    `${FILE_STATUS_LETTERS[status] ?? "?"} ${path} +${insertions} -${deletions}`,
+  );
+}
+
+export function changedFileLines(
+  database: Database.Database,
+  conversationId: string,
+  route: ContinuationRouteFilter | null,
+  maximumBytes: number,
+): ChangedFileLines | null {
+  const files = changedFilesNewestFirst(database, conversationId, route);
+  const lines: string[] = [];
+  let bytes = byteLength(JSON.stringify({ files: [], omittedFiles: files.length }));
+  for (const file of files.slice(0, MAX_PROVIDER_HANDOFF_FILES)) {
+    const line = fileLine(file);
+    const lineBytes = byteLength(JSON.stringify(line)) + 1;
+    if (bytes + lineBytes > maximumBytes) break;
+    lines.push(line);
+    bytes += lineBytes;
+  }
+  if (lines.length === 0) return null;
+  return lines.length < files.length
+    ? { files: lines, omittedFiles: files.length - lines.length }
+    : { files: lines };
+}
+
 /**
  * Lists the paths this chat changed so a provider handoff carries the
  * workspace story without file contents. Only turns whose messages the route
@@ -89,27 +121,19 @@ export function providerHandoffFilesBlock(
   conversationId: string,
   route: ContinuationRouteFilter,
 ): ProviderHandoffBlock | null {
-  const files = changedFilesNewestFirst(database, conversationId, route);
-  if (files.length === 0) return null;
-  const included: ProviderHandoffFile[] = [];
-  let bytes = byteLength(filesContent([], files.length));
-  for (const file of files.slice(0, MAX_PROVIDER_HANDOFF_FILES)) {
-    const entryBytes = byteLength(JSON.stringify(file)) + 1;
-    if (bytes + entryBytes > MAX_PROVIDER_HANDOFF_FILES_BYTES) break;
-    included.push(file);
-    bytes += entryBytes;
-  }
-  if (included.length === 0) return null;
-  return {
-    label: PROVIDER_HANDOFF_FILES_LABEL,
-    content: filesContent(included, files.length - included.length),
-    optional: true,
-  };
+  const files = changedFileLines(database, conversationId, route, MAX_PROVIDER_HANDOFF_FILES_BYTES);
+  return files
+    ? { label: PROVIDER_HANDOFF_FILES_LABEL, content: JSON.stringify(files), optional: true, structured: true }
+    : null;
+}
+
+export function contextBlockPromptBytes(block: { content: string; structured?: true }): number {
+  return block.structured ? byteLength(block.content) : byteLength(JSON.stringify(block.content));
 }
 
 /** Prompt bytes the block needs in the room the restored messages leave. */
 export function providerHandoffBlockBytes(block: ProviderHandoffBlock): number {
-  return byteLength(JSON.stringify(block.content))
+  return contextBlockPromptBytes(block)
     + byteLength(block.label)
     + PROVIDER_HANDOFF_BLOCK_OVERHEAD_BYTES;
 }

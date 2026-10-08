@@ -150,10 +150,9 @@ export class TurnFollowUpCoordinator {
     }
     onProviderAcknowledged?.();
     if (!this.ownsLiveTurn(active, lease)) {
-      if (
-        PROVIDER_ENDED_ANSWER_HARNESSES.has(active.turn.harnessId)
-        && this.options.store.agentTurn(active.turn.id).status !== "completed"
-      ) {
+      const outcome = active.runState.terminalRequest()
+        ?? this.options.store.agentTurn(active.turn.id).status;
+      if (outcome !== "completed") {
         return { kind: "unconfirmed", message: "The follow-up was accepted as its turn ended. Check this chat before retrying." };
       }
       return {

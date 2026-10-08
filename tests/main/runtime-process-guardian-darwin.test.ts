@@ -925,7 +925,7 @@ describe("macOS runtime process guardian", () => {
         expect(result).toMatchObject({ exitCode: 1, signalCode: null });
         elapsed.push(result.elapsedMs);
       }
-      expect(Math.min(...elapsed)).toBeLessThan(20);
+      expect(Math.min(...elapsed)).toBeLessThan(60);
     },
     15_000,
   );

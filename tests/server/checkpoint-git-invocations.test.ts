@@ -191,4 +191,58 @@ describe("checkpoint Git invocations", () => {
       store.close();
     }
   });
+
+  it("labels the turn checkpoint by its order when it started", async () => {
+    const { root, indexes } = repository();
+    writeFileSync(join(root, "tracked.txt"), "edit\n");
+    const { store, conversation, turn } = turnInRepository(root, indexes);
+    try {
+      let releaseStatus!: () => void;
+      const statusReleased = new Promise<void>((resolve) => { releaseStatus = resolve; });
+      gitGate.hold = (args) => args[0] === "status" ? statusReleased : null;
+
+      const creating = new TurnGitArtifactManager(store, indexes).createTurnCheckpoint(turn);
+      await vi.waitFor(() => expect(gitEvents.some((event) => event.startsWith("start:status"))).toBe(true));
+      store.addCheckpoint({
+        conversationId: conversation.id,
+        ref: `refs/inertia/checkpoints/${conversation.id}/${randomUUID()}`,
+        label: "Before checkpoint restore",
+        turnIndex: 1,
+        filesChanged: 0,
+        insertions: 0,
+        deletions: 0,
+      });
+      releaseStatus();
+      const result = await creating;
+
+      expect(store.conversationDetail(conversation.id)!.checkpoints
+        .find(({ id }) => id === result.checkpointId)).toMatchObject({ label: "Before turn 1", turnIndex: 1 });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("discards a turn checkpoint whose turn stopped while it was being written", async () => {
+    const { root, indexes } = repository();
+    writeFileSync(join(root, "tracked.txt"), "edit\n");
+    const { store, conversation, turn } = turnInRepository(root, indexes);
+    try {
+      let releaseStatus!: () => void;
+      const statusReleased = new Promise<void>((resolve) => { releaseStatus = resolve; });
+      gitGate.hold = (args) => args[0] === "status" ? statusReleased : null;
+      const stop = new AbortController();
+
+      const creating = new TurnGitArtifactManager(store, indexes).createTurnCheckpoint(turn, stop.signal);
+      await vi.waitFor(() => expect(gitEvents.some((event) => event.startsWith("start:status"))).toBe(true));
+      stop.abort();
+      releaseStatus();
+      const result = await creating;
+
+      expect(result.checkpointId).toBeNull();
+      expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([]);
+      expect(git(root, "for-each-ref", "--format=%(refname)", `refs/inertia/checkpoints/${conversation.id}/`)).toBe("");
+    } finally {
+      store.close();
+    }
+  });
 });

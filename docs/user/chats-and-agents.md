@@ -59,7 +59,7 @@ Press ⌘K (Ctrl+K elsewhere) to find commands, projects, chats and saved messag
 
 ## Optional desktop mascot
 
-Turn on the mascot in **Settings → Notifications** for a movable companion that previews progress, questions, approvals and results in a small bubble. Click the bubble to open the chat; right-click to pause or hide it. **Animate mascot** in the same place pauses or resumes its animation.
+Turn on the mascot in **Settings → Notifications** for a movable companion that previews progress, questions, approvals and results in a small bubble. Click the bubble to open the chat; right-click to pause or hide it. **Animate mascot** in the same place pauses or resumes its animation. Hiding lasts until you choose **Show mascot** in the Window menu (or the Dock menu on macOS) or restart Inertia, while the bubble keeps the chat that needs you most in view and lists up to five other chats you can click to open.
 
 ## Notifications
 

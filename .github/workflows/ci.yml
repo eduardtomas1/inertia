@@ -146,7 +146,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up minimum supported Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.13.0
           cache: npm
@@ -196,7 +196,7 @@ jobs:
 
       - name: Keep core failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pr-linux-core-results
           path: |
@@ -271,7 +271,7 @@ jobs:
 
       - name: Keep Linux sentinel failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pr-linux-lifecycle-results
           path: test-results
@@ -280,7 +280,7 @@ jobs:
 
       - name: Keep compact Electron timing evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: electron-timings-pr-linux-lifecycle-${{ github.run_attempt }}
           path: ci-test-timings/*.json
@@ -361,7 +361,7 @@ jobs:
 
       - name: Keep Windows sentinel failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pr-windows-lifecycle-results
           path: test-results
@@ -370,7 +370,7 @@ jobs:
 
       - name: Keep compact Electron timing evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: electron-timings-pr-windows-lifecycle-${{ github.run_attempt }}
           path: ci-test-timings/*.json
@@ -435,7 +435,7 @@ jobs:
 
       - name: Keep macOS sentinel failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pr-macos-lifecycle-results
           path: test-results
@@ -444,7 +444,7 @@ jobs:
 
       - name: Keep compact Electron timing evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: electron-timings-pr-macos-lifecycle-${{ github.run_attempt }}
           path: ci-test-timings/*.json
@@ -720,7 +720,7 @@ jobs:
 
       - name: Keep failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-test-results-${{ matrix.artifact }}
           path: |
@@ -731,7 +731,7 @@ jobs:
 
       - name: Keep cross-platform performance evidence
         if: always() && (needs.classify.outputs.benchmarks == 'true')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: performance-${{ matrix.artifact }}
           path: performance-results
@@ -845,7 +845,7 @@ jobs:
 
       - name: Keep provider settings visual evidence
         if: runner.os == 'Linux' && matrix.arch == 'x64' && matrix.phase == 'isolated'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: provider-settings-screenshots
           path: test-results/**/provider-settings-*.png
@@ -854,7 +854,7 @@ jobs:
 
       - name: Keep CLI conversation import screenshots
         if: always() && runner.os == 'Linux' && matrix.arch == 'x64' && matrix.phase == 'isolated'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-conversation-import-screenshots
           path: test-results/**/cli-import-*.png
@@ -863,7 +863,7 @@ jobs:
 
       - name: Keep failure diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-test-results-electron-${{ matrix.evidence_artifact }}
           path: test-results
@@ -872,7 +872,7 @@ jobs:
 
       - name: Keep desktop performance evidence
         if: always() && (needs.classify.outputs.benchmarks == 'true') && matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: performance-electron-${{ matrix.artifact }}
           path: performance-results
@@ -881,7 +881,7 @@ jobs:
 
       - name: Keep compact Electron timing evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: electron-timings-${{ matrix.evidence_artifact }}-${{ github.run_attempt }}
           path: ci-test-timings/*.json
@@ -936,7 +936,7 @@ jobs:
 
       - name: Keep Windows shard evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-test-results-windows-unit-${{ matrix.shard }}
           path: test-results

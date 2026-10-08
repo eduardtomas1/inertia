@@ -314,6 +314,8 @@ export interface ActiveTurn {
   assistantSegmentText: string;
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
+  followUpBoundary: { at: string; text: string; messageId: string | null } | null;
+  pendingFollowUpBoundaryAt: string | null;
   assistantStream: TurnStreamChannel;
   reasoningText: string;
   reasoningPendingHighSurrogate: string;
@@ -348,5 +350,6 @@ export interface FollowUpAdmissionLease {
 export type FollowUpSteerResult =
   | { kind: "accepted"; message: ChatMessage }
   | { kind: "turn-ended" }
+  | { kind: "unconfirmed"; message: string }
   | { kind: "refused" }
   | { kind: "unavailable" };

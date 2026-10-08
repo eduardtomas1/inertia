@@ -24,11 +24,23 @@ function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<
   });
 }
 
+const PROVIDER_ENDED_ANSWER_HARNESSES = new Set(["claude-agent-sdk"]);
+const UNKNOWN_DELIVERY = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
+
 interface TurnFollowUpCoordinatorOptions {
   store: RuntimeStore;
   providers: TurnProviderRuntime;
   now(): string;
   activeForConversation(conversationId: string): ActiveTurn | undefined;
+  answerBoundary?: {
+    prepare(active: ActiveTurn, keepAnswerOpen: boolean): { deferred: boolean; after: string | null };
+    record(active: ActiveTurn, createdAt: string, deferred: boolean): void;
+  };
+}
+
+function laterThan(submittedAt: string, after: string | null): string {
+  if (!after) return submittedAt;
+  return new Date(Math.max(Date.parse(submittedAt), Date.parse(after) + 1)).toISOString();
 }
 
 /** Owns exact-turn admission, ordering, acknowledgement, and persistence. */
@@ -127,33 +139,40 @@ export class TurnFollowUpCoordinator {
         throw error;
       }
       onProviderAcknowledged?.();
-      throw new RuntimeRequestError("The provider did not confirm whether it received this follow-up. Check this chat before retrying.", undefined, "ambiguous");
+      if (error.turnEnded || !this.ownsLiveTurn(active, lease)) {
+        return { kind: "unconfirmed", message: UNKNOWN_DELIVERY };
+      }
+      throw new RuntimeRequestError(UNKNOWN_DELIVERY, undefined, "ambiguous");
     }
     if (!accepted) {
       active.freshSessionRequest ??= freshSessionRequest;
       return { kind: "refused" };
     }
     onProviderAcknowledged?.();
-    const ownerAfterSteer = this.options.activeForConversation(
-      lease.conversationId,
+    if (!this.ownsLiveTurn(active, lease)) {
+      return { kind: "unconfirmed", message: "The follow-up was accepted as its turn ended. Check this chat before retrying." };
+    }
+    const boundary = this.options.answerBoundary?.prepare(
+      active,
+      PROVIDER_ENDED_ANSWER_HARNESSES.has(active.turn.harnessId),
     );
-    if (
-      ownerAfterSteer !== active
-      || !active.runState.acceptsProviderEvents()
-      || active.turn.runId !== lease.runId
-      || active.turn.id !== lease.turnId
-    ) throw new RuntimeRequestError("The follow-up was accepted as its turn ended. Check this chat before retrying.", undefined, "ambiguous");
-    return {
-      kind: "accepted",
-      message: this.options.store.createAcknowledgedFollowUpMessage(
-        lease.conversationId,
-        active.turn.id,
-        followUp,
-        lease.submittedAt,
-        this.options.now(),
-        attachments,
-      ),
-    };
+    const message = this.options.store.createAcknowledgedFollowUpMessage(
+      lease.conversationId,
+      active.turn.id,
+      followUp,
+      laterThan(lease.submittedAt, boundary?.after ?? null),
+      this.options.now(),
+      attachments,
+    );
+    this.options.answerBoundary?.record(active, message.createdAt, boundary?.deferred ?? false);
+    return { kind: "accepted", message };
+  }
+
+  private ownsLiveTurn(active: ActiveTurn, lease: FollowUpAdmissionLease): boolean {
+    return this.options.activeForConversation(lease.conversationId) === active
+      && active.runState.acceptsProviderEvents()
+      && active.turn.runId === lease.runId
+      && active.turn.id === lease.turnId;
   }
 
   deferAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {

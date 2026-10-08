@@ -605,6 +605,7 @@ function startClaudeRun(
               // snapshots from the next turn must not be suppressed by text
               // that was emitted before the admitted follow-up was handled.
               messageProjector.resetTurnOutput();
+              emitter.textBoundary();
               continue;
             }
           } else if ((message.subtype !== "success" || message.is_error) && pendingFollowUpIds.size > 0) {

@@ -336,10 +336,16 @@ export function createTurnInteractionCommandHandler(
               },
               AbortSignal.timeout(Math.max(0, preparationDeadlineAt - Date.now())),
             );
-            if ((steered.kind === "turn-ended" || steered.kind === "refused") && dependencies.undeliveredFollowUps) {
-              const queued = dependencies.undeliveredFollowUps.adopt({ ...undelivered, attachments });
+            if ((steered.kind === "turn-ended" || steered.kind === "refused" || steered.kind === "unconfirmed") && dependencies.undeliveredFollowUps) {
+              let queued: MessageQueueResult;
+              try {
+                queued = dependencies.undeliveredFollowUps.adopt({ ...undelivered, attachments });
+              } catch (error) {
+                if (steered.kind !== "unconfirmed") throw error;
+                throw new RuntimeRequestError(steered.message, undefined, "ambiguous");
+              }
               followUpPersisted = true;
-              if (retentionId) {
+              if (retentionId && !retentionAccepted) {
                 dependencies.conversationAttachments.acceptRetention(retentionId);
                 retentionAccepted = true;
               }
@@ -347,6 +353,9 @@ export function createTurnInteractionCommandHandler(
               sourceClaimSettled = true;
               dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: queued });
               return "handled";
+            }
+            if (steered.kind === "unconfirmed") {
+              throw new RuntimeRequestError(steered.message, undefined, "ambiguous");
             }
             const followUpMessage = steered.kind === "accepted" ? steered.message : null;
             if (!followUpMessage?.turnId) {

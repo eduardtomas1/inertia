@@ -173,6 +173,10 @@ export class TurnController {
       now: () => this.now(),
       activeForConversation: (conversationId) =>
         this.activeByConversation.get(conversationId),
+      answerBoundary: {
+        prepare: (active, keepAnswerOpen) => this.streams.prepareFollowUp(active, keepAnswerOpen),
+        record: (active, createdAt, deferred) => this.streams.recordFollowUp(active, createdAt, deferred),
+      },
     });
     this.timeouts = new TurnTimeoutCoordinator({
       scheduler: this.scheduler,

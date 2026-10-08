@@ -85,6 +85,49 @@ export class TurnStreamProjection {
    * activity never gets flattened across assistant prose boundaries.
    */
   closeAssistantSegment(active: ActiveTurn): boolean {
+    const closed = this.closeOpenAssistantSegment(active);
+    if (active.pendingFollowUpBoundaryAt) {
+      this.commitFollowUpBoundary(active, active.pendingFollowUpBoundaryAt);
+    }
+    return closed;
+  }
+
+  prepareFollowUp(
+    active: ActiveTurn,
+    keepAnswerOpen: boolean,
+  ): { deferred: boolean; after: string | null } {
+    const deferred = keepAnswerOpen && Boolean(active.assistantSegmentText);
+    if (deferred) this.flush(active, "assistant");
+    else this.closeAssistantSegment(active);
+    const latest = active.latestAssistantMessageId
+      ? this.options.store.message(active.latestAssistantMessageId).createdAt
+      : null;
+    const after = [
+      latest,
+      active.followUpBoundary?.at,
+      active.pendingFollowUpBoundaryAt,
+    ].reduce<string | null>((current, value) =>
+      value && (!current || Date.parse(value) > Date.parse(current))
+        ? value
+        : current, null);
+    return { deferred, after };
+  }
+
+  recordFollowUp(active: ActiveTurn, createdAt: string, deferred: boolean): void {
+    if (deferred) active.pendingFollowUpBoundaryAt = createdAt;
+    else this.commitFollowUpBoundary(active, createdAt);
+  }
+
+  private commitFollowUpBoundary(active: ActiveTurn, at: string): void {
+    active.pendingFollowUpBoundaryAt = null;
+    active.followUpBoundary = {
+      at,
+      text: active.assistantText,
+      messageId: active.latestAssistantMessageId,
+    };
+  }
+
+  private closeOpenAssistantSegment(active: ActiveTurn): boolean {
     if (!active.assistantSegmentText) return false;
     this.flush(active, "assistant");
     const messageId = active.assistantMessageId;
@@ -98,6 +141,13 @@ export class TurnStreamProjection {
     active.assistantSegmentText = "";
     active.assistantMessageId = null;
     return true;
+  }
+
+  private assistantCreatedAt(active: ActiveTurn): string {
+    const now = this.options.now();
+    const boundary = active.followUpBoundary?.at;
+    if (!boundary) return now;
+    return new Date(Math.max(Date.parse(now), Date.parse(boundary) + 1)).toISOString();
   }
 
   appendReasoning(active: ActiveTurn, text: string): void {
@@ -161,12 +211,20 @@ export class TurnStreamProjection {
    * consolidated transactionally before any active or renderer state moves.
    */
   replaceAssistantSnapshot(active: ActiveTurn, text: string): ReturnType<RuntimeStore["message"]> | null {
-    const finalText = normalizedPrefix(
+    const snapshotText = normalizedPrefix(
       normalizeStreamText(text),
       MAX_ASSISTANT_TEXT,
     );
+    const boundary = active.followUpBoundary ?? null;
+    const preservedText = boundary?.text ?? "";
+    const finalText = boundary && snapshotText.startsWith(preservedText)
+      ? snapshotText.slice(preservedText.length)
+      : snapshotText;
+    const latestAfterBoundary = active.latestAssistantMessageId !== boundary?.messageId
+      ? active.latestAssistantMessageId
+      : null;
     let retainedMessageId = finalText
-      ? active.assistantMessageId ?? active.latestAssistantMessageId
+      ? active.assistantMessageId ?? latestAfterBoundary
       : null;
     if (retainedMessageId || !finalText) {
       this.options.store.transcriptRepository
@@ -174,6 +232,7 @@ export class TurnStreamProjection {
           active.turn.id,
           retainedMessageId,
           finalText,
+          boundary?.at ?? null,
         );
     } else {
       // With no durable segment there are no siblings to consolidate. Creating
@@ -184,15 +243,15 @@ export class TurnStreamProjection {
         "assistant",
         [],
         active.turn.id,
-        this.options.now(),
+        this.assistantCreatedAt(active),
       ).id;
     }
     active.assistantPendingHighSurrogate = "";
     active.assistantStream.replacePending("");
-    active.assistantText = finalText;
+    active.assistantText = `${preservedText}${finalText}`;
     active.assistantSegmentText = finalText;
     active.assistantMessageId = retainedMessageId;
-    active.latestAssistantMessageId = retainedMessageId;
+    active.latestAssistantMessageId = retainedMessageId ?? boundary?.messageId ?? null;
     if (retainedMessageId) {
       try {
         this.options.hooks.onStreamingPersisted?.({
@@ -266,7 +325,7 @@ export class TurnStreamProjection {
           "assistant",
           [],
           active.turn.id,
-          this.options.now(),
+          this.assistantCreatedAt(active),
         ).id;
         active.latestAssistantMessageId = active.assistantMessageId;
       }

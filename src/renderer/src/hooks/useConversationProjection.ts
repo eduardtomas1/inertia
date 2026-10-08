@@ -69,9 +69,12 @@ function replaceAssistantMessagesForTurn(
   messages: readonly ChatMessage[],
   turnId: string,
   replacement: ChatMessage | null,
+  after?: string,
 ): ChatMessage[] {
   const retained = messages.filter((message) =>
-    message.turnId !== turnId || message.role !== "assistant");
+    message.turnId !== turnId
+    || message.role !== "assistant"
+    || (after !== undefined && Date.parse(message.createdAt) <= Date.parse(after)));
   if (replacement) retained.push(replacement);
   return retained.sort(compareCreatedRecords);
 }
@@ -840,6 +843,7 @@ export function useConversationProjection({
               current.detail.messages,
               event.turnId,
               event.message,
+              event.after,
             ),
           },
         };
@@ -850,6 +854,7 @@ export function useConversationProjection({
           existing,
           event.turnId,
           event.message,
+          event.after,
         );
         if (replacement.length === 0) {
           if (!(event.conversationId in current)) return current;

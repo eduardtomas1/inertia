@@ -22,11 +22,48 @@ function listPrefix(item: HTMLElement): string {
   return `${indent}${list.start + [...list.children].indexOf(item)}. `;
 }
 
-function linkText(text: string, href: string): string {
+function listItemText(item: HTMLElement): string {
+  const prefix = listPrefix(item);
+  const hanging = " ".repeat(prefix.length);
+  const lines: string[] = [];
+  let pending = "";
+  const flush = (): void => {
+    for (const line of pending.split("\n")) {
+      if (line.trim()) lines.push(`${lines.length ? hanging : prefix}${line}`);
+    }
+    pending = "";
+  };
+  for (const child of item.childNodes) {
+    if (child instanceof HTMLUListElement || child instanceof HTMLOListElement) {
+      flush();
+      if (!lines.length) lines.push(prefix.trimEnd());
+      lines.push(...plainText(child).split("\n").filter((line) => line.trim()));
+    } else {
+      pending += plainText(child);
+    }
+  }
+  flush();
+  return `${lines.join("\n") || prefix.trimEnd()}\n`;
+}
+
+function withTarget(text: string, target: string): string {
+  return target && text !== target ? `${text} (${target})` : text;
+}
+
+function linkText(node: HTMLElement, text: string): string {
+  const path = node.dataset.linkPath;
+  if (path) return withTarget(text, path);
+  const href = node.getAttribute("href") ?? "";
   if (!/^(?:https?|mailto):/iu.test(href)) return text;
-  const named = [text, `mailto:${text}`]
+  const named = [text, `mailto:${text}`, `http://${text}`]
     .some((candidate) => URL.canParse(candidate) && new URL(candidate).href === href);
   return named ? text : `${text} (${href})`;
+}
+
+function imageText(node: HTMLElement): string {
+  const alt = node.dataset.markdownImageAlt ?? "";
+  const source = node.dataset.markdownImageSource ?? "";
+  return alt ? withTarget(alt, source) : source;
 }
 
 function plainText(node: Node): string {
@@ -34,22 +71,28 @@ function plainText(node: Node): string {
     const text = node.textContent ?? "";
     return STRUCTURAL.has(node.parentElement?.tagName ?? "") && !text.trim() ? "" : text;
   }
-  if (!(node instanceof HTMLElement) || node.matches(SKIPPED)) return "";
+  if (!(node instanceof HTMLElement)) return "";
+  if (node.dataset.markdownImageSource !== undefined) return imageText(node);
+  if (node.matches(SKIPPED)) return "";
+  if (node instanceof HTMLInputElement) {
+    return node.type === "checkbox" ? `[${node.checked ? "x" : " "}]` : "";
+  }
   if (node.tagName === "BR") return "\n";
   if (node.tagName === "HR") return "\n\n";
+  if (node.tagName === "LI") return listItemText(node);
   const text = [...node.childNodes].map(plainText).join("");
-  if (node.tagName === "A") return linkText(text, node.getAttribute("href") ?? "");
+  if (node.tagName === "A") return linkText(node, text);
   if (node.tagName === "TD" || node.tagName === "TH") return `${text}\t`;
   if (node.tagName === "TR") return `${text.replace(/\t$/u, "")}\n`;
-  if (node.tagName === "LI") {
-    return `${listPrefix(node)}${text.replace(/^\n+|\n+$/gu, "").replace(/\n{2,}/gu, "\n")}\n`;
-  }
   return BLOCKS.has(node.tagName) ? `\n${text}\n` : text;
 }
 
 export function renderedAnswerText(surface: HTMLElement, fallback: string): string {
   const body = surface.querySelector<HTMLElement>(".response-markdown");
   if (!body) return fallback;
-  const text = plainText(body).replace(/\n{3,}/gu, "\n\n").trim();
-  return text || fallback;
+  const text = plainText(body)
+    .replace(/\n{3,}/gu, "\n\n")
+    .replace(/^(?:[ \t]*\n)+/u, "")
+    .replace(/(?:\n[ \t]*)+$/u, "");
+  return text.trim() ? text : fallback;
 }

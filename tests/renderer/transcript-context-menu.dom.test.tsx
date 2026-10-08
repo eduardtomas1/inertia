@@ -159,7 +159,7 @@ describe("transcript context menus", () => {
     expect(JSON.stringify(lastRequest())).not.toContain("build");
     await settleMenu();
     expect(bridge.copyText).toHaveBeenCalledExactlyOnceWith(
-      "The build passes.\n\nSee the entry point and the docs (https://example.com/docs).\n\nconst value = 1;",
+      "The build passes.\n\nSee the entry point (src/index.ts) and the docs (https://example.com/docs).\n\nconst value = 1;",
     );
   });
 

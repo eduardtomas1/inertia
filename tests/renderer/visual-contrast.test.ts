@@ -263,10 +263,11 @@ describe("visual contrast system", () => {
     },
   );
 
-  it("keeps a visible focus outline on the new branch input", () => {
+  it("moves the new branch input border to the accent on focus", () => {
     expect(css).toMatch(
-      /\.new-branch-form input:focus-visible\s*[,{][\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
+      /^:is\([^{]*\.new-branch-form input,[^{]*\):focus,[^{]*\{\s*outline: none;\s*border-color: var\(--accent\);/mu,
     );
+    expect(css).toMatch(/\.new-branch-form input \{[^}]*border: 1px solid var\(--line\);/u);
   });
 
   it.each(["light", "dark"] as const)(

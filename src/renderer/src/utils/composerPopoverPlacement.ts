@@ -22,7 +22,7 @@ export interface ComposerPopoverPlacement {
   horizontal: PopoverHorizontalPlacement;
 }
 
-const DEFAULT_GAP = 8;
+const DEFAULT_GAP = 4;
 const DEFAULT_PADDING = 8;
 
 function clamp(value: number, minimum: number, maximum: number): number {

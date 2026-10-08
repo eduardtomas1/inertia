@@ -56,11 +56,7 @@
 .agent-input-page-dots > button[data-answered="true"] { border-width: 0; background: var(--status-input); }
 .agent-input-page-dots > button[aria-current="true"] { width: 9px; height: 9px; border: 2.5px solid var(--line-strong); background: transparent; }
 
-.composer-suggestion-menu { transform-origin: bottom center; animation: beautiful-pop-in var(--dur) var(--ease) both; }
-.composer-suggestion-menu button {
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
-}
-.composer-suggestion-menu button:active { transform: scale(.94); }
+.composer-suggestion-menu { transform-origin: bottom center; }
 .composer-attachment {
   animation: beautiful-fade-up var(--dur-slow) var(--ease) both;
   animation-delay: calc(var(--motion-index, 0) * var(--stagger));
@@ -280,7 +276,7 @@
   .response-markdown.is-streaming > blockquote:last-child > :last-child::after,
   .response-markdown.is-streaming > .response-code-block:last-child pre code::after,
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
-  .agent-input-question, .composer-suggestion-menu,
+  .agent-input-question,
   .composer-attachment, .composer-attachment-copy small, .diff-selection-popover,
   .turn-changed-files-body, .turn-changed-files-list > span,
   .turn-work-log details[open] > .turn-work-details,

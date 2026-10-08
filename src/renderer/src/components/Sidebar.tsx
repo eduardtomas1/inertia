@@ -22,7 +22,6 @@ import {
   FolderGit2,
   RefreshCw,
   GitBranch,
-  Layers3,
   Pencil,
   Search,
   Settings,
@@ -557,49 +556,54 @@ function SidebarView({
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
       {onOpenProjectSettings && <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("context-change"); onOpenProjectSettings(project); }}><Settings size={13} />Project settings</button>}
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
-      <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
-      <button
-        type="button"
-        role="menuitemradio"
-        tabIndex={-1}
-        aria-checked={project.groupingMode === null}
-        onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, null); }}
-      >
-        <span className="menu-check">{project.groupingMode === null ? "✓" : ""}</span>
-        Use global ({groupingLabel(globalGrouping)})
-      </button>
-      {(["repository", "repository-path", "separate"] as const).map((mode) => (
+      <div role="separator" />
+      <div role="group" aria-label="Grouping behavior">
         <button
           type="button"
           role="menuitemradio"
           tabIndex={-1}
-          aria-checked={project.groupingMode === mode}
-          onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, mode); }}
-          key={mode}
+          aria-checked={project.groupingMode === null}
+          onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, null); }}
         >
-          <span className="menu-check">{project.groupingMode === mode ? "✓" : ""}</span>
-          {groupingLabel(mode)}
+          <span className="menu-check">{project.groupingMode === null ? "✓" : ""}</span>
+          Use global ({groupingLabel(globalGrouping)})
         </button>
-      ))}
-      <span className="project-menu-heading"><FolderOpen size={12} />Repository display limit</span>
-      {projectRepositoryLimitChoices(project.gitRepositoryLimit).map((limit) => (
-        <button
-          type="button"
-          role="menuitemradio"
-          tabIndex={-1}
-          aria-checked={project.gitRepositoryLimit === limit}
-          onClick={() => {
-            dismissMenu("selection");
-            onSetProjectGitRepositoryLimit(project, limit);
-          }}
-          key={limit}
-        >
-          <span className="menu-check">
-            {project.gitRepositoryLimit === limit ? "✓" : ""}
-          </span>
-          Show up to {limit} repositories
-        </button>
-      ))}
+        {(["repository", "repository-path", "separate"] as const).map((mode) => (
+          <button
+            type="button"
+            role="menuitemradio"
+            tabIndex={-1}
+            aria-checked={project.groupingMode === mode}
+            onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, mode); }}
+            key={mode}
+          >
+            <span className="menu-check">{project.groupingMode === mode ? "✓" : ""}</span>
+            {groupingLabel(mode)}
+          </button>
+        ))}
+      </div>
+      <div role="separator" />
+      <div role="group" aria-label="Repository display limit">
+        {projectRepositoryLimitChoices(project.gitRepositoryLimit).map((limit) => (
+          <button
+            type="button"
+            role="menuitemradio"
+            tabIndex={-1}
+            aria-checked={project.gitRepositoryLimit === limit}
+            onClick={() => {
+              dismissMenu("selection");
+              onSetProjectGitRepositoryLimit(project, limit);
+            }}
+            key={limit}
+          >
+            <span className="menu-check">
+              {project.gitRepositoryLimit === limit ? "✓" : ""}
+            </span>
+            Show up to {limit} repositories
+          </button>
+        ))}
+      </div>
+      <div role="separator" />
       <button
         type="button"
         role="menuitem"

@@ -35,7 +35,7 @@
   width: 100%;
   max-height: min(420px, var(--project-popup-height, 70vh));
   border-radius: var(--radius-xs);
-  animation: workspace-popover-in var(--dur) var(--ease);
+  animation: popover-in var(--dur) var(--ease) both;
 }
 .project-search-popover .palette-search { min-height: 42px; padding-left: 11px; }
 .project-search-popover .palette-group > span { display: none; }

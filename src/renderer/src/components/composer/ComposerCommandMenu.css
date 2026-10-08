@@ -8,12 +8,8 @@
 
 .composer-command-menu {
   width: 100%;
+  padding: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  box-shadow:
-    var(--shadow-float);
 }
 
 .composer-command-list {
@@ -40,40 +36,6 @@
   height: 1px;
   margin: 8px 8px 9px;
   background: var(--line-soft);
-}
-
-.composer-command-list button {
-  display: flex;
-  width: 100%;
-  min-height: 32px;
-  align-items: center;
-  gap: 9px;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  background: transparent;
-  font: inherit;
-  text-align: left;
-}
-
-.composer-command-list button > svg {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.composer-command-list button[data-active="true"] {
-  color: var(--text);
-  background: var(--fill);
-}
-
-.composer-command-list button[data-active="true"] > svg {
-  color: var(--text-muted);
-}
-
-.composer-command-list button:disabled {
-  cursor: default;
-  opacity: var(--disabled-opacity);
 }
 
 .composer-command-copy {
@@ -176,14 +138,3 @@
   animation-play-state: paused;
 }
 
-@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .composer-command-menu { background: var(--surface-raised); }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .composer-command-menu {
-    background: var(--surface-raised);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-}

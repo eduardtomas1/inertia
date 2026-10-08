@@ -157,7 +157,6 @@ export function ComposerSettings({
                         ? " · Default"
                         : ""}
                     </strong>
-                    <small>{option.description}</small>
                   </span>
                   {selectedReasoning === option.value && (
                     <span className="option-check" />
@@ -348,11 +347,6 @@ export function ComposerSettings({
               >
                 <span>
                   <strong>{mode === "build" ? "Build" : "Plan"}</strong>
-                  <small>
-                    {mode === "build"
-                      ? "Work directly in the project"
-                      : "Inspect and propose steps first"}
-                  </small>
                 </span>
                 {conversation.interactionMode === mode && (
                   <span className="option-check" />

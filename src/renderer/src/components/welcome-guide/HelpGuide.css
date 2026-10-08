@@ -123,19 +123,6 @@
   font-size: var(--text-sm);
 }
 
-.help-guide-entries kbd,
-.help-guide-result kbd {
-  padding: 1px 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-xs);
-  color: var(--text);
-  background: var(--surface-raised);
-  font: inherit;
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .help-guide .help-guide-entries p,
 .help-guide-result-detail {
   grid-column: 1 / -1;

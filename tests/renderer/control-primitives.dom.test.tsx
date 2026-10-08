@@ -12,7 +12,7 @@ let sheet: HTMLStyleElement;
 
 beforeAll(() => {
   sheet = document.createElement("style");
-  sheet.textContent = css.replace(/^@import[^;]*;/mu, "");
+  sheet.textContent = css.replace(/^@import[^;]*;/mu, "").replace(/\s+/gu, " ");
   document.head.append(sheet);
 });
 
@@ -126,5 +126,66 @@ describe("field primitives", () => {
     expect(composerCss).toMatch(/\.composer-shell \.composer > \.composer-surface \{[^}]*background: var\(--surface-raised\);[^}]*box-shadow: var\(--shadow-float\);/u);
     expect(`${css}\n${composerCss}`).not.toMatch(/^\.composer(?:-shell \.composer)?:focus-within[^{,]*\{[^}]*(?:--focus-ring|--accent|gradient|box-shadow:(?! none))/mu);
     expect(composerCss).toMatch(/\.composer-shell \.composer textarea \{[^}]*max-height: 200px;/u);
+  });
+});
+
+describe("popover primitives", () => {
+  const surfaces = [".project-menu", ".conversation-menu", ".header-popover", ".composer-popover", ".command-palette", ".thread-submenu"];
+  const allCss = [
+    css,
+    readFileSync("src/renderer/src/components/sidebar/thread-actions.css", "utf8"),
+    readFileSync("src/renderer/src/components/composer/ComposerCommandMenu.css", "utf8"),
+    readFileSync("src/renderer/src/components/composer/ComposerSurface.css", "utf8"),
+  ].join("\n");
+
+  function whereRule(member: string, suffix = ""): { list: string; body: string } | undefined {
+    for (const match of css.matchAll(/^:where\(\n(?<list>[\s\S]*?)\n\)(?<suffix>[^{\n]*) \{\n(?<body>[\s\S]*?)\n\}/gmu)) {
+      const list = match.groups!.list!.split(",\n").map((entry) => entry.trim());
+      if (list.includes(member) && match.groups!.suffix === suffix) return { list: list.join("|"), body: match.groups!.body! };
+    }
+    return undefined;
+  }
+
+  it("draws every menu, picker and palette on one raised surface that opens with a fade and slight scale", () => {
+    const base = whereRule(".project-menu");
+    expect(base?.body).toBe([
+      "  padding: 4px;",
+      "  border: 1px solid var(--line-soft);",
+      "  border-radius: var(--radius-sm);",
+      "  color: var(--text);",
+      "  background: var(--surface-raised);",
+      "  box-shadow: var(--shadow-float);",
+      "  transform-origin: top center;",
+      "  animation: popover-in var(--dur) var(--ease) both;",
+    ].join("\n"));
+    for (const surface of surfaces) {
+      expect(base?.list.split("|"), surface).toContain(surface);
+      const escaped = surface.replace(".", String.raw`\.`);
+      expect(allCss, surface).not.toMatch(new RegExp(String.raw`(?:^|\n)[^{}\n]*${escaped} \{[^}]*(?:box-shadow|border-radius|background):`, "u"));
+    }
+    expect(css).toMatch(/@keyframes popover-in \{\n  from \{\n    opacity: 0;\n    transform: scale\(0\.98\);\n  \}\n\}/u);
+    expect(allCss).not.toMatch(/composer-popover-in|workspace-popover-in|palette-panel-in var\(--dur-fast\) var\(--ease\) both;\n\}/u);
+  });
+
+  it("gives menu items one 28px row and highlights keyboard and pointer focus with the same fill and no ring", () => {
+    const item = whereRule(".project-menu button");
+    expect(item?.body).toContain("  min-height: var(--menu-item-height);");
+    expect(item?.body).toContain("  border-radius: var(--radius-xs);");
+    expect(item?.body).toContain("  font-size: var(--text-sm);");
+    expect(css).toMatch(/--menu-item-height: calc\(var\(--ui-control-height\) - 4px\);/u);
+    for (const menuItem of [".conversation-menu button", ".header-menu-item", ".palette-group button", ".composer-command-list button", ".thread-submenu button"]) {
+      expect(item?.list.split("|"), menuItem).toContain(menuItem);
+    }
+    expect(whereRule(".project-menu button", ':is(:hover, :focus-visible, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"])')?.body)
+      .toBe("  outline: none;\n  background: var(--fill);");
+    expect(whereRule(".project-menu button", " > svg")?.body).toContain("color: var(--text-muted);");
+  });
+
+  it("prints shortcut hints as plain faint text instead of key boxes", () => {
+    render(<div className="palette-group"><button type="button">Open <kbd>⌘K</kbd></button></div>);
+    const hint = screen.getByText("⌘K");
+    expect(getComputedStyle(hint).borderTopWidth).toMatch(/^0(?:px)?$/u);
+    expect(getComputedStyle(hint).fontVariantNumeric).toBe("tabular-nums");
+    expect(css).not.toMatch(/\.palette-footer kbd \{|\.workspace-panel-launcher kbd \{/u);
   });
 });

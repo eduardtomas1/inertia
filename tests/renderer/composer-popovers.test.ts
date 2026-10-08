@@ -109,7 +109,7 @@ describe("Composer popover state", () => {
       boundary,
       popover: { width: 260, height: 200 },
     });
-    expect(below).toMatchObject({ vertical: "below", top: 80 });
+    expect(below).toMatchObject({ vertical: "below", top: 76 });
 
     const constrained = calculateComposerPopoverPlacement({
       trigger: { top: 300, right: 472, bottom: 332, left: 440 },
@@ -119,7 +119,7 @@ describe("Composer popover state", () => {
     expect(constrained).toMatchObject({
       vertical: "above",
       top: 8,
-      maxHeight: 284,
+      maxHeight: 288,
     });
   });
 });

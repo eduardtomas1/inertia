@@ -43,11 +43,6 @@
   margin-top: 4px;
 }
 
-.attachment-storage-confirm .secondary-button.is-danger,
-.restore-defaults-confirm .secondary-button.is-danger {
-  color: var(--danger);
-}
-
 .archived-chats {
   display: grid;
   min-width: 0;

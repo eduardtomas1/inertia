@@ -49,7 +49,7 @@ test("filters Work by project and manages chat history", async () => {
   await expect(projectMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
   await expect(projectMenu.getByRole("menuitem", { name: "New chat in Inertia" })).toBeVisible();
   await expect(projectMenu.getByRole("menuitem", { name: "Rename" })).toBeVisible();
-  await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
+  await expect(projectMenu.getByRole("group", { name: "Grouping behavior" })).toBeVisible();
   await sidebar.getByRole("searchbox", {
     name: "Search projects and conversations",
   }).click();

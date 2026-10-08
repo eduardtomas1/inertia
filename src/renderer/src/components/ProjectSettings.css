@@ -253,10 +253,6 @@
   margin-top: 4px;
 }
 
-.project-remove-confirm .secondary-button.is-danger {
-  color: var(--danger);
-}
-
 @media (forced-colors: active) {
   .project-remove-confirm {
     border: 1px solid CanvasText;

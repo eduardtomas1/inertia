@@ -188,7 +188,7 @@ export class MascotMain {
   }
 
   private installShowMenu(): void {
-    const show = (): void => { void this.show(); };
+    const show = (): void => { void this.show().catch(() => undefined); };
     const menu = Menu.getApplicationMenu();
     const windowMenu = menu?.items.find(({ role }) => role?.toLowerCase() === "windowmenu")?.submenu;
     if (menu && windowMenu && !menu.getMenuItemById("show-mascot")) {

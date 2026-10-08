@@ -191,6 +191,7 @@ export class MascotStatusPublisher {
         break;
       }
     }
+    // Retain only small previews even if a provider sends excessive concurrent requests.
     if (requests.size > 32) requests.delete(requests.keys().next().value!);
     this.emit();
   }
@@ -215,6 +216,7 @@ export class MascotStatusPublisher {
         since: timestamp(terminal ? turn.completedAt ?? turn.updatedAt : turn.startedAt ?? turn.requestedAt), quietSince: null,
       },
       seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt),
+      // Activity updates must not bounce between live chats.
       at: terminal ? turn.updatedAt : turn.requestedAt,
       changedAt: sameTurn && previous.status.phase === phase ? previous.changedAt : Number.isFinite(changed) ? changed : now,
       heardAt: sameTurn && previous.status.phase === phase ? previous.heardAt : now,

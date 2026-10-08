@@ -37,17 +37,20 @@ export function entryForExcerpt(
 }
 
 function source(packet: ConversationContextPacket): Record<string, string> {
+  const conversation: Record<string, string> = packet.sourceState === "deleted"
+    ? {}
+    : { conversationId: packet.sourceConversationId };
   if (isOwnConversationContext(packet)) {
     return {
       chat: packet.sourceConversationTitle,
-      conversationId: packet.sourceConversationId,
+      ...conversation,
       project: packet.sourceProjectName,
       workspace: packet.sourceWorkspaceLabel,
     };
   }
   return {
     chat: packet.sourceConversationTitle,
-    conversationId: packet.sourceConversationId,
+    ...conversation,
     project: packet.sourceProjectName,
     workspace: packet.workspaceRelation === "different-workspace"
       ? `${packet.sourceWorkspaceLabel} (not this chat's workspace)`
@@ -77,7 +80,9 @@ export function contextEnvelope(
     ...(supplement.files ? { filesChanged: supplement.files } : {}),
     ...(supplement.omittedFiles ? { filesOmitted: supplement.omittedFiles } : {}),
     ...(supplement.commands?.length ? { lastCommands: supplement.commands } : {}),
-    more: `If the ${CONTEXT_TOOL} tool is available, call it with the source conversationId to read older turns of ${own ? "this chat" : "the referenced chat"} and their attached images.`,
+    ...(packet.sourceState === "deleted" ? {} : {
+      more: `If the ${CONTEXT_TOOL} tool is available, call it with the source conversationId to read older turns of ${own ? "this chat" : "the referenced chat"} and their attached images.`,
+    }),
     messages,
   };
 }

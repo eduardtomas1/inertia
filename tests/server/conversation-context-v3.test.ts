@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { sentConversationContextReferences } from "../../src/server/persistence/conversation-context-packet-repository";
-import { prepareConversationContextPacket } from "../../src/server/persistence/conversation-context-transport";
+import {
+  allocateConversationContextBudgets,
+  prepareConversationContextPacket,
+} from "../../src/server/persistence/conversation-context-transport";
 import { conversationContextDeliveriesMigration } from "../../src/server/persistence/migrations/conversation-context-deliveries";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { AGENT_CONTEXT_TOOL_NAME } from "../../src/server/runtime/agent-context-tool";
@@ -389,6 +392,73 @@ describe("conversation context transport version 3", () => {
     ]);
   });
 
+  it("stays within budget, reports what it left out and rebuilds the same selection for random packets", () => {
+    let seed = 1;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const agents = ["Claude claude-sonnet-4-6", "Codex gpt-5", `Kimi ${"k".repeat(100)}`];
+    const packet = (count: number, own: boolean): ConversationContextPacket => {
+      const excerpts = Array.from({ length: count }, (_, index): ConversationContextExcerpt => {
+        const role = index === 0 || random() < 0.4 ? "user" : "assistant";
+        const length = Math.floor(random() ** 3 * 30_000) + 1;
+        const content = Array.from({ length }, () => "ab\"\\n é😀".charAt(Math.floor(random() * 9))).join("") || "x";
+        return {
+          sourceMessageId: id(index + 1), sourceTurnId: null, role, content, truncated: random() < 0.1,
+          createdAt: new Date(1_700_000_000_000 + index).toISOString(),
+          ...(role === "assistant" && random() < 0.8 ? { agent: agents[Math.floor(random() * 3)]! } : {}),
+          ...(role === "assistant" && random() < 0.1 ? { turn: "failed" as const } : {}),
+        };
+      });
+      const target = id(9_999);
+      return {
+        id: id(5_000 + count), sourceConversationId: own ? target : id(8_888), targetConversationId: target,
+        sourceProjectId: id(7_777), targetProjectId: id(7_777), sourceConversationTitle: "T", sourceProjectName: "P",
+        sourceWorkspaceLabel: "W", targetWorkspaceLabel: "W", workspaceRelation: "same-workspace",
+        note: random() < 0.5 ? null : "note", messageCount: count,
+        characterCount: excerpts.reduce((total, { content }) => total + content.length, 0),
+        droppedMessageCount: Math.floor(random() * 5), createdAt: "2030-01-01T00:00:00.000Z",
+        consumedMessageId: null, consumedAt: null, sourceState: "available", excerpts,
+        ...(random() < 0.5 ? { supplement: { files: ["M a.ts +1 -1"], commands: ["npm test (ok)"] } } : {}),
+      };
+    };
+    let checked = 0;
+    for (let iteration = 0; iteration < 150; iteration += 1) {
+      const original = packet(1 + Math.floor(random() * 40), random() < 0.3);
+      for (const transport of ["prompt", "tool-result"] as const) {
+        for (const restored of [false, true]) {
+          const budget = 2_000 + Math.floor(random() * 200_000);
+          let prepared: ReturnType<typeof prepareConversationContextPacket>;
+          try {
+            prepared = prepareConversationContextPacket(original, budget, transport, restored);
+          } catch {
+            continue;
+          }
+          checked += 1;
+          expect(prepared.blocks.reduce((total, { content }) => total + Buffer.byteLength(content), 0)).toBeLessThanOrEqual(budget);
+          const sent = prepared.blocks.flatMap(({ content }) => (JSON.parse(content) as { messages: unknown[][] }).messages);
+          expect(sent.filter(([author]) => author !== "gap")).toHaveLength(prepared.packet.messageCount);
+          const omitted = (JSON.parse(prepared.blocks[0]!.content) as { omitted?: Record<string, number> }).omitted ?? {};
+          expect(Object.values(omitted).reduce((total, count) => total + count, 0)).toBe(prepared.packet.droppedMessageCount);
+          expect(prepared.packet.messageCount + prepared.packet.droppedMessageCount)
+            .toBe(original.messageCount + original.droppedMessageCount);
+          expect(prepareConversationContextPacket(original, budget, transport, restored).blocks).toEqual(prepared.blocks);
+          if (!restored) {
+            const [allocated] = allocateConversationContextBudgets([original], budget, transport);
+            const atAllocation = prepareConversationContextPacket(original, allocated!, transport);
+            if (prepared.complete) {
+              expect(atAllocation.complete).toBe(true);
+              expect(allocated).toBe(prepared.requiredBudgetBytes);
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(400);
+  });
+
   it("restores exactly the counts it sends and states a split history's envelope once", async () => {
     const w = await world();
     const chat = w.chat(w.billing.id, "Steps", "claude");
@@ -505,6 +575,50 @@ describe("conversation context transport version 3", () => {
       expect(v2Reference!.sentBlocks()).toEqual(legacy.blocks);
     } finally { reopened.close(); }
     expect(upgraded.contextPackets.materialize(target.id, [draft.id]).blocks.every(({ structured }) => structured)).toBe(true);
+  });
+
+  it("keeps re-sending a reference whose chat was deleted without pointing the agent at that chat", async () => {
+    const w = await world();
+    const source = w.chat(w.billing.id, "Architecture notes", "claude");
+    for (let index = 0; index < 30; index += 1) {
+      w.store.createMessage(source.id, `${index}-${"detail ".repeat(1_100)}`, index % 2 === 0 ? "user" : "assistant",
+        [], null, new Date(Date.UTC(2030, 0, 1, 0, 0, index)).toISOString());
+    }
+    const target = w.chat(w.billing.id, "Implementation", "codex");
+    const packet = w.service.createFromRenderer({ sourceConversationId: source.id, targetConversationId: target.id, acknowledgedWorkspaceDifference: false });
+    const sent = w.begin(target.id, "Use the notes.", { context: { conversationContextPacketIds: [packet.id] } });
+    const delivered = w.store.contextPackets.preview(packet.id, target.id);
+    expect(delivered.droppedMessageCount).toBeGreaterThan(0);
+    expect(contextSection(sent.providerInput.prompt)).toContain(source.id);
+
+    w.store.deleteConversation(source.id);
+    const after = w.store.contextPackets.preview(packet.id, target.id);
+    expect(after).toMatchObject({ sourceState: "deleted", messageCount: delivered.messageCount, droppedMessageCount: delivered.droppedMessageCount });
+    const database = new Database(w.databasePath, { readonly: true });
+    try {
+      const [reference] = sentConversationContextReferences(database, target.id, [sent.turn.userMessageId]);
+      const blocks = reference!.sentBlocks()!;
+      const envelope = JSON.parse(blocks[0]!.content) as { source: Record<string, string>; more?: string };
+      expect(blocks.map(({ content }) => content).join("")).not.toContain(source.id);
+      expect(envelope.more).toBeUndefined();
+      expect(envelope.source).toEqual({
+        chat: "Architecture notes", project: "Billing", workspace: "Project checkout", captured: packet.createdAt,
+      });
+      expect(blocks.flatMap(({ content }) => (JSON.parse(content) as { messages: unknown[][] }).messages)
+        .filter(([author]) => author !== "gap")).toHaveLength(delivered.messageCount);
+    } finally { database.close(); }
+  });
+
+  it("redacts secret assignments in the commands a reference carries", async () => {
+    const w = await world();
+    const source = w.chat(w.billing.id, "Database", "claude");
+    const turn = w.begin(source.id, "Check the replica.");
+    w.say(source.id, turn.turn.id, "The replica is healthy.");
+    w.command(source.id, turn.turn, "PGPASSWORD=hunter2 psql -h db.internal -U admin", "completed");
+    w.settle(source.id, turn.turn.id, "claude-session");
+    const target = w.chat(w.billing.id, "Implementation", "codex");
+    const packet = w.store.contextPackets.create({ sourceConversationId: source.id, targetConversationId: target.id, acknowledgedWorkspaceDifference: false });
+    expect(packet.supplement?.commands).toEqual(["PGPASSWORD=[redacted] psql -h db.internal -U admin (ok)"]);
   });
 
   it("reads new excerpt facts and a supplement only on version 3 packets", async () => {

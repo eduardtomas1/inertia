@@ -3,15 +3,14 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 
 import {
-  MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
-  MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
   type ConversationContextExcerpt,
   type ConversationContextPacket,
 } from "../../shared/conversation-context";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel,
+  finalAnswerExcerptBytes,
   scrubConversationContextMetadata,
 } from "./conversation-context-excerpts";
 import type { ContinuationRouteFilter } from "./conversation-context-source";
@@ -107,10 +106,7 @@ export function readContinuationHistory(
     null,
     excludedMessageId,
     route,
-    Math.min(
-      MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
-      Math.max(MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, Math.floor(capacityBytes / 4)),
-    ),
+    finalAnswerExcerptBytes(capacityBytes),
   );
   if (!collected) return null;
   const { droppedMessageCount, withheldMessageCount } = collected;

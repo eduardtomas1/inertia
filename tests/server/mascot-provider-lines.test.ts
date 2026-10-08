@@ -1,7 +1,8 @@
 // @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentActivity, AgentApprovalRequest, ProviderId } from "../../src/shared/contracts/agent";
+import type { AgentActivity, AgentApprovalRequest } from "../../src/shared/contracts/agent";
+import type { ProviderId } from "../../src/shared/provider";
 import { createAgentHarnessEmitter, type AgentHarnessEvent } from "../../src/server/provider/agent-harness";
 import { joinProviderActivityDetail, providerActivityDetailSections } from "../../src/server/provider/activity-detail";
 import { agentActivityKind, agentActivityStatus } from "../../src/server/runtime-snapshots";

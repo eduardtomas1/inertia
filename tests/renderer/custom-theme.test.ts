@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildCustomPaletteTokens, buildPaletteTokens, PALETTE_FAMILIES } from "../../src/shared/theme/color-theme-spec";
+import { buildCustomPaletteTokens, buildPaletteTokens, FILL_INK, inkOver, PALETTE_FAMILIES } from "../../src/shared/theme/color-theme-spec";
 import { contrastRatio, hexToOklch, oklchToHex } from "../../src/shared/theme/color-palette";
 import { cacheCustomColor, cachedCustomColor, CUSTOM_COLOR_CACHE_KEY } from "../../src/renderer/src/utils/customTheme";
 
@@ -16,7 +16,7 @@ describe("custom appearance palettes", () => {
       for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "surface-muted", "surface-hover"]) {
         expect(Math.abs(hexToOklch(palette[role]!).l - hexToOklch(builtIn[role]!).l)).toBeLessThan(0.006);
         expect(contrastRatio(palette.text!, palette[role]!)).toBeGreaterThanOrEqual(7);
-        for (const text of ["text-soft", "text-muted", "danger", "warning", "status-completed", "status-input"]) {
+        for (const text of ["text-muted", "danger", "warning", "status-completed", "status-input"]) {
           expect(contrastRatio(palette[text]!, palette[role]!), `${color} ${text} on ${role}`).toBeGreaterThanOrEqual(4.5);
         }
       }
@@ -36,9 +36,9 @@ describe("custom appearance palettes", () => {
   it("keeps the preset palettes byte-identical and pins the vivid custom palettes", () => {
     const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
     expect(digest(PALETTE_FAMILIES.flatMap((family) => modes.map((mode) => [family, mode, buildPaletteTokens(family, mode)]))))
-      .toBe("affd00b9d4e5464cc3300f9f5588a4038d55804434cde1c9d75e95b2e201af94");
+      .toBe("7c1924ea5dd8e8a22e6b68c8949df441e0047823326255dc156637522bf1f026");
     expect(digest([...colors, "#0d9488", "#f97316"].flatMap((color) => modes.map((mode) => [color, mode, buildCustomPaletteTokens(color, mode)]))))
-      .toBe("9afe0c56ce0f1500943cd059bc6fd34c25a6f96f72db58e57745ba5bf751191a");
+      .toBe("1542431ee0c69b37df6a1ea29f0b7efbd2bad84408566dcd013ba01925706f1d");
   });
 
   it.each(modes)("uses the picked colour as the %s accent and moves it only as far as contrast requires", (mode) => {
@@ -99,7 +99,7 @@ describe("custom appearance palettes", () => {
         const label = `${color}${muted ? " muted" : ""}`;
         for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "surface-muted", "surface-hover"]) {
           expect(contrastRatio(palette.text!, palette[role]!), `${label} text on ${role}`).toBeGreaterThanOrEqual(7);
-          for (const text of ["text-soft", "text-muted"]) {
+          for (const text of ["text-muted"]) {
             expect(contrastRatio(palette[text]!, palette[role]!), `${label} ${text} on ${role}`).toBeGreaterThanOrEqual(4.5);
           }
         }
@@ -112,8 +112,12 @@ describe("custom appearance palettes", () => {
         expect(contrastRatio(palette["terminal-fg"]!, palette["terminal-bg"]!), `${label} terminal`).toBeGreaterThanOrEqual(7);
         expect(contrastRatio(palette["terminal-fg"]!, palette["terminal-selection"]!), `${label} terminal selection`).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(palette.accent!, palette["terminal-bg"]!), `${label} terminal cursor`).toBeGreaterThanOrEqual(3);
-        for (const syntax of ["syntax-keyword", "syntax-string", "syntax-function", "syntax-comment"]) {
-          expect(contrastRatio(palette[syntax]!, palette["code-surface"]!), `${label} ${syntax}`).toBeGreaterThanOrEqual(4.5);
+        const raised = mode === "light" ? palette["surface-strong"]! : palette["surface-muted"]!;
+        for (const background of [palette.surface!, palette["surface-strong"]!, raised]) {
+          const code = inkOver(palette.text!, background, FILL_INK);
+          for (const syntax of ["syntax-keyword", "syntax-string", "syntax-function", "syntax-comment"]) {
+            expect(contrastRatio(palette[syntax]!, code), `${label} ${syntax} on ${code}`).toBeGreaterThanOrEqual(4.5);
+          }
         }
       }
     }

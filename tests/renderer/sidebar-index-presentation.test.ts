@@ -42,7 +42,7 @@ describe("sidebar index presentation contracts", () => {
     expect(orbitRule).toContain("animation-duration: 950ms");
     // The shorthand would reset animation-play-state and beat the hidden-document pause.
     expect(orbitRule).not.toMatch(/(^|[\s;])animation:/u);
-    expect(arrivalRule).toContain("work-status-arrival 420ms");
+    expect(arrivalRule).toContain("work-status-arrival var(--dur-slow)");
     expect(arrivalRule).not.toContain("infinite");
   });
 

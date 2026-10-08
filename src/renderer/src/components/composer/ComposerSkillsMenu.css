@@ -41,7 +41,7 @@
   max-height: 280px;
   overflow-y: auto;
   padding: 3px 0;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--line);
 }
 
 .composer-skills-list button {
@@ -64,7 +64,7 @@
   padding: 9px 7px;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 
-.composer-skills-error { color: var(--failure-accent); }
+.composer-skills-error { color: var(--status-failed); }

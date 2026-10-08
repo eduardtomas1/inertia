@@ -59,7 +59,7 @@
 /* A status the user has not seen yet arrives with one short pop, then rests.
    Only Working loops. */
 .activity-thread-status-label [data-work-arrival] > svg {
-  animation: work-status-arrival 420ms var(--motion-ease) both;
+  animation: work-status-arrival var(--dur-slow) var(--ease) both;
 }
 
 @keyframes work-status-arrival {
@@ -86,24 +86,24 @@
   gap: 1px;
   pointer-events: none;
   color: var(--text-muted);
-  font-size: 8px;
-  line-height: 1.05;
+  font-size: var(--text-xs);
+  line-height: 1;
   transition:
-    opacity var(--motion-fast) var(--motion-ease),
-    transform var(--motion-fast) var(--motion-ease);
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .activity-thread-trailing time {
   color: var(--text-muted);
-  font-size: 8px;
+  font-size: var(--text-xs);
 }
 
 .activity-thread-status-label {
   max-width: 58px;
   overflow: hidden;
   color: var(--status-idle);
-  font-size: 8px;
-  font-weight: 650;
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -121,7 +121,7 @@
 
 .work-status-separator {
   opacity: 0.6;
-  font-weight: 450;
+  font-weight: 400;
 }
 
 .work-status-elapsed {
@@ -134,7 +134,7 @@
    active and unread rows never recede. */
 .activity-thread.status-idle:not(.is-active, .is-unread) .activity-thread-title {
   color: var(--text-muted);
-  font-weight: 450;
+  font-weight: 400;
 }
 
 .activity-thread:hover .activity-thread-trailing,
@@ -190,11 +190,11 @@
 }
 
 .sidebar.is-wide .activity-thread-title {
-  font-size: 11.5px;
+  font-size: var(--text-sm);
 }
 
 .sidebar.is-wide .work-thread-meta {
-  font-size: 8.5px;
+  font-size: var(--text-xs);
 }
 
 @media (prefers-reduced-motion: reduce) {

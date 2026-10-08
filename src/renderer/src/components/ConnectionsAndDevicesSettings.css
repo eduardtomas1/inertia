@@ -2,7 +2,7 @@
   margin: 12px 0 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -15,14 +15,14 @@
   gap: 12px;
   margin-top: 12px;
   padding-top: 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .private-connect-qr {
   display: block;
   width: min(176px, 100%);
   height: auto;
-  border-radius: var(--radius-medium);
+  border-radius: var(--radius-sm);
   background: white;
 }
 
@@ -48,21 +48,20 @@
 
 .private-connect-facts {
   margin: 0 0 12px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .private-connect-code {
   color: var(--text);
   font-family: var(--font-mono);
-  letter-spacing: 0.18em;
 }
 
 .private-connect-device {
   display: grid;
   gap: 12px;
   padding: 14px 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .private-connect-device-heading {
@@ -117,8 +116,8 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .private-connect-projects label span {
@@ -136,7 +135,7 @@
 .private-connect-disclosure {
   margin-top: 12px;
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .private-connect-disclosure .setting-disclosure-content {
@@ -163,14 +162,14 @@
 }
 
 .private-connect-audit-list li + li {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .private-connect-audit-list span {
   display: grid;
   min-width: 0;
   gap: 3px;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .private-connect-audit-list strong {
@@ -192,7 +191,7 @@
 .private-connect-diagnostics dl {
   display: grid;
   margin: 4px 0 0;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .private-connect-diagnostics dl > div {
@@ -203,7 +202,7 @@
 }
 
 .private-connect-diagnostics dl > div + div {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .private-connect-diagnostics dt {
@@ -213,7 +212,7 @@
 .private-connect-diagnostics dd {
   min-width: 0;
   margin: 0;
-  color: var(--text-soft);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 

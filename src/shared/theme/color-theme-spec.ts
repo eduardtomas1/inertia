@@ -83,7 +83,6 @@ export const ARCHITECTURE = {
     direction: "darker" as const,
     textL: 0.250,
     textTarget: 7.0,
-    softTarget: 5.6,
     mutedTarget: 4.6,
     statusTarget: 4.6,
     statusStartL: 0.520,
@@ -98,9 +97,6 @@ export const ARCHITECTURE = {
     accentTextChroma: 0.004,
     softTintL: 0.910,
     softTintChroma: 0.030,
-    codeSurfaceL: 0.974,
-    codeHeaderL: 0.946,
-    inlineCodeL: 0.938,
     terminalBgL: 0.992,
     terminalFgL: 0.270,
     terminalSelectionL: 0.885,
@@ -112,10 +108,6 @@ export const ARCHITECTURE = {
     activeChromaScale: 0.55,
     ultraSweepL: 0.560,
     ultraSweepChroma: 0.100,
-    borderAlpha: 0.15,
-    borderStrongAlpha: 0.25,
-    panelBorderAlpha: 0.21,
-    codeBorderAlpha: 0.20,
   },
   dark: {
     ladder: {
@@ -129,7 +121,6 @@ export const ARCHITECTURE = {
     direction: "lighter" as const,
     textL: 0.950,
     textTarget: 7.0,
-    softTarget: 5.6,
     mutedTarget: 4.6,
     statusTarget: 4.6,
     statusStartL: 0.745,
@@ -144,9 +135,6 @@ export const ARCHITECTURE = {
     accentTextChroma: 0.020,
     softTintL: 0.245,
     softTintChroma: 0.034,
-    codeSurfaceL: 0.146,
-    codeHeaderL: 0.184,
-    inlineCodeL: 0.230,
     terminalBgL: 0.132,
     terminalFgL: 0.920,
     terminalSelectionL: 0.320,
@@ -158,10 +146,6 @@ export const ARCHITECTURE = {
     activeChromaScale: 0.55,
     ultraSweepL: 0.800,
     ultraSweepChroma: 0.090,
-    borderAlpha: 0.10,
-    borderStrongAlpha: 0.17,
-    panelBorderAlpha: 0.13,
-    codeBorderAlpha: 0.14,
   },
 };
 
@@ -175,9 +159,12 @@ export const FAMILY_SPECS = {
 
 export const BASE_NEUTRAL_CHROMA = { light: 0.004, dark: 0.005 };
 
-function rgba(hex: string, alpha: number): string {
-  const [r, g, b] = hexToRgb(hex);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+export const FILL_INK = 0.04;
+
+export function inkOver(ink: string, background: string, amount: number): string {
+  const top = hexToRgb(ink);
+  return `#${hexToRgb(background).map((channel, index) => Math.round(top[index]! * amount + channel * (1 - amount))
+    .toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function buildPaletteTokens(family: PaletteFamily, appearance: PaletteAppearance): (readonly [string, string])[] {
@@ -205,14 +192,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     : surfaces["surface-hover"];
 
   const text = neutral(arch.textL, neutralChroma * 2.5);
-  const textSoft = solveLightness({
-    hue,
-    chromaCap: arch.syntaxNeutralChroma,
-    backgrounds: [worstSurface],
-    target: arch.softTarget,
-    direction: arch.direction,
-    startL: appearance === "light" ? 0.38 : 0.82,
-  });
   const textMuted = solveLightness({
     hue,
     chromaCap: arch.syntaxNeutralChroma,
@@ -266,12 +245,13 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
       })])
     : { accent, accentHover, accentStrong, accentText };
 
-  const codeSurface = neutral(arch.codeSurfaceL);
-  const inlineCode = neutral(arch.inlineCodeL);
+  const raised = appearance === "light" ? surfaces["surface-strong"] : surfaces["surface-muted"];
+  const codeBackgrounds = [surfaces.surface, surfaces["surface-strong"], raised]
+    .map((background) => inkOver(text, background, FILL_INK));
   const syntaxOn = (syntaxHue: number, chromaCap = arch.syntaxChroma) => solveLightness({
     hue: syntaxHue,
     chromaCap,
-    backgrounds: [codeSurface, inlineCode],
+    backgrounds: codeBackgrounds,
     target: arch.statusTarget,
     direction: arch.direction,
     startL: arch.statusStartL,
@@ -302,11 +282,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     ["surface-muted", surfaces["surface-muted"]],
     ["surface-hover", surfaces["surface-hover"]],
     ["text", text],
-    ["text-soft", textSoft.hex],
     ["text-muted", textMuted.hex],
-    ["border", rgba(text, arch.borderAlpha)],
-    ["border-strong", rgba(text, arch.borderStrongAlpha)],
-    ["panel-border", rgba(text, arch.panelBorderAlpha)],
     ["accent", accents.accent],
     ["accent-hover", accents.accentHover],
     ["accent-soft", oklchToHex({
@@ -316,10 +292,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     })],
     ["accent-text", accents.accentText],
     ["accent-strong", accents.accentStrong],
-    ["code-surface", codeSurface],
-    ["code-header-surface", neutral(arch.codeHeaderL)],
-    ["code-border", rgba(text, arch.codeBorderAlpha)],
-    ["inline-code-surface", inlineCode],
     ["terminal-bg", terminalBg],
     ["terminal-fg", neutral(arch.terminalFgL, neutralChroma * 2)],
     ["terminal-selection", oklchToHex({
@@ -337,7 +309,7 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     ["syntax-comment", solveLightness({
       hue,
       chromaCap: arch.syntaxNeutralChroma,
-      backgrounds: [codeSurface, inlineCode],
+      backgrounds: codeBackgrounds,
       target: arch.mutedTarget,
       direction: arch.direction,
       startL: appearance === "light" ? 0.52 : 0.66,

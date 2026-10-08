@@ -11,12 +11,12 @@
   max-width: 100%;
   margin: -4px 0;
   padding: 4px 7px;
-  border-radius: 5px;
-  color: var(--text-soft);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
   background: transparent;
   font: inherit;
   text-align: left;
-  transition: background-color var(--motion-fast) var(--motion-ease);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 .composer-project-picker-trigger > span {
   min-width: 0;
@@ -25,7 +25,7 @@
   white-space: nowrap;
 }
 .composer-project-picker-trigger > svg { flex: 0 0 auto; color: var(--text-muted); }
-.composer-project-picker-trigger:hover { background: var(--surface-hover); }
+.composer-project-picker-trigger:hover { background: var(--fill); }
 .composer-project-picker-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .composer-project-picker-trigger:disabled { opacity: var(--disabled-opacity); }
 .conversation-history-controls {
@@ -38,7 +38,7 @@
 .conversation-history-controls p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .conversation-history-controls button[aria-disabled="true"] {
@@ -53,5 +53,5 @@
 .response-turn-omitted {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }

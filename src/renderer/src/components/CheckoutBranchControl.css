@@ -10,18 +10,18 @@
   max-width: 100%;
   padding: 2px 5px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   color: inherit;
   background: transparent;
   font: inherit;
   cursor: pointer;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
 .checkout-branch-button:hover,
 .checkout-branch-button[aria-expanded="true"] {
-  color: var(--text-soft);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-muted);
+  background: var(--fill);
 }
 
 .checkout-branch-button:focus-visible {

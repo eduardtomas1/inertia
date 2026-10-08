@@ -564,8 +564,6 @@
     "tests/renderer/settings-search.dom.test.tsx": 1378,
     "tests/renderer/settings-sections.dom.test.tsx": 686,
     "tests/renderer/settings-target.dom.test.tsx": 452,
-    "tests/renderer/sidebar-aurora.dom.test.tsx": 52,
-    "tests/renderer/sidebar-aurora.test.ts": 4,
     "tests/renderer/sidebar-index-motion.dom.test.tsx": 304,
     "tests/renderer/sidebar-index-presentation.test.ts": 8,
     "tests/renderer/sidebar-model.test.ts": 63,

@@ -46,12 +46,12 @@
   justify-content: center;
   gap: 2px;
   padding: 4px 10px;
-  border-radius: var(--radius-medium);
-  color: var(--text-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
   background: transparent;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
   text-align: left;
-  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
 .settings-search-group button > span {
@@ -67,21 +67,21 @@
 .settings-search-group button:hover,
 .settings-search-group button.is-active {
   color: var(--text);
-  background: var(--surface-hover);
+  background: var(--fill);
 }
 
 .settings-search-group mark {
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--accent-soft);
-  font-weight: 650;
+  background: var(--fill);
+  font-weight: 600;
 }
 
 .settings-search-empty {
   margin: 0;
   padding: 2px 10px;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 @media (max-width: 900px) {

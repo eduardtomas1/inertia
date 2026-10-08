@@ -4,7 +4,7 @@
   display: grid;
   width: 100%;
   min-width: 0;
-  max-width: var(--answer-max-width);
+  max-width: var(--final-answer-max-width);
   gap: var(--response-block-gap);
   margin: 0 auto var(--response-block-gap);
 }
@@ -20,7 +20,7 @@
 .response-turn > .turn-answer-tail {
   width: 100%;
   min-width: 0;
-  max-width: var(--answer-max-width);
+  max-width: var(--final-answer-max-width);
   margin: 0 auto;
 }
 
@@ -36,7 +36,7 @@
   border: 0;
   overflow: hidden;
   background: transparent;
-  transition: opacity var(--motion-fast) var(--motion-ease);
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
 /* Hidden, not removed, so the page lays out and can report its height. */
@@ -51,11 +51,11 @@
   z-index: 1;
   width: 28px;
   height: 28px;
-  border-color: var(--border);
+  border-color: var(--line);
   color: var(--text-muted);
   background: var(--surface);
   opacity: 0;
-  transition: opacity var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
 .html-render:hover > .html-render-open,

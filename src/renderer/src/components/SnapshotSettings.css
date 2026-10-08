@@ -8,7 +8,7 @@
 
 .snapshot-settings-guide {
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .snapshot-settings-guide .setting-disclosure-content {
@@ -18,9 +18,9 @@
 .snapshot-instructions {
   margin: 0;
   padding-left: 18px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   list-style: decimal;
 }
 
@@ -30,9 +30,9 @@
 
 .snapshot-instructions kbd {
   padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--fill);
   font-family: inherit;
   font-size: var(--text-xs);
 }
@@ -41,5 +41,5 @@
   margin: 8px 0 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
 }

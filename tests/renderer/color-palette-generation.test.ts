@@ -10,6 +10,7 @@ import {
 } from "../../scripts/color-palette.mjs";
 import {
   ARCHITECTURE,
+  FILL_INK,
   PALETTE_APPEARANCES,
   PALETTE_FAMILIES,
   buildPaletteTokens,
@@ -103,12 +104,17 @@ describe("generated color palettes", () => {
   it.each(cases)("keeps the %s %s text ramp strictly descending", (family, appearance) => {
     const tokens = palette(family, appearance);
     const surface = tokens.surface!;
-    const ratios = ["text", "text-soft", "text-muted"]
+    const ratios = ["text", "text-muted"]
       .map((role) => contrastRatio(tokens[role]!, surface));
     expect(ratios[0]).toBeGreaterThan(ratios[1]!);
-    expect(ratios[1]).toBeGreaterThan(ratios[2]!);
-    expect(ratios[2]).toBeGreaterThanOrEqual(4.5);
+    expect(ratios[1]).toBeGreaterThanOrEqual(4.5);
     expect(ratios[0]).toBeGreaterThanOrEqual(7);
+  });
+
+  it("solves syntax colours against the same ink fill the stylesheet paints code on", () => {
+    const fill = /--fill:\s*color-mix\(in srgb, var\(--text\) (?<percent>[\d.]+)%, transparent\)/u
+      .exec(repoFile("src/renderer/src/styles.css"))?.groups?.percent;
+    expect(Number(fill) / 100).toBe(FILL_INK);
   });
 
   it("maps out-of-gamut requests by reducing chroma only", () => {

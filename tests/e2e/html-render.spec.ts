@@ -29,7 +29,7 @@ async function inlineFrame(page: Page, selector = INLINE_FRAME): Promise<Frame> 
 async function canvasColor(page: Page): Promise<string> {
   return await page.evaluate(() => {
     const probe = document.createElement("div");
-    probe.style.backgroundColor = "var(--conversation-canvas-surface)";
+    probe.style.backgroundColor = "var(--bg)";
     document.body.append(probe);
     const color = getComputedStyle(probe).backgroundColor;
     probe.remove();

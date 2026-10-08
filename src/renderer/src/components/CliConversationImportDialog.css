@@ -5,13 +5,13 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-composer);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   color: var(--text);
-  background: var(--surface-strong);
-  box-shadow: var(--shadow);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
   outline: none;
-  animation: palette-panel-in var(--motion-base) var(--motion-ease) both;
+  animation: palette-panel-in var(--dur-fast) var(--ease) both;
 }
 
 .cli-import-search {
@@ -22,9 +22,9 @@
   align-items: center;
   gap: 9px;
   padding: 0 10px 0 15px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   color: var(--text-muted);
-  transition: border-color var(--motion-fast) var(--motion-ease);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 
 .cli-import-search:focus-within {
@@ -44,7 +44,7 @@
   color: var(--text);
   background: transparent;
   font: inherit;
-  font-size: var(--ui-font-main);
+  font-size: var(--text-base);
   text-overflow: ellipsis;
 }
 
@@ -56,7 +56,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .cli-import-filter > span {
@@ -73,12 +73,12 @@
   min-height: var(--ui-control-height);
   padding: 0 5px;
   border: 0;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
   font: inherit;
   cursor: pointer;
-  transition: color var(--motion-fast) var(--motion-ease);
+  transition: color var(--dur-fast) var(--ease);
 }
 
 .cli-import-dialog .cli-import-filter button:hover,
@@ -106,8 +106,8 @@
   margin: auto;
   padding: 48px 24px;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.5;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   text-align: center;
 }
 
@@ -115,10 +115,10 @@
   flex: 0 0 auto;
   margin: 0;
   padding: 10px 16px 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   text-align: center;
   overflow-wrap: anywhere;
 }
@@ -143,8 +143,8 @@
 .cli-import-cell {
   display: grid;
   min-width: 0;
-  animation: view-swap-workspace var(--motion-enter) var(--motion-ease) both;
-  animation-delay: calc(var(--cli-import-index, 0) * 30ms);
+  animation: view-swap-workspace var(--dur) var(--ease) both;
+  animation-delay: calc(var(--cli-import-index, 0) * var(--stagger));
 }
 
 .cli-import-card {
@@ -155,19 +155,19 @@
   gap: 10px;
   padding: 14px 14px 12px;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-content);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   color: var(--text);
   background: var(--surface);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: transform var(--motion-base) var(--motion-ease), box-shadow var(--motion-base) var(--motion-ease), border-color var(--motion-base) var(--motion-ease);
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 
 .cli-import-card:hover:not([aria-disabled="true"]) {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-soft);
+  border-color: var(--line-strong);
+  box-shadow: none;
   transform: translateY(-2px);
 }
 
@@ -195,9 +195,9 @@
   min-width: 0;
   padding-right: 52px;
   overflow: hidden;
-  font-size: var(--ui-font-main);
+  font-size: var(--text-base);
   font-weight: 400;
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -211,9 +211,9 @@
   align-content: start;
   gap: 6px;
   overflow: hidden;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }
 
 .cli-import-mini::after {
@@ -237,9 +237,9 @@
   max-width: 88%;
   justify-self: end;
   padding: 5px 8px;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--user-request-tint);
+  background: var(--fill);
 }
 
 .cli-import-card-meta {
@@ -274,7 +274,7 @@
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  animation: cli-import-open-in 200ms var(--motion-ease) both;
+  animation: cli-import-open-in var(--dur) var(--ease) both;
 }
 
 @keyframes cli-import-open-in {
@@ -296,9 +296,9 @@
   min-width: 0;
   margin: 0;
   color: var(--text);
-  font-size: var(--ui-font-main);
+  font-size: var(--text-base);
   font-weight: 400;
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -322,7 +322,7 @@
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 
 .cli-import-message {
@@ -334,15 +334,15 @@
   max-width: var(--user-request-max-width);
   justify-self: end;
   padding: 11px 13px 10px;
-  border-radius: var(--radius-medium);
-  background: var(--user-request-tint);
+  border-radius: var(--radius-sm);
+  background: var(--fill);
 }
 
 .cli-import-message p {
   margin: 0;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.6;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -359,7 +359,7 @@
   justify-content: flex-end;
   gap: 16px;
   padding: 12px 16px 16px 52px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .cli-import-continuation,
@@ -368,8 +368,8 @@
   flex: 1;
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -389,7 +389,7 @@
 }
 
 .cli-import-dialog .secondary-button[aria-disabled="true"]:hover {
-  background: var(--surface-strong);
+  background: var(--surface-raised);
 }
 
 @media (max-width: 760px) {

@@ -25,7 +25,7 @@
   min-height: 0;
   overflow-y: auto;
   padding: 2px 4px 18px 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   outline: none;
 }
 
@@ -40,12 +40,12 @@
   min-height: var(--control-height);
   flex-shrink: 0;
   padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-small);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
   color: var(--text);
   background: var(--surface);
   font: inherit;
-  font-size: calc(var(--ui-font-secondary) + 1px);
+  font-size: var(--text-sm);
 }
 
 .help-guide-search::placeholder {
@@ -76,14 +76,14 @@
 .help-guide-group h3 {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .help-guide-empty {
   margin: 0;
   color: var(--text-muted);
-  font-size: calc(var(--ui-font-secondary) + 1px);
+  font-size: var(--text-sm);
 }
 
 .help-guide .welcome-demo {
@@ -107,14 +107,14 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 3px 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
 .help-guide-entries li {
-  animation: welcome-rise 300ms var(--motion-ease-out) both;
-  animation-delay: calc(var(--i, 0) * 35ms);
+  animation: welcome-rise var(--dur-slow) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
 }
 
 .help-guide-result {
@@ -125,7 +125,7 @@
 }
 
 .help-guide-result:hover {
-  background: var(--surface-hover);
+  background: var(--fill);
 }
 
 .help-guide .help-guide-result:focus-visible {
@@ -134,18 +134,18 @@
 
 .help-guide-entries strong,
 .help-guide-result strong {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .help-guide-entries kbd,
 .help-guide-result kbd {
   padding: 1px 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--surface-strong);
+  background: var(--surface-raised);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -153,18 +153,18 @@
 .help-guide .help-guide-entries p,
 .help-guide-result-detail {
   grid-column: 1 / -1;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .help-guide-result-detail {
   color: var(--text-muted);
-  line-height: 1.55;
+  line-height: var(--leading-prose);
 }
 
 .help-guide-results mark {
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   color: inherit;
-  background: var(--accent-soft);
+  background: var(--fill);
 }
 
 .help-guide .welcome-guide-actions {
@@ -183,12 +183,12 @@
   align-items: center;
   gap: 6px;
   padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   color: var(--text);
   background: transparent;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .help-guide-jumps button:hover {
@@ -203,7 +203,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .help-guide-result {
-    transition: background-color var(--motion-fast) var(--motion-ease-out);
+    transition: background-color var(--dur-fast) var(--ease);
   }
 }
 

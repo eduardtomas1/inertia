@@ -4,7 +4,7 @@
 
 .attachment-storage-setting > .setting-row {
   margin-top: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .attachment-storage-setting > .setting-row + .setting-row {
@@ -17,21 +17,21 @@
   gap: 6px;
   margin-top: 10px;
   padding: 11px 12px;
-  border-radius: var(--radius-medium);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--fill);
 }
 
 .attachment-storage-confirm strong,
 .restore-defaults-confirm strong {
-  font-size: var(--ui-font-secondary);
-  font-weight: 620;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .attachment-storage-confirm small,
 .restore-defaults-confirm small {
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
 }
 
 .attachment-storage-confirm > div,
@@ -77,7 +77,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .archive-row .setting-copy strong {
@@ -95,7 +95,7 @@
   justify-content: space-between;
   gap: 8px 12px;
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .archived-chats-footer small {

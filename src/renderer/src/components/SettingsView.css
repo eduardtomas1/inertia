@@ -4,15 +4,15 @@
   align-items: center;
   gap: 8px;
   padding: 0 0 14px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .mascot-settings-controls small {
   flex-basis: 100%;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 
 .mascot-sprites {
@@ -20,7 +20,7 @@
   flex-direction: column;
   gap: 10px;
   padding: 10px 0 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .mascot-sprites-heading {
@@ -54,31 +54,31 @@
   align-items: center;
   gap: 6px;
   padding: 8px;
-  border-radius: var(--radius-medium);
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: var(--fill);
   font-size: var(--text-xs);
 }
 
 .mascot-sprite-preview small {
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-size: var(--text-xs);
-  font-weight: 560;
+  font-weight: 500;
 }
 
 .mascot-sprite-preview img {
   display: block;
   width: 96px;
   height: 96px;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   image-rendering: pixelated;
-  background: repeating-conic-gradient(var(--surface-muted) 0% 25%, var(--surface-strong) 0% 50%) 0 0 / 12px 12px;
+  background: repeating-conic-gradient(var(--fill) 0% 25%, var(--surface-raised) 0% 50%) 0 0 / 12px 12px;
 }
 
 .mascot-sprite-guide {
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.5;
+  line-height: var(--leading-chrome);
 }
 
 .mascot-sprite-guide > summary {
@@ -87,9 +87,9 @@
   min-height: var(--control-height-small);
   align-items: center;
   gap: 6px;
-  border-radius: var(--radius-small);
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
   cursor: default;
   list-style: none;
 }
@@ -133,8 +133,8 @@
 }
 
 .mascot-sprite-guide ol li::marker {
-  color: var(--text-soft);
-  font-weight: 560;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .mascot-sprite-guide .mascot-sprite-files {
@@ -153,22 +153,22 @@
   align-items: baseline;
   column-gap: 12px;
   padding: 6px 0;
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
 .mascot-sprite-files li + li {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .mascot-sprite-files strong {
-  font-weight: 560;
+  font-weight: 500;
 }
 
 .mascot-sprite-files small {
   color: var(--text-muted);
   font-size: inherit;
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 
 .mascot-sprite-files code,
@@ -187,12 +187,12 @@
   margin: 0;
   color: var(--danger);
   font-size: var(--text-xs);
-  line-height: 1.5;
+  line-height: var(--leading-chrome);
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .mascot-sprite-guide > summary::before {
-    transition: transform var(--motion-fast) var(--motion-ease);
+    transition: transform var(--dur-fast) var(--ease);
   }
 }
 

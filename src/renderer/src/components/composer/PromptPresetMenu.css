@@ -39,7 +39,7 @@
   flex: 0 0 auto;
   gap: 5px;
   padding: 5px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
 }
 .prompt-presets-search {
   display: flex;
@@ -47,12 +47,12 @@
   gap: 7px;
   margin: 0 3px 5px;
   padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
-  background: var(--surface-muted);
+  background: var(--fill);
 }
-.prompt-presets-search:focus-within { border-color: var(--accent); }
+.prompt-presets-search:focus-within { border-color: var(--focus-ring); }
 .prompt-presets-search input {
   width: 100%;
   min-width: 0;
@@ -61,7 +61,7 @@
   outline: 0;
   color: var(--text);
   background: transparent;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 .prompt-presets-list {
   display: grid;
@@ -69,7 +69,7 @@
   gap: 2px;
   overflow-y: auto;
   padding-top: 3px;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--line);
 }
 .prompt-preset-row {
   display: grid;
@@ -95,7 +95,7 @@
   white-space: nowrap;
 }
 .composer-popover .prompt-preset-use[aria-disabled="true"] {
-  color: var(--quiet-muted);
+  color: var(--text-muted);
 }
 .composer-popover .prompt-preset-edit {
   width: 30px;
@@ -112,14 +112,14 @@
   color: var(--text-muted);
   text-align: center;
 }
-.prompt-presets-empty > strong { color: var(--text-soft); }
+.prompt-presets-empty > strong { color: var(--text-muted); }
 .prompt-presets-empty > span { font-size: var(--text-xs); }
 .composer-popover .prompt-presets-empty > button {
   width: auto;
   margin-top: 6px;
   gap: 6px;
   padding: 6px 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
 }
 .prompt-preset-editor {
   display: grid;
@@ -132,20 +132,20 @@
   gap: 5px;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  font-weight: 650;
+  font-weight: 600;
 }
 .prompt-preset-editor > label > input:not([type="checkbox"]),
 .prompt-preset-editor > label > textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
   outline: 0;
   color: var(--text);
-  background: var(--surface-muted);
+  background: var(--fill);
   font: inherit;
-  font-size: var(--ui-font-secondary);
-  font-weight: 450;
+  font-size: var(--text-sm);
+  font-weight: 400;
 }
 .prompt-preset-editor > label > input:not([type="checkbox"]) {
   height: 32px;
@@ -155,20 +155,20 @@
   min-height: 118px;
   padding: 8px;
   resize: vertical;
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 .prompt-preset-editor > label > input:focus,
-.prompt-preset-editor > label > textarea:focus { border-color: var(--accent); }
+.prompt-preset-editor > label > textarea:focus { border-color: var(--focus-ring); }
 .prompt-preset-route-toggle {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: start;
   gap: 8px;
   padding: 7px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-soft);
-  background: color-mix(in srgb, var(--surface-muted) 60%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: var(--fill);
 }
 .prompt-preset-route-toggle input { margin: 1px 0 0; }
 .prompt-preset-route-toggle > span { display: grid; min-width: 0; gap: 2px; }
@@ -179,27 +179,27 @@
 }
 .prompt-preset-route-toggle .prompt-preset-route-rebind-note {
   overflow: visible;
-  color: var(--warning-accent);
+  color: var(--warning);
   text-overflow: clip;
   white-space: normal;
 }
 .prompt-preset-safety-note {
   padding: 0 2px;
   color: var(--text-muted);
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 .prompt-preset-error {
   margin: 0 5px 5px;
-  color: var(--failure-accent);
+  color: var(--status-failed);
   font-size: var(--text-xs);
-  line-height: 1.45;
+  line-height: var(--leading-chrome);
 }
 .prompt-preset-editor-tools {
   display: grid;
   grid-template-columns: 30px 30px minmax(0, 1fr) minmax(0, 1fr);
   gap: 3px;
   padding-top: 8px;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--line);
 }
 .composer-popover .prompt-preset-editor-tools > button {
   min-width: 0;
@@ -207,13 +207,13 @@
   justify-content: center;
   gap: 5px;
   padding: 5px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   font-size: var(--text-xs);
   text-align: center;
 }
 .composer-popover .prompt-preset-editor-tools > button.is-confirming {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-color: var(--line-strong);
 }
 .prompt-preset-editor-actions {
   display: flex;
@@ -226,7 +226,7 @@
   justify-content: center;
   margin: 0;
   padding: 6px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
 }
 .composer-popover .prompt-preset-editor-actions > .primary-button {
   color: var(--accent-text);

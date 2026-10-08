@@ -1,5 +1,5 @@
 .provider-handoff-marker { flex-wrap: wrap; white-space: normal; }
-.provider-handoff-marker > strong { color: var(--text); font-weight: 600; }
+.provider-handoff-marker > strong { color: var(--text); font-weight: 500; }
 .provider-handoff-route { display: inline-flex; min-width: 0; align-items: center; gap: 5px; overflow-wrap: anywhere; }
 @media (forced-colors: active) {
   .provider-handoff-marker { border-color: CanvasText; }

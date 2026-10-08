@@ -13,14 +13,14 @@
   min-height: 42px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 10px;
-  color: var(--text-soft);
-  background: color-mix(in srgb, var(--accent-soft) 24%, var(--surface));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--fill);
 }
 
 .p-c[data-workspace-relation="different-workspace"] {
-  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+  border-color: var(--line-strong);
   background: color-mix(in srgb, var(--warning) 7%, var(--surface));
 }
 
@@ -45,8 +45,8 @@
 .p-o > span { display: grid; min-width: 0; gap: 2px; }
 .p-o strong,
 .p-o small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p-o strong { color: var(--text); font-size: 11px; font-weight: 620; }
-.p-o small { color: var(--text-muted); font-size: 10px; }
+.p-o strong { color: var(--text); font-size: var(--text-sm); font-weight: 500; }
+.p-o small { color: var(--text-muted); font-size: var(--text-xs); }
 .p-o:hover strong { color: var(--accent-strong); }
 
 .p-r {
@@ -55,11 +55,11 @@
   height: 30px;
   margin-right: 4px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   color: var(--text-faint);
 }
 
 .p-r:hover:not(:disabled) {
   color: var(--danger);
-  background: var(--surface-hover);
+  background: var(--fill);
 }

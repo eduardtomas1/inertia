@@ -139,7 +139,7 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(page.getByRole("group", { name: "Process health" })).toContainText("Memory");
   const fields = await page.locator(".diagnostics-filters").evaluate((filters) => {
     const probe = document.createElement("span");
-    probe.style.background = "var(--surface-muted)";
+    probe.style.background = "var(--fill)";
     filters.append(probe);
     const surface = getComputedStyle(probe).backgroundColor;
     probe.remove();

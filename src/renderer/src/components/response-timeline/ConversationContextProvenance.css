@@ -13,10 +13,10 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 22%, transparent);
+  background: var(--fill);
 }
 
 .sent-context > button {
@@ -27,7 +27,7 @@
 
 .sent-context > button:hover,
 .sent-context > button[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
+  background: var(--fill);
 }
 
 .turn-user-request > .composer-context-preview {
@@ -53,12 +53,12 @@
 }
 
 .sent-context strong {
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 620;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .sent-context small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-xs);
 }

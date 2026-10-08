@@ -465,7 +465,7 @@
 }
 
 .daily-work-conversation-card:hover .usage-provider-mark + .usage-provider-mark {
-  border-color: var(--fill);
+  border-color: var(--line-soft);
 }
 
 .daily-work-conversation-identity {

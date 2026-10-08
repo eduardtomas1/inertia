@@ -13,7 +13,7 @@
 .browser-evidence-entry-copy > strong { overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--text-sm); font-weight: 500; line-height: var(--leading-chrome); }
 .browser-evidence-entry-copy > span:not(.browser-evidence-entry-meta, .browser-evidence-entry-flags, .browser-evidence-image-status) { overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-chrome); }
 .browser-evidence-entry-meta { display: flex; min-width: 0; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--text-xs); }
-.browser-evidence-entry-meta > * + *::before { margin-right: 5px; color: var(--line-strong); content: "·"; }
+.browser-evidence-entry-meta > * + *::before { margin-right: 5px; color: var(--text-faint); content: "·"; }
 .browser-evidence-entry-meta time { margin-left: auto; font-variant-numeric: tabular-nums; }
 .browser-evidence-entry-flags { display: flex; flex-wrap: wrap; gap: 5px; }
 .browser-evidence-entry-flags:empty { display: none; }

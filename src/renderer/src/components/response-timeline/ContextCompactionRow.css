@@ -7,7 +7,7 @@
 .context-compaction-separator svg { flex: none; }
 .turn-execution-stream .context-compaction-separator, .turn-agent-execution > .context-compaction-separator { margin-block: 8px; }
 .context-compaction-marker { min-width: 0; padding: 3px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.context-compaction-marker > i { color: var(--line-soft); font-style: normal; }
+.context-compaction-marker > i { color: var(--text-faint); font-style: normal; }
 .context-compaction-marker .context-compaction-icon { width: 14px; height: 14px; }
 .context-compaction-marker .context-compaction-icon > g { animation: none; }
 @media (forced-colors: active) {

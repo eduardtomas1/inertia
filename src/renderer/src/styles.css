@@ -10490,7 +10490,7 @@ button.sent-attachment-open:focus-visible {
 
 .turn-working-copy small::before {
   margin: 0 6px;
-  color: var(--line-soft);
+  color: var(--text-faint);
   content: "·";
 }
 
@@ -10911,7 +10911,7 @@ button.sent-attachment-open:focus-visible {
 }
 
 .turn-thinking-separator {
-  color: var(--line-soft);
+  color: var(--text-faint);
 }
 
 .turn-work-log > details.turn-thinking[data-thinking-state="folded"] > summary {
@@ -11271,7 +11271,7 @@ button.sent-attachment-open:focus-visible {
 .turn-meta-primary > time:not(:first-child)::before,
 .turn-meta-primary > span:not(:first-child)::before {
   margin-right: 7px;
-  color: var(--line-soft);
+  color: var(--text-faint);
   content: "·";
 }
 

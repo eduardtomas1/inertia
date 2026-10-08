@@ -112,10 +112,11 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
         rows.set(key, row);
       }
       const [name, state] = row.children as unknown as [HTMLElement, HTMLElement];
+      const word = mascotRowState(chat);
       name.textContent = choices[index]!.title;
-      state.textContent = `· ${mascotRowState(chat)}`;
+      state.textContent = `· ${word}`;
       row.dataset.tone = mascotTone(chat.phase);
-      row.setAttribute("aria-label", `Open ${name.textContent}, ${mascotRowState(chat)}`);
+      row.setAttribute("aria-label", `Open ${name.textContent}, ${word}`);
       return row;
     });
     for (const key of rows.keys()) if (!chats.some(({ conversationId }) => conversationId === key)) rows.delete(key);

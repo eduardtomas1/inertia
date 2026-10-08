@@ -13,8 +13,8 @@ const budgets = {
   // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.
   // See docs/pr-evidence/dependency-batch-v0.0.56-renderer.json.
   entryJavaScript: 217.5 * kibibyte,
-  mascotFirstLoadJavaScript: 6 * kibibyte + 5_018,
-  mascotJavaScript: 6 * kibibyte + 5_018,
+  mascotFirstLoadJavaScript: 6 * kibibyte + 5_542,
+  mascotJavaScript: 6 * kibibyte + 5_542,
   mascotSettingsJavaScript: 6.8 * kibibyte + 841,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and

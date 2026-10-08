@@ -182,7 +182,10 @@ async function world() {
     const fourth = begin(source.id, "Now add a CSV header row and run the full test suite.");
     say(source.id, fourth.turn.id, "Adding the header row in `writer.ts`; running `npm test` next.");
     command(source.id, fourth.turn, "npm run build", "completed");
-    command(source.id, fourth.turn, "npm test", "failed", "\nExit code: 1");
+    store.addActivity({
+      conversationId: source.id, runId: fourth.turn.runId, turnId: fourth.turn.id, kind: "command", title: "Bash",
+      detail: "Command:\nnpm test\n\nError:\nExit code 1\n2 failed", status: "failed", createdAt: tick(),
+    });
     fail(fourth.turn.id);
     return { source, lastTurn: fourth.turn };
   };

@@ -57,7 +57,9 @@ not offered while a resume is scheduled; cancel the resume first. Choosing a
 model from another provider keeps working in the same chat: the composer notes
 that the next message starts a new session on that provider with the chat's
 earlier messages as context, and any reset offer from the previous provider is
-retired. That message carries the chat's earlier visible messages, up to 192
+retired. When that message starts, a snooze on the chat ends too, because the
+chat was waiting for a provider it no longer uses; switching back before sending
+keeps it. That message carries the chat's earlier visible messages, up to 192
 KiB (three 64 KiB blocks, each message excerpt at most 8 KiB, oldest messages
 left out first and counted as omitted), with pattern-matched secrets redacted,
 plus a list of the files the chat's turns changed (paths and line counts only,

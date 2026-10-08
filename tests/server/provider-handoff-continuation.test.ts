@@ -16,7 +16,7 @@ import {
   type ConversationCommandDependencies,
 } from "../../src/server/runtime/commands/conversation-commands";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
-import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { prepareTurnRequest, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import type { ProviderId, TurnGitArtifactFile } from "../../src/shared/contracts";
 import { modelSelectionSchema, providerNativeModelSelection, type ModelSelection } from "../../src/shared/model-routing";
@@ -68,7 +68,7 @@ async function fixture() {
       ? route
       : { ...route, continuationIdentity: { ...route.continuationIdentity, endpointIdentity } };
   };
-  const resolve = (request: Partial<QueueTurnRequest> = {}, endpointIdentity?: string) => resolveTurnRequest({
+  const dependencies = (endpointIdentity?: string) => ({
     store,
     providers: {
       resolveModelRoute: (selection: ModelSelection) => routeFor(selection, endpointIdentity),
@@ -78,7 +78,15 @@ async function fixture() {
     id: () => `handoff-${++sequence}`,
     now: tick,
     clock: () => new Date(clock),
-  }, { conversationId: conversation.id, content: "Continue the export.", ...request });
+  });
+  const resolve = (request: Partial<QueueTurnRequest> = {}, endpointIdentity?: string) => resolveTurnRequest(
+    dependencies(endpointIdentity),
+    { conversationId: conversation.id, content: "Continue the export.", ...request },
+  );
+  const prepare = (content: string) => prepareTurnRequest(
+    dependencies(),
+    { conversationId: conversation.id, content },
+  );
   const begin = (content: string, endpointIdentity?: string) => {
     const resolved = resolve({ content }, endpointIdentity);
     const queued = store.beginAgentTurn(resolved.input);
@@ -177,7 +185,7 @@ async function fixture() {
     }
     expect(store.conversation(conversation.id).providerSessionId).toBeNull();
   };
-  return { store, conversation, tick, resolve, begin, complete, fail, switchProvider, update, clearSession, seedClaudeHistory, filesBlock };
+  return { store, conversation, tick, resolve, prepare, begin, complete, fail, switchProvider, update, clearSession, seedClaudeHistory, filesBlock };
 }
 
 describe("provider handoff continuation", () => {
@@ -549,5 +557,44 @@ describe("provider handoff files block", () => {
     expect(parsed.files.length).toBeGreaterThan(0);
     expect(parsed.files.length).toBeLessThan(MAX_PROVIDER_HANDOFF_FILES);
     expect(parsed.files.length + parsed.omittedFileCount).toBe(MAX_PROVIDER_HANDOFF_FILES);
+  });
+
+  describe("usage-limit snooze", () => {
+    const snoozedUntil = "2030-01-02T00:00:00.000Z";
+    const stopClaude = async (usageLimited: boolean) => {
+      const f = await fixture();
+      f.seedClaudeHistory();
+      const limited = f.begin("Run the full export.");
+      f.fail(limited.queued.turn.id);
+      if (usageLimited) f.store.limitResets.markUsageLimited(limited.queued.turn.id);
+      f.store.updateConversation(f.conversation.id, { snoozedUntil });
+      return f;
+    };
+
+    it("ends the snooze when the handoff turn starts on the new provider", async () => {
+      const f = await stopClaude(true);
+      await f.switchProvider("codex");
+      expect(f.store.conversation(f.conversation.id).snoozedUntil).toBe(snoozedUntil);
+
+      const handoff = f.prepare("Continue on Codex.");
+      expect(handoff.queued.turn).toMatchObject({ providerId: "codex", continuationReasonCode: "harness-changed" });
+      expect(f.store.conversation(f.conversation.id).snoozedUntil).toBeNull();
+    });
+
+    it("keeps a snooze when the chat did not stop at a usage limit", async () => {
+      const f = await stopClaude(false);
+      await f.switchProvider("codex");
+      f.prepare("Continue on Codex.");
+      expect(f.store.conversation(f.conversation.id).snoozedUntil).toBe(snoozedUntil);
+    });
+
+    it("keeps the snooze when the chat switches back before sending", async () => {
+      const f = await stopClaude(true);
+      await f.switchProvider("codex");
+      await f.switchProvider("claude");
+      const turn = f.prepare("Try Claude again.");
+      expect(turn.queued.turn.providerId).toBe("claude");
+      expect(f.store.conversation(f.conversation.id).snoozedUntil).toBe(snoozedUntil);
+    });
   });
 });

@@ -5,7 +5,7 @@ import type { RuntimeStore } from "../../src/server/database";
 import type { TurnController } from "../../src/server/runtime/turns/turn-controller";
 
 afterEach(cleanupTurnControllerTestDirectories);
-it("keeps an accepted follow-up ambiguous when its owner ends before acknowledgement", async () => {
+it("reports an accepted follow-up as unconfirmed when its owner ends before acknowledgement", async () => {
   const runtime = await createTurnControllerTestRuntime();
   const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start" });
   runtime.controller.start(queued.turn.id);
@@ -18,7 +18,10 @@ it("keeps an accepted follow-up ambiguous when its owner ends before acknowledge
   await flushTurnControllerTestPromises();
   runtime.provider.resolve(); await flushTurnControllerTestPromises();
   accept(true);
-  await expect(sending).rejects.toMatchObject({ delivery: "ambiguous" });
+  await expect(sending).resolves.toEqual({
+    kind: "unconfirmed",
+    message: "The follow-up was accepted as its turn ended. Check this chat before retrying.",
+  });
   expect(acknowledged).toHaveBeenCalledTimes(1);
   lease.release(); await flushTurnControllerTestPromises();
   expect(runtime.store.conversationDetail(runtime.conversationId)?.messages.filter((message) => message.content === "Follow up")).toEqual([]);

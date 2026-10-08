@@ -25,6 +25,7 @@ import {
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
+  MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
   type ConversationContextExcerpt,
 } from "../../src/shared/contracts";
 
@@ -318,8 +319,8 @@ describe("conversation context packets", () => {
     // The preceding tokens shrink during redaction; a token cut by the raw
     // read limit could otherwise survive inside the smaller final excerpt.
     const secret = "OPENAI_API_KEY=synthetic-credential ";
-    const before = secret.repeat(Math.floor((2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 6) / secret.length));
-    const padding = " ".repeat(2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 6 - before.length);
+    const before = secret.repeat(Math.floor((2 * MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES - 6) / secret.length));
+    const padding = " ".repeat(2 * MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES - 6 - before.length);
     store.createMessage(sourceId, `${before}${padding}sk-ant-${"q".repeat(40)} tail`, "assistant", [], null,
       "2026-09-19T00:00:00.000Z");
     store.createMessage(sourceId, `${"a".repeat(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 3)}😀 end`, "assistant", [], null,
@@ -1429,7 +1430,7 @@ describe("conversation context packets", () => {
     const { store, sourceId, targetId } = fixture();
     const body = [
       "Intro: migrate the importer in three phases.",
-      ...Array.from({ length: 900 }, (_, index) => `Working note ${index} about batching.`),
+      ...Array.from({ length: 2700 }, (_, index) => `Working note ${index} about batching.`),
       "Conclusion: ship phase one behind the flag.",
     ].join("\n");
     const message = store.createMessage(sourceId, streaming ? "" : body, "assistant");
@@ -1456,7 +1457,7 @@ describe("conversation context packets", () => {
     const tailBytes = MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
     const secretLine = `OPENAI_API_KEY=${"q".repeat(40)}`;
     const after = `\n${"Closing line.\n".repeat(Math.ceil(tailBytes / 14))}`.slice(0, tailBytes - 20);
-    const body = `${"Opening line.\n".repeat(1600)}${secretLine}${after}`;
+    const body = `${"Opening line.\n".repeat(Math.ceil(2 * tailBytes / 14))}${secretLine}${after}`;
     store.createMessage(sourceId, body, "assistant");
     try {
       const [excerpt] = store.contextPackets.create({

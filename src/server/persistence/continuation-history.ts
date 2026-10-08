@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { ConversationContextPacket } from "../../shared/conversation-context";
+import {
+  MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+  MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
+  type ConversationContextPacket,
+} from "../../shared/conversation-context";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel,
@@ -56,6 +60,10 @@ export function readContinuationHistory(
     null,
     excludedMessageId,
     route,
+    Math.min(
+      MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+      Math.max(MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, Math.floor(capacityBytes / 4)),
+    ),
   );
   if (!collected) return null;
   const { excerpts, droppedMessageCount, withheldMessageCount } = collected;

@@ -6,6 +6,7 @@ import {
   MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES,
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
+  MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
   type ConversationContextAttachmentReference,
   type ConversationContextExcerpt,
 } from "../../shared/conversation-context";
@@ -63,6 +64,7 @@ function attachmentReferences(
 }
 
 const SHORTENED_MIDDLE = "…\n\n[middle of message omitted]\n\n";
+const MAX_EXCERPT_ESCAPED_BYTES = 40 * 1024;
 
 function cleanExcerptText(value: string): string | null {
   const scrubbed = boundedSubagentText(value, value.length);
@@ -83,22 +85,33 @@ function tailUtf8(value: string, maximumBytes: number): string {
   return space !== -1 && space < tail.length / 2 ? tail.slice(space + 1) : tail;
 }
 
+function headUtf8(value: string, maximumBytes: number): string {
+  const { text, truncated } = truncateUtf8(value, maximumBytes);
+  if (!truncated || /^\s/u.test(value.slice(text.length))) return text;
+  const wordEnd = text.search(/\s\S*$/u);
+  return wordEnd > text.length / 2 ? text.slice(0, wordEnd) : text;
+}
+
 function boundExcerptText(head: string, tail: string, maximumBytes: number): string {
   const available = maximumBytes - byteLength(SHORTENED_MIDDLE);
   const keptTail = tail.trim()
     ? neutralizeUntrustedAgentText(tailUtf8(tail, Math.floor(available * 0.4)))
     : "";
-  if (!keptTail.trim()) return truncateUtf8(head, maximumBytes).text;
+  if (!keptTail.trim()) return headUtf8(head, maximumBytes);
   let headBytes = available - byteLength(keptTail);
   while (headBytes > 0) {
     const candidate = neutralizeUntrustedAgentText(
-      `${truncateUtf8(head, headBytes).text}${SHORTENED_MIDDLE}${keptTail}`,
+      `${headUtf8(head, headBytes)}${SHORTENED_MIDDLE}${keptTail}`,
     );
     const overflow = byteLength(candidate) - maximumBytes;
     if (overflow <= 0) return candidate;
     headBytes -= overflow;
   }
-  return truncateUtf8(head, maximumBytes).text;
+  return headUtf8(head, maximumBytes);
+}
+
+function escapedBytes(value: string): number {
+  return byteLength(JSON.stringify(value)) - 2;
 }
 
 /**
@@ -108,27 +121,26 @@ function boundExcerptText(head: string, tail: string, maximumBytes: number): str
  */
 export function scrubAndBoundExcerpt(
   row: ConversationContextSourceRow,
-  remainingBytes = MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+  remainingBytes = MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
 ): ConversationContextExcerpt {
-  const limit = Math.min(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, remainingBytes);
   // Redact, then neutralize instruction-shaped text another model may have
   // written, then bound: neutralizing grows the text, so the cap comes last.
   const head = cleanExcerptText(row.content);
-  const bounded = head === null
+  const tail = row.contentTruncated ? cleanExcerptText(row.tail ?? "") ?? "" : head ?? "";
+  const boundTo = (limit: number) => head === null
     ? truncateUtf8(
         row.contentTruncated ? "[Message excerpt omitted]" : "[Empty message omitted]",
         limit,
       )
     : !row.contentTruncated && byteLength(head) <= limit
       ? { text: head, truncated: false }
-      : {
-          text: boundExcerptText(
-            head,
-            row.contentTruncated ? cleanExcerptText(row.tail ?? "") ?? "" : head,
-            limit,
-          ),
-          truncated: true,
-        };
+      : { text: boundExcerptText(head, tail, limit), truncated: true };
+  let limit = Math.min(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, remainingBytes);
+  let bounded = boundTo(limit);
+  while (limit > 0 && escapedBytes(bounded.text) > MAX_EXCERPT_ESCAPED_BYTES) {
+    limit -= escapedBytes(bounded.text) - MAX_EXCERPT_ESCAPED_BYTES;
+    bounded = boundTo(limit);
+  }
   const attachments = attachmentReferences(row.attachments_json);
   return {
     sourceMessageId: row.id,
@@ -153,6 +165,7 @@ export function collectConversationContextExcerpts(
   selectedIds: readonly string[] | null,
   excludedMessageId?: string,
   route?: ContinuationRouteFilter,
+  finalAnswerBytes = MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
 ): CollectedConversationContextExcerpts | null {
   const countEligible = (routed: ReturnType<typeof continuationRouteSql>) => (database.prepare(`
     SELECT COUNT(*) AS count FROM messages
@@ -180,12 +193,13 @@ export function collectConversationContextExcerpts(
       ? { excerpts: [], droppedMessageCount: 0, withheldMessageCount }
       : null;
   }
-  const perExcerptBudget = selectedIds
-    ? Math.min(
-        MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
-        Math.floor(MAX_CONVERSATION_CONTEXT_TOTAL_BYTES / eligibleCount),
-      )
+  const shareBytes = selectedIds
+    ? Math.floor(MAX_CONVERSATION_CONTEXT_TOTAL_BYTES / eligibleCount)
     : MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
+  const excerptBytes = (final: boolean) => Math.min(
+    final ? finalAnswerBytes : MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
+    shareBytes,
+  );
   let retainedBytes = 0;
   let retainedJsonBytes = 2;
   const retain = (excerpt: ConversationContextExcerpt): boolean => {
@@ -202,7 +216,7 @@ export function collectConversationContextExcerpts(
   const openingRow = selectedIds
     ? null
     : conversationContextOpeningRow(database, sourceConversationId, excludedMessageId, route);
-  let opening = openingRow ? scrubAndBoundExcerpt(openingRow, perExcerptBudget) : null;
+  let opening = openingRow ? scrubAndBoundExcerpt(openingRow, excerptBytes(false)) : null;
   if (opening && !retain(opening)) opening = null;
   const window: ConversationContextExcerpt[] = [];
   for (const row of conversationContextSourceRows(
@@ -212,6 +226,7 @@ export function collectConversationContextExcerpts(
     selectedIds ?? undefined,
     excludedMessageId,
     route,
+    finalAnswerBytes,
   )) {
     if (window.length + (opening ? 1 : 0) >= MAX_CONVERSATION_CONTEXT_MESSAGES) break;
     if (opening && row.id === opening.sourceMessageId) {
@@ -219,7 +234,7 @@ export function collectConversationContextExcerpts(
       opening = null;
       continue;
     }
-    const excerpt = scrubAndBoundExcerpt(row, perExcerptBudget);
+    const excerpt = scrubAndBoundExcerpt(row, excerptBytes(row.final));
     if (!retain(excerpt)) break;
     window.push(excerpt);
   }

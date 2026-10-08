@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conversation-context-transport";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
+import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
 import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { resolveNativeModelRoute } from "./model-route-fixture";
@@ -561,7 +561,7 @@ describe("restored chat history", () => {
   it.each([false, true])("drops partial credentials at the byte boundary before redaction (streamed: %s)", async (streamed) => {
     const f = await fixture();
     const prefix = "OPENAI_API_KEY=synthetic-credential ".repeat(100);
-    const body = prefix + " ".repeat(16_381 - prefix.length) + "sk-" + "Q".repeat(50);
+    const body = prefix + " ".repeat(2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 3 - prefix.length) + "sk-" + "Q".repeat(50);
     const message = f.store.createMessage(f.conversation.id, streamed ? "" : body, "assistant");
     if (streamed) f.store.appendMessageContent(message.id, body);
     const content = f.history()!.blocks.map((block) => block.content).join("\n");

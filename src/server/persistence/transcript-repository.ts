@@ -252,6 +252,7 @@ export class TranscriptRepository {
     turnId: string,
     retainedMessageId: string | null,
     content: string,
+    after: string | null = null,
   ): void {
     if (!retainedMessageId && content) {
       throw new Error("A non-empty assistant snapshot requires a message.");
@@ -260,17 +261,18 @@ export class TranscriptRepository {
       const turn = this.context.requireAgentTurn(turnId);
       if (retainedMessageId) {
         const retained = this.context.database.prepare(`
-          SELECT id, turn_id, role
+          SELECT id, turn_id, role, created_at
           FROM messages
           WHERE id = ?
         `).get(retainedMessageId) as Pick<
           MessageRow,
-          "id" | "turn_id" | "role"
+          "id" | "turn_id" | "role" | "created_at"
         > | undefined;
         if (
           !retained
           || retained.turn_id !== turnId
           || retained.role !== "assistant"
+          || (after !== null && Date.parse(retained.created_at) <= Date.parse(after))
         ) {
           throw new Error(
             "The retained assistant message does not belong to this turn.",
@@ -289,7 +291,8 @@ export class TranscriptRepository {
         WHERE conversation_id = ? AND turn_id = ?
           AND role = 'assistant'
           AND (? IS NULL OR id <> ?)
-      `).run(turn.conversation_id, turnId, retainedMessageId, retainedMessageId);
+          AND (? IS NULL OR created_at > ?)
+      `).run(turn.conversation_id, turnId, retainedMessageId, retainedMessageId, after, after);
     })();
   }
 

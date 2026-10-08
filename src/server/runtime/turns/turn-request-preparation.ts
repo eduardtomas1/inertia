@@ -505,6 +505,8 @@ export function resolveTurnRequest(
           assistantSegmentText: "",
           assistantMessageId: null,
           latestAssistantMessageId: null,
+          followUpBoundary: null,
+          pendingFollowUpBoundaryAt: null,
           reasoningText: "",
           reasoningPendingHighSurrogate: "",
           reasoningId: null,

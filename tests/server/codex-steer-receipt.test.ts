@@ -37,7 +37,7 @@ describe("Codex follow-up acknowledgement ownership", () => {
       // The fixture writes the receipt and terminal event in one stdout batch.
       // Completion must not erase a real receipt, or turn a foreign one into success.
       if (accepted) await expect(run.steer!(input)).resolves.toBe(true);
-      else await expect(run.steer!(input)).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError" });
+      else await expect(run.steer!(input)).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError", turnEnded: true });
       await expect(run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
       expect(processExists(run.child.pid!)).toBe(false);
       const requests = captured(fake.capturePath).filter(({ method }) => method === "turn/steer");
@@ -102,14 +102,14 @@ describe("Codex follow-up delivery uncertainty", () => {
 
   it("reports a lost steer acknowledgement as unknown delivery", async () => {
     await withSteerRun("steer-receipt-lost", 1_000, async (run, capturePath) => {
-      await expect(run.steer!(input)).rejects.toMatchObject(unknownDelivery);
+      await expect(run.steer!(input)).rejects.toMatchObject({ ...unknownDelivery, turnEnded: false });
       expect(steerRequests(capturePath)).toHaveLength(1);
     });
   });
 
   it("keeps a late steer acknowledgement unknown without resending", async () => {
     await withSteerRun("steer-receipt-late", 1_000, async (run, capturePath) => {
-      await expect(run.steer!(input)).rejects.toMatchObject(unknownDelivery);
+      await expect(run.steer!(input)).rejects.toMatchObject({ ...unknownDelivery, turnEnded: false });
       await expect(run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
       expect(steerRequests(capturePath)).toHaveLength(1);
     });
@@ -126,7 +126,7 @@ describe("Codex follow-up delivery uncertainty", () => {
       const steering = run.steer!(input);
       await waitFor("the steer request to reach Codex", () => steerRequests(capturePath).length === 1);
       run.cancel();
-      await expect(steering).rejects.toMatchObject(unknownDelivery);
+      await expect(steering).rejects.toMatchObject({ ...unknownDelivery, turnEnded: true });
       await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
       expect(steerRequests(capturePath)).toHaveLength(1);
     });

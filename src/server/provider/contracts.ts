@@ -155,7 +155,7 @@ export interface ProviderSteerInput {
 }
 
 export class ProviderSteerDeliveryUnknownError extends Error {
-  constructor() {
+  constructor(readonly turnEnded = false) {
     super("The provider did not confirm whether it admitted the follow-up.");
     this.name = "ProviderSteerDeliveryUnknownError";
   }
@@ -229,6 +229,10 @@ export interface ProviderTextSnapshotEvent extends ProviderEventBase {
   type: "text-snapshot";
   itemId: string;
   text: string;
+}
+
+export interface ProviderTextBoundaryEvent extends ProviderEventBase {
+  type: "text-boundary";
 }
 
 export type ProviderActivityKind = "system" | "turn" | "tool" | "command" | "reasoning";
@@ -371,6 +375,7 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
 export type ProviderEvent =
   | ProviderTextEvent
   | ProviderTextSnapshotEvent
+  | ProviderTextBoundaryEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent

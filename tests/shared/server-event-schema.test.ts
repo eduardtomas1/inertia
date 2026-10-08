@@ -1750,6 +1750,8 @@ describe("server event remaining discriminant and identity boundary", () => {
     };
     expect(parseServerEvent(replacement)).toBeTruthy();
     expect(parseServerEvent({ ...replacement, message: null })).toBeTruthy();
+    expect(parseServerEvent({ ...replacement, after: "2026-07-28T12:00:32.000Z" })).toBeTruthy();
+    expect(() => parseServerEvent({ ...replacement, after: 5 })).toThrow("Malformed server event");
     expect(() => parseServerEvent({
       ...replacement,
       message: { ...assistantMessage, role: "user" },

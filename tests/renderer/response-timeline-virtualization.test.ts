@@ -393,6 +393,32 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(longEstimate).toBeLessThanOrEqual(12_400);
   });
 
+  it("estimates a settled follow-up exchange that stays visible outside the work details", () => {
+    const exchange = (earlierAnswer: string): ResponseTimelineItem => {
+      const turn = agentTurn("exchange", "completed", "exchange-answer");
+      const at = (second: number) => `2026-07-26T10:00:0${second}.000Z`;
+      const item = buildResponseTimeline({
+        turns: [turn],
+        messages: [
+          { ...message("exchange-request", turn.id, "user", "Fix the parser."), createdAt: at(1) },
+          { ...message("exchange-earlier", turn.id, "assistant", earlierAnswer), createdAt: at(2) },
+          { ...message("exchange-follow-up", turn.id, "user", "Also rename the file."), createdAt: at(3) },
+          { ...message("exchange-answer", turn.id, "assistant", "Renamed it."), createdAt: at(4) },
+        ],
+        activities: [],
+        reasonings: [],
+        checkpoints: [],
+      }).find((candidate) => candidate.kind === "turn");
+      if (!item) throw new Error("Missing exchange turn.");
+      return item;
+    };
+    const longAnswer = Array.from({ length: 20 }, (_, index) =>
+      `Paragraph ${index + 1} explains one part of the parser fix in enough words to wrap.`).join("\n\n");
+
+    expect(estimateTimelineRowSize(exchange(longAnswer)) - estimateTimelineRowSize(exchange("Fixed.")))
+      .toBeGreaterThan(400);
+  });
+
   it("accounts for wrapping, interface scale, and response density using integer CSS-pixel estimates", () => {
     const item = buildItem({
       id: "scaled",

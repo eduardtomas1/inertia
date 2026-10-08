@@ -355,18 +355,6 @@ export const Composer = memo(function Composer({
   useEffect(() => {
     if (running) {
       dismissMenu("context-change");
-      const retainedImages = attachmentsRef.current.filter(
-        ({ mimeType }) => chatAttachmentKind(mimeType) === "image",
-      );
-      for (const attachment of attachmentsRef.current) {
-        if (chatAttachmentKind(attachment.mimeType) !== "image") {
-          void releaseAttachmentRef.current(attachment.id);
-        }
-      }
-      if (retainedImages.length !== attachmentsRef.current.length) {
-        attachmentsRef.current = retainedImages;
-        setAttachments(() => retainedImages);
-      }
       if (submissionReleaseTimerRef.current !== null) {
         window.clearTimeout(submissionReleaseTimerRef.current);
         submissionReleaseTimerRef.current = null;
@@ -534,6 +522,11 @@ export const Composer = memo(function Composer({
         onClearPromptContext?.();
       }
       textareaRef.current?.focus();
+      if (running) {
+        submittingRef.current = false;
+        setSubmitting(false);
+        return;
+      }
       submissionReleaseTimerRef.current = window.setTimeout(() => {
         submissionReleaseTimerRef.current = null;
         submittingRef.current = false;

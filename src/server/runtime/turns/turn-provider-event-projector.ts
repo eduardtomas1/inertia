@@ -92,6 +92,7 @@ export class TurnProviderEventProjector {
           runId: active.turn.runId,
           turnId: active.turn.id,
           message,
+          ...(active.followUpBoundary ? { after: active.followUpBoundary.at } : {}),
         });
         this.options.hooks.broadcast({
           type: "conversation.detail.invalidated",
@@ -100,6 +101,9 @@ export class TurnProviderEventProjector {
         broadcastTurnSnapshot(this.options.hooks);
         break;
       }
+      case "text-boundary":
+        this.options.streams.closeAssistantSegment(active);
+        break;
       case "reasoning-summary":
         this.options.streams.appendReasoning(active, event.text);
         break;

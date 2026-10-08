@@ -427,8 +427,8 @@ export const CommentaryRow = memo(function CommentaryRow({
   }, [entry.content, entry.streaming]);
   return (
     <article
-      className={clsx("turn-commentary-row", entry.streaming && "is-streaming")}
-      aria-label={entry.streaming ? "Live agent update" : "Agent update"}
+      className={clsx("turn-commentary-row", entry.streaming && "is-streaming", entry.answer && "is-answer")}
+      aria-label={entry.streaming ? "Live agent update" : entry.answer ? "Agent answer" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
       {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content) : undefined)}
     >
@@ -652,6 +652,7 @@ export const ActivityGroup = memo(function ActivityGroup({
 function ExecutionStream({
   entries,
   live = false,
+  label = "Agent work transcript",
   projectRoot,
   projectId,
   conversationId,
@@ -662,6 +663,7 @@ function ExecutionStream({
 }: {
   entries: TurnExecutionStreamEntry[];
   live?: boolean;
+  label?: string;
   projectRoot: string;
   projectId: string;
   conversationId: string;
@@ -673,7 +675,7 @@ function ExecutionStream({
   if (entries.length === 0) return null;
   const lastIndex = entries.length - 1;
   return (
-    <div className="turn-execution-stream" role="list" aria-label="Agent work transcript">
+    <div className="turn-execution-stream" role="list" aria-label={label}>
       {entries.map((entry, index) => {
         if (entry.kind === "commentary") {
           return (
@@ -1095,7 +1097,12 @@ export function WorkLog({
     );
   }
 
-  const hasFoldableDetails = stream.length > 0 || supplementalCount > 0;
+  const exchange = stream.filter((entry) =>
+    entry.kind === "follow-up" || (entry.kind === "commentary" && entry.answer));
+  const workStream = exchange.length > 0
+    ? stream.filter((entry) => !exchange.includes(entry))
+    : stream;
+  const hasFoldableDetails = workStream.length > 0 || supplementalCount > 0;
   const status = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
     ? "limited"
     : turn.agentTurn.status === "failed"
@@ -1142,7 +1149,7 @@ export function WorkLog({
           <div id={detailsId} hidden={!expanded}>
             {expanded && (
               <SettledWorkDetails
-                entries={stream}
+                entries={workStream}
                 turn={turn}
                 reasoningContent={reasoningContent}
                 includesReasoning={includesReasoning}
@@ -1181,6 +1188,17 @@ export function WorkLog({
           />
         </Suspense>
       ))}
+      <ExecutionStream
+        entries={exchange}
+        label="Follow-up messages"
+        projectRoot={projectRoot}
+        projectId={projectId}
+        conversationId={conversationId}
+        defaultCodeWrap={defaultCodeWrap}
+        onOpenProjectFile={onOpenProjectFile}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
     </div>
   );
 }

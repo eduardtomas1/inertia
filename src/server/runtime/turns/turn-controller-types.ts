@@ -40,7 +40,6 @@ import type { TurnStreamChannel } from "./turn-stream-channel";
 import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
-import type { TurnCheckpointCapture } from "../../turn-git-artifacts";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -119,6 +118,11 @@ export interface TurnStructuredContextCapture {
 export interface TurnStructuredContextRecord {
   turn: AgentTurn;
   context: unknown;
+}
+
+export interface TurnCheckpointCapture {
+  checkpointId: string | null;
+  failure: string | null;
 }
 
 export interface TurnGitArtifactHookInput {

@@ -40,6 +40,7 @@ import {
   checkpointFailureReason,
   isExpectedCheckpointAbsence,
 } from "./runtime/turns/turn-checkpoint-notice";
+import type { TurnCheckpointCapture } from "./runtime/turns/turn-controller-types";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
@@ -53,10 +54,6 @@ export interface CaptureTurnGitArtifactInput {
   terminalAssistantMessageId?: string | null;
 }
 
-export interface TurnCheckpointCapture {
-  checkpointId: string | null;
-  failure: string | null;
-}
 
 export interface TurnGitArtifactManagerOptions {
   clockMs?: () => number;

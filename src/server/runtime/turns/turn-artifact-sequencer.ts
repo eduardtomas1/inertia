@@ -1,8 +1,8 @@
 import type { RuntimeStore } from "../../database";
-import type { TurnCheckpointCapture } from "../../turn-git-artifacts";
 import { recordTurnCheckpointUnavailable } from "./turn-checkpoint-notice";
 import type {
   ActiveTurn,
+  TurnCheckpointCapture,
   TurnControllerHooks,
 } from "./turn-controller-types";
 import type { TurnSettlementEffects } from "./turn-settlement-effects";

@@ -4,12 +4,9 @@
  * component-by-component, so every established surface inherits the theme.
  */
 :root[data-theme="light"][data-color-theme="grove"] {
-  --app-bg: #e6eee8;
-  --sidebar-bg: #dfe7e0;
   --surface: #edf6ef;
   --surface-strong: #f4fdf6;
   --surface-muted: #d7e0d9;
-  --surface-hover: #d0d9d2;
   --text: #16261a;
   --text-muted: #585e59;
   --accent: #10653e;
@@ -44,12 +41,9 @@
 }
 
 :root[data-theme="dark"][data-color-theme="grove"] {
-  --app-bg: #030703;
-  --sidebar-bg: #060d08;
   --surface: #0c140e;
   --surface-strong: #131b15;
   --surface-muted: #1a221c;
-  --surface-hover: #222a23;
   --text: #dcf7e2;
   --text-muted: #98a19a;
   --accent: #53c88a;
@@ -84,12 +78,9 @@
 }
 
 :root[data-theme="light"][data-color-theme="ocean"] {
-  --app-bg: #e4eef3;
-  --sidebar-bg: #dde6ec;
   --surface: #ebf5fa;
   --surface-strong: #f5fcff;
   --surface-muted: #d5dfe4;
-  --surface-hover: #ced8dd;
   --text: #11242e;
   --text-muted: #565d62;
   --accent: #0f5c80;
@@ -124,12 +115,9 @@
 }
 
 :root[data-theme="dark"][data-color-theme="ocean"] {
-  --app-bg: #02060a;
-  --sidebar-bg: #050c11;
   --surface: #0a1317;
   --surface-strong: #111a1f;
   --surface-muted: #182126;
-  --surface-hover: #1f292e;
   --text: #dcf3ff;
   --text-muted: #96a0a6;
   --accent: #3cbbf9;
@@ -164,12 +152,9 @@
 }
 
 :root[data-theme="light"][data-color-theme="ember"] {
-  --app-bg: #f4e9e5;
-  --sidebar-bg: #ece2de;
   --surface: #fbf1ec;
   --surface-strong: #fff9f6;
   --surface-muted: #e5dbd7;
-  --surface-hover: #ded4cf;
   --text: #2f1d15;
   --text-muted: #635a57;
   --accent: #9b210c;
@@ -204,12 +189,9 @@
 }
 
 :root[data-theme="dark"][data-color-theme="ember"] {
-  --app-bg: #0a0402;
-  --sidebar-bg: #110906;
   --surface: #180f0c;
   --surface-strong: #1f1613;
   --surface-muted: #261d1a;
-  --surface-hover: #2e2521;
   --text: #ffe9e0;
   --text-muted: #a69c97;
   --accent: #f98a74;
@@ -244,12 +226,9 @@
 }
 
 :root[data-theme="light"][data-color-theme="iris"] {
-  --app-bg: #eceaf4;
-  --sidebar-bg: #e5e3ec;
   --surface: #f3f2fb;
   --surface-strong: #fafaff;
   --surface-muted: #dddce5;
-  --surface-hover: #d6d5de;
   --text: #221f30;
   --text-muted: #5c5b63;
   --accent: #5f27bf;
@@ -284,12 +263,9 @@
 }
 
 :root[data-theme="dark"][data-color-theme="iris"] {
-  --app-bg: #06050a;
-  --sidebar-bg: #0b0a11;
   --surface: #121018;
   --surface-strong: #19171f;
   --surface-muted: #201e27;
-  --surface-hover: #27262e;
   --text: #efecff;
   --text-muted: #9f9da7;
   --accent: #b09efa;

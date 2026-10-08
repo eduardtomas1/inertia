@@ -6,12 +6,9 @@
   background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --app-bg: #ebebee;
-  --sidebar-bg: #e4e4e7;
   --surface: #f3f3f6;
   --surface-strong: #fafafd;
   --surface-muted: #dddde0;
-  --surface-hover: #d6d6d9;
   --text: #212126;
   --text-muted: #5c5b63;
   --accent: #4e30c5;
@@ -197,12 +194,9 @@
 }
 
 :root[data-theme="dark"] {
-  --app-bg: #050507;
-  --sidebar-bg: #0b0b0d;
   --surface: #111114;
   --surface-strong: #18181b;
   --surface-muted: #1f1f22;
-  --surface-hover: #27272a;
   --text: #ededf7;
   --text-muted: #9d9da7;
   --accent: #a3a3fa;

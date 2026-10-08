@@ -11,6 +11,12 @@ const STYLES = "src/renderer/src/styles.css";
 const FAMILY_THEMES = "src/renderer/public/color-themes.css";
 const THEME_LIBRARY = "src/renderer/src/components/ThemeLibrary.css";
 
+const UNPAINTED_TOKENS = new Set(["app-bg", "sidebar-bg", "surface-hover"]);
+
+export function paintedPaletteTokens(family, appearance) {
+  return buildPaletteTokens(family, appearance).filter(([name]) => !UNPAINTED_TOKENS.has(name));
+}
+
 export function paletteSelector(family, appearance) {
   if (family === "inertia") {
     return appearance === "light" ? ":root" : ':root[data-theme="dark"]';
@@ -58,7 +64,7 @@ export function renderFiles(read) {
 
   for (const family of PALETTE_FAMILIES) {
     for (const appearance of PALETTE_APPEARANCES) {
-      const tokens = buildPaletteTokens(family, appearance);
+      const tokens = paintedPaletteTokens(family, appearance);
       const selector = paletteSelector(family, appearance);
       if (family === "inertia") {
         styles = replaceTokensInBlock(styles, selector, tokens);

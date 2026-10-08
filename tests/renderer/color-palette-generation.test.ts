@@ -80,6 +80,17 @@ describe("generated color palettes", () => {
     expect(preview["theme-preview-sidebar"]).toBe(tokens.surface);
   });
 
+  it("maps every family onto the five painted neutrals without the unpainted ladder steps", () => {
+    const families = repoFile("src/renderer/public/color-themes.css");
+    const styles = repoFile("src/renderer/src/styles.css");
+    for (const source of [families, styles]) {
+      expect(source).not.toMatch(/--(?:app-bg|sidebar-bg|surface-hover):/u);
+    }
+    expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);\n  --surface-raised: var\(--surface-strong\);/u);
+    expect(styles).toMatch(/:root\[data-theme="dark"\] \{[^}]*--surface-raised: var\(--surface-muted\);[^}]*--scrollbar-thumb:[^}]*--shadow-float-alpha: 0\.56;[^}]*--raised-edge:/u);
+    expect(families).not.toMatch(/--(?:bg|surface-raised|fill|fill-strong|line|scrollbar-thumb|shadow-float-alpha|raised-edge):/u);
+  });
+
   it("covers exactly the shipped color theme identities", () => {
     expect([...PALETTE_FAMILIES]).toEqual([...COLOR_THEME_IDS]);
   });

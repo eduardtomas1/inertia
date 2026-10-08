@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   CircleAlert,
   CircleDot,
-  LoaderCircle,
   Plus,
   Trash2,
   X,
@@ -177,10 +176,10 @@ function profileState(profile: ModelBackendProfileView): { tone: "ready" | "atte
 
 function BackendProfileState({ profile }: { profile: ModelBackendProfileView }): React.JSX.Element {
   const { tone, label } = profileState(profile);
-  const Icon = tone === "ready" ? CheckCircle2 : tone === "checking" ? LoaderCircle : tone === "idle" ? CircleDot : CircleAlert;
+  const Icon = tone === "ready" ? CheckCircle2 : tone === "checking" ? LoadingMark : tone === "idle" ? CircleDot : CircleAlert;
   return (
     <span className={clsx("backend-profile-state", `is-${tone}`)}>
-      <Icon size={13} aria-hidden="true" className={tone === "checking" ? "provider-status-spinner" : undefined} />
+      <Icon size={13} aria-hidden="true" />
       {label}
     </span>
   );

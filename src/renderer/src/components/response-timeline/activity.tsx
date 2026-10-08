@@ -97,7 +97,6 @@ export function ReasoningSummary({
     return (
       <p className="turn-reasoning-body">
         {content}
-        {streaming && <span className="streaming-caret" aria-hidden="true" />}
       </p>
     );
   }
@@ -125,9 +124,6 @@ export function ReasoningSummary({
           )}
           {segment.body && (
             <span className="turn-reasoning-step-body">{segment.body}</span>
-          )}
-          {streaming && index === segments.length - 1 && (
-            <span className="streaming-caret" aria-hidden="true" />
           )}
         </li>
       ))}
@@ -157,50 +153,21 @@ export function LiveElapsed({
   );
 }
 
-export const MAX_ANIMATED_STREAM_WORDS = 96;
-
-function animatedStreamStart(content: string): number {
-  for (let size = 4_096; ; size *= 8) {
-    const from = Math.max(0, content.length - size);
-    const tokens = content.slice(from).split(/(\s+)/u).filter(Boolean);
-    let words = 0;
-    let start = content.length;
-    for (let index = tokens.length - 1; index >= (from > 0 ? 1 : 0); index -= 1) {
-      start -= tokens[index]!.length;
-      if (!/\S/u.test(tokens[index]!)) continue;
-      words += 1;
-      if (words === MAX_ANIMATED_STREAM_WORDS) return start;
-    }
-    if (from === 0) return 0;
-  }
-}
-
 /**
- * Keeps the live fast path as escaped plain text while giving newly appended
- * words stable keyed spans. Only the recent tail gets nodes, which bounds DOM
- * work during long responses and lets React preserve already animated words.
+ * Keeps the live fast path as escaped plain text. Each paragraph is a stable
+ * keyed block, so text appended to a paragraph updates it in place and only a
+ * newly started paragraph mounts and fades in.
  */
 export function StreamingPlainText({
   content,
 }: {
   content: string;
 }): React.JSX.Element {
-  const animatedStart = animatedStreamStart(content);
-  let offset = animatedStart;
   return (
     <p>
-      {content.slice(0, animatedStart)}
-      {content.slice(animatedStart).split(/(\s+)/u).filter(Boolean).map((token) => {
-        const start = offset;
-        offset += token.length;
-        return /\S/u.test(token)
-          ? (
-              <span className="response-stream-word" key={`stream-word-${start}`}>
-                {token}
-              </span>
-            )
-          : token;
-      })}
+      {content.split(/(\n{2,})/u).map((block, index) => index % 2 === 1
+        ? block
+        : <span className="response-stream-block" key={index}>{block}</span>)}
     </p>
   );
 }
@@ -437,7 +404,7 @@ export const CommentaryRow = memo(function CommentaryRow({
             <div
               className="response-markdown is-streaming is-plain-stream"
               data-stream-renderer="plain-text"
-              data-stream-motion="word-reveal"
+              data-stream-motion="block-fade"
             >
               <StreamingPlainText content={entry.content} />
             </div>

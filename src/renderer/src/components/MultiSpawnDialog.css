@@ -682,11 +682,6 @@
   min-width: 126px;
 }
 
-.multi-spawn-launch .loading-mark {
-  width: 14px;
-  height: 14px;
-}
-
 @media (max-width: 780px) {
   .multi-spawn-backdrop {
     place-items: start center;

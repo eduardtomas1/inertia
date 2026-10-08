@@ -4,7 +4,6 @@ import {
   File,
   FileSpreadsheet,
   FileText,
-  LoaderCircle,
   X,
 } from "lucide-react";
 import {
@@ -50,6 +49,7 @@ import {
 } from "../utils/modalFocus";
 import { pdfCanvasLayout } from "../utils/pdfCanvasLayout";
 import { ZoomableAttachmentImage } from "./ZoomableAttachmentImage";
+import { LoadingMark } from "./ui";
 
 export { pdfCanvasLayout };
 
@@ -327,7 +327,7 @@ export function DocumentAttachmentPreview({
   if (!content) {
     return (
       <div className="document-attachment-preview-loading" role="status">
-        <LoaderCircle size={18} aria-hidden="true" />
+        <LoadingMark size={16} aria-hidden="true" />
         <span>Preparing secure preview…</span>
       </div>
     );

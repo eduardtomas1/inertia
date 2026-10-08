@@ -4,10 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
-import {
-  MAX_ANIMATED_STREAM_WORDS,
-  StreamingPlainText,
-} from "../../src/renderer/src/components/response-timeline/activity";
+import { StreamingPlainText } from "../../src/renderer/src/components/response-timeline/activity";
 import { CONVERSATION_HISTORY_PREPEND_EVENT } from "../../src/renderer/src/utils/conversationHistoryNavigation";
 import { summarizeActivities } from "../../src/renderer/src/utils/responseTimeline";
 import type {
@@ -196,31 +193,21 @@ describe("response timeline render stability", () => {
       .toEqual([["activity-3", "activity-4", "activity-5"]]);
   });
 
-  it("keeps animated live words mounted while the bounded window slides", () => {
-    const words = (count: number) => Array.from({ length: count }, (_, index) => `word-${index}`).join(" ");
-    const view = render(<StreamingPlainText content={words(120)} />);
-    const spans = () => [...document.querySelectorAll(".response-stream-word")];
-    const retained = spans().find((span) => span.textContent === "word-110");
-    expect(spans()).toHaveLength(MAX_ANIMATED_STREAM_WORDS);
+  it("keeps live paragraphs mounted as text streams and adds one block per new paragraph", () => {
+    const view = render(<StreamingPlainText content="First paragraph" />);
+    const blocks = () => [...document.querySelectorAll(".response-stream-block")];
+    const first = blocks()[0];
+    expect(blocks()).toHaveLength(1);
 
-    view.rerender(<StreamingPlainText content={`${words(121)} `} />);
-    view.rerender(<StreamingPlainText content={words(122)} />);
+    view.rerender(<StreamingPlainText content="First paragraph keeps growing" />);
+    expect(blocks()).toHaveLength(1);
+    expect(blocks()[0]).toBe(first);
 
-    expect(spans()).toHaveLength(MAX_ANIMATED_STREAM_WORDS);
-    expect(spans()[0]?.textContent).toBe("word-26");
-    expect(spans().at(-1)?.textContent).toBe("word-121");
-    expect(spans().find((span) => span.textContent === "word-110")).toBe(retained);
-    expect(document.querySelector("p")?.textContent).toBe(words(122));
-  });
-
-  it("tokenises only the animated tail of a long live stream", () => {
-    const content = Array.from({ length: 5_000 }, (_, index) => `word-${index}`).join(" ");
-    const split = vi.spyOn(String.prototype, "split");
-
-    render(<StreamingPlainText content={content} />);
-
-    const longest = Math.max(0, ...split.mock.contexts.map((value) => String(value).length));
-    expect(document.querySelectorAll(".response-stream-word")).toHaveLength(MAX_ANIMATED_STREAM_WORDS);
-    expect(longest).toBeLessThan(content.length / 10);
+    view.rerender(<StreamingPlainText content={"First paragraph keeps growing\n\nSecond"} />);
+    expect(blocks()).toHaveLength(2);
+    expect(blocks()[0]).toBe(first);
+    expect(blocks()[1]?.textContent).toBe("Second");
+    expect(document.querySelector("p")?.textContent).toBe("First paragraph keeps growing\n\nSecond");
+    expect(document.querySelectorAll(".response-stream-word")).toHaveLength(0);
   });
 });

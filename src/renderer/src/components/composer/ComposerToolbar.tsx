@@ -4,7 +4,6 @@ import {
   Command,
   Folder,
   FolderGit2,
-  LoaderCircle,
   MessagesSquare,
   Paperclip,
   Wrench,
@@ -40,7 +39,7 @@ import {
 } from "../../utils/usageDisplay";
 import { CheckoutBranchSlot } from "../CheckoutBranchControl";
 import { ModelChooser } from "../ModelChooser";
-import { IconButton } from "../ui";
+import { IconButton, LoadingMark } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
 import {
@@ -362,11 +361,7 @@ export function ComposerToolbar({
         >
         {attachmentImporting && (
           <span className="provider-status is-ready" role="status">
-            <LoaderCircle
-              size={13}
-              className="provider-status-spinner"
-              aria-hidden="true"
-            />
+            <LoadingMark size={13} aria-hidden="true" />
             <span>Adding attachments…</span>
           </span>
         )}

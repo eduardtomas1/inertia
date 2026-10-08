@@ -3,7 +3,6 @@ import {
   CircleAlert,
   Download,
   ExternalLink,
-  LoaderCircle,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -13,7 +12,7 @@ import type {
   ProviderMaintenanceOperation,
   ProviderMaintenanceStatus,
 } from "@shared/contracts";
-import { IconButton } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 
 const DISMISSED_UPDATES_KEY = "inertia:provider-updates-dismissed:v1";
 const DISMISSED_OPERATIONS_KEY =
@@ -199,7 +198,7 @@ export function ProviderMaintenanceNotice({
     }
   };
   const Icon = activeOperation
-    ? LoaderCircle
+    ? LoadingMark
     : displayOperation?.status === "failed"
       ? CircleAlert
       : displayOperation
@@ -226,11 +225,7 @@ export function ProviderMaintenanceNotice({
       aria-live="polite"
       aria-busy={activeOperation}
     >
-      <Icon
-        size={13}
-        className={activeOperation ? "is-spinning" : undefined}
-        aria-hidden="true"
-      />
+      <Icon size={13} aria-hidden="true" />
       <span>
         <strong>{title}</strong>
         {detail && <small>{detail}</small>}

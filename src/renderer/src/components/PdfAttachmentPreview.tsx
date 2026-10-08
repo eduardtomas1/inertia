@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -11,6 +11,7 @@ import type {
   PageViewport,
   getDocument,
 } from "pdfjs-dist";
+import { LoadingMark } from "./ui";
 
 interface PdfAttachmentPreviewProps {
   source: string;
@@ -149,7 +150,7 @@ export function PdfAttachmentPreview({
       </div>
       {rendering && (
         <span className="pdf-attachment-preview-loading" role="status">
-          <LoaderCircle size={17} aria-hidden="true" />
+          <LoadingMark size={16} aria-hidden="true" />
           Rendering PDF…
         </span>
       )}

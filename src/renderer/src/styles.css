@@ -775,12 +775,8 @@ textarea {
 
 .loading-mark {
   display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: spin 750ms linear infinite;
+  flex: 0 0 auto;
+  animation: spin 800ms linear infinite;
 }
 
 @keyframes spin {
@@ -2915,7 +2911,6 @@ button.header-breadcrumb-project:hover {
 .thinking-summary.is-live { margin: 0 0 9px; }
 .thinking-summary.is-live > summary { color: var(--accent-strong); }
 .thinking-summary.is-live > div { max-height: 190px; overflow-y: auto; }
-.thinking-summary .streaming-caret { width: 1px; height: 10px; margin: 0 0 0 4px; }
 
 .message-meta {
   display: flex;
@@ -3043,31 +3038,6 @@ button.header-breadcrumb-project:hover {
   font-size: var(--text-sm);
   line-height: var(--leading-prose);
   white-space: pre-wrap;
-}
-
-.streaming-caret,
-.response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
-.response-markdown.is-streaming > blockquote:last-child > :last-child::after,
-.response-markdown.is-streaming > .response-code-block:last-child pre code::after,
-.response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after {
-  display: inline-block;
-  width: 2px;
-  height: 12px;
-  margin-right: 7px;
-  vertical-align: -1px;
-  background: var(--accent);
-  animation: pulse 900ms ease-in-out infinite;
-}
-
-.response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
-.response-markdown.is-streaming > blockquote:last-child > :last-child::after,
-.response-markdown.is-streaming > .response-code-block:last-child pre code::after,
-.response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after {
-  margin-right: 0;
-  margin-left: 4px;
-  content: "";
 }
 
 .agent-request-card {
@@ -4159,10 +4129,6 @@ button.header-breadcrumb-project:hover {
   font-size: var(--text-sm);
 }
 
-.pdf-attachment-preview-loading svg {
-  animation: spin 1s linear infinite;
-}
-
 .document-attachment-preview-loading {
   display: flex;
   align-items: center;
@@ -4170,10 +4136,6 @@ button.header-breadcrumb-project:hover {
   color: var(--text-muted);
   font-size: var(--text-sm);
   font-weight: 500;
-}
-
-.document-attachment-preview-loading svg {
-  animation: spin 0.9s linear infinite;
 }
 
 .text-attachment-preview {
@@ -9029,7 +8991,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .provider-status.is-ready { color: var(--accent-strong); border-color: var(--line-strong); background: var(--fill); }
 .provider-status.is-attention { color: var(--warning); }
 .provider-status.is-unavailable { color: var(--danger); background: var(--fill); }
-.provider-status-spinner { animation: spin 900ms linear infinite; }
 
 .provider-readiness {
   display: flex;
@@ -9512,10 +9473,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     animation: none !important;
   }
 
-  .loading-mark,
-  .provider-status-spinner,
-  .pdf-attachment-preview-loading svg,
-  .document-attachment-preview-loading svg {
+  .loading-mark {
     animation-duration: 2.4s !important;
     animation-iteration-count: infinite !important;
   }
@@ -10161,10 +10119,6 @@ button.sent-attachment-open:hover {
   padding-bottom: 5px;
 }
 
-.message.is-assistant.is-streaming > .streaming-caret {
-  margin-left: 4px;
-}
-
 .message-meta .live-label {
   padding: 2px 6px;
   border-radius: var(--radius-xs);
@@ -10334,26 +10288,11 @@ button.sent-attachment-open:hover {
   animation-play-state: paused;
 }
 
-.attachment-preview-backdrop[data-document-visible="false"]
-  :is(.pdf-attachment-preview-loading, .document-attachment-preview-loading) svg {
+.attachment-preview-backdrop[data-document-visible="false"] .loading-mark {
   animation-play-state: paused;
 }
 
-.app-shell[data-document-visible="false"] .streaming-caret,
 .app-shell[data-document-visible="false"] .loading-mark,
-.app-shell[data-document-visible="false"] .pdf-attachment-preview-loading svg,
-.app-shell[data-document-visible="false"] .document-attachment-preview-loading svg,
-.app-shell[data-document-visible="false"] .provider-status-spinner,
-.app-shell[data-document-visible="false"]
-  .response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.app-shell[data-document-visible="false"]
-  .response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
-.app-shell[data-document-visible="false"]
-  .response-markdown.is-streaming > blockquote:last-child > :last-child::after,
-.app-shell[data-document-visible="false"]
-  .response-markdown.is-streaming > .response-code-block:last-child pre code::after,
-.app-shell[data-document-visible="false"]
-  .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
 .app-shell[data-document-visible="false"]
   .response-turn.is-active .agent-activity.is-running svg,
 .app-shell[data-document-visible="false"]
@@ -10516,10 +10455,6 @@ button.sent-attachment-open:hover {
   padding-bottom: 3px;
 }
 
-.turn-commentary-row.is-streaming > .streaming-caret {
-  margin-left: 4px;
-}
-
 .turn-follow-up-row {
   width: fit-content;
   max-width: min(620px, 78%);
@@ -10621,7 +10556,7 @@ button.sent-attachment-open:hover {
   mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);
   -webkit-mask-size: 300% 100%;
   mask-size: 300% 100%;
-  animation: turn-thinking-sweep 3400ms var(--ease) infinite;
+  animation: turn-thinking-sweep 2200ms var(--ease) infinite;
 }
 
 .turn-thinking[data-thinking-state="live"][data-thinking-hold] .turn-thinking-pulse {

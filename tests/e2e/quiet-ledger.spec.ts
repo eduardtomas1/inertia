@@ -171,7 +171,6 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       return {
         lastTag: last?.tagName ?? null,
         caretContent: caret?.content ?? null,
-        caretDisplay: caret?.display ?? null,
         duplicateCaret: element.parentElement?.querySelector(
           ":scope > .streaming-caret",
         ) !== null,
@@ -179,8 +178,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     expect(paragraphCaret).toEqual({
       lastTag: "P",
-      caretContent: '""',
-      caretDisplay: "inline-block",
+      caretContent: "none",
       duplicateCaret: false,
     });
     await publishFixtureEvent({
@@ -219,7 +217,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     expect(codeCaret).toEqual({
       lastTag: "P",
       literalText: "```ts\nconst verified = true;\n```",
-      caretContent: '""',
+      caretContent: "none",
       duplicateCaret: false,
     });
     await captureElementScenario("streaming-caret-code", activeTurn);

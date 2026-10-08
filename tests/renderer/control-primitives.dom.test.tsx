@@ -1,9 +1,10 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { render, screen } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { IconButton } from "../../src/renderer/src/components/ui";
+import { IconButton, LoadingMark } from "../../src/renderer/src/components/ui";
 
 const css = readFileSync("src/renderer/src/styles.css", "utf8")
   .replace(/\r\n?/gu, "\n");
@@ -231,5 +232,34 @@ describe("dialog primitives", () => {
     expect(css).toMatch(/@keyframes dialog-surface-out \{\n  to \{\n    opacity: 0;\n    transform: scale\(0\.98\);/u);
     expect(css).toMatch(/\.dialog-presence\.is-closing > \.dialog-backdrop > \* \{\n    animation: dialog-surface-out/u);
     expect(css).toMatch(/\.dialog-backdrop > \*,[\s\S]*?\{\n    animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
+  });
+});
+
+describe("loading primitives", () => {
+  function sources(directory: string): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return sources(path);
+      return /\.(?:tsx|ts|css)$/u.test(entry.name) ? [path] : [];
+    });
+  }
+
+  it("draws one stroked spinner that announces its label or stays decorative", () => {
+    render(<div><LoadingMark label="Saving file" /><LoadingMark size={16} aria-hidden="true" /></div>);
+    const status = screen.getByRole("status", { name: "Saving file" });
+    expect(status.tagName.toLowerCase()).toBe("svg");
+    expect(status.getAttribute("stroke-width")).toBe("1.75");
+    expect(status).toHaveClass("loading-mark");
+    const decorative = document.querySelector('svg.loading-mark[aria-hidden="true"]');
+    expect(decorative?.getAttribute("width")).toBe("16");
+    expect(decorative).not.toHaveAttribute("role");
+    expect(css).toMatch(/\.loading-mark \{\n  display: inline-block;\n  flex: 0 0 auto;\n  animation: spin 800ms linear infinite;\n\}/u);
+  });
+
+  it("uses no second spinner, per-word stream spans, blur reveal or pulsing caret", () => {
+    const renderer = sources("src/renderer/src").map((path) => readFileSync(path, "utf8")).join("\n");
+    expect(renderer).not.toMatch(/\bLoaderCircle\b|Loader2|provider-status-spinner|response-stream-word|streaming-caret|beautiful-stream-in/u);
+    expect(renderer).toMatch(/\.response-stream-block,\n\.response-markdown\.is-streaming:not\(\.is-plain-stream\) > \* \{\n  animation: beautiful-fade-in var\(--dur-slow\) var\(--ease-fade\) both;/u);
+    expect(css).toMatch(/animation: turn-thinking-sweep 2200ms/u);
   });
 });

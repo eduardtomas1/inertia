@@ -444,11 +444,14 @@ describe("streamed agent text", () => {
     expect(counting.renders.AppLayout).toBe(0);
   });
 
-  it("reveals each streamed word in its own commit behind the caret", async () => {
+  it("streams each word into the same live block and fades in only new paragraphs", async () => {
     const { default: App } = await import("../../src/renderer/src/App");
     const view = await renderReadyTranscript(<App />);
     const words = Array.from({ length: 12 }, (_, index) => `word${index}`);
-    const revealed: Element[] = [];
+    const blocks = () => [...view.container.querySelectorAll(
+      `[data-turn-id="${turn.id}"] [data-stream-motion="block-fade"] .response-stream-block`,
+    )];
+    let first: Element | undefined;
     for (const [index, word] of words.entries()) {
       act(() => {
         emit({
@@ -459,15 +462,16 @@ describe("streamed agent text", () => {
           text: index === 0 ? word : ` ${word}`,
         });
       });
-      const spans = [...view.container.querySelectorAll(
-        `[data-turn-id="${turn.id}"] [data-stream-motion="word-reveal"] .response-stream-word`,
-      )];
-      expect(spans.map((span) => span.textContent))
-        .toEqual(words.slice(0, index + 1));
-      expect(revealed.every((span, position) => spans[position] === span))
-        .toBe(true);
-      expect(spans[index]!.parentElement!.lastElementChild).toBe(spans[index]);
-      revealed.push(spans[index]!);
+      expect(blocks()).toHaveLength(1);
+      expect(blocks()[0]!.textContent).toBe(words.slice(0, index + 1).join(" "));
+      first ??= blocks()[0];
+      expect(blocks()[0]).toBe(first);
     }
+    act(() => {
+      emit({ type: "agent.text", conversationId, runId: turn.runId, turnId: turn.id, text: "\n\nNext" });
+    });
+    expect(blocks()).toHaveLength(2);
+    expect(blocks()[0]).toBe(first);
+    expect(blocks()[1]!.textContent).toBe("Next");
   });
 });

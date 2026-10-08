@@ -608,7 +608,7 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
     } finally { await f.close(); }
   });
 
-  it("queues a follow-up the provider accepted as its turn ended and starts it as the next turn", async () => {
+  it("records a follow-up the provider confirmed as its turn ended in that turn without queueing it", async () => {
     const f = await fixture();
     try {
       const initial = startRunning(f);
@@ -620,16 +620,16 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       });
       await flushTurnControllerTestPromises();
       f.provider.resolve({ status: "completed" });
-      await flushTurnControllerTestPromises();
       acknowledge(true);
       await expect(sending).resolves.toBe("handled");
-      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, content: "Also rename the file." } } });
-      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("accepted"));
       await f.drain();
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.accepted", turnId: initial.turn.id, disposition: "follow-up" } });
       expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
-      expect(f.provider.runCount).toBe(2);
-      const receipt = f.store.queuedMessages.get(f.conversationId, requestId)!;
-      expect(f.store.message(receipt.userMessageId!).content).toBe("Also rename the file.");
+      expect(f.store.conversationDetail(f.conversationId)!.messages
+        .filter((message) => message.content === "Also rename the file.")
+        .map(({ role, turnId }) => ({ role, turnId }))).toEqual([{ role: "user", turnId: initial.turn.id }]);
+      expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
+      expect(f.provider.runCount).toBe(1);
     } finally { await f.close(); }
   });
 

@@ -150,7 +150,23 @@ export class TurnFollowUpCoordinator {
     }
     onProviderAcknowledged?.();
     if (!this.ownsLiveTurn(active, lease)) {
-      return { kind: "unconfirmed", message: "The follow-up was accepted as its turn ended. Check this chat before retrying." };
+      if (
+        PROVIDER_ENDED_ANSWER_HARNESSES.has(active.turn.harnessId)
+        && this.options.store.agentTurn(active.turn.id).status !== "completed"
+      ) {
+        return { kind: "unconfirmed", message: "The follow-up was accepted as its turn ended. Check this chat before retrying." };
+      }
+      return {
+        kind: "accepted",
+        message: this.options.store.createAcknowledgedFollowUpMessage(
+          lease.conversationId,
+          active.turn.id,
+          followUp,
+          lease.submittedAt,
+          this.options.now(),
+          attachments,
+        ),
+      };
     }
     const boundary = this.options.answerBoundary?.prepare(
       active,

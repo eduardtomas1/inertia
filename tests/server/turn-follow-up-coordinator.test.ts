@@ -249,7 +249,7 @@ describe("TurnFollowUpCoordinator", () => {
     admission.release();
   });
 
-  it.each([true, false])("preserves provider acceptance (%s) without persisting against a settled owner", async (accepted) => {
+  it.each([true, false])("records only a confirmed follow-up (%s) against a settled owner", async (accepted) => {
     let accept!: (accepted: boolean) => void;
     const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {
       accept = resolve;
@@ -279,16 +279,14 @@ describe("TurnFollowUpCoordinator", () => {
     accept(accepted);
 
     if (accepted) {
-      await expect(pending).resolves.toEqual({
-        kind: "unconfirmed",
-        message: "The follow-up was accepted as its turn ended. Check this chat before retrying.",
-      });
+      await expect(pending).resolves.toMatchObject({ kind: "accepted" });
       expect(acknowledged).toHaveBeenCalledOnce();
+      expect(persist).toHaveBeenCalledExactlyOnceWith("conversation-1", "turn-1", "Do not persist after Stop", admission.submittedAt, "2026-08-21T10:00:00.000Z", []);
     } else {
       await expect(pending).resolves.toEqual({ kind: "refused" });
       expect(acknowledged).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
     }
-    expect(persist).not.toHaveBeenCalled();
     admission.release();
   });
 });

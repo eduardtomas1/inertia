@@ -26,6 +26,7 @@ import { conversationContextSourceRows } from "./conversation-context-source";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel as workspaceLabel,
+  finalAnswerExcerptBytes,
   scrubAndBoundExcerpt,
   scrubConversationContextMetadata as scrubMetadata,
 } from "./conversation-context-excerpts";
@@ -525,6 +526,9 @@ export class ConversationContextPacketRepository {
       this.context.database,
       source.id,
       selectedIds,
+      undefined,
+      undefined,
+      consumption ? finalAnswerExcerptBytes(consumption.budgetBytes) : undefined,
     );
     if (!collected) throw new Error("That chat has no shareable messages yet.");
     const { excerpts, droppedMessageCount } = collected;

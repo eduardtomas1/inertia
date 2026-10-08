@@ -158,6 +158,13 @@ export function scrubAndBoundExcerpt(
   };
 }
 
+export function finalAnswerExcerptBytes(capacityBytes: number): number {
+  return Math.min(
+    MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+    Math.max(MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, Math.floor(capacityBytes / 4)),
+  );
+}
+
 export interface CollectedConversationContextExcerpts {
   excerpts: ConversationContextExcerpt[];
   droppedMessageCount: number;

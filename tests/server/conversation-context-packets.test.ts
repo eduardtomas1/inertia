@@ -1046,6 +1046,40 @@ describe("conversation context packets", () => {
     store.close();
   });
 
+  it("keeps the newest answer when an agent requests a chat whose final answers are long", () => {
+    const { store, sourceId, targetId } = fixture();
+    try {
+      const at = (second: number) => new Date(Date.UTC(2026, 7, 19, 0, 0, second)).toISOString();
+      const answer = (label: string) => `${label} ${Array.from({ length: 4_000 }, (_, index) => `word${index}`).join(" ")}`;
+      store.createMessage(sourceId, "Plan the importer.", "user", [], null, at(1));
+      store.createMessage(sourceId, answer("FIRST_ANSWER"), "assistant", [], null, at(2));
+      store.createMessage(sourceId, "Now the exporter.", "user", [], null, at(3));
+      store.createMessage(sourceId, answer("NEWEST_ANSWER"), "assistant", [], null, at(4));
+      const turn = beginWithPacket(store, targetId, []).turn;
+      const requestId = randomUUID();
+      const toolCallIdHash = "5".repeat(64);
+      store.contextPackets.reserveAgentRequest({
+        id: requestId, targetConversationId: targetId, targetTurnId: turn.id,
+        targetUserMessageId: turn.userMessageId, targetRunId: turn.runId,
+        sourceHarnessId: turn.harnessId, requestedSourceConversationId: sourceId,
+        toolCallIdHash, requestFingerprint: "4".repeat(64),
+        now: "2026-08-19T10:00:00.000Z", expiresAt: "2026-08-19T10:05:00.000Z",
+      });
+      const result = store.contextPackets.completeAgentRequest({
+        requestId, targetConversationId: targetId, targetTurnId: turn.id,
+        targetUserMessageId: turn.userMessageId, targetRunId: turn.runId,
+        sourceConversationId: sourceId, acknowledgedWorkspaceDifference: false, toolCallIdHash,
+        completedAt: "2026-08-19T10:01:00.000Z",
+      });
+      const sent = (JSON.parse(result.resultJson) as { context: SentBlock[] }).context.flatMap(({ messages }) => messages);
+      expect(sent.map(([author, text]) => author === "gap" ? "gap" : String(text).split(" ")[0])).toEqual(
+        expect.arrayContaining(["Now", "NEWEST_ANSWER"]),
+      );
+      expect(sent.at(-1)![1]).toMatch(/^NEWEST_ANSWER word0 /u);
+      expect(Buffer.byteLength(result.resultJson, "utf8")).toBeLessThanOrEqual(32 * 1024);
+    } finally { store.close(); }
+  });
+
   it("carries media as durable identifiers instead of file paths", () => {
     const { store, sourceId, targetId } = fixture();
     store.createMessage(

@@ -1,9 +1,9 @@
 import type Database from "better-sqlite3";
 
+import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { continuationRouteTurnSql, type ContinuationRouteFilter } from "./conversation-context-source";
 import { byteLength } from "./bounded-message-text";
 import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
-import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 
 export const PROVIDER_HANDOFF_FILES_LABEL = "Files changed earlier in this chat";
 export const MAX_PROVIDER_HANDOFF_FILES = 200;
@@ -39,6 +39,7 @@ export interface ChangedFileLines {
   files: string[];
   omittedFiles?: number;
 }
+
 /**
  * Newest status wins, except that a file added earlier stays added unless a
  * later turn deleted it. Line counts add up across every recorded turn.

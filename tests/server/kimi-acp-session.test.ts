@@ -34,3 +34,21 @@ it("reselects the mode of a restored session whose advertised mode is stale", as
   const failed = vi.fn().mockRejectedValue(new RequestError(-32603, "Internal error", { details: "Mode switch failed" }));
   await expect(configureKimiSession({ request: failed } as unknown as ClientContext, "session", modes, [], "plan", undefined, undefined, undefined, true)).rejects.toThrow("Internal error");
 });
+
+it("reconfirms the model and effort of a restored session even when they are advertised as selected", async () => {
+  const configOptions = [
+    { id: "model", name: "Model", category: "model", type: "select" as const, currentValue: "kimi-model", options: [{ value: "kimi-model", name: "Kimi model" }] },
+    { id: "effort", name: "Thinking", category: "thought_level", type: "select" as const, currentValue: "high", options: [{ value: "high", name: "High" }] },
+  ];
+  const modes = { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] };
+  const fresh = vi.fn().mockResolvedValue({ configOptions });
+  await expect(configureKimiSession({ request: fresh } as unknown as ClientContext, "session", modes, configOptions, "build", "kimi-model", "high"))
+    .resolves.toEqual(configOptions);
+  expect(fresh).not.toHaveBeenCalled();
+  const restored = vi.fn().mockResolvedValue({ configOptions });
+  await configureKimiSession({ request: restored } as unknown as ClientContext, "session", modes, configOptions, "build", "kimi-model", "high", undefined, true);
+  expect(restored.mock.calls).toEqual([
+    ["session/set_config_option", { sessionId: "session", configId: "model", value: "kimi-model" }],
+    ["session/set_config_option", { sessionId: "session", configId: "effort", value: "high" }],
+  ]);
+});

@@ -924,7 +924,7 @@ export class CodexAppServerEvents {
       } else if (status === "failed" || providerInterrupted) {
         this.host.rememberFailure(
           "codex-error",
-          interruptionFailure?.message ?? "Codex could not complete the turn.",
+          interruptionFailure?.message ?? boundedText(turnError?.message, 4_000) ?? "Codex could not complete the turn.",
           interruptionFailure ? interruptionFailure.technicalDetail : lastError,
           codexUsageLimited(turnError?.codexErrorInfo),
         );

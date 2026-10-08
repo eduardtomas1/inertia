@@ -564,6 +564,30 @@ describe("Codex App Server terminal outcomes", () => {
     expect(app.terminateProcessTree).toHaveBeenCalledOnce();
   });
 
+  it.each([false, true])("reports the failed turn's own error instead of a generic sentence: %s", async (throughHarness) => {
+    const app = fixture(throughHarness);
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("failed", { message: "TimeoutError waiting for selector \"#submit\" after 30000ms\nat tests/login.test.ts:88", codexErrorInfo: null, additionalDetails: null });
+    app.finishCleanup(true);
+
+    await expect(app.run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "codex-error", message: "TimeoutError waiting for selector \"#submit\" after 30000ms\nat tests/login.test.ts:88" },
+    });
+  });
+
+  it.each([false, true])("reports an error notification's own message when Codex will not retry: %s", async (throughHarness) => {
+    const app = fixture(throughHarness);
+    await vi.advanceTimersByTimeAsync(0);
+    app.providerError();
+    app.terminal("failed");
+    app.finishCleanup(true);
+
+    await expect(app.run.result).resolves.toMatchObject({
+      status: "failed", failure: { reason: "codex-error", message: "Provider rejected the operation." },
+    });
+  });
+
   it("retains the first provider error when malformed output requires stopping", async () => {
     const app = fixture();
     await vi.advanceTimersByTimeAsync(0);

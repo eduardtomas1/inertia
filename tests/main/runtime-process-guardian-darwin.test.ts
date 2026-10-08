@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { spawn as spawnPty } from "node-pty";
@@ -95,6 +96,38 @@ function processIsAlive(pid: number): boolean {
       && error.code === "ESRCH"
     );
   }
+}
+
+async function runAuthorizedGuardian(
+  payload: readonly string[],
+): Promise<{ elapsedMs: number; exitCode: number | null; signalCode: string | null }> {
+  const guardianPath = join(
+    process.cwd(),
+    "resources/generated/runtime-process-guardian/runtime-process-guardian",
+  );
+  const guardian = spawn(guardianPath, [
+    "watch",
+    String(process.pid),
+    "--",
+    ...payload,
+  ], { detached: true, shell: false, stdio: "ignore" });
+  liveChildren.add(guardian);
+  guardian.once("close", () => liveChildren.delete(guardian));
+  const guardianPid = guardian.pid ?? 0;
+  expect(guardianPid).toBeGreaterThan(1);
+  await expect.poll(
+    () => darwinProcessGuardianReady(guardianPid, guardianPath)?.pid ?? 0,
+    { timeout: 5_000 },
+  ).toBe(guardianPid);
+  const closed = closeOf(guardian);
+  const started = performance.now();
+  process.kill(guardianPid, "SIGUSR1");
+  await closed;
+  return {
+    elapsedMs: performance.now() - started,
+    exitCode: guardian.exitCode,
+    signalCode: guardian.signalCode,
+  };
 }
 
 afterEach(async () => {
@@ -879,6 +912,45 @@ describe("macOS runtime process guardian", () => {
             timeout: 5_000,
           }).toBe(true)));
       }
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "retires a fast-exiting payload without fixed polling delays",
+    async () => {
+      const elapsed: number[] = [];
+      for (let run = 0; run < 5; run += 1) {
+        const result = await runAuthorizedGuardian(["/usr/bin/false"]);
+        expect(result).toMatchObject({ exitCode: 1, signalCode: null });
+        elapsed.push(result.elapsedMs);
+      }
+      expect(Math.min(...elapsed)).toBeLessThan(20);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin").each([
+    ["accepts", ""],
+    ["ignores", 'trap "" TERM; '],
+  ])(
+    "drains a descendant that outlives its completed payload and %s TERM",
+    async (_disposition, prefix) => {
+      const directory = temporaryDirectory();
+      const descendantPidPath = join(directory, "descendant.pid");
+      const result = await runAuthorizedGuardian([
+        "/bin/sh",
+        "-c",
+        `${prefix}/bin/sleep 30 & echo $! > "$1"; exit 3`,
+        "payload",
+        descendantPidPath,
+      ]);
+      const descendantPid = Number(readFileSync(descendantPidPath, "utf8").trim());
+      expect(Number.isSafeInteger(descendantPid) && descendantPid > 1).toBe(true);
+
+      expect(result).toMatchObject({ exitCode: 3, signalCode: null });
+      await expect.poll(() => processIsAlive(descendantPid), { timeout: 2_000 })
+        .toBe(false);
     },
     15_000,
   );

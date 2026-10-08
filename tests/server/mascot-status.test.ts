@@ -435,3 +435,24 @@ describe("mascot bubble words", () => {
     expect(feed().status).toEqual(emptyMascotStatus());
   });
 });
+
+describe("mascot message helpers", () => {
+  it("takes the first prose sentence of a result, skipping headings, fences, rules, tables, quotes and list markers", async () => {
+    const { mascotResultLine } = await import("../../src/server/runtime/mascot-message");
+    expect(mascotResultLine("```ts\nconst hidden = true;\n```\n\n> **Done.** The tests pass.")).toBe("Done.");
+    expect(mascotResultLine("# Title\n---\n| a | b |\n- Fixed the race in `server.ts`. Then more.")).toBe("Fixed the race in server.ts.");
+    expect(mascotResultLine("1. Updated the docs")).toBe("Updated the docs");
+    expect(mascotResultLine("## Only a heading")).toBeNull();
+  });
+
+  it("names a command approval's target only for commands and never a file approval's raw detail", async () => {
+    const { mascotApprovalLine } = await import("../../src/server/runtime/mascot-message");
+    expect(mascotApprovalLine({ kind: "command", title: "OpenCode wants to use bash", command: null, detail: "npm test", reason: null }))
+      .toBe("OpenCode wants to use bash: npm test");
+    expect(mascotApprovalLine({ kind: "file-change", title: "Approve file changes", command: null, detail: "Allow changes under /Users/someone/project", reason: null }))
+      .toBe("Approve file changes");
+    expect(mascotApprovalLine({ kind: "command", title: "Cursor requested permission", command: null, detail: "{\"input\":{\"command\":\"git push\"}}", reason: null }))
+      .toBe("Cursor requested permission: git push");
+    expect(mascotApprovalLine({ kind: "command", title: "Run", command: null, detail: "{broken", reason: null })).toBe("Run");
+  });
+});

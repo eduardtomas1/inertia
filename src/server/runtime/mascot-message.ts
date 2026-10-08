@@ -36,9 +36,12 @@ export function mascotCommentaryLine(content: string): string | null {
 }
 
 export function mascotResultLine(content: string): string | null {
-  const line = content.slice(0, 16_384).split("\n").map((part) => part.trim())
-    .find((part) => part && !/^(?:#|```|~~~|[-*_]{3,}$|\|)/u.test(part));
-  const text = mascotPreview(line?.replace(/^(?:[-*+]|\d+[.)])\s+/u, ""), 4_096);
+  let fenced = false;
+  const line = content.slice(0, 16_384).split("\n").map((part) => part.trim()).find((part) => {
+    if (/^(?:```|~~~)/u.test(part)) { fenced = !fenced; return false; }
+    return !fenced && part && !/^(?:#|[-*_]{3,}$|\|)/u.test(part);
+  });
+  const text = mascotPreview(line?.replace(/^(?:>\s*)?(?:(?:[-*+]|\d+[.)])\s+)?/u, ""), 4_096);
   return text ? mascotPreview(sentences(text)[0]) : null;
 }
 
@@ -110,10 +113,10 @@ export function mascotActivityLine(activity: Pick<AgentActivity, "kind" | "title
   return state === "failed" ? `${phrase[1]} failed` : phrase[state === "completed" ? 2 : 1];
 }
 
-function approvalTarget(request: Pick<AgentApprovalRequest, "command" | "detail" | "reason">): string | null {
+function approvalTarget(request: Pick<AgentApprovalRequest, "kind" | "command" | "detail" | "reason">): string | null {
   if (request.command) return mascotCommand(request.command);
   const detail = request.detail?.trim() ?? "";
-  if (!detail || request.reason) return null;
+  if (!detail || request.reason || request.kind !== "command") return null;
   if (detail.startsWith("{")) {
     try {
       const value = JSON.parse(detail) as { command?: unknown; input?: { command?: unknown } };
@@ -124,7 +127,7 @@ function approvalTarget(request: Pick<AgentApprovalRequest, "command" | "detail"
   return detail.includes("\n") ? null : mascotCommand(detail);
 }
 
-export function mascotApprovalLine(request: Pick<AgentApprovalRequest, "title" | "command" | "detail" | "reason">): string {
+export function mascotApprovalLine(request: Pick<AgentApprovalRequest, "kind" | "title" | "command" | "detail" | "reason">): string {
   const target = approvalTarget(request);
   const action = target ? `${request.title}: ${target}` : request.title;
   return mascotPreview([action, request.reason].filter(Boolean).join(" — ")) ?? "Review the request in the chat.";

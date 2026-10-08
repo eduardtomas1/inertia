@@ -291,6 +291,31 @@ export async function verifyDesktopMarkdownControls(input: {
   await expect(firstCopy).toHaveText("Copy");
   await expect.poll(() => electronApp.evaluate(({ clipboard }) =>
     clipboard.readText())).toBe('{"route":"secondary","verified":true}');
+  await completedTurn.locator('[data-turn-layer="final-answer"]').evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  });
+  await electronApp.evaluate(({ clipboard }) => clipboard.writeText("Selection copy pending"));
+  await electronApp.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows()
+    .find((window) => window.webContents.getURL() === url)!.webContents.copy(), page.url());
+  await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+    .toContain("Historical attribution comes from the persisted route");
+  const selectionCopy = await electronApp.evaluate(async ({ clipboard }) => {
+    const [item] = await clipboard.read();
+    return {
+      html: await (await item!.getType("text/html")).text(),
+      text: await clipboard.readText(),
+    };
+  });
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  expect(selectionCopy.html).toContain("<blockquote");
+  expect(selectionCopy.html).not.toContain("border-left");
+  expect(selectionCopy.html).not.toContain('node="');
+  for (const label of ["Codex · OpenAI", "Markdown", "CSV", "Wrap", "Copy"]) {
+    expect(selectionCopy.text).not.toContain(label);
+  }
 }
 
 /** Opening details in a tall narrow turn must retain its next disclosure. */

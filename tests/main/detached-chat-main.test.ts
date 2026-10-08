@@ -113,6 +113,7 @@ class FakeBrowserWindow extends EventEmitter {
   destroyCalls = 0;
   title = "";
   backgroundColor = "";
+  titleBarOverlay: unknown = null;
   bounds: Rectangle;
 
   constructor(readonly options: BrowserWindowConstructorOptions = {}) {
@@ -142,6 +143,7 @@ class FakeBrowserWindow extends EventEmitter {
   setTitle(title: string): void { this.title = title; }
   setAlwaysOnTop(value: boolean): void { this.alwaysOnTop = value; }
   setBackgroundColor(value: string): void { this.backgroundColor = value; }
+  setTitleBarOverlay(value: unknown): void { this.titleBarOverlay = value; }
   show(): void { this.visible = true; }
   focus(): void { this.focused = true; }
   restore(): void { this.minimized = false; }
@@ -224,7 +226,8 @@ function fixture(
     statePath: join(directory, "detached-chat-window-state.json"),
     draftStatePath: join(directory, "detached-chat-pending-drafts.json"),
     iconPath: join(directory, "icon.png"),
-    backgroundColor: "#101214",
+    theme: "dark",
+    platform: "win32",
     onDock: docked,
   });
   coordinator.registerIpc();
@@ -326,7 +329,9 @@ describe("detached chat main-process boundary", () => {
         movable: true,
         resizable: true,
         skipTaskbar: false,
-        backgroundColor: "#101214",
+        backgroundColor: "#18181b",
+        titleBarStyle: "hidden",
+        titleBarOverlay: { color: "#00000000", symbolColor: "#ededf7", height: 48 },
         webPreferences: {
           preload: join(value.directory, "detached-chat.cjs"),
           partition: expect.stringMatching(/^inertia-detached-chat-/u),
@@ -495,8 +500,9 @@ describe("detached chat main-process boundary", () => {
         channel: "inertia:runtime-ready",
         args: [],
       });
-      value.coordinator.setBackgroundColor("#22262a");
-      expect(popup.backgroundColor).toBe("#22262a");
+      value.coordinator.setTheme("light");
+      expect(popup.backgroundColor).toBe("#fafafd");
+      expect(popup.titleBarOverlay).toEqual({ color: "#00000000", symbolColor: "#212126", height: 48 });
     } finally {
       await cleanup(value);
     }

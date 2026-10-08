@@ -14,8 +14,8 @@ import {
 import type { DesktopWindowContext } from "../shared/desktop.js";
 
 type ContextMenuEntry =
-  | { label: string; action: ContextMenuAction; enabled?: boolean }
-  | { role: "copy" | "paste"; label: string }
+  | { label: string; action: ContextMenuAction; enabled?: boolean; accelerator?: string }
+  | { role: "copy" | "paste"; label: string; accelerator?: string }
   | { separator: true };
 
 export interface ContextMenuIpcOptions {
@@ -35,6 +35,12 @@ export interface ContextMenuIpcOptions {
 }
 
 const SEPARATOR = { separator: true } as const;
+const SELECTION_COPY = { role: "copy", label: "Copy", accelerator: "CmdOrCtrl+C" } as const;
+
+function terminalShortcut(platform: NodeJS.Platform, key: "C" | "V"): { accelerator?: string } {
+  if (platform === "darwin") return { accelerator: `Cmd+${key}` };
+  return platform === "win32" && key === "V" ? { accelerator: "Ctrl+V" } : {};
+}
 
 function revealLabel(platform: NodeJS.Platform): string {
   if (platform === "darwin") return "Reveal in Finder";
@@ -59,7 +65,7 @@ export function contextMenuEntries(
   switch (request.kind) {
     case "message":
       return [
-        ...(request.hasSelection ? [{ role: "copy", label: "Copy" } as const, SEPARATOR] : []),
+        ...(request.hasSelection ? [SELECTION_COPY, SEPARATOR] : []),
         { label: "Copy message", action: "copy-message" },
         ...(request.role === "assistant"
           ? [{ label: "Copy as Markdown", action: "copy-markdown" } as const]
@@ -67,7 +73,7 @@ export function contextMenuEntries(
       ];
     case "code":
       return [
-        ...(request.hasSelection ? [{ role: "copy", label: "Copy" } as const, SEPARATOR] : []),
+        ...(request.hasSelection ? [SELECTION_COPY, SEPARATOR] : []),
         { label: "Copy code", action: "copy-code" },
       ];
     case "project-link":
@@ -77,8 +83,8 @@ export function contextMenuEntries(
       return pathEntries(platform, !request.directory);
     case "terminal":
       return [
-        { label: "Copy", action: "terminal-copy", enabled: request.hasSelection },
-        { role: "paste", label: "Paste" },
+        { label: "Copy", action: "terminal-copy", enabled: request.hasSelection, ...terminalShortcut(platform, "C") },
+        { role: "paste", label: "Paste", ...terminalShortcut(platform, "V") },
         { label: "Select all", action: "terminal-select-all" },
         ...(request.clearable
           ? [SEPARATOR, { label: "Clear", action: "terminal-clear" } as const]
@@ -115,10 +121,14 @@ function showMenu(
       options.platform ?? process.platform,
     ).map((entry) => {
       if ("separator" in entry) return { type: "separator" };
-      if ("role" in entry) return { role: entry.role, label: entry.label };
+      const shortcut = entry.accelerator
+        ? { accelerator: entry.accelerator, registerAccelerator: false }
+        : {};
+      if ("role" in entry) return { role: entry.role, label: entry.label, ...shortcut };
       return {
         label: entry.label,
         enabled: entry.enabled ?? true,
+        ...shortcut,
         click: () => complete(entry.action),
       };
     });

@@ -56,7 +56,7 @@ function detachedWindow() {
     rendererUrl,
     userDataDirectory: "/tmp/inertia-user-data",
     iconPath: "/tmp/icon.png",
-    backgroundColor: "#000000",
+    theme: "dark",
     registerRendererProtocol: vi.fn(),
     registerHealthRenderer: () => () => undefined,
     onDock: vi.fn(),

@@ -34,6 +34,7 @@ import {
   DetachedChatWindowStateStore,
 } from "./detached-chat-window-state.js";
 import { guardFramedPages } from "./frame-navigation-policy.js";
+import { applyWindowTheme, type ResolvedWindowTheme, windowChromeOptions } from "./window-appearance.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -74,7 +75,8 @@ export interface DetachedChatMainOptions {
   statePath: string;
   draftStatePath: string;
   iconPath: string;
-  backgroundColor: string;
+  theme: ResolvedWindowTheme;
+  platform?: NodeJS.Platform;
   onDraftStoreDiagnostic?: (
     diagnostic: DetachedChatDraftStoreDiagnostic,
   ) => void;
@@ -126,7 +128,8 @@ export class DetachedChatMain {
   readonly #rendererUrl: string;
   readonly #manager: DetachedChatWindowManager;
   readonly #pendingDrafts: DetachedChatDraftStore;
-  #backgroundColor: string;
+  #theme: ResolvedWindowTheme;
+  readonly #platform: NodeJS.Platform;
   #ipcRegistered = false;
   #shuttingDown = false;
   readonly #drafts = new Map<string, string>();
@@ -166,7 +169,8 @@ export class DetachedChatMain {
       options.rendererUrl,
       options.applicationScheme ?? "inertia",
     );
-    this.#backgroundColor = options.backgroundColor;
+    this.#theme = options.theme;
+    this.#platform = options.platform ?? process.platform;
     this.#pendingDrafts = new DetachedChatDraftStore(options.draftStatePath, {
       onDiagnostic: options.onDraftStoreDiagnostic,
     });
@@ -381,14 +385,14 @@ export class DetachedChatMain {
     this.#manager.sendToAll(channel, ...args);
   }
 
-  setBackgroundColor(backgroundColor: string): void {
-    if (!backgroundColor || /[\0\r\n]/u.test(backgroundColor)) {
-      throw new Error("Invalid detached-chat background color");
+  setTheme(theme: ResolvedWindowTheme): void {
+    if (theme !== "light" && theme !== "dark") {
+      throw new Error("Invalid detached-chat window theme");
     }
-    this.#backgroundColor = backgroundColor;
+    this.#theme = theme;
     for (const { conversationId: id } of this.#manager.summary()) {
       const window = this.#manager.windowForConversation(id);
-      if (liveWindow(window)) window.setBackgroundColor(backgroundColor);
+      if (liveWindow(window)) applyWindowTheme(window, this.#platform, theme);
     }
   }
 
@@ -464,7 +468,7 @@ export class DetachedChatMain {
       fullscreenable: true,
       skipTaskbar: false,
       autoHideMenuBar: true,
-      backgroundColor: this.#backgroundColor,
+      ...windowChromeOptions(this.#platform, this.#theme),
       icon: this.#options.iconPath,
       webPreferences: {
         preload: this.#options.preloadPath,

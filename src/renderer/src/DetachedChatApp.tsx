@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useMemo,
@@ -29,6 +30,7 @@ import type {
 } from "@shared/contracts";
 import type { DesktopWindowContext } from "@shared/desktop";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
+import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
@@ -509,8 +511,9 @@ export default function DetachedChatApp({
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <div
-      className="detached-chat-shell"
+      className={`detached-chat-shell platform-${window.inertia?.getPlatform?.() ?? "unknown"}`}
       data-interface-scale={settings.interfaceScale}
+      style={{ "--mac-titlebar-brand-safe-inset": `${MAC_BRAND_SAFE_INSET}px` } as CSSProperties}
     >
       <header className="detached-chat-header drag-region">
         <div className="detached-chat-title">

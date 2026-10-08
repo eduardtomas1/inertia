@@ -638,6 +638,19 @@ button:disabled,
 
 .app-shell.platform-win32 {
   --composer-bottom-breathing-room: 20px;
+  --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+}
+
+.platform-win32 .workspace-frame:not(.has-right-panel) > .workspace-header {
+  padding-right: calc(14px + var(--workspace-corner-controls-width, 0px) + var(--titlebar-overlay-inset));
+}
+
+.platform-win32 .workspace-panel:not(.is-stacked) > .workspace-panel-tabs {
+  padding-right: calc(var(--workspace-corner-controls-width, 0px) + 16px + var(--titlebar-overlay-inset));
+}
+
+.platform-win32 .workspace-corner-controls {
+  right: calc(12px + var(--titlebar-overlay-inset));
 }
 
 .app-shell.is-sidebar-collapsed {

@@ -37,7 +37,6 @@ import {
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { openDesktopLink } from "./external-link-open.js";
 import { inertiaWindowInForeground } from "./desktop-notification-gate.js";
-import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
 import { cleanupWithSnapshots } from "./snapshot-shutdown.js";
@@ -127,9 +126,11 @@ import {
 } from "./thread-notification-activation.js";
 import {
   WINDOW_APPEARANCE_FILENAME,
+  applyWindowTheme,
   isWindowThemePreference,
   readWindowThemePreference,
-  resolveWindowBackground,
+  resolveWindowTheme,
+  windowChromeOptions,
   type WindowThemePreference,
   writeWindowThemePreference,
 } from "./window-appearance.js";
@@ -688,9 +689,9 @@ function registerIpcHandlers(): void {
     if (!isWindowThemePreference(preference)) throw new Error("Invalid theme preference");
     windowThemePreference = preference;
     nativeTheme.themeSource = preference;
-    const backgroundColor = resolveWindowBackground(preference, nativeTheme.shouldUseDarkColors);
-    mainWindow?.setBackgroundColor(backgroundColor);
-    detachedChatMain?.setBackgroundColor(backgroundColor);
+    const theme = resolveWindowTheme(preference, nativeTheme.shouldUseDarkColors);
+    if (mainWindow) applyWindowTheme(mainWindow, process.platform, theme);
+    detachedChatMain?.setTheme(theme);
     try {
       writeWindowThemePreference(windowAppearancePath(), preference);
     } catch {
@@ -720,14 +721,14 @@ async function createMainWindow(): Promise<void> {
   if (!mainWindowCreation.allowsCreation()) return;
   windowThemePreference = readWindowThemePreference(windowAppearancePath());
   nativeTheme.themeSource = windowThemePreference;
-  const backgroundColor = resolveWindowBackground(
+  const windowTheme = resolveWindowTheme(
     windowThemePreference,
     nativeTheme.shouldUseDarkColors,
   );
   detachedChatMain ??= createDetachedChatMain({
     mainWindow: () => mainWindow,
     rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
-    iconPath, backgroundColor, productName: releaseChannel.productName,
+    iconPath, theme: windowTheme, productName: releaseChannel.productName,
     applicationScheme: releaseChannel.protocolScheme,
     sessionPartitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary" : "inertia",
     registerRendererProtocol: (session, conversationId) =>
@@ -753,15 +754,9 @@ async function createMainWindow(): Promise<void> {
     minWidth: 760,
     minHeight: 600,
     show: false,
-    backgroundColor,
     autoHideMenuBar: true,
     icon: iconPath,
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION,
-        }
-      : {}),
+    ...windowChromeOptions(process.platform, windowTheme),
     webPreferences: {
       preload: fileURLToPath(new URL("../preload/index.cjs", import.meta.url)),
       contextIsolation: true,
@@ -944,9 +939,9 @@ async function bootstrap(): Promise<void> {
   });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
-    const backgroundColor = resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors);
-    mainWindow?.setBackgroundColor(backgroundColor);
-    detachedChatMain?.setBackgroundColor(backgroundColor);
+    const theme = resolveWindowTheme(windowThemePreference, nativeTheme.shouldUseDarkColors);
+    if (mainWindow) applyWindowTheme(mainWindow, process.platform, theme);
+    detachedChatMain?.setTheme(theme);
   });
   const dataDirectory = configuredRuntimeDataDirectory();
   runtimeDataDirectory = dataDirectory;

@@ -11,13 +11,14 @@ import { DetachedChatMain } from "./detached-chat-main.js";
 import type { DetachedChatDraftStoreDiagnostic } from "./detached-chat-draft-store.js";
 import { hardenDesktopSession } from "./preview-broker.js";
 import { registerEditContextMenu } from "./edit-context-menu.js";
+import type { ResolvedWindowTheme } from "./window-appearance.js";
 
 export interface DetachedChatBootstrapOptions {
   mainWindow(): BrowserWindow | null;
   rendererUrl: string;
   userDataDirectory: string;
   iconPath: string;
-  backgroundColor: string;
+  theme: ResolvedWindowTheme;
   onDraftStoreDiagnostic?: (
     diagnostic: DetachedChatDraftStoreDiagnostic,
   ) => void;
@@ -63,7 +64,7 @@ export function createDetachedChatMain(
       "detached-chat-pending-drafts.json",
     ),
     iconPath: options.iconPath,
-    backgroundColor: options.backgroundColor,
+    theme: options.theme,
     onDraftStoreDiagnostic: options.onDraftStoreDiagnostic,
     onDock: options.onDock,
   });

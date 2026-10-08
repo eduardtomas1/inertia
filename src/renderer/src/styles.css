@@ -3203,9 +3203,9 @@ button.header-breadcrumb-project:hover {
 }
 
 .agent-input-text:focus-visible {
-  border-color: var(--line-strong);
-  outline: 2px solid color-mix(in srgb, var(--status-input) 20%, transparent);
-  outline-offset: 1px;
+  border-color: var(--focus-ring);
+  outline: 0;
+  box-shadow: var(--shadow-focus);
 }
 
 .agent-request-note { margin-top: 7px; }
@@ -7861,7 +7861,7 @@ button.turn-agents-line:focus-visible {
 }
 
 .file-editor-dialog textarea:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 
 .file-editor-dialog > footer {

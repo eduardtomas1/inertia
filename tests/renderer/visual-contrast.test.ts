@@ -263,6 +263,25 @@ describe("visual contrast system", () => {
     },
   );
 
+  it("marks focused answer inputs and the file editor with the accent focus ring", () => {
+    const focusRule = (selector: string): string => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      return new RegExp(`(?:^|\\n)${escaped}\\s*\\{(?<body>[^}]*)\\}`, "u").exec(css)?.groups?.body ?? "";
+    };
+    const answer = focusRule(".agent-input-text:focus-visible");
+    expect(answer).toMatch(/border-color:\s*var\(--focus-ring\)/u);
+    expect(answer).toMatch(/box-shadow:\s*var\(--shadow-focus\)/u);
+    expect(focusRule(".file-editor-dialog textarea:focus-visible"))
+      .toMatch(/box-shadow:\s*inset 0 0 0 2px var\(--focus-ring\)/u);
+    for (const theme of ["light", "dark"] as const) {
+      const tokens = themeTokens(theme);
+      for (const [backgroundName, background] of paintedBackgrounds(tokens)) {
+        expect(contrast(tokens.get("focus-ring") ?? tokens.get("accent")!, background),
+          `${theme} focus ring on ${backgroundName}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
   it("keeps a visible focus outline on the new branch input", () => {
     expect(css).toMatch(
       /\.new-branch-form input:focus-visible\s*[,{][\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,

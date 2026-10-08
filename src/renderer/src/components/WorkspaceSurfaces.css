@@ -16,7 +16,6 @@
   gap: 14px;
   overflow-y: auto;
   padding: 6px 14px 16px;
-  scrollbar-width: thin;
 }
 
 .workspace-surface-heading {

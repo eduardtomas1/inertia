@@ -131,7 +131,6 @@
   gap: 16px;
   padding: 16px;
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 @container (max-width: 719px) {
@@ -309,7 +308,6 @@
   flex-direction: column;
   padding: 16px 24px 20px 52px;
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .cli-import-messages {

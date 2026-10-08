@@ -56,7 +56,13 @@
   --diff-addition-surface: color-mix(in srgb, var(--status-completed) 10%, transparent);
   --diff-deletion-surface: color-mix(in srgb, var(--status-failed) 9%, transparent);
   --diff-hunk-surface: color-mix(in srgb, var(--accent) 7%, var(--surface));
-  --disabled-opacity: 0.72;
+  --disabled-opacity: 0.64;
+  --backdrop: rgb(0 0 0 / 0.48);
+  --scrollbar-thumb: color-mix(in srgb, var(--text) 10%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text) 18%, transparent);
+  --menu-item-height: 28px;
+  --popover-offset: 4px;
+  --raised-edge: transparent;
   --ultra-sweep: #2a7da6;
   --text-faint: color-mix(in srgb, var(--text-muted) 93%, var(--surface));
   --text-xs: 12px;
@@ -82,8 +88,10 @@
   --line-soft: color-mix(in srgb, var(--text) 6%, transparent);
   --line: color-mix(in srgb, var(--text) 10%, transparent);
   --line-strong: color-mix(in srgb, var(--text) 16%, transparent);
-  --shadow-float: 0 12px 32px -14px rgb(0 0 0 / 0.24), 0 2px 6px -2px rgb(0 0 0 / 0.08);
-  --shadow-overlay: 0 28px 72px -20px rgb(0 0 0 / 0.36), 0 6px 16px -6px rgb(0 0 0 / 0.14);
+  --shadow-float-alpha: 0.24;
+  --shadow-overlay-alpha: 0.36;
+  --shadow-float: inset 0 1px 0 var(--raised-edge), 0 12px 32px -14px rgb(0 0 0 / var(--shadow-float-alpha)), 0 2px 6px -2px rgb(0 0 0 / calc(var(--shadow-float-alpha) / 3));
+  --shadow-overlay: inset 0 1px 0 var(--raised-edge), 0 28px 72px -20px rgb(0 0 0 / var(--shadow-overlay-alpha)), 0 6px 16px -6px rgb(0 0 0 / calc(var(--shadow-overlay-alpha) / 2.5));
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 300ms;
@@ -217,6 +225,11 @@
   --status-completed: #70c18e;
   --status-idle: var(--text-muted);
   --surface-raised: var(--surface-muted);
+  --scrollbar-thumb: color-mix(in srgb, var(--text) 8%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text) 14%, transparent);
+  --shadow-float-alpha: 0.56;
+  --shadow-overlay-alpha: 0.68;
+  --raised-edge: rgb(255 255 255 / 0.06);
   --active-work-text-rest: #8a8cb4;
   --active-work-text-highlight: #e4e6fe;
   --syntax-keyword: #a1a1fa;
@@ -330,8 +343,17 @@ button:disabled {
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  background: var(--scrollbar-thumb);
   background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-track {
@@ -4253,7 +4275,6 @@ button.header-breadcrumb-project:hover {
   min-width: 0;
   gap: 3px;
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .spreadsheet-attachment-tabs button {

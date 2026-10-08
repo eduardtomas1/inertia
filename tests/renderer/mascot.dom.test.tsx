@@ -29,12 +29,14 @@ function fixture() {
   const media = new EventTarget() as MediaQueryList;
   Object.defineProperty(media, "matches", { value: false, configurable: true });
   vi.stubGlobal("matchMedia", () => media);
+  const bubble = vi.fn<(height: unknown) => void>();
   window.mascot = {
-    snapshot: async () => snapshot, action,
+    snapshot: async () => snapshot,
+    action: async (...args) => { if (args[0] === "bubble") bubble(args[1]); else await action(...args); },
     onChanged: (listener) => { receive = listener; return unsubscribe; },
   };
   return {
-    action, unsubscribe, media,
+    action, bubble, unsubscribe, media,
     customize(sprites?: MascotSprites): void {
       snapshot = { ...snapshot, sprites };
       act(() => receive(snapshot));
@@ -340,6 +342,21 @@ describe("mascot rows, words and announcements", () => {
     app.list(shown, [shown], null, { chats: 1, attention: 1, others: 0 }, []);
     expect(group.hidden).toBe(true);
     expect(view.container.querySelector<HTMLElement>(".mascot-status")!.style.height).toBe("116px");
+  });
+
+  it("reports the drawn bubble height once per change, including the chooser opened from idle", async () => {
+    const app = fixture();
+    renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    expect(app.bubble.mock.calls).toEqual([[31]]);
+    const shown = chat("shown", "waiting-for-input");
+    const rows = Array.from({ length: 5 }, (_, index) => chat(`r${index}`, "running"));
+    app.list(shown, [shown, ...rows], null, { chats: 7, attention: 1, others: 6 }, rows);
+    app.list(shown, [shown, ...rows], null, { chats: 7, attention: 1, others: 6 }, rows);
+    expect(app.bubble.mock.calls).toEqual([[31], [192]]);
+    app.list(emptyMascotStatus(), [shown]);
+    fireEvent.click(screen.getByRole("button", { name: /Show chat/ }));
+    expect(app.bubble.mock.calls).toEqual([[31], [192], [31], [116]]);
   });
 
   it("shows one short line at idle and the quiet state of a working chat", async () => {

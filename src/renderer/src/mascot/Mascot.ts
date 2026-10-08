@@ -1,5 +1,5 @@
 import {
-  emptyMascotStatus, isLiveMascotPhase, MASCOT_CHAT_LIMIT, MASCOT_LABELS, mascotBubbleHeight,
+  emptyMascotStatus, isLiveMascotPhase, MASCOT_CHAT_LIMIT, MASCOT_COMPACT_HEIGHT, MASCOT_LABELS, mascotBubbleHeight,
   type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot, type MascotStatus,
 } from "../../../shared/mascot";
 import { mascotChatChoices } from "../../../shared/mascot-choices";
@@ -37,6 +37,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const options = new Map<string, HTMLButtonElement>();
   const rows = new Map<string, HTMLButtonElement>();
   let announced = "";
+  let reported = 0;
   const media = matchMedia("(prefers-reduced-motion: reduce)");
   const listeners = new AbortController();
   const eventOptions = { signal: listeners.signal };
@@ -174,7 +175,12 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     const shownRows = snapshot.rows ?? [];
     const otherCount = snapshot.counts?.others ?? shownRows.length;
     renderRows(shownRows, otherCount);
-    bubble.style.height = `${main.dataset.compact === "true" ? 31 : mascotBubbleHeight(shownRows.length, otherCount)}px`;
+    const height = main.dataset.compact === "true" ? MASCOT_COMPACT_HEIGHT : mascotBubbleHeight(shownRows.length, otherCount);
+    bubble.style.height = `${height}px`;
+    if (height !== reported && active) {
+      reported = height;
+      void bridge.action("bubble", height).catch(() => { reported = 0; });
+    }
     const attentionNow = mascotTone(status.phase) === "attention";
     const announcement = [label.textContent, status.conversationId ? title.textContent : "", attentionNow ? status.message : ""].filter(Boolean).join(". ");
     const key = `${status.phase}\u0000${status.conversationId}\u0000${attentionNow ? status.message : ""}\u0000${Boolean(status.quietSince)}`;

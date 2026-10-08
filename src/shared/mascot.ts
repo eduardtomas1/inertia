@@ -59,11 +59,12 @@ export interface MascotSnapshot {
 }
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
-  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop" | "pin";
+  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop" | "pin" | "bubble";
 
 export const MASCOT_ACTIONS: readonly MascotAction[] = [
-  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop", "pin",
+  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop", "pin", "bubble",
 ];
+export const MASCOT_COMPACT_HEIGHT = 31;
 export const MASCOT_LABELS: Record<MascotPhase, string> = {
   idle: "Ready when you are",
   unavailable: "Reconnecting to Inertia",
@@ -169,7 +170,7 @@ export function parseMascotPreferences(value: unknown): MascotPreferences | null
 export interface MascotBridge {
   snapshot(): Promise<MascotSnapshot>;
   onChanged(listener: (snapshot: MascotSnapshot) => void): () => void;
-  action(action: MascotAction, expected?: MascotStatus | MascotGesture | string | null): Promise<void>;
+  action(action: MascotAction, expected?: MascotStatus | MascotGesture | string | number | null): Promise<void>;
 }
 
 export interface MascotSettingsBridge extends MascotBridge {

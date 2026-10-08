@@ -5,7 +5,7 @@ import {
   type IpcMainInvokeEvent, type Session, type WebContents,
 } from "electron";
 import {
-  emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS, mascotBubbleHeight,
+  emptyMascotStatus, MASCOT_ACTIONS, MASCOT_COMPACT_HEIGHT, MASCOT_IPC, MASCOT_LABELS, MASCOT_ROW_LIMIT, mascotBubbleHeight,
   parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotStatus,
 } from "../shared/mascot.js";
 import { mascotChatChoices } from "../shared/mascot-choices.js";
@@ -58,6 +58,7 @@ export class MascotMain {
   private suspended = false;
   private hidden = false;
   private shape = "";
+  private drawn: number | null = null;
   private registered = false;
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
 
@@ -144,8 +145,17 @@ export class MascotMain {
       });
       ipcMain.handle(MASCOT_IPC.action, async (event, ...args) => {
         const dragAction = args[0] === "pickup" || args[0] === "drop";
-        this.assertSender(event, args.length, args[0] === "open-chat" || args[0] === "pin" || dragAction ? 2 : 1);
+        this.assertSender(event, args.length, args[0] === "open-chat" || args[0] === "pin" || args[0] === "bubble" || dragAction ? 2 : 1);
         if (!MASCOT_ACTIONS.includes(args[0] as MascotAction)) throw new Error("Invalid mascot action");
+        if (args[0] === "bubble") {
+          if (event.sender !== this.window?.webContents) throw new Error("Rejected untrusted mascot bubble");
+          if (!Number.isSafeInteger(args[1]) || (args[1] as number) < MASCOT_COMPACT_HEIGHT
+            || (args[1] as number) > mascotBubbleHeight(MASCOT_ROW_LIMIT, MASCOT_ROW_LIMIT + 1)) throw new Error("Invalid mascot bubble");
+          this.drawn = args[1] as number;
+          this.applyShape();
+          this.updateHitTesting();
+          return;
+        }
         if (args[0] === "pin") {
           if (args[1] !== null && typeof args[1] !== "string") throw new Error("Invalid mascot chat identity");
           this.choose(args[1]);
@@ -289,6 +299,7 @@ export class MascotMain {
     this.lastGesture = 0;
     this.ignoringMouse = false;
     this.shape = "";
+    this.drawn = null;
     const unregister = this.options.registerHealthRenderer(window.webContents);
     this.options.registerProtocol(window.webContents.session);
     hardenDesktopSession(window.webContents.session);
@@ -383,7 +394,7 @@ export class MascotMain {
 
   private region(): { top: number; height: number; figure: { x: number; y: number; width: number; height: number } } {
     const rows = this.rows().length;
-    const height = mascotBubbleHeight(rows, this.feed.counts?.others ?? rows);
+    const height = this.drawn ?? (this.status().conversationId ? mascotBubbleHeight(rows, this.feed.counts?.others ?? rows) : MASCOT_COMPACT_HEIGHT);
     return { top: MASCOT_BUBBLE_BOTTOM - height, height, figure: this.sprites ? MASCOT_FIGURE : MASCOT_ARTWORK };
   }
 

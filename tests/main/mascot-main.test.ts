@@ -441,9 +441,9 @@ describe("mascot window ownership", () => {
     };
     hover(20, 296);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
-    hover(120, 116);
+    hover(120, 175);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
-    hover(4, 76); // Transparent rounded corner of the status bubble.
+    hover(4, 161); // Transparent rounded corner of the status bubble.
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
     hover(120, 260);
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
@@ -839,7 +839,7 @@ describe("mascot window presence, input region and placement memory", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble & { setShape: ReturnType<typeof vi.fn> };
     expect(overlay.setShape).toHaveBeenLastCalledWith([
-      { x: 4, y: 76, width: 232, height: 118 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+      { x: 4, y: 161, width: 232, height: 33 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
     ]);
     const shown = chat("shown", "waiting-for-input");
     const rows = [chat("a", "failed"), chat("b", "running")];
@@ -850,6 +850,17 @@ describe("mascot window presence, input region and placement memory", () => {
     const calls = overlay.setShape.mock.calls.length;
     app.mascot.observe(feed(shown, [shown, ...rows], null, { chats: 9, attention: 1, others: 7 }, null, rows));
     expect(overlay.setShape).toHaveBeenCalledTimes(calls);
+    await app.invoke(MASCOT_IPC.action, ["bubble", 192], overlay);
+    expect(overlay.setShape).toHaveBeenLastCalledWith([
+      { x: 4, y: 0, width: 232, height: 194 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+    ]);
+    for (const height of [30, 193, 116.5, "116", null]) {
+      await expect(app.invoke(MASCOT_IPC.action, ["bubble", height], overlay)).rejects.toThrow("Invalid");
+    }
+    await expect(app.invoke(MASCOT_IPC.action, ["bubble", 31])).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["bubble"], overlay)).rejects.toThrow("untrusted");
+    await app.invoke(MASCOT_IPC.action, ["bubble", 31], overlay);
+    expect(overlay.setShape.mock.lastCall![0][0]).toEqual({ x: 4, y: 161, width: 232, height: 33 });
   });
 
   it("passes clicks through the empty corners of the figure box on macOS", async () => {
@@ -861,6 +872,8 @@ describe("mascot window presence, input region and placement memory", () => {
       overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y, button: "none" });
       return overlay.setIgnoreMouseEvents.mock.lastCall?.[0] ?? false;
     };
+    expect(hover(120, 100)).toBe(true);
+    expect(hover(120, 175)).toBe(false);
     expect(hover(120, 260)).toBe(false);
     expect(hover(76, 300)).toBe(true);
     expect(hover(160, 220)).toBe(true);
@@ -869,8 +882,11 @@ describe("mascot window presence, input region and placement memory", () => {
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     expect(app.mascot.snapshot().dragging).toBe(false);
     expect(hover(120, 40)).toBe(true);
+    await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
+    expect(hover(120, 100)).toBe(false);
     const rows = [chat("a", "failed"), chat("b", "running"), chat("c", "running")];
     app.mascot.observe(feed(chat("shown", "waiting-for-input"), [chat("shown", "waiting-for-input"), ...rows], null, { chats: 4, attention: 1, others: 3 }, null, rows));
+    await app.invoke(MASCOT_IPC.action, ["bubble", 156], overlay);
     expect(hover(120, 40)).toBe(false);
   });
 

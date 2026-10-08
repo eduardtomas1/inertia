@@ -209,6 +209,7 @@ export class TurnController {
       onPersistenceFailure,
     });
     this.artifacts = new TurnArtifactSequencer({
+      store: this.store,
       hooks: this.hooks,
       barriers: this.gitArtifactBarriers,
     });

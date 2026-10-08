@@ -502,6 +502,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(captured.some(({ method }) => method === "authenticate")).toBe(true);
     expect(captured.some(({ method }) => method === "session/set_mode")).toBe(true);
+    expect(captured.some(({ method }) => method === "session/set_config_option")).toBe(false);
   });
 
   it("prefers negotiated session/resume and rejects malformed frames", async () => {

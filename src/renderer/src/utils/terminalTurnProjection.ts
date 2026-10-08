@@ -3,6 +3,7 @@ import type {
   AgentTurn,
   AgentTurnStatus,
   AgentTurnTerminalStatus,
+  ChatMessage,
   ConversationDetailViewState,
   ConversationLatestTurnSummary,
   ConversationShell,
@@ -281,4 +282,34 @@ export function applyTerminalTurnProjections(
       updatedAt: settlement?.updatedAt ?? turn.updatedAt,
     };
   });
+}
+
+export function withProvisionalLatestTurn(
+  turns: AgentTurn[],
+  conversation: Pick<ConversationShell, "id" | "latestTurn" | "interactionMode" | "accessMode"> | null,
+  liveMessages: readonly ChatMessage[],
+): AgentTurn[] {
+  const latest = conversation?.latestTurn;
+  if (!conversation || !latest || turns.some(({ id }) => id === latest.id)) return turns;
+  const userMessage = liveMessages.find((message) =>
+    message.role === "user" && message.turnId === latest.id);
+  if (!userMessage) return turns;
+  const { usageLimited: _usageLimited, ...summary } = latest;
+  return [...turns, {
+    ...summary,
+    conversationId: conversation.id,
+    userMessageId: userMessage.id,
+    terminalAssistantMessageId: null,
+    modelAlias: latest.modelSelection.alias,
+    interactionMode: conversation.interactionMode,
+    accessMode: conversation.accessMode,
+    providerSessionBefore: null,
+    providerSessionAfter: null,
+    checkpointId: null,
+    usageAtStart: null,
+    usageAtCompletion: null,
+    configurationRevision: latest.modelSelection.backendConfigurationRevision,
+    association: "authoritative",
+    createdAt: latest.requestedAt,
+  }];
 }

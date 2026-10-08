@@ -417,11 +417,11 @@ function startClaudeRun(
             : {}),
         },
       });
-      if (usesNativeAnthropic) {
-        await emitClaudeModelMetadata(query, emitter.rich);
-      }
       acceptingFollowUps = true;
       emitter.status("running");
+      if (usesNativeAnthropic) {
+        void emitClaudeModelMetadata(query, emitter.rich).catch(() => undefined);
+      }
       messageIterator = query[Symbol.asyncIterator]();
       let terminalDrainDeadline: number | null = null;
       let parentResumedAfterProvisional = false;

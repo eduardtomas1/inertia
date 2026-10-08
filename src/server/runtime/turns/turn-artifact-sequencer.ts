@@ -1,10 +1,14 @@
+import type { RuntimeStore } from "../../database";
+import { recordTurnCheckpointUnavailable } from "./turn-checkpoint-notice";
 import type {
   ActiveTurn,
+  TurnCheckpointCapture,
   TurnControllerHooks,
 } from "./turn-controller-types";
 import type { TurnSettlementEffects } from "./turn-settlement-effects";
 
 export interface TurnArtifactSequencerOptions {
+  store: Pick<RuntimeStore, "addActivity">;
   hooks: TurnControllerHooks;
   barriers: Map<string, Promise<void>>;
 }
@@ -18,11 +22,15 @@ export class TurnArtifactSequencer {
 
   captureBefore(active: ActiveTurn): Promise<void> | null {
     try {
-      const capture = () => this.options.hooks.captureGitBefore?.({
+      const turnCheckpoint = this.createTurnCheckpoint(active);
+      const captureGitBefore = () => this.options.hooks.captureGitBefore?.({
         turn: active.turn,
         checkpointId: active.checkpointId,
         terminalAssistantMessageId: null,
       });
+      const capture = () => turnCheckpoint
+        ? turnCheckpoint.then(captureGitBefore)
+        : captureGitBefore();
       const priorArtifact = this.options.barriers.get(active.conversation.id);
       const value = priorArtifact
         ? priorArtifact.catch(() => undefined).then(capture)
@@ -34,6 +42,31 @@ export class TurnArtifactSequencer {
     } catch {
       return null;
     }
+  }
+
+  private createTurnCheckpoint(active: ActiveTurn): Promise<void> | null {
+    if (!active.turnCheckpoint || active.checkpointId) return null;
+    const created = this.options.hooks.createTurnCheckpoint?.(active.turn);
+    if (!created) return null;
+    return created
+      .then((checkpoint) => this.applyTurnCheckpoint(active, checkpoint))
+      .catch(() => undefined);
+  }
+
+  private applyTurnCheckpoint(
+    active: ActiveTurn,
+    checkpoint: TurnCheckpointCapture,
+  ): void {
+    active.checkpointId = checkpoint.checkpointId;
+    active.checkpointFailure = checkpoint.failure;
+    if (checkpoint.checkpointId) {
+      this.options.hooks.broadcast({
+        type: "conversation.detail.invalidated",
+        conversationId: active.conversation.id,
+      });
+    }
+    if (active.runState.isTerminal()) return;
+    recordTurnCheckpointUnavailable(this.options.store, this.options.hooks, active);
   }
 
   finalize(active: ActiveTurn, effects: TurnSettlementEffects): void | Promise<void> {

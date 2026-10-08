@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 
 import type WebSocket from "ws";
 
@@ -15,12 +14,7 @@ import {
   type ServerEvent,
   type TurnRequestContext,
 } from "../../../shared/contracts";
-import {
-  createCheckpoint,
-  deleteCheckpoint,
-} from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
-import { getRepositoryStatus } from "../../git";
 import {
   MESSAGE_ADMISSION_UNAVAILABLE,
   publicRuntimeError,
@@ -35,10 +29,6 @@ import type { PrivateGeneratedAttachmentStore } from "../attachments/private-gen
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
-import {
-  checkpointFailureReason,
-  isExpectedCheckpointAbsence,
-} from "../turns/turn-checkpoint-notice";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
@@ -53,7 +43,6 @@ import {
   assertMessageSendPreparationPending,
   awaitMessageSendPreparation,
   messageSendPreparationDeadline,
-  messageSendPreparationExpired,
 } from "./message-send-preparation";
 import { ConversationContextService } from "../conversation-context-service";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
@@ -69,7 +58,6 @@ type MessageSendStage =
   | "backend-readiness"
   | "skills"
   | "provider-transition"
-  | "checkpoint"
   | "retention"
   | "turn-persistence"
   | "turn-publication";
@@ -85,7 +73,6 @@ const MESSAGE_SEND_STAGE_LABELS: Record<MessageSendStage, string> = {
   "backend-readiness": "provider readiness",
   skills: "skill preparation",
   "provider-transition": "provider transition",
-  checkpoint: "checkpoint preparation",
   retention: "attachment retention",
   "turn-persistence": "turn persistence",
   "turn-publication": "turn publication",
@@ -709,72 +696,6 @@ export function createTurnInteractionCommandHandler(
           await relinquishAttachments();
           throw error;
         }
-        messageSendStage = "checkpoint";
-        let checkpointId: string | null = null;
-        let checkpointFailure: string | null = null;
-        let capturedCheckpoint: {
-          repositoryPath: string;
-          ref: string;
-        } | null = null;
-        let pendingCheckpoint: {
-          repositoryPath: string;
-          ref: string;
-          label: string;
-          turnIndex: number;
-          filesChanged: number;
-          insertions: number;
-          deletions: number;
-        } | null = null;
-        if (dependencies.enableProviders) {
-          try {
-            const path = dependencies.store.conversationPath(conversation.id);
-            const status = await getRepositoryStatus(path, {
-              deadlineAt: preparationDeadlineAt,
-            });
-            const captured = await createCheckpoint(
-              path,
-              join(dependencies.dataDirectory, "checkpoint-indexes"),
-              conversation.id,
-              { deadlineAt: preparationDeadlineAt },
-            );
-            capturedCheckpoint = {
-              repositoryPath: path,
-              ref: captured.ref,
-            };
-            assertMessageSendPreparationPending(preparationDeadlineAt);
-            const turnIndex = dependencies.store.checkpointCount(
-              conversation.id,
-            ) + 1;
-            pendingCheckpoint = {
-              repositoryPath: path,
-              ref: captured.ref,
-              label: `Before turn ${turnIndex}`,
-              turnIndex,
-              filesChanged: status.files.length,
-              insertions: status.insertions,
-              deletions: status.deletions,
-            };
-          } catch (error) {
-            if (capturedCheckpoint && !pendingCheckpoint) {
-              await deleteCheckpoint(
-                capturedCheckpoint.repositoryPath,
-                capturedCheckpoint.ref,
-                conversation.id,
-              ).catch(() => undefined);
-            }
-            if (!isExpectedCheckpointAbsence(error)) {
-              checkpointFailure = checkpointFailureReason(error);
-            }
-            if (messageSendPreparationExpired(preparationDeadlineAt)) {
-              if (providerTransitionReserved) {
-                dependencies.providerTerminalResumes.release(conversation.id);
-                providerTransitionReserved = false;
-              }
-              await relinquishAttachments();
-              assertMessageSendPreparationPending(preparationDeadlineAt);
-            }
-          }
-        }
         messageSendStage = "retention";
         const retentionAbort = new AbortController();
         attachmentRetentionStarted = true;
@@ -816,13 +737,6 @@ export function createTurnInteractionCommandHandler(
             dependencies.providerTerminalResumes.release(conversation.id);
             providerTransitionReserved = false;
           }
-          if (pendingCheckpoint) {
-            await deleteCheckpoint(
-              pendingCheckpoint.repositoryPath,
-              pendingCheckpoint.ref,
-              conversation.id,
-            ).catch(() => undefined);
-          }
           await relinquishAttachments();
           throw error;
         }
@@ -844,17 +758,6 @@ export function createTurnInteractionCommandHandler(
           // Capture history before queue/createMessage persists this message.
           deriveInitialTitle = (conversation.title === "New chat" || conversation.title === "New thread")
             && !dependencies.store.hasConversationMessages(conversation.id);
-          if (pendingCheckpoint) {
-            checkpointId = dependencies.store.addCheckpoint({
-              conversationId: conversation.id,
-              ref: pendingCheckpoint.ref,
-              label: pendingCheckpoint.label,
-              turnIndex: pendingCheckpoint.turnIndex,
-              filesChanged: pendingCheckpoint.filesChanged,
-              insertions: pendingCheckpoint.insertions,
-              deletions: pendingCheckpoint.deletions,
-            }).id;
-          }
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
                 queuedMessageId: dependencies.queuedMessage?.id,
@@ -868,8 +771,7 @@ export function createTurnInteractionCommandHandler(
                 activateConversation: command.payload.activate,
                 context: resolvedTurnContext,
                 contextRequestId: command.requestId,
-                checkpointId,
-                checkpointFailure,
+                turnCheckpoint: true,
                 skills: resolvedSkills.inputs,
               }, () => {
                 durableTurnPersisted = true;
@@ -885,27 +787,6 @@ export function createTurnInteractionCommandHandler(
           }
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);
-          }
-          if (pendingCheckpoint && !durableTurnPersisted) {
-            let removeGitCheckpoint = checkpointId === null;
-            if (checkpointId !== null) {
-              try {
-                removeGitCheckpoint =
-                  dependencies.store.removeUnassociatedCheckpoint(
-                    checkpointId,
-                    conversation.id,
-                  );
-              } catch {
-                removeGitCheckpoint = false;
-              }
-            }
-            if (removeGitCheckpoint) {
-              await deleteCheckpoint(
-                pendingCheckpoint.repositoryPath,
-                pendingCheckpoint.ref,
-                conversation.id,
-              ).catch(() => undefined);
-            }
           }
           await relinquishAttachments();
           throw error;
@@ -968,6 +849,12 @@ export function createTurnInteractionCommandHandler(
                 type: "request.ok",
                 requestId: command.requestId,
               });
+          if (queued) {
+            dependencies.broadcast({
+              type: "conversation.message.persisted",
+              message: queued.message,
+            });
+          }
           dependencies.broadcast({
             type: "conversation.detail.invalidated",
             conversationId: conversation.id,

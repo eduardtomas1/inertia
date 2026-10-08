@@ -120,6 +120,11 @@ export interface TurnStructuredContextRecord {
   context: unknown;
 }
 
+export interface TurnCheckpointCapture {
+  checkpointId: string | null;
+  failure: string | null;
+}
+
 export interface TurnGitArtifactHookInput {
   turn: AgentTurn;
   checkpointId: string | null;
@@ -170,6 +175,7 @@ export interface TurnControllerHooks {
     kind: "assistant" | "reasoning";
     recordId: string;
   }): void;
+  createTurnCheckpoint?(turn: AgentTurn): Promise<TurnCheckpointCapture>;
   captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
   /** Optional metadata; failure cannot change a committed provider outcome. */
@@ -214,6 +220,7 @@ export interface QueueTurnRequest {
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
   checkpointFailure?: string | null;
+  turnCheckpoint?: boolean;
   /** Privileged provider-native skill references resolved from opaque IDs. */
   skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
@@ -283,6 +290,7 @@ export interface ActiveTurn {
   generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;
   checkpointFailure: string | null;
+  turnCheckpoint?: boolean;
   rendererOwnerId: string | null;
   structuredContext: unknown;
   gitBeforeCapture: Promise<void> | null;

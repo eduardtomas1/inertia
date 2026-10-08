@@ -425,6 +425,108 @@ describe("TurnController terminal truthfulness", () => {
     value.store.close();
   });
 
+  it("records a turn checkpoint failure from pre-turn capture before the provider starts", async () => {
+    const checkpointTurns: string[] = [];
+    const value = await runtime("codex", {
+      createTurnCheckpoint: async (turn) => {
+        checkpointTurns.push(turn.id);
+        return { checkpointId: null, failure: "Checkpoint operation timed out." };
+      },
+    });
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Start and checkpoint later.",
+      turnCheckpoint: true,
+    });
+    expect(value.controller.start(queued.turn.id)).toBe(true);
+    expect(value.provider.runCount).toBe(0);
+    expect(value.store.conversationDetail(value.conversationId)?.activities).toEqual([]);
+
+    await vi.waitFor(() => expect(value.provider.runCount).toBe(1));
+    expect(checkpointTurns).toEqual([queued.turn.id]);
+    expect(value.store.conversationDetail(value.conversationId)?.activities)
+      .toEqual([expect.objectContaining({
+        turnId: queued.turn.id,
+        title: "No checkpoint for this turn",
+        detail: "Checkpoint operation timed out.",
+      })]);
+    value.provider.resolve();
+    await flushPromises();
+    value.store.close();
+  });
+
+  it("creates the next turn checkpoint while the previous turn's artifacts finish", async () => {
+    let finishPrevious!: () => void;
+    const previousArtifacts = new Promise<void>((resolve) => { finishPrevious = resolve; });
+    const order: string[] = [];
+    const value = await runtime("codex", {
+      captureGitArtifacts: () => previousArtifacts,
+      createTurnCheckpoint: async () => {
+        order.push("checkpoint");
+        return { checkpointId: null, failure: null };
+      },
+      captureGitBefore: () => { order.push("capture"); },
+    });
+    const first = value.controller.queue({ conversationId: value.conversationId, content: "First." });
+    value.controller.start(first.turn.id);
+    value.provider.resolve();
+    await vi.waitFor(() => expect(value.store.agentTurn(first.turn.id).status).toBe("completed"));
+    order.splice(0);
+
+    const second = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Second.",
+      turnCheckpoint: true,
+    });
+    value.controller.start(second.turn.id);
+    await flushPromises();
+    expect(order).toEqual(["checkpoint"]);
+    expect(value.provider.runCount).toBe(1);
+
+    finishPrevious();
+    await vi.waitFor(() => expect(value.provider.runCount).toBe(2));
+    expect(order).toEqual(["checkpoint", "capture"]);
+    value.provider.resolve();
+    await flushPromises();
+    value.store.close();
+  });
+
+  it("records a checkpoint created by pre-turn capture on the settled turn", async () => {
+    let checkpointId: string | null = null;
+    const checkpointInputs: Array<string | null> = [];
+    const value = await runtime("codex", {
+      createTurnCheckpoint: async () => ({ checkpointId: checkpointId!, failure: null }),
+      captureGitBefore: (input) => { checkpointInputs.push(input.checkpointId); },
+    });
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Checkpoint during start.",
+      turnCheckpoint: true,
+    });
+    checkpointId = value.store.addCheckpoint({
+      conversationId: value.conversationId,
+      turnId: queued.turn.id,
+      ref: "refs/inertia/checkpoints/created-at-start",
+      label: "Before turn 1",
+      turnIndex: 1,
+      filesChanged: 0,
+      insertions: 0,
+      deletions: 0,
+    }).id;
+    value.controller.start(queued.turn.id);
+    await vi.waitFor(() => expect(value.provider.runCount).toBe(1));
+    expect(checkpointInputs).toEqual([checkpointId]);
+    expect(value.events).toContainEqual({
+      type: "conversation.detail.invalidated",
+      conversationId: value.conversationId,
+    });
+
+    value.provider.resolve();
+    await vi.waitFor(() => expect(value.store.agentTurn(queued.turn.id).status).toBe("completed"));
+    expect(value.store.agentTurn(queued.turn.id).checkpointId).toBe(checkpointId);
+    value.store.close();
+  });
+
   it("does not record a missing checkpoint when the turn has one", async () => {
     const value = await runtime();
     const checkpoint = value.store.addCheckpoint({

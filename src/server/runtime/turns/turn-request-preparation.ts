@@ -474,6 +474,9 @@ export function resolveTurnRequest(
           checkpointFailure: request.checkpointId
             ? null
             : request.checkpointFailure ?? null,
+          ...(request.turnCheckpoint && !request.checkpointId
+            ? { turnCheckpoint: true }
+            : {}),
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,

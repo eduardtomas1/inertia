@@ -18,6 +18,7 @@ import type {
   TurnGitDiffSnapshot,
 } from "../shared/contracts";
 import {
+  MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
   TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
   TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS,
 } from "../shared/runtime-command-timeouts";
@@ -25,13 +26,21 @@ import {
   RuntimeStore,
   type StoredTurnGitArtifact,
 } from "./database";
-import { CheckpointError, createCheckpoint } from "./checkpoints";
+import { CheckpointError, createCheckpoint, deleteCheckpoint } from "./checkpoints";
 import {
   captureGitArtifactState,
   compareGitSnapshots,
   GitError,
+  repositoryChangeCounts,
 } from "./git";
+import { mayBeInsideGitRepository } from "./git/paths";
+import { gitInspectionSettlementValues } from "./git/runner";
 import { isGitProcessTreeTerminationFailure } from "./git/types";
+import {
+  checkpointFailureReason,
+  isExpectedCheckpointAbsence,
+} from "./runtime/turns/turn-checkpoint-notice";
+import type { TurnCheckpointCapture } from "./runtime/turns/turn-controller-types";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
@@ -44,6 +53,7 @@ export interface CaptureTurnGitArtifactInput {
   checkpointId: string | null;
   terminalAssistantMessageId?: string | null;
 }
+
 
 export interface TurnGitArtifactManagerOptions {
   clockMs?: () => number;
@@ -183,6 +193,24 @@ export class TurnGitArtifactManager {
     };
   }
 
+  async createTurnCheckpoint(turn: AgentTurn): Promise<TurnCheckpointCapture> {
+    try {
+      const repositoryPath = this.store.conversationPath(turn.conversationId);
+      if (!await mayBeInsideGitRepository(
+        repositoryPath,
+        this.#operationOptions(this.#preCaptureTimeoutMs),
+      )) return { checkpointId: null, failure: null };
+      return {
+        checkpointId: await this.#createTurnCheckpoint(turn, repositoryPath),
+        failure: null,
+      };
+    } catch (error) {
+      if (isExpectedCheckpointAbsence(error)) return { checkpointId: null, failure: null };
+      this.#recordCleanupFailure(error);
+      return { checkpointId: null, failure: checkpointFailureReason(error) };
+    }
+  }
+
   async captureBefore(input: CaptureTurnGitArtifactInput): Promise<void> {
     if (this.store.turnGitArtifact(input.turn.id)) return;
     const operation = this.#operationOptions(this.#preCaptureTimeoutMs);
@@ -190,6 +218,9 @@ export class TurnGitArtifactManager {
     let checkpointId = input.checkpointId;
     let beforeRef: string | null = null;
     try {
+      if (!checkpointId && !await mayBeInsideGitRepository(repositoryPath, operation)) {
+        throw new GitError("not-repository", "This workspace is not a Git repository.");
+      }
       if (checkpointId) {
         const checkpoint = this.store.checkpoint(checkpointId);
         if (
@@ -236,6 +267,42 @@ export class TurnGitArtifactManager {
           createdAt: this.now().toISOString(),
         });
       }
+    }
+  }
+
+  async #createTurnCheckpoint(
+    turn: AgentTurn,
+    repositoryPath: string,
+  ): Promise<string> {
+    const operation = this.#operationOptions(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+    const [counts, captured] = await Promise.allSettled([
+      repositoryChangeCounts(repositoryPath, operation),
+      createCheckpoint(
+        repositoryPath,
+        this.#checkpointDirectory,
+        turn.conversationId,
+        operation,
+      ),
+    ]);
+    if (captured.status === "fulfilled" && counts.status === "rejected") {
+      await deleteCheckpoint(repositoryPath, captured.value.ref, turn.conversationId)
+        .catch(() => undefined);
+    }
+    const [changes, checkpoint] = gitInspectionSettlementValues([counts, captured]);
+    try {
+      const turnIndex = this.store.checkpointCount(turn.conversationId) + 1;
+      return this.store.addCheckpoint({
+        conversationId: turn.conversationId,
+        turnId: turn.id,
+        ref: checkpoint.ref,
+        label: `Before turn ${turnIndex}`,
+        turnIndex,
+        ...changes,
+      }).id;
+    } catch (error) {
+      await deleteCheckpoint(repositoryPath, checkpoint.ref, turn.conversationId)
+        .catch(() => undefined);
+      throw error;
     }
   }
 

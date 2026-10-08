@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import {
   type Event,
   type OpencodeClient,
+  type Session,
 } from "@opencode-ai/sdk/v2";
 
 import {
@@ -464,21 +465,25 @@ function startOpenCodeRun(
         eventAbort.signal,
       );
 
-      if (hostTools) await hostTools.install(client, initialize);
-
-      const [providerResponse, agentResponse] = await initialize(
-        "provider and agent discovery",
-        async (signal) => await Promise.all([
-          client!.provider.list(
-            { directory: options.input.cwd },
-            { signal, throwOnError: true },
-          ),
-          client!.app.agents(
-            { directory: options.input.cwd },
-            { signal, throwOnError: true },
-          ),
-        ]),
-      );
+      const [installation, discovery] = await Promise.allSettled([
+        hostTools?.install(client, initialize),
+        initialize(
+          "provider and agent discovery",
+          async (signal) => await Promise.all([
+            client!.provider.list(
+              { directory: options.input.cwd },
+              { signal, throwOnError: true },
+            ),
+            client!.app.agents(
+              { directory: options.input.cwd },
+              { signal, throwOnError: true },
+            ),
+          ]),
+        ),
+      ]);
+      if (installation.status === "rejected") throw installation.reason;
+      if (discovery.status === "rejected") throw discovery.reason;
+      const [providerResponse, agentResponse] = discovery.value;
       const providerData = {
         ...providerResponse,
         data: hostTools?.redactPayload(providerResponse.data)
@@ -507,6 +512,7 @@ function startOpenCodeRun(
         throw new Error(`OpenCode does not advertise the selected reasoning variant '${options.input.reasoningEffort}'.`);
       }
 
+      let activeSession: Session;
       if (sessionId) {
         const resumed = await initialize(
           "session resume",
@@ -523,6 +529,7 @@ function startOpenCodeRun(
           sessionUnavailable = true;
           throw new Error("OpenCode did not confirm the exact session selected for this run.");
         }
+        activeSession = resumed.data;
         await initialize(
           "session permission update",
           async (signal) => await client!.session.update(
@@ -553,20 +560,11 @@ function startOpenCodeRun(
         }
         sessionId = created.data.id;
         emitter.session(created.data.id);
+        activeSession = created.data;
       }
       if (!sessionId) throw new Error("OpenCode did not return a session ID.");
 
-      const session = await initialize(
-        "active session",
-        async (signal) => await client!.session.get(
-          { sessionID: sessionId!, directory: options.input.cwd },
-          { signal, throwOnError: true },
-        ),
-      );
-      if (session.data.id !== sessionId) {
-        throw new Error("OpenCode did not confirm the exact session selected for this run.");
-      }
-      const effectiveModel = selectedModel ?? (session.data.model ? findOpenCodeModel(session.data.model.providerID, session.data.model.id, providerData.data.all) : undefined);
+      const effectiveModel = selectedModel ?? (activeSession.model ? findOpenCodeModel(activeSession.model.providerID, activeSession.model.id, providerData.data.all) : undefined);
       // OpenCode image support is model-negotiated. Publish the exact-run
       // observation before any attachment can cross the provider boundary.
       emitter.capability(

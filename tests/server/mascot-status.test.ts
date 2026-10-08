@@ -467,3 +467,18 @@ describe("mascot message helpers", () => {
     expect(mascotApprovalLine({ kind: "command", title: "Run", command: null, detail: "{broken", reason: null })).toBe("Run");
   });
 });
+
+describe("mascot prose", () => {
+  it("keeps code blocks, file contents and image and emphasis markup out of the agent's words", async () => {
+    const { mascotCommentaryLine, mascotResultLine } = await import("../../src/server/runtime/mascot-message");
+    expect(mascotCommentaryLine("I'll update the config like this:\n```ts\nconst apiUrl = process.env.URL;\nexport default { apiUrl };\n```")).toBe("I'll update the config like this:");
+    expect(mascotCommentaryLine("Here is the file I read.\n```\nDATABASE_URL=postgres://u:pw@host/db\n```")).toBe("Here is the file I read.");
+    expect(mascotCommentaryLine("Here is the file I read.\n~~~\nDATABASE_URL=postgres://u:pw@host/db\n~~~\nNext I'll edit it.")).toBe("Here is the file I read. Next I'll edit it.");
+    expect(mascotCommentaryLine("I read the settings file.\n\n    password = hunter2\n\tTOKEN=abc")).toBe("I read the settings file.");
+    expect(mascotCommentaryLine("```\nonly code\n```")).toBeNull();
+    expect(mascotResultLine("    rm -rf node_modules && npm ci\n\nDone.")).toBe("Done.");
+    expect(mascotResultLine("![Screenshot of the page](/Users/me/shot.png)\n\nDone.")).toBe("Screenshot of the page");
+    expect(mascotResultLine("*Fixed* the _login_ bug in `auth.ts`.")).toBe("Fixed the login bug in auth.ts.");
+    expect(mascotResultLine("Renamed load_user_data to fetch_user and 2*3*4 stays.")).toBe("Renamed load_user_data to fetch_user and 2*3*4 stays.");
+  });
+});

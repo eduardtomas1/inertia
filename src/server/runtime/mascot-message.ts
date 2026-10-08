@@ -28,19 +28,29 @@ function sentences(text: string): string[] {
   return text.split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}"'(`])/u).map((part) => part.trim()).filter(Boolean);
 }
 
+function prose(content: string): string[] {
+  let fence: string | null = null;
+  const lines: string[] = [];
+  for (const line of content.slice(0, 16_384).split("\n")) {
+    const marker = /^\s*(```|~~~)/u.exec(line)?.[1];
+    if (marker) { fence = fence === null ? marker : fence === marker ? null : fence; continue; }
+    if (fence === null && !/^(?: {4}|\t)/u.test(line)) {
+      lines.push(line.trim().replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
+        .replace(/(^|[\s(])[*_](?=[^*_\s])([^*_]*?[^*_\s])[*_](?=[\s).,;:!?]|$)/gu, "$1$2"));
+    }
+  }
+  return lines;
+}
+
 export function mascotCommentaryLine(content: string): string | null {
-  const parts = sentences(mascotPreview(content, 4_096) ?? "");
+  const parts = sentences(mascotPreview(prose(content).join("\n"), 4_096) ?? "");
   const last = parts.at(-1);
   if (!last) return null;
   return mascotPreview(last.length < 24 && parts.length > 1 ? `${parts.at(-2)} ${last}` : last);
 }
 
 export function mascotResultLine(content: string): string | null {
-  let fenced = false;
-  const line = content.slice(0, 16_384).split("\n").map((part) => part.trim()).find((part) => {
-    if (/^(?:```|~~~)/u.test(part)) { fenced = !fenced; return false; }
-    return !fenced && part && !/^(?:#|[-*_]{3,}$|\|)/u.test(part);
-  });
+  const line = prose(content).find((part) => part && !/^(?:#|[-*_]{3,}$|\|)/u.test(part));
   const text = mascotPreview(line?.replace(/^(?:>\s*)?(?:(?:[-*+]|\d+[.)])\s+)?/u, ""), 4_096);
   return text ? mascotPreview(sentences(text)[0]) : null;
 }

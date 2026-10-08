@@ -2319,6 +2319,67 @@ describe("Claude Agent SDK harness", () => {
     expect(existsSync(stagedPluginPath)).toBe(false);
   });
 
+  it("marks Claude running without waiting for its model metadata", async () => {
+    const root = portableFixtureRoot("Claude SDK background metadata");
+    roots.push(root);
+    let releaseModels!: () => void;
+    const modelsReleased = new Promise<void>((resolve) => { releaseModels = resolve; });
+    let reportMetadata!: () => void;
+    const metadataReported = new Promise<void>((resolve) => { reportMetadata = resolve; });
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => {
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          await metadataReported;
+          yield {
+            ...claudeSuccessResult("Claude response"),
+            session_id: "77777777-7777-4777-8777-777777777777",
+          } satisfies SDKResultSuccess;
+        })();
+        return Object.assign(stream, {
+          supportedModels: async () => {
+            await modelsReleased;
+            return [{
+              value: "sonnet",
+              resolvedModel: "claude-sonnet-test",
+              displayName: "Sonnet",
+              description: "Balanced model",
+              supportsEffort: true,
+              supportedEffortLevels: ["high"],
+            }];
+          },
+          interrupt: async () => undefined,
+          close: () => undefined,
+        }) as unknown as Query;
+      },
+    });
+    const manager = ProviderManager.createForTests(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const events: string[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-background-metadata",
+      cwd: root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: ({ status }) => {
+        events.push(status);
+        if (status === "running") releaseModels();
+      },
+      onMetadata: (event) => {
+        events.push(`models:${(event.metadata.models ?? []).map(({ id }) => id).join(",")}`);
+        reportMetadata();
+      },
+    });
+
+    expect(result).toMatchObject({ status: "completed" });
+    expect(events.slice(0, 3)).toEqual(["starting", "running", "models:sonnet"]);
+  });
+
   it("resumes through the SDK contract and interrupts without leaving an active run", async () => {
     const root = portableFixtureRoot("Claude SDK cancellation");
     roots.push(root);

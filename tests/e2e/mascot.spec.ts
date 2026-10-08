@@ -291,9 +291,14 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     expect(await app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === "Inertia mascot")!.getPosition())).toEqual(position);
     await overlay.locator("main").focus();
     await overlay.keyboard.press("Escape");
+    for (let sample = 0; sample < 10; sample += 1) {
+      await overlay.waitForTimeout(100);
+      expect(overlay.isClosed()).toBe(false);
+      expect(app.electronApp.windows()).toHaveLength(2);
+    }
     await expect(overlay.locator(".mascot")).toBeVisible();
     const closed = overlay.waitForEvent("close");
-    await overlay.evaluate(() => (window as unknown as { mascot: MascotBridge }).mascot.action("hide")).catch(() => undefined);
+    await overlay.evaluate(() => { void (window as unknown as { mascot: MascotBridge }).mascot.action("hide"); });
     await closed;
     await expect.poll(() => app.electronApp.windows().length).toBe(1);
     expect(JSON.parse(await readFile(join(app.testDirectory, "electron-profile", "mascot-window-state.json"), "utf8")).preferences.enabled).toBe(true);

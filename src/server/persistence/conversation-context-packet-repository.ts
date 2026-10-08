@@ -402,7 +402,9 @@ export function sentConversationContextReferences(
       AND packet.source_conversation_id <> packet.target_conversation_id
       AND packet.consumed_message_id IN (SELECT value FROM json_each(?))
       AND NOT EXISTS (
-        SELECT 1 FROM agent_context_requests request WHERE request.packet_id = packet.id
+        SELECT 1 FROM agent_context_requests request
+        WHERE request.target_conversation_id = packet.target_conversation_id
+          AND request.packet_id = packet.id
       )
     ORDER BY packet.consumed_at ASC, packet.id ASC
   `).all(targetConversationId, JSON.stringify(messageIds)) as Array<

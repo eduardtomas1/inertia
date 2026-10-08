@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../../shared/agent-browser";
-import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
+import {
+  MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES,
+  MAX_PROVIDER_HOST_TOOL_IMAGES,
+  MAX_PROVIDER_HOST_TOOL_RESULT_BYTES,
+} from "../../shared/provider-host-tools";
 import {
   providerHostToolAccepted,
   type ProviderHostToolApprovalRequest,
   type ProviderHostToolBridge,
+  type ProviderHostToolImage,
   type ProviderHostToolResult,
 } from "./contracts";
 import type {
@@ -79,22 +83,32 @@ function validIdentity(value: string, maximum: number): boolean {
     && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
-function boundedHostImage(
-  image: ProviderHostToolResult["image"],
-): ProviderHostToolResult["image"] | null | undefined {
-  if (!image) return undefined;
-  const maximumBase64 = Math.ceil(MAX_AGENT_BROWSER_SCREENSHOT_BYTES / 3) * 4;
-  if (
-    image.mimeType !== "image/png"
-    || image.data.length === 0
-    || image.data.length > maximumBase64
-    || image.data.length % 4 !== 0
-    || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data)
-  ) return null;
-  const padding = image.data.endsWith("==") ? 2 : image.data.endsWith("=") ? 1 : 0;
-  return image.data.length / 4 * 3 - padding <= MAX_AGENT_BROWSER_SCREENSHOT_BYTES
-    ? image
-    : null;
+const HOST_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+function boundedHostImages(
+  images: ProviderHostToolResult["images"],
+): readonly ProviderHostToolImage[] | null | undefined {
+  if (!images || images.length === 0) return undefined;
+  if (images.length > MAX_PROVIDER_HOST_TOOL_IMAGES) return null;
+  const maximumBase64 = Math.ceil(MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES / 3) * 4;
+  let decodedBytes = 0;
+  for (const image of images) {
+    if (
+      !HOST_IMAGE_MIME_TYPES.has(image.mimeType)
+      || image.data.length === 0
+      || image.data.length > maximumBase64
+      || image.data.length % 4 !== 0
+      || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data)
+    ) return null;
+    const padding = image.data.endsWith("==") ? 2 : image.data.endsWith("=") ? 1 : 0;
+    decodedBytes += image.data.length / 4 * 3 - padding;
+  }
+  return decodedBytes <= MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES ? images : null;
 }
 
 /**
@@ -178,13 +192,13 @@ export class ProviderHostToolRuntime {
         if (this.settled || controller.signal.aborted) {
           return failure("The Inertia chat-tool call was cancelled.");
         }
-        const image = boundedHostImage(result.image);
-        return image === null
-          ? failure("The Inertia chat-tool returned invalid visual evidence.")
+        const images = boundedHostImages(result.images);
+        return images === null
+          ? failure("The Inertia chat-tool returned invalid images.")
           : {
               success: result.success,
               text: boundedUtf8(result.text, MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
-              ...(image ? { image } : {}),
+              ...(images ? { images } : {}),
             };
       },
       (error: unknown) => failure(

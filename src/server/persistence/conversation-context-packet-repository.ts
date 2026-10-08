@@ -42,6 +42,7 @@ import {
   type ConversationContextDelivery,
   type ConversationContextTransport,
 } from "./conversation-context-transport";
+import { ConversationContextTurnReads } from "./conversation-context-turn-reads";
 import type { CreateMessageOptions } from "./types";
 
 interface ConversationContextPacketRow {
@@ -509,9 +510,13 @@ export function sentConversationContextReferences(
 }
 
 export class ConversationContextPacketRepository {
+  readonly turnReads: ConversationContextTurnReads;
+
   constructor(
     private readonly context: ConversationContextPacketPersistenceContext,
-  ) {}
+  ) {
+    this.turnReads = new ConversationContextTurnReads(context);
+  }
 
   create(input: CreateConversationContextPacketInput): ConversationContextPacket {
     return this.insert(input, null);

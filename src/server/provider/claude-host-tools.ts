@@ -73,13 +73,11 @@ export function createClaudeHostTools(
         return {
           content: [
             { type: "text" as const, text: result.text },
-            ...(result.image
-              ? [{
-                  type: "image" as const,
-                  data: result.image.data,
-                  mimeType: result.image.mimeType,
-                }]
-              : []),
+            ...(result.images ?? []).map((image) => ({
+              type: "image" as const,
+              data: image.data,
+              mimeType: image.mimeType,
+            })),
           ],
           ...(result.success ? {} : { isError: true }),
         };

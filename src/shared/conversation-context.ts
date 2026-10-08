@@ -80,6 +80,22 @@ export interface ConversationContextSourceTranscript {
   messages: ConversationContextExcerpt[];
 }
 
+export type AgentContextReadAccess = "own" | "referenced" | "approved";
+
+/** What an agent read from one chat during one turn, through the context tool. */
+export interface AgentContextReadSummary {
+  targetMessageId: string;
+  targetTurnId: string;
+  sourceConversationId: string;
+  sourceConversationTitle: string;
+  sourceState: "available" | "deleted";
+  access: AgentContextReadAccess;
+  listedTurns: boolean;
+  turnIds: string[];
+  firstReadAt: string;
+  lastReadAt: string;
+}
+
 /** Renderer-safe prompt for a host-owned, user-selected context disclosure. */
 export interface AgentConversationContextRequest {
   requestId: string;

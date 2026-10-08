@@ -6,11 +6,13 @@ import "./ConversationContextPacketStrip.css";
 export function ConversationContextPacketStrip({
   packets,
   disabled,
+  previewPacketId,
   onPreview,
   onRemove,
 }: {
   packets: readonly ConversationContextPacketSummary[];
   disabled: boolean;
+  previewPacketId: string | null;
   onPreview: (packetId: string) => void;
   onRemove: (packetId: string) => void;
 }): React.JSX.Element | null {
@@ -32,6 +34,7 @@ export function ConversationContextPacketStrip({
             <button
               type="button"
               className="p-o"
+              aria-expanded={previewPacketId === packet.id}
               onClick={() => onPreview(packet.id)}
             >
               <span>

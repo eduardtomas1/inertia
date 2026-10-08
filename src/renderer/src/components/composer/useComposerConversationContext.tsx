@@ -247,6 +247,7 @@ export function ComposerConversationContextStrip({
           <ConversationContextPacketStrip
             packets={controller.draftContextPackets}
             disabled={disabled}
+            previewPacketId={controller.previewPacketId}
             onPreview={controller.togglePreview}
             onRemove={(packetId) => {
               void controller.remove(packetId).catch(() => undefined);
@@ -284,9 +285,10 @@ export function ComposerConversationContextPreview({
   return (
     <Suspense fallback={null}>
       <PreviewCard
-        key={`${targetConversationId}/${controller.previewPacketId}/${controller.contextPacketIds.join(",")}`}
+        key={`${targetConversationId}/${controller.previewPacketId}`}
         packetId={controller.previewPacketId}
         targetConversationId={targetConversationId}
+        revision={controller.contextPacketIds.join(",")}
         onCommand={onCommand}
         onDismiss={() => controller.togglePreview(controller.previewPacketId!)}
       />

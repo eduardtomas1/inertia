@@ -286,6 +286,7 @@ export function sameTurnTimelineProps(
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
     && left.onOpenSurface === right.onOpenSurface
+    && left.onConversationContextCommand === right.onConversationContextCommand
     && left.turns === right.turns
     && left.contextPackets === right.contextPackets
     && left.omittedTurnIds === right.omittedTurnIds

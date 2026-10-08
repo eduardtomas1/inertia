@@ -1,10 +1,14 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AgentConversationContextRequest,
   ConversationContextPacket,
   ServerEvent,
 } from "@shared/contracts";
-import { isOwnConversationContext } from "@shared/conversation-context";
+import {
+  isOwnConversationContext,
+  type ConversationContextExcerpt,
+  type ConversationContextOmissions,
+} from "@shared/conversation-context";
 import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
@@ -38,93 +42,130 @@ export function ChatReferenceConfirmation({ source, onConfirm }: {
   );
 }
 
-function packetFromEvent(event: ServerEvent): ConversationContextPacket | null {
-  if (event.type !== "request.result") return null;
-  const result = event.result as {
-    kind?: string;
-    packet?: ConversationContextPacket;
-  };
-  return result.kind === "conversation.context.packet" && result.packet
-    ? result.packet
-    : null;
+interface ContextPreviewContent {
+  title: string;
+  detail: string;
+  excerpts: readonly ConversationContextExcerpt[];
+  omissions?: ConversationContextOmissions;
 }
 
-export function ConversationContextPreviewCard({
-  packetId,
-  targetConversationId,
-  onCommand,
+function messageCount(count: number): string {
+  return `${count} ${count === 1 ? "message" : "messages"}`;
+}
+
+function packetPreview(
+  event: ServerEvent,
+  packetId: string,
+  targetConversationId: string,
+): ContextPreviewContent | null {
+  if (event.type !== "request.result" || event.result.kind !== "conversation.context.packet") return null;
+  const packet = event.result.packet as ConversationContextPacket;
+  if (packet.id !== packetId || packet.targetConversationId !== targetConversationId) return null;
+  const own = isOwnConversationContext(packet);
+  return {
+    title: own ? "This chat" : packet.sourceConversationTitle,
+    detail: `${own ? "Earlier messages" : packet.sourceProjectName} · ${messageCount(packet.messageCount)}${
+      packet.droppedMessageCount > 0 ? ` · ${packet.droppedMessageCount} omitted` : ""}`,
+    excerpts: packet.excerpts,
+    omissions: packet.omissions,
+  };
+}
+
+function sourcePreview(
+  event: ServerEvent,
+  sourceConversationId: string,
+  targetConversationId: string,
+): ContextPreviewContent | null {
+  if (event.type !== "request.result" || event.result.kind !== "conversation.context.source") return null;
+  const source = event.result.source;
+  if (source.conversationId !== sourceConversationId || source.targetConversationId !== targetConversationId) return null;
+  return {
+    title: source.conversationTitle,
+    detail: `${source.projectName} · ${messageCount(source.messages.length)}`,
+    excerpts: source.messages,
+  };
+}
+
+function ContextPreview({
+  label,
+  loadingText,
+  load,
+  revision,
   onDismiss,
 }: {
-  packetId: string;
-  targetConversationId: string;
-  onCommand: ConversationContextCommandRunner;
+  label: string;
+  loadingText: string;
+  load(): Promise<ContextPreviewContent | null>;
+  revision?: string;
   onDismiss(): void;
 }): React.JSX.Element {
-  const [packet, setPacket] = useState<ConversationContextPacket | null>(null);
+  const [content, setContent] = useState<ContextPreviewContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const section = useRef<HTMLElement>(null);
+  const opener = useRef<Element | null>(null);
+
+  useLayoutEffect(() => {
+    opener.current = document.activeElement;
+    section.current?.focus();
+  }, []);
 
   useEffect(() => {
     let active = true;
-    setPacket(null);
+    setContent(null);
     setError(null);
-    void onCommand("conversation.context.load", {
-      type: "conversation.context.load",
-      payload: { packetId, targetConversationId },
-    }).then((event) => {
+    void load().then((loaded) => {
       if (!active) return;
-      const loaded = packetFromEvent(event);
-      if (loaded?.id !== packetId || loaded.targetConversationId !== targetConversationId) {
-        setError("This shared context is unavailable.");
-      } else {
-        setPacket(loaded);
-      }
+      if (loaded) setContent(loaded);
+      else setError("This shared context is unavailable.");
     }).catch(() => {
       if (active) setError("Could not load shared context. Try again.");
     });
     return () => { active = false; };
-  }, [packetId, targetConversationId, onCommand, attempt]);
+  }, [load, revision, attempt]);
 
+  const dismiss = (): void => {
+    const previous = opener.current;
+    onDismiss();
+    if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+  };
   const gapAt = (index: number): React.JSX.Element | null => (
-    packet && (packet.omissions?.earlierMessages ?? 0) > 0 && packet.omissions!.gapIndex === index
+    content && (content.omissions?.earlierMessages ?? 0) > 0 && content.omissions!.gapIndex === index
       ? (
         <li data-role="gap">
           <small>
-            {packet.omissions!.earlierMessages} earlier{" "}
-            {packet.omissions!.earlierMessages === 1 ? "message" : "messages"} omitted
+            {content.omissions!.earlierMessages} earlier{" "}
+            {content.omissions!.earlierMessages === 1 ? "message" : "messages"} omitted
           </small>
         </li>
       )
       : null
   );
   return (
-    <section className="composer-context-preview" aria-label="Shared chat context">
-      <button type="button" onClick={onDismiss}>Close preview</button>
-      {packet
+    <section ref={section} className="composer-context-preview" aria-label={label} tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss();
+      }}>
+      <button type="button" onClick={dismiss}>Close preview</button>
+      {content
         ? (
           <>
             <header>
-              <strong>
-                {isOwnConversationContext(packet) ? "This chat" : packet.sourceConversationTitle}
-              </strong>
-              <small>
-                {isOwnConversationContext(packet) ? "Earlier messages" : packet.sourceProjectName}
-                {" · "}{packet.messageCount}{" "}
-                {packet.messageCount === 1 ? "message" : "messages"}
-                {packet.droppedMessageCount > 0
-                  ? ` · ${packet.droppedMessageCount} omitted`
-                  : ""}
-              </small>
-              {(packet.omissions?.intermediateAgentUpdates ?? 0) > 0 && (
+              <strong>{content.title}</strong>
+              <small>{content.detail}</small>
+              {(content.omissions?.intermediateAgentUpdates ?? 0) > 0 && (
                 <small>
-                  {packet.omissions!.intermediateAgentUpdates} intermediate agent{" "}
-                  {packet.omissions!.intermediateAgentUpdates === 1 ? "update" : "updates"}
+                  {content.omissions!.intermediateAgentUpdates} intermediate agent{" "}
+                  {content.omissions!.intermediateAgentUpdates === 1 ? "update" : "updates"}
                   {" "}left out so more turns fit.
                 </small>
               )}
             </header>
             <ol>
-              {packet.excerpts.map((excerpt, index) => (
+              {content.excerpts.map((excerpt, index) => (
                 <Fragment key={excerpt.sourceMessageId}>
                   {gapAt(index)}
                   <li data-role={excerpt.role}>
@@ -139,7 +180,7 @@ export function ConversationContextPreviewCard({
                   </li>
                 </Fragment>
               ))}
-              {gapAt(packet.excerpts.length)}
+              {gapAt(content.excerpts.length)}
             </ol>
           </>
         )
@@ -152,8 +193,55 @@ export function ConversationContextPreviewCard({
               </button>
             </>
           )
-          : <p role="status">Loading the exact shared excerpt…</p>}
+          : <p role="status">{loadingText}</p>}
     </section>
+  );
+}
+
+export function ConversationContextPreviewCard({
+  packetId,
+  targetConversationId,
+  revision,
+  onCommand,
+  onDismiss,
+}: {
+  packetId: string;
+  targetConversationId: string;
+  revision?: string;
+  onCommand: ConversationContextCommandRunner;
+  onDismiss(): void;
+}): React.JSX.Element {
+  const load = useCallback(() => onCommand("conversation.context.load", {
+    type: "conversation.context.load",
+    payload: { packetId, targetConversationId },
+  }).then((event) => packetPreview(event, packetId, targetConversationId)),
+  [packetId, targetConversationId, onCommand]);
+  return (
+    <ContextPreview label="Shared chat context" loadingText="Loading the exact shared excerpt…"
+      load={load} revision={revision} onDismiss={onDismiss} />
+  );
+}
+
+function AgentSourcePreviewCard({
+  request,
+  sourceConversationId,
+  onCommand,
+  onDismiss,
+}: {
+  request: AgentConversationContextRequest;
+  sourceConversationId: string;
+  onCommand: ConversationContextCommandRunner;
+  onDismiss(): void;
+}): React.JSX.Element {
+  const { requestId, targetConversationId } = request;
+  const load = useCallback(() => onCommand("conversation.context.agent.source.load", {
+    type: "conversation.context.agent.source.load",
+    payload: { contextRequestId: requestId, sourceConversationId, targetConversationId },
+  }).then((event) => sourcePreview(event, sourceConversationId, targetConversationId)),
+  [requestId, sourceConversationId, targetConversationId, onCommand]);
+  return (
+    <ContextPreview label="Chat to share" loadingText="Loading the chat…"
+      load={load} onDismiss={onDismiss} />
   );
 }
 
@@ -172,6 +260,7 @@ export function ConversationContextRequestCard({
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   useEffect(() => {
     setSelected(preselected ?? "");
@@ -179,6 +268,7 @@ export function ConversationContextRequestCard({
     setAcknowledgement(null);
     setError(null);
     setResponse(null);
+    setPreviewing(false);
   }, [preselected, request.requestId]);
 
   const choice = selected || preselected || "";
@@ -225,72 +315,89 @@ export function ConversationContextRequestCard({
   };
 
   return (
-    <section
-      className="composer-context-request"
-      aria-label="Agent requested chat context"
-    >
-      <header>
-        <strong>The agent asked to read another chat</strong>
-        <small>It receives a size-limited, redacted copy of the chat only if you share it. Older messages and long text may be shortened.</small>
-      </header>
-      {preselected
-        ? <p>{source?.conversationTitle ?? "That chat is unavailable."}</p>
-        : (
+    <>
+      <section
+        className="composer-context-request"
+        aria-label="Agent requested chat context"
+      >
+        <header>
+          <strong>The agent asked to read another chat</strong>
+          <small>It receives a size-limited, redacted copy of the chat only if you share it. Older messages and long text may be shortened.</small>
+        </header>
+        {preselected
+          ? <p>{source?.conversationTitle ?? "That chat is unavailable."}</p>
+          : (
+            <label>
+              <span>Chat to share</span>
+              <select
+                value={choice}
+                disabled={pending || response !== null}
+                onChange={(event) => {
+                  setSelected(event.target.value);
+                  setPreviewing(false);
+                  setAcknowledgement(null);
+                  setError(null);
+                }}
+              >
+                <option value="">Choose a chat…</option>
+                {sources.map((option) => (
+                  <option key={option.conversationId} value={option.conversationId}>
+                    {option.conversationTitle}
+                    {` · ${option.projectName} · ${option.workspaceLabel}`}
+                    {option.workspaceRelation === "different-workspace"
+                      ? " · different workspace"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        {source && (
+          <p>
+            From {source.projectName} · {source.workspaceLabel}<br />
+            To this chat · {source.targetWorkspaceLabel}
+          </p>
+        )}
+        {differentWorkspace && (
           <label>
-            <span>Chat to share</span>
-            <select
-              value={choice}
+            <input
+              type="checkbox"
+              checked={acknowledged}
               disabled={pending || response !== null}
-              onChange={(event) => {
-                setSelected(event.target.value);
-                setAcknowledgement(null);
-                setError(null);
-              }}
-            >
-              <option value="">Choose a chat…</option>
-              {sources.map((option) => (
-                <option key={option.conversationId} value={option.conversationId}>
-                  {option.conversationTitle}
-                  {` · ${option.projectName} · ${option.workspaceLabel}`}
-                  {option.workspaceRelation === "different-workspace"
-                    ? " · different workspace"
-                    : ""}
-                </option>
-              ))}
-            </select>
+              onChange={(event) => setAcknowledgement(event.target.checked ? acknowledgementKey : null)}
+            />
+            Share context across these different workspaces
           </label>
         )}
-      {source && (
-        <p>
-          From {source.projectName} · {source.workspaceLabel}<br />
-          To this chat · {source.targetWorkspaceLabel}
-        </p>
+        {error && <p role="alert">{error}</p>}
+        {response && <p role="status">{response}</p>}
+        <div>
+          <button
+            type="button"
+            disabled={pending || response !== null || !source || (differentWorkspace && !acknowledged)}
+            onClick={() => respond(true)}
+          >
+            Share chat
+          </button>
+          <button type="button" disabled={pending || response !== null} onClick={() => respond(false)}>
+            Decline
+          </button>
+          {source && (
+            <button type="button" aria-expanded={previewing} onClick={() => setPreviewing((open) => !open)}>
+              Preview
+            </button>
+          )}
+        </div>
+      </section>
+      {source && previewing && (
+        <AgentSourcePreviewCard
+          key={source.conversationId}
+          request={request}
+          sourceConversationId={source.conversationId}
+          onCommand={onCommand}
+          onDismiss={() => setPreviewing(false)}
+        />
       )}
-      {differentWorkspace && (
-        <label>
-          <input
-            type="checkbox"
-            checked={acknowledged}
-            disabled={pending || response !== null}
-            onChange={(event) => setAcknowledgement(event.target.checked ? acknowledgementKey : null)}
-          />
-          Share context across these different workspaces
-        </label>
-      )}
-      {error && <p role="alert">{error}</p>}
-      {response && <p role="status">{response}</p>}
-      <div>
-        <button
-          type="button"
-          disabled={pending || response !== null || !source || (differentWorkspace && !acknowledged)}
-          onClick={() => respond(true)}
-        >
-          Share chat
-        </button>
-        <button type="button" disabled={pending || response !== null} onClick={() => respond(false)}>
-          Decline
-        </button>
-      </div>
-    </section>
+    </>
   );
 }

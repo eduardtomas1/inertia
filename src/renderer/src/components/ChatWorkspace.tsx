@@ -984,6 +984,7 @@ export function ChatWorkspace({
               turns={ownedTurns}
               messages={ownedMessages}
               contextPackets={contextPackets}
+              onConversationContextCommand={onConversationContextCommand}
               activities={ownedActivities}
               subagents={ownedSubagents}
               reasonings={ownedReasonings}

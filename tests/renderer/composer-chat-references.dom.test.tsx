@@ -525,6 +525,106 @@ describe("composer chat references", () => {
     expect(screen.getByText("3 intermediate agent updates left out so more turns fit.")).toBeVisible();
   });
 
+  it("focuses an opened preview, closes it on Escape and returns focus to its reference", async () => {
+    const user = userEvent.setup();
+    const current = conversation("preview-focus");
+    const draft = packetSummary({ targetConversationId: current.id });
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "preview",
+      result: { kind: "conversation.context.packet", packet: {
+        ...draft,
+        excerpts: [{ sourceMessageId: "decision", role: "assistant", content: "Keep the retry decision.", truncated: false }],
+      } },
+    } as unknown as ServerEvent));
+    render(<Composer {...composerProps(current, {
+      contextSources: [sourceOption],
+      contextPackets: [draft],
+      onConversationContextCommand: onCommand,
+    })} />);
+    const reference = screen.getByRole("button", { name: /From Architecture decisions/u });
+    expect(reference).toHaveAttribute("aria-expanded", "false");
+    await user.click(reference);
+    const preview = await screen.findByRole("region", { name: "Shared chat context" });
+    expect(reference).toHaveAttribute("aria-expanded", "true");
+    expect(preview).toHaveFocus();
+    await screen.findByText("Keep the retry decision.");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Shared chat context" })).not.toBeInTheDocument();
+    expect(reference).toHaveAttribute("aria-expanded", "false");
+    expect(reference).toHaveFocus();
+  });
+
+  it("keeps focus where it is when an open preview reloads for a changed selection", async () => {
+    const onCommand = vi.fn(async () => ({
+      type: "request.result", requestId: "preview",
+      result: { kind: "conversation.context.packet", packet: { ...packetSummary(), excerpts: [] } },
+    } as unknown as ServerEvent));
+    const preview = (contextPacketIds: string[]) => <ComposerConversationContextPreview
+      targetConversationId={packetSummary().targetConversationId} onCommand={onCommand}
+      controller={{ previewPacketId: packetSummary().id, contextPacketIds } as ComposerConversationContextController}
+    />;
+    const view = render(<><textarea aria-label="Draft" />{preview(["first"])}</>);
+    expect(await screen.findByRole("region", { name: "Shared chat context" })).toHaveFocus();
+    screen.getByRole("textbox", { name: "Draft" }).focus();
+    view.rerender(<><textarea aria-label="Draft" />{preview(["first", "second"])}</>);
+    await act(async () => {});
+    expect(onCommand).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("textbox", { name: "Draft" })).toHaveFocus();
+  });
+
+  it("previews the chat an agent asked for before the user shares it", async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn(async (type: string) => type === "conversation.context.agent.source.load"
+      ? {
+          type: "request.result", requestId: "source",
+          result: { kind: "conversation.context.source", source: {
+            conversationId: sourceOption.conversationId, projectId: "project", conversationTitle: sourceOption.conversationTitle,
+            projectName: sourceOption.projectName, workspaceLabel: "Project checkout · main", targetConversationId: "target",
+            targetProjectId: "project", targetWorkspaceLabel: "Project checkout · main", workspaceRelation: "same-workspace",
+            messages: [{ sourceMessageId: "m1", sourceTurnId: null, role: "assistant", content: "Retry with jitter.", truncated: false, createdAt: "now" }],
+          } },
+        } as unknown as ServerEvent
+      : { type: "request.ok", requestId: "reply" } as ServerEvent);
+    const request = { requestId: "request", targetConversationId: "target", targetTurnId: "turn",
+      requestedSourceConversationId: null, createdAt: "now", expiresAt: "later" };
+    render(<ConversationContextRequestCard request={request} sources={[sourceOption]} onCommand={onCommand} />);
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox"), sourceOption.conversationId);
+    const open = screen.getByRole("button", { name: "Preview" });
+    expect(open).toHaveAttribute("aria-expanded", "false");
+    await user.click(open);
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith("conversation.context.agent.source.load", {
+      type: "conversation.context.agent.source.load",
+      payload: { contextRequestId: "request", sourceConversationId: sourceOption.conversationId, targetConversationId: "target" },
+    });
+    const preview = await screen.findByRole("region", { name: "Chat to share" });
+    expect(preview).toHaveFocus();
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    expect(await within(preview).findByText("Retry with jitter.")).toBeVisible();
+    expect(preview).toHaveTextContent("Inertia · 1 message");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Chat to share" })).not.toBeInTheDocument();
+    expect(open).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Share chat" }));
+    expect(onCommand).toHaveBeenLastCalledWith("conversation.context.agent.respond", expect.anything());
+  });
+
+  it("refuses an agent source preview for a different chat than the one chosen", async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn(async () => ({
+      type: "request.result", requestId: "source",
+      result: { kind: "conversation.context.source", source: {
+        conversationId: "someone-else", targetConversationId: "target", messages: [],
+      } },
+    } as unknown as ServerEvent));
+    render(<ConversationContextRequestCard request={{ requestId: "request", targetConversationId: "target",
+      targetTurnId: "turn", requestedSourceConversationId: sourceOption.conversationId, createdAt: "now", expiresAt: "later" }}
+    sources={[sourceOption]} onCommand={onCommand} />);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("unavailable");
+  });
+
   it("marks omitted later messages after the only retained opening request", async () => {
     const onCommand = vi.fn(async () => ({
       type: "request.result",

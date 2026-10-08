@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useLayoutEffect, useMemo, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
@@ -51,6 +51,10 @@ import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 import "./ConversationContextProvenance.css";
 
+const SentContextPreview = lazy(async () => ({
+  default: (await import("../composer/ComposerConversationContextCards")).ConversationContextPreviewCard,
+}));
+
 export function AgentPixelLoader({
   animated,
   phase,
@@ -90,6 +94,7 @@ export function UserRequestLayer({
   const isDocumentLike = turn.userMessage.content.length >= 280;
   const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
   const [expanded, setExpanded] = useState(false);
+  const [openPacketId, setOpenPacketId] = useState<string | null>(null);
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -98,6 +103,12 @@ export function UserRequestLayer({
     setExpanded((current) => !current);
     window.requestAnimationFrame(() => onAfterToggle?.());
   };
+  const togglePacket = (packetId: string): void => {
+    onBeforeToggle?.();
+    setOpenPacketId((current) => current === packetId ? null : packetId);
+    window.requestAnimationFrame(() => onAfterToggle?.());
+  };
+  const onContextCommand = props.onConversationContextCommand;
   const contextPackets = props.contextPackets?.filter(
     ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
   ) ?? [];
@@ -157,8 +168,8 @@ export function UserRequestLayer({
           {contextPackets.map((packet) => {
             const own = isOwnConversationContext(packet);
             const count = `${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.droppedMessageCount > 0 ? ` · ${packet.droppedMessageCount} omitted` : ""}`;
-            return (
-              <span key={packet.id} data-source-state={packet.sourceState}>
+            const receipt = (
+              <>
                 <MessagesSquare size={13} aria-hidden="true" />
                 <span>
                   <strong>
@@ -172,10 +183,36 @@ export function UserRequestLayer({
                         : `${packet.sourceProjectName} · ${count}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}
                   </small>
                 </span>
+              </>
+            );
+            return onContextCommand ? (
+              <button
+                key={packet.id}
+                type="button"
+                data-source-state={packet.sourceState}
+                aria-expanded={openPacketId === packet.id}
+                onClick={() => togglePacket(packet.id)}
+              >
+                {receipt}
+              </button>
+            ) : (
+              <span key={packet.id} data-source-state={packet.sourceState}>
+                {receipt}
               </span>
             );
           })}
         </div>
+      )}
+      {onContextCommand && openPacketId && contextPackets.some(({ id }) => id === openPacketId) && (
+        <Suspense fallback={null}>
+          <SentContextPreview
+            key={openPacketId}
+            packetId={openPacketId}
+            targetConversationId={props.conversationId}
+            onCommand={onContextCommand}
+            onDismiss={() => togglePacket(openPacketId)}
+          />
+        </Suspense>
       )}
     </article>
   );

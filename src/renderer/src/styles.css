@@ -10557,6 +10557,7 @@ button.sent-attachment-open:focus-visible {
 
 .final-answer-identity {
   display: flex;
+  user-select: none;
   min-width: 0;
   align-items: baseline;
   gap: 8px;
@@ -12044,18 +12045,30 @@ button.sent-attachment-open:focus-visible {
 }
 
 .response-markdown blockquote {
-  padding: 0.1em 0 0.1em 1em;
-  border-left: 3px solid var(--border-strong);
+  position: relative;
+  padding: 0.1em 0 0.1em calc(1em + 3px);
   color: var(--text-soft);
 }
 
+.response-markdown blockquote::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-left: 3px solid var(--border-strong);
+  content: "";
+}
+
 .turn-final-answer-document .response-markdown blockquote {
-  padding: 0.12em 0 0.12em 1em;
-  border-left-width: 2px;
-  border-left-color: color-mix(in srgb, var(--accent) 38%, var(--border-strong));
+  padding: 0.12em 0 0.12em calc(1em + 2px);
   border-radius: 0;
   color: color-mix(in srgb, var(--final-answer-text) 78%, var(--text-muted));
   background: transparent;
+}
+
+.turn-final-answer-document .response-markdown blockquote::before {
+  border-left-width: 2px;
+  border-left-color: color-mix(in srgb, var(--accent) 38%, var(--border-strong));
 }
 
 .response-markdown blockquote > :first-child { margin-top: 0; }
@@ -12147,6 +12160,7 @@ button.sent-attachment-open:focus-visible {
 
 .response-code-block > header {
   display: flex;
+  user-select: none;
   min-height: 35px;
   align-items: center;
   justify-content: space-between;
@@ -12279,6 +12293,7 @@ button.sent-attachment-open:focus-visible {
 
 .response-table-toolbar {
   display: flex;
+  user-select: none;
   min-height: 33px;
   align-items: center;
   gap: 5px;

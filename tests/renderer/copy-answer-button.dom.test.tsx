@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -127,5 +129,35 @@ describe("final answer copy feedback", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy answer" }));
     await waitFor(() => expect(copyText).toHaveBeenCalledExactlyOnceWith(answer));
+  });
+});
+
+describe("final answer selection copy", () => {
+  it("keeps the quote bar and interface labels out of a selected answer", () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync("src/renderer/src/styles.css", "utf8");
+    document.head.append(style);
+    const { container } = render(
+      <>
+        <article className="message is-assistant turn-final-answer-document is-final-answer">
+          <header className="final-answer-identity"><span>GPT-5.6</span></header>
+          <ResponseMarkdown content={answer} projectRoot="/workspace" projectId="11111111-1111-4111-8111-111111111111" defaultCodeWrap={false} />
+        </article>
+        <ResponseMarkdown content="> Earlier quote" projectRoot="/workspace" projectId="11111111-1111-4111-8111-111111111111" defaultCodeWrap={false} />
+      </>,
+    );
+
+    const quotes = [...container.querySelectorAll("blockquote")];
+    expect(quotes).toHaveLength(2);
+    const rules = [...style.sheet!.cssRules].filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule);
+    for (const quote of quotes) {
+      expect(getComputedStyle(quote).borderLeftWidth).toBe("");
+      expect(rules.filter((rule) => quote.matches(rule.selectorText) && /border-left|border:/u.test(rule.style.cssText)))
+        .toEqual([]);
+    }
+    for (const selector of [".final-answer-identity", ".response-table-toolbar", ".response-code-block > header"]) {
+      expect(getComputedStyle(container.querySelector(selector)!).userSelect).toBe("none");
+    }
+    style.remove();
   });
 });

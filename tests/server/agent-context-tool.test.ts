@@ -269,7 +269,7 @@ describe("inertia_request_context", () => {
       const longAnswer = `${"The writer used latin1. ".repeat(600)}END-OF-ANSWER`;
       store.addActivity({
         conversationId: source.id, runId: turn.runId, turnId: turn.id, kind: "command",
-        title: "npm test", detail: "Command:\nnpm test -- export\n\nOutput:\nExit code 1\n2 failed", status: "failed",
+        title: "npm test", detail: "Command:\nnpm test -- export\n\nOutput:\n2 failed", status: "failed",
         createdAt: tick(),
       });
       store.addActivity({
@@ -318,7 +318,7 @@ describe("inertia_request_context", () => {
       });
       expect(result.entries).toEqual([
         { kind: "request", text: "Fix the export encoding." },
-        { kind: "command", title: "npm test", command: "npm test -- export", status: "failed", exitCode: 1 },
+        { kind: "command", title: "npm test", command: "npm test -- export", status: "failed" },
         { kind: "tool", title: "Read src/export/writer.ts", status: "completed" },
         { kind: "answer", text: longAnswer },
         { kind: "page", text: "[page: Export duration by night]" },
@@ -490,6 +490,61 @@ describe("inertia_request_context", () => {
     }
   });
 
+  it.each([
+    ["codex", "Command:\n./release.sh\n\nOutput:\nbuilding\nExit code: 0\nupload failed: 403", undefined],
+    ["claude", "Command:\n./release.sh\n\nError:\nbuilding\nExit code: 0\nupload failed: 403", undefined],
+    ["claude", "Command:\n./release.sh\n\nOutput:\nExit code 0\n\nError:\nupload failed: 403", undefined],
+    ["claude", "Command:\n./release.sh\n\nError:\nExit code 1\nupload failed: 403", 1],
+  ] as const)("reports a %s command's exit code only from the adapter's own prefix line", async (providerId, detail, exitCode) => {
+    const context = await fixture({ providerId });
+    const { begin, bridgeFor, settle, store, target } = context;
+    try {
+      const turn = begin(target, "Run the release script.");
+      store.addActivity({
+        conversationId: target.id, runId: turn.runId, turnId: turn.id, kind: "command",
+        title: "./release.sh", detail, status: "failed", createdAt: tick(),
+      });
+      settle(turn.id);
+      const current = begin(target, "What happened?");
+      const result = parsed(await bridgeFor(current).invoke(call({ conversationId: target.id, turnId: turn.id })));
+      const command = result.entries.find(({ kind }: { kind: string }) => kind === "command");
+      expect(command).toMatchObject({ status: "failed" });
+      expect(command.exitCode).toBe(exitCode);
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each([[100, 90], [100, 120], [64, 200]] as const)(
+    "bounds the first page of a turn whose request carries %i images with %i-character names",
+    async (count, nameLength) => {
+      const context = await fixture({ providerId: "opencode" });
+      try {
+        const attachments = Array.from({ length: count }, (_, index) => {
+          const base = `Screenshot 2026-10-08 at 10.12.${String(index).padStart(2, "0")} `;
+          return image(`${base}${"x".repeat(Math.max(0, nameLength - base.length - 4))}.png`, 64);
+        });
+        const turn = context.begin(context.target, "Why does this look broken?", { attachments });
+        context.store.createMessage(context.target.id, "A long answer. ".repeat(4_000), "assistant", [], turn.id, tick());
+        context.settle(turn.id);
+        const current = context.begin(context.target, "Look again.");
+        const result = parsed(await context.bridgeFor(current).invoke(call({ conversationId: context.target.id, turnId: turn.id })));
+        const request = result.entries[0];
+        expect(request.kind).toBe("request");
+        expect(request.attachments.length + request.moreAttachments).toBe(count);
+        expect(request.attachments.length).toBeGreaterThan(0);
+        expect(result.images.length + result.moreImages).toBe(count);
+        expect(result.nextCursor).toEqual(expect.any(String));
+        const next = parsed(await context.bridgeFor(current).invoke(call({
+          conversationId: context.target.id, turnId: turn.id, cursor: result.nextCursor,
+        })));
+        expect(next.entries.length).toBeGreaterThan(0);
+      } finally {
+        context.store.close();
+      }
+    },
+  );
+
   it("describes what it reads and that other chats need approval", async () => {
     const context = await fixture();
     const { begin, bridgeFor, store, target } = context;
@@ -561,6 +616,26 @@ describe("inertia_request_context images", () => {
       const result = await context.bridgeFor(current).invoke(call({ conversationId: context.target.id, turnId: turn.id }));
       expect(result.images).toBeUndefined();
       expect(parsed(result).images[0]).toMatchObject({ included: false, note: "image attachment not available here" });
+    } finally {
+      context.store.close();
+    }
+  });
+
+  it("says when a fifth image does not fit because the result already carries four", async () => {
+    const context = await fixture({ providerId: "claude" });
+    try {
+      const attachments = Array.from({ length: 5 }, (_, index) => image(`shot-${index}.png`, 16));
+      for (const attachment of attachments) context.storeImage(attachment, Buffer.alloc(16, 3));
+      const turn = context.begin(context.target, "Compare these.", { attachments });
+      context.settle(turn.id);
+      const current = context.begin(context.target, "Again.");
+      const result = await context.bridgeFor(current).invoke(call({ conversationId: context.target.id, turnId: turn.id }));
+      expect(result.images).toHaveLength(4);
+      expect(parsed(result).images[4]).toEqual({
+        name: "shot-4.png",
+        included: false,
+        note: "not included: this result already carries 4 images",
+      });
     } finally {
       context.store.close();
     }

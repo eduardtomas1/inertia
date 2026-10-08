@@ -7,6 +7,7 @@ import { PROVIDER_INFO } from "../provider/catalog";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { byteLength } from "./bounded-message-text";
+import { recordedCommandExitCode } from "./command-exit-code";
 
 export const MAX_TURN_AGENT_LABEL_LENGTH = 120;
 export const MAX_TURN_COMMANDS_BYTES = 200;
@@ -68,13 +69,16 @@ function commandText(title: string, detail: string | null): string | null {
   return line.length > MAX_TURN_COMMAND_LENGTH ? `${line.slice(0, MAX_TURN_COMMAND_LENGTH - 1)}…` : line;
 }
 
-function commandOutcome(status: string, detail: string | null): string {
-  const exitCode = /^Exit code:? (-?\d{1,6})$/mu.exec(detail ?? "")?.[1];
-  if (exitCode !== undefined) return `exit ${Number(exitCode)}`;
+function commandOutcome(providerId: ProviderId, status: string, detail: string | null): string {
+  const exitCode = recordedCommandExitCode(providerId, status, detail);
+  if (exitCode !== null) return `exit ${exitCode}`;
   return status === "completed" ? "ok" : status;
 }
 
 export function lastTurnCommands(database: Database.Database, turnId: string): string[] {
+  const providerId = (database.prepare("SELECT provider_id FROM agent_turns WHERE id = ?")
+    .get(turnId) as { provider_id: ProviderId } | undefined)?.provider_id;
+  if (!providerId) return [];
   const rows = database.prepare(`
     SELECT title, detail, status FROM activities
     WHERE turn_id = ? AND kind = 'command'
@@ -86,7 +90,7 @@ export function lastTurnCommands(database: Database.Database, turnId: string): s
   for (const row of rows) {
     const text = commandText(row.title, row.detail);
     if (!text) continue;
-    const line = `${text} (${commandOutcome(row.status, row.detail)})`;
+    const line = `${text} (${commandOutcome(providerId, row.status, row.detail)})`;
     const lineBytes = byteLength(JSON.stringify(line)) + 1;
     if (bytes + lineBytes > MAX_TURN_COMMANDS_BYTES) break;
     commands.unshift(line);

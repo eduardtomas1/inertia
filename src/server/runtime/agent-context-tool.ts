@@ -228,12 +228,20 @@ export class AgentContextTool {
         notes.push({ name, included: false, note: IMAGE_NOT_AVAILABLE_HERE });
         continue;
       }
-      if (
-        images.length >= MAX_PROVIDER_HOST_TOOL_IMAGES
-        || attachment.size > MAX_AGENT_CONTEXT_IMAGE_BYTES
-        || totalBytes + attachment.size > MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES
-      ) {
-        notes.push({ name, included: false, note: "image attachment too large to include in this result" });
+      if (images.length >= MAX_PROVIDER_HOST_TOOL_IMAGES) {
+        notes.push({
+          name,
+          included: false,
+          note: `not included: this result already carries ${MAX_PROVIDER_HOST_TOOL_IMAGES} images`,
+        });
+        continue;
+      }
+      if (attachment.size > MAX_AGENT_CONTEXT_IMAGE_BYTES) {
+        notes.push({ name, included: false, note: "not included: the image is larger than one result can carry" });
+        continue;
+      }
+      if (totalBytes + attachment.size > MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES) {
+        notes.push({ name, included: false, note: "not included: the images before it fill this result's image budget" });
         continue;
       }
       const preview = await store.preview(attachment.id, signal).catch(() => null);

@@ -27,6 +27,7 @@ export {
   type ActivityWorkKind,
 } from "./response-timeline/activity-summary";
 export {
+  answerTailCommentary,
   buildResponseTimeline,
   shouldConsolidateSettledWorkIntoRunDetails,
   stabilizeResponseTimeline,

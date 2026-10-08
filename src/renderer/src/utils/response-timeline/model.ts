@@ -79,6 +79,29 @@ export function shouldConsolidateSettledWorkIntoRunDetails(
     && turn.systemMessages.length === 0;
 }
 
+export function answerTailCommentary(
+  turn: Pick<
+    ResponseTurn,
+    | "isActive"
+    | "htmlRenders"
+    | "activities"
+    | "approvals"
+    | "inputRequests"
+    | "commentaryMessages"
+  >,
+): ChatMessage[] | null {
+  const lastRender = turn.htmlRenders.at(-1);
+  if (!turn.isActive || !lastRender) return null;
+  if (turn.approvals.length > 0 || turn.inputRequests.length > 0) return null;
+  const since = timestamp(lastRender.createdAt);
+  const afterRender = ({ createdAt }: { createdAt: string }): boolean =>
+    timestamp(createdAt) > since;
+  const workFollows = turn.activities.some((activity) =>
+    (activity.kind === "tool" || activity.kind === "command" || activity.kind === "file")
+    && afterRender(activity));
+  return workFollows ? null : turn.commentaryMessages.filter(afterRender);
+}
+
 export interface ResponseTimelineCompatibility {
   inferredTurns: ResponseTurn[];
   malformedTurns: AgentTurn[];

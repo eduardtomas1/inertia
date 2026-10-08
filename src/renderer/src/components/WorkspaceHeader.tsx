@@ -310,7 +310,7 @@ export function WorkspaceHeader({
     <header ref={headerRef} className="workspace-header drag-region">
       <div className="header-leading no-drag">
         <IconButton label="Toggle project navigation" className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
-          {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </IconButton>
         <nav className="header-breadcrumb" aria-label="Chat breadcrumb">
           {showProjectCrumb && (
@@ -379,7 +379,7 @@ export function WorkspaceHeader({
                     }}
                   >
                     <span className="header-title-text">{title}</span>
-                    <ChevronDown size={13} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
+                    <ChevronDown size={14} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
                   </button>
                 ) : (
                   <span className="header-title-text">{title}</span>
@@ -450,9 +450,9 @@ export function WorkspaceHeader({
           </div>
         )}
         {view === "settings" ? (
-          <IconButton label="Close settings" onClick={onCloseSettings}><Settings size={17} /></IconButton>
+          <IconButton label="Close settings" onClick={onCloseSettings}><Settings size={16} /></IconButton>
         ) : view !== "workspace" ? (
-          <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={17} /></IconButton>
+          <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={16} /></IconButton>
         ) : null}
       </div>
       {menu === "title" && ConversationActionsMenu && conversation && conversationMenu && (

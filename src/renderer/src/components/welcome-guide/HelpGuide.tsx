@@ -199,7 +199,7 @@ export function HelpGuide({
             onClick={next ? () => choose(next.id) : close}
           >
             {next ? `Next: ${next.title}` : "Done"}
-            {next && <ArrowRight size={15} aria-hidden="true" />}
+            {next && <ArrowRight size={14} aria-hidden="true" />}
           </button>
         </span>
       </footer>

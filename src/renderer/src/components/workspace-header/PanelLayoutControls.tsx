@@ -87,7 +87,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         disabled={!terminalAvailable}
         onClick={onToggleTerminal}
       >
-        <PanelBottom size={15} aria-hidden="true" />
+        <PanelBottom size={16} aria-hidden="true" />
       </button>
       <button
         type="button"
@@ -99,7 +99,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         data-right-panel-toggle
         onClick={onToggleRightPanel}
       >
-        <PanelRight size={15} aria-hidden="true" />
+        <PanelRight size={16} aria-hidden="true" />
         {activeBackgroundTaskCount > 0 && (
           <span className="corner-toggle-badge" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}

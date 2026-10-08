@@ -203,7 +203,7 @@ const SettingsShell = memo(function SettingsShell({
                 onClick={() => navigate(item.id)}
                 key={item.id}
               >
-                <Icon size={15} />
+                <Icon size={14} />
                 <span>{item.label}</span>
               </button>
             );

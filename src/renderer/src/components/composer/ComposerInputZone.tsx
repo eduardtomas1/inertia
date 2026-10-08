@@ -3,7 +3,6 @@ import { INTERFACE_LOCALE } from "../../lib/locale";
 import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeftRight,
-  Box,
   Check,
   CircleAlert,
   MessageSquarePlus,
@@ -336,7 +335,7 @@ export function ComposerInputZone({
               routeReadiness.transient ? "is-checking" : "is-attention",
             )}>
               {routeReadiness.transient && (
-                <RefreshCw size={11} className="is-spinning" aria-hidden="true" />
+                <RefreshCw size={14} className="is-spinning" aria-hidden="true" />
               )}
               {routeReadiness.badge}
             </span>
@@ -372,7 +371,7 @@ export function ComposerInputZone({
             className="composer-context"
             aria-label={`Selected ${contextKind} context`}
           >
-            <MessageSquarePlus size={13} />
+            <MessageSquarePlus size={14} />
             <span>
               <strong>
                 {reviewNoteContext
@@ -386,7 +385,7 @@ export function ComposerInputZone({
               aria-label={`Remove selected ${contextKind} context`}
               onClick={onClearPromptContext}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </div>
         )}
@@ -416,7 +415,7 @@ export function ComposerInputZone({
               title={previewDismissLabel}
               onClick={onDismissPreviewContext}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </div>
         )}
@@ -428,7 +427,7 @@ export function ComposerInputZone({
         />
         {handoffNotice && (
           <div className="composer-handoff-notice" role="status">
-            <ArrowLeftRight size={13} aria-hidden="true" />
+            <ArrowLeftRight size={14} aria-hidden="true" />
             <span>{handoffNotice}</span>
           </div>
         )}
@@ -442,14 +441,14 @@ export function ComposerInputZone({
             aria-live={compactError ? "assertive" : "polite"}
           >
             <span className="composer-compact-notice-icon" aria-hidden="true">
-              {compactWorking ? <ContextCompactionIcon /> : <Box size={14} />}
+              <ContextCompactionIcon />
             </span>
             <span>{compactNotice.message}</span>
             <span className="composer-compact-notice-state" aria-hidden="true">
               {compactWorking ? null : compactNotice.kind === "success" ? (
-                <Check size={13} />
+                <Check size={14} />
               ) : (
-                <CircleAlert size={13} />
+                <CircleAlert size={14} />
               )}
             </span>
           </div>
@@ -620,7 +619,7 @@ export function ComposerInputZone({
                   ? (
                     <>
                       <span className="composer-suggestion-chat">
-                        <MessagesSquare size={11} aria-hidden="true" />
+                        <MessagesSquare size={14} aria-hidden="true" />
                         This chat
                       </span>
                       <small>Earlier messages · {thisChatTitle}</small>
@@ -630,7 +629,7 @@ export function ComposerInputZone({
                   ? (
                     <>
                       <span className="composer-suggestion-chat">
-                        <MessagesSquare size={11} aria-hidden="true" />
+                        <MessagesSquare size={14} aria-hidden="true" />
                         {option.source.conversationTitle}
                       </span>
                       <small>

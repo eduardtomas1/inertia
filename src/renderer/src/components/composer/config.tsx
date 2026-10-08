@@ -1,7 +1,7 @@
 import {
   Download,
   KeyRound,
-  PlugZap,
+  Plug,
   RefreshCw,
   Wrench,
 } from "lucide-react";
@@ -67,13 +67,13 @@ export function RouteRepairIcon({
   if (pending || action === "refresh") {
     return (
       <RefreshCw
-        size={13}
+        size={14}
         className={pending ? "is-spinning" : undefined}
       />
     );
   }
-  if (action === "install") return <Download size={13} />;
-  if (action === "connect") return <PlugZap size={13} />;
-  if (action === "add-key") return <KeyRound size={13} />;
-  return <Wrench size={13} />;
+  if (action === "install") return <Download size={14} />;
+  if (action === "connect") return <Plug size={14} />;
+  if (action === "add-key") return <KeyRound size={14} />;
+  return <Wrench size={14} />;
 }

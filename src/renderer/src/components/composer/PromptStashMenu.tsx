@@ -67,7 +67,7 @@ export function PromptStashMenu({
           handleComposerMenuTriggerKeyDown("stash", event);
         }}
       >
-        <Archive size={15} />
+        <Archive size={16} />
       </button>
       {menu === "stash" && (
         <div
@@ -176,7 +176,7 @@ export function PromptStashMenu({
                     title={deleteLabel}
                     onClick={() => onRemove(entry.id)}
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={14} />
                   </button>
                 </div>
                 );

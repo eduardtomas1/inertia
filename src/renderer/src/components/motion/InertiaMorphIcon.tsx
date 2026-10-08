@@ -16,7 +16,7 @@ export function InertiaMorphIcon({
   icon,
   iconState,
   size,
-  strokeWidth = 2,
+  strokeWidth = 1.75,
   className,
   spring = "snappy",
 }: {

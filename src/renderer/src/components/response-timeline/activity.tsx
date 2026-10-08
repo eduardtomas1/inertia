@@ -10,13 +10,11 @@ import {
   useState,
 } from "react";
 import {
-  Brain,
-  BrainCircuit,
   Check,
-  CheckCircle2,
   ChevronDown,
+  CircleCheck,
   CircleDot,
-  Clock3,
+  Clock,
   Code2,
   FileText,
   ListChecks,
@@ -303,7 +301,7 @@ export const ActivityRow = memo(function ActivityRow({
       >
         {runningOrb
           ? <WorkingOrb size={14} design={runningOrb.design} pace={runningOrb.pace} />
-          : <Icon size={12} />}
+          : <Icon size={14} />}
       </span>
       <span className={clsx(
         "agent-activity-copy",
@@ -348,7 +346,7 @@ export const ActivityRow = memo(function ActivityRow({
           }}
         >
           <span>{disclosureLabel}</span>
-          <ChevronDown size={11} aria-hidden="true" />
+          <ChevronDown size={14} aria-hidden="true" />
         </button>
       )}
       {showDisclosure && detailExpanded && (
@@ -363,7 +361,7 @@ export const ActivityRow = memo(function ActivityRow({
 export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
   return (
     <div className="turn-reasoning-detail" data-turn-plan={plan.turnId ?? "legacy"}>
-      <span><ListChecks size={13} aria-hidden="true" />Plan</span>
+      <span><ListChecks size={14} aria-hidden="true" />Plan</span>
       {plan.explanation && <p>{plan.explanation}</p>}
       {plan.steps.length > 0 && (
         <p>{plan.steps.map(({ step, status }) => `${status === "completed" ? "✓" : status === "cancelled" ? "✕" : status === "inProgress" ? "•" : "○"} ${step}`).join("\n")}</p>
@@ -555,7 +553,7 @@ export const ActivityGroup = memo(function ActivityGroup({
         >
           {groupOrb
             ? <WorkingOrb size={14} design={groupOrb.design} pace={groupOrb.pace} />
-            : <MarkIcon size={11} />}
+            : <MarkIcon size={14} />}
         </span>
         <span className="turn-activity-group-parts">
           {parts.map((part) => (
@@ -572,7 +570,7 @@ export const ActivityGroup = memo(function ActivityGroup({
           ))}
         </span>
         <ChevronDown
-          size={12}
+          size={14}
           className="turn-activity-group-chevron"
           aria-hidden="true"
         />
@@ -788,7 +786,6 @@ function ThinkingSummary({
   return (
     <>
       <span className="turn-thinking-pulse">
-        <Brain size={16} className="turn-thinking-icon" aria-hidden="true" />
         <span className="turn-thinking-label" key={live ? "live" : "folded"}>
           {live
             ? "Thinking"
@@ -866,7 +863,7 @@ export function SettledWorkDetails({
       />
       {includesReasoning && (
         <div className="turn-reasoning-detail">
-          <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+          <span>Reasoning summary</span>
           <ReasoningSummary content={reasoningContent} />
         </div>
       )}
@@ -1044,12 +1041,12 @@ export function WorkLog({
                       <small>{activeTraceCount}</small>
                     </>
                   )}
-              <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
+              <ChevronDown size={14} className="turn-work-chevron" aria-hidden="true" />
             </summary>
             <div className="turn-work-details" id={detailsId} hidden={!expanded}>
               {expanded && includesReasoning && (
                 <div className="turn-reasoning-detail">
-                  <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+                  <span>Reasoning summary</span>
                   <ReasoningSummary
                     content={reasoningContent}
                     streaming={activeReasoning}
@@ -1080,12 +1077,12 @@ export function WorkLog({
   const summaryContent = (
     <>
       {status === "failed"
-        ? <TriangleAlert size={13} aria-hidden="true" />
+        ? <TriangleAlert size={14} aria-hidden="true" />
         : status === "limited"
-          ? <Clock3 size={13} aria-hidden="true" />
+          ? <Clock size={14} aria-hidden="true" />
         : status === "stopped"
-          ? <CircleDot size={13} aria-hidden="true" />
-          : <CheckCircle2 size={13} aria-hidden="true" />}
+          ? <CircleDot size={14} aria-hidden="true" />
+          : <CircleCheck size={14} aria-hidden="true" />}
       <span>{workSummaryLabel(turn)}</span>
     </>
   );
@@ -1111,7 +1108,7 @@ export function WorkLog({
           >
             {summaryContent}
             <small>{expanded ? "Hide details" : "Details"}</small>
-            <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
+            <ChevronDown size={14} className="turn-work-chevron" aria-hidden="true" />
           </summary>
           <div id={detailsId} hidden={!expanded}>
             {expanded && (

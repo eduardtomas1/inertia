@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Check,
-  CheckCircle2,
   CircleAlert,
+  CircleCheck,
   CircleDot,
   Plus,
   Trash2,
@@ -176,10 +176,10 @@ function profileState(profile: ModelBackendProfileView): { tone: "ready" | "atte
 
 function BackendProfileState({ profile }: { profile: ModelBackendProfileView }): React.JSX.Element {
   const { tone, label } = profileState(profile);
-  const Icon = tone === "ready" ? CheckCircle2 : tone === "checking" ? LoadingMark : tone === "idle" ? CircleDot : CircleAlert;
+  const Icon = tone === "ready" ? CircleCheck : tone === "checking" ? LoadingMark : tone === "idle" ? CircleDot : CircleAlert;
   return (
     <span className={clsx("backend-profile-state", `is-${tone}`)}>
-      <Icon size={13} aria-hidden="true" />
+      <Icon size={14} aria-hidden="true" />
       {label}
     </span>
   );
@@ -509,7 +509,7 @@ export function ModelBackendsSettings({
                   <strong>{editingId ? "Edit backend configuration" : "New backend profile"}</strong>
                   <small>{editingId ? "Saving changes to the connection starts a new revision that needs a fresh connection test." : "Custom endpoints stay separate from native provider configuration."}</small>
                 </span>
-                <IconButton label="Cancel profile editing" onClick={cancelEditing}><X size={15} aria-hidden="true" /></IconButton>
+                <IconButton label="Cancel profile editing" onClick={cancelEditing}><X size={14} aria-hidden="true" /></IconButton>
               </div>
 
               <fieldset disabled={busy === "save" || busy === "create"}>

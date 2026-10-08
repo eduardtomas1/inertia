@@ -326,7 +326,7 @@ export function BackgroundTasksSurface({
                     <span className="background-task-danger">{failedCount} failed</span>
                   </>
                 )}
-                <ChevronRight size={13} aria-hidden="true" />
+                <ChevronRight size={14} aria-hidden="true" />
               </button>
               {dismissible.length > 0 && (
                 <button
@@ -338,7 +338,7 @@ export function BackgroundTasksSurface({
                     feed?.dismissed(dismissible.map(({ id }) => id));
                   }}
                 >
-                  <Trash2 size={13} aria-hidden="true" />
+                  <Trash2 size={14} aria-hidden="true" />
                 </button>
               )}
             </div>

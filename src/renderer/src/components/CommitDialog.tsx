@@ -1,4 +1,4 @@
-import { GitCommitHorizontal, Upload, X } from "lucide-react";
+import { CloudUpload, GitCommitHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DiffReviewState,
@@ -294,8 +294,8 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
         {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
         <label><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(false); }} /></label>
         <footer>
-          <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={15} />}<span>Commit</span></button>
-          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <Upload size={15} />}<span>Commit & push</span></button>
+          <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={14} />}<span>Commit</span></button>
+          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <CloudUpload size={14} />}<span>Commit & push</span></button>
         </footer>
       </section>
     </div>

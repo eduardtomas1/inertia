@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert, CircleDot, PlugZap, RefreshCw } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleDot, Plug, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import type { ProviderInfo } from "@shared/contracts";
 import { providerStateLabel, providerVersionLabel, type ProviderSetupAction } from "../utils/providerStatus";
@@ -11,7 +11,7 @@ export function ProviderStatus({ provider, id }: { provider: ProviderInfo; id?: 
   const checking = provider.installState === "checking" || provider.authState === "checking";
   const ready = provider.canRun;
   const unavailable = provider.installState === "not-installed" || provider.installState === "unresponsive" || provider.installState === "error" || provider.authState === "error";
-  const StatusIcon = checking ? LoadingMark : unavailable ? CircleAlert : ready ? CheckCircle2 : CircleDot;
+  const StatusIcon = checking ? LoadingMark : unavailable ? CircleAlert : ready ? CircleCheck : CircleDot;
 
   return (
     <span
@@ -21,7 +21,7 @@ export function ProviderStatus({ provider, id }: { provider: ProviderInfo; id?: 
         checking ? "is-checking" : unavailable ? "is-unavailable" : ready ? "is-ready" : "is-attention",
       )}
     >
-      <StatusIcon size={13} aria-hidden="true" />
+      <StatusIcon size={14} aria-hidden="true" />
       <span>{providerStateLabel(provider)}</span>
       {provider.version && <span className="provider-state-version">{providerVersionLabel(provider.version)}</span>}
     </span>
@@ -29,5 +29,5 @@ export function ProviderStatus({ provider, id }: { provider: ProviderInfo; id?: 
 }
 
 export function ProviderActionIcon({ action }: { action: Exclude<ProviderSetupAction, null> }): React.JSX.Element {
-  return action === "connect" ? <PlugZap size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />;
+  return action === "connect" ? <Plug size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />;
 }

@@ -14,13 +14,9 @@ import {
 } from "react";
 import {
   ArrowDown,
-  ArrowRight,
-  Code2,
   FolderPlus,
   MessageCircleQuestion,
-  MessageSquarePlus,
-  ShieldCheck,
-  TerminalSquare,
+  SquarePen,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -888,9 +884,9 @@ export function ChatWorkspace({
           <span className="welcome-kicker">A calmer place to build</span>
           <h2 id="welcome-title">Bring a project into focus.</h2>
           <p>Inertia keeps conversations, your project, and a real local terminal together—without turning the workspace into noise.</p>
-          <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span><ArrowRight size={15} /></button>
-          <button type="button" className="secondary-button welcome-scratch-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>Start without a project</span></button>
-          <div className="welcome-features"><div><Code2 size={17} /><span>Project-aware</span></div><div><TerminalSquare size={17} /><span>Local terminal</span></div><div><ShieldCheck size={17} /><span>Local by default</span></div></div>
+          <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span></button>
+          <button type="button" className="secondary-button welcome-scratch-button" onClick={onCreateConversation}><SquarePen size={16} /><span>Start without a project</span></button>
+          <div className="welcome-features"><div><span>Project-aware</span></div><div><span>Local terminal</span></div><div><span>Local by default</span></div></div>
         </section>
       </Root>
     );
@@ -900,11 +896,10 @@ export function ChatWorkspace({
     return (
       <Root className="chat-workspace welcome-workspace">
         <section className="project-welcome" aria-labelledby="project-welcome-title">
-          <span className="project-welcome-icon"><MessageSquarePlus size={22} /></span>
           <span className="welcome-kicker">{project.name}</span>
           <h2 id="project-welcome-title">Start with a clear chat.</h2>
           <p>Create a chat for the next feature, question, or focused pass through this project.</p>
-          <button type="button" className="primary-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>New chat</span></button>
+          <button type="button" className="primary-button" onClick={onCreateConversation}><SquarePen size={16} /><span>New chat</span></button>
           <code className="project-path-display">{project.path}</code>
         </section>
       </Root>

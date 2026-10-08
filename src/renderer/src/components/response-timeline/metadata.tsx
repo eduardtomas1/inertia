@@ -56,7 +56,7 @@ export function CopyAnswerButton({
         <InertiaMorphIcon
           icon={copied ? checkMorphIcon : copyMorphIcon}
           iconState={copied ? "copied" : "copy"}
-          size={12}
+          size={14}
         />
         <span>{copied ? "Copied" : error ? "Copy failed" : "Copy"}</span>
       </button>
@@ -242,7 +242,7 @@ export function TurnMetadata({
           onClick={toggleDetails}
         >
           <span>Run details</span>
-          <ChevronDown size={12} aria-hidden="true" />
+          <ChevronDown size={14} aria-hidden="true" />
         </button>
       </div>
       <dl

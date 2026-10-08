@@ -133,7 +133,7 @@ export function PdfAttachmentPreview({
           disabled={pageNumber <= 1}
           onClick={() => setPageNumber((current) => Math.max(1, current - 1))}
         >
-          <ChevronLeft size={15} aria-hidden="true" />
+          <ChevronLeft size={14} aria-hidden="true" />
         </button>
         <span aria-live="polite">
           {pageCount > 0 ? `${pageNumber} / ${pageCount}` : "Loading PDF"}
@@ -145,7 +145,7 @@ export function PdfAttachmentPreview({
           onClick={() =>
             setPageNumber((current) => Math.min(pageCount, current + 1))}
         >
-          <ChevronRight size={15} aria-hidden="true" />
+          <ChevronRight size={14} aria-hidden="true" />
         </button>
       </div>
       {rendering && (

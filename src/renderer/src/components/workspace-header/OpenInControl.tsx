@@ -1,10 +1,9 @@
 import { lazy, Suspense, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronDown,
+  ExternalLink,
   FolderOpen,
-  FolderSearch,
   PanelLeft,
-  SquareArrowOutUpRight,
 } from "lucide-react";
 
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
@@ -50,7 +49,7 @@ interface OpenInControlProps {
 
 const targetIcons = {
   folder: FolderOpen,
-  "file-manager": FolderSearch,
+  "file-manager": FolderOpen,
   files: PanelLeft,
 } as const;
 
@@ -119,7 +118,7 @@ export function OpenInControl({
           <PrimaryIcon size={14} aria-hidden="true" />
           <span>Open in {labels[effectivePreferred]}</span>
         </button>
-        <HeaderMenuGroup label="Open in…" icon={<SquareArrowOutUpRight size={14} aria-hidden="true" />}>
+        <HeaderMenuGroup label="Open in…" icon={<ExternalLink size={14} aria-hidden="true" />}>
           {renderItems()}
         </HeaderMenuGroup>
       </>

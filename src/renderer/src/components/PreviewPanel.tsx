@@ -19,7 +19,7 @@ import {
   usePreviewTabCloseFocus,
   type WorkspacePreviewOwner,
 } from "../utils/workspacePreviewFocus";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe2, History, LockKeyhole, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
 import "./PreviewPanel.css";
 
@@ -218,7 +218,7 @@ export function PreviewPanel({
     <section className="preview-panel" aria-label="Browser preview" aria-busy={loading}>
       <div className="preview-tab-strip" aria-label="Inertia Browser pages">
         <span className="preview-browser-label">
-          <Globe2 size={13} aria-hidden="true" />
+          <Globe size={14} aria-hidden="true" />
           <span>Browser</span>
         </span>
         <div className="preview-tabs" role="tablist" aria-label="Browser pages">
@@ -264,7 +264,7 @@ export function PreviewPanel({
                     onCloseTab(tab.id);
                   }}
                 >
-                  <X size={11} aria-hidden="true" />
+                  <X size={14} aria-hidden="true" />
                 </button>
               )}
             </div>
@@ -286,7 +286,7 @@ export function PreviewPanel({
             current === contextId ? null : contextId
           ))}
         >
-          <History size={13} aria-hidden="true" />
+          <History size={14} aria-hidden="true" />
           <span>Evidence</span>
           <small>{evidence.entries.length}</small>
         </button>
@@ -295,25 +295,25 @@ export function PreviewPanel({
         <div className="preview-history-actions">
           {onBack && (
             <IconButton label="Go back" onClick={onBack} disabled={!canGoBack}>
-              <ArrowLeft size={15} />
+              <ArrowLeft size={14} />
             </IconButton>
           )}
           {onForward && (
             <IconButton label="Go forward" onClick={onForward} disabled={!canGoForward}>
-              <ArrowRight size={15} />
+              <ArrowRight size={14} />
             </IconButton>
           )}
           {onReload && (
             <IconButton label="Reload preview" onClick={onReload} disabled={!url || loading}>
-              {loading ? <LoadingMark label="Loading preview" /> : <RefreshCw size={15} />}
+              {loading ? <LoadingMark label="Loading preview" /> : <RefreshCw size={14} />}
             </IconButton>
           )}
         </div>
 
         <form className="preview-address-form" onSubmit={(event) => { event.preventDefault(); navigate(); }}>
           {currentLocation && !("error" in currentLocation) && currentLocation.parsed.protocol === "https:"
-            ? <LockKeyhole size={14} aria-label="Secure HTTPS address" />
-            : <Globe2 size={14} aria-hidden="true" />}
+            ? <Lock size={14} aria-label="Secure HTTPS address" />
+            : <Globe size={14} aria-hidden="true" />}
           <input
             ref={addressRef}
             type="text"
@@ -335,7 +335,7 @@ export function PreviewPanel({
         </form>
 
         <IconButton label="Open in system browser" onClick={openExternal} disabled={!url && !draftUrl.trim()}>
-          <ExternalLink size={15} />
+          <ExternalLink size={14} />
         </IconButton>
       </header>
 
@@ -363,7 +363,6 @@ export function PreviewPanel({
             <div className="panel-loading"><LoadingMark label="Connecting to preview" /><span>Connecting to preview…</span></div>
           ) : currentLocation && !("error" in currentLocation) ? (
             <div className="preview-safe-card">
-              <span className="preview-safe-icon"><ShieldCheck size={23} aria-hidden="true" /></span>
               <span className="panel-kicker">Safe preview target</span>
               <h3>{currentLocation.parsed.hostname}</h3>
               <p>{currentLocation.parsed.origin}</p>
@@ -371,13 +370,12 @@ export function PreviewPanel({
                 Inertia keeps remote content outside the React renderer. Navigation is handed to the desktop preview service.
               </p>
               <button type="button" className="secondary-button" onClick={openExternal}>
-                <ExternalLink size={15} aria-hidden="true" />
+                <ExternalLink size={14} aria-hidden="true" />
                 <span>Open externally</span>
               </button>
             </div>
           ) : (
             <div className="panel-empty preview-empty">
-              <Globe2 size={23} aria-hidden="true" />
               <h3>Open a local preview</h3>
               <p>Enter a development server URL above. No untrusted page is embedded in this renderer.</p>
             </div>

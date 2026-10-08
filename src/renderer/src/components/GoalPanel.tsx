@@ -7,10 +7,9 @@ import {
   CirclePause,
   Eye,
   Flag,
-  Network,
+  ListTree,
   Play,
   RefreshCw,
-  Sparkles,
   Square,
   Trash2,
 } from "lucide-react";
@@ -103,10 +102,10 @@ function goalProgress(goal: AgentGoal): number | null {
 }
 
 const actionIcons: Record<GoalActionIcon, React.JSX.Element> = {
-  play: <Play size={11} aria-hidden="true" />,
-  pause: <CirclePause size={12} aria-hidden="true" />,
-  block: <Square size={10} aria-hidden="true" />,
-  complete: <Check size={12} aria-hidden="true" />,
+  play: <Play size={14} aria-hidden="true" />,
+  pause: <CirclePause size={14} aria-hidden="true" />,
+  block: <Square size={14} aria-hidden="true" />,
+  complete: <Check size={14} aria-hidden="true" />,
 };
 
 function GoalCard({
@@ -271,7 +270,7 @@ function GoalCard({
                 }
               }}
             >
-              <Play size={11} aria-hidden="true" />
+              <Play size={14} aria-hidden="true" />
               Resume with new budget
             </button>
             <button
@@ -280,7 +279,7 @@ function GoalCard({
               disabled={controlsBusy}
               onClick={() => void resumeBudgetLimitedGoal(null)}
             >
-              <Play size={11} aria-hidden="true" />
+              <Play size={14} aria-hidden="true" />
               Resume without budget
             </button>
           </div>
@@ -311,7 +310,7 @@ function GoalCard({
               disabled={controlsBusy}
               onClick={() => void clearGoal()}
             >
-              <Trash2 size={12} aria-hidden="true" />
+              <Trash2 size={14} aria-hidden="true" />
             </button>
           )}
         </footer>
@@ -387,7 +386,7 @@ function GoalComposer({
             || parseGoalTokenBudget(tokenBudget) === undefined
           }
         >
-          <Flag size={13} aria-hidden="true" />
+          <Flag size={14} aria-hidden="true" />
         </button>
       </div>
       <label htmlFor={budgetId}>
@@ -462,7 +461,6 @@ function SkillsSection({
     <section className="goal-panel-section" aria-labelledby={headingId}>
       <header className="goal-panel-section-heading">
         <div>
-          <Sparkles size={14} aria-hidden="true" />
           <h3 id={headingId}>Skills</h3>
         </div>
         {workflow.skillsCapability.available && onRefreshSkills && (
@@ -472,7 +470,7 @@ function SkillsSection({
             aria-label="Refresh skills"
             onClick={onRefreshSkills}
           >
-            <RefreshCw size={12} aria-hidden="true" />
+            <RefreshCw size={14} aria-hidden="true" />
           </button>
         )}
       </header>
@@ -576,7 +574,7 @@ export function SubagentsSection({
     <section className="goal-panel-section" aria-labelledby={headingId}>
       <header className="goal-panel-section-heading">
         <div>
-          <Network size={14} aria-hidden="true" />
+          <ListTree size={14} aria-hidden="true" />
           <h3 id={headingId}>Delegated work</h3>
         </div>
         <span aria-label={`${subagents.length} delegated ${subagents.length === 1 ? "task" : "tasks"}${statsLabel
@@ -673,7 +671,7 @@ export function SubagentsSection({
                       aria-label={`View parent turn for ${label}`}
                       onClick={() => onOpenSubagent?.(trace)}
                     >
-                      <Eye size={10} aria-hidden="true" />
+                      <Eye size={14} aria-hidden="true" />
                       View turn
                     </button>
                   )}
@@ -699,7 +697,7 @@ export function SubagentsSection({
                     })}
                   >
                     Details
-                    <ChevronDown size={10} aria-hidden="true" />
+                    <ChevronDown size={14} aria-hidden="true" />
                   </button>
                   {mayStop && (
                     <button
@@ -719,7 +717,7 @@ export function SubagentsSection({
                         });
                       }}
                     >
-                      <Square size={9} fill="currentColor" aria-hidden="true" />
+                      <Square size={14} fill="currentColor" aria-hidden="true" />
                       {stopping ? "Stopping…" : "Stop"}
                     </button>
                   )}
@@ -810,7 +808,7 @@ export function GoalPanel({
     >
       <header className="panel-toolbar goal-panel-toolbar">
         <div className="panel-heading">
-          <Flag size={17} aria-hidden="true" />
+          <Flag size={16} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>Goal</h2>
             <span>{workflow?.goalCapability.label ?? "Workflow unavailable"}</span>

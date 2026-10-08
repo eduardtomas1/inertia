@@ -49,7 +49,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
     }} /></label>
     <div className="git-branch-load-status">
       <span role="status">{loading ? "Refreshing branches…" : error ?? `${branches.length} branches`}</span>
-      {onRefresh && <button type="button" aria-label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={13} /></button>}
+      {onRefresh && <button type="button" aria-label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={14} /></button>}
     </div>
     <div className="git-branch-results" aria-busy={loading} onBlur={() => { queued.current = null; }}>
       {[false, true].map((remote) => {
@@ -58,8 +58,8 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
         return <div role="group" aria-label={remote ? "Remote branches" : "Local branches"} key={String(remote)}>
           <div className="git-menu-section-label">{remote ? "Remote branches" : "Local branches"}<span>{group.length}</span></div>
           {group.map((branch) => <button type="button" role="menuitemradio" aria-checked={branch.current} disabled={busy || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} title={`${branch.name}${branch.checkedOut && !branch.current ? " · Checked out in another worktree" : branch.remote ? " · Create a local tracking branch" : ""}`} onClick={() => select(branch)}>
-            <GitBranch size={13} /><span className="git-branch-name">{branch.name}</span>
-            {branch.current ? <Check size={13} aria-label="Current" /> : branch.checkedOut ? <small>In worktree</small> : remote ? <small>Track</small> : null}
+            <GitBranch size={14} /><span className="git-branch-name">{branch.name}</span>
+            {branch.current ? <Check size={14} aria-label="Current" /> : branch.checkedOut ? <small>In worktree</small> : remote ? <small>Track</small> : null}
           </button>)}
         </div>;
       })}

@@ -401,10 +401,10 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
-                <TerminalSquare size={13} /><span>{tab.label}</span>
+                <TerminalSquare size={14} /><span>{tab.label}</span>
               </button>
               <button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
-                onClick={() => closeTerminal(tab.id)}><X size={11} /></button>
+                onClick={() => closeTerminal(tab.id)}><X size={14} /></button>
             </div>
           ))}
         </div>

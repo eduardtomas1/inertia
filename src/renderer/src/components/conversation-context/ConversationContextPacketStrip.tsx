@@ -61,7 +61,7 @@ export function ConversationContextPacketStrip({
               disabled={disabled}
               onClick={() => onRemove(packet.id)}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </article>
         );

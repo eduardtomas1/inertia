@@ -1335,9 +1335,8 @@ describe("compact Work sidebar", () => {
       ["input", "needs-input", "input", "lucide-message-circle-question-mark"],
       ["failed", "failed", null, "lucide-circle-x"],
       ["completed", "completed", null, "lucide-circle-check"],
-      ["idle", "idle", null, "lucide-minus"],
     ] as const;
-    renderSidebar(statusCases.map(([id, status, attentionKind]) => conversation(
+    renderSidebar([...statusCases, ["idle", "idle", null, null] as const].map(([id, status, attentionKind]) => conversation(
       id,
       `${id} task`,
       new Date(2026, 7, 11, 9),
@@ -1349,6 +1348,9 @@ describe("compact Work sidebar", () => {
       expect(cue).not.toBeNull();
       expect(cue?.querySelector(`.${iconClass}`)).not.toBeNull();
     }
+    const idleTime = screen.getByText("idle task").closest(".activity-thread")?.querySelector(".activity-thread-trailing time");
+    expect(idleTime).not.toBeNull();
+    expect(idleTime?.querySelector("svg")).toBeNull();
   });
 
   it("labels a chat stopped by a usage limit as Limited with its own icon", () => {
@@ -1358,7 +1360,7 @@ describe("compact Work sidebar", () => {
     const latestTurn = { id: "limited-turn", status: "failed", usageLimited: true } as unknown as NonNullable<ConversationShell["latestTurn"]>;
     renderSidebar([{ ...failed, latestTurn }]);
     const cue = document.querySelector('[data-work-status="limited"]');
-    expect(cue?.querySelector(".lucide-clock-3, .lucide-clock3")).not.toBeNull();
+    expect(cue?.querySelector(".lucide-clock")).not.toBeNull();
     expect(cue?.closest(".activity-thread-status-label")).toHaveTextContent("Limited");
     expect(screen.getByRole("button", { name: /Limited task.*Limited$/u })).toBeVisible();
   });

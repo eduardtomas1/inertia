@@ -129,7 +129,7 @@ export function UserRequestLayer({
         <span>You</span>
         <MessageOrigin message={turn.userMessage} />
         {props.showTimestamps && <time dateTime={turn.userMessage.createdAt} title={formatFullDateTime(turn.userMessage.createdAt)}>{formatMessageTime(turn.userMessage.createdAt)}</time>}
-        {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
+        {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</button>}
         {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
       </div>
       <div
@@ -155,7 +155,7 @@ export function UserRequestLayer({
       {sessionRecovery && (
         <div className="sent-context" aria-label="Provider session">
           <span data-session-recovery="">
-            <MessagesSquare size={13} aria-hidden="true" />
+            <MessagesSquare size={14} aria-hidden="true" />
             <span>
               <strong>New provider session</strong>
               <small title={sessionRecovery}>{sessionRecovery}</small>
@@ -170,7 +170,7 @@ export function UserRequestLayer({
             const count = `${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.droppedMessageCount > 0 ? ` · ${packet.droppedMessageCount} omitted` : ""}`;
             const receipt = (
               <>
-                <MessagesSquare size={13} aria-hidden="true" />
+                <MessagesSquare size={14} aria-hidden="true" />
                 <span>
                   <strong>
                     {own ? "Earlier messages from this chat" : `Context from ${packet.sourceConversationTitle}`}

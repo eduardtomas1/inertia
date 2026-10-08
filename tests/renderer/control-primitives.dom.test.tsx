@@ -286,3 +286,48 @@ describe("toast primitives", () => {
     expect(css).not.toMatch(/\.provider-quota-notice\.is-5 \{|\.database-recovery-notice\.is-critical \{/u);
   });
 });
+
+describe("icon primitives", () => {
+  function tsxSources(directory: string): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return tsxSources(path);
+      return /\.tsx?$/u.test(entry.name) ? [path] : [];
+    });
+  }
+  const files = tsxSources("src/renderer/src").map((path) => ({ path, source: readFileSync(path, "utf8") }));
+  const lucideImports = files.map(({ path, source }) => ({
+    path,
+    source,
+    names: (/import \{(?<names>[^}]*)\} from "lucide-react";/u.exec(source)?.groups?.names ?? "")
+      .split(",").map((name) => name.trim()).filter(Boolean),
+  }));
+
+  it("uses one glyph per action and no generic AI glyphs", () => {
+    const retired = new Set([
+      "AlertCircle", "AlertTriangle", "CheckCircle2", "Clock3", "Edit3", "FolderSearch", "Folders", "Globe2",
+      "LifeBuoy", "LockKeyhole", "PlugZap", "SquareArrowOutUpRight", "Clipboard", "BarChart3", "Bot", "Brain",
+      "BrainCircuit", "Command", "Network", "Share2", "Star", "WandSparkles", "Table2", "WrapText", "Compass",
+      "MessageSquareX", "ArrowUpRight", "LoaderCircle", "Activity", "FilePenLine", "FileSearch",
+    ]);
+    const offenders = lucideImports.flatMap(({ path, names }) => names
+      .filter((name) => retired.has(name) || (name === "Sparkles" && !path.endsWith("ProjectIcon.tsx")))
+      .map((name) => `${path}: ${name}`));
+    expect(offenders).toEqual([]);
+  });
+
+  it("draws lucide glyphs at 14px or 16px with the shared stroke", () => {
+    const offSize: string[] = [];
+    for (const { path, source, names } of lucideImports) {
+      if (path.endsWith("WelcomeDemos.tsx") || names.length === 0) continue;
+      const tags = new RegExp(String.raw`<(?:${names.join("|")})\b[^<>]*?size=\{(\d+)\}`, "gsu");
+      for (const match of source.matchAll(tags)) {
+        if (!["14", "16"].includes(match[1]!)) offSize.push(`${path}: ${match[0].slice(0, 60)}`);
+      }
+      const stroked = new RegExp(String.raw`<(?:${names.join("|")})\b[^<>]*?strokeWidth=`, "su");
+      if (stroked.test(source)) offSize.push(`${path}: strokeWidth`);
+    }
+    expect(offSize).toEqual([]);
+    expect(css).toMatch(/svg\.lucide \{\n  stroke-width: 1\.75;\n\}/u);
+  });
+});

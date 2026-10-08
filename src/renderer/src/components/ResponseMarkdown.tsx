@@ -14,9 +14,8 @@ import {
   Check,
   Code2,
   Copy,
+  Database,
   FileCode2,
-  Table2,
-  WrapText,
 } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform, type ExtraProps } from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -434,9 +433,9 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
   return (
     <div className="response-table-shell">
       <div className="response-table-toolbar">
-        <span><Table2 size={13} />Table</span>
-        <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={12} /> : <Copy size={12} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
-        <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={12} /> : <Copy size={12} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
+        <span>Table</span>
+        <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
+        <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
       </div>
       {(markdownCopy.error || csvCopy.error) && (
         <p className="response-copy-error" role="alert">
@@ -564,7 +563,7 @@ function CodeBlock({
   );
   const fileLabel = (
     <>
-      <HeaderIcon size={13} />
+      <HeaderIcon size={14} />
       {meta.file ?? meta.label}
     </>
   );
@@ -611,7 +610,7 @@ function CodeBlock({
               >
                 {meta.file ? fileLabel : (
                   <>
-                    <HeaderIcon size={13} />
+                    <HeaderIcon size={14} />
                     {sourceLanguage.label === "Text"
                       ? meta.label
                       : sourceLanguage.label}
@@ -620,8 +619,8 @@ function CodeBlock({
               </span>
             )}
         <div>
-          <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><WrapText size={13} /><span>Wrap</span></button>
-          <button type="button" title="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={13} /> : <Copy size={13} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></button>
+          <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><span>Wrap</span></button>
+          <button type="button" title="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={14} /> : <Copy size={14} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></button>
         </div>
       </header>
       {clipboard.error && (
@@ -682,7 +681,7 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
         setError(false);
         void window.inertia.openExternal(url).catch(() => setError(true));
       }}>
-      <FileCode2 className="response-project-file-icon" size={13} aria-hidden="true" />
+      <FileCode2 className="response-project-file-icon" size={14} aria-hidden="true" />
       <span>{children}</span>
     </a>
     {error && <span className="response-copy-error" role="alert">The local file could not be opened.</span>}
@@ -732,7 +731,7 @@ function MarkdownLink({
           fill="none"
           height="12"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.75"
           viewBox="0 0 24 24"
           width="12"
         >
@@ -751,7 +750,7 @@ function MarkdownLink({
     const projectLinkClass = [props.className, "response-project-file-link"]
       .filter(Boolean)
       .join(" ");
-    const FileIcon = language.id === "sql" ? Table2 : FileCode2;
+    const FileIcon = language.id === "sql" ? Database : FileCode2;
     const openLink = (): void => {
       if (onOpenProjectFile) {
         if (target.headingId) {
@@ -804,7 +803,7 @@ function MarkdownLink({
       >
         <FileIcon
           className="response-project-file-icon"
-          size={13}
+          size={14}
           aria-hidden="true"
         />
         <span>{children}</span>

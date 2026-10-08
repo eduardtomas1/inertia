@@ -250,7 +250,7 @@ export function WorkspacePanel({
                     tabIndex={-1}
                     onClick={() => closeSurface(surface, false)}
                   >
-                    <X size={12} aria-hidden="true" />
+                    <X size={14} aria-hidden="true" />
                   </button>
                 </div>
               );

@@ -48,7 +48,7 @@ export function SettingsGroup({
   return (
     <section className={clsx("settings-card", className)} aria-labelledby={headingId} data-setting-id={settingId}>
       <div className="settings-card-heading">
-        {Icon && <div><Icon size={18} aria-hidden="true" /></div>}
+        {Icon && <div><Icon size={16} aria-hidden="true" /></div>}
         <span>
           {notice === undefined
             ? <h3 id={headingId}>{title}</h3>
@@ -187,7 +187,7 @@ export function SettingDisclosure({
   return (
     <details className={clsx("setting-disclosure", className)} open={defaultOpen || undefined}>
       <summary aria-controls={contentId}>
-        <ChevronDown size={13} aria-hidden="true" className="setting-disclosure-chevron" />
+        <ChevronDown size={14} aria-hidden="true" className="setting-disclosure-chevron" />
         {summary}
       </summary>
       <div id={contentId} className="setting-disclosure-content">{children}</div>

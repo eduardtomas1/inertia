@@ -224,10 +224,6 @@
   align-items: center;
   gap: 3px;
 }
-.sidebar .activity-idle-icon {
-  display: inline-flex;
-  opacity: 0.5;
-}
 
 .sidebar-scope-actions {
   position: absolute;

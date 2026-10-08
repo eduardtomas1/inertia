@@ -137,13 +137,13 @@ export function DetachedContextHandoffNotice({
       role="status"
       aria-live="polite"
     >
-      <MessagesSquare size={15} aria-hidden="true" />
+      <MessagesSquare size={14} aria-hidden="true" />
       <span>
         <strong>Agent requested chat context</strong>
         <small>Review this request in the main window.</small>
       </span>
       <button type="button" onClick={onReturnToMain}>
-        <PanelTopOpen size={13} aria-hidden="true" />
+        <PanelTopOpen size={14} aria-hidden="true" />
         Return to main
       </button>
     </div>
@@ -515,7 +515,7 @@ export default function DetachedChatApp({
       <header className="detached-chat-header drag-region">
         <div className="detached-chat-title">
           <span className="detached-chat-project">
-            {project && <ProjectIcon project={project} size={12} />}
+            {project && <ProjectIcon project={project} size={14} />}
             <ProjectName project={project}>{project?.name ?? "Inertia"}</ProjectName>
           </span>
           <h1>{conversation?.title ?? "Detached chat"}</h1>
@@ -530,8 +530,8 @@ export default function DetachedChatApp({
             onClick={toggleAlwaysOnTop}
           >
             {windowContext.alwaysOnTop
-              ? <PinOff size={15} />
-              : <Pin size={15} />}
+              ? <PinOff size={14} />
+              : <Pin size={14} />}
           </IconButton>
           <IconButton label="Return chat to main window" onClick={dockInMain}>
             <PanelTopOpen size={16} />

@@ -16,7 +16,7 @@ export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): Rea
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
         }}>
-        <ProjectIcon project={picker.selectedProject} size={13} /><ProjectName project={picker.selectedProject}>{picker.selectedProject.name}</ProjectName><ChevronDown size={12} aria-hidden="true" />
+        <ProjectIcon project={picker.selectedProject} size={14} /><ProjectName project={picker.selectedProject}>{picker.selectedProject.name}</ProjectName><ChevronDown size={14} aria-hidden="true" />
       </button>
       {open && !picker.disabled && <ProjectSearchDialog projects={picker.projects} selectedId={picker.selectedProject.id}
         onSelectNoProject={() => { if (picker.selectedProject.workspaceKind !== "scratch") picker.onChange(null); }}

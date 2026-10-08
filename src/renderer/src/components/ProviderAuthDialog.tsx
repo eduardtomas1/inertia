@@ -3,11 +3,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
-  AlertTriangle,
-  CheckCircle2,
+  CircleCheck,
   Copy,
   ExternalLink,
-  PlugZap,
+  Plug,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import type {
@@ -480,7 +480,7 @@ export function ProviderAuthDialog({
         aria-describedby="provider-auth-description"
       >
         <header className="provider-auth-header">
-          <span className="provider-auth-mark"><PlugZap size={17} /></span>
+          <span className="provider-auth-mark"><Plug size={16} /></span>
           <span><h2 id="provider-auth-title">Connect {provider.label}</h2><p id="provider-auth-description">{isAntigravity
             ? "Sign in with Antigravity's own prompt below. Inertia only shows this terminal and doesn't read or store your sign-in. Close this window once Antigravity is ready."
             : "Finish the official provider sign-in below or in the browser it opens."}</p></span>
@@ -498,10 +498,10 @@ export function ProviderAuthDialog({
           >
             <span className="provider-auth-browser-copy">
               {browserState === "failed" || copyState === "failed"
-                ? <AlertTriangle size={15} />
+                ? <TriangleAlert size={14} />
                 : browserState === "opened" || copyState === "copied"
-                  ? <CheckCircle2 size={15} />
-                  : <ExternalLink size={15} />}
+                  ? <CircleCheck size={14} />
+                  : <ExternalLink size={14} />}
               <span>
                 <strong>{browserState === "opening"
                   ? "Opening the secure sign-in page…"
@@ -518,14 +518,14 @@ export function ProviderAuthDialog({
               </span>
             </span>
             <span className="provider-auth-browser-actions">
-              <button type="button" className="secondary-button" onClick={() => { void copyBrowserUrl(); focusTerminal(); }}><Copy size={13} />Copy link</button>
-              <button type="button" className="secondary-button" disabled={browserState === "opening"} onClick={() => { void openBrowser(browserUrl); focusTerminal(); }}><ExternalLink size={13} />{browserState === "failed" ? "Try again" : "Open again"}</button>
+              <button type="button" className="secondary-button" onClick={() => { void copyBrowserUrl(); focusTerminal(); }}><Copy size={14} />Copy link</button>
+              <button type="button" className="secondary-button" disabled={browserState === "opening"} onClick={() => { void openBrowser(browserUrl); focusTerminal(); }}><ExternalLink size={14} />{browserState === "failed" ? "Try again" : "Open again"}</button>
             </span>
           </div>
         ) : null}
         <footer className="provider-auth-footer">
           <span className={`provider-auth-state is-${sessionState}`}>
-            {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !isAntigravity ? <CheckCircle2 size={15} /> : <PlugZap size={15} />}
+            {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !isAntigravity ? <CircleCheck size={14} /> : <Plug size={14} />}
             <span
               aria-live={sessionState === "error" ? "assertive" : "polite"}
               aria-atomic="true"

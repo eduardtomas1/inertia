@@ -27,7 +27,6 @@ import {
   focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
-import { DailyWorkMark } from "./DailyWorkMark";
 import { ProviderMark } from "./ProviderMark";
 import { IconButton, LoadingMark } from "./ui";
 import "./DailyWorkDialog.css";
@@ -234,9 +233,6 @@ export function DailyWorkDialog({
         onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
       >
         <header className="daily-work-header">
-          <span className="daily-work-header-icon" aria-hidden="true">
-            <DailyWorkMark size={19} />
-          </span>
           <div>
             <h2 id={titleId}>Daily work</h2>
             <p id={descriptionId}>
@@ -344,7 +340,6 @@ export function DailyWorkDialog({
                 </header>
                 {dashboard.conversations.length === 0 ? (
                   <div className="daily-work-empty">
-                    <DailyWorkMark size={24} />
                     <strong>No work recorded</strong>
                     <span>No conversations or settled agent turns were found for this date.</span>
                   </div>
@@ -382,7 +377,7 @@ export function DailyWorkDialog({
                             <strong><MetricValue metric={conversation.processedTokens} format={formatCompact} /></strong>
                           </span>
                         </span>
-                        <ChevronRight className="daily-work-card-chevron" size={15} aria-hidden="true" />
+                        <ChevronRight className="daily-work-card-chevron" size={14} aria-hidden="true" />
                       </button>
                     ))}
                   </div>

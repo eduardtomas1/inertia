@@ -79,7 +79,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
     >
       <div className="turn-failure-summary">
         <span className="turn-failure-mark" aria-hidden="true">
-          <TriangleAlert size={15} />
+          <TriangleAlert size={14} />
         </span>
         <div className="turn-failure-summary-copy">
           <span>Run failed</span>
@@ -97,8 +97,8 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
             onClick={() => void copy(presentation.copyText)}
           >
             {copied
-              ? <Check size={12} aria-hidden="true" />
-              : <Copy size={12} aria-hidden="true" />}
+              ? <Check size={14} aria-hidden="true" />
+              : <Copy size={14} aria-hidden="true" />}
             <span>{copied ? "Copied" : copyError ? "Copy failed" : "Copy"}</span>
           </button>
           <button
@@ -109,7 +109,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
             onClick={toggle}
           >
             <span>{expanded ? "Hide details" : "Technical details"}</span>
-            <ChevronDown size={12} aria-hidden="true" />
+            <ChevronDown size={14} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -140,7 +140,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
             </section>
           ) : null}
           <p className="turn-failure-privacy">
-            <ShieldCheck size={12} aria-hidden="true" />
+            <ShieldCheck size={14} aria-hidden="true" />
             <span>Scrubbed and bounded. Prompts, project paths, provider session IDs, credentials, and token values are excluded.</span>
           </p>
         </div>

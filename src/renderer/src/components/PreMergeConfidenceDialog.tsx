@@ -1,9 +1,9 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
 import {
-  AlertCircle,
-  CheckCircle2,
+  CircleAlert,
+  CircleCheck,
   CircleDot,
-  Clock3,
+  Clock,
   ExternalLink,
   FileCheck2,
   GitPullRequest,
@@ -56,12 +56,12 @@ function evidenceLabel(state: GitPreMergeEvidenceState): string {
 }
 
 function StateMark({ state }: { state: GitPreMergeEvidenceState }): React.JSX.Element {
-  if (state === "passed") return <CheckCircle2 aria-hidden="true" />;
-  if (state === "pending") return <Clock3 aria-hidden="true" />;
+  if (state === "passed") return <CircleCheck aria-hidden="true" />;
+  if (state === "pending") return <Clock aria-hidden="true" />;
   if (state === "missing" || state === "unknown" || state === "neutral") {
     return <CircleDot aria-hidden="true" />;
   }
-  return <AlertCircle aria-hidden="true" />;
+  return <CircleAlert aria-hidden="true" />;
 }
 
 function FactSource({ kind, children }: {
@@ -275,7 +275,7 @@ export function PreMergeConfidenceDialog({
               }}
               disabled={loading}
             >
-              {loading ? <LoadingMark label="Refreshing pre-merge evidence" /> : <RefreshCw size={15} />}
+              {loading ? <LoadingMark label="Refreshing pre-merge evidence" /> : <RefreshCw size={14} />}
             </IconButton>
             <IconButton ref={closeRef} label="Close pre-merge confidence" onClick={onClose}>
               <X size={16} />
@@ -292,7 +292,7 @@ export function PreMergeConfidenceDialog({
 
           {error && (
             <div className="pre-merge-alert" role="alert">
-              <AlertCircle size={15} /><span><strong>Action failed.</strong> {error}</span>
+              <CircleAlert size={14} /><span><strong>Action failed.</strong> {error}</span>
             </div>
           )}
 
@@ -307,7 +307,7 @@ export function PreMergeConfidenceDialog({
             <>
               <section className="pre-merge-section pre-merge-identity" aria-labelledby="pre-merge-identity-title">
                 <div className="pre-merge-section-heading">
-                  <GitPullRequest size={15} />
+                  <GitPullRequest size={14} />
                   <div><h3 id="pre-merge-identity-title">Exact identity</h3><span>Green applies only to this local head and this GitHub PR head.</span></div>
                   <span className={`pre-merge-state is-${confidence.identity.state}`}>{confidence.identity.state}</span>
                 </div>
@@ -336,7 +336,7 @@ export function PreMergeConfidenceDialog({
 
               <section className="pre-merge-section" aria-labelledby="pre-merge-checks-title">
                 <div className="pre-merge-section-heading">
-                  <MonitorCheck size={15} />
+                  <MonitorCheck size={14} />
                   <div><h3 id="pre-merge-checks-title">Hosted checks</h3><span>{stateSummary(confidence.checks)}</span></div>
                   <FactSource kind="github">GitHub</FactSource>
                 </div>
@@ -356,7 +356,7 @@ export function PreMergeConfidenceDialog({
 
               <section className="pre-merge-section" aria-labelledby="pre-merge-reviews-title">
                 <div className="pre-merge-section-heading">
-                  <FileCheck2 size={15} />
+                  <FileCheck2 size={14} />
                   <div>
                     <h3 id="pre-merge-reviews-title">Actionable review threads</h3>
                     <span>{codexThreads.length} Codex · {otherThreads.length} other unresolved</span>
@@ -375,7 +375,7 @@ export function PreMergeConfidenceDialog({
                           {thread.outdated && <em>Outdated position</em>}
                         </div>
                         <p>{thread.body}</p>
-                        {thread.url && <button type="button" onClick={() => void openExternal(thread.url!)}><ExternalLink size={11} />Open thread</button>}
+                        {thread.url && <button type="button" onClick={() => void openExternal(thread.url!)}><ExternalLink size={14} />Open thread</button>}
                       </li>
                     ))}
                   </ul>
@@ -385,7 +385,7 @@ export function PreMergeConfidenceDialog({
 
               <section className="pre-merge-section" aria-labelledby="pre-merge-scope-title">
                 <div className="pre-merge-section-heading">
-                  <FileCheck2 size={15} />
+                  <FileCheck2 size={14} />
                   <div><h3 id="pre-merge-scope-title">Affected scope</h3><span>{confidence.totalFiles} remote {confidence.totalFiles === 1 ? "file" : "files"}</span></div>
                   <FactSource kind="github">GitHub</FactSource>
                 </div>
@@ -408,7 +408,7 @@ export function PreMergeConfidenceDialog({
 
               <section className="pre-merge-section pre-merge-evidence" aria-labelledby="pre-merge-evidence-title">
                 <div className="pre-merge-section-heading">
-                  <TestTube2 size={15} />
+                  <TestTube2 size={14} />
                   <div><h3 id="pre-merge-evidence-title">Test and portability evidence</h3><span>Execution evidence stays separate from changed test scope.</span></div>
                 </div>
                 <div className="pre-merge-evidence-row">
@@ -441,7 +441,7 @@ export function PreMergeConfidenceDialog({
 
               <section className="pre-merge-section pre-merge-readiness" aria-labelledby="pre-merge-readiness-title">
                 <div className="pre-merge-section-heading">
-                  <ShieldCheck size={15} />
+                  <ShieldCheck size={14} />
                   <div><h3 id="pre-merge-readiness-title">Readiness</h3><span>Merge confidence and release proof are intentionally different.</span></div>
                 </div>
                 <div className="pre-merge-readiness-row">
@@ -461,7 +461,7 @@ export function PreMergeConfidenceDialog({
               {confidence.authorClaim && (
                 <section className="pre-merge-section" aria-labelledby="pre-merge-claim-title">
                   <div className="pre-merge-section-heading">
-                    <FileCheck2 size={15} />
+                    <FileCheck2 size={14} />
                     <div><h3 id="pre-merge-claim-title">PR description</h3><span>User-entered text is shown as a claim, never as execution evidence.</span></div>
                     <FactSource kind="claim">Author claim</FactSource>
                   </div>
@@ -478,7 +478,7 @@ export function PreMergeConfidenceDialog({
 
         <footer className="pre-merge-footer">
           <span>{confidence ? `Evidence collected ${new Date(confidence.generatedAt).toLocaleTimeString(INTERFACE_LOCALE)}` : "Evidence not yet collected"}{stale ? " · stale" : ""}</span>
-          {github && <button type="button" className="secondary-button" onClick={() => void openExternal(github.url)}><ExternalLink size={13} />Open PR #{github.number}</button>}
+          {github && <button type="button" className="secondary-button" onClick={() => void openExternal(github.url)}><ExternalLink size={14} />Open PR #{github.number}</button>}
           <button type="button" className="primary-button" onClick={onClose}>Done</button>
         </footer>
       </section>

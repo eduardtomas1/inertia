@@ -3,7 +3,7 @@ import {
   ArrowUp,
   BookOpenText,
   Copy,
-  Edit3,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -249,7 +249,7 @@ export function PromptPresetMenu({
         onKeyDown={(event) =>
           handleComposerMenuTriggerKeyDown("presets", event)}
       >
-        <BookOpenText size={15} />
+        <BookOpenText size={16} />
       </button>
       {menu === "presets" && (
         <div
@@ -278,7 +278,7 @@ export function PromptPresetMenu({
                 disabled={presets.length >= MAX_PROMPT_PRESETS}
                 onClick={beginCreate}
               >
-                <Plus size={13} />New
+                <Plus size={14} />New
               </button>
             )}
           </div>
@@ -356,7 +356,7 @@ export function PromptPresetMenu({
                     title="Move up"
                     disabled={pending || editor.position === 0}
                     onClick={() => void move(editor.preset!, "up")}
-                  ><ArrowUp size={13} /></button>
+                  ><ArrowUp size={14} /></button>
                   <button
                     type="button"
                     aria-label={`Move ${editor.preset.name} down`}
@@ -365,7 +365,7 @@ export function PromptPresetMenu({
                       pending || editor.position === presets.length - 1
                     }
                     onClick={() => void move(editor.preset!, "down")}
-                  ><ArrowDown size={13} /></button>
+                  ><ArrowDown size={14} /></button>
                   <button
                     type="button"
                     disabled={pending || presets.length >= MAX_PROMPT_PRESETS}
@@ -382,7 +382,7 @@ export function PromptPresetMenu({
                         })
                         .catch(() => undefined);
                     }}
-                  ><Copy size={13} />Duplicate</button>
+                  ><Copy size={14} />Duplicate</button>
                   <button
                     type="button"
                     className={confirmingDelete ? "is-confirming" : undefined}
@@ -404,7 +404,7 @@ export function PromptPresetMenu({
                         })
                         .catch(() => undefined);
                     }}
-                  ><Trash2 size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}</button>
+                  ><Trash2 size={14} />{confirmingDelete ? "Confirm delete" : "Delete"}</button>
                 </div>
               )}
               <div className="prompt-preset-editor-actions">
@@ -426,7 +426,7 @@ export function PromptPresetMenu({
             <>
               {presets.length > 0 && (
                 <label className="prompt-presets-search">
-                  <Search size={13} />
+                  <Search size={14} />
                   <input
                     value={query}
                     placeholder="Find a preset…"
@@ -437,11 +437,11 @@ export function PromptPresetMenu({
               )}
               {presets.length === 0 ? (
                 <div className="prompt-presets-empty">
-                  <BookOpenText size={17} />
+                  <BookOpenText size={16} />
                   <strong>Keep the prompts you reuse</strong>
                   <span>Presets never send automatically.</span>
                   <button type="button" onClick={beginCreate}>
-                    <Plus size={13} />Create a preset
+                    <Plus size={14} />Create a preset
                   </button>
                 </div>
               ) : visiblePresets.length === 0 ? (
@@ -485,7 +485,7 @@ export function PromptPresetMenu({
                           aria-label={`Edit prompt preset: ${preset.name}`}
                           title={`Edit ${preset.name}`}
                           onClick={() => beginEdit(preset)}
-                        ><Edit3 size={13} /></button>
+                        ><Pencil size={14} /></button>
                       </div>
                     );
                   })}

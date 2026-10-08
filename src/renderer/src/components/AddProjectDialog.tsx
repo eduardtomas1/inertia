@@ -149,7 +149,7 @@ export function AddProjectDialog({
         {!source ? (
           <>
             <div className="add-project-search">
-              <Search size={17} />
+              <Search size={16} />
               <input
                 aria-label="Search project sources"
                 placeholder="Search project sources…"
@@ -168,7 +168,7 @@ export function AddProjectDialog({
                   type="button"
                   onClick={() => setSource(item.id)}
                 >
-                  <item.icon size={20} />
+                  <item.icon size={16} />
                   <span>
                     <strong>{item.title}</strong>
                     <small>{item.detail}</small>
@@ -233,7 +233,7 @@ export function AddProjectDialog({
                   disabled={busy}
                   onClick={() => void chooseFolder()}
                 >
-                  <FolderOpen size={15} />
+                  <FolderOpen size={14} />
                   Browse
                 </button>
               </div>

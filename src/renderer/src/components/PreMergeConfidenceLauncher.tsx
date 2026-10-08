@@ -51,7 +51,7 @@ export function PreMergeConfidenceLauncher({
         if (authorityRef) setOpen({ kind: "confidence" });
       }}
     >
-      <GitPullRequest size={12} aria-hidden="true" /><span>Confidence</span>
+      <GitPullRequest size={14} aria-hidden="true" /><span>Confidence</span>
     </button>
     <button
       type="button"
@@ -61,7 +61,7 @@ export function PreMergeConfidenceLauncher({
         if (authorityRef) setOpen({ kind: "pull-request", authorityRef });
       }}
     >
-      <GitPullRequest size={12} aria-hidden="true" /><span>PR</span>
+      <GitPullRequest size={14} aria-hidden="true" /><span>PR</span>
     </button>
     {open?.kind === "confidence" && authorityRef && (
       <PreMergeConfidenceDialog

@@ -126,8 +126,7 @@ describe("DailyWorkDialog", () => {
 
     expect(screen.getByRole("status", { name: "Loading daily work" })).toBeVisible();
     const dialog = await screen.findByRole("dialog", { name: "Daily work" });
-    const mark = dialog.querySelector(".daily-work-mark");
-    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(dialog.querySelector(".daily-work-mark")).toBeNull();
     await waitFor(() => expect(view.request).toHaveBeenCalledTimes(1));
     expect(view.request.mock.calls[0]?.[0]).toEqual(dailyWorkCommand(new Date()));
 

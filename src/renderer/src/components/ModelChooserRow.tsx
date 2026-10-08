@@ -4,7 +4,7 @@ import {
   type JSX,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { Check, Star } from "lucide-react";
+import { Check, Pin } from "lucide-react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { providerIdForHarness, providerNativeBackendProfile } from "../../../shared/model-routing";
@@ -237,7 +237,7 @@ export const ModelChooserRow = memo(function ModelChooserRow({
             {row.providerId && (
               <ProviderBrandIcon
                 providerId={row.providerId}
-                size={11}
+                size={14}
                 className="model-chooser-row-brand"
                 decorative
               />
@@ -295,7 +295,7 @@ export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButt
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => activateModelChooserFavorite(event, row, onFavoriteToggle)}
     >
-      <Star size={13} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
+      <Pin size={14} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
     </button>
   );
 });

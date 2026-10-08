@@ -10,22 +10,21 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
-  Activity,
   ArrowLeft,
-  BarChart3,
   Check,
-  Clock,
   ChevronDown,
   ChevronRight,
+  Clock,
+  Columns2,
   Folder,
-  FolderOpen,
   FolderGit2,
-  RefreshCw,
+  FolderOpen,
+  Gauge,
   GitBranch,
   Pencil,
+  RefreshCw,
   Search,
   Settings,
-  Share2,
   SquarePen,
   Trash2,
   X,
@@ -552,10 +551,10 @@ function SidebarView({
       aria-label={`Project actions for ${project.name}`}
       onKeyDown={navigateMenuItems}
     >
-      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onCreateConversation(project); }}><SquarePen size={13} />New chat in {project.name}</button>
-      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
-      {onOpenProjectSettings && <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("context-change"); onOpenProjectSettings(project); }}><Settings size={13} />Project settings</button>}
-      <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
+      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onCreateConversation(project); }}><SquarePen size={14} />New chat in {project.name}</button>
+      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={14} />Open folder</button>
+      {onOpenProjectSettings && <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("context-change"); onOpenProjectSettings(project); }}><Settings size={14} />Project settings</button>}
+      <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={14} />Rename</button>
       <div role="separator" />
       <div role="group" aria-label="Grouping behavior">
         <button
@@ -627,7 +626,7 @@ function SidebarView({
           : undefined}
         onClick={() => { dismissMenu("selection"); onRemoveProject(project); }}
       >
-        <Trash2 size={13} />Remove project
+        <Trash2 size={14} />Remove project
       </button>
     </div>
   );
@@ -790,7 +789,7 @@ function SidebarView({
             onClick={() => activateConversation(conversation)}
           >
             <span className="activity-thread-projectline">
-              {chatFolder ? <Folder size={15} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
+              {chatFolder ? <Folder size={14} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={14} /> : <FolderGit2 size={14} aria-hidden="true" />}
               {chatFolder ? <span className="activity-thread-project-meta" title={conversation.worktreePath ?? undefined}>Chat folder</span>
                 : <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
@@ -810,8 +809,8 @@ function SidebarView({
               {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
             </span>
             <span className="work-thread-meta">
-              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{chatFolder ? null : repositoryLabel ?? "Local workspace"}</span>}
-              <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={15} /></span>
+              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={14} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{chatFolder ? null : repositoryLabel ?? "Local workspace"}</span>}
+              <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
             </span>
           </button>
         )}
@@ -822,11 +821,11 @@ function SidebarView({
                 const bounds = event.currentTarget.getBoundingClientRect();
                 setMenuAnchor({ x: bounds.right, y: bounds.bottom });
                 if (conversationMenu !== conversation.id) toggleMenu(conversation.id);
-              }}><Clock size={13} /></button>
+              }}><Clock size={14} /></button>
             <button type="button" aria-label={`${conversation.settledAt ? "Reopen" : "Settle"} ${conversation.title}`}
               title={conversation.settledAt ? "Reopen thread" : "Settle thread"}
               onClick={() => { preview.close(); if (conversation.settledAt) onRestoreConversation(conversation); else onSettleConversation(conversation); }}>
-              <Check size={13} />{conversation.settledAt ? "Reopen" : "Settle"}
+              <Check size={14} />{conversation.settledAt ? "Reopen" : "Settle"}
             </button>
         </div>}
         {conversationMenu === conversation.id && conversationActions(conversation)}
@@ -880,8 +879,8 @@ function SidebarView({
               }}
             >
               {expanded
-                ? <ChevronDown size={12} />
-                : <ChevronRight size={12} />}
+                ? <ChevronDown size={14} />
+                : <ChevronRight size={14} />}
               <span>{section.label}</span>
               <span>{section.threads.length}</span>
             </button>
@@ -947,21 +946,21 @@ function SidebarView({
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
             <span className="brand-name">Inertia</span>
           </button>
-          <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={17} /></IconButton>
+          <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={16} /></IconButton>
         </div>
 
         <div className="sidebar-search-row">
           <div className="sidebar-search-wrap">
             <Search size={16} aria-hidden="true" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
-            {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
+            {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={14} /></IconButton>}
           </div>
           <IconButton label="New chat" aria-haspopup={regularProjects.length !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
             if (regularProjects.length > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
             const target = regularProjects.find((project) => project.id === (scopedProjectId ?? snapshot?.activeProjectId)) ?? regularProjects[0];
             if (target) onCreateConversation(target); else onChooseNewChatProject();
-          }}><SquarePen size={17} /></IconButton>
-          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
+          }}><SquarePen size={16} /></IconButton>
+          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={14} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
         <ProjectScopePicker projects={regularProjects} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"}
@@ -1009,7 +1008,6 @@ function SidebarView({
             >
               {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
-                  <Activity size={19} />
                   <span>{query ? "No matching work" : regularProjects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
@@ -1043,7 +1041,7 @@ function SidebarView({
             <DailyWorkMark size={16} /><span>Daily work</span>
           </button>
           <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-label="Usage" title="Usage" aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
-            <BarChart3 size={16} /><span>Usage</span>
+            <Gauge size={16} /><span>Usage</span>
           </button>
           <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>

@@ -83,7 +83,7 @@ export function TerminalResumeStatus({
                   <strong>{selectedResumeOption.conversationTitle}</strong>
                   <small>{selectedResumeOption.projectName}</small>
                 </span>
-                <ChevronDown size={13} aria-hidden="true" />
+                <ChevronDown size={14} aria-hidden="true" />
               </button>
               {pickerOpen && (
                 <span className="terminal-resume-popover" role="dialog" aria-label="Choose a chat to resume">

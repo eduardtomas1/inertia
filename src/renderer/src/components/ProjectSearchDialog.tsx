@@ -1,4 +1,4 @@
-import { Check, Folders, MessageSquare, Palette, Pin, Search, Settings, X } from "lucide-react";
+import { Check, Folder, MessageSquare, Palette, Pin, Search, Settings, X } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Project } from "@shared/contracts";
@@ -112,7 +112,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
           : <div className="project-customize-loading" tabIndex={-1} ref={(node) => node?.focus({ preventScroll: true })}><LoadingMark label="Loading project customisation" /></div>
         : <>
         <div className="palette-search">
-          <Search size={17} aria-hidden="true" />
+          <Search size={16} aria-hidden="true" />
           <input ref={input} value={query} placeholder="Search projects…" aria-label="Search projects"
             role="combobox" aria-expanded="true" aria-controls={`${id}-results`}
             aria-activedescendant={active ? `${id}-${activeIndex}` : undefined} autoComplete="off"
@@ -133,7 +133,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
               }
               if (event.key === "Enter" && active) { event.preventDefault(); choose(active.id); }
             }} />
-          <IconButton label="Close project search" onClick={onClose}><X size={15} /></IconButton>
+          <IconButton label="Close project search" onClick={onClose}><X size={14} /></IconButton>
         </div>
         <div className="palette-results" id={`${id}-results`} role="listbox" aria-label="Projects">
           <div className="palette-group">
@@ -145,25 +145,25 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
                   aria-describedby={project.path || "detail" in project ? `${id}-${index}-path` : undefined}
                   aria-selected={project.id === selection} className={index === activeIndex ? "is-active" : undefined}
                   onPointerMove={() => setActiveId(project.id)} onClick={() => choose(project.id)}>
-                  {"color" in project ? <ProjectIcon project={project} size={15} /> : project.id === "no-project" ? <MessageSquare size={15} aria-hidden="true" className="project-all-icon" /> : <Folders size={15} aria-hidden="true" className="project-all-icon" />}
+                  {"color" in project ? <ProjectIcon project={project} size={14} /> : project.id === "no-project" ? <MessageSquare size={14} aria-hidden="true" className="project-all-icon" /> : <Folder size={14} aria-hidden="true" className="project-all-icon" />}
                   <span><strong><ProjectName project={"color" in project ? project : undefined}>{project.name}</ProjectName></strong>{(project.path || "detail" in project) && <small id={`${id}-${index}-path`}>{"detail" in project ? project.detail : project.path}</small>}</span>
-                  {"color" in project && project.preferences?.pinned && <Pin size={11} aria-hidden="true" className="project-search-pin" />}
-                  {project.id === selection && <Check size={13} aria-hidden="true" />}
+                  {"color" in project && project.preferences?.pinned && <Pin size={14} aria-hidden="true" className="project-search-pin" />}
+                  {project.id === selection && <Check size={14} aria-hidden="true" />}
                 </button>
                 {project.id && "color" in project && !project.workspaceKind && onCustomize && <IconButton label={`Customise ${project.name}`} data-customize-project-id={project.id}
                   onPointerEnter={() => void loadProjectCustomizePanel()} onFocus={() => void loadProjectCustomizePanel()}
-                  onClick={() => setCustomizingId(project.id)}><Palette size={13} /></IconButton>}
+                  onClick={() => setCustomizingId(project.id)}><Palette size={14} /></IconButton>}
                 {project.id && "color" in project && !project.workspaceKind && onManage && <IconButton label={`Project actions for ${project.name}`} onClick={() => {
                   const candidate = projects.find((item) => item.id === project.id);
                   if (!candidate) return;
                   restoreFocus.current = false;
                   onClose();
                   onManage(candidate);
-                }}><Settings size={13} /></IconButton>}
+                }}><Settings size={14} /></IconButton>}
               </div>
             ))}
           </div>
-          {!items.length && <div className="palette-empty"><Search size={18} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>}
+          {!items.length && <div className="palette-empty"><Search size={16} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>}
         </div>
         </>}
       </section>

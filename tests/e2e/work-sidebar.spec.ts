@@ -99,12 +99,7 @@ test("keeps three-line Work sidebar geometry", async ({
     expect(rowBox).not.toBeNull();
     expect(rowBox!.height).toBeGreaterThanOrEqual(78);
     expect(rowBox!.height).toBeLessThanOrEqual(84);
-    const statusCue = row.locator('[data-work-status="idle"]');
-    await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
-    const statusBox = await statusCue.boundingBox();
-    expect(statusBox).not.toBeNull();
-    expect(statusBox!.width).toBeCloseTo(10, 3);
-    expect(statusBox!.height).toBeCloseTo(10, 3);
+    await expect(row.locator(".activity-thread-trailing time svg")).toHaveCount(0);
     for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,

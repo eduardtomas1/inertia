@@ -209,7 +209,7 @@ function LegacyComposerQueuedActions({
         }`}
         role="listitem"
       >
-        <CornerDownRight size={15} aria-hidden="true" />
+        <CornerDownRight size={16} aria-hidden="true" />
         <span className="composer-queue-copy" title={queued.content}>
           {queued.content}
         </span>
@@ -218,7 +218,7 @@ function LegacyComposerQueuedActions({
             className="composer-queue-media"
             title={queued.attachments.map(({ name }) => name).join("\n")}
           >
-            <Paperclip size={13} aria-hidden="true" />
+            <Paperclip size={14} aria-hidden="true" />
             {queued.attachments.length === 1
               ? "1 image"
               : `${queued.attachments.length} images`}

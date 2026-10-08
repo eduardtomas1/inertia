@@ -9,7 +9,6 @@
 .update-status-icon { position: relative; display: grid; width: 16px; height: 16px; place-items: center; }
 .update-status-icon.is-downloading { width: 32px; height: 32px; }
 .update-available-dot { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px var(--fill); }
-.update-ready-badge { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 50%; color: var(--surface); background: var(--text); box-shadow: 0 0 0 2px var(--surface); }
 .update-progress-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
 .update-progress-ring circle { fill: none; stroke: currentColor; stroke-width: 1.5; }
 .update-progress-track { opacity: 0.22; }
@@ -56,6 +55,6 @@
   .update-progress-value { transition: none; }
 }
 @media (forced-colors: active) {
-  .update-available-dot, .update-ready-badge { background: ButtonText; color: ButtonFace; }
+  .update-available-dot { background: ButtonText; color: ButtonFace; }
   .sidebar-update-details, .update-restart-dialog { border-color: ButtonText; }
 }

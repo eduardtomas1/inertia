@@ -1,4 +1,4 @@
-import { ExternalLink, PictureInPicture2 } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
 export interface DetachedConversationPlaceholderProps {
   title: string;
@@ -16,9 +16,6 @@ export function DetachedConversationPlaceholder({
       className="chat-workspace centered-state detached-conversation-placeholder"
       aria-label={`Detached chat: ${title}`}
     >
-      <span className="detached-conversation-symbol" aria-hidden="true">
-        <PictureInPicture2 size={25} />
-      </span>
       <span className="detached-conversation-eyebrow">
         {windowOpen ? "Chat window active" : "Chat window closed"}
       </span>

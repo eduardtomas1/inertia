@@ -79,9 +79,9 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
   };
   const element = <div className="composer-queue" role="list" aria-label="Queued messages">
     <div className={`composer-queue-item${first.attachments.length ? " has-media" : ""}`} role="listitem">
-      <CornerDownRight size={15} aria-hidden="true" />
+      <CornerDownRight size={16} aria-hidden="true" />
       <span className="composer-queue-copy" title={first.content}>{first.content}</span>
-      {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={13} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
+      {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={14} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
       <small className="composer-queue-count" title={first.error ?? undefined}>{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>
       <button type="button" className="composer-queue-send" aria-label="Send queued message now" disabled={busy || dispatching || running || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>
       <button type="button" className="composer-queue-remove" aria-label="Remove queued message" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></button>

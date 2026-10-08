@@ -444,7 +444,6 @@ export function AttachmentPreviewDialog({
           {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
             ? (
                 <div className="attachment-preview-unavailable" role="alert">
-                  <FileText size={28} aria-hidden="true" />
                   <strong>Preview unavailable</strong>
                   <span>
                     This file could not be previewed. It may use an unsupported format, have changed, or have been removed from storage.
@@ -454,7 +453,6 @@ export function AttachmentPreviewDialog({
             : previewKind === "file"
               ? (
                   <div className="attachment-preview-unavailable">
-                    <File size={28} aria-hidden="true" />
                     <strong>No preview for this file type</strong>
                     <span>The complete file is saved. The agent can read or search it with file tools.</span>
                   </div>

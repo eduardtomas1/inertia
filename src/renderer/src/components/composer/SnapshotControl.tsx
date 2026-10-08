@@ -33,7 +33,7 @@ export function SnapshotControl({ conversationId, disabled }: { conversationId: 
       if (event.key === "Escape") { event.stopPropagation(); setError(null); }
       else trapModalFocus(event, event.currentTarget);
     }}>
-      <header><h2 id="snapshot-title">Snapshots</h2><button ref={close} aria-label="Close Snapshots" onClick={() => setError(null)}><X size={18} /></button></header>
+      <header><h2 id="snapshot-title">Snapshots</h2><button ref={close} aria-label="Close Snapshots" onClick={() => setError(null)}><X size={16} /></button></header>
       <p role="alert" className="snapshot-alert">{error.split(/`([^`]+)`/u).map((part, index) => index % 2 ? <code key={index}>{part}</code> : part)}</p>
       <p className="snapshot-note">Capture options and access guidance are in Settings → Devices & integrations in the main window.</p>
     </section>

@@ -258,13 +258,13 @@ export function CompletionSoundSettings({
                     <li key={sound.file}>
                       <SoundName sound={sound} disabled={disabled} focusRequest={named === sound.file}
                         onRename={(name) => rename(sound.file, name)} />
-                      <IconButton label={`Preview ${sound.name}`} disabled={disabled} onClick={() => preview(sound.file)}><Play size={13} /></IconButton>
+                      <IconButton label={`Preview ${sound.name}`} disabled={disabled} onClick={() => preview(sound.file)}><Play size={14} /></IconButton>
                       <IconButton label={`Remove ${sound.name}`} disabled={disabled || importing}
                         ref={(node) => {
                           if (node) removeButtons.current.set(sound.file, node);
                           else removeButtons.current.delete(sound.file);
                         }}
-                        onClick={(event) => void removeSound(sound, document.activeElement === event.currentTarget)}><Trash2 size={13} /></IconButton>
+                        onClick={(event) => void removeSound(sound, document.activeElement === event.currentTarget)}><Trash2 size={14} /></IconButton>
                     </li>
                   ))}
                 </ul>

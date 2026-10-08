@@ -36,7 +36,7 @@ export function limitTone(remaining: number | null, stale: boolean): LimitTone {
   return remaining < 20 ? "critical" : remaining < 50 ? "low" : "ok";
 }
 function ProviderLogo({ providerId }: { providerId: string }): React.JSX.Element {
-  return <span className="limits-logo" aria-hidden="true"><ProviderBrandIcon providerId={providerId} decorative size={18} /></span>;
+  return <span className="limits-logo" aria-hidden="true"><ProviderBrandIcon providerId={providerId} decorative size={16} /></span>;
 }
 type Props = { request(command: CommandWithoutId): Promise<ServerEvent>; status: ConnectionStatus };
 type LimitCellValue = { key: string; label: string; value: number | null; resetsAt: string | null; stale: boolean; accounts: number };
@@ -314,7 +314,7 @@ export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void;
   if (!context) return null;
   return <div className="dialog-backdrop limits-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-label="Provider usage limits" className="limits-dialog" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } else trapModalFocus(event, event.currentTarget); }}>
-      <button type="button" className="limits-dialog-close" aria-label="Close provider limits" onClick={onClose}><X size={18} /></button>
+      <button type="button" className="limits-dialog-close" aria-label="Close provider limits" onClick={onClose}><X size={16} /></button>
       <UsageLimitsPanel request={context.request} status={context.status} />
     </section>
   </div>;

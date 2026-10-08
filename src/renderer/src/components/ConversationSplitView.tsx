@@ -179,12 +179,12 @@ export function ConversationSplitView({
             >
               {details.conversationId && (
                 <GripVertical
-                  size={12}
+                  size={14}
                   aria-hidden="true"
                   className="conversation-split-grip"
                 />
               )}
-              {details.project && <ProjectIcon project={details.project} size={12} />}
+              {details.project && <ProjectIcon project={details.project} size={14} />}
               <ProjectName project={details.project} title={details.projectName}>{details.projectName}</ProjectName>
               <strong title={details.title}>{details.title}</strong>
               <span className="conversation-split-actions">
@@ -221,7 +221,7 @@ export function ConversationSplitView({
                       : "Stack split chats"}
                     onClick={() => onLayoutChange(toggleSplitAxis(layout))}
                   >
-                    {stacked ? <Columns2 size={13} /> : <Rows2 size={13} />}
+                    {stacked ? <Columns2 size={14} /> : <Rows2 size={14} />}
                   </IconButton>
                 )}
                 {position > 0 && (
@@ -232,7 +232,7 @@ export function ConversationSplitView({
                       focusPaneComposer(details.owner);
                     }}
                   >
-                    <ArrowLeftRight size={13} />
+                    <ArrowLeftRight size={14} />
                   </IconButton>
                 )}
                 {details.owner !== "primary" && (

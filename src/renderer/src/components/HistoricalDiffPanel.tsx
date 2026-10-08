@@ -66,7 +66,7 @@ export function HistoricalDiffPanel({
     <section className="changes-panel historical-diff-panel" aria-label="Historical turn changes">
       <header className="panel-toolbar">
         <div className="panel-heading">
-          <GitCompareArrows size={17} aria-hidden="true" />
+          <GitCompareArrows size={16} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>{diff.title}</h2>
             <span>Historical snapshot · not current workspace state</span>
@@ -76,7 +76,7 @@ export function HistoricalDiffPanel({
           <span className="stat-additions">+{insertions}</span>
           <span className="stat-deletions">−{deletions}</span>
           <button type="button" className="subtle-button" onClick={onShowCurrentChanges}>
-            <RotateCcw size={13} />Current changes
+            <RotateCcw size={14} />Current changes
           </button>
         </div>
       </header>
@@ -89,7 +89,6 @@ export function HistoricalDiffPanel({
 
       {error ? (
         <div className="panel-empty changes-empty" role="alert">
-          <GitCompareArrows size={22} />
           <h3>Historical diff unavailable</h3>
           <p>{error}</p>
         </div>
@@ -97,7 +96,6 @@ export function HistoricalDiffPanel({
         <div className="panel-loading"><span>Parsing historical diff…</span></div>
       ) : diff.files.length === 0 ? (
         <div className="panel-empty changes-empty">
-          <GitCompareArrows size={22} />
           <h3>No files changed by this turn</h3>
           <p>The before and after snapshots are identical.</p>
         </div>
@@ -150,7 +148,7 @@ export function HistoricalDiffPanel({
                 <div className="diff-file-review-heading">
                   <div><strong>{selectedFile.path}</strong><span>Exact turn artifact</span></div>
                   <button type="button" className="subtle-button" onClick={() => onOpenFile(selectedFile.path)}>
-                    <ExternalLink size={12} />Open current file
+                    <ExternalLink size={14} />Open current file
                   </button>
                 </div>
                 <HistoricalFileDiff file={selectedFile} wrapLines={wrapLines} />

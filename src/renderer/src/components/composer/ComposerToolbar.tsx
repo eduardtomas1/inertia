@@ -1,11 +1,11 @@
 import { lazy, Suspense } from "react";
 import {
   ChevronDown,
-  Command,
   Folder,
   FolderGit2,
   MessagesSquare,
   Paperclip,
+  Play,
   Wrench,
 } from "lucide-react";
 import clsx from "clsx";
@@ -349,7 +349,7 @@ export function ComposerToolbar({
               aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
               title={selectedProvider.agentThreadManagement.detail}
             >
-              <MessagesSquare size={13} aria-hidden="true" />
+              <MessagesSquare size={14} aria-hidden="true" />
               <span>Chat tools</span>
             </span>
           )}
@@ -361,7 +361,7 @@ export function ComposerToolbar({
         >
         {attachmentImporting && (
           <span className="provider-status is-ready" role="status">
-            <LoadingMark size={13} aria-hidden="true" />
+            <LoadingMark size={14} aria-hidden="true" />
             <span>Adding attachments…</span>
           </span>
         )}
@@ -442,7 +442,7 @@ export function ComposerToolbar({
             >
               <Wrench size={14} />
               <span>Actions</span>
-              <ChevronDown size={12} />
+              <ChevronDown size={14} />
             </button>
             {menu === "action" && (
               <div
@@ -464,7 +464,7 @@ export function ComposerToolbar({
                       onRunAction(action);
                     }}
                   >
-                    <Command size={15} />
+                    <Play size={16} />
                     <span>
                       <strong>{action.label}</strong>
                       <small>{action.command}</small>
@@ -539,7 +539,7 @@ export function ComposerToolbar({
             <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
-              {scratchWorkspace ? <Folder size={12} aria-hidden="true" /> : <FolderGit2 size={12} aria-hidden="true" />}
+              {scratchWorkspace ? <Folder size={14} aria-hidden="true" /> : <FolderGit2 size={14} aria-hidden="true" />}
               <span>{scratchWorkspace ? "Chat folder" : conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}

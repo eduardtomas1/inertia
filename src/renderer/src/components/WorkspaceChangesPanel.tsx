@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
-  AlertTriangle,
-  Download,
+  CloudDownload,
+  CloudUpload,
   ExternalLink,
   FileCode2,
   FolderGit2,
@@ -10,7 +10,7 @@ import {
   GitCommitHorizontal,
   Info,
   RefreshCw,
-  Upload,
+  TriangleAlert,
 } from "lucide-react";
 
 import type {
@@ -658,7 +658,7 @@ export function WorkspaceChangesPanel({
         <span className="workspace-repository-scope-meta">
           {activeRepository.branch && (
             <span className="workspace-repository-scope-branch" title={activeRepository.branch}>
-              <GitBranch size={11} aria-hidden="true" />{activeRepository.branch}
+              <GitBranch size={14} aria-hidden="true" />{activeRepository.branch}
             </span>
           )}
           <span className="workspace-repository-scope-status">
@@ -677,7 +677,7 @@ export function WorkspaceChangesPanel({
               className="workspace-repository-scope-boundary"
               title="Review marks, notes, questions, prompt references, and selective revert stay with this nested repository. Agent summaries and revisions remain limited to the project-root checkout because recovery checkpoints cover that root."
             >
-              <Info size={11} aria-hidden="true" />Nested repo
+              <Info size={14} aria-hidden="true" />Nested repo
               <span className="sr-only">Review marks, local notes, questions, prompt references, and selective revert keep this repository identity. Agent summaries and revisions remain available only for the project-root repository because their recovery checkpoints cover that root.</span>
             </span>
           )}
@@ -699,11 +699,11 @@ export function WorkspaceChangesPanel({
                 : commitAction?.detail}
               onClick={prepareActiveCommit}
             >
-              <GitCommitHorizontal size={12} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
+              <GitCommitHorizontal size={14} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
             </button>
             <button type="button" disabled={!authorityRef || Boolean(busyAction) || !activeRepository.hasRemote} title="Refresh remote branches while preserving local changes" onClick={() => {
               void run("git.fetch", { type: "git.fetch", payload: { projectId, conversationId, repositoryPath: activeRepository.repositoryPath, authorityRef } }).then(onRefresh).catch(() => undefined);
-            }}><RefreshCw size={12} aria-hidden="true" /><span>Fetch</span></button>
+            }}><RefreshCw size={14} aria-hidden="true" /><span>Fetch</span></button>
             <button
               type="button"
               disabled={!authorityRef || (pullAction?.disabled ?? true)}
@@ -720,7 +720,7 @@ export function WorkspaceChangesPanel({
                 }).then(onRefresh).catch(() => undefined);
               }}
             >
-              <Download size={12} aria-hidden="true" /><span>{pullAction?.label ?? "Pull"}</span>
+              <CloudDownload size={14} aria-hidden="true" /><span>{pullAction?.label ?? "Pull"}</span>
             </button>
             <button
               type="button"
@@ -728,7 +728,7 @@ export function WorkspaceChangesPanel({
               title={!authorityRef ? "Refresh this repository before changing it." : pushAction?.detail}
               onClick={pushActiveRepository}
             >
-              <Upload size={12} aria-hidden="true" /><span>{pushAction?.label ?? "Push"}</span>
+              <CloudUpload size={14} aria-hidden="true" /><span>{pushAction?.label ?? "Push"}</span>
             </button>
             <Suspense fallback={null}>
               <PreMergeConfidenceLauncher
@@ -842,7 +842,7 @@ export function WorkspaceChangesPanel({
                     {...(openPath === null ? { title: "This file is outside the project folder." } : {})}
                     onClick={() => { if (openPath !== null) onOpenWorkspaceFile(openPath); }}
                   >
-                    <ExternalLink size={12} />
+                    <ExternalLink size={14} />
                   </IconButton>
                 </li>
               );
@@ -884,7 +884,7 @@ export function WorkspaceChangesPanel({
     <>
       {snapshot?.partial && (
         <div className="panel-notice workspace-repository-notice" role="status">
-          <AlertTriangle size={14} />
+          <TriangleAlert size={14} />
           <span>
             <strong>{snapshot.truncated ? "Repository discovery was bounded." : "Some repositories could not be read."}</strong>
             {snapshot.discoveredRepositories > snapshot.repositories.length
@@ -897,12 +897,12 @@ export function WorkspaceChangesPanel({
       )}
       {diffError && (
         <div className="panel-notice workspace-repository-notice is-error" role="alert">
-          <AlertTriangle size={14} /><span><strong>{diff ? "Diff could not be refreshed." : "Diff unavailable."}</strong> {diffError}</span>
+          <TriangleAlert size={14} /><span><strong>{diff ? "Diff could not be refreshed." : "Diff unavailable."}</strong> {diffError}</span>
         </div>
       )}
       {statusError && (
         <div className="panel-notice workspace-repository-notice is-error" role="alert">
-          <AlertTriangle size={14} /><span><strong>Git status could not be refreshed.</strong> {statusError}</span>
+          <TriangleAlert size={14} /><span><strong>Git status could not be refreshed.</strong> {statusError}</span>
           <button type="button" className="subtle-button" aria-disabled={loading || undefined} onClick={() => { if (!loading) onRefresh(); }}>Retry</button>
         </div>
       )}

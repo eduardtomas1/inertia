@@ -10,13 +10,13 @@
    the Usage and Settings icons at every size the app renders it. */
 .daily-work-mark > path {
   stroke: currentcolor;
-  stroke-width: 2;
+  stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 /* Matching the base rule's specificity so the dot keeps its heavier stroke:
-   `.daily-work-mark > path` would otherwise win and render it at width 2. */
+   `.daily-work-mark > path` would otherwise win and render it at the base width. */
 .daily-work-mark > .daily-work-mark-today {
   color: var(--daily-work-mark-highlight, var(--accent));
   stroke-width: 3.2;

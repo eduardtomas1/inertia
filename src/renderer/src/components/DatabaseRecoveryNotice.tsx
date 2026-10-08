@@ -1,4 +1,4 @@
-import { ArchiveRestore, Clipboard, ShieldAlert, X } from "lucide-react";
+import { ArchiveRestore, Copy, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
@@ -52,7 +52,7 @@ export function DatabaseRecoveryNotice({
       aria-label="Database recovery warning"
       role="alert"
     >
-      <ShieldAlert size={17} aria-hidden="true" />
+      <ShieldAlert size={16} aria-hidden="true" />
       <span>
         <strong>{createdEmpty
           ? "Inertia started with empty data"
@@ -64,7 +64,7 @@ export function DatabaseRecoveryNotice({
         disabled={busy !== null}
         onClick={() => { void run("import", onImportRecovery); }}
       >
-        <ArchiveRestore size={13} aria-hidden="true" />
+        <ArchiveRestore size={14} aria-hidden="true" />
         {busy === "import" ? "Importing…" : "Import recovery file"}
       </button>
       <button
@@ -72,7 +72,7 @@ export function DatabaseRecoveryNotice({
         disabled={busy !== null}
         onClick={() => { void run("report", onCopyReport); }}
       >
-        <Clipboard size={13} aria-hidden="true" />
+        <Copy size={14} aria-hidden="true" />
         {busy === "report" ? "Copying…" : "Copy report"}
       </button>
       <IconButton label="Dismiss database recovery warning" onClick={onDismiss}>

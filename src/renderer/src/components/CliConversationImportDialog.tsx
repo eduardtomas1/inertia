@@ -175,7 +175,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
           if (openId && event.key === "Enter" && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); runAction(); }
         }}>
         <div className="cli-import-search">
-          <Search size={17} aria-hidden="true" />
+          <Search size={16} aria-hidden="true" />
           <input ref={searchInput} aria-label="Search CLI conversations" placeholder="Search Codex and Claude Code conversations…" value={query} autoComplete="off"
             onChange={(event) => { setQuery(event.target.value); if (openId) back(false); }}
             onKeyDown={(event) => {
@@ -193,14 +193,14 @@ export function CliConversationImportDialog({ project, request, disabled = false
           </div>
           <IconButton label="Scan again" className={busy === "scan" ? "is-scanning" : undefined} aria-disabled={scanUnavailable}
             onClick={() => { if (!scanUnavailable) void refresh(); }}>
-            <RefreshCw size={15} aria-hidden="true" />
+            <RefreshCw size={14} aria-hidden="true" />
           </IconButton>
-          <IconButton label="Close CLI import" aria-disabled={busy === "import"} onClick={() => { if (!importing.current) onClose(); }}><X size={15} aria-hidden="true" /></IconButton>
+          <IconButton label="Close CLI import" aria-disabled={busy === "import"} onClick={() => { if (!importing.current) onClose(); }}><X size={14} aria-hidden="true" /></IconButton>
         </div>
         <div className="cli-import-body">
           {openId && openCandidate ? <div key={openId} className="cli-import-open" role="group" aria-labelledby={openTitleId}>
             <div className="cli-import-open-head">
-              <IconButton ref={backButton} label="Back to conversations" aria-disabled={busy === "import"} onClick={() => back()}><ArrowLeft size={15} aria-hidden="true" /></IconButton>
+              <IconButton ref={backButton} label="Back to conversations" aria-disabled={busy === "import"} onClick={() => back()}><ArrowLeft size={14} aria-hidden="true" /></IconButton>
               <h2 id={openTitleId}>{openCandidate.title}</h2>
             </div>
             <div className="cli-import-open-scroll">

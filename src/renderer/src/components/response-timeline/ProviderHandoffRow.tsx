@@ -26,16 +26,16 @@ export function ProviderHandoffRow({
       <div className="context-compaction-separator provider-handoff-separator" role="separator" aria-label={text.label}>
         <span aria-hidden="true" />
         <small className="context-compaction-marker provider-handoff-marker" aria-hidden="true">
-          <ArrowLeftRight size={13} />
+          <ArrowLeftRight size={14} />
           <strong>{PROVIDER_HANDOFF_TITLE}</strong>
           <i>·</i>
           <span className="provider-handoff-route">
-            <ProviderBrandIcon providerId={handoff.from.providerId} decorative size={12} />
+            <ProviderBrandIcon providerId={handoff.from.providerId} decorative size={14} />
             <span>{text.from}</span>
           </span>
-          <ArrowRight size={12} />
+          <ArrowRight size={14} />
           <span className="provider-handoff-route">
-            <ProviderBrandIcon providerId={handoff.to.providerId} decorative size={12} />
+            <ProviderBrandIcon providerId={handoff.to.providerId} decorative size={14} />
             <span>{text.to}</span>
           </span>
           {text.detail && <i>·</i>}

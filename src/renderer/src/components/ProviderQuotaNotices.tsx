@@ -44,7 +44,7 @@ export function ProviderQuotaNotices({
             data-provider-id={notice.providerId}
             data-quota-window={notice.windowLabel}
           >
-            <Gauge size={15} aria-hidden="true" />
+            <Gauge size={14} aria-hidden="true" />
             <span>
               <strong>
                 {notice.providerLabel} {notice.windowLabel} limit

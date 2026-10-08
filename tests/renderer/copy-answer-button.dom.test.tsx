@@ -89,7 +89,7 @@ describe("final answer copy feedback", () => {
         if (/display:\s*none/u.test(body!)) hidden.push(selectors!.trim());
       }
     }
-    const view = render(<CopyAnswerButton content="Narrow answer" />);
+    const view = render(<CopyAnswerButton content="Narrow answer" answerId="answer-1" />);
     const copy = screen.getByRole("button", { name: "Copy answer" });
     const icon = copy.querySelector(".inertia-morph-icon")!;
     const label = [...copy.children].find((child) => child.textContent === "Copy")!;

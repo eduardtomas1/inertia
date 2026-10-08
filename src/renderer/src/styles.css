@@ -5079,16 +5079,14 @@ button.turn-agents-line:focus-visible {
   justify-content: center;
   gap: 7px;
   padding: 3px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
+  background: transparent;
 }
 
 .usage-popover-trigger:hover,
 .usage-popover-trigger.is-open {
-  border-color: var(--line-strong);
   color: var(--text);
   background: var(--fill);
 }
@@ -7272,7 +7270,7 @@ button.turn-agents-line:focus-visible {
   white-space: nowrap;
 }
 .diff-selection-help { margin: 0; padding: 5px 10px; border-bottom: 1px solid var(--line); color: var(--text-muted); background: var(--surface); font: var(--text-xs)/var(--leading-chrome) var(--font-sans); }
-.diff-review-toolbar { display: flex; min-height: 34px; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--line); color: var(--text-muted); background: var(--fill); font-size: var(--text-xs); }
+.diff-review-toolbar { display: flex; min-height: 34px; flex-wrap: wrap; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--line); color: var(--text-muted); background: var(--fill); font-size: var(--text-xs); }
 .diff-review-toolbar progress { width: min(120px, 20vw); height: 5px; accent-color: var(--accent); }
 .diff-review-toolbar select { min-height: 27px; margin-left: auto; padding: 0 22px 0 7px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text-muted); background: var(--surface); font-size: var(--text-xs); }
 .diff-review-toolbar .icon-button { width: 27px; height: 27px; }

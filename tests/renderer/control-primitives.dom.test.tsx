@@ -263,3 +263,26 @@ describe("loading primitives", () => {
     expect(css).toMatch(/animation: turn-thinking-sweep 2200ms/u);
   });
 });
+
+describe("toast primitives", () => {
+  it("puts toasts and notices on the neutral raised surface and colours only the icon", () => {
+    render(
+      <div>
+        <div className="error-toast" data-testid="error"><svg /><span>Failed</span></div>
+        <div className="provider-quota-notice is-5" data-testid="quota"><svg /><span>Low</span></div>
+        <div className="database-recovery-notice is-critical" data-testid="recovery"><svg /><span>Recovered</span></div>
+      </div>,
+    );
+    const root = getComputedStyle(document.documentElement);
+    for (const id of ["error", "quota", "recovery"]) {
+      const style = getComputedStyle(screen.getByTestId(id));
+      expect(style.borderRadius, id).toBe("10px");
+      expect(style.fontSize, id).toBe("13px");
+      expect(style.color, id).toBe(root.getPropertyValue("--text").trim());
+    }
+    expect(getComputedStyle(screen.getByTestId("error").querySelector("svg")!).color)
+      .toBe(root.getPropertyValue("--danger").trim());
+    expect(css).toMatch(/^:where\(\.database-recovery-notice, \.error-toast, \.provider-quota-notice\) \{\n  border: 1px solid var\(--line-soft\);\n  border-radius: var\(--radius-sm\);\n  color: var\(--text\);\n  background: var\(--surface-raised\);\n  box-shadow: var\(--shadow-float\);/mu);
+    expect(css).not.toMatch(/\.provider-quota-notice\.is-5 \{|\.database-recovery-notice\.is-critical \{/u);
+  });
+});

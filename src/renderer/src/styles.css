@@ -9079,18 +9079,9 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   display: grid;
   width: min(620px, calc(100vw - 44px));
   align-items: center;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
+  gap: 8px;
+  padding: 8px;
   grid-template-columns: 19px minmax(0, 1fr) auto auto 28px;
-}
-
-.database-recovery-notice.is-critical {
-  border-color: var(--line-strong);
 }
 
 .database-recovery-notice > svg {
@@ -9119,20 +9110,20 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .database-recovery-notice > button:not(.icon-button) {
   display: inline-flex;
-  min-height: 30px;
+  min-height: var(--control-height-small);
   align-items: center;
-  gap: 5px;
-  padding: 0 9px;
+  gap: 6px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--fill);
-  font-size: var(--text-xs);
-  font-weight: 600;
+  background: transparent;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
-.database-recovery-notice > button:disabled {
-  opacity: var(--disabled-opacity);
+.database-recovery-notice > button:not(.icon-button):hover:not(:disabled) {
+  background: var(--fill);
 }
 
 .status-overlay-stack {
@@ -9168,24 +9159,14 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   display: grid;
   min-height: 46px;
   align-items: center;
-  gap: 9px;
-  padding: 7px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--fill);
-  box-shadow: var(--shadow-float);
+  gap: 8px;
+  padding: 8px;
   grid-template-columns: 17px minmax(0, 1fr) 28px;
   animation: quota-notice-enter var(--dur-fast) var(--ease) both;
 }
 
 .provider-quota-notice > svg {
   color: var(--warning);
-}
-
-.provider-quota-notice.is-5 {
-  border-color: var(--line-strong);
-  background: var(--fill);
 }
 
 .provider-quota-notice.is-5 > svg {
@@ -9235,14 +9216,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: min(390px, calc(100vw - 44px));
   min-height: 46px;
   align-items: center;
-  gap: 9px;
-  padding: 7px 7px 7px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--fill);
-  box-shadow: var(--shadow-float);
-  font-size: var(--text-xs);
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
 }
 
 .status-overlay-stack > .error-toast {
@@ -9268,6 +9243,15 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .error-toast > svg {
   flex: 0 0 auto;
   color: var(--danger);
+}
+
+:where(.database-recovery-notice, .error-toast, .provider-quota-notice) {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  font-size: var(--text-sm);
 }
 
 .error-toast > span {

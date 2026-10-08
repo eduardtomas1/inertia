@@ -140,6 +140,7 @@ export interface AssembleTurnRequestInput {
   documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
+  carriedConversationContexts?: readonly MaterializedConversationContext[];
   internalInstructions?: readonly HiddenProviderInstruction[];
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
 }
@@ -738,6 +739,43 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     );
   }
 
+  const fitAppended = (appended: typeof providerContexts) => {
+    const candidate = buildPrompt([...providerContexts, ...appended]);
+    const candidateBytes = byteLength(candidate) + imageReferenceBytes;
+    return providerContexts.length + appended.length <= MAX_EXECUTION_CONTEXT_REFERENCES
+      && executionSegmentCount + appended.length <= MAX_EXECUTION_MESSAGE_SEGMENTS
+      && candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES
+      ? { candidate, candidateBytes }
+      : null;
+  };
+  const append = (
+    appended: typeof providerContexts,
+    fit: { candidate: string; candidateBytes: number },
+  ) => {
+    providerContexts.push(...appended);
+    executionPrompt = fit.candidate;
+    assembledPayloadBytes = fit.candidateBytes;
+    executionSegmentCount += appended.length;
+  };
+
+  const carriedPackets = [...new Set((input.carriedConversationContexts ?? []).map(({ packetId }) => packetId))];
+  let carried: typeof providerContexts = [];
+  let carriedFit: ReturnType<typeof fitAppended> = null;
+  for (const packetId of carriedPackets.reverse()) {
+    const candidate = [
+      ...materializeConversationContexts(
+        input.carriedConversationContexts!.filter((block) => block.packetId === packetId),
+      ).map(providerContext),
+      ...carried,
+    ];
+    const fit = fitAppended(candidate);
+    if (fit) {
+      carried = candidate;
+      carriedFit = fit;
+    }
+  }
+  if (carriedFit) append(carried, carriedFit);
+
   let sessionRecovery: TurnSessionRecovery | null = null;
   if (input.restoredHistory) {
     const history = input.restoredHistory(Math.min(
@@ -754,27 +792,17 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
           content: boundedText(block.content, "Restored history", MAX_EXECUTION_CONTEXT_BLOB_BYTES),
           truncated: history.omittedMessageCount > 0,
         }));
-        const candidate = buildPrompt([...providerContexts, ...restored]);
-        const candidateBytes = byteLength(candidate) + imageReferenceBytes;
-        return providerContexts.length + restored.length <= MAX_EXECUTION_CONTEXT_REFERENCES
-          && executionSegmentCount + restored.length <= MAX_EXECUTION_MESSAGE_SEGMENTS
-          && candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES
-          ? { restored, candidate, candidateBytes }
-          : null;
+        const fit = fitAppended(restored);
+        return fit ? { restored, fit } : null;
       };
       // Optional supplements never cost the restored messages their place.
       const required = history.blocks.filter(({ optional }) => !optional);
-      const selected = required.length === 0
+      const selected = required.length === 0 && history.messageCount === 0
         ? null
         : fitRestored(history.blocks)
           ?? (required.length < history.blocks.length ? fitRestored(required) : null);
       const fits = selected !== null;
-      if (selected) {
-        providerContexts.push(...selected.restored);
-        executionPrompt = selected.candidate;
-        assembledPayloadBytes = selected.candidateBytes;
-        executionSegmentCount += selected.restored.length;
-      }
+      if (selected) append(selected.restored, selected.fit);
       sessionRecovery = {
         ...(fits
           ? {

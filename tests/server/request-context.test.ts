@@ -580,6 +580,34 @@ describe("restored history respects the selected request's capacity", () => {
     }).persistence.manifest.contextReferenceCount).toBe(0);
   });
 
+  it("adds an earlier reference's sent copy only in the room the request leaves, newest first", async () => {
+    const cwd = await workspace();
+    const block = (packetId: string, size: number) => ({
+      packetId, label: `Chat context · ${packetId.slice(0, 4)} · 1 message`,
+      content: JSON.stringify({ text: "r".repeat(size) }), blockIndex: 0, blockCount: 1,
+    });
+    const older = block("11111111-1111-4111-8111-111111111111", 1_000);
+    const newer = block("22222222-2222-4222-8222-222222222222", 60_000);
+    const labels = (request: AssembleTurnRequestInput) => assembleTurnRequest(request)
+      .persistence.manifest.references.map(({ label }) => label);
+
+    expect(labels({ cwd, visibleContent: "Try again.", carriedConversationContexts: [older, newer] }))
+      .toEqual([older.label, newer.label]);
+    const crowded = (roomBytes: number): AssembleTurnRequestInput => {
+      const request: AssembleTurnRequestInput = {
+        cwd, visibleContent: "x",
+        context: {
+          terminalContexts: Array.from({ length: 3 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "y".repeat(60_000) })),
+        },
+      };
+      const used = assembleTurnRequest(request).persistence.manifest.assembledPayloadBytes;
+      return { ...request, visibleContent: "x".repeat(1 + MAX_EXECUTION_PAYLOAD_BYTES - used - roomBytes) };
+    };
+    expect(labels({ ...crowded(30_000), carriedConversationContexts: [older, newer] }))
+      .toEqual([...labels(crowded(30_000)), older.label]);
+    expect(labels({ ...crowded(500), carriedConversationContexts: [older, newer] })).toEqual(labels(crowded(500)));
+  });
+
   it("offers only the capacity left beside a large selected request", async () => {
     const cwd = await workspace();
     const capacities: number[] = [];

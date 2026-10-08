@@ -1,6 +1,5 @@
 import type Database from "better-sqlite3";
 
-import type { ContinuationHistoryBlock } from "./continuation-history";
 import { continuationRouteTurnSql, type ContinuationRouteFilter } from "./conversation-context-source";
 import { byteLength } from "./bounded-message-text";
 import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
@@ -14,6 +13,12 @@ const MAX_PROVIDER_HANDOFF_ARTIFACTS = 100;
 const PROVIDER_HANDOFF_BLOCK_OVERHEAD_BYTES = 512;
 const PROVIDER_HANDOFF_FILES_ABOUT =
   "Files this chat's earlier turns changed, from the local Git records; paths only, no contents.";
+
+interface ProviderHandoffBlock {
+  label: string;
+  content: string;
+  optional?: true;
+}
 
 interface ProviderHandoffFile {
   path: string;
@@ -83,7 +88,7 @@ export function providerHandoffFilesBlock(
   database: Database.Database,
   conversationId: string,
   route: ContinuationRouteFilter,
-): ContinuationHistoryBlock | null {
+): ProviderHandoffBlock | null {
   const files = changedFilesNewestFirst(database, conversationId, route);
   if (files.length === 0) return null;
   const included: ProviderHandoffFile[] = [];
@@ -103,7 +108,7 @@ export function providerHandoffFilesBlock(
 }
 
 /** Prompt bytes the block needs in the room the restored messages leave. */
-export function providerHandoffBlockBytes(block: ContinuationHistoryBlock): number {
+export function providerHandoffBlockBytes(block: ProviderHandoffBlock): number {
   return byteLength(JSON.stringify(block.content))
     + byteLength(block.label)
     + PROVIDER_HANDOFF_BLOCK_OVERHEAD_BYTES;

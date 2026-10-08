@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conversation-context-transport";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
+import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
 import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { resolveNativeModelRoute } from "./model-route-fixture";
@@ -338,7 +338,7 @@ describe("provider session continuity", () => {
     const prompt = resolved.adopt(queued).active.providerInput.prompt;
     expect(prompt.split("The export must preserve accented names.")).toHaveLength(2);
     expect(f.restoredReferences(queued.turn.id)).toEqual([]);
-    expect(queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 0, omittedMessageCount: 0 });
+    expect(queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
   });
 
   it("prepares a fresh-session request that replaces a rejected resume inside the same turn", async () => {
@@ -376,6 +376,84 @@ describe("provider session continuity", () => {
       sessionRecovery: fresh.sessionRecovery,
       restartedAt: capturedAt,
     })).toThrow("can no longer restart on a fresh provider session");
+  });
+
+  it("keeps an earlier reference when a rejected resume restarts on a fresh session", async () => {
+    const f = await fixture();
+    const source = f.store.createConversation(f.conversation.projectId, "Export encoding", {
+      modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }),
+      activate: false,
+    });
+    f.store.createMessage(source.id, "REFERENCE_SENTINEL: the writer opened latin1.", "assistant");
+    const packet = f.store.contextPackets.create({
+      sourceConversationId: source.id, targetConversationId: f.conversation.id, acknowledgedWorkspaceDifference: false,
+    });
+    f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: f.previous });
+    const first = f.resolve(f.store, {
+      content: "Port the encoding fix.",
+      context: { conversationContextPacketIds: [packet.id] },
+      contextRequestId: "11111111-1111-4111-8111-111111111111",
+    });
+    const used = f.store.beginAgentTurn(first.input);
+    expect(first.adopt(used).active.providerInput.prompt).toContain("REFERENCE_SENTINEL");
+    f.store.createMessage(f.conversation.id, "Ported the writer change.", "assistant", [], used.turn.id);
+    f.store.settleAgentTurn(used.turn.id, {
+      status: "completed", terminalReason: "provider-completed", providerSessionAfter: "before-update",
+      startedAt: used.turn.requestedAt, completedAt: used.turn.requestedAt, updatedAt: used.turn.requestedAt,
+    });
+    f.store.updateConversation(f.conversation.id, { continuationIdentity: used.turn.continuationIdentity });
+
+    const resolved = f.resolve(f.store, { content: "Also add the opt-in BOM." });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const active = resolved.adopt(queued).active;
+    expect(active.providerInput.sessionId).toBe("before-update");
+    expect(active.providerInput.prompt).not.toContain("REFERENCE_SENTINEL");
+    const fresh = active.freshSessionRequest!(queued.message.id);
+    expect(fresh.sessionRecovery).toEqual({ restoredMessageCount: 4, omittedMessageCount: 0 });
+    expect(fresh.executionPrompt).toContain("REFERENCE_SENTINEL");
+    expect(fresh.executionPrompt).toContain("[referenced chat: Export encoding]");
+  });
+
+  it.each([false, true])("carries a reference whose turn failed before the provider ran (saved session: %s)", async (saved) => {
+    const f = await fixture();
+    const source = f.store.createConversation(f.conversation.projectId, "Export encoding", {
+      modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }),
+      activate: false,
+    });
+    f.store.createMessage(source.id, "REFERENCE_SENTINEL: the writer opened latin1.", "assistant");
+    if (saved) f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: f.previous });
+    const packet = f.store.contextPackets.create({
+      sourceConversationId: source.id, targetConversationId: f.conversation.id, acknowledgedWorkspaceDifference: false,
+    });
+    const first = f.resolve(f.store, {
+      content: "Port the encoding fix.",
+      context: { conversationContextPacketIds: [packet.id] },
+      contextRequestId: "11111111-1111-4111-8111-111111111111",
+    });
+    const failed = f.store.beginAgentTurn(first.input);
+    first.adopt(failed);
+    f.store.settleAgentTurn(failed.turn.id, {
+      status: "failed", terminalReason: "turn-start-failed", providerSessionAfter: failed.turn.providerSessionBefore,
+      startedAt: failed.turn.requestedAt, completedAt: failed.turn.requestedAt, updatedAt: failed.turn.requestedAt,
+    });
+
+    const resolved = f.resolve(f.store, { content: "Try again please." });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const input = resolved.adopt(queued).active.providerInput;
+    expect(input.sessionId).toBe(saved ? "before-update" : undefined);
+    expect(input.prompt).toContain("REFERENCE_SENTINEL");
+    expect(f.store.turnExecutionManifest(queued.turn.id)?.references.map(({ label }) => label))
+      .toContain("Chat context · Export encoding · 1 message");
+
+    f.store.createMessage(f.conversation.id, "Ported it.", "assistant", [], queued.turn.id);
+    f.store.settleAgentTurn(queued.turn.id, {
+      status: "completed", terminalReason: "provider-completed", providerSessionAfter: "after-retry",
+      startedAt: queued.turn.requestedAt, completedAt: queued.turn.requestedAt, updatedAt: queued.turn.requestedAt,
+    });
+    f.store.updateConversation(f.conversation.id, { providerSessionId: "after-retry", continuationIdentity: queued.turn.continuationIdentity });
+    const next = f.resolve(f.store, { content: "Now add the BOM." });
+    const nextQueued = f.store.beginAgentTurn(next.input);
+    expect(next.adopt(nextQueued).active.providerInput.prompt).not.toContain("REFERENCE_SENTINEL");
   });
 
   it("refuses to restart a settled turn or one whose session already changed", async () => {
@@ -561,7 +639,7 @@ describe("restored chat history", () => {
   it.each([false, true])("drops partial credentials at the byte boundary before redaction (streamed: %s)", async (streamed) => {
     const f = await fixture();
     const prefix = "OPENAI_API_KEY=synthetic-credential ".repeat(100);
-    const body = prefix + " ".repeat(16_381 - prefix.length) + "sk-" + "Q".repeat(50);
+    const body = prefix + " ".repeat(2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 3 - prefix.length) + "sk-" + "Q".repeat(50);
     const message = f.store.createMessage(f.conversation.id, streamed ? "" : body, "assistant");
     if (streamed) f.store.appendMessageContent(message.id, body);
     const content = f.history()!.blocks.map((block) => block.content).join("\n");

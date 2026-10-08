@@ -93,6 +93,7 @@ On this branch, on Linux x64:
 | `npx vitest run` | 1, then 0 | 13,070 of 13,071 tests passed while E2E specs ran on the same host; the failing `inertia-connection.dom.test.tsx` reconnect test passed 18 of 18 on its own, as it did when it flaked under load on 2026-10-06. |
 | `playwright test app-shell html-render conversation-continuation` | 0 | On Electron 44.7.0. One app-shell launch first failed with `spawn ETXTBSY` while the unit suite ran, then passed 4 of 4 on its own. |
 | `npm audit --omit=dev`, `npm audit` | 0 | 0 vulnerabilities. |
+| `npx vitest run` on the final head (with the Claude fix) | 0 | 1,172 files and 13,074 tests pass; 8 files and 99 tests are skipped by platform. |
 
 ## Main's CI on `e5c28844`
 

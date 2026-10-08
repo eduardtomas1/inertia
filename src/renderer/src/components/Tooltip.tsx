@@ -105,7 +105,9 @@ export function useTooltip<T extends HTMLElement>(
       },
       onKeyDown: (event) => {
         handlers.onKeyDown?.(event);
-        if (event.key === "Escape" && openRef.current) close();
+        if (event.key !== "Escape" || !openRef.current) return;
+        event.stopPropagation();
+        close();
       },
     },
   };

@@ -435,7 +435,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(dailyWorkDestination).toBeVisible();
   await dailyWorkDestination.click();
   await expect(dailyWorkDialog).toBeVisible();
-  await expect(headerMark).toBeVisible();
+  await expect(dailyWorkDialog.getByRole("region", {
+    name: "Daily work totals",
+  })).toBeVisible();
   const dailyWorkDarkPath = testInfo.outputPath(
     "daily-work-day-ledger-mark-dark.png",
   );

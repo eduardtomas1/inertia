@@ -552,7 +552,8 @@ describe("turn Git artifacts", () => {
     writeFileSync(join(runtime.repository, "tracked.txt"), "before\nedited\n");
     const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
 
-    const result = await manager.captureBefore({ turn, checkpointId: null, turnCheckpoint: true });
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
 
     const checkpoints = runtime.store.conversationDetail(conversationId)!.checkpoints;
     const created = checkpoints.find(({ id }) => id !== earlier.id)!;
@@ -586,7 +587,8 @@ describe("turn Git artifacts", () => {
       `refs/inertia/checkpoints/${runtime.conversationId}/`,
     ]).split("\n").filter(Boolean);
 
-    const result = await manager.captureBefore({ turn, checkpointId: null, turnCheckpoint: true });
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
 
     const artifact = runtime.store.turnGitArtifactStorage(turn.id);
     expect(result).toEqual({ checkpointId: null, failure: "Git could not create the checkpoint." });
@@ -602,7 +604,8 @@ describe("turn Git artifacts", () => {
     const turn = beginTurn(runtime.store, runtime.conversationId, "turn-checkpoint-failure");
     const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
 
-    const result = await manager.captureBefore({ turn, checkpointId: null, turnCheckpoint: true });
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
 
     expect(result).toEqual({ checkpointId: null, failure: "Git could not create the checkpoint." });
     expect(runtime.store.conversationDetail(runtime.conversationId)!.checkpoints).toEqual([]);
@@ -622,7 +625,8 @@ describe("turn Git artifacts", () => {
     const turn = beginTurn(store, conversation.id, "turn-plain-folder");
     const manager = new TurnGitArtifactManager(store, data);
 
-    const result = await manager.captureBefore({ turn, checkpointId: null, turnCheckpoint: true });
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
 
     expect(result).toEqual({ checkpointId: null, failure: null });
     expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([]);

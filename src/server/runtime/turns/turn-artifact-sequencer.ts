@@ -22,20 +22,21 @@ export class TurnArtifactSequencer {
 
   captureBefore(active: ActiveTurn): Promise<void> | null {
     try {
-      const capture = () => this.options.hooks.captureGitBefore?.({
+      const turnCheckpoint = this.createTurnCheckpoint(active);
+      const captureGitBefore = () => this.options.hooks.captureGitBefore?.({
         turn: active.turn,
         checkpointId: active.checkpointId,
         terminalAssistantMessageId: null,
-        ...(active.turnCheckpoint ? { turnCheckpoint: true } : {}),
       });
+      const capture = () => turnCheckpoint
+        ? turnCheckpoint.then(captureGitBefore)
+        : captureGitBefore();
       const priorArtifact = this.options.barriers.get(active.conversation.id);
       const value = priorArtifact
         ? priorArtifact.catch(() => undefined).then(capture)
         : capture();
       if (value && typeof (value as Promise<void>).then === "function") {
-        return Promise.resolve(value)
-          .then((checkpoint) => this.applyTurnCheckpoint(active, checkpoint))
-          .catch(() => undefined);
+        return Promise.resolve(value).catch(() => undefined);
       }
       return null;
     } catch {
@@ -43,11 +44,19 @@ export class TurnArtifactSequencer {
     }
   }
 
+  private createTurnCheckpoint(active: ActiveTurn): Promise<void> | null {
+    if (!active.turnCheckpoint || active.checkpointId) return null;
+    const created = this.options.hooks.createTurnCheckpoint?.(active.turn);
+    if (!created) return null;
+    return created
+      .then((checkpoint) => this.applyTurnCheckpoint(active, checkpoint))
+      .catch(() => undefined);
+  }
+
   private applyTurnCheckpoint(
     active: ActiveTurn,
-    checkpoint: TurnCheckpointCapture | null | void,
+    checkpoint: TurnCheckpointCapture,
   ): void {
-    if (!checkpoint) return;
     active.checkpointId = checkpoint.checkpointId;
     active.checkpointFailure = checkpoint.failure;
     if (checkpoint.checkpointId) {

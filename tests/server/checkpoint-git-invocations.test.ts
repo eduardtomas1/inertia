@@ -149,8 +149,9 @@ describe("checkpoint Git invocations", () => {
       gitEvents.splice(0);
       gitCalls.splice(0);
 
-      const result = await new TurnGitArtifactManager(store, indexes)
-        .captureBefore({ turn, checkpointId: null, turnCheckpoint: true });
+      const manager = new TurnGitArtifactManager(store, indexes);
+      const result = await manager.createTurnCheckpoint(turn);
+      await manager.captureBefore({ turn, checkpointId: result.checkpointId });
 
       expect(await checkpointWritten).toBe(true);
       const statusStart = gitEvents.findIndex((event) => event.startsWith("start:status"));
@@ -160,9 +161,9 @@ describe("checkpoint Git invocations", () => {
       expect(statusStart).toBeLessThan(checkpointRef);
       expect(checkpointRef).toBeLessThan(statusEnd);
       expect(gitCalls.map(subcommand)).not.toContain("remote");
-      expect(result?.failure).toBeNull();
+      expect(result.failure).toBeNull();
       expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([
-        expect.objectContaining({ id: result?.checkpointId, filesChanged: 1, insertions: 1, deletions: 1 }),
+        expect.objectContaining({ id: result.checkpointId, filesChanged: 1, insertions: 1, deletions: 1 }),
       ]);
     } finally {
       store.close();
@@ -178,8 +179,9 @@ describe("checkpoint Git invocations", () => {
         ? Promise.reject(new GitError("operation-failed", "Unable to read the repository status."))
         : null;
 
-      const result = await new TurnGitArtifactManager(store, indexes)
-        .captureBefore({ turn, checkpointId: null, turnCheckpoint: true });
+      const manager = new TurnGitArtifactManager(store, indexes);
+      const result = await manager.createTurnCheckpoint(turn);
+      await manager.captureBefore({ turn, checkpointId: result.checkpointId });
 
       expect(result).toEqual({ checkpointId: null, failure: "Unable to read the repository status." });
       expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([]);

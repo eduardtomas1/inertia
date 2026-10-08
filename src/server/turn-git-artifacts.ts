@@ -51,7 +51,6 @@ export interface CaptureTurnGitArtifactInput {
   turn: AgentTurn;
   checkpointId: string | null;
   terminalAssistantMessageId?: string | null;
-  turnCheckpoint?: boolean;
 }
 
 export interface TurnCheckpointCapture {
@@ -197,31 +196,33 @@ export class TurnGitArtifactManager {
     };
   }
 
-  async captureBefore(
-    input: CaptureTurnGitArtifactInput,
-  ): Promise<TurnCheckpointCapture | null> {
-    if (this.store.turnGitArtifact(input.turn.id)) return null;
-    let operation = this.#operationOptions(this.#preCaptureTimeoutMs);
+  async createTurnCheckpoint(turn: AgentTurn): Promise<TurnCheckpointCapture> {
+    try {
+      const repositoryPath = this.store.conversationPath(turn.conversationId);
+      if (!await mayBeInsideGitRepository(
+        repositoryPath,
+        this.#operationOptions(this.#preCaptureTimeoutMs),
+      )) return { checkpointId: null, failure: null };
+      return {
+        checkpointId: await this.#createTurnCheckpoint(turn, repositoryPath),
+        failure: null,
+      };
+    } catch (error) {
+      if (isExpectedCheckpointAbsence(error)) return { checkpointId: null, failure: null };
+      this.#recordCleanupFailure(error);
+      return { checkpointId: null, failure: checkpointFailureReason(error) };
+    }
+  }
+
+  async captureBefore(input: CaptureTurnGitArtifactInput): Promise<void> {
+    if (this.store.turnGitArtifact(input.turn.id)) return;
+    const operation = this.#operationOptions(this.#preCaptureTimeoutMs);
     const repositoryPath = this.store.conversationPath(input.turn.conversationId);
     let checkpointId = input.checkpointId;
     let beforeRef: string | null = null;
-    const turnCheckpoint: TurnCheckpointCapture | null = input.turnCheckpoint && !checkpointId
-      ? { checkpointId: null, failure: null }
-      : null;
     try {
       if (!checkpointId && !await mayBeInsideGitRepository(repositoryPath, operation)) {
         throw new GitError("not-repository", "This workspace is not a Git repository.");
-      }
-      if (turnCheckpoint) {
-        try {
-          checkpointId = await this.#createTurnCheckpoint(input.turn, repositoryPath);
-          turnCheckpoint.checkpointId = checkpointId;
-        } catch (error) {
-          if (isExpectedCheckpointAbsence(error)) throw error;
-          this.#recordCleanupFailure(error);
-          turnCheckpoint.failure = checkpointFailureReason(error);
-        }
-        operation = this.#operationOptions(this.#preCaptureTimeoutMs);
       }
       if (checkpointId) {
         const checkpoint = this.store.checkpoint(checkpointId);
@@ -270,7 +271,6 @@ export class TurnGitArtifactManager {
         });
       }
     }
-    return turnCheckpoint;
   }
 
   async #createTurnCheckpoint(

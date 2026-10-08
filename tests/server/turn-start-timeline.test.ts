@@ -59,6 +59,7 @@ async function fixture() {
   let artifacts: TurnGitArtifactManager | undefined;
   const events: ServerEvent[] = [];
   const runtime = await createTurnControllerTestRuntime({
+    createTurnCheckpoint: (turn) => artifacts!.createTurnCheckpoint(turn),
     captureGitBefore: (input) => artifacts!.captureBefore(input),
   });
   artifacts = new TurnGitArtifactManager(runtime.store, runtime.directory);

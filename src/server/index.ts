@@ -624,10 +624,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           providerSessionId,
         );
       },
+      createTurnCheckpoint: (turn) => turnGitArtifacts.createTurnCheckpoint(turn),
       captureGitBefore: async (input) => {
-        const checkpoint = await turnGitArtifacts.captureBefore(input);
+        await turnGitArtifacts.captureBefore(input);
         broadcastSnapshot();
-        return checkpoint;
       },
       captureGitArtifacts: (input) => turnGitArtifacts.finalize(input),
       releaseTurnAttachments: ({ attachmentIds }) =>

@@ -125,7 +125,6 @@ export interface TurnGitArtifactHookInput {
   turn: AgentTurn;
   checkpointId: string | null;
   terminalAssistantMessageId: string | null;
-  turnCheckpoint?: boolean;
 }
 
 export interface TurnMetadataRefreshHookInput {
@@ -172,9 +171,8 @@ export interface TurnControllerHooks {
     kind: "assistant" | "reasoning";
     recordId: string;
   }): void;
-  captureGitBefore?(
-    input: TurnGitArtifactHookInput,
-  ): void | Promise<TurnCheckpointCapture | null | void>;
+  createTurnCheckpoint?(turn: AgentTurn): Promise<TurnCheckpointCapture>;
+  captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
   /** Optional metadata; failure cannot change a committed provider outcome. */
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;

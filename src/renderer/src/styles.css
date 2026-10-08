@@ -12308,8 +12308,8 @@ button.sent-attachment-open:focus-visible {
     padding-left: 18px;
   }
 
-  .response-code-block > header button span,
-  .turn-action span {
+  .response-code-block > header button span:not(.inertia-morph-icon),
+  .turn-action > span:not(.inertia-morph-icon) {
     display: none;
   }
 }
@@ -13169,7 +13169,8 @@ button.sent-attachment-open:focus-visible {
     padding-left: 6px;
   }
 
-  .model-chooser-anchor .selected-model-chip-chevron {
+  .model-chooser-anchor .selected-model-chip-chevron,
+  .model-chooser-anchor .selected-model-chip-glyph + .selected-model-chip-label {
     display: none;
   }
 

@@ -462,6 +462,11 @@ function conversationContextPacketSummary(value: unknown): value is UnknownRecor
     && integerField(value, "messageCount") && (value.messageCount as number) >= 1 && (value.messageCount as number) <= MAX_CONVERSATION_CONTEXT_MESSAGES
     && integerField(value, "characterCount") && (value.characterCount as number) >= 1 && (value.characterCount as number) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES && integerField(value, "droppedMessageCount") && (value.droppedMessageCount as number) >= 0;
 }
+function agentContextReadSummary(value: unknown): boolean {
+  return recordWithStrings(value, "targetMessageId", "targetTurnId", "sourceConversationId", "sourceConversationTitle", "sourceState", "access", "firstReadAt", "lastReadAt")
+    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved"])
+    && booleanField(value, "listedTurns") && arrayOf(value.turnIds, (entry) => typeof entry === "string");
+}
 function conversationContextPacket(value: unknown): boolean {
   if (!conversationContextPacketSummary(value) || !arrayOf(value.excerpts, conversationContextExcerpt)
     || (value.excerpts as unknown[]).length !== value.messageCount || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")
@@ -1004,6 +1009,7 @@ function conversationDetail(
     && arrayOf(value.reviewNotes, reviewNote)
     && (value.contextPackets === undefined
       || arrayOf(value.contextPackets, conversationContextPacketSummary))
+    && (value.contextReads === undefined || arrayOf(value.contextReads, agentContextReadSummary))
     && conversationDetailCollectionsCoherent(value, conversationId);
 }
 

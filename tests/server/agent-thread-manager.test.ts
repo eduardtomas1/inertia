@@ -427,7 +427,7 @@ describe("AgentThreadManager", () => {
       expect(bridge.definitions.map(({ name }) => name))
         .toContain("inertia_request_context");
       const requestCall = call("inertia_request_context", {
-        sourceConversationId: sibling.id,
+        conversationId: sibling.id,
       });
       const resultPromise = bridge.invoke(requestCall);
       const chooser = [...pendingInputs.values()][0];
@@ -460,7 +460,7 @@ describe("AgentThreadManager", () => {
         .toMatchObject({ consumedMessageId: sourceTurn.userMessageId });
 
       const replay = await bridge.invoke(call("inertia_request_context", {
-        sourceConversationId: sibling.id,
+        conversationId: sibling.id,
       }));
       expect(replay).toEqual(result);
       expect(store.conversationDetail(source.id)?.contextPackets).toHaveLength(1);

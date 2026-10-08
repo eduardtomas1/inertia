@@ -1,5 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
-
 import { z } from "zod";
 
 import type {
@@ -31,12 +29,16 @@ import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume
 import type { ProviderManager } from "../providers";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import type { ConversationCreationService } from "./conversation-creation-service";
-import {
-  createConversationContextPacketFromAuthorizedAgent,
-} from "./conversation-context-service";
 import type {
   ConversationContextRequestCoordinator,
 } from "./conversation-context-request-coordinator";
+import type { ConversationAttachmentStore } from "../../node/conversation-attachment-store";
+import {
+  AGENT_CONTEXT_TOOL_DEFINITION,
+  AGENT_CONTEXT_TOOL_NAME,
+  AgentContextTool,
+} from "./agent-context-tool";
+import { hostToolDigest as digest } from "./host-tool-digest";
 import type { TurnController } from "./turns/turn-controller";
 import {
   AGENT_BROWSER_TOOL_NAMES,
@@ -114,9 +116,6 @@ const archiveSchema = z.object({
   conversationId: idSchema,
   archived: z.boolean().default(true),
 }).strict();
-const requestContextSchema = z.object({
-  sourceConversationId: idSchema.optional(),
-}).strict();
 
 const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
   {
@@ -145,19 +144,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
     inputValidator: inspectSchema,
     readOnly: true,
   },
-  {
-    name: "inertia_request_context",
-    description: "Ask the user to share bounded context from another Inertia chat. The optional sourceConversationId can only preselect one existing chat; it never reveals content. Inertia asks the user to approve the share and to confirm cross-workspace sharing before any content is read. The result contains only that bounded, defense-in-depth-redacted transcript and its provenance, may arrive as several ordered blocks, and reports how many oldest messages fell outside the budget. Attachments appear as identifiers only, never file paths or bytes. Do not supply message IDs.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        sourceConversationId: { type: "string", format: "uuid" },
-      },
-    },
-    inputValidator: requestContextSchema,
-    readOnly: false,
-  },
+  AGENT_CONTEXT_TOOL_DEFINITION,
   {
     name: "inertia_create_conversation",
     description: "After explicit user approval, create a real independent top-level Inertia chat in the current project and dispatch its first prompt. Route, reasoning, mode, access, branch, and workspace choices are validated by Inertia; access cannot exceed this parent chat. No project id or filesystem path can be supplied.",
@@ -295,6 +282,7 @@ export interface AgentThreadManagerDependencies {
     "acquire" | "isActive" | "release"
   >;
   contextRequests: ConversationContextRequestCoordinator;
+  conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
@@ -309,19 +297,6 @@ function json(value: unknown): ProviderHostToolResult {
 
 function failure(code: string, message: string): ProviderHostToolResult {
   return { success: false, text: JSON.stringify({ error: { code, message } }) };
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right, "en"))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
-    .join(",")}}`;
-}
-
-function digest(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
 }
 
 function accessRank(mode: AccessMode): number {
@@ -362,6 +337,7 @@ export class AgentThreadManager {
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
   private readonly capabilities: HarnessCapabilityRegistry;
   private readonly htmlRenders: HtmlRenderHostTool;
+  private readonly contextTool: AgentContextTool;
 
   constructor(private readonly dependencies: AgentThreadManagerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
@@ -369,6 +345,11 @@ export class AgentThreadManager {
       ? new AgentBrowserHostTools(dependencies.agentBrowser)
       : undefined;
     this.htmlRenders = new HtmlRenderHostTool(dependencies);
+    this.contextTool = new AgentContextTool({
+      ...dependencies,
+      now: this.now,
+      assertSource: (source) => this.assertSource(source),
+    });
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
@@ -443,8 +424,8 @@ export class AgentThreadManager {
           return this.status(current, call.arguments);
         case "inertia_get_latest_result":
           return this.latestResult(current, call.arguments);
-        case "inertia_request_context":
-          return await this.requestContext(source, call);
+        case AGENT_CONTEXT_TOOL_NAME:
+          return await this.contextTool.invoke(source, call);
         case "inertia_create_conversation":
           return await this.mutate(source, call, call.tool, (operationId, signal) =>
             this.create(source, call.arguments, operationId, signal));
@@ -581,138 +562,6 @@ export class AgentThreadManager {
       persisted: true,
       source: "visible-assistant-message",
     });
-  }
-
-  private async requestContext(
-    source: AgentThreadSource,
-    call: ProviderHostToolCall,
-  ): Promise<ProviderHostToolResult> {
-    const input = requestContextSchema.parse(call.arguments ?? {});
-    const current = this.assertSource(source);
-    if (input.sourceConversationId) {
-      const requestedSource = this.dependencies.store.conversation(
-        input.sourceConversationId,
-      );
-      if (requestedSource.id === current.id) {
-        throw new Error("Choose another chat as the context source.");
-      }
-    }
-    const toolCallIdHash = digest(call.toolCallId);
-    const requestFingerprint = digest({
-      toolName: "inertia_request_context",
-      arguments: input,
-    });
-    const createdAt = this.now();
-    const expiresAt = new Date(Date.parse(createdAt) + 5 * 60_000).toISOString();
-    const reserved = this.dependencies.store.contextPackets.reserveAgentRequest({
-      id: randomUUID(),
-      targetConversationId: current.id,
-      targetTurnId: source.turn.id,
-      targetUserMessageId: source.turn.userMessageId,
-      targetRunId: source.turn.runId,
-      sourceHarnessId: source.turn.modelSelection.harnessId,
-      requestedSourceConversationId: input.sourceConversationId ?? null,
-      toolCallIdHash,
-      requestFingerprint,
-      now: createdAt,
-      expiresAt,
-    });
-    if (reserved.kind === "limit") {
-      return failure("budget_exceeded", "This turn already requested context four times.");
-    }
-    if (reserved.kind === "conflict") {
-      return failure(
-        "idempotency_conflict",
-        "This provider tool-call identity was reused with different input.",
-      );
-    }
-    if (reserved.kind === "replay") {
-      if (reserved.request?.status === "completed" && reserved.request.resultJson) {
-        return { success: true, text: reserved.request.resultJson };
-      }
-      return failure(
-        "operation_not_replayable",
-        `The original context request is ${reserved.request?.status ?? "unavailable"}; Inertia will not reopen it.`,
-      );
-    }
-    const durable = reserved.request!;
-    const outcome = await this.dependencies.contextRequests.request({
-      scope: {
-        contextRequestId: durable.id,
-        targetConversationId: current.id,
-        targetTurnId: source.turn.id,
-        targetRunId: source.turn.runId,
-        toolCallIdHash,
-      },
-      providerId: source.turn.providerId,
-      requestedSourceConversationId: input.sourceConversationId ?? null,
-      createdAt,
-      signal: call.signal,
-    });
-    if (outcome.kind === "cancelled") {
-      const status = outcome.reason === "expired"
-        ? "expired" as const
-        : outcome.reason === "cancelled"
-          ? "cancelled" as const
-          : "interrupted" as const;
-      if (this.dependencies.store.contextPackets.agentRequest(durable.id)
-        ?.status === "selection-pending") {
-        this.dependencies.store.contextPackets.finishAgentRequest(
-          durable.id,
-          status,
-          outcome.reason === "expired"
-            ? "The context chooser expired before the user responded."
-            : outcome.reason === "cancelled"
-              ? "The user cancelled the context chooser."
-              : "The originating turn ended before context selection settled.",
-          this.now(),
-        );
-      }
-      return failure(
-        status === "cancelled" ? "user_cancelled" : "call_cancelled",
-        status === "expired"
-          ? "The context chooser expired."
-          : status === "cancelled"
-            ? "The user did not share chat context."
-            : "The parent turn ended before context selection settled.",
-      );
-    }
-    try {
-      this.assertSource(source);
-      const completed = createConversationContextPacketFromAuthorizedAgent(
-        this.dependencies.store,
-        {
-          contextRequestId: durable.id,
-          targetConversationId: current.id,
-          targetTurnId: source.turn.id,
-          targetRunId: source.turn.runId,
-          targetUserMessageId: source.turn.userMessageId,
-          toolCallIdHash,
-          authorizationReceipt: outcome.authorization.receipt,
-          completedAt: this.now(),
-        },
-        this.dependencies.contextRequests,
-      );
-      this.dependencies.broadcastConversationShell(current.id);
-      this.dependencies.broadcast({
-        type: "conversation.detail.invalidated",
-        conversationId: current.id,
-      });
-      return { success: true, text: completed.resultJson };
-    } catch (error) {
-      const pending = this.dependencies.store.contextPackets.agentRequest(durable.id);
-      if (pending?.status === "selection-pending") {
-        this.dependencies.store.contextPackets.finishAgentRequest(
-          durable.id,
-          call.signal.aborted ? "interrupted" : "failed",
-          error instanceof Error
-            ? error.message.slice(0, 1_000)
-            : "The approved context selection failed.",
-          this.now(),
-        );
-      }
-      throw error;
-    }
   }
 
   private async mutate(

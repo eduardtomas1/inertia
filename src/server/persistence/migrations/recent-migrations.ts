@@ -17,6 +17,7 @@ import { workingIndicatorMigration } from "./working-indicator";
 import { scratchProjectMigration } from "./scratch-project";
 import { issueReportPreviewMigration } from "./issue-report-preview";
 import { htmlRendersMigration } from "./html-renders";
+import { agentContextReadsMigration } from "./agent-context-reads";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -37,4 +38,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   mutedCustomColorsMigration,
   cliConversationImportsMigration,
   htmlRendersMigration,
+  agentContextReadsMigration,
 ];

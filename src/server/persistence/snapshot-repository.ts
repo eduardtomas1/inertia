@@ -69,6 +69,7 @@ import {
   MESSAGE_PROJECTION_COLUMNS,
   REASONING_PROJECTION_COLUMNS,
 } from "./stream-text-storage";
+import { agentContextReadSummaries } from "./conversation-context-turn-reads";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number };
@@ -77,7 +78,7 @@ type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewS
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
 const EMPTY_HISTORY_RECORDS: HistoryPageRecords = { agentTurns: [], turnGitArtifacts: [], messages: [], activities: [],
-  subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [] };
+  subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [], contextReads: [] };
 
 export interface RecentConversationLimits {
   messages: number;
@@ -311,6 +312,7 @@ export class SnapshotRepository {
       plans: query<AgentPlanRow>("agent_plans", "conversation_id, run_id, turn_id, explanation, steps_json", "updated_at ASC, conversation_id ASC, run_id ASC").map(planFromRow),
       checkpoints: query<CheckpointRow>("checkpoints", "*", "created_at ASC, id ASC").map(checkpointFromRow),
       contextPackets: this.context.contextPackets(conversationId, scope ? messages.map(({ id }) => id) : undefined),
+      contextReads: agentContextReadSummaries(this.context.database, conversationId, scope ? messages.map(({ id }) => id) : undefined),
     };
   }
 
@@ -321,7 +323,8 @@ export class SnapshotRepository {
       WHERE messages.conversation_id = ? AND messages.id = ?`)
       .all(conversationId, turn.user_message_id) as MessageRow[]).map(messageFromRow);
     return { ...EMPTY_HISTORY_RECORDS, agentTurns: [agentTurnFromRow(turn)], messages,
-      contextPackets: this.context.contextPackets(conversationId, messages.map(({ id }) => id)) };
+      contextPackets: this.context.contextPackets(conversationId, messages.map(({ id }) => id)),
+      contextReads: agentContextReadSummaries(this.context.database, conversationId, messages.map(({ id }) => id)) };
   }
 
   private conversationRecords(conversationId: string): ConversationRecords {

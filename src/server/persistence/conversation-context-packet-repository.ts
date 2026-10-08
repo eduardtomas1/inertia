@@ -42,6 +42,7 @@ import {
   type ConversationContextDelivery,
   type ConversationContextTransport,
 } from "./conversation-context-transport";
+import { ConversationContextTurnReads } from "./conversation-context-turn-reads";
 import type { CreateMessageOptions } from "./types";
 
 interface ConversationContextPacketRow {
@@ -77,6 +78,7 @@ type ConversationContextPacketListRow = Omit<ConversationContextPacketRow, "exce
 };
 
 const AGENT_CONTEXT_RESULT_BUDGET_BYTES = 28 * 1024;
+const UNREACHED_TURN_LOOKBACK = 16;
 
 export type ConversationContextReplay =
   | MessageSendAcceptance
@@ -428,10 +430,93 @@ export function claimConversationContextPackets(
   }
 }
 
+function sentCopy(
+  database: Database.Database,
+  row: ConversationContextPacketRow & { source_available: 0 | 1 },
+  packet = packetFromRow(row, row.source_available === 1),
+): { packet: ConversationContextPacket; blocks: MaterializedConversationContext[] } {
+  const agentRequested = database.prepare(`
+    SELECT 1 FROM agent_context_requests
+    WHERE packet_id = ? AND target_conversation_id = ? AND status = 'completed'
+  `).get(row.id, row.target_conversation_id) !== undefined;
+  if (row.transport_version !== 1) {
+    const delivered = prepareConversationContextPacket(
+      packet,
+      row.delivered_budget_bytes ?? 0,
+      agentRequested ? "tool-result" : "prompt",
+    );
+    const expected = deliveredSummary(row, row.source_available === 1);
+    if (
+      delivered.packet.messageCount !== expected.messageCount
+      || delivered.packet.characterCount !== expected.characterCount
+      || delivered.packet.droppedMessageCount !== expected.droppedMessageCount
+    ) {
+      throw new Error("The saved chat context no longer matches its provenance.");
+    }
+    return delivered;
+  }
+  // Sent receipts use their immutable request cohort, never today's drafts.
+  const cohort = database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM conversation_context_packets
+    WHERE target_conversation_id = ? AND consumed_request_id IS (
+      SELECT consumed_request_id FROM conversation_context_packets WHERE id = ?
+    )
+  `).get(row.target_conversation_id, row.id) as { count: number };
+  return prepareLegacyConversationContextPacket(
+    packet,
+    agentRequested ? AGENT_CONTEXT_RESULT_BUDGET_BYTES : conversationContextTransportBudget(cohort.count),
+    agentRequested ? "tool-result" : "prompt",
+  );
+}
+
+export interface SentConversationContextReference {
+  messageId: string;
+  title: string;
+  sentBlocks(): MaterializedConversationContext[] | null;
+}
+
+export function sentConversationContextReferences(
+  database: Database.Database,
+  targetConversationId: string,
+  messageIds: readonly string[],
+): SentConversationContextReference[] {
+  if (messageIds.length === 0) return [];
+  const rows = database.prepare(`
+    SELECT packet.*,
+      EXISTS(
+        SELECT 1 FROM conversations source
+        WHERE source.id = packet.source_conversation_id
+      ) AS source_available
+    FROM conversation_context_packets packet
+    WHERE packet.target_conversation_id = ?
+      AND packet.source_conversation_id <> packet.target_conversation_id
+      AND packet.consumed_message_id IN (SELECT value FROM json_each(?))
+    ORDER BY packet.consumed_at ASC, packet.id ASC
+  `).all(targetConversationId, JSON.stringify(messageIds)) as Array<
+    ConversationContextPacketRow & { source_available: 0 | 1 }
+  >;
+  return rows.map((row) => ({
+    messageId: row.consumed_message_id!,
+    title: row.source_conversation_title,
+    sentBlocks: () => {
+      try {
+        return sentCopy(database, row).blocks;
+      } catch {
+        return null;
+      }
+    },
+  }));
+}
+
 export class ConversationContextPacketRepository {
+  readonly turnReads: ConversationContextTurnReads;
+
   constructor(
     private readonly context: ConversationContextPacketPersistenceContext,
-  ) {}
+  ) {
+    this.turnReads = new ConversationContextTurnReads(context);
+  }
 
   create(input: CreateConversationContextPacketInput): ConversationContextPacket {
     return this.insert(input, null);
@@ -886,39 +971,7 @@ export class ConversationContextPacketRepository {
       return this.previewDrafts(this.draftPackets(targetConversationId))
         .find(({ id }) => id === packetId)!;
     }
-    const agentRequested = this.context.database.prepare(`
-      SELECT 1 FROM agent_context_requests
-      WHERE packet_id = ? AND target_conversation_id = ? AND status = 'completed'
-    `).get(packetId, targetConversationId) !== undefined;
-    if (row.transport_version !== 1) {
-      const delivered = prepareConversationContextPacket(
-        packet,
-        row.delivered_budget_bytes ?? 0,
-        agentRequested ? "tool-result" : "prompt",
-      ).packet;
-      const expected = deliveredSummary(row, row.source_available === 1);
-      if (
-        delivered.messageCount !== expected.messageCount
-        || delivered.characterCount !== expected.characterCount
-        || delivered.droppedMessageCount !== expected.droppedMessageCount
-      ) {
-        throw new Error("The saved chat context no longer matches its provenance.");
-      }
-      return delivered;
-    }
-    // Sent receipts use their immutable request cohort, never today's drafts.
-    const cohort = this.context.database.prepare(`
-      SELECT COUNT(*) AS count
-      FROM conversation_context_packets
-      WHERE target_conversation_id = ? AND consumed_request_id IS (
-        SELECT consumed_request_id FROM conversation_context_packets WHERE id = ?
-      )
-    `).get(targetConversationId, packetId) as { count: number };
-    return prepareLegacyConversationContextPacket(
-      packet,
-      agentRequested ? AGENT_CONTEXT_RESULT_BUDGET_BYTES : conversationContextTransportBudget(cohort.count),
-      agentRequested ? "tool-result" : "prompt",
-    ).packet;
+    return sentCopy(this.context.database, row, packet).packet;
   }
 
   deleteDraft(packetId: string, targetConversationId: string): void {
@@ -986,14 +1039,32 @@ export class ConversationContextPacketRepository {
     };
   }
 
-  includesOwnConversation(targetConversationId: string, packetIds: readonly string[]): boolean {
-    if (packetIds.length === 0) return false;
-    return this.context.database.prepare(`
-      SELECT 1 FROM conversation_context_packets
+  ownConversationPacketId(targetConversationId: string, packetIds: readonly string[]): string | null {
+    if (packetIds.length === 0) return null;
+    const row = this.context.database.prepare(`
+      SELECT id FROM conversation_context_packets
       WHERE target_conversation_id = ? AND source_conversation_id = target_conversation_id
         AND id IN (${packetIds.map(() => "?").join(", ")})
       LIMIT 1
-    `).get(targetConversationId, ...packetIds) !== undefined;
+    `).get(targetConversationId, ...packetIds) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  unreachedReferences(targetConversationId: string): SentConversationContextReference[] {
+    const turns = this.context.database.prepare(`
+      SELECT user_message_id, terminal_reason FROM agent_turns
+      WHERE conversation_id = ?
+      ORDER BY requested_at DESC, id DESC
+      LIMIT ?
+    `).all(targetConversationId, UNREACHED_TURN_LOOKBACK) as Array<{
+      user_message_id: string | null;
+      terminal_reason: string | null;
+    }>;
+    const reached = turns.findIndex(({ terminal_reason }) => terminal_reason !== "turn-start-failed");
+    const messageIds = turns.slice(0, reached === -1 ? turns.length : reached)
+      .flatMap(({ user_message_id }) => user_message_id ? [user_message_id] : []);
+    return sentConversationContextReferences(this.context.database, targetConversationId, messageIds)
+      .slice(-MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN);
   }
 
   assertSendable(targetConversationId: string, packetIds: readonly string[]): void {

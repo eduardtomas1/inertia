@@ -446,15 +446,18 @@ export interface ProviderHostToolCall {
   ): Promise<AgentApprovalDecision>;
 }
 
+export interface ProviderHostToolImage {
+  mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  /** Base64 without a data-URL prefix. */
+  data: string;
+}
+
 export interface ProviderHostToolResult {
   success: boolean;
   /** Bounded model-visible JSON or plain text. */
   text: string;
-  /** Optional bounded host-owned visual evidence returned directly to the model. */
-  image?: {
-    mimeType: "image/png";
-    data: string;
-  };
+  /** Optional bounded host-owned images returned directly to the model. */
+  images?: readonly ProviderHostToolImage[];
 }
 
 /** Owned by one exact active Inertia run; never persisted or provider-authored. */

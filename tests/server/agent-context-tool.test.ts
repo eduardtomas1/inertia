@@ -14,6 +14,7 @@ import {
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import type { ChatAttachment, Conversation, ProviderId } from "../../src/shared/contracts";
 import {
+  continuationIdentityForSelection,
   providerNativeBackendProfile,
   providerNativeHarnessId,
   providerNativeModelSelection,
@@ -56,7 +57,7 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean 
   const begin = (
     conversation: Conversation,
     content: string,
-    extra: { attachments?: ChatAttachment[]; packetIds?: string[] } = {},
+    extra: { attachments?: ChatAttachment[]; packetIds?: string[]; endpointIdentity?: string } = {},
   ) => {
     const turnProvider = conversation.providerId;
     return store.beginAgentTurn({
@@ -79,6 +80,9 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean 
       configurationRevision: conversation.modelSelection.backendConfigurationRevision,
       association: "authoritative",
       requestedAt: tick(),
+      ...(extra.endpointIdentity ? {
+        continuationIdentity: continuationIdentityForSelection(conversation.modelSelection, extra.endpointIdentity),
+      } : {}),
       ...(extra.packetIds ? {
         conversationContextPacketIds: extra.packetIds,
         contextRequestId: randomUUID(),
@@ -544,6 +548,53 @@ describe("inertia_request_context", () => {
       }
     },
   );
+
+  it("withholds this chat's turns from another endpoint the way restored history does", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, settle, store, target } = context;
+    try {
+      const onA = begin(target, "Plan the export on endpoint A.", { endpointIdentity: "endpoint-a" });
+      store.createMessage(target.id, "ENDPOINT-A-ANSWER", "assistant", [], onA.id, tick());
+      settle(onA.id);
+      const earlierOnB = begin(target, "Continue on endpoint B.", { endpointIdentity: "endpoint-b" });
+      settle(earlierOnB.id);
+      const current = begin(target, "What did we decide?", { endpointIdentity: "endpoint-b" });
+      const bridge = bridgeFor(current);
+
+      const list = parsed(await bridge.invoke(call({ conversationId: target.id })));
+      expect(list.turns.map(({ turnId }: { turnId: string }) => turnId)).toEqual([current.id, earlierOnB.id]);
+      expect(list.withheldTurns).toBe(1);
+      expect(JSON.stringify(list)).not.toContain("endpoint A");
+
+      const read = await bridge.invoke(call({ conversationId: target.id, turnId: onA.id }));
+      expect(read.success).toBe(false);
+      expect(read.text).not.toContain("ENDPOINT-A-ANSWER");
+      expect(read.text).not.toContain("endpoint A");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("redacts secret assignments in command lines", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, settle, store, target } = context;
+    try {
+      const turn = begin(target, "Deploy.");
+      store.addActivity({
+        conversationId: target.id, runId: turn.runId, turnId: turn.id, kind: "command",
+        title: "Command", detail: "Command:\nDEPLOY_TOKEN=abc123secret ./deploy.sh --verbose\n\nOutput:\nok",
+        status: "completed", createdAt: tick(),
+      });
+      settle(turn.id);
+      const current = begin(target, "What ran?");
+      const result = parsed(await bridgeFor(current).invoke(call({ conversationId: target.id, turnId: turn.id })));
+      const command = result.entries.find(({ kind }: { kind: string }) => kind === "command");
+      expect(command.command).toBe("DEPLOY_TOKEN=[redacted] ./deploy.sh --verbose");
+      expect(JSON.stringify(result)).not.toContain("abc123secret");
+    } finally {
+      store.close();
+    }
+  });
 
   it("describes what it reads and that other chats need approval", async () => {
     const context = await fixture();

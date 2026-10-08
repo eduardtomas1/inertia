@@ -18,6 +18,7 @@ import {
 } from "../../shared/provider-host-tools";
 import type { ConversationAttachmentStore } from "../../node/conversation-attachment-store";
 import type { RuntimeStore } from "../database";
+import type { ContinuationRouteFilter } from "../persistence/conversation-context-source";
 import { scrubConversationContextMetadata as scrubMetadata } from "../persistence/conversation-context-excerpts";
 import type {
   ProviderHostToolCall,
@@ -166,6 +167,7 @@ export class AgentContextTool {
     input: { conversationId: string; turnId?: string; cursor?: string; limit: number },
   ): Promise<ProviderHostToolResult> {
     const reads = this.dependencies.store.contextPackets.turnReads;
+    const route = access === "own" ? this.ownChatRoute(current, source.turn) : undefined;
     let result: unknown;
     let images: ProviderHostToolImage[] = [];
     if (input.turnId === undefined) {
@@ -174,10 +176,15 @@ export class AgentContextTool {
         access,
         limit: input.limit,
         cursor: input.cursor,
+        route,
       });
     } else {
-      const turn = reads.turn(input.conversationId, input.turnId);
-      if (!turn) return failure("turn_not_found", "That turn is not part of this chat.");
+      const turn = reads.turn(input.conversationId, input.turnId, route);
+      if (!turn) {
+        return reads.turn(input.conversationId, input.turnId)
+          ? failure("turn_withheld", "That turn ran on another model endpoint, so it is withheld from this chat's history.")
+          : failure("turn_not_found", "That turn is not part of this chat.");
+      }
       const attachments = input.cursor === undefined
         ? reads.requestAttachments(input.conversationId, turn)
           .filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
@@ -210,6 +217,31 @@ export class AgentContextTool {
       });
     }
     return json(result, images);
+  }
+
+  private ownChatRoute(conversation: Conversation, turn: AgentTurn): ContinuationRouteFilter {
+    const { backendProfileId, endpointIdentity } = turn.continuationIdentity;
+    const ledger = this.dependencies.store.turnLedgerRepository;
+    const history = ledger.historyStayedOnEndpoint(conversation.id, backendProfileId, endpointIdentity);
+    const shell = conversation.continuationIdentity;
+    const previous = this.dependencies.store.agentTurnsForConversation(conversation.id)
+      .filter(({ id, requestedAt }) => id !== turn.id && requestedAt <= turn.requestedAt)
+      .at(-1);
+    const handoffBefore = turn.continuationReasonCode === "harness-changed"
+      && previous !== undefined
+      && previous.providerId !== turn.providerId
+      ? turn.requestedAt
+      : ledger.latestProviderHandoffOnRoute(conversation.id, backendProfileId, endpointIdentity)?.requestedAt;
+    return {
+      backendProfileId,
+      endpointIdentity,
+      includeUnattributed: history.stayed && (shell
+        ? shell.backendProfileId === backendProfileId && shell.endpointIdentity === endpointIdentity
+        : history.turnCount > 0),
+      ...(handoffBefore === undefined
+        ? {}
+        : { handoff: { before: handoffBefore, providerId: turn.providerId } }),
+    };
   }
 
   private async images(

@@ -18,11 +18,16 @@ export interface TurnArtifactSequencerOptions {
  * materialization part of the authoritative provider lifecycle.
  */
 export class TurnArtifactSequencer {
+  readonly #checkpoints = new Map<string, Promise<void>>();
+  readonly #checkpointStops = new Map<string, AbortController>();
+
   constructor(private readonly options: TurnArtifactSequencerOptions) {}
 
   captureBefore(active: ActiveTurn): Promise<void> | null {
     try {
-      const turnCheckpoint = this.createTurnCheckpoint(active);
+      const priorCheckpoint = this.#checkpoints.get(active.conversation.id) ?? null;
+      const turnCheckpoint = this.createTurnCheckpoint(active, priorCheckpoint)
+        ?? priorCheckpoint;
       const captureGitBefore = () => this.options.hooks.captureGitBefore?.({
         turn: active.turn,
         checkpointId: active.checkpointId,
@@ -44,13 +49,28 @@ export class TurnArtifactSequencer {
     }
   }
 
-  private createTurnCheckpoint(active: ActiveTurn): Promise<void> | null {
-    if (!active.turnCheckpoint || active.checkpointId) return null;
-    const created = this.options.hooks.createTurnCheckpoint?.(active.turn);
-    if (!created) return null;
-    return created
-      .then((checkpoint) => this.applyTurnCheckpoint(active, checkpoint))
-      .catch(() => undefined);
+  private createTurnCheckpoint(
+    active: ActiveTurn,
+    priorCheckpoint: Promise<void> | null,
+  ): Promise<void> | null {
+    const create = this.options.hooks.createTurnCheckpoint;
+    if (!create || !active.turnCheckpoint || active.checkpointId) return null;
+    const stop = new AbortController();
+    const start = async (): Promise<void> => {
+      if (stop.signal.aborted || active.runState.isTerminal()) return;
+      this.applyTurnCheckpoint(active, await create(active.turn, stop.signal));
+    };
+    const checkpoint: Promise<void> = (priorCheckpoint ? priorCheckpoint.then(start) : start())
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.#checkpoints.get(active.conversation.id) === checkpoint) {
+          this.#checkpoints.delete(active.conversation.id);
+        }
+        this.#checkpointStops.delete(active.turn.id);
+      });
+    this.#checkpoints.set(active.conversation.id, checkpoint);
+    this.#checkpointStops.set(active.turn.id, stop);
+    return checkpoint;
   }
 
   private applyTurnCheckpoint(
@@ -70,6 +90,7 @@ export class TurnArtifactSequencer {
   }
 
   finalize(active: ActiveTurn, effects: TurnSettlementEffects): void | Promise<void> {
+    this.#checkpointStops.get(active.turn.id)?.abort();
     const finalization = this.options.hooks.captureGitArtifacts?.({
       turn: active.turn,
       checkpointId: active.checkpointId,

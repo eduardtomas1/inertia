@@ -491,6 +491,43 @@ describe("TurnController terminal truthfulness", () => {
     value.store.close();
   });
 
+  it("stops a starting turn's checkpoint and holds the next turn until it settles", async () => {
+    const pending: Array<{
+      turnId: string;
+      signal: AbortSignal | undefined;
+      resolve: (checkpoint: { checkpointId: string | null; failure: string | null }) => void;
+    }> = [];
+    const value = await runtime("codex", {
+      createTurnCheckpoint: (turn, signal) => new Promise((resolve) => {
+        pending.push({ turnId: turn.id, signal, resolve });
+      }),
+    });
+    const first = value.controller.queue({ conversationId: value.conversationId, content: "One.", turnCheckpoint: true });
+    value.controller.start(first.turn.id);
+    await flushPromises();
+    expect(value.controller.cancel(value.conversationId)).toBe(true);
+    await flushPromises();
+    expect(value.store.agentTurn(first.turn.id).status).toBe("cancelled");
+    expect(pending.map(({ turnId, signal }) => [turnId, signal?.aborted])).toEqual([[first.turn.id, true]]);
+
+    const second = value.controller.queue({ conversationId: value.conversationId, content: "Two.", turnCheckpoint: true });
+    value.controller.start(second.turn.id);
+    await flushPromises();
+    expect(pending.map(({ turnId }) => turnId)).toEqual([first.turn.id]);
+    expect(value.provider.runCount).toBe(0);
+
+    pending[0]!.resolve({ checkpointId: null, failure: "Checkpoint operation timed out." });
+    await vi.waitFor(() => expect(pending.map(({ turnId }) => turnId)).toEqual([first.turn.id, second.turn.id]));
+    expect(value.provider.runCount).toBe(0);
+    pending[1]!.resolve({ checkpointId: null, failure: null });
+    await vi.waitFor(() => expect(value.provider.runCount).toBe(1));
+    expect(value.store.conversationDetail(value.conversationId)?.activities
+      .filter(({ title }) => title === "No checkpoint for this turn")).toEqual([]);
+    value.provider.resolve();
+    await flushPromises();
+    value.store.close();
+  });
+
   it("records a checkpoint created by pre-turn capture on the settled turn", async () => {
     let checkpointId: string | null = null;
     const checkpointInputs: Array<string | null> = [];

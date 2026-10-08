@@ -65,7 +65,7 @@
   --text-md: 16px;
   --text-lg: 19px;
   --text-xl: 24px;
-  --text-code: 0.9em;
+  --text-code: max(12px, 0.9em);
   --text-diff: 12.5px;
   --leading-prose: 1.6;
   --leading-chrome: 1.4;

@@ -359,7 +359,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.iconSizes[0]).toEqual({ width: 13, height: 13 });
+    expect(settingGeometry.iconSizes[0]).toEqual({ width: 14, height: 14 });
     // Only the family's first icon is shown; the rest are hidden by rule, not
     // merely collapsed to an empty box.
     expect(settingGeometry.iconDisplays[0]).not.toBe("none");

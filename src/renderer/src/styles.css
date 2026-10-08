@@ -3845,6 +3845,7 @@ button.header-breadcrumb-project:hover {
   min-width: 0;
   flex-direction: column;
   gap: 2px;
+  line-height: var(--leading-heading);
 }
 
 .composer-attachment-copy strong,

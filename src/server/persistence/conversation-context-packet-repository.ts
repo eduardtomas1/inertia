@@ -986,14 +986,15 @@ export class ConversationContextPacketRepository {
     };
   }
 
-  includesOwnConversation(targetConversationId: string, packetIds: readonly string[]): boolean {
-    if (packetIds.length === 0) return false;
-    return this.context.database.prepare(`
-      SELECT 1 FROM conversation_context_packets
+  ownConversationPacketId(targetConversationId: string, packetIds: readonly string[]): string | null {
+    if (packetIds.length === 0) return null;
+    const row = this.context.database.prepare(`
+      SELECT id FROM conversation_context_packets
       WHERE target_conversation_id = ? AND source_conversation_id = target_conversation_id
         AND id IN (${packetIds.map(() => "?").join(", ")})
       LIMIT 1
-    `).get(targetConversationId, ...packetIds) !== undefined;
+    `).get(targetConversationId, ...packetIds) as { id: string } | undefined;
+    return row?.id ?? null;
   }
 
   assertSendable(targetConversationId: string, packetIds: readonly string[]): void {

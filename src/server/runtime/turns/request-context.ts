@@ -764,7 +764,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
       };
       // Optional supplements never cost the restored messages their place.
       const required = history.blocks.filter(({ optional }) => !optional);
-      const selected = required.length === 0
+      const selected = required.length === 0 && history.messageCount === 0
         ? null
         : fitRestored(history.blocks)
           ?? (required.length < history.blocks.length ? fitRestored(required) : null);

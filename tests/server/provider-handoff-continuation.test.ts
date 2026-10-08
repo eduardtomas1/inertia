@@ -75,7 +75,7 @@ async function fixture() {
       harnessIdFor: (input: { harnessId: string }) => input.harnessId,
     } as unknown as TurnProviderRuntime,
     hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
-    id: () => `handoff-${++sequence}`,
+    id: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     now: tick,
     clock: () => new Date(clock),
   });
@@ -442,6 +442,53 @@ describe("provider handoff continuation", () => {
     await f.switchProvider("claude");
     expect(f.store.agentTurn(running.queued.turn.id).status).not.toBe("completed");
     expect(f.store.conversation(f.conversation.id)).toMatchObject({ providerSessionId: null, continuationIdentity: null });
+  });
+
+  it("counts a reference to this chat as the handoff's restored history and keeps it for later sessions", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    await f.switchProvider("codex");
+    const packet = f.store.contextPackets.create({
+      sourceConversationId: f.conversation.id,
+      targetConversationId: f.conversation.id,
+      acknowledgedWorkspaceDifference: false,
+    });
+    const resolved = f.resolve({
+      content: "Continue on Codex.",
+      context: { conversationContextPacketIds: [packet.id] },
+      contextRequestId: "22222222-2222-4222-8222-222222222222",
+    });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const prompt = resolved.adopt(queued).active.providerInput.prompt;
+    expect(queued.turn).toMatchObject({
+      continuationReasonCode: "harness-changed",
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
+    });
+    expect(prompt.split("CLAUDE_REPLY_SENTINEL")).toHaveLength(2);
+    expect(prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(prompt).toContain("src/legacy-export.ts");
+    f.complete(queued.turn.id, "CODEX_DEFAULT_REPLY", "codex-session");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: null, continuationIdentity: null });
+
+    const later = f.begin("Pick it back up on Codex.");
+    expect(later.queued.turn.continuationReasonCode).toBe("missing-continuation-identity");
+    expect(later.queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 6, omittedMessageCount: 0 });
+    expect(later.providerInput.prompt).toContain("CLAUDE_REPLY_SENTINEL");
+    expect(later.providerInput.prompt).toContain("CODEX_DEFAULT_REPLY");
+  });
+
+  it("lists the changed files when a rejected Claude resume restarts on a fresh session", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    const resolved = f.resolve({ content: "Keep going on Claude." });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const active = resolved.adopt(queued).active;
+    expect(active.providerInput.sessionId).toBe("claude-session");
+    const fresh = active.freshSessionRequest!(queued.message.id);
+    expect(fresh.sessionRecovery).toEqual({ restoredMessageCount: 4, omittedMessageCount: 0 });
+    expect(fresh.executionPrompt).toContain("CLAUDE_REPLY_SENTINEL");
+    expect(fresh.executionPrompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(fresh.executionPrompt).toContain("src/legacy-export.ts");
   });
 
   it("hands the chat back to the original provider with the full history", async () => {

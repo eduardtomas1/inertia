@@ -338,7 +338,7 @@ describe("provider session continuity", () => {
     const prompt = resolved.adopt(queued).active.providerInput.prompt;
     expect(prompt.split("The export must preserve accented names.")).toHaveLength(2);
     expect(f.restoredReferences(queued.turn.id)).toEqual([]);
-    expect(queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 0, omittedMessageCount: 0 });
+    expect(queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
   });
 
   it("prepares a fresh-session request that replaces a rejected resume inside the same turn", async () => {

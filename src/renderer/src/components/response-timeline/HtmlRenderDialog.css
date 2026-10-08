@@ -8,11 +8,6 @@
   max-height: min(90dvh, calc(100dvh - clamp(16px, 6vw, 56px)));
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: var(--bg);
-  box-shadow: var(--shadow-overlay);
 }
 
 .html-render-dialog:focus {

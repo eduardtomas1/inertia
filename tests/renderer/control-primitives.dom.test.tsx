@@ -189,3 +189,47 @@ describe("popover primitives", () => {
     expect(css).not.toMatch(/\.palette-footer kbd \{|\.workspace-panel-launcher kbd \{/u);
   });
 });
+
+describe("dialog primitives", () => {
+  const dialogCss = [
+    css,
+    ...[
+      "components/AddProjectDialog.css",
+      "components/CliConversationImportDialog.css",
+      "components/MultiSpawnDialog.css",
+      "components/DailyWorkDialog.css",
+      "components/welcome-guide/WelcomeGuide.css",
+      "components/composer/SnapshotControl.css",
+      "components/sidebar/SidebarUpdateControl.css",
+      "components/response-timeline/HtmlRenderDialog.css",
+    ].map((path) => readFileSync(`src/renderer/src/${path}`, "utf8")),
+  ].join("\n");
+
+  it("gives every dialog one surface, radius, overlay shadow and title size, without icon tiles", () => {
+    const base = /^:where\(\n(?<list>[^)]*)\n\) \{\n(?<body>[^}]*)\n\}/mu.exec(css.slice(css.indexOf("@keyframes dialog-surface-out")))?.groups;
+    expect(base?.body).toBe([
+      "  border: 1px solid var(--line-soft);",
+      "  border-radius: var(--radius-md);",
+      "  color: var(--text);",
+      "  background: var(--surface-raised);",
+      "  box-shadow: var(--shadow-overlay);",
+    ].join("\n"));
+    for (const dialog of [".commit-dialog", ".file-editor-dialog", ".pre-merge-dialog", ".provider-auth-dialog", ".add-project-dialog", ".multi-spawn-dialog", ".welcome-guide"]) {
+      expect(base?.list, dialog).toContain(dialog);
+    }
+    expect(css).toMatch(/\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
+    expect(dialogCss).not.toMatch(/\.dialog-icon|--scrim\b|--scrim-strong|backdrop-filter: blur\(5px\)|welcome-guide-open|palette-panel-in/u);
+  });
+
+  it("dims the window behind dialogs with one backdrop token and no blur", () => {
+    expect(css).toMatch(/--backdrop: rgb\(0 0 0 \/ 0\.48\);/u);
+    expect(css).toMatch(/\.attachment-preview-backdrop\n\),\n\.update-restart-dialog::backdrop \{\n  background: var\(--backdrop\);\n\}/u);
+  });
+
+  it("opens with a fade and slight scale and closes the same way while DialogPresence holds it", () => {
+    expect(css).toMatch(/@keyframes dialog-surface-in \{\n  from \{\n    opacity: 0;\n    transform: scale\(0\.98\);/u);
+    expect(css).toMatch(/@keyframes dialog-surface-out \{\n  to \{\n    opacity: 0;\n    transform: scale\(0\.98\);/u);
+    expect(css).toMatch(/\.dialog-presence\.is-closing > \.dialog-backdrop > \* \{\n    animation: dialog-surface-out/u);
+    expect(css).toMatch(/\.dialog-backdrop > \*,[\s\S]*?\{\n    animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
+  });
+});

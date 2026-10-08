@@ -2,11 +2,6 @@
   width: min(540px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
-  color: var(--text);
 }
 .add-project-dialog header {
   display: flex;
@@ -18,8 +13,6 @@
 .add-project-dialog h2 {
   flex: 1;
   margin: 0;
-  font-size: var(--text-base);
-  font-weight: 500;
 }
 .add-project-search {
   display: flex;
@@ -124,7 +117,7 @@
 }
 
 .add-project-dialog {
-  animation: palette-panel-in var(--dur) var(--ease);
+  animation: dialog-surface-in var(--dur) var(--ease) both;
 }
 .add-project-dialog form,
 .add-project-sources {

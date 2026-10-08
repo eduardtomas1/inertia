@@ -45,8 +45,6 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Segoe UI Emoji", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --focus-ring: var(--accent);
-  --scrim: rgb(9 9 12 / 0.56);
-  --scrim-strong: rgb(7 8 12 / 0.76);
   --media-scrim: rgb(0 0 0 / 0.8);
   --on-media: #fff;
   --paper: #fff;
@@ -1521,7 +1519,6 @@ textarea {
   background: var(--status-completed);
   box-shadow: none;
 }
-
 
 .activity-thread-stream {
   position: relative;
@@ -3881,9 +3878,6 @@ button.header-breadcrumb-project:hover {
   place-items: center;
   padding: clamp(8px, 3vw, 28px);
   overscroll-behavior: contain;
-  background: var(--scrim-strong);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
 }
 
 .attachment-preview-dialog {
@@ -3893,11 +3887,6 @@ button.header-breadcrumb-project:hover {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-overlay);
 }
 
 .attachment-preview-header {
@@ -7581,7 +7570,7 @@ button.turn-agents-line:hover {
 @keyframes dialog-surface-in {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.965);
+    transform: scale(0.98);
   }
   to {
     opacity: 1;
@@ -7594,7 +7583,7 @@ button.turn-agents-line:hover {
   .multi-spawn-backdrop,
   .daily-work-backdrop,
   .attachment-preview-backdrop {
-    animation: dialog-veil-in var(--dur-fast) var(--ease) backwards;
+    animation: dialog-veil-in var(--dur) var(--ease-fade) backwards;
   }
 
   .dialog-backdrop > *,
@@ -7605,7 +7594,7 @@ button.turn-agents-line:hover {
   }
 
   .dialog-presence.is-closing > .dialog-backdrop {
-    animation: dialog-veil-out var(--dur-fast) var(--ease) both;
+    animation: dialog-veil-out var(--dur-fast) var(--ease-fade) both;
   }
 
   .dialog-presence.is-closing > .dialog-backdrop > * {
@@ -7620,8 +7609,56 @@ button.turn-agents-line:hover {
 @keyframes dialog-surface-out {
   to {
     opacity: 0;
-    transform: translateY(10px) scale(0.975);
+    transform: scale(0.98);
   }
+}
+
+:where(
+  .add-project-dialog,
+  .attachment-preview-dialog,
+  .cli-import-dialog,
+  .commit-dialog,
+  .daily-work-dialog,
+  .file-editor-dialog,
+  .html-render-dialog,
+  .limits-dialog,
+  .multi-spawn-dialog,
+  .pre-merge-dialog,
+  .provider-auth-dialog,
+  .snapshot-dialog,
+  .update-restart-dialog,
+  .welcome-guide
+) {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-overlay);
+}
+
+:where(
+  .add-project-dialog,
+  .commit-dialog,
+  .file-editor-dialog,
+  .pre-merge-dialog,
+  .snapshot-dialog,
+  .update-restart-dialog
+) h2 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-heading);
+}
+
+:where(
+  .dialog-backdrop,
+  .palette-backdrop,
+  .multi-spawn-backdrop,
+  .daily-work-backdrop,
+  .snapshot-backdrop,
+  .attachment-preview-backdrop
+),
+.update-restart-dialog::backdrop {
+  background: var(--backdrop);
 }
 
 .dialog-backdrop {
@@ -7631,18 +7668,11 @@ button.turn-agents-line:hover {
   display: grid;
   place-items: center;
   padding: 22px;
-  background: var(--scrim);
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
 }
 
 .commit-dialog {
   width: min(440px, 100%);
   padding: 18px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
 }
 
 .file-editor-dialog {
@@ -7652,10 +7682,6 @@ button.turn-agents-line:hover {
   height: min(720px, calc(100vh - 44px));
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
 }
 
 .file-editor-dialog > header {
@@ -7673,7 +7699,6 @@ button.turn-agents-line:hover {
 
 .file-editor-dialog h2 {
   margin: 0 0 3px;
-  font-size: var(--text-base);
 }
 
 .file-editor-dialog header p {
@@ -7738,9 +7763,8 @@ button.turn-agents-line:hover {
 }
 
 .commit-dialog > header { display: flex; align-items: flex-start; gap: 11px; }
-.dialog-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-sm); color: var(--accent); background: var(--fill); }
 .commit-dialog header > div { min-width: 0; flex: 1; }
-.commit-dialog h2 { margin: 1px 0 4px; font-size: var(--text-sm); }
+.commit-dialog h2 { margin: 0 0 4px; }
 .commit-dialog header p { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
 .commit-dialog > label { display: flex; flex-direction: column; gap: 7px; margin-top: 20px; color: var(--text-muted); font-size: var(--text-xs); font-weight: 500; }
 .commit-dialog > label input,
@@ -7760,17 +7784,12 @@ button.turn-agents-line:hover {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
 }
 
 .pre-merge-header {
   display: grid;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
   padding: 14px 16px;
@@ -7779,7 +7798,7 @@ button.turn-agents-line:hover {
 }
 
 .pre-merge-header > div { min-width: 0; }
-.pre-merge-header h2 { margin: 2px 0 3px; font-size: var(--text-base); }
+.pre-merge-header h2 { margin: 2px 0 3px; }
 .pre-merge-header p {
   overflow: hidden;
   margin: 0;
@@ -7788,16 +7807,6 @@ button.turn-agents-line:hover {
   line-height: var(--leading-chrome);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pre-merge-dialog[data-state="passed"] .dialog-icon {
-  color: var(--status-completed);
-  background: var(--fill);
-}
-
-.pre-merge-dialog[data-state="failed"] .dialog-icon {
-  color: var(--danger);
-  background: var(--fill);
 }
 
 .pre-merge-kicker {
@@ -8320,10 +8329,6 @@ button.turn-agents-line:hover {
   height: min(590px, calc(100vh - 44px));
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
 }
 
 .provider-auth-header,
@@ -8354,7 +8359,6 @@ button.turn-agents-line:hover {
   align-items: flex-start;
   justify-content: center;
   padding: min(14vh, 120px) 18px 18px;
-  background: var(--scrim);
   animation: palette-backdrop-in var(--dur-fast) var(--ease) both;
 }
 
@@ -8369,10 +8373,6 @@ button.turn-agents-line:hover {
 
 @keyframes palette-backdrop-in {
   from { opacity: 0; }
-}
-
-@keyframes palette-panel-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
 
 .palette-search {
@@ -9251,12 +9251,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: 100%;
 }
 
-.commit-dialog,
-.provider-auth-dialog {
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
-}
-
 .overlay-loading-shell {
   min-height: 112px;
   align-items: center;
@@ -9344,7 +9338,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     display: block;
     pointer-events: none;
     opacity: 0;
-    background: var(--scrim);
+    background: var(--backdrop);
     transition: opacity var(--dur-fast) var(--ease);
   }
 
@@ -9484,72 +9478,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .document-attachment-preview-loading svg {
     animation-duration: 2.4s !important;
     animation-iteration-count: infinite !important;
-  }
-}
-
-@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .sidebar,
-  .panel-toolbar,
-  .terminal-tabbar,
-  .terminal-header {
-    background: var(--surface);
-  }
-
-  .composer,
-  .composer-suggestion-menu,
-  .composer-popover,
-  .header-popover,
-  .project-menu,
-  .conversation-menu,
-  .command-palette,
-  .commit-dialog,
-  .provider-auth-dialog {
-    background: var(--surface-raised);
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .sidebar,
-  .panel-toolbar,
-  .terminal-tabbar,
-  .terminal-header {
-    background: var(--surface);
-  }
-
-  .composer,
-  .composer-suggestion-menu,
-  .composer-popover,
-  .header-popover,
-  .project-menu,
-  .conversation-menu,
-  .command-palette,
-  .commit-dialog,
-  .provider-auth-dialog,
-  .error-toast,
-  .app-update-notice,
-  .provider-quota-notice {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-
-  .composer,
-  .composer-suggestion-menu,
-  .composer-popover,
-  .header-popover,
-  .project-menu,
-  .conversation-menu,
-  .command-palette,
-  .commit-dialog,
-  .provider-auth-dialog {
-    background: var(--surface-raised);
-  }
-
-  .dialog-backdrop,
-  .palette-backdrop,
-  .attachment-preview-backdrop {
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-    background: var(--scrim-strong);
   }
 }
 

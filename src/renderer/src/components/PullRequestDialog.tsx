@@ -149,7 +149,6 @@ export function PullRequestDialog({
         }}
       >
         <header>
-          <span className="dialog-icon"><GitPullRequest size={18} /></span>
           <div>
             <h2 id="pull-request-dialog-title">{integrated ? "Create GitHub pull request" : `Open ${forgeLabel} ${forge === "gitlab" ? "merge" : "pull"} request`}</h2>
             <p>{integrated ? "Uses your local GitHub CLI sign-in. Nothing is sent through Inertia infrastructure." : `Continue in ${forgeLabel} using the current branch and selected Git remote.`}</p>

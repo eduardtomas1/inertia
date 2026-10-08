@@ -9,17 +9,7 @@
   height: min(500px, calc(100vh - 32px));
   overflow: hidden;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
   outline: none;
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
-  animation: welcome-guide-open var(--dur) var(--ease) both;
-}
-
-.dialog-presence.is-closing .welcome-guide {
-  animation: welcome-guide-close var(--dur-fast) var(--ease) both;
 }
 
 .welcome-guide button {
@@ -1140,14 +1130,6 @@
 .app-shell[data-document-visible="false"] .welcome-demo *,
 .app-shell[data-document-visible="false"] .welcome-demo *::after {
   animation-play-state: paused;
-}
-
-@keyframes welcome-guide-open {
-  from { opacity: 0; transform: translateY(6px) scale(0.985); }
-}
-
-@keyframes welcome-guide-close {
-  to { opacity: 0; transform: scale(0.985); }
 }
 
 @keyframes welcome-step-in {

@@ -1,4 +1,4 @@
-import { FilePenLine, Save, X } from "lucide-react";
+import { Save, X } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -136,9 +136,6 @@ export function FileEditorDialog({
         onKeyDown={trapFocus}
       >
         <header>
-          <span className="dialog-icon">
-            <FilePenLine size={18} aria-hidden="true" />
-          </span>
           <div>
             <h2 id={titleId}>Edit {file.path.split("/").at(-1)}</h2>
             <p id={descriptionId} title={file.path}>{file.path}</p>

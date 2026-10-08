@@ -1,7 +1,7 @@
-.snapshot-backdrop { position: fixed; inset: 0; z-index: 140; display: grid; place-items: center; padding: 20px; background: var(--scrim); }
-.snapshot-dialog { width: min(440px, 100%); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--text); padding: 20px; box-shadow: var(--shadow-overlay); font-size: var(--text-sm); line-height: var(--leading-chrome); }
+.snapshot-backdrop { position: fixed; inset: 0; z-index: 140; display: grid; place-items: center; padding: 20px; }
+.snapshot-dialog { width: min(440px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 20px; font-size: var(--text-sm); line-height: var(--leading-chrome); }
 .snapshot-dialog header { display: flex; align-items: center; justify-content: space-between; }
-.snapshot-dialog h2 { margin: 0; font-size: var(--text-md); }
+.snapshot-dialog h2 { margin: 0; }
 .snapshot-dialog header button { display: grid; place-items: center; border: 0; background: transparent; color: inherit; padding: 5px; }
 .snapshot-note { color: var(--text-muted); font-size: var(--text-sm); }
 

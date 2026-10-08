@@ -3,7 +3,6 @@
 .daily-work-backdrop {
   align-items: safe center;
   overflow-y: auto;
-  background: var(--scrim);
 }
 
 .daily-work-dialog {
@@ -17,11 +16,6 @@
   max-height: min(780px, calc(100vh - 44px));
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-overlay);
   font-variant-numeric: tabular-nums;
 }
 

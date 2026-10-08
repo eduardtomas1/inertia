@@ -5,13 +5,7 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-float);
   outline: none;
-  animation: palette-panel-in var(--dur-fast) var(--ease) both;
 }
 
 .cli-import-search {

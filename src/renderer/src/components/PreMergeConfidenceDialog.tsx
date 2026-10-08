@@ -260,7 +260,6 @@ export function PreMergeConfidenceDialog({
         }}
       >
         <header className="pre-merge-header">
-          <span className="dialog-icon"><ShieldCheck size={19} /></span>
           <div>
             <span className="pre-merge-kicker">Pre-merge confidence</span>
             <h2 id="pre-merge-title">{headline.title}</h2>

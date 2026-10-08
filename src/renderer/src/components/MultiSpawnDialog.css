@@ -121,10 +121,8 @@
   overflow: visible;
   padding: 15px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
-  box-shadow:
-    var(--shadow-float);
 }
 
 .multi-spawn-side > header {
@@ -332,7 +330,6 @@
 
 .multi-spawn-comparison.is-enabled {
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-float);
 }
 
 .multi-spawn-comparison-toggle {

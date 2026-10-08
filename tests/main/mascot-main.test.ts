@@ -66,6 +66,7 @@ vi.mock("electron", async () => {
     focus = vi.fn();
     setFocusable = vi.fn();
     setShape = vi.fn();
+    setSize = vi.fn((width: number, height: number) => { this.bounds = { ...this.bounds, width, height }; });
     setIgnoreMouseEvents = vi.fn();
     setMenu = vi.fn();
     setBounds = vi.fn((value: Rectangle) => {
@@ -706,6 +707,33 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], harness.windows[1] as WindowDouble);
     expect(app.mascot.snapshot()).toMatchObject({ placement: "system", dragging: false });
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("sizes the Wayland window to the drawn bubble and figure because the compositor cannot pass clicks through", async () => {
+    vi.stubGlobal("process", { ...process, platform: "linux", env: { ...process.env, WAYLAND_DISPLAY: "wayland-0" } });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble & { setSize: ReturnType<typeof vi.fn>; setShape: ReturnType<typeof vi.fn> };
+    expect(harness.options[1]).toMatchObject({ width: 240, height: 155 });
+    expect(harness.options[1]).not.toHaveProperty("x");
+    await app.invoke(MASCOT_IPC.action, ["bubble", 192], overlay);
+    expect(overlay.setSize).toHaveBeenLastCalledWith(240, 316);
+    await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
+    expect(overlay.setSize).toHaveBeenLastCalledWith(240, 240);
+    const calls = overlay.setSize.mock.calls.length;
+    await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
+    expect(overlay.setSize).toHaveBeenCalledTimes(calls);
+    expect(overlay.setShape).not.toHaveBeenCalled();
+  });
+
+  it("keeps the full overlay size where placement and pass-through are available", async () => {
+    vi.stubGlobal("process", { ...process, platform: "win32" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble & { setSize: ReturnType<typeof vi.fn> };
+    expect(harness.options[1]).toMatchObject({ width: 240, height: 316 });
+    await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
+    expect(overlay.setSize).not.toHaveBeenCalled();
   });
 });
 

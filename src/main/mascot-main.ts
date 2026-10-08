@@ -153,6 +153,7 @@ export class MascotMain {
             || (args[1] as number) > mascotBubbleHeight(MASCOT_ROW_LIMIT, MASCOT_ROW_LIMIT + 1)) throw new Error("Invalid mascot bubble");
           this.drawn = args[1] as number;
           this.applyShape();
+          this.fit();
           this.updateHitTesting();
           return;
         }
@@ -283,7 +284,7 @@ export class MascotMain {
     if (this.window && !this.window.isDestroyed()) return;
     const displays = screen.getAllDisplays();
     const window = new BrowserWindow({
-      title: "Inertia mascot", ...(this.canPosition ? mascotBounds(mascotPosition(this.state.positions, displays), displays) : MASCOT_SIZE),
+      title: "Inertia mascot", ...(this.canPosition ? mascotBounds(mascotPosition(this.state.positions, displays), displays) : this.fitted()),
       show: false, frame: false, transparent: true, backgroundColor: "#00000000",
       resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
       alwaysOnTop: true, skipTaskbar: true, focusable: false, hasShadow: false, acceptFirstMouse: true,
@@ -403,6 +404,18 @@ export class MascotMain {
     return x >= figure.x && x < figure.x + figure.width && y >= figure.y && y < figure.y + figure.height;
   }
 
+  private fitted(): { width: number; height: number } {
+    return { width: MASCOT_SIZE.width, height: MASCOT_SIZE.height - MASCOT_BUBBLE_BOTTOM + this.region().height };
+  }
+
+  private fit(): void {
+    const window = this.window;
+    if (this.canPosition || !window || window.isDestroyed()) return;
+    const { width, height } = this.fitted();
+    const bounds = window.getBounds();
+    if (bounds.width !== width || bounds.height !== height) window.setSize(width, height);
+  }
+
   private applyShape(): void {
     const window = this.window;
     if (process.platform === "darwin" || !this.canPosition || !window || window.isDestroyed()) return;
@@ -515,6 +528,7 @@ export class MascotMain {
 
   private broadcast(): void {
     this.applyShape();
+    this.fit();
     const snapshot = this.snapshot();
     for (const window of [this.window, this.options.mainWindow()]) {
       if (window && !window.isDestroyed()) window.webContents.send(MASCOT_IPC.changed, snapshot);

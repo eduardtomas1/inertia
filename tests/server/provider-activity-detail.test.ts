@@ -53,6 +53,30 @@ describe("provider activity detail boundary", () => {
     expect(detail).not.toContain("/Users/alice");
   });
 
+  it("redacts credentials passed as environment assignments and command-line options", () => {
+    const detail = sanitizeProviderActivityDetail([
+      "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG aws s3 ls",
+      "PGPASSWORD=hunter2 psql -h db",
+      "GITHUB_TOKEN='tok en' NPM_KEY=\"quoted value\" gh pr list",
+      "MY_PASS=letmein BUILD_ID=42 PATH_HINT=/opt/bin",
+      "curl -u admin:s3cr3tpass https://example.com --user ci:other",
+      "mysql --password hunter3 -h db && mysqldump -u root -phunter4 shop",
+      "find . -print -path ./x && mkdir -p build && tar -pxf a.tar",
+    ].join("\n"));
+    expect(detail).toBe([
+      "[redacted] aws s3 ls",
+      "PGPASSWORD=[redacted] psql -h db",
+      "GITHUB_TOKEN=[redacted] NPM_KEY=[redacted] gh pr list",
+      "MY_PASS=[redacted] BUILD_ID=42 PATH_HINT=/opt/bin",
+      "curl -u admin:[redacted] https://example.com --user ci:[redacted]",
+      "mysql --password=[redacted] -h db && mysqldump -u root -p[redacted] shop",
+      "find . -print -path ./x && mkdir -p build && tar -pxf a.tar",
+    ].join("\n"));
+    for (const secret of ["wJalrXUtnFEMI", "hunter2", "tok en", "quoted value", "letmein", "s3cr3tpass", "other", "hunter3", "hunter4"]) {
+      expect(detail).not.toContain(secret);
+    }
+  });
+
   it("extracts only official text-shaped results and never stringifies arbitrary payloads", () => {
     expect(officialToolResultText([
       { type: "text", text: "first" },

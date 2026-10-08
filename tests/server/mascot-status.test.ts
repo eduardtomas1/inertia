@@ -482,3 +482,11 @@ describe("mascot prose", () => {
     expect(mascotResultLine("Renamed load_user_data to fetch_user and 2*3*4 stays.")).toBe("Renamed load_user_data to fetch_user and 2*3*4 stays.");
   });
 });
+
+describe("mascot activity titles", () => {
+  it("scrubs paths and secrets from provider-authored titles before showing them", async () => {
+    const { mascotActivityLine } = await import("../../src/server/runtime/mascot-message");
+    expect(mascotActivityLine({ kind: "tool", title: "Read /Users/alice/.ssh/id_rsa", detail: null, status: "running" })).toBe("Read <path>");
+    expect(mascotActivityLine({ kind: "command", title: "PGPASSWORD=hunter2 psql -h db", detail: null, status: "running" })).toBe("PGPASSWORD=[redacted] psql -h db");
+  });
+});

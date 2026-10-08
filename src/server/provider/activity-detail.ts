@@ -146,7 +146,11 @@ export function sanitizeProviderActivityDetail(
     .replace(
       /\b(api[_ -]?key|authorization|cookie|credential|password|prompt|secret|system[_ -]?prompt|tokens?)\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu,
       "$1=[redacted]",
-    );
+    )
+    .replace(/\b([A-Z][A-Z0-9_]*(?:PASS|SECRET|TOKEN|KEY)[A-Z0-9_]*)=(?:"[^"\n]*"|'[^'\n]*'|[^\s,;]+)/gu, "$1=[redacted]")
+    .replace(/(^|\s)(-u|--user)(\s+|=)([^\s:]+):(?!\[redacted\])\S+/gmu, "$1$2$3$4:[redacted]")
+    .replace(/(^|\s)--password\s+(?:"[^"\n]*"|'[^'\n]*'|\S+)/gmu, "$1--password=[redacted]")
+    .replace(/(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]*?\s)-p(?=[^\s-])\S+/gu, "$1-p[redacted]");
   text = options.preserveWhitespace
     ? scrubSubagentSecrets(text)
     : boundedSubagentText(text, text.length) ?? "";

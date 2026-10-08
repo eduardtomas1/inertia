@@ -94,7 +94,8 @@ function tense(state: AgentActivity["status"], running: string, done: string, su
 
 export function mascotActivityLine(activity: Pick<AgentActivity, "kind" | "title" | "detail" | "status">): string | null {
   if (activity.kind !== "command" && activity.kind !== "tool" && activity.kind !== "file") return null;
-  const title = activity.title.replace(/^Interrupted · /u, "").trim();
+  const title = (sanitizeProviderActivityDetail(activity.title.replace(/^Interrupted · /u, ""), { maxChars: 4_096 }) ?? "")
+    .replace(/\s+/gu, " ").trim();
   if (SKIPPED.test(title)) return null;
   const detail = activity.detail?.slice(0, 32_768) ?? "";
   const state = activity.status;

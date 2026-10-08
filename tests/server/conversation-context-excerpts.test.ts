@@ -216,8 +216,8 @@ describe("conversation context notes", () => {
       .toContain("[page: Exports by night] (rendered page; content not available here)");
     const { blocks } = f.store.contextPackets.materialize(f.target.id, [packet.id]);
     const format = (JSON.parse(blocks[0]!.content) as { format: string }).format;
-    expect(format).toContain("details.attachments");
-    expect(format).toContain("not available here");
+    expect(format).toContain("attached files are named but not available here");
+    expect(format).toContain("[page: title] is a rendered page whose content is not included");
     const restored = JSON.parse(f.restored().history.blocks[0]!.content) as { format: string };
     expect(restored.format).toBe(format);
   });

@@ -58,9 +58,11 @@ function sentReferenceBlocks(
 ): ContinuationHistoryBlock[] {
   const included: ContinuationHistoryBlock[][] = [];
   let room = roomBytes;
-  for (const reference of [...references].reverse()) {
-    if (included.length === MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) break;
-    if (!keptMessageIds.has(reference.messageId)) continue;
+  const newest = references
+    .filter(({ messageId }) => keptMessageIds.has(messageId))
+    .slice(-MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN)
+    .reverse();
+  for (const reference of newest) {
     const blocks = reference.sentBlocks()?.map(({ label, content }) => ({
       label, content, optional: true as const,
     }));

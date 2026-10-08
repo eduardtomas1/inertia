@@ -203,6 +203,32 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(html).not.toContain("data-turn-layer=\"supporting-ledger\"");
   });
 
+  it("shows no surrogate answer during the settlement gap after a visual reply", () => {
+    const turn = {
+      ...agentTurn("completed", null),
+      updatedAt: "2026-07-26T10:00:10.000Z",
+    };
+    const html = renderTimeline(
+      turn,
+      [
+        message("user-streaming-answer", turn.id, "user", "Chart it, then explain."),
+        {
+          ...message("render-streaming-answer", turn.id, "system", "Rendered page: Chart", "2026-07-26T10:00:05.000Z"),
+          htmlRender: { renderId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", title: "Chart", height: 360 },
+        },
+      ],
+      "STALE DRAFT MUST NOT SURVIVE SETTLEMENT",
+      [],
+      "text",
+    );
+
+    expect(html).toContain('data-turn-layer="html-renders"');
+    expect(html).not.toContain("STALE DRAFT MUST NOT SURVIVE SETTLEMENT");
+    expect(html).not.toContain('data-turn-layer="answer-tail"');
+    expect(html).not.toContain("turn-commentary-row");
+    expect(html).not.toContain("turn-final-answer-document");
+  });
+
   it("renders terminal text once even when the cleared transient tail has identical content", () => {
     const terminalText = "Authoritative persisted answer";
     const terminalMessage = message(

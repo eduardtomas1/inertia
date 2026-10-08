@@ -1,11 +1,13 @@
 /**
  * @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
  */
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
+import { startFinalAnswerAnchor } from "../../src/renderer/src/components/response-timeline/final-answer-anchor";
+import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 import type {
   AgentActivity,
   AgentTurn,
@@ -243,5 +245,60 @@ describe("the answer after a visual reply", () => {
     const row = element(`[data-assistant-commentary-id='live-commentary:${turnId}']`);
     expect(element("[data-active-work-region]").contains(row)).toBe(true);
     expect(precedes(row, element("[data-testid='html-render']"))).toBe(true);
+  });
+});
+
+describe("the settled answer anchor after a visual reply", () => {
+  function placed(element: HTMLElement, scroller: HTMLElement, top: number, height: number): void {
+    element.getBoundingClientRect = () => {
+      const y = top - scroller.scrollTop;
+      return { x: 0, y, top: y, bottom: y + height, left: 0, right: 800, width: 800, height, toJSON: () => ({}) } as DOMRect;
+    };
+  }
+
+  async function anchoredScrollTop(withRenders: boolean): Promise<number> {
+    const scroller = document.createElement("div");
+    const root = document.createElement("div");
+    const section = document.createElement("section");
+    section.dataset.turnId = turnId;
+    const renders = document.createElement("div");
+    renders.dataset.turnLayer = "html-renders";
+    const final = document.createElement("article");
+    final.dataset.terminalAnswerId = "answer";
+    section.append(...(withRenders ? [renders, final] : [final]));
+    root.append(section);
+    scroller.append(root);
+    document.body.append(scroller);
+    Object.defineProperty(scroller, "clientHeight", { value: 600 });
+    Object.defineProperty(scroller, "scrollHeight", { value: 4_000 });
+    scroller.getBoundingClientRect = () =>
+      ({ x: 0, y: 0, top: 0, bottom: 600, left: 0, right: 800, width: 800, height: 600, toJSON: () => ({}) }) as DOMRect;
+    placed(renders, scroller, 1_000, 360);
+    placed(final, scroller, 1_400, 120);
+
+    const events: FinalAnswerAutoScrollEvent[] = [];
+    startFinalAnswerAnchor({
+      conversationId,
+      answerId: "answer",
+      scrollElement: scroller,
+      root,
+      virtualized: false,
+      getAnswerIndex: () => 0,
+      scrollToIndex: vi.fn(),
+      activeOwner: { current: null },
+      cancelLayoutAnchorRestoration: vi.fn(),
+      onEvent: (event) => events.push(event),
+    });
+    await waitFor(() => expect(events.at(-1)?.status).toBe("positioned"));
+    scroller.remove();
+    return scroller.scrollTop;
+  }
+
+  it("lands on the top of the turn's renders so the page and answer arrive together", async () => {
+    expect(await anchoredScrollTop(true)).toBe(992);
+  });
+
+  it("still lands on the answer itself when the turn has no renders", async () => {
+    expect(await anchoredScrollTop(false)).toBe(1_392);
   });
 });

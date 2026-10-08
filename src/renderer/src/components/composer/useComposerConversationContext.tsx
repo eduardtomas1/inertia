@@ -55,6 +55,8 @@ export function useComposerConversationContext(input: {
   contextPackets: readonly ConversationContextPacketSummary[];
   hasVisibleHistory: boolean;
   enabled: boolean;
+  latestTurnCompletedAt: string | null;
+  paused: boolean;
   onCommand?: ConversationContextCommandRunner;
 }): ComposerConversationContextController {
   const {
@@ -65,6 +67,8 @@ export function useComposerConversationContext(input: {
     workspaceKey,
     enabled,
     hasVisibleHistory,
+    latestTurnCompletedAt,
+    paused,
     onCommand,
   } = input;
   const [previewPacketId, setPreviewPacketId] = useState<string | null>(null);
@@ -150,17 +154,18 @@ export function useComposerConversationContext(input: {
     sourceConversationId: string,
     label: string,
     source?: ConversationContextSourceOption,
+    acknowledged = false,
   ): Promise<boolean> => {
     if (!onCommand) return false;
     pendingRequests.current.set(conversationId, null);
     refresh();
     setError(null);
     try {
-      const acknowledgedWorkspaceDifference = source?.workspaceRelation === "different-workspace"
+      const acknowledgedWorkspaceDifference = acknowledged || (source?.workspaceRelation === "different-workspace"
         && await new Promise<boolean>((resolve) => {
           confirmationReply.current = resolve;
           setConfirmation({ conversationId, workspaceKey, source });
-        });
+        }));
       if (source?.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) {
         pendingRequests.current.delete(conversationId);
         return false;
@@ -200,6 +205,40 @@ export function useComposerConversationContext(input: {
     if (!canAddReference()) return false;
     return createReference(conversationId, "This chat");
   };
+
+  const recopying = useRef(new Set<string>());
+  const recopy = async (packet: ConversationContextPacketSummary): Promise<void> => {
+    pendingRequests.current.set(conversationId, null);
+    refresh();
+    try {
+      await remove(packet.id);
+    } catch {
+      pendingRequests.current.delete(conversationId);
+      refresh();
+      return;
+    }
+    await createReference(
+      packet.sourceConversationId,
+      isOwnConversationContext(packet) ? "This chat" : packet.sourceConversationTitle,
+      undefined,
+      packet.workspaceRelation === "different-workspace",
+    );
+  };
+  useEffect(() => {
+    if (!enabled || !onCommand || paused || referencing) return;
+    const stale = draftContextPackets.find((packet) => {
+      const completedAt = packet.sourceConversationId === conversationId
+        ? latestTurnCompletedAt
+        : contextSources.find(({ conversationId: id }) => id === packet.sourceConversationId)
+          ?.latestTurnCompletedAt;
+      return completedAt
+        && Date.parse(completedAt) > Date.parse(packet.createdAt)
+        && !recopying.current.has(packet.id);
+    });
+    if (!stale) return;
+    recopying.current.add(stale.id);
+    void recopy(stale);
+  });
 
   return {
     contextPacketIds,

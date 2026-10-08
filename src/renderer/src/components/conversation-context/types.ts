@@ -9,6 +9,7 @@ export interface ConversationContextSourceOption {
   targetWorkspaceLabel: string;
   workspaceRelation: "same-workspace" | "different-workspace";
   archived: boolean;
+  latestTurnCompletedAt?: string | null;
 }
 
 export type ConversationContextCommand = Extract<

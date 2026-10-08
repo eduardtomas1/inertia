@@ -77,6 +77,7 @@ export function conversationWorkspaceOptions(input: {
           ? "same-workspace"
           : "different-workspace",
         archived: candidate.archivedAt !== null,
+        latestTurnCompletedAt: candidate.latestTurn?.completedAt ?? null,
       });
     }
     if (sameWorkspace) {

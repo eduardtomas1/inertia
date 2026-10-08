@@ -142,12 +142,12 @@ export const Composer = memo(function Composer({
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]); const [pendingAttachmentIds, setPendingAttachmentIds] = useState<ReadonlySet<string>>(() => new Set()); const pendingAttachmentIdsRef = useRef(new Set<string>());
   const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
+  const [submitting, setSubmitting] = useState(false);
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, latestTurnCompletedAt: latestKnownTurn?.completedAt ?? null, paused: running || submitting || sending, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const shownAttachmentsRef = useRef(attachments);
   shownAttachmentsRef.current = attachments;
-  const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const queueingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);

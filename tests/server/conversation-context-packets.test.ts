@@ -1080,6 +1080,38 @@ describe("conversation context packets", () => {
     } finally { store.close(); }
   });
 
+  it("never re-sends a chat an agent requested in a later restored history", () => {
+    const { store, sourceId, targetId } = fixture();
+    try {
+      store.createMessage(sourceId, "AGENT_REQUESTED_SENTINEL: keep three retries.", "assistant", [], null,
+        "2026-08-19T00:00:01.000Z");
+      const turn = beginWithPacket(store, targetId, []).turn;
+      const requestId = randomUUID();
+      const toolCallIdHash = "3".repeat(64);
+      store.contextPackets.reserveAgentRequest({
+        id: requestId, targetConversationId: targetId, targetTurnId: turn.id,
+        targetUserMessageId: turn.userMessageId, targetRunId: turn.runId,
+        sourceHarnessId: turn.harnessId, requestedSourceConversationId: sourceId,
+        toolCallIdHash, requestFingerprint: "2".repeat(64),
+        now: "2026-08-19T10:00:00.000Z", expiresAt: "2026-08-19T10:05:00.000Z",
+      });
+      store.contextPackets.completeAgentRequest({
+        requestId, targetConversationId: targetId, targetTurnId: turn.id,
+        targetUserMessageId: turn.userMessageId, targetRunId: turn.runId,
+        sourceConversationId: sourceId, acknowledgedWorkspaceDifference: false, toolCallIdHash,
+        completedAt: "2026-08-19T10:01:00.000Z",
+      });
+      store.createMessage(targetId, "Mirrored the retry limit.", "assistant", [], turn.id);
+
+      const history = store.continuationHistory(targetId, MAX_CONVERSATION_CONTEXT_TURN_BYTES, "2030-01-01T00:00:00.000Z")!;
+      const content = history.blocks.map(({ content }) => content).join("\n");
+      expect(history.blocks).toHaveLength(1);
+      expect(content).not.toContain("AGENT_REQUESTED_SENTINEL");
+      expect(content).not.toContain("[referenced chat:");
+      expect(store.contextPackets.unreachedReferences(targetId)).toEqual([]);
+    } finally { store.close(); }
+  });
+
   it("carries media as durable identifiers instead of file paths", () => {
     const { store, sourceId, targetId } = fixture();
     store.createMessage(

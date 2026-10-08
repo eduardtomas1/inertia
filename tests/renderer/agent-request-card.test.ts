@@ -54,12 +54,12 @@ describe("agent input answers", () => {
 
   it("uses the emitting provider captured on the request for branding", () => {
     expect(agentRequestProviderName("claude")).toBe("Claude");
-    expect(inputRequestTitle("claude")).toBe("Claude needs your input");
-    expect(inputRequestTitle("cursor")).toBe("Cursor needs your input");
-    expect(inputRequestTitle("kimi")).toBe("Kimi Code needs your input");
-    expect(inputRequestTitle("opencode")).toBe("OpenCode needs your input");
-    expect(inputRequestTitle("codex")).toBe("Codex needs your input");
-    expect(inputRequestTitle("future-provider")).toBe("The agent needs your input");
+    expect(inputRequestTitle("claude", 1)).toBe("Claude has a question");
+    expect(inputRequestTitle("cursor", 2)).toBe("Cursor has 2 questions");
+    expect(inputRequestTitle("kimi", 1)).toBe("Kimi Code has a question");
+    expect(inputRequestTitle("opencode", 3)).toBe("OpenCode has 3 questions");
+    expect(inputRequestTitle("codex", 1)).toBe("Codex has a question");
+    expect(inputRequestTitle("future-provider", 2)).toBe("The agent has 2 questions");
   });
 
   it("renders a compact approval region with captured provider identity and labelled actions", () => {
@@ -147,9 +147,9 @@ describe("agent input answers", () => {
       onRespond: vi.fn(),
     }));
 
-    expect(html).toContain("OpenCode needs your input");
-    expect(html).toContain("OpenCode will continue after every question is answered.");
-    expect(html).toContain("Input required");
+    expect(html).toContain("OpenCode has 2 questions");
+    expect(html).toContain("Paused until you answer");
+    expect(html).toContain("1 of 2");
     expect(html).toContain(`aria-describedby="input-${input.id}-description"`);
     expect(html).toContain('data-agent-request-kind="input"');
     expect(html).toContain('data-agent-request-state="question"');
@@ -158,9 +158,15 @@ describe("agent input answers", () => {
     expect(html).toContain("<fieldset");
     expect(html).toContain('type="radio"');
     expect(html).toContain(`name="${input.id}-strategy"`);
-    expect(html).toContain('aria-label="Question navigation"');
-    expect(html).toContain("Next →");
-    expect(html).toContain('aria-label="Go to question 2"');
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-label="Questions"');
+    expect(html).toContain('role="tab"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain('role="tabpanel"');
+    expect(html).toContain(">Strategy</button>");
+    expect(html).toContain(">Token</button>");
+    expect(html).toContain("Choose one");
+    expect(html).toContain("Next");
     expect(html).toContain('disabled=""');
     expect(html).not.toContain('type="text"');
     expect(html).not.toContain('aria-live="polite"');

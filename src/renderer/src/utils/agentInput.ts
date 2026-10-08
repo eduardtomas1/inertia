@@ -14,8 +14,12 @@ export function agentRequestProviderName(providerId: AgentInputRequest["provider
   }
 }
 
-export function inputRequestTitle(providerId: AgentInputRequest["providerId"] | string): string {
-  return `${agentRequestProviderName(providerId)} needs your input`;
+export function inputRequestTitle(
+  providerId: AgentInputRequest["providerId"] | string,
+  questionCount: number,
+): string {
+  const asks = questionCount === 1 ? "has a question" : `has ${questionCount} questions`;
+  return `${agentRequestProviderName(providerId)} ${asks}`;
 }
 
 export function buildAgentInputAnswers(

@@ -675,6 +675,7 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
     <a {...props} href={url}
       className={[props.className, "response-project-file-link"].filter(Boolean).join(" ")}
       data-language-family={language.family}
+      data-link-path={path}
       title={props.title ?? "Open local file"}
       onClick={(event) => {
         event.preventDefault();
@@ -792,6 +793,7 @@ function MarkdownLink({
         {...props}
         className={projectLinkClass}
         data-language-family={language.family}
+        data-link-path={target.relativePath}
         href={href}
         onClick={(event) => {
           event.preventDefault();
@@ -853,6 +855,14 @@ function MarkdownImage({
       }, applicationRendererScheme(globalThis.location?.protocol))
     : null;
   const schedule = useMarkdownImageSchedule(trustedSource);
+  const copyAttributes = {
+    "data-markdown-image-alt": unavailableAlt,
+    "data-markdown-image-source": target.kind === "external"
+      ? target.url
+      : target.kind === "project"
+        ? target.relativePath
+        : target.kind === "local" ? target.path : "",
+  };
   const placeholder = (reason: string, overflow = false): React.JSX.Element => {
     const message = unavailableAlt
       ? `${unavailableAlt} (${reason})`
@@ -864,6 +874,7 @@ function MarkdownImage({
         aria-label={unavailableAlt}
         data-markdown-image-overflow={overflow ? "true" : undefined}
         title={title}
+        {...copyAttributes}
       >
         {message}
       </span>
@@ -873,6 +884,7 @@ function MarkdownImage({
         aria-hidden="true"
         data-markdown-image-overflow={overflow ? "true" : undefined}
         title={title}
+        {...copyAttributes}
       >
         {message}
       </span>
@@ -886,6 +898,7 @@ function MarkdownImage({
       ref={schedule.shellRef}
       className="response-markdown-image-shell"
       data-markdown-image-state={schedule.state}
+      {...copyAttributes}
     >
       {schedule.state === "loading" || schedule.state === "loaded" ? (
         <img

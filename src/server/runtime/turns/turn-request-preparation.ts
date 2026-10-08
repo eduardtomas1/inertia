@@ -344,7 +344,12 @@ export function resolveTurnRequest(
     && request.goalStart === undefined;
   const assembled = startsFreshInEstablishedChat
     ? assembleOnFreshSession()
-    : assembleTurnRequest(assemblyInput);
+    : assembleTurnRequest({
+        ...assemblyInput,
+        carriedConversationContexts: dependencies.store.contextPackets
+          .unreachedReferences(conversation.id)
+          .flatMap((reference) => reference.sentBlocks() ?? []),
+      });
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
     : undefined;

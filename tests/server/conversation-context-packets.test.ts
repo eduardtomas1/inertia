@@ -1352,6 +1352,35 @@ describe("conversation context packets", () => {
     store.close();
   });
 
+  it("restores a reference's sent copy beside the request that carried it", () => {
+    const { store, sourceId, targetId } = fixture();
+    store.createMessage(sourceId, "REFERENCE_SENTINEL: the writer opened latin1.", "assistant", [], null,
+      "2026-09-19T08:00:00.000Z");
+    const packet = store.contextPackets.create({
+      sourceConversationId: sourceId, targetConversationId: targetId, acknowledgedWorkspaceDifference: false,
+    });
+    const sent = beginWithPacket(store, targetId, [packet.id]).turn;
+    store.createMessage(targetId, "Mirrored the writer change.", "assistant", [], sent.id);
+    const delivered = store.contextPackets.preview(packet.id, targetId);
+
+    const history = store.continuationHistory(targetId, MAX_CONVERSATION_CONTEXT_TURN_BYTES, "2030-01-01T00:00:00.000Z")!;
+    expect(history.messageCount).toBe(2);
+    expect(history.blocks).toHaveLength(2);
+    const [restored, reference] = history.blocks;
+    expect(sentBlocks([restored!])[0]!.messages).toEqual([
+      ["user", "Use the selected context and implement the change.\n\n[referenced chat: Architecture notes]"],
+      ["agent", "Mirrored the writer change."],
+    ]);
+    expect(reference).toMatchObject({ optional: true, label: "Chat context · Architecture notes · 1 message" });
+    expect(sentBlocks([reference!])[0]).toMatchObject({ packetId: packet.id, reference: "another-chat" });
+    expect(sentMessages([reference!])).toEqual(asSent(delivered.excerpts));
+
+    const tight = store.continuationHistory(targetId, 2_400, "2030-01-01T00:00:00.000Z")!;
+    expect(tight.messageCount).toBe(2);
+    expect(tight.blocks.map(({ optional }) => optional)).toEqual([undefined]);
+    store.close();
+  });
+
   it("freezes the delivered selection when the turn had less room than the preview", () => {
     const { store, sourceId, siblingId, targetId } = fixture();
     const service = new ConversationContextService(store);

@@ -491,6 +491,31 @@ describe("provider handoff continuation", () => {
     expect(fresh.executionPrompt).toContain("src/legacy-export.ts");
   });
 
+  it("carries a reference used before the switch to the new provider", async () => {
+    const f = await fixture();
+    const source = f.store.createConversation(f.conversation.projectId, "Export encoding", { activate: false });
+    f.store.createMessage(source.id, "REFERENCE_SENTINEL: the writer opened latin1.", "assistant", [], null, f.tick());
+    const packet = f.store.contextPackets.create({
+      sourceConversationId: source.id, targetConversationId: f.conversation.id, acknowledgedWorkspaceDifference: false,
+    });
+    const resolved = f.resolve({
+      content: "Port the encoding fix.",
+      context: { conversationContextPacketIds: [packet.id] },
+      contextRequestId: "33333333-3333-4333-8333-333333333333",
+    });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    expect(resolved.adopt(queued).active.providerInput.prompt).toContain("REFERENCE_SENTINEL");
+    f.complete(queued.turn.id, "Ported the writer change.", "claude-session");
+    await f.switchProvider("codex");
+
+    const handoff = f.begin("Also add the opt-in BOM.");
+    expect(handoff.queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
+    expect(handoff.providerInput.prompt).toContain("REFERENCE_SENTINEL");
+    expect(handoff.providerInput.prompt).toContain("[referenced chat: Export encoding]");
+    expect(f.store.turnExecutionManifest(handoff.queued.turn.id)?.references.map(({ label }) => label))
+      .toContain("Chat context · Export encoding · 1 message");
+  });
+
   it("hands the chat back to the original provider with the full history", async () => {
     const f = await fixture();
     f.seedClaudeHistory();

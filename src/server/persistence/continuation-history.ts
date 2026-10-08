@@ -4,16 +4,24 @@ import type Database from "better-sqlite3";
 
 import {
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+  MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
   MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
+  type ConversationContextExcerpt,
   type ConversationContextPacket,
 } from "../../shared/conversation-context";
+import { byteLength } from "./bounded-message-text";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel,
   scrubConversationContextMetadata,
 } from "./conversation-context-excerpts";
 import type { ContinuationRouteFilter } from "./conversation-context-source";
+import {
+  sentConversationContextReferences,
+  type SentConversationContextReference,
+} from "./conversation-context-packet-repository";
 import { prepareConversationContextPacket } from "./conversation-context-transport";
+import { providerHandoffBlockBytes } from "./provider-handoff-files";
 
 export interface ContinuationHistoryBlock {
   label: string;
@@ -27,6 +35,42 @@ export interface ContinuationHistory {
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
+}
+
+function markReferences(
+  excerpts: readonly ConversationContextExcerpt[],
+  references: readonly SentConversationContextReference[],
+): ConversationContextExcerpt[] {
+  const notes = new Map<string, string>();
+  for (const { messageId, title } of references) {
+    notes.set(messageId, `${notes.get(messageId) ?? ""}\n\n[referenced chat: ${title}]`);
+  }
+  return excerpts.map((excerpt) => {
+    const note = notes.get(excerpt.sourceMessageId);
+    return note ? { ...excerpt, content: `${excerpt.content}${note}` } : excerpt;
+  });
+}
+
+function sentReferenceBlocks(
+  references: readonly SentConversationContextReference[],
+  keptMessageIds: ReadonlySet<string>,
+  roomBytes: number,
+): ContinuationHistoryBlock[] {
+  const included: ContinuationHistoryBlock[][] = [];
+  let room = roomBytes;
+  for (const reference of [...references].reverse()) {
+    if (included.length === MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) break;
+    if (!keptMessageIds.has(reference.messageId)) continue;
+    const blocks = reference.sentBlocks()?.map(({ label, content }) => ({
+      label, content, optional: true as const,
+    }));
+    if (!blocks) continue;
+    const bytes = blocks.reduce((total, block) => total + providerHandoffBlockBytes(block), 0);
+    if (bytes > room) continue;
+    room -= bytes;
+    included.unshift(blocks);
+  }
+  return included.flat();
 }
 
 interface ContinuationHistorySourceRow {
@@ -66,7 +110,13 @@ export function readContinuationHistory(
     ),
   );
   if (!collected) return null;
-  const { excerpts, droppedMessageCount, withheldMessageCount } = collected;
+  const { droppedMessageCount, withheldMessageCount } = collected;
+  const references = sentConversationContextReferences(
+    database,
+    source.id,
+    collected.excerpts.filter(({ role }) => role === "user").map(({ sourceMessageId }) => sourceMessageId),
+  );
+  const excerpts = markReferences(collected.excerpts, references);
   const withheld = withheldMessageCount > 0 ? { withheldMessageCount } : {};
   if (excerpts.length === 0) {
     return { blocks: [], messageCount: 0, omittedMessageCount: 0, ...withheld };
@@ -106,8 +156,13 @@ export function readContinuationHistory(
   if (capacityBytes <= 0) return unavailable;
   try {
     const prepared = prepareConversationContextPacket(packet, capacityBytes, "prompt", true);
+    const restored = prepared.blocks.map(({ label, content }) => ({ label, content }));
     return {
-      blocks: prepared.blocks.map(({ label, content }) => ({ label, content })),
+      blocks: [...restored, ...sentReferenceBlocks(
+        references,
+        new Set(prepared.packet.excerpts.map(({ sourceMessageId }) => sourceMessageId)),
+        capacityBytes - restored.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0),
+      )],
       messageCount: prepared.packet.messageCount,
       omittedMessageCount: prepared.packet.droppedMessageCount,
       ...withheld,

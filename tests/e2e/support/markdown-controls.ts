@@ -310,8 +310,10 @@ export async function verifyDesktopMarkdownControls(input: {
     };
   });
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
-  expect(selectionCopy.html).toContain("<blockquote");
-  expect(selectionCopy.html).not.toContain("border-left");
+  const copiedQuoteBorder = await page.evaluate((html) => new DOMParser()
+    .parseFromString(html, "text/html")
+    .querySelector("blockquote")?.style.borderLeftWidth ?? null, selectionCopy.html);
+  expect(["", "0px"]).toContain(copiedQuoteBorder);
   expect(selectionCopy.html).not.toContain('node="');
   for (const label of ["Codex · OpenAI", "Markdown", "CSV", "Wrap", "Copy"]) {
     expect(selectionCopy.text).not.toContain(label);

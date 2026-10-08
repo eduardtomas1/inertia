@@ -405,7 +405,7 @@ export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }
   );
 });
 
-const CommentaryRow = memo(function CommentaryRow({
+export const CommentaryRow = memo(function CommentaryRow({
   entry,
   projectRoot,
   projectId,

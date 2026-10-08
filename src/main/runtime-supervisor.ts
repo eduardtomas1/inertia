@@ -4,7 +4,7 @@ import type { PrivateConnectRuntimeAuthorization, PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
-  isRuntimeMascotStatusMessage, parseRuntimeWorkerEvent, validSystemBootId,
+  parseRuntimeWorkerEvent, validSystemBootId,
   type RuntimeDatabaseRecoveryOperation, type RuntimeDatabaseRecoverySummary,
   type RuntimeDatabaseStartupRecoveryReport, type RuntimePrivateConnectForgetScope,
   type RuntimePrivateConnectPromptPreparation, type RuntimeSystemSuspendInterval,
@@ -17,7 +17,7 @@ import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
 import { boundedDuration, publicProcessError, runtimeRestartDelayMs, postRuntimeWorkerCommand, clearSupervisorTimer,
-  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage } from "./runtime-supervisor-values.js";
+  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage, isRuntimeMascotStatusMessage } from "./runtime-supervisor-values.js";
 import { detachedRuntimeConnection, runtimeConnection,
   runtimeConnectionUnavailableError } from "./runtime-supervisor-connection.js";
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";

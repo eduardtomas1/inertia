@@ -66,3 +66,8 @@ export function unconfirmedRuntimeCleanupMessage(
 ): string {
   return `${prefix} Inertia kept the affected work unchanged and will retry exact cleanup when its local service starts again.`;
 }
+
+export function isRuntimeMascotStatusMessage(value: unknown): boolean {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && (value as { type?: unknown }).type === "runtime.mascot-status";
+}

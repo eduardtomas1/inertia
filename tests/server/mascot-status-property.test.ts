@@ -60,7 +60,7 @@ function run(seed: number): string | null {
         title: "Run command", command: "rm -rf build", detail: null, reason: null, cwd: null, networkScope: null, permissionRoots: [], availableDecisions: ["approve", "deny"] } });
     } else if (action < 0.8) {
       const kept = [...shells.values()].filter(() => next() < 0.8);
-      for (const key of [...shells.keys()]) if (!kept.some((entry) => entry.id === key)) shells.delete(key);
+      for (const key of shells.keys()) if (!kept.some((entry) => entry.id === key)) shells.delete(key);
       publisher.replace(kept);
     } else {
       clock.advance(pick(ADVANCES));

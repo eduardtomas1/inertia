@@ -688,10 +688,6 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   };
 }
 
-export function isRuntimeMascotStatusMessage(value: unknown): boolean {
-  return plainObject(value) && value.type === "runtime.mascot-status";
-}
-
 export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.incident") {

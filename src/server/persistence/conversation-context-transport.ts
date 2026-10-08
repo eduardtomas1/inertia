@@ -335,7 +335,7 @@ function layoutPacket(
     };
   }
   const first = byteLength(JSON.stringify(contextEnvelope(
-    packet, restored, bound, MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET, [],
+    { ...packet, sourceState: "available" }, restored, bound, MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET, [],
   )));
   const later = byteLength(JSON.stringify(contextPart(MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET, [])));
   return {

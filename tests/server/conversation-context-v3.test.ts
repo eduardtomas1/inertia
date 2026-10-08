@@ -504,6 +504,38 @@ describe("conversation context transport version 3", () => {
     expect(upgraded.contextPackets.materialize(target.id, [draft.id]).blocks.every(({ structured }) => structured)).toBe(true);
   });
 
+  it("keeps re-sending a reference whose chat was deleted without pointing the agent at that chat", async () => {
+    const w = await world();
+    const source = w.chat(w.billing.id, "Architecture notes", "claude");
+    for (let index = 0; index < 30; index += 1) {
+      w.store.createMessage(source.id, `${index}-${"detail ".repeat(1_100)}`, index % 2 === 0 ? "user" : "assistant",
+        [], null, new Date(Date.UTC(2030, 0, 1, 0, 0, index)).toISOString());
+    }
+    const target = w.chat(w.billing.id, "Implementation", "codex");
+    const packet = w.service.createFromRenderer({ sourceConversationId: source.id, targetConversationId: target.id, acknowledgedWorkspaceDifference: false });
+    const sent = w.begin(target.id, "Use the notes.", { context: { conversationContextPacketIds: [packet.id] } });
+    const delivered = w.store.contextPackets.preview(packet.id, target.id);
+    expect(delivered.droppedMessageCount).toBeGreaterThan(0);
+    expect(contextSection(sent.providerInput.prompt)).toContain(source.id);
+
+    w.store.deleteConversation(source.id);
+    const after = w.store.contextPackets.preview(packet.id, target.id);
+    expect(after).toMatchObject({ sourceState: "deleted", messageCount: delivered.messageCount, droppedMessageCount: delivered.droppedMessageCount });
+    const database = new Database(w.databasePath, { readonly: true });
+    try {
+      const [reference] = sentConversationContextReferences(database, target.id, [sent.turn.userMessageId]);
+      const blocks = reference!.sentBlocks()!;
+      const envelope = JSON.parse(blocks[0]!.content) as { source: Record<string, string>; more?: string };
+      expect(blocks.map(({ content }) => content).join("")).not.toContain(source.id);
+      expect(envelope.more).toBeUndefined();
+      expect(envelope.source).toEqual({
+        chat: "Architecture notes", project: "Billing", workspace: "Project checkout", captured: packet.createdAt,
+      });
+      expect(blocks.flatMap(({ content }) => (JSON.parse(content) as { messages: unknown[][] }).messages)
+        .filter(([author]) => author !== "gap")).toHaveLength(delivered.messageCount);
+    } finally { database.close(); }
+  });
+
   it("reads new excerpt facts and a supplement only on version 3 packets", async () => {
     const w = await world();
     const { source } = await w.exportChat();

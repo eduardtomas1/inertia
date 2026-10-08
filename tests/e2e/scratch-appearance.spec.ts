@@ -40,7 +40,7 @@ async function expectSidebarGeometry(page: Page): Promise<void> {
       document.querySelector(selector)?.getBoundingClientRect().left ?? null;
     return {
       heading: left(".work-thread-section.is-no-project > h2 > span"),
-      rowText: left("[data-work-section='no-project'] .activity-thread-projectline"),
+      rowText: left("[data-work-section='no-project'] .activity-thread-title"),
       projectDone: left("[data-work-focus-id='section:done']"),
       noProjectDone: left("[data-work-focus-id='section:no-project-done']"),
       noProjectSnoozed: left("[data-work-focus-id='section:no-project-snoozed']"),
@@ -53,7 +53,8 @@ async function expectSidebarGeometry(page: Page): Promise<void> {
   const rows = page.locator("[data-work-section^='no-project'] .activity-thread-select");
   await expect(rows.first()).toBeVisible();
   for (const row of await rows.all()) {
-    await expect(row.locator(".activity-thread-projectline")).toContainText("Chat folder");
+    await expect(row.locator(".activity-thread-title")).toBeVisible();
+    await expect(row).not.toContainText("Chat folder");
     await expect(row).not.toContainText("Local workspace");
   }
 }

@@ -1,6 +1,6 @@
 .sidebar-update-control { position: relative; margin-left: auto; flex: 0 0 32px; }
 .update-status-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.sidebar .sidebar-update-button { position: relative; width: 32px; height: 32px; padding: 0; border-radius: 50%; }
+.sidebar .sidebar-update-button { position: relative; width: 32px; height: 32px; padding: 0; border-radius: var(--radius-xs); }
 .sidebar-update-button[data-update-state="available"],
 .sidebar-update-button[data-update-state="downloading"],
 .sidebar-update-button[data-update-state="downloaded"] { color: var(--text); background: var(--fill); }

@@ -76,12 +76,12 @@ test("filters Work by project and manages chat history", async () => {
   await expect(threadCard).toBeVisible();
   const trailing = activityCard.locator(".activity-thread-trailing");
   await expect(trailing.locator("time")).toBeVisible();
-  await expect(trailing).toHaveCSS("opacity", "1");
   await activityCard.hover();
-  await expect(trailing).toHaveCSS("opacity", "0");
+  await expect(trailing).toBeHidden();
   await expect(activityCard.getByRole("button", { name: "Thread actions for New chat" })).toHaveCount(0);
   const inlineActions = activityCard.locator(".thread-inline-actions");
-  await expect(inlineActions).toHaveCSS("opacity", "1");
+  await expect(inlineActions).toBeVisible();
+  await expect(inlineActions.getByRole("button", { name: "Settle New chat" })).toHaveText("");
 
   const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
   await firstNavigationItem.focus();

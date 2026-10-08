@@ -4,15 +4,14 @@ import clsx from "clsx";
 import { useHelpGuideOpen } from "../../hooks/useHelpGuideOpen";
 import { openHelpGuide } from "../../utils/helpGuide";
 import { loadWelcomeGuide } from "../lazySurfaceLoaders";
+import { IconButton } from "../ui";
 
 export function SidebarHelpButton(): React.JSX.Element {
   const open = useHelpGuideOpen();
   return (
-    <button
-      type="button"
+    <IconButton
+      label="Help"
       className={clsx("sidebar-destination", open && "is-open")}
-      aria-label="Help"
-      title="Help"
       aria-haspopup="dialog"
       aria-expanded={open}
       onFocus={() => void loadWelcomeGuide()}
@@ -20,7 +19,7 @@ export function SidebarHelpButton(): React.JSX.Element {
       onPointerEnter={() => void loadWelcomeGuide()}
       onClick={() => openHelpGuide()}
     >
-      <CircleHelp size={16} /><span>Help</span>
-    </button>
+      <CircleHelp size={16} />
+    </IconButton>
   );
 }

@@ -48,8 +48,11 @@ function sidebarProps(state: AppSnapshot, scope: string | null, onProjectScopeCh
     onRenameProject: noop, onSetProjectGrouping: noop, onSetProjectGitRepositoryLimit: noop, onRemoveProject: noop, onUpdateProjectAppearance };
 }
 
-function projectLine(title: string): HTMLElement {
-  return screen.getByRole("button", { name: new RegExp(`^${title},`, "u") }).querySelector<HTMLElement>(".activity-thread-projectline")!;
+function projectHeader(name: string): HTMLElement {
+  const headers = [...document.querySelectorAll<HTMLElement>(".work-project-group > h3")]
+    .filter((header) => header.querySelector(".work-project-name")?.textContent === name);
+  expect(headers).toHaveLength(1);
+  return headers[0]!;
 }
 
 describe("project colour marks", () => {
@@ -58,25 +61,26 @@ describe("project colour marks", () => {
     const other = project("other", "Other");
     const conversations = [chat("a", "studio", "Studio review"), chat("b", "studio", "Studio polish"), chat("c", "other", "Other task")];
     const view = render(<Sidebar {...sidebarProps(snapshot([studio, other], conversations), null, noop)} />);
+    const line = projectHeader("Studio");
+    const name = line.querySelector<HTMLElement>(".work-project-name")!;
+    expect(name).toHaveClass("project-name-tinted");
+    expect(name.style.getPropertyValue("--project-tint-dark")).toBe(PROJECT_COLOR_PALETTE.blue.dark);
+    expect(name.style.getPropertyValue("--project-tint-light")).toBe(PROJECT_COLOR_PALETTE.blue.light);
+    expect(line.querySelector("svg")).toHaveAttribute("data-project-tinted", "true");
     for (const title of ["Studio review", "Studio polish"]) {
-      const line = projectLine(title);
-      const name = line.querySelector<HTMLElement>(".activity-thread-project-meta")!;
-      expect(name).toHaveClass("project-name-tinted");
-      expect(name.style.getPropertyValue("--project-tint-dark")).toBe(PROJECT_COLOR_PALETTE.blue.dark);
-      expect(name.style.getPropertyValue("--project-tint-light")).toBe(PROJECT_COLOR_PALETTE.blue.light);
-      expect(line.querySelector("svg")).toHaveAttribute("data-project-tinted", "true");
+      expect(screen.getByRole("button", { name: new RegExp(`^${title},`, "u") }).querySelector("[data-project-tinted]")).toBeNull();
     }
-    const untinted = projectLine("Other task");
+    const untinted = projectHeader("Other");
     expect(untinted.querySelector(".project-name-tinted")).toBeNull();
     expect(untinted.querySelector("svg")).not.toHaveAttribute("data-project-tinted");
     expect(untinted.querySelector<SVGElement>("svg")?.getAttribute("style")).toBeNull();
     const iconOnly = { ...studio, preferences: { ...studio.preferences!, colorEmphasis: "icon" as const } };
     view.rerender(<Sidebar {...sidebarProps(snapshot([iconOnly, other], conversations), null, noop)} />);
-    expect(projectLine("Studio review").querySelector(".project-name-tinted")).toBeNull();
-    expect(projectLine("Studio review").querySelector("svg")).toHaveAttribute("data-project-tinted", "true");
+    expect(projectHeader("Studio").querySelector(".project-name-tinted")).toBeNull();
+    expect(projectHeader("Studio").querySelector("svg")).toHaveAttribute("data-project-tinted", "true");
     const cleared = { ...studio, preferences: { ...studio.preferences!, color: null } };
     view.rerender(<Sidebar {...sidebarProps(snapshot([cleared, other], conversations), null, noop)} />);
-    expect(projectLine("Studio polish").querySelector("[data-project-tinted]")).toBeNull();
+    expect(projectHeader("Studio").querySelector("[data-project-tinted]")).toBeNull();
   });
 
   it("renders the filter trigger and menu coherently, with pinned projects first", () => {

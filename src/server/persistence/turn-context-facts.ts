@@ -4,6 +4,7 @@ import type { ProviderId } from "../../shared/contracts";
 import type { ConversationContextExcerpt, UnfinishedTurnState } from "../../shared/conversation-context";
 import type { AgentTurnStatus } from "../../shared/turn-lifecycle";
 import { PROVIDER_INFO } from "../provider/catalog";
+import { scrubCommandSecrets } from "../provider/command-secrets";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { byteLength } from "./bounded-message-text";
@@ -64,7 +65,7 @@ function commandText(title: string, detail: string | null): string | null {
     4_096,
   );
   if (!scrubbed) return null;
-  const line = oneLine(scrubbed, MAX_TURN_COMMAND_LENGTH + 1);
+  const line = oneLine(scrubCommandSecrets(scrubbed), MAX_TURN_COMMAND_LENGTH + 1);
   return line.length > MAX_TURN_COMMAND_LENGTH ? `${line.slice(0, MAX_TURN_COMMAND_LENGTH - 1)}…` : line;
 }
 

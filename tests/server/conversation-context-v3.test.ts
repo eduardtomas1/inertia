@@ -536,6 +536,18 @@ describe("conversation context transport version 3", () => {
     } finally { database.close(); }
   });
 
+  it("redacts secret assignments in the commands a reference carries", async () => {
+    const w = await world();
+    const source = w.chat(w.billing.id, "Database", "claude");
+    const turn = w.begin(source.id, "Check the replica.");
+    w.say(source.id, turn.turn.id, "The replica is healthy.");
+    w.command(source.id, turn.turn, "PGPASSWORD=hunter2 psql -h db.internal -U admin", "completed");
+    w.settle(source.id, turn.turn.id, "claude-session");
+    const target = w.chat(w.billing.id, "Implementation", "codex");
+    const packet = w.store.contextPackets.create({ sourceConversationId: source.id, targetConversationId: target.id, acknowledgedWorkspaceDifference: false });
+    expect(packet.supplement?.commands).toEqual(["PGPASSWORD=[redacted] psql -h db.internal -U admin (ok)"]);
+  });
+
   it("reads new excerpt facts and a supplement only on version 3 packets", async () => {
     const w = await world();
     const { source } = await w.exportChat();

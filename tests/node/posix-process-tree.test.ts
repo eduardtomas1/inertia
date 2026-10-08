@@ -200,6 +200,8 @@ describe("POSIX process tree root observation", () => {
       kill: vi.fn(() => true) as never,
       spawnProcessSync: vi.fn(() => read) as never,
       rootProcessGroup: true,
+      platform: "linux",
+      procRoot: join(tmpdir(), `inertia-missing-proc-${process.pid}`),
     });
     expect(result).toMatchObject({
       rootStop: "sent",

@@ -14,6 +14,11 @@ const PHRASES: Array<[RegExp, string, string]> = [
   [/todo|plan/u, "Updating the plan", "Updated the plan"],
 ];
 
+function cut(text: string, length: number): string {
+  const part = text.slice(0, length);
+  return /[\uD800-\uDBFF]$/u.test(part) ? part.slice(0, -1) : part;
+}
+
 export function mascotPreview(value: string | null | undefined, limit = 280): string | null {
   const text = (value ?? "").slice(0, 4_096)
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
@@ -21,7 +26,7 @@ export function mascotPreview(value: string | null | undefined, limit = 280): st
     .replace(/^#{1,6}\s+/u, "")
     .replace(/[‪-‮⁦-⁩]/gu, "")
     .replace(/[\s\x00-\x1f\x7f]+/gu, " ").trim();
-  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text || null;
+  return text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text || null;
 }
 
 function sentences(text: string): string[] {
@@ -56,7 +61,7 @@ export function mascotResultLine(content: string): string | null {
 }
 
 function bounded(text: string, limit: number): string {
-  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
+  return text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text;
 }
 
 export function mascotCommand(value: string): string | null {

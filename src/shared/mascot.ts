@@ -124,7 +124,8 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   for (const [key, limit] of [["chatTitle", 96], ["projectName", 64], ["message", 280], ["progress", 80]] as const) {
     const text = candidate[key];
     if (text !== null && (empty || typeof text !== "string" || !text.length || text.length > limit
-      || /[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/u.test(text))) return null;
+      || /[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/u.test(text)
+      || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text))) return null;
   }
   const { steps, since, quietSince } = candidate;
   if (steps !== null) {

@@ -490,3 +490,17 @@ describe("mascot activity titles", () => {
     expect(mascotActivityLine({ kind: "command", title: "PGPASSWORD=hunter2 psql -h db", detail: null, status: "running" })).toBe("PGPASSWORD=[redacted] psql -h db");
   });
 });
+
+describe("mascot text bounds", () => {
+  it("never cuts a character in half when it shortens text, and the boundary rejects a lone surrogate", async () => {
+    const { mascotPreview, mascotCommand } = await import("../../src/server/runtime/mascot-message");
+    const preview = mascotPreview(`${"a".repeat(278)}😀😀😀`)!;
+    expect(preview).toBe(`${"a".repeat(278)}…`);
+    expect(mascotPreview(`${"a".repeat(277)}😀😀😀`)).toBe(`${"a".repeat(277)}😀…`);
+    expect(mascotCommand(`echo ${"b".repeat(53)}😀 done`)).toBe(`echo ${"b".repeat(53)}…`);
+    const chat = { ...emptyMascotStatus(), phase: "running" as const, projectId: "p", conversationId: "c", runId: "r", turnId: "t", activeCount: 1 };
+    expect(parseMascotStatus({ ...chat, message: "ok 😀" })).not.toBeNull();
+    expect(parseMascotStatus({ ...chat, message: `${"a".repeat(278)}\ud83d…` })).toBeNull();
+    expect(parseMascotStatus({ ...chat, chatTitle: "\ude00 title" })).toBeNull();
+  });
+});

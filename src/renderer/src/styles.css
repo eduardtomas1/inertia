@@ -463,7 +463,7 @@ button:disabled,
   .palette-group button,
   .project-menu button,
   .thread-submenu button
-) {
+):is(button) {
   display: flex;
   width: 100%;
   min-height: var(--menu-item-height);

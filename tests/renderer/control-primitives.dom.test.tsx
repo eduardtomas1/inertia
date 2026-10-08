@@ -169,7 +169,7 @@ describe("popover primitives", () => {
   });
 
   it("gives menu items one 28px row and highlights keyboard and pointer focus with the same fill and no ring", () => {
-    const item = whereRule(".project-menu button");
+    const item = whereRule(".project-menu button", ":is(button)");
     expect(item?.body).toContain("  min-height: var(--menu-item-height);");
     expect(item?.body).toContain("  border-radius: var(--radius-xs);");
     expect(item?.body).toContain("  font-size: var(--text-sm);");

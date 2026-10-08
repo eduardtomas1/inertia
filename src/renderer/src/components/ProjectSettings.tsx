@@ -12,7 +12,7 @@ import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { ProjectColorPicker, ProjectEmphasisPicker } from "./ProjectAppearanceControls";
 import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
-import { Switch } from "./ui";
+import { IconButton, Switch } from "./ui";
 import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { FULL_ACCESS_CAUTION } from "./settings/accessCaution";
@@ -189,8 +189,8 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         </SettingRow>
         {preferences.actions.length > 0 && <ul className="project-actions-list" aria-label="Project actions">{preferences.actions.map((projectAction) => <li key={projectAction.id}>
           <span><strong>{projectAction.name}</strong><code>{[projectAction.executable, ...projectAction.args].join(" ")}</code></span>
-          <button type="button" className="icon-button" aria-label={`Remove ${projectAction.name}`} title={`Remove ${projectAction.name}`} disabled={unavailable} aria-disabled={busy}
-            onClick={guarded(() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id)))}><Trash2 size={14} aria-hidden="true" /></button>
+          <IconButton label={`Remove ${projectAction.name}`} disabled={unavailable} aria-disabled={busy}
+            onClick={guarded(() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id)))}><Trash2 size={14} aria-hidden="true" /></IconButton>
         </li>)}</ul>}
         {actionForm.open && <form className="project-action-form" aria-label="New action" onSubmit={(event) => {
           event.preventDefault();

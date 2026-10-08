@@ -108,7 +108,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
         row.append(document.createElement("span"), document.createElement("span"));
         row.addEventListener("click", () => {
           const target = snapshot.rows?.find((candidate) => candidate.conversationId === key);
-          if (target) void bridge.action("open-chat", target).catch(() => { if (active) label.textContent = "That chat changed. Try again"; });
+          if (target) perform("open-chat", target);
         }, eventOptions);
         rows.set(key, row);
       }
@@ -219,8 +219,10 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     snapshot = value;
     render();
   };
-  const perform = (action: MascotAction): void => {
-    const expected = action === "open-chat" ? snapshot.status : action === "drop" ? gesture : undefined;
+  const perform = (
+    action: MascotAction,
+    expected: MascotStatus | MascotGesture | undefined = action === "open-chat" ? snapshot.status : action === "drop" ? gesture : undefined,
+  ): void => {
     const operation = expected ? bridge.action(action, expected) : bridge.action(action);
     void operation.catch(() => { if (active) label.textContent = "Open Inertia to continue"; });
   };

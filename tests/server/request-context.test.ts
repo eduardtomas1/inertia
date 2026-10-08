@@ -250,6 +250,37 @@ describe("bounded structured turn request context", () => {
       .not.toContain("Keep the existing fallback");
   });
 
+  it("embeds a structured chat packet as an object, escaped once, and keeps its digest in the manifest", async () => {
+    const cwd = await workspace();
+    const packetContent = JSON.stringify({ messages: [["agent", "Use \"quotes\" and C:\\repo\nnext line"]] });
+    const result = assembleTurnRequest({
+      cwd,
+      visibleContent: "Implement the approved decision.",
+      conversationContexts: () => ({
+        blocks: [{
+          packetId: "11111111-1111-4111-8111-111111111111",
+          label: "Chat context · Architecture notes · 1 message",
+          content: packetContent,
+          blockIndex: 0,
+          blockCount: 1,
+          structured: true,
+        }],
+        deliveries: [],
+      }),
+    });
+
+    expect(result.executionPrompt).toContain(
+      `{"kind":"attachment","label":"Chat context · Architecture notes · 1 message","content":${packetContent}}`,
+    );
+    expect(result.executionPrompt).not.toContain(JSON.stringify(packetContent));
+    expect(result.executionPrompt).not.toContain("sha256:");
+    expect(result.persistence.manifest.references).toEqual([
+      expect.objectContaining({ kind: "attachment", byteSize: Buffer.byteLength(packetContent), truncated: false }),
+    ]);
+    expect(result.persistence.blobs.map(({ content }) => content)).toEqual([packetContent]);
+    expect(result.persistence.manifest.assembledPayloadBytes).toBe(Buffer.byteLength(result.executionPrompt));
+  });
+
   it("deduplicates identical context bodies by content address without dropping references", async () => {
     const cwd = await workspace();
     const result = assembleTurnRequest({

@@ -143,8 +143,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       projectDecoration: "none",
       projectDecorationStyle: "solid",
     });
-    expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
-    expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);
+    expect(longHeadingGeometry.fontSize).toBe(await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--text-xl"))));
     updateProjectName(originalProject.name);
     await page.reload();
     await expect(page.getByRole("heading", {
@@ -223,7 +223,15 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        surfaceBackground: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
+        surfaceBackground: (() => {
+          const surface = getComputedStyle(element.querySelector(".composer-surface")!);
+          const probe = document.createElement("span");
+          probe.style.backgroundColor = "var(--surface-raised)";
+          element.append(probe);
+          const raised = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return { image: surface.backgroundImage, color: surface.backgroundColor, raised };
+        })(),
         inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
@@ -271,7 +279,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
-    expect(wideGeometry.surfaceBackground).toContain("linear-gradient");
+    expect(wideGeometry.surfaceBackground.image).toBe("none");
+    expect(wideGeometry.surfaceBackground.color).toBe(wideGeometry.surfaceBackground.raised);
     expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);

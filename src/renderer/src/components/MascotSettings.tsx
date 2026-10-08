@@ -91,6 +91,9 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
           <span className="setting-title"><strong>Show mascot</strong><RowStatus notice={showAction.notice} /></span>
           <small>A tiny companion above your windows, showing live chat status.</small>
         </span>
+        {snapshot?.hidden && <button className="secondary-button" type="button" onClick={() => {
+          void bridge.action("show").catch(() => setError("Could not show the mascot."));
+        }}>Show mascot</button>}
         <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure(showAction, { enabled: value })} />
       </div>
       <div className="setting-row" data-setting-id="mascot-motion">

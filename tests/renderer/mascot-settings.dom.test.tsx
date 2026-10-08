@@ -208,3 +208,19 @@ describe("mascot animation setting", () => {
     expect(within(motion).queryByText("Saved")).toBeNull();
   });
 });
+
+describe("mascot hidden for the session", () => {
+  it("offers a plain Show mascot button only while the enabled mascot is hidden", async () => {
+    const bridge = install();
+    let changed = (_snapshot: MascotSnapshot): void => undefined;
+    bridge.onChanged.mockImplementation(((listener: (snapshot: MascotSnapshot) => void) => { changed = listener; return () => undefined; }) as never);
+    bridge.snapshot.mockResolvedValue({ preferences: { enabled: true, motion: true }, status: emptyMascotStatus(), hidden: true });
+    render(<MascotSettings />);
+    const button = await screen.findByRole("button", { name: "Show mascot" });
+    expect(screen.getByRole("switch", { name: "Show mascot" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(button);
+    expect(bridge.action).toHaveBeenCalledWith("show");
+    changed({ preferences: { enabled: true, motion: true }, status: emptyMascotStatus() });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Show mascot" })).toBeNull());
+  });
+});

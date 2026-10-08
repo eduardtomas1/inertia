@@ -59,6 +59,8 @@ export class MascotMain {
   private hidden = false;
   private shape = "";
   private drawn: number | null = null;
+  private showItems: MenuItem[] = [];
+  private showOffered: boolean | null = null;
   private registered = false;
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
 
@@ -75,7 +77,7 @@ export class MascotMain {
     this.spriteQueue = this.spritesLoaded;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), rows: this.rows().map((chat) => ({ ...chat })), ...(this.feed.counts ? { counts: { ...this.feed.counts } } : {}), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), rows: this.rows().map((chat) => ({ ...chat })), ...(this.feed.counts ? { counts: { ...this.feed.counts } } : {}), pinned: this.pin(), ...(this.offerShow() ? { hidden: true as const } : {}), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
 
   sprite(id: string, name: string): MascotSpriteFile | null {
     const set = [this.sprites, this.pendingSprites].find((candidate) => candidate?.id === id);
@@ -198,24 +200,38 @@ export class MascotMain {
     if (process.platform !== "darwin") this.suspend();
   }
 
+  private offerShow(): boolean {
+    return this.hidden && this.state.preferences.enabled;
+  }
+
   private installShowMenu(): void {
-    const show = (): void => { void this.show().catch(() => undefined); };
     const menu = Menu.getApplicationMenu();
     const windowMenu = menu?.items.find(({ role }) => role?.toLowerCase() === "windowmenu")?.submenu;
-    if (menu && windowMenu && !menu.getMenuItemById("show-mascot")) {
-      windowMenu.append(new MenuItem({ type: "separator" }));
-      windowMenu.append(new MenuItem({ id: "show-mascot", label: "Show mascot", click: show }));
-      if (process.platform === "darwin") Menu.setApplicationMenu(menu);
+    if (!menu || !windowMenu || menu.getMenuItemById("show-mascot")) return;
+    this.showItems = [
+      new MenuItem({ type: "separator", visible: false }),
+      new MenuItem({ id: "show-mascot", label: "Show mascot", visible: false, click: () => { void this.show().catch(() => undefined); } }),
+    ];
+    for (const item of this.showItems) windowMenu.append(item);
+    this.updateShowMenu();
+  }
+
+  private updateShowMenu(): void {
+    const offered = this.offerShow();
+    if (offered === this.showOffered) return;
+    this.showOffered = offered;
+    for (const item of this.showItems) item.visible = offered;
+    const menu = Menu.getApplicationMenu();
+    if (process.platform === "darwin" && menu && this.showItems.length) Menu.setApplicationMenu(menu);
+    if (process.platform === "darwin") {
+      app.dock?.setMenu(Menu.buildFromTemplate(offered ? [{ label: "Show mascot", click: () => { void this.show().catch(() => undefined); } }] : []));
     }
-    if (process.platform === "darwin") app.dock?.setMenu(Menu.buildFromTemplate([{ label: "Show mascot", click: show }]));
   }
 
   private async show(): Promise<void> {
+    if (!this.offerShow()) return;
     this.hidden = false;
-    if (!this.state.preferences.enabled) {
-      this.state.preferences.enabled = true;
-      this.save();
-    }
+    this.updateShowMenu();
     await this.reconcile();
     this.broadcast();
   }
@@ -529,6 +545,7 @@ export class MascotMain {
   private broadcast(): void {
     this.applyShape();
     this.fit();
+    this.updateShowMenu();
     const snapshot = this.snapshot();
     for (const window of [this.window, this.options.mainWindow()]) {
       if (window && !window.isDestroyed()) window.webContents.send(MASCOT_IPC.changed, snapshot);
@@ -543,6 +560,7 @@ export class MascotMain {
       if (target.conversationId) await this.options.openChat(target.conversationId);
       return;
     }
+    if (action === "show") { await this.show(); return; }
     if (action === "hide") this.hidden = true;
     else if (action === "pause" || action === "resume") this.state.preferences.motion = action === "resume";
     else if (action === "focus") {

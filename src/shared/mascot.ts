@@ -56,13 +56,14 @@ export interface MascotSnapshot {
   rows?: readonly MascotStatus[];
   counts?: MascotCounts;
   pinned?: string | null;
+  hidden?: true;
 }
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
-  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop" | "pin" | "bubble";
+  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop" | "pin" | "bubble" | "show";
 
 export const MASCOT_ACTIONS: readonly MascotAction[] = [
-  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop", "pin", "bubble",
+  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop", "pin", "bubble", "show",
 ];
 export const MASCOT_COMPACT_HEIGHT = 31;
 export const MASCOT_LABELS: Record<MascotPhase, string> = {

@@ -106,6 +106,34 @@ fixture's 5 s control-RPC deadline whose failed result would not match, so a
 cancel that does not settle the run still fails the test. The failed job on
 main was rerun without code changes.
 
+## Claude turns cut off by a notification reply
+
+A local Claude turn on 2026-10-08 completed at "Waiting for `update.database`
+to finish." while that background shell was still running, and the CLI was
+stopped with it: Claude's next session reported the shell "didn't finish before
+the previous session ended". The turn had started a background `gradlew
+update.database` and a Monitor, ended its reply, and was correctly held open;
+the Monitor's event made Claude reply again, and that reply closed the turn.
+
+A probe through the real Claude Agent SDK 0.3.293 (Claude Code 2.1.293, Haiku,
+two background shells of different lengths) shows the cause:
+`background_tasks_changed` still lists the long shell when the short one ends,
+but the CLI sends `system/init` before each notification-driven reply.
+`ClaudeDelegateLifecycle` treated every `init` as a restarted CLI and cleared
+its background level, so the next result looked final. Every `init` in the
+probe carried the same `messaging_socket_path`, named after the CLI process,
+and Inertia's owned query refuses a second process for one query. The level is
+now reset on the first `init` and when the reported process changes, and kept
+across repeated `init`s from the same process. A lifecycle test and a harness
+test replaying the probe's event order fail without the change; with it the
+turn completes on the long shell's final reply.
+
+The two earlier local Claude failures ("exited without a final result", exit
+143, on 2026-10-06 19:39 and 2026-10-07 07:31) each came about two seconds
+after a background task's notification, the parent-resume bound #587 fixed;
+both ran before the app restarted into v0.0.70, and no Claude turn has failed
+that way since.
+
 ## Not exercised
 
 Windows and macOS packaging, installers and signing, and the macOS
@@ -121,6 +149,8 @@ not on this machine.
   `.github/actions/install-dependencies/action.yml`: the Actions pins.
 - `CHANGELOG.md`: the curated 0.0.71 section.
 - `tests/server/acp-adapter-drift.test.ts`: the cancellation window.
+- `src/server/provider/claude-delegate-lifecycle.ts` and its lifecycle and
+  harness tests: the background level across notification turns.
 - This release preparation evidence report.
 
 ## Publication boundary

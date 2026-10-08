@@ -36,6 +36,10 @@ in the same chat.
 
 ### Claude
 
+- A turn no longer ends while one of Claude's background commands is still
+  running. When another background task or a watcher finished first, Claude's
+  reply to it closed the turn and stopped the remaining command, such as a long
+  build, with the turn cut off at "waiting for it to finish".
 - A Fast session no longer fails when a later turn reports the rate-limit
   cooldown, and organization configuration problems at startup are explained.
 - Inertia asks Claude Code to save its session before the turn ends, so the

@@ -25,6 +25,7 @@ export type ClaudeDelegateCompletion =
 export class ClaudeDelegateLifecycle {
   private liveBackgroundTaskIds = new Set<string>();
   private observedBackgroundTaskLevel = false;
+  private initProcess: string | null | undefined;
   private latestResult:
     | {
         message: SDKResultMessage;
@@ -103,9 +104,14 @@ export class ClaudeDelegateLifecycle {
 
     if (message.subtype === "init") {
       // The background-task level is process-local. A restarted CLI begins
-      // with an empty level until it publishes the next membership change.
-      this.liveBackgroundTaskIds.clear();
-      this.observedBackgroundTaskLevel = false;
+      // with an empty level until it publishes the next membership change;
+      // a later init from the same process opens a notification turn.
+      const initProcess = claudeInitProcess(message);
+      if (this.initProcess === undefined || initProcess !== this.initProcess) {
+        this.liveBackgroundTaskIds.clear();
+        this.observedBackgroundTaskLevel = false;
+      }
+      this.initProcess = initProcess;
       return { turnEnded: false };
     }
 
@@ -164,6 +170,7 @@ export class ClaudeDelegateLifecycle {
   dispose(): void {
     this.liveBackgroundTaskIds.clear();
     this.observedBackgroundTaskLevel = false;
+    this.initProcess = undefined;
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
     this.parentResumedAfterProvisional = false;
@@ -201,6 +208,11 @@ export class ClaudeDelegateLifecycle {
       && this.latestResult !== undefined
       && !this.latestResult.deferred);
   }
+}
+
+function claudeInitProcess(message: SDKMessage): string | null {
+  const socket = (message as { messaging_socket_path?: unknown }).messaging_socket_path;
+  return typeof socket === "string" && socket.length > 0 ? socket : null;
 }
 
 function isDeferredResult(

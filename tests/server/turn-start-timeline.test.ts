@@ -169,4 +169,31 @@ describe("turn start timeline", () => {
       f.store.close();
     }
   });
+
+  it("starts a turn in a folder outside any repository without running Git", async () => {
+    const f = await fixture();
+    try {
+      timeline.splice(0);
+
+      await f.send("Summarize the notes.");
+      await f.providerStarted();
+
+      expect(timeline.filter((entry) => entry.startsWith("git:"))).toEqual([]);
+      const turn = f.store.latestAgentTurnForConversation(f.conversationId)!;
+      expect(f.store.conversationDetail(f.conversationId)!.checkpoints).toEqual([]);
+      expect(f.store.turnGitArtifact(turn.id)).toMatchObject({
+        status: "unavailable",
+        absenceReason: "not-repository",
+        failureReason: "This workspace is not a Git repository.",
+      });
+      expect(f.store.conversationDetail(f.conversationId)!.activities
+        .filter(({ title }) => title === "No checkpoint for this turn")).toEqual([]);
+      f.provider.resolve();
+      await vi.waitFor(() => expect(f.store.agentTurn(turn.id).status).toBe("completed"));
+    } finally {
+      await flushTurnControllerTestPromises();
+      await f.controller.dispose();
+      f.store.close();
+    }
+  });
 });

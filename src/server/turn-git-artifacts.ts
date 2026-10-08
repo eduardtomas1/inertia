@@ -33,6 +33,7 @@ import {
   GitError,
   repositoryChangeCounts,
 } from "./git";
+import { mayBeInsideGitRepository } from "./git/paths";
 import { gitInspectionSettlementValues } from "./git/runner";
 import { isGitProcessTreeTerminationFailure } from "./git/types";
 import {
@@ -204,10 +205,14 @@ export class TurnGitArtifactManager {
     const repositoryPath = this.store.conversationPath(input.turn.conversationId);
     let checkpointId = input.checkpointId;
     let beforeRef: string | null = null;
-    let turnCheckpoint: TurnCheckpointCapture | null = null;
+    const turnCheckpoint: TurnCheckpointCapture | null = input.turnCheckpoint && !checkpointId
+      ? { checkpointId: null, failure: null }
+      : null;
     try {
-      if (!checkpointId && input.turnCheckpoint) {
-        turnCheckpoint = { checkpointId: null, failure: null };
+      if (!checkpointId && !await mayBeInsideGitRepository(repositoryPath, operation)) {
+        throw new GitError("not-repository", "This workspace is not a Git repository.");
+      }
+      if (turnCheckpoint) {
         try {
           checkpointId = await this.#createTurnCheckpoint(input.turn, repositoryPath);
           turnCheckpoint.checkpointId = checkpointId;

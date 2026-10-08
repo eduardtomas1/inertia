@@ -367,6 +367,31 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(completedTurn.locator('[data-turn-layer="final-answer"]')).toContainText("The provider route now");
     await expect(completedTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
       .toHaveText("Codex · OpenAI · GPT-5.6");
+    await completedTurn.locator('[data-turn-layer="final-answer"]').evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    });
+    await electronApp.evaluate(({ clipboard }) => clipboard.writeText("Selection copy pending"));
+    await electronApp.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows()
+      .find((window) => window.webContents.getURL() === url)!.webContents.copy(), page.url());
+    await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toContain("Historical attribution comes from the persisted route");
+    const selectionCopy = await electronApp.evaluate(async ({ clipboard }) => {
+      const [item] = await clipboard.read();
+      return {
+        html: await (await item!.getType("text/html")).text(),
+        text: await clipboard.readText(),
+      };
+    });
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    expect(selectionCopy.html).toContain("<blockquote");
+    expect(selectionCopy.html).not.toContain("border-left");
+    expect(selectionCopy.html).not.toContain('node="');
+    for (const label of ["Codex · OpenAI", "Markdown", "CSV", "Wrap", "Copy"]) {
+      expect(selectionCopy.text).not.toContain(label);
+    }
     const turnMetaPrimary = completedTurn.locator(".turn-meta-primary");
     const runDetailsToggle = completedTurn.getByRole("button", { name: "Run details" });
     const runDetails = completedTurn.locator(".turn-run-details");

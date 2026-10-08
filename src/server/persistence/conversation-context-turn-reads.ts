@@ -213,8 +213,11 @@ export class ConversationContextTurnReads {
     return row ? turnFromRecord(row) : null;
   }
 
-  entries(conversationId: string, turn: ConversationContextTurnRow): ConversationContextTurnEntryRow[] {
-    const messages = (this.context.database.prepare(`
+  entries(conversationId: string, turn: ConversationContextTurnRow): {
+    entries: ConversationContextTurnEntryRow[];
+    recordsOmitted: boolean;
+  } {
+    const messageRows = this.context.database.prepare(`
       SELECT id, role, created_at, attachments_json,
         CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title
       FROM messages
@@ -222,13 +225,14 @@ export class ConversationContextTurnReads {
         AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
       ORDER BY created_at ASC, id ASC
       LIMIT ?
-    `).all(conversationId, turn.id, turn.userMessageId, MAX_TURN_MESSAGES) as Array<{
+    `).all(conversationId, turn.id, turn.userMessageId, MAX_TURN_MESSAGES + 1) as Array<{
       id: string;
       role: "user" | "assistant" | "system";
       created_at: string;
       attachments_json: string;
       page_title: unknown;
-    }>).map((row): ConversationContextTurnEntryRow => row.role === "system"
+    }>;
+    const messages = messageRows.slice(0, MAX_TURN_MESSAGES).map((row): ConversationContextTurnEntryRow => row.role === "system"
       ? {
           kind: "page",
           id: row.id,
@@ -242,7 +246,7 @@ export class ConversationContextTurnReads {
           createdAt: row.created_at,
           attachments: parseStoredAttachments(row.attachments_json),
         });
-    const activities = (this.context.database.prepare(`
+    const activityRows = this.context.database.prepare(`
       SELECT id, kind, title, status, created_at,
         CASE WHEN kind = 'command' THEN substr(detail, 1, ?) END AS detail
       FROM activities
@@ -250,14 +254,15 @@ export class ConversationContextTurnReads {
         AND kind IN ('command', 'tool', 'file', 'error')
       ORDER BY created_at ASC, rowid ASC
       LIMIT ?
-    `).all(MAX_COMMAND_DETAIL_CHARS, conversationId, turn.id, MAX_TURN_ACTIVITIES) as Array<{
+    `).all(MAX_COMMAND_DETAIL_CHARS, conversationId, turn.id, MAX_TURN_ACTIVITIES + 1) as Array<{
       id: string;
       kind: "command" | "tool" | "file" | "error";
       title: string;
       detail: string | null;
       status: "running" | "completed" | "failed";
       created_at: string;
-    }>).map((row): ConversationContextTurnEntryRow => ({
+    }>;
+    const activities = activityRows.slice(0, MAX_TURN_ACTIVITIES).map((row): ConversationContextTurnEntryRow => ({
       kind: "activity",
       id: row.id,
       activityKind: row.kind,
@@ -269,7 +274,10 @@ export class ConversationContextTurnReads {
     const request = messages.findIndex(({ id }) => id === turn.userMessageId);
     const ordered = [...messages.filter((_, index) => index !== request), ...activities]
       .sort((left, right) => left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : 0);
-    return request === -1 ? ordered : [messages[request]!, ...ordered];
+    return {
+      entries: request === -1 ? ordered : [messages[request]!, ...ordered],
+      recordsOmitted: messageRows.length > MAX_TURN_MESSAGES || activityRows.length > MAX_TURN_ACTIVITIES,
+    };
   }
 
   requestAttachments(conversationId: string, turn: ConversationContextTurnRow): ChatAttachment[] {

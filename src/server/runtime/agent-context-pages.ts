@@ -193,7 +193,7 @@ export function agentContextTurnPage(
   },
 ): JsonEntry {
   const { turn } = input;
-  const rows = reads.entries(input.conversationId, turn);
+  const { entries: rows, recordsOmitted } = reads.entries(input.conversationId, turn);
   const files = reads.files(turn.id);
   const entryCount = rows.length + (files.length > 0 ? 1 : 0);
   const start = parseCursor(input.cursor, Math.max(entryCount, 1));
@@ -207,6 +207,7 @@ export function agentContextTurnPage(
       requestedAt: turn.requestedAt,
       startedAt: turn.startedAt,
       completedAt: turn.completedAt,
+      ...(recordsOmitted ? { laterRecordsOmitted: true } : {}),
     },
     about: TURN_ABOUT,
     ...(input.images && input.images.length > 0 ? { images: input.images } : {}),

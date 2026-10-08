@@ -96,6 +96,28 @@ describe("ConversationContextTurnReads", () => {
     }
   });
 
+  it("bounds the records one turn read loads and says when later ones were left out", async () => {
+    const { source, store } = await fixture();
+    try {
+      const turn = store.contextPackets.turnReads.turn(source.id, store.latestAgentTurnForConversation(source.id)!.id)!;
+      const sourceTurn = store.agentTurn(turn.id);
+      const add = (index: number) => store.addActivity({
+        conversationId: source.id, runId: sourceTurn.runId, turnId: turn.id, kind: "tool",
+        title: `Tool ${index}`, detail: null, status: "completed",
+        createdAt: new Date(Date.parse("2030-01-01T00:00:00.000Z") + index).toISOString(),
+      });
+      for (let index = 0; index < 2_000; index += 1) add(index);
+      expect(store.contextPackets.turnReads.entries(source.id, turn)).toMatchObject({ recordsOmitted: false });
+      add(2_000);
+      const read = store.contextPackets.turnReads.entries(source.id, turn);
+      expect(read.recordsOmitted).toBe(true);
+      expect(read.entries).toHaveLength(2_001);
+      expect(read.entries.at(-1)).toMatchObject({ kind: "activity", title: "Tool 1999" });
+    } finally {
+      store.close();
+    }
+  });
+
   it("records each chat and turn once per turn and reports it with the target message", async () => {
     const { source, store, target, turn } = await fixture();
     try {

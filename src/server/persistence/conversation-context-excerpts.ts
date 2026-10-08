@@ -6,6 +6,7 @@ import {
   MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES,
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
+  conversationWorkspaceLabel,
   type ConversationContextAttachmentReference,
   type ConversationContextExcerpt,
 } from "../../shared/conversation-context";
@@ -26,14 +27,10 @@ import { byteLength } from "./bounded-message-text";
 export function conversationContextWorkspaceLabel(
   conversation: Pick<ConversationRow, "branch" | "worktree_path">,
 ): string {
-  if (conversation.worktree_path) {
-    return conversation.branch
-      ? `Isolated worktree · ${conversation.branch}`
-      : "Isolated worktree";
-  }
-  return conversation.branch
-    ? `Project checkout · ${conversation.branch}`
-    : "Project checkout";
+  return conversationWorkspaceLabel({
+    branch: conversation.branch,
+    worktreePath: conversation.worktree_path,
+  });
 }
 
 // Titles and branch-derived labels can be authored by another agent run.

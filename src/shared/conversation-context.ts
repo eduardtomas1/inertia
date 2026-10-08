@@ -102,6 +102,19 @@ export interface MaterializedConversationContext {
   blockCount: number;
 }
 
+export function conversationWorkspaceLabel(
+  conversation: { branch: string | null; worktreePath: string | null },
+): string {
+  if (conversation.worktreePath) {
+    return conversation.branch
+      ? `Isolated worktree · ${conversation.branch}`
+      : "Isolated worktree";
+  }
+  return conversation.branch
+    ? `Project checkout · ${conversation.branch}`
+    : "Project checkout";
+}
+
 export function isOwnConversationContext(
   packet: Pick<ConversationContextPacketSummary, "sourceConversationId" | "targetConversationId">,
 ): boolean {

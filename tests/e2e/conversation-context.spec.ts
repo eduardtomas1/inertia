@@ -356,8 +356,10 @@ test("confirms cross-workspace sharing inline and restores keyboard input", asyn
     await expect(option).toContainText("different workspace");
     await option.click();
     const confirmation = page.getByRole("alertdialog", { name: "Share context from another workspace?" });
-    await expect(confirmation).toContainText(sourceWorkspace);
-    await expect(confirmation).toContainText(targetWorkspace);
+    await expect(confirmation).toContainText("From: Another workspace · Project checkout");
+    await expect(confirmation).toContainText(/To: this chat · \S/u);
+    await expect(confirmation).not.toContainText(sourceWorkspace);
+    await expect(confirmation).not.toContainText(targetWorkspace);
     await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
     const cancelBounds = (await confirmation.getByRole("button", { name: "Cancel", exact: true }).boundingBox())!;
     const shareBounds = (await confirmation.getByRole("button", { name: "Share chat", exact: true }).boundingBox())!;

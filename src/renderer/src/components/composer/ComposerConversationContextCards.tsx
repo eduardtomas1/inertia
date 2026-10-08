@@ -30,9 +30,9 @@ export function ChatReferenceConfirmation({ source, onConfirm }: {
         onConfirm(false);
       }}>
       <strong id={titleId}>Share context from another workspace?</strong>
-      <p>“{source.conversationTitle}” in {source.projectName}</p>
-      <p>From: {source.workspaceLabel}</p>
-      <p>To: {source.targetWorkspaceLabel}</p>
+      <p>“{source.conversationTitle}”</p>
+      <p>From: {source.projectName} · {source.workspaceLabel}</p>
+      <p>To: this chat · {source.targetWorkspaceLabel}</p>
       <p>Shares a size-limited copy with the agent. The original chat stays unchanged.</p>
       <footer>
         <button ref={cancel} type="button" className="secondary-button" onClick={() => onConfirm(false)}>Cancel</button>

@@ -9,6 +9,7 @@ import {
   visibleConversationLatestTurnSummary,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
+  conversationWorkspaceOptions,
   terminalResumeDirectory,
   visibleWorkspaceConversation,
   workspaceDirectoryIdentity,
@@ -16,6 +17,8 @@ import {
 import {
   draftWorkspaceToolsUnavailableReason,
 } from "../../src/renderer/src/utils/draftWorkspaceAvailability";
+import { conversationContextWorkspaceLabel } from "../../src/server/persistence/conversation-context-excerpts";
+import type { Conversation, ConversationShell, Project } from "../../src/shared/contracts";
 import {
   createStreamingAgentStore,
   EMPTY_STREAMING_AGENT_SOURCE,
@@ -55,6 +58,38 @@ describe("runtime conversation references", () => {
     expect(workspaceDirectoryIdentity("/Work/Project")).not.toBe(
       workspaceDirectoryIdentity("/work/project"),
     );
+  });
+
+  it("labels both sides of a chat reference the way the shared packet labels them", () => {
+    const project = { id: "project", name: "Inertia", path: "/workspace/inertia", normalizedPath: "/workspace/inertia" } as Project;
+    const other = { id: "other", name: "Research", path: "/workspace/research", normalizedPath: "/workspace/research" } as Project;
+    const shell = (id: string, projectId: string, branch: string | null, worktreePath: string | null) => ({
+      id, projectId, title: id, branch, worktreePath, archivedAt: null, updatedAt: "2026-10-08T10:00:00.000Z",
+      latestTurn: null, providerId: "codex",
+    }) as unknown as ConversationShell;
+    const current = shell("current", project.id, "main", null);
+    const sources = [
+      shell("isolated", project.id, "feature/retry", "/workspace/inertia/.worktrees/retry"),
+      shell("research", other.id, null, null),
+    ];
+    const { contextSources } = conversationWorkspaceOptions({
+      conversations: [current, ...sources],
+      projects: [project, other],
+      providers: [],
+      persistedConversationId: current.id,
+      conversation: current as Conversation,
+      project,
+      workspaceToolsUnavailable: false,
+    });
+    const packetLabel = (conversation: ConversationShell) => conversationContextWorkspaceLabel({
+      branch: conversation.branch, worktree_path: conversation.worktreePath,
+    });
+    expect(contextSources.map(({ workspaceLabel, targetWorkspaceLabel }) => [workspaceLabel, targetWorkspaceLabel])).toEqual([
+      ["Isolated worktree · feature/retry", "Project checkout · main"],
+      ["Project checkout", "Project checkout · main"],
+    ]);
+    expect(contextSources.map(({ workspaceLabel }) => workspaceLabel)).toEqual(sources.map(packetLabel));
+    expect(contextSources[0]!.targetWorkspaceLabel).toBe(packetLabel(current));
   });
 
   it("uses the visible draft project directory for provider resume choices", () => {

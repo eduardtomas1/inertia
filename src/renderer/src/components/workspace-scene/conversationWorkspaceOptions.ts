@@ -4,6 +4,7 @@ import type {
   Project,
   ProviderInfo,
 } from "@shared/contracts";
+import { conversationWorkspaceLabel } from "@shared/conversation-context";
 import { providerTerminalResumeAvailability } from "@shared/provider-terminal-resume";
 
 import type { ConversationContextSourceOption } from "../conversation-context/types";
@@ -69,10 +70,10 @@ export function conversationWorkspaceOptions(input: {
         conversationId: candidate.id,
         conversationTitle: candidate.title,
         projectName: candidateProject.name,
-        workspaceLabel: candidate.worktreePath ?? candidateProject.path,
+        workspaceLabel: conversationWorkspaceLabel(candidate),
         targetWorkspaceLabel: workspaceToolsUnavailable
           ? `New isolated worktree for ${project?.name ?? "this project"}`
-          : conversation.worktreePath ?? project?.path ?? activeDirectory,
+          : conversationWorkspaceLabel(conversation),
         workspaceRelation: sameWorkspace && !workspaceToolsUnavailable
           ? "same-workspace"
           : "different-workspace",

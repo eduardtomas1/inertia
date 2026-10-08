@@ -210,6 +210,7 @@ describe("long user request expansion", () => {
       result: { kind: "conversation.context.packet", packet: {
         ...packet,
         excerpts: [{ sourceMessageId: "m1", sourceTurnId: null, role: "assistant", content: "Retry with jitter.", truncated: false, createdAt: "now" }],
+        supplement: { files: ["M src/retry.ts +9 -2"], commands: ["npm test (ok)"] },
       } },
     } as unknown as ServerEvent));
     render(
@@ -252,6 +253,11 @@ describe("long user request expansion", () => {
     expect(receipt).toHaveAttribute("aria-expanded", "true");
     expect(preview).toHaveFocus();
     expect(await within(preview).findByText("Retry with jitter.")).toBeVisible();
+    expect(within(preview).getAllByRole("listitem").map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Retry with jitter."),
+      "M src/retry.ts +9 -2",
+      "npm test (ok)",
+    ]);
     expect(onCommand).toHaveBeenCalledExactlyOnceWith("conversation.context.load", {
       type: "conversation.context.load",
       payload: { packetId: packet.id, targetConversationId: conversationId },

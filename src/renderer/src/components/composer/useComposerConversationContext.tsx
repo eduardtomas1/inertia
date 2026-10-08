@@ -155,6 +155,7 @@ export function useComposerConversationContext(input: {
     label: string,
     source?: ConversationContextSourceOption,
     acknowledged = false,
+    attempts = 1,
   ): Promise<boolean> => {
     if (!onCommand) return false;
     pendingRequests.current.set(conversationId, null);
@@ -170,20 +171,28 @@ export function useComposerConversationContext(input: {
         pendingRequests.current.delete(conversationId);
         return false;
       }
-      const event = await onCommand("conversation.context.create", {
-        type: "conversation.context.create",
-        payload: {
-          sourceConversationId,
-          targetConversationId: conversationId,
-          acknowledgedWorkspaceDifference,
-        },
-      });
-      if (event.type !== "request.result"
-        || event.result.kind !== "conversation.context.packet"
-        || event.result.packet.targetConversationId !== conversationId
-        || event.result.packet.sourceConversationId !== sourceConversationId
-        || event.result.packet.consumedMessageId !== null) throw new Error("Invalid chat reference response.");
-      pendingRequests.current.set(conversationId, event.result.packet.id);
+      const create = async (remaining: number): Promise<string> => {
+        try {
+          const event = await onCommand("conversation.context.create", {
+            type: "conversation.context.create",
+            payload: {
+              sourceConversationId,
+              targetConversationId: conversationId,
+              acknowledgedWorkspaceDifference,
+            },
+          });
+          if (event.type !== "request.result"
+            || event.result.kind !== "conversation.context.packet"
+            || event.result.packet.targetConversationId !== conversationId
+            || event.result.packet.sourceConversationId !== sourceConversationId
+            || event.result.packet.consumedMessageId !== null) throw new Error("Invalid chat reference response.");
+          return event.result.packet.id;
+        } catch (error) {
+          if (remaining <= 1) throw error;
+          return create(remaining - 1);
+        }
+      };
+      pendingRequests.current.set(conversationId, await create(attempts));
       return true;
     } catch {
       pendingRequests.current.delete(conversationId);
@@ -207,10 +216,23 @@ export function useComposerConversationContext(input: {
   };
 
   const recopying = useRef(new Set<string>());
+  const sameRelation = async (packet: ConversationContextPacketSummary): Promise<boolean> => {
+    if (isOwnConversationContext(packet)) return true;
+    const event = await onCommand!("conversation.context.source.load", {
+      type: "conversation.context.source.load",
+      payload: { sourceConversationId: packet.sourceConversationId, targetConversationId: conversationId },
+    });
+    return event.type === "request.result"
+      && event.result.kind === "conversation.context.source"
+      && event.result.source.conversationId === packet.sourceConversationId
+      && event.result.source.targetConversationId === conversationId
+      && event.result.source.workspaceRelation === packet.workspaceRelation;
+  };
   const recopy = async (packet: ConversationContextPacketSummary): Promise<void> => {
     pendingRequests.current.set(conversationId, null);
     refresh();
     try {
+      if (!await sameRelation(packet)) throw new Error("The confirmed workspace relation changed.");
       await remove(packet.id);
     } catch {
       pendingRequests.current.delete(conversationId);
@@ -222,6 +244,7 @@ export function useComposerConversationContext(input: {
       isOwnConversationContext(packet) ? "This chat" : packet.sourceConversationTitle,
       undefined,
       packet.workspaceRelation === "different-workspace",
+      2,
     );
   };
   useEffect(() => {

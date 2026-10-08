@@ -323,6 +323,31 @@ describe("Claude delegated lifecycle", () => {
     });
   });
 
+  it("keeps a running shell across the init that opens a notification turn", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    const socket = { messaging_socket_path: "/tmp/cc-socks/4242.sock" };
+    lifecycle.observe(claudeSystem("init", socket));
+    lifecycle.observe(claudeBackgroundTasks(["shell-long", "shell-short"]));
+    expect(lifecycle.observe(claudeSuccessResult("Started both", "completed"))).toEqual({ turnEnded: false });
+    lifecycle.observe(claudeBackgroundTasks(["shell-long"]));
+    lifecycle.observe(claudeSystem("init", socket));
+    expect(lifecycle.observe(claudeSuccessResult("The short one finished", "completed"))).toEqual({ turnEnded: false });
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: "delegates-abandoned" });
+
+    lifecycle.observe(claudeBackgroundTasks([]));
+    lifecycle.observe(claudeSystem("init", socket));
+    expect(lifecycle.observe(claudeSuccessResult("The long one finished", "completed"))).toEqual({ turnEnded: true });
+    expect(lifecycle.complete()).toMatchObject({ kind: "result", result: { result: "The long one finished" } });
+  });
+
+  it("drops the background level when init reports a different CLI process", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    lifecycle.observe(claudeSystem("init", { messaging_socket_path: "/tmp/cc-socks/1.sock" }));
+    lifecycle.observe(claudeBackgroundTasks(["orphan-from-old-process"]));
+    lifecycle.observe(claudeSystem("init", { messaging_socket_path: "/tmp/cc-socks/2.sock" }));
+    expect(lifecycle.observe(claudeSuccessResult("Resumed cleanly", "completed"))).toEqual({ turnEnded: true });
+  });
+
   it("resets the process-local background level on SDK init and cleanup", () => {
     const lifecycle = new ClaudeDelegateLifecycle();
     lifecycle.observe(claudeBackgroundTasks(["orphan-from-old-process"]));

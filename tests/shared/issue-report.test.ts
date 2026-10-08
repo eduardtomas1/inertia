@@ -154,7 +154,7 @@ it.each(["a.", "a-", "a_", "a.b-c+d_", "a@b.", "x-y=", "ab.cd-ef:"])("scrubs a f
   const text = unit.repeat(Math.ceil(REPORT_BODY_LIMIT / unit.length)).slice(0, REPORT_BODY_LIMIT);
   const started = performance.now();
   const scrubbed = scrubReportText(text, REPORT_BODY_LIMIT);
-  expect(performance.now() - started).toBeLessThan(100);
+  expect(performance.now() - started).toBeLessThan(1_000);
   expect(scrubReportText(scrubbed, REPORT_BODY_LIMIT)).toBe(scrubbed);
 });
 

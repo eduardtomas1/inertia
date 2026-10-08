@@ -2,6 +2,108 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.71 — 2026-10-08
+
+Move a chat to another provider without losing its thread, let agents answer
+with a rendered page, and keep going after a usage limit by switching provider
+in the same chat.
+
+### Chats and providers
+
+- Pick a model from another provider in a chat that already has turns and keep
+  going in the same chat. The next message starts a fresh session on that
+  provider with the chat's earlier messages (up to 192 KiB) and a list of the
+  files its turns changed. A **Context handoff** divider marks the switch, and
+  switching back before you send resumes the original session. This replaces
+  **Continue in a new chat**.
+- **Continue with another model** on a usage-limit row now switches the same
+  chat. A scheduled resume is cancelled when the chat moves to another
+  provider, and **Snooze until reset** ends when the first message on the new
+  provider starts.
+- Files changed by turns on another account or endpoint stay out of a handoff,
+  like those turns' messages.
+
+### Visual replies
+
+- Agents can answer with a rendered page, such as a chart, table, diagram or
+  mockup, shown above their written reply. Codex, Claude, Cursor, Kimi Code and
+  OpenCode can use it. Pages run sandboxed without network access, follow the
+  app's theme, open full size, and open a link in your browser only when you
+  click it.
+- SVG and image-map links open in your browser, a page that reloads itself
+  keeps its links working, and a failed page reads **Could not render a page**
+  in the work log.
+
+### Claude
+
+- A turn no longer ends while one of Claude's background commands is still
+  running. When another background task or a watcher finished first, Claude's
+  reply to it closed the turn and stopped the remaining command, such as a long
+  build, with the turn cut off at "waiting for it to finish".
+- A Fast session no longer fails when a later turn reports the rate-limit
+  cooldown, and organization configuration problems at startup are explained.
+- Inertia asks Claude Code to save its session before the turn ends, so the
+  next turn can continue from it.
+- A turn that delegates to an in-process teammate stays open until the
+  teammate finishes.
+
+### Codex
+
+- Questions with up to twelve options or longer descriptions are shown instead
+  of failing the turn, and form or user-verification requests from MCP servers
+  are declined instead of failing it.
+- A turn that ends while a sub-agent still runs completes once the sub-agent
+  settles, and a resumed sub-agent shows as working again.
+- A goal started without a budget is confirmed when Codex applies its default
+  budget.
+
+### Kimi Code
+
+- Kimi Code shows Moonshot's official mark, and its usage is read from
+  `~/.kimi-code` (or `KIMI_CODE_HOME`).
+
+### Windows, macOS and Linux
+
+- On Linux, a background update check no longer rolls back an update that is
+  being installed, which made the next launch fail.
+- On Linux, an AppImage in a folder you cannot write to starts normally and
+  updates manually, process cleanup works without `ps`, and projects on
+  filesystems that report no creation time (sshfs, NFS, ecryptfs) can be added.
+- On Windows, Inertia also finds CLIs in `~/.local/bin` and `~/.opencode/bin`.
+  On Windows and macOS, an unconfirmed quit can be retried instead of leaving a
+  hidden process behind.
+- Selective revert keeps each file's line endings, with or without
+  `core.autocrlf`.
+- Cursor sign-in and terminal resume work when the `cursor` editor launcher is
+  configured, and fullscreen windows remember their normal size.
+
+### Performance
+
+- Startup no longer loads the image canvas library before it is needed, long
+  chats look up their history through an index (52 ms to 1.6 ms at 60,000
+  activities), and the composer no longer re-renders on every activity.
+
+### Providers and dependencies
+
+- Codex 0.161.0, Claude Agent SDK 0.3.293 (Claude Code 2.1.293), OpenCode
+  1.18.35, Kimi Code 2.1.1, Antigravity 1.3.1 and the current Cursor release
+  are supported.
+- Updated Electron to 44.7.0, with upstream Chromium, V8 and WebRTC fixes,
+  lucide-react to 1.53.0 and the Anthropic SDK used by the provider drift
+  checks to 0.132.1, with Playwright 1.64.0 and newer pinned GitHub Actions for
+  development and CI.
+
+### Fixes
+
+- Migration 93 stores visual replies.
+- Sidebar repository labels and context-sharing labels show the project path
+  as you chose it, and Antigravity turns are no longer labelled OpenCode.
+- CI only: the stalled ACP cancellation test allows 4 seconds instead of 1 for
+  a slow Windows runner to stop the provider's process tree, the report
+  scrubbing test allows 1 second instead of 100 ms on a slow runner, and the
+  truncated-text preview test waits for its notice instead of the loading
+  status.
+
 ## 0.0.70 — 2026-10-06
 
 Claude no longer fails a turn that is still answering after background work

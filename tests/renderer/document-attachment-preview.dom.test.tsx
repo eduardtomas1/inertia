@@ -298,8 +298,8 @@ describe("document attachment previews", () => {
     const user = userEvent.setup();
     render(<ComposerAttachmentList attachments={[attachment({ name: "service.log", mimeType: "text/plain", size: 4 * 1024 * 1024 })]} onRemove={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Preview attachment service.log" }));
-    const notice = await screen.findByRole("status");
-    expect(notice).toHaveTextContent("Showing the first 1 MiB. The complete file is saved and available to the agent.");
+    const notice = await screen.findByText("Showing the first 1 MiB. The complete file is saved and available to the agent.");
+    expect(notice).toHaveAttribute("role", "status");
     expect(notice).toHaveClass("text-attachment-preview-notice");
     const frame = notice.parentElement;
     expect(frame).toHaveClass("text-attachment-preview-frame");

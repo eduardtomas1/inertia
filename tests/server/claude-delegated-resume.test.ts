@@ -247,3 +247,66 @@ describe("Claude delegated parent resume", () => {
     });
   });
 });
+
+describe("Claude notification turns with a shell still running", () => {
+  const roots: string[] = [];
+
+  afterEach(async () =>
+    await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  it("keeps the turn open until the last background shell settles", async () => {
+    const root = portableFixtureRoot("Claude SDK notification turn with a shell still running");
+    roots.push(root);
+    const socket = { messaging_socket_path: "/tmp/cc-socks/4242.sock" };
+    const shells = (ids: readonly string[]) => claudeSystem("background_tasks_changed", {
+      tasks: ids.map((id) => ({ task_id: id, task_type: "local_bash", description: `Shell ${id}` })),
+    });
+    const reply = (text: string) => sdkMessage({
+      type: "assistant",
+      session_id: CLAUDE_PROTOCOL_SESSION_ID,
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text }] },
+    });
+    let longShellSettled = false;
+    const harness = createClaudeAgentSdkHarness({
+      terminalSubagentDrainTimeoutMs: 25,
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("init", socket);
+          yield shells(["shell-long", "shell-short"]);
+          yield reply("Both builds are running. ");
+          yield claudeSuccessResult("Both builds are running.", "completed");
+          yield claudeSystem("task_notification", { task_id: "shell-short", status: "completed", output_file: "/tmp/short", summary: "Short build done" });
+          yield shells(["shell-long"]);
+          yield claudeSystem("init", socket);
+          yield reply("The short build finished; waiting for the long one. ");
+          yield claudeSuccessResult("The short build finished; waiting for the long one.", "completed");
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          longShellSettled = true;
+          yield claudeSystem("task_notification", { task_id: "shell-long", status: "completed", output_file: "/tmp/long", summary: "Long build done" });
+          yield shells([]);
+          yield claudeSystem("init", socket);
+          yield reply("The long build finished too.");
+          yield claudeSuccessResult("The long build finished too.", "completed");
+        })(),
+      ),
+    });
+    const manager = ProviderManager.createForTests(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-notification-turn-shell-running",
+      cwd: root,
+      prompt: "Run both builds in the background",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "The long build finished too.",
+    });
+    expect(longShellSettled).toBe(true);
+  });
+});

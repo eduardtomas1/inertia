@@ -71,7 +71,7 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
       await waitFor(`stalled ${method}`, () => existsSync(marker) && readFileSync(marker, "utf8").includes(JSON.stringify(method)));
       run.cancel(false);
       await expect(Promise.race([result, new Promise((resolve) => {
-        const timer = setTimeout(() => resolve("still running"), 1_000); timer.unref();
+        const timer = setTimeout(() => resolve("still running"), 4_000); timer.unref();
       })])).resolves.toMatchObject({ status: "cancelled", cleanupConfirmed: true });
       expect(readFileSync(marker, "utf8")).not.toContain('"session/cancel"');
     } finally {

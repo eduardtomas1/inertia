@@ -137,7 +137,6 @@ function dependencies(options: {
     routeKey: string | null,
   ) => void>;
   conversationPath?: string;
-  checkpointCount?: Mock<() => number>;
   providerTerminalResumeActive?: boolean;
   providerTerminalResumeAcquire?: boolean;
   providerTerminalResumeAcquireWhenAvailable?: Mock<(
@@ -191,11 +190,9 @@ function dependencies(options: {
       })),
       conversationPath: vi.fn(() => options.conversationPath ?? tmpdir()),
       hasConversationMessages: vi.fn(() => false),
-      checkpointCount: options.checkpointCount ?? vi.fn(() => 0),
       addCheckpoint: vi.fn(() => ({
         id: "55555555-5555-4555-8555-555555555555",
       })),
-      removeUnassociatedCheckpoint: vi.fn(() => true),
       createMessage: vi.fn(() => ({ id: "message-id" })),
       updateConversation: vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["store"],
@@ -1532,7 +1529,7 @@ describe("message attachment ownership transfer", () => {
     expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
   });
 
-  it("revalidates skills before checkpoint work and passes them to the turn", async () => {
+  it("revalidates skills before provider transition and passes them to the turn", async () => {
     const skill = {
       source: "codex-native" as const,
       name: "review",
@@ -1551,14 +1548,11 @@ describe("message attachment ownership transfer", () => {
 
     await expect(handler({} as never, command)).resolves.toBe("handled");
     expect(queue).toHaveBeenCalledWith(
-      expect.objectContaining({ skills: [skill] }),
+      expect.objectContaining({ skills: [skill], turnCheckpoint: true }),
       expect.any(Function),
       expect.objectContaining({ conversationId }),
     );
-    expect(resolveSkills.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(handlerDependencies.store.conversationPath)
-        .mock.invocationCallOrder[0]!,
-    );
+    expect(handlerDependencies.store.conversationPath).not.toHaveBeenCalled();
     expect(
       vi.mocked(handlerDependencies.workflows.assertTurnSkillsCurrent)
         .mock.invocationCallOrder[0],
@@ -1569,10 +1563,7 @@ describe("message attachment ownership transfer", () => {
     expect(
       vi.mocked(handlerDependencies.providerTerminalResumes.acquireWhenAvailable)
         .mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      vi.mocked(handlerDependencies.store.conversationPath)
-        .mock.invocationCallOrder[0]!,
-    );
+    ).toBeLessThan(queue.mock.invocationCallOrder[0]!);
     expect(
       vi.mocked(handlerDependencies.turns.start).mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -1858,43 +1849,7 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
-  it("removes a captured checkpoint when its metadata cannot be counted", async () => {
-    const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-count-"));
-    try {
-      await execFileAsync("git", ["init", "--quiet", repository]);
-      await writeFile(join(repository, "request.txt"), "pending\n");
-      const queue = vi.fn(() => queuedTurn());
-      const handlerDependencies = dependencies({
-        queue,
-        relinquishAll: vi.fn(async () => undefined),
-        conversationPath: repository,
-        checkpointCount: vi.fn(() => {
-          throw new Error("checkpoint count unavailable");
-        }),
-      });
-      const handler = createTurnInteractionCommandHandler(
-        handlerDependencies,
-      );
-
-      await expect(handler({} as never, messageCommand())).resolves.toBe(
-        "handled",
-      );
-      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
-      expect(queue).toHaveBeenCalledOnce();
-      const { stdout } = await execFileAsync("git", [
-        "-C",
-        repository,
-        "for-each-ref",
-        "--format=%(refname)",
-        `refs/inertia/checkpoints/${conversationId}/`,
-      ]);
-      expect(stdout.trim()).toBe("");
-    } finally {
-      await rm(repository, { recursive: true, force: true });
-    }
-  });
-
-  it("removes a captured checkpoint when durable attachment retention fails", async () => {
+  it("leaves no checkpoint when durable attachment retention fails", async () => {
     const repository = await mkdtemp(join(tmpdir(), "inertia-attachment-retain-"));
     try {
       await execFileAsync("git", ["init", "--quiet", repository]);
@@ -1933,7 +1888,7 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
-  it("removes unassociated checkpoint metadata and its ref before turn persistence", async () => {
+  it("creates no checkpoint when turn persistence fails", async () => {
     const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-queue-"));
     try {
       await execFileAsync("git", ["init", "--quiet", repository]);
@@ -1951,12 +1906,7 @@ describe("message attachment ownership transfer", () => {
         messageCommand(),
       )).rejects.toThrow("message-send/turn-persistence/unexpected");
 
-      expect(handlerDependencies.store.addCheckpoint).toHaveBeenCalledOnce();
-      expect(handlerDependencies.store.removeUnassociatedCheckpoint)
-        .toHaveBeenCalledWith(
-          "55555555-5555-4555-8555-555555555555",
-          conversationId,
-        );
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
       const { stdout } = await execFileAsync("git", [
         "-C",
         repository,
@@ -1970,50 +1920,34 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
-  it("passes the checkpoint failure reason to the turn when capture fails", async () => {
-    const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-failure-"));
-    try {
-      await execFileAsync("git", ["init", "--quiet", repository]);
-      await execFileAsync("git", ["init", "--quiet", join(repository, "nested")]);
-      const queue = vi.fn(() => queuedTurn());
-      const handlerDependencies = dependencies({
-        queue,
-        relinquishAll: vi.fn(async () => undefined),
-        conversationPath: repository,
-      });
+  it("accepts the message before any checkpoint and asks the turn to create one", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+    });
 
-      await createTurnInteractionCommandHandler(handlerDependencies)(
-        {} as never,
-        messageCommand(),
-      );
+    await createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    );
 
-      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
-      expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-        checkpointId: null,
-        checkpointFailure: "Git could not create the checkpoint.",
-      }), expect.any(Function), expect.anything());
-    } finally {
-      await rm(repository, { recursive: true, force: true });
-    }
-  });
-
-  it("does not report a checkpoint failure outside a Git repository", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "inertia-checkpoint-absent-"));
-    try {
-      const queue = vi.fn(() => queuedTurn());
-      await createTurnInteractionCommandHandler(dependencies({
-        queue,
-        relinquishAll: vi.fn(async () => undefined),
-        conversationPath: directory,
-      }))({} as never, messageCommand());
-
-      expect(queue).toHaveBeenCalledWith(expect.objectContaining({
-        checkpointId: null,
-        checkpointFailure: null,
-      }), expect.any(Function), expect.anything());
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    expect(handlerDependencies.store.conversationPath).not.toHaveBeenCalled();
+    expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+    expect(queue).toHaveBeenCalledWith(
+      expect.not.objectContaining({ checkpointId: expect.anything() }),
+      expect.any(Function),
+      expect.anything(),
+    );
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({ turnCheckpoint: true }),
+      expect.any(Function),
+      expect.anything(),
+    );
+    expect(handlerDependencies.broadcast).toHaveBeenCalledWith({
+      type: "conversation.message.persisted",
+      message: queuedTurn().message,
+    });
   });
 
   it("does not release after an authoritative turn accepts ownership", async () => {

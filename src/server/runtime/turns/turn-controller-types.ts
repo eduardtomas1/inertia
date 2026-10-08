@@ -40,6 +40,7 @@ import type { TurnStreamChannel } from "./turn-stream-channel";
 import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
+import type { TurnCheckpointCapture } from "../../turn-git-artifacts";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -124,6 +125,7 @@ export interface TurnGitArtifactHookInput {
   turn: AgentTurn;
   checkpointId: string | null;
   terminalAssistantMessageId: string | null;
+  turnCheckpoint?: boolean;
 }
 
 export interface TurnMetadataRefreshHookInput {
@@ -170,7 +172,9 @@ export interface TurnControllerHooks {
     kind: "assistant" | "reasoning";
     recordId: string;
   }): void;
-  captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
+  captureGitBefore?(
+    input: TurnGitArtifactHookInput,
+  ): void | Promise<TurnCheckpointCapture | null | void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
   /** Optional metadata; failure cannot change a committed provider outcome. */
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
@@ -214,6 +218,7 @@ export interface QueueTurnRequest {
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
   checkpointFailure?: string | null;
+  turnCheckpoint?: boolean;
   /** Privileged provider-native skill references resolved from opaque IDs. */
   skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
@@ -283,6 +288,7 @@ export interface ActiveTurn {
   generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;
   checkpointFailure: string | null;
+  turnCheckpoint?: boolean;
   rendererOwnerId: string | null;
   structuredContext: unknown;
   gitBeforeCapture: Promise<void> | null;

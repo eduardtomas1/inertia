@@ -1,3 +1,6 @@
+import type { RuntimeStore } from "../../database";
+import type { TurnCheckpointCapture } from "../../turn-git-artifacts";
+import { recordTurnCheckpointUnavailable } from "./turn-checkpoint-notice";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -5,6 +8,7 @@ import type {
 import type { TurnSettlementEffects } from "./turn-settlement-effects";
 
 export interface TurnArtifactSequencerOptions {
+  store: Pick<RuntimeStore, "addActivity">;
   hooks: TurnControllerHooks;
   barriers: Map<string, Promise<void>>;
 }
@@ -22,18 +26,38 @@ export class TurnArtifactSequencer {
         turn: active.turn,
         checkpointId: active.checkpointId,
         terminalAssistantMessageId: null,
+        ...(active.turnCheckpoint ? { turnCheckpoint: true } : {}),
       });
       const priorArtifact = this.options.barriers.get(active.conversation.id);
       const value = priorArtifact
         ? priorArtifact.catch(() => undefined).then(capture)
         : capture();
       if (value && typeof (value as Promise<void>).then === "function") {
-        return Promise.resolve(value).catch(() => undefined);
+        return Promise.resolve(value)
+          .then((checkpoint) => this.applyTurnCheckpoint(active, checkpoint))
+          .catch(() => undefined);
       }
       return null;
     } catch {
       return null;
     }
+  }
+
+  private applyTurnCheckpoint(
+    active: ActiveTurn,
+    checkpoint: TurnCheckpointCapture | null | void,
+  ): void {
+    if (!checkpoint) return;
+    active.checkpointId = checkpoint.checkpointId;
+    active.checkpointFailure = checkpoint.failure;
+    if (checkpoint.checkpointId) {
+      this.options.hooks.broadcast({
+        type: "conversation.detail.invalidated",
+        conversationId: active.conversation.id,
+      });
+    }
+    if (active.runState.isTerminal()) return;
+    recordTurnCheckpointUnavailable(this.options.store, this.options.hooks, active);
   }
 
   finalize(active: ActiveTurn, effects: TurnSettlementEffects): void | Promise<void> {

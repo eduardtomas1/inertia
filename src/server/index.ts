@@ -625,8 +625,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
       },
       captureGitBefore: async (input) => {
-        await turnGitArtifacts.captureBefore(input);
+        const checkpoint = await turnGitArtifacts.captureBefore(input);
         broadcastSnapshot();
+        return checkpoint;
       },
       captureGitArtifacts: (input) => turnGitArtifacts.finalize(input),
       releaseTurnAttachments: ({ attachmentIds }) =>

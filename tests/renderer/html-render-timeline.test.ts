@@ -264,6 +264,14 @@ describe("the answer tail after a visual reply", () => {
     expect(answerTailCommentary(liveTurn([page], [renderTool], { inputRequests: [input] }))).toBeNull();
   });
 
+  it("returns the text to the work rail once the user follows up after the render", () => {
+    const followUp = message("follow-up", "user", "Add the error budget too.", 6);
+
+    expect(answerTailCommentary(liveTurn([preamble, page, followUp, tail], [renderTool]))).toBeNull();
+    const earlier = message("earlier-follow-up", "user", "Use the last quarter.", 2);
+    expect(answerTailCommentary(liveTurn([earlier, preamble, page, tail], [renderTool]))).toEqual([tail]);
+  });
+
   it("starts the tail after the last of several renders", () => {
     const between = message("between", "assistant", "Now the error budget.", 6);
     const turn = liveTurn(

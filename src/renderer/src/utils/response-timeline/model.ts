@@ -88,6 +88,7 @@ export function answerTailCommentary(
     | "approvals"
     | "inputRequests"
     | "commentaryMessages"
+    | "followUpMessages"
   >,
 ): ChatMessage[] | null {
   const lastRender = turn.htmlRenders.at(-1);
@@ -98,7 +99,8 @@ export function answerTailCommentary(
     timestamp(createdAt) > since;
   const workFollows = turn.activities.some((activity) =>
     (activity.kind === "tool" || activity.kind === "command" || activity.kind === "file")
-    && afterRender(activity));
+    && afterRender(activity))
+    || turn.followUpMessages.some(afterRender);
   return workFollows ? null : turn.commentaryMessages.filter(afterRender);
 }
 

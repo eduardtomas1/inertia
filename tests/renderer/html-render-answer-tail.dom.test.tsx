@@ -246,6 +246,16 @@ describe("the answer after a visual reply", () => {
     expect(element("[data-active-work-region]").contains(row)).toBe(true);
     expect(precedes(row, element("[data-testid='html-render']"))).toBe(true);
   });
+
+  it("returns the text to the work rail when the user follows up after the page", () => {
+    const followUp = chatMessage("follow-up", "user", "Add the error budget too.", 6);
+    render(<ResponseTimeline {...props("running", [page, followUp], ANSWER)} />);
+
+    expect(document.querySelector("[data-turn-layer='answer-tail']")).toBeNull();
+    const row = element(`[data-assistant-commentary-id='live-commentary:${turnId}']`);
+    expect(element("[data-active-work-region]").contains(row)).toBe(true);
+    expect(precedes(row, element("[data-testid='html-render']"))).toBe(true);
+  });
 });
 
 describe("the settled answer anchor after a visual reply", () => {

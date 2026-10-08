@@ -1,17 +1,19 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, screen,
+  app, BrowserWindow, dialog, ipcMain, Menu, MenuItem, screen,
   type IpcMainInvokeEvent, type Session, type WebContents,
 } from "electron";
 import {
-  emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS,
-  parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotCounts, type MascotSnapshot, type MascotStatus,
+  emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS, mascotBubbleHeight,
+  parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotStatus,
 } from "../shared/mascot.js";
 import { mascotChatChoices } from "../shared/mascot-choices.js";
+import type { MascotFeed } from "../shared/mascot-feed.js";
 import type { MascotSpriteAction, MascotSpriteImport, MascotTemplateExport } from "../shared/mascot-sprites.js";
 import {
-  mascotBounds, MASCOT_SIZE, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState,
+  MASCOT_ARTWORK, MASCOT_BUBBLE_BOTTOM, MASCOT_FIGURE, mascotBounds, mascotPosition, MASCOT_SIZE, readMascotWindowState,
+  rememberMascotPosition, supportsMascotPlacement, writeMascotWindowState,
 } from "./mascot-placement.js";
 import {
   loadMascotSprites, MascotSpriteError, mascotSprites, readMascotSprites, removeMascotSprites, saveMascotSprites,
@@ -41,8 +43,8 @@ export class MascotMain {
   private pendingSprites: MascotSpriteSet | null = null;
   private readonly rendererUrl: string;
   private state;
-  private feed: { status: MascotStatus; chats: MascotStatus[]; counts: MascotCounts | null } = {
-    status: emptyMascotStatus("unavailable"), chats: [], counts: null,
+  private feed: Omit<MascotFeed, "focus" | "request"> = {
+    status: emptyMascotStatus("unavailable"), chats: [], rows: [], counts: null,
   };
   private readonly pinning: MascotPin;
   private window: BrowserWindow | null = null;
@@ -54,6 +56,8 @@ export class MascotMain {
   private lastGesture = 0;
   private ignoringMouse = false;
   private suspended = false;
+  private hidden = false;
+  private shape = "";
   private registered = false;
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
 
@@ -70,18 +74,15 @@ export class MascotMain {
     this.spriteQueue = this.spritesLoaded;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), ...(this.feed.counts ? { counts: { ...this.feed.counts } } : {}), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), rows: this.rows().map((chat) => ({ ...chat })), ...(this.feed.counts ? { counts: { ...this.feed.counts } } : {}), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
 
   sprite(id: string, name: string): MascotSpriteFile | null {
     const set = [this.sprites, this.pendingSprites].find((candidate) => candidate?.id === id);
     return set?.files.find((file) => file.name === name) ?? null;
   }
 
-  observe(
-    status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null,
-    counts: MascotCounts | null = null, request?: number | null,
-  ): void {
-    this.feed = { status, chats, counts };
+  observe({ status, chats, rows, focus, counts, request }: MascotFeed): void {
+    this.feed = { status, chats, rows, counts };
     this.pinning.answer(focus, request);
     this.broadcast();
   }
@@ -89,6 +90,11 @@ export class MascotMain {
   private pin(): string | null {
     const pinned = this.pinning.id;
     return this.feed.chats.some(({ conversationId }) => conversationId === pinned) ? pinned : null;
+  }
+
+  private rows(): MascotStatus[] {
+    const pinned = this.pin();
+    return pinned ? this.feed.rows.filter(({ conversationId }) => conversationId !== pinned) : this.feed.rows;
   }
 
   private status(): MascotStatus {
@@ -106,7 +112,7 @@ export class MascotMain {
 
   runtimePhase(phase: string): void {
     this.pinning.runtime(phase === "ready");
-    if (phase !== "ready") this.observe(emptyMascotStatus("unavailable"), [], null, null, null);
+    if (phase !== "ready") this.observe({ status: emptyMascotStatus("unavailable"), chats: [], rows: [], focus: null, counts: null, request: null });
   }
 
   attach(): void {
@@ -129,6 +135,7 @@ export class MascotMain {
         this.assertSender(event, args.length, 1, true);
         const preferences = parseMascotPreferences(args[0]);
         if (!preferences) throw new Error("Invalid mascot preferences");
+        if (preferences.enabled && !this.state.preferences.enabled) this.hidden = false;
         this.state.preferences = preferences;
         this.save();
         await this.reconcile();
@@ -166,6 +173,7 @@ export class MascotMain {
       screen.on("display-added", this.displayChanged);
       screen.on("display-removed", this.displayChanged);
       screen.on("display-metrics-changed", this.displayChanged);
+      this.installShowMenu();
     }
     void this.reconcile().catch(() => undefined);
   }
@@ -173,6 +181,32 @@ export class MascotMain {
   suspend(): void {
     this.suspended = true;
     this.destroyWindow();
+  }
+
+  mainWindowClosed(): void {
+    if (process.platform !== "darwin") this.suspend();
+  }
+
+  private installShowMenu(): void {
+    const show = (): void => { void this.show(); };
+    const menu = Menu.getApplicationMenu();
+    const windowMenu = menu?.items.find(({ role }) => role?.toLowerCase() === "windowmenu")?.submenu;
+    if (menu && windowMenu && !menu.getMenuItemById("show-mascot")) {
+      windowMenu.append(new MenuItem({ type: "separator" }));
+      windowMenu.append(new MenuItem({ id: "show-mascot", label: "Show mascot", click: show }));
+      if (process.platform === "darwin") Menu.setApplicationMenu(menu);
+    }
+    if (process.platform === "darwin") app.dock?.setMenu(Menu.buildFromTemplate([{ label: "Show mascot", click: show }]));
+  }
+
+  private async show(): Promise<void> {
+    this.hidden = false;
+    if (!this.state.preferences.enabled) {
+      this.state.preferences.enabled = true;
+      this.save();
+    }
+    await this.reconcile();
+    this.broadcast();
   }
 
   private assertSender(event: IpcMainInvokeEvent, count: number, expected: number, mainOnly = false): void {
@@ -235,10 +269,11 @@ export class MascotMain {
   }
 
   private async reconcile(): Promise<void> {
-    if (!this.state.preferences.enabled || this.suspended) { this.destroyWindow(); return; }
+    if (!this.state.preferences.enabled || this.suspended || this.hidden) { this.destroyWindow(); return; }
     if (this.window && !this.window.isDestroyed()) return;
+    const displays = screen.getAllDisplays();
     const window = new BrowserWindow({
-      title: "Inertia mascot", ...(this.canPosition ? mascotBounds(this.state.position, screen.getAllDisplays()) : MASCOT_SIZE),
+      title: "Inertia mascot", ...(this.canPosition ? mascotBounds(mascotPosition(this.state.positions, displays), displays) : MASCOT_SIZE),
       show: false, frame: false, transparent: true, backgroundColor: "#00000000",
       resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
       alwaysOnTop: true, skipTaskbar: true, focusable: false, hasShadow: false, acceptFirstMouse: true,
@@ -253,6 +288,7 @@ export class MascotMain {
     this.epoch += 1;
     this.lastGesture = 0;
     this.ignoringMouse = false;
+    this.shape = "";
     const unregister = this.options.registerHealthRenderer(window.webContents);
     this.options.registerProtocol(window.webContents.session);
     hardenDesktopSession(window.webContents.session);
@@ -273,8 +309,7 @@ export class MascotMain {
       // Capture the grab point before dispatching to the renderer. The OS
       // cursor may already have moved when its asynchronous pickup arrives.
       if (mouse.type === "mouseDown" && mouse.button === "left") {
-        this.pickupOffset = mouse.x >= 72 && mouse.x < 168 && mouse.y >= 136 && mouse.y < 234
-          ? { x: mouse.x, y: mouse.y } : null;
+        this.pickupOffset = this.onFigure(mouse) ? { x: mouse.x, y: mouse.y } : null;
         this.updateHitTesting(mouse);
       }
       if (mouse.type === "mouseUp" && mouse.button === "left") this.endDrag();
@@ -291,12 +326,7 @@ export class MascotMain {
       unregister();
       if (this.window === window) this.window = null;
     });
-    // Cut away unused corners on platforms with native input-region support.
-    if (process.platform !== "darwin" && this.canPosition) window.setShape([
-      { x: 4, y: 0, width: 232, height: 118 },
-      { x: 108, y: 116, width: 36, height: 36 },
-      { x: 72, y: 136, width: 96, height: 98 },
-    ]);
+    this.applyShape();
     try { await window.loadURL(this.rendererUrl); }
     catch {
       if (this.window === window) this.failed();
@@ -320,31 +350,62 @@ export class MascotMain {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     const window = this.window;
     if (window && !window.isDestroyed()) {
-      if (this.canPosition) {
-        const { x, y } = window.getBounds();
-        this.state.position = { x, y };
-      }
       this.save();
       window.destroy();
     }
     this.window = null;
   }
 
-  private readonly displayChanged = (): void => { this.pickupOffset = null; this.reposition(); };
+  private readonly displayChanged = (): void => {
+    this.pickupOffset = null;
+    const displays = screen.getAllDisplays();
+    this.reposition(mascotPosition(this.state.positions, displays) ?? undefined);
+  };
 
-  private readonly reposition = (): void => {
+  private readonly reposition = (target?: { x: number; y: number }): void => {
     const window = this.window;
     if (!this.canPosition || !window || window.isDestroyed()) return;
     // A display was unplugged or its scale changed. End the gesture before
     // restoring reachability; an old cursor offset must not move it back out.
     if (this.drag) { this.endDrag(); return; }
-    const bounds = mascotBounds(window.getBounds(), screen.getAllDisplays());
     const current = window.getBounds();
+    const bounds = mascotBounds(target ?? current, screen.getAllDisplays());
     if (current.x !== bounds.x || current.y !== bounds.y || current.width !== bounds.width || current.height !== bounds.height) window.setBounds(bounds);
-    this.state.position = { x: bounds.x, y: bounds.y };
-    this.save();
     this.updateHitTesting();
   };
+
+  private remember(): void {
+    const window = this.window;
+    if (!this.canPosition || !window || window.isDestroyed()) return;
+    this.state.positions = rememberMascotPosition(this.state.positions, window.getBounds(), screen.getAllDisplays());
+    this.save();
+  }
+
+  private region(): { top: number; height: number; figure: { x: number; y: number; width: number; height: number } } {
+    const rows = this.rows().length;
+    const height = mascotBubbleHeight(rows, this.feed.counts?.others ?? rows);
+    return { top: MASCOT_BUBBLE_BOTTOM - height, height, figure: this.sprites ? MASCOT_FIGURE : MASCOT_ARTWORK };
+  }
+
+  private onFigure({ x, y }: { x: number; y: number }): boolean {
+    const { figure } = this.region();
+    return x >= figure.x && x < figure.x + figure.width && y >= figure.y && y < figure.y + figure.height;
+  }
+
+  private applyShape(): void {
+    const window = this.window;
+    if (process.platform === "darwin" || !this.canPosition || !window || window.isDestroyed()) return;
+    const { top, height, figure } = this.region();
+    const shape = `${top}:${figure.width}`;
+    if (shape === this.shape) return;
+    this.shape = shape;
+    // Cut away unused corners on platforms with native input-region support.
+    window.setShape([
+      { x: 4, y: top, width: 232, height: height + 2 },
+      { x: 108, y: MASCOT_BUBBLE_BOTTOM, width: 36, height: 36 },
+      { ...figure },
+    ]);
+  }
 
   private updateHitTesting(point?: { x: number; y: number }): void {
     // macOS has no setShape input region. Transparency alone still intercepts
@@ -357,9 +418,10 @@ export class MascotMain {
       point = { x: cursor.x - bounds.x, y: cursor.y - bounds.y };
     }
     const { x, y } = point;
-    const character = x >= 72 && x < 168 && y >= 136 && y < 234;
+    const { top } = this.region();
+    const character = this.onFigure(point);
     const bubble = (x - Math.max(18, Math.min(x, 222))) ** 2
-      + (y - Math.max(14, Math.min(y, 102))) ** 2 <= 14 ** 2;
+      + (y - Math.max(top + 14, Math.min(y, MASCOT_BUBBLE_BOTTOM - 14))) ** 2 <= 14 ** 2;
     // A native press owns input while its asynchronous pickup is still pending,
     // so a quick move/release cannot pass through before the renderer responds.
     const ignore = !this.drag && !this.pickupOffset && !character && !bubble;
@@ -436,10 +498,12 @@ export class MascotMain {
     this.moveDrag(true);
     this.clearDrag(gesture === undefined);
     this.reposition();
+    this.remember();
     this.broadcast();
   }
 
   private broadcast(): void {
+    this.applyShape();
     const snapshot = this.snapshot();
     for (const window of [this.window, this.options.mainWindow()]) {
       if (window && !window.isDestroyed()) window.webContents.send(MASCOT_IPC.changed, snapshot);
@@ -448,14 +512,13 @@ export class MascotMain {
 
   private async action(action: MascotAction, expectedStatus?: MascotStatus): Promise<void> {
     if (action === "open-chat") {
-      if (!expectedStatus || ["projectId", "conversationId", "runId", "turnId"].some(
-        (key) => expectedStatus[key as keyof MascotStatus] !== this.status()[key as keyof MascotStatus],
-      )) throw new Error("The mascot chat has changed. Try again.");
-      const { conversationId } = this.status();
-      if (conversationId) await this.options.openChat(conversationId);
+      const target = [this.status(), ...this.rows()].find((chat) => expectedStatus && (["projectId", "conversationId", "runId", "turnId"] as const)
+        .every((key) => expectedStatus[key] === chat[key]));
+      if (!target) throw new Error("The mascot chat has changed. Try again.");
+      if (target.conversationId) await this.options.openChat(target.conversationId);
       return;
     }
-    if (action === "hide") this.state.preferences.enabled = false;
+    if (action === "hide") this.hidden = true;
     else if (action === "pause" || action === "resume") this.state.preferences.motion = action === "resume";
     else if (action === "focus") {
       this.window?.setFocusable(true);
@@ -465,12 +528,15 @@ export class MascotMain {
     } else {
       if (!this.canPosition) return;
       this.endDrag();
-      const position = this.window?.getBounds() ?? this.state.position;
-      this.state.position = action === "reset-position" || !position ? null : {
+      const displays = screen.getAllDisplays();
+      const position = this.window?.getBounds() ?? mascotPosition(this.state.positions, displays);
+      const point = action === "reset-position" || !position ? null : {
         x: position.x + (action === "left" ? -16 : action === "right" ? 16 : 0),
         y: position.y + (action === "up" ? -16 : action === "down" ? 16 : 0),
       };
-      this.window?.setBounds(mascotBounds(this.state.position, screen.getAllDisplays()));
+      const bounds = mascotBounds(point, displays);
+      this.window?.setBounds(bounds);
+      this.state.positions = point ? rememberMascotPosition(this.state.positions, bounds, displays) : [];
     }
     this.save();
     await this.reconcile();

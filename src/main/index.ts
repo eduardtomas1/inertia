@@ -817,7 +817,7 @@ async function createMainWindow(): Promise<void> {
   window.once("ready-to-show", () => window.show());
   detachedChatClose.coordinateMainWindowClose(window, detachedChatMain, saveWindowState);
   window.on("closed", () => {
-    mascotMain?.suspend();
+    mascotMain?.mainWindowClosed();
     unregisterHealthRenderer();
     previewBroker.close();
     if (mainWindow === window) {
@@ -1090,7 +1090,7 @@ async function bootstrap(): Promise<void> {
       }));
       return child;
     },
-    onMascotStatus: (status, chats, focus, counts, request) => mascotMain?.observe(status, chats, focus, counts, request),
+    onMascotStatus: (feed) => mascotMain?.observe(feed),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {

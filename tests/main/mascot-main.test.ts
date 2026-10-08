@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
 import { MASCOT_PIN_TIMEOUT_MS } from "../../src/main/mascot-pin";
-import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_IPC, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_IPC, type MascotCounts, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
+import type { MascotFeed } from "../../src/shared/mascot-feed";
+import { mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
 import type { ConversationShell } from "../../src/shared/contracts/app";
 import { agentTurnStatusForRunState, type AgentRunState } from "../../src/shared/run-state";
@@ -15,7 +17,28 @@ import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
 
 function immediatePublisher(...args: Partial<ConstructorParameters<typeof MascotStatusPublisher>>): MascotStatusPublisher {
-  return new MascotStatusPublisher(args[0], args[1], args[2], (task) => task());
+  return new MascotStatusPublisher(args[0], args[1], args[2], (task) => task(), mascotTestClock());
+}
+
+function feed(
+  status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null,
+  counts: MascotCounts | null = null, request?: number | null, rows: MascotStatus[] = [],
+): MascotFeed {
+  return { status, chats, rows, focus, counts, ...(request === undefined ? {} : { request }) };
+}
+
+interface MenuItemDouble { id?: string; label?: string; type?: string; click?: () => void }
+interface AppMenuDouble {
+  items: Array<{ role?: string; submenu?: { items: MenuItemDouble[]; append(item: MenuItemDouble): void } }>;
+  getMenuItemById(id: string): MenuItemDouble | null;
+}
+
+function appMenuDouble(): AppMenuDouble {
+  const windowItems: MenuItemDouble[] = [];
+  return {
+    items: [{ role: "editMenu" }, { role: "windowMenu", submenu: { items: windowItems, append: (item) => { windowItems.push(item); } } }],
+    getMenuItemById: (id) => windowItems.find((item) => item.id === id) ?? null,
+  };
 }
 
 const harness = vi.hoisted(() => ({
@@ -26,6 +49,9 @@ const harness = vi.hoisted(() => ({
   cursor: { x: 1296, y: 820 },
   displayListeners: new Map<string, () => void>(),
   menus: [] as unknown[][],
+  appMenu: null as AppMenuDouble | null,
+  dockMenus: [] as unknown[],
+  setApplicationMenu: vi.fn(),
   openDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePaths: string[] }>>(async () => ({ canceled: true, filePaths: [] })),
   saveDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePath?: string }>>(async () => ({ canceled: true })),
 }));
@@ -60,7 +86,7 @@ vi.mock("electron", async () => {
     destroy(): void { this.destroyed = true; this.emit("closed"); }
   }
   return {
-    app: { commandLine: { getSwitchValue: () => "" }, getPath: () => "/documents" },
+    app: { commandLine: { getSwitchValue: () => "" }, getPath: () => "/documents", dock: { setMenu: (menu: unknown) => harness.dockMenus.push(menu) } },
     dialog: {
       showOpenDialog: (...args: unknown[]) => harness.openDialog(...args),
       showSaveDialog: (...args: unknown[]) => harness.saveDialog(...args),
@@ -69,7 +95,12 @@ vi.mock("electron", async () => {
     ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => harness.handlers.set(channel, listener) },
     screen: { getAllDisplays: () => harness.displays, getCursorScreenPoint: () => harness.cursor,
       on: (event: string, listener: () => void) => harness.displayListeners.set(event, listener) },
-    Menu: { buildFromTemplate: (template: unknown[]) => { harness.menus.push(template); return { popup: vi.fn() }; } },
+    Menu: {
+      buildFromTemplate: (template: unknown[]) => { harness.menus.push(template); return { popup: vi.fn(), template }; },
+      getApplicationMenu: () => harness.appMenu,
+      setApplicationMenu: (menu: unknown) => harness.setApplicationMenu(menu),
+    },
+    MenuItem: class { constructor(options: object) { Object.assign(this, options); } },
   };
 });
 
@@ -94,11 +125,13 @@ afterEach(() => {
   vi.useRealTimers(); harness.windows.length = 0; harness.options.length = 0; harness.handlers.clear();
   harness.displays = [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }];
   harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); harness.menus.length = 0; vi.unstubAllGlobals();
+  harness.appMenu = appMenuDouble(); harness.dockMenus.length = 0; harness.setApplicationMenu.mockReset();
   harness.openDialog.mockReset().mockResolvedValue({ canceled: true, filePaths: [] });
   harness.saveDialog.mockReset().mockResolvedValue({ canceled: true });
 });
 
 async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) {
+  harness.appMenu ??= appMenuDouble();
   const main = new BrowserWindow({});
   await main.loadURL("inertia://bundle/index.html");
   const openChat = vi.fn(async () => undefined);
@@ -132,11 +165,11 @@ describe("mascot chat selection", () => {
     const overlay = harness.windows[1] as WindowDouble;
     const urgent = chat("urgent", "waiting-for-input");
     const quiet = chat("quiet", "running");
-    app.mascot.observe(urgent, [urgent, quiet], null);
+    app.mascot.observe(feed(urgent, [urgent, quiet]));
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null, chats: [urgent, quiet] });
     expect(app.mascot.snapshot()).not.toHaveProperty("counts");
-    app.mascot.observe(urgent, [urgent, quiet], null, { chats: 20, attention: 14 });
-    expect(app.mascot.snapshot()).toMatchObject({ counts: { chats: 20, attention: 14 } });
+    app.mascot.observe(feed(urgent, [urgent, quiet], null, { chats: 20, attention: 14, others: 1 }, null, [quiet]));
+    expect(app.mascot.snapshot()).toMatchObject({ counts: { chats: 20, attention: 14, others: 1 }, rows: [quiet] });
     await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
     expect(app.focusChat).toHaveBeenLastCalledWith("quiet", 1);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
@@ -155,7 +188,7 @@ describe("mascot chat selection", () => {
 
   it("keeps a runtime-ranked pin below the list cap and clears it only when the chat is archived or deleted", async () => {
     const app = await fixture();
-    const publisher = immediatePublisher((status, chats, focus, counts, request) => app.mascot.observe(status, chats, focus, counts, request));
+    const publisher = immediatePublisher((value) => app.mascot.observe(value));
     app.focusChat.mockImplementation((conversationId: string | null, request: number) => publisher.focus(conversationId, request));
     const shell = (id: string, state: AgentRunState, extra: Partial<ConversationShell> = {}): ConversationShell => ({
       id, projectId: "project", title: `Chat ${id}`, status: "idle", archivedAt: null, lastViewedAt: "2026-09-06T11:00:00.000Z",
@@ -209,7 +242,7 @@ describe("mascot chat selection", () => {
       named("loose", "running", { chatTitle: "Fix login", projectName: null }),
       named("long", "completed", { chatTitle: null, projectName: project }),
     ];
-    app.mascot.observe(chats[0]!, chats, null);
+    app.mascot.observe(feed(chats[0]!, chats));
     overlay.webContents.emit("context-menu");
     const menu = harness.menus.at(-1) as Array<{ label?: string; submenu?: Array<{ label?: string; type?: string }> }>;
     const items = menu.find(({ label }) => label === "Show chat")!.submenu!.filter(({ type }) => type === "radio").slice(1);
@@ -235,7 +268,7 @@ describe("mascot pin state machine", () => {
     app.mascot.runtimePhase("ready");
     const told = (): string | null | undefined => ((app.main as unknown as WindowDouble).webContents.send.mock.lastCall?.[1] as MascotSnapshot | undefined)?.pinned;
     const answer = (focus: string | null, request?: number | null, chats: MascotStatus[] = [a, b]): void => {
-      app.mascot.observe(chats[0] ?? emptyMascotStatus(), chats, focus, null, request);
+      app.mascot.observe(feed(chats[0] ?? emptyMascotStatus(), chats, focus, null, request));
     };
     answer(null, null);
     const pin = async (id: string | null): Promise<void> => { await app.invoke(MASCOT_IPC.action, ["pin", id]); };
@@ -381,11 +414,11 @@ describe("mascot window ownership", () => {
     const overlay = harness.windows[1] as WindowDouble;
     expect(overlay.showInactive).toHaveBeenCalledOnce();
     expect(overlay.focus).not.toHaveBeenCalled();
-    app.mascot.observe({ ...emptyMascotStatus(), phase: "running", conversationId: "chat", projectId: "project", runId: "run", turnId: "turn", activeCount: 1 });
+    app.mascot.observe(feed({ ...emptyMascotStatus(), phase: "running", conversationId: "chat", projectId: "project", runId: "run", turnId: "turn", activeCount: 1 }));
     await app.invoke(MASCOT_IPC.action, ["open-chat", app.mascot.snapshot().status], overlay);
     expect(app.openChat).toHaveBeenCalledWith("chat");
     const previousStatus = app.mascot.snapshot().status;
-    app.mascot.observe({ ...previousStatus, turnId: "new-turn" });
+    app.mascot.observe(feed({ ...previousStatus, turnId: "new-turn" }));
     await expect(app.invoke(MASCOT_IPC.action, ["open-chat", previousStatus], overlay)).rejects.toThrow("changed");
     expect(app.openChat).toHaveBeenCalledOnce();
     await app.invoke(MASCOT_IPC.action, ["focus"]);
@@ -406,25 +439,25 @@ describe("mascot window ownership", () => {
     const hover = (x: number, y: number, button: "none" | "left" = "none"): void => {
       overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y, button });
     };
-    hover(20, 220);
+    hover(20, 296);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
-    hover(120, 40);
+    hover(120, 116);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
-    hover(4, 0); // Transparent rounded corner of the status bubble.
+    hover(4, 76); // Transparent rounded corner of the status bubble.
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
-    hover(120, 184);
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    hover(120, 260);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     hover(-100, -100, "left"); // Pointer capture must continue outside the window.
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
-    hover(20, 220, "left"); // Losing capture does not prove a physical release.
+    hover(20, 296, "left"); // Losing capture does not prove a physical release.
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
     if (ending === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
-    hover(20, 220);
+    hover(20, 296);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
     const calls = overlay.setIgnoreMouseEvents.mock.calls.length;
-    hover(20, 220);
+    hover(20, 296);
     vi.advanceTimersByTime(500);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenCalledTimes(calls);
     expect(vi.getTimerCount()).toBe(0);
@@ -436,12 +469,12 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 120, y: 184 });
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 296 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 120, y: 260 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     const bounds = overlay.getBounds();
-    harness.cursor = { x: bounds.x + 20, y: bounds.y + 220 };
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
+    harness.cursor = { x: bounds.x + 20, y: bounds.y + 296 };
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 296 });
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     expect(app.mascot.snapshot().dragging).toBe(true);
@@ -458,15 +491,15 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 120, y: 184 });
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 296 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 120, y: 260 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     const bounds = overlay.getBounds();
-    harness.cursor = { x: bounds.x + 20, y: bounds.y + 220 };
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
+    harness.cursor = { x: bounds.x + 20, y: bounds.y + 296 };
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 296 });
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
     if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
-    else if (reason === "released hover") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220, button: "none" });
+    else if (reason === "released hover") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 296, button: "none" });
     else if (reason === "reload") overlay.webContents.emit("did-start-loading");
     else if (reason === "display") harness.displayListeners.get("display-metrics-changed")!();
     else overlay.emit(reason);
@@ -483,8 +516,8 @@ describe("mascot window ownership", () => {
     const overlay = harness.windows[1] as WindowDouble;
     const press = (x: number): void => {
       const bounds = overlay.getBounds();
-      harness.cursor = { x: bounds.x + x, y: bounds.y + 184 };
-      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x, y: 184 });
+      harness.cursor = { x: bounds.x + x, y: bounds.y + 260 };
+      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x, y: 260 });
     };
     press(120);
     if (ordering !== "all messages late") await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
@@ -498,7 +531,7 @@ describe("mascot window ownership", () => {
     expect(app.mascot.snapshot()).toMatchObject({ dragging: true, gesture: app.gesture(2) });
     harness.cursor = { x: 900, y: 500 };
     vi.advanceTimersByTime(16);
-    expect(overlay.getBounds()).toMatchObject({ x: 790, y: 316 });
+    expect(overlay.getBounds()).toMatchObject({ x: 790, y: 240 });
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -510,7 +543,7 @@ describe("mascot window ownership", () => {
     const overlay = harness.windows[1] as WindowDouble;
     const stale = app.gesture();
     overlay.webContents.emit("did-start-loading");
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     await app.invoke(MASCOT_IPC.action, ["pickup", stale], overlay);
     await app.invoke(MASCOT_IPC.action, ["drop", stale], overlay);
     expect(app.mascot.snapshot().dragging).toBe(false);
@@ -557,9 +590,9 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    overlay.setBounds({ x: 2000, y: 2000, width: 240, height: 240 });
+    overlay.setBounds({ x: 2000, y: 2000, width: 240, height: 316 });
     vi.advanceTimersByTime(400);
-    expect(overlay.getBounds()).toEqual({ x: 1200, y: 660, width: 240, height: 240 });
+    expect(overlay.getBounds()).toEqual({ x: 1200, y: 584, width: 240, height: 316 });
     expect(vi.getTimerCount()).toBe(0);
     app.mascot.runtimePhase("restarting");
     expect(app.mascot.snapshot().status).toEqual(emptyMascotStatus("unavailable"));
@@ -577,28 +610,28 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
     const saved = (): ReturnType<typeof readMascotWindowState> => readMascotWindowState(join(app.directory, "mascot-window-state.json"));
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     // A quick mouse movement can precede the renderer's asynchronous request.
     harness.cursor = { x: 1100, y: 700 };
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     expect(app.mascot.snapshot().dragging).toBe(true);
     const sends = overlay.webContents.send.mock.calls.length;
     vi.advanceTimersByTime(16);
-    expect(overlay.getBounds()).toEqual({ x: 980, y: 516, width: 240, height: 240 });
+    expect(overlay.getBounds()).toEqual({ x: 980, y: 440, width: 240, height: 316 });
     vi.advanceTimersByTime(1000); // Holding still must not drop, save, or broadcast.
-    expect(saved().position).toBeNull();
+    expect(saved().positions).toEqual([]);
     expect(overlay.webContents.send).toHaveBeenCalledTimes(sends);
     expect(overlay.focus).not.toHaveBeenCalled();
-    app.mascot.observe({ ...emptyMascotStatus(), phase: "running", activeCount: 1 });
+    app.mascot.observe(feed({ ...emptyMascotStatus(), phase: "running", activeCount: 1 }));
     expect(app.mascot.snapshot().dragging).toBe(true);
     harness.displays.push({ workArea: { x: -1920, y: -200, width: 1920, height: 1080 } });
     harness.cursor = { x: -1, y: 20 };
     vi.advanceTimersByTime(16);
-    expect(overlay.getBounds()).toEqual({ x: -121, y: -164, width: 240, height: 240 });
+    expect(overlay.getBounds()).toEqual({ x: -121, y: -240, width: 240, height: 316 });
     harness.cursor = { x: -1900, y: -190 };
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay); // Flush the last cursor sample.
-    expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 240 });
-    expect(saved().position).toEqual({ x: -1920, y: -200 });
+    expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 316 });
+    expect(saved().positions).toEqual([{ display: null, x: -1920, y: -200 }]);
     expect(app.mascot.snapshot()).toMatchObject({ dragging: false, status: { phase: "running" } });
     expect(vi.getTimerCount()).toBe(0);
     app.mascot.suspend(); app.mascot.attach(); await Promise.resolve();
@@ -615,15 +648,15 @@ describe("mascot window ownership", () => {
       { workArea: { x: 1440, y: 100, width: 1920, height: 1080 }, scaleFactor: 1.25 },
     ];
     harness.displays = displays;
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     for (const x of [1438, 1439, 1440, 1441, 1440, 1439, 1441]) {
       harness.cursor = { x, y: 420 };
       vi.advanceTimersByTime(16);
-      expect(overlay.getBounds()).toEqual({ x: x - 120, y: 236, width: 240, height: 240 });
+      expect(overlay.getBounds()).toEqual({ x: x - 120, y: 160, width: 240, height: 316 });
     }
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
-    expect(overlay.getBounds()).toEqual({ x: 1440, y: 236, width: 240, height: 240 });
+    expect(overlay.getBounds()).toEqual({ x: 1440, y: 160, width: 240, height: 316 });
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -632,7 +665,7 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     if (reason === "reload") overlay.webContents.emit("did-start-loading");
     else if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
@@ -654,11 +687,11 @@ describe("mascot window ownership", () => {
     await expect(app.invoke(MASCOT_IPC.action, ["drop"], overlay)).rejects.toThrow("untrusted");
     await expect(app.invoke(MASCOT_IPC.action, ["pickup", app.gesture(), { x: 0, y: 0 }], overlay)).rejects.toThrow("untrusted");
     await expect(app.invoke(MASCOT_IPC.action, ["pickup", { x: 0, y: 0 }], overlay)).rejects.toThrow("Invalid");
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 40 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 116 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     expect(app.mascot.snapshot().dragging).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     expect(app.mascot.snapshot().dragging).toBe(false);
@@ -734,5 +767,180 @@ describe("mascot custom sprites", () => {
       title: "Export mascot sprite template", defaultPath: join("/documents", "Inertia mascot sprites"),
     }));
     expect(harness.openDialog).toHaveBeenLastCalledWith(app.main, expect.objectContaining({ properties: ["openDirectory"] }));
+  });
+});
+
+describe("mascot window presence, input region and placement memory", () => {
+  const chat = (id: string, phase: MascotStatus["phase"]): MascotStatus => ({
+    ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
+    activeCount: 1, chatTitle: `Chat ${id}`,
+  });
+  const saved = (directory: string) => readMascotWindowState(join(directory, "mascot-window-state.json"));
+
+  it("hides for this app session from the context menu and returns from the app or Dock menu without changing the setting", async () => {
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("context-menu");
+    (harness.menus.at(-1) as MenuItemDouble[]).find(({ label }) => label === "Hide mascot")!.click!();
+    await vi.waitFor(() => expect(overlay.isDestroyed()).toBe(true));
+    expect(app.mascot.snapshot().preferences.enabled).toBe(true);
+    expect(saved(app.directory).preferences.enabled).toBe(true);
+    app.mascot.attach();
+    await Promise.resolve();
+    expect(harness.windows).toHaveLength(2);
+    const show = harness.appMenu!.getMenuItemById("show-mascot")!;
+    expect(show.label).toBe("Show mascot");
+    expect(harness.setApplicationMenu).toHaveBeenCalledWith(harness.appMenu);
+    show.click!();
+    await vi.waitFor(() => expect(harness.windows).toHaveLength(3));
+    const again = harness.windows[2] as WindowDouble;
+    await app.invoke(MASCOT_IPC.action, ["hide"], again);
+    expect(again.isDestroyed()).toBe(true);
+    const dock = harness.dockMenus[0] as { template: MenuItemDouble[] };
+    expect(dock.template.map(({ label }) => label)).toEqual(["Show mascot"]);
+    dock.template[0]!.click!();
+    await vi.waitFor(() => expect(harness.windows).toHaveLength(4));
+    await app.invoke(MASCOT_IPC.action, ["hide"], harness.windows[3] as WindowDouble);
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: false, motion: true }]);
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    expect(harness.windows).toHaveLength(5);
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: false, motion: true }]);
+    show.click!();
+    await vi.waitFor(() => expect(harness.windows).toHaveLength(6));
+    expect(saved(app.directory).preferences.enabled).toBe(true);
+    expect(harness.appMenu!.items[1]!.submenu!.items.filter(({ id }) => id === "show-mascot")).toHaveLength(1);
+  });
+
+  it("starts visible again on the next launch after a session hide", async () => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    await app.invoke(MASCOT_IPC.action, ["hide"], harness.windows[1] as WindowDouble);
+    expect((harness.windows[1] as WindowDouble).isDestroyed()).toBe(true);
+    await fixture(app.directory);
+    await vi.waitFor(() => expect(harness.windows.filter((window) => !(window as WindowDouble).isDestroyed())).toHaveLength(3));
+  });
+
+  it.each([["darwin", false], ["win32", true], ["linux", true]] as const)("on %s, closing the main window removes the mascot: %s", async (platform, removed) => {
+    vi.stubGlobal("process", { ...process, platform });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    app.mascot.mainWindowClosed();
+    expect(overlay.isDestroyed()).toBe(removed);
+    app.mascot.attach();
+    await vi.waitFor(() => expect(harness.windows).toHaveLength(removed ? 3 : 2));
+  });
+
+  it("trims the native input region to the visible figure and grows the bubble region with its rows", async () => {
+    vi.stubGlobal("process", { ...process, platform: "win32" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble & { setShape: ReturnType<typeof vi.fn> };
+    expect(overlay.setShape).toHaveBeenLastCalledWith([
+      { x: 4, y: 76, width: 232, height: 118 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+    ]);
+    const shown = chat("shown", "waiting-for-input");
+    const rows = [chat("a", "failed"), chat("b", "running")];
+    app.mascot.observe(feed(shown, [shown, ...rows], null, { chats: 9, attention: 1, others: 7 }, null, rows));
+    expect(overlay.setShape).toHaveBeenLastCalledWith([
+      { x: 4, y: 36, width: 232, height: 158 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+    ]);
+    const calls = overlay.setShape.mock.calls.length;
+    app.mascot.observe(feed(shown, [shown, ...rows], null, { chats: 9, attention: 1, others: 7 }, null, rows));
+    expect(overlay.setShape).toHaveBeenCalledTimes(calls);
+  });
+
+  it("passes clicks through the empty corners of the figure box on macOS", async () => {
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const hover = (x: number, y: number): unknown => {
+      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y, button: "none" });
+      return overlay.setIgnoreMouseEvents.mock.lastCall?.[0] ?? false;
+    };
+    expect(hover(120, 260)).toBe(false);
+    expect(hover(76, 300)).toBe(true);
+    expect(hover(160, 220)).toBe(true);
+    expect(hover(90, 215)).toBe(false);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 76, y: 300 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(hover(120, 40)).toBe(true);
+    const rows = [chat("a", "failed"), chat("b", "running"), chat("c", "running")];
+    app.mascot.observe(feed(chat("shown", "waiting-for-input"), [chat("shown", "waiting-for-input"), ...rows], null, { chats: 4, attention: 1, others: 3 }, null, rows));
+    expect(hover(120, 40)).toBe(false);
+  });
+
+  it("remembers the position per display and restores it when an unplugged display returns", async () => {
+    vi.useFakeTimers();
+    const primary = { id: 1, workArea: { x: 0, y: 24, width: 1440, height: 876 } };
+    const external = { id: 2, workArea: { x: 1440, y: 0, width: 1920, height: 1080 } };
+    harness.displays = [primary, external];
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    harness.cursor = { x: 2500, y: 500 };
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
+    expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 316 });
+    expect(saved(app.directory).positions).toEqual([{ display: 2, x: 2380, y: 240 }]);
+    harness.displays = [primary];
+    harness.displayListeners.get("display-removed")!();
+    expect(overlay.getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 316 });
+    vi.advanceTimersByTime(400);
+    expect(saved(app.directory).positions).toEqual([{ display: 2, x: 2380, y: 240 }]);
+    await app.invoke(MASCOT_IPC.action, ["left"]);
+    expect(saved(app.directory).positions).toEqual([{ display: 1, x: 1184, y: 240 }, { display: 2, x: 2380, y: 240 }]);
+    harness.displays = [primary, external];
+    harness.displayListeners.get("display-added")!();
+    expect(overlay.getBounds()).toEqual({ x: 1184, y: 240, width: 240, height: 316 });
+    await app.invoke(MASCOT_IPC.action, ["reset-position"]);
+    expect(saved(app.directory).positions).toEqual([]);
+  });
+
+  it("returns the window to a display the user placed it on when that display is the first one remembered", async () => {
+    vi.useFakeTimers();
+    const primary = { id: 1, workArea: { x: 0, y: 24, width: 1440, height: 876 } };
+    const external = { id: 2, workArea: { x: 1440, y: 0, width: 1920, height: 1080 } };
+    harness.displays = [primary, external];
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    harness.cursor = { x: 2500, y: 500 };
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
+    harness.displays = [primary];
+    harness.displayListeners.get("display-removed")!();
+    harness.displays = [primary, external];
+    harness.displayListeners.get("display-added")!();
+    expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 316 });
+    app.mascot.suspend();
+    harness.displays = [primary];
+    app.mascot.attach();
+    await vi.waitFor(() => expect(harness.windows).toHaveLength(3));
+    expect((harness.windows[2] as WindowDouble).getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 316 });
+  });
+
+  it("opens a chat listed in the rows, leaves the pinned chat out of them, and rejects a row that changed", async () => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const shown = chat("shown", "waiting-for-input");
+    const failed = { ...chat("failed", "failed"), activeCount: 1 };
+    const busy = chat("busy", "running");
+    app.mascot.observe(feed(shown, [shown, failed, busy], null, { chats: 3, attention: 1, others: 2 }, null, [failed, busy]));
+    expect(app.mascot.snapshot().rows).toEqual([failed, busy]);
+    await app.invoke(MASCOT_IPC.action, ["open-chat", failed], overlay);
+    expect(app.openChat).toHaveBeenLastCalledWith("failed");
+    await expect(app.invoke(MASCOT_IPC.action, ["open-chat", { ...failed, turnId: "older-turn" }], overlay)).rejects.toThrow("changed");
+    await app.invoke(MASCOT_IPC.action, ["pin", "busy"], overlay);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: "busy", status: { conversationId: "busy" }, rows: [failed] });
+    await expect(app.invoke(MASCOT_IPC.action, ["open-chat", busy], overlay)).resolves.toBeUndefined();
+    expect(app.openChat).toHaveBeenLastCalledWith("busy");
   });
 });

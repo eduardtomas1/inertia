@@ -3,7 +3,14 @@ import type { Rectangle } from "electron";
 import { parseMascotPreferences, type MascotPreferences } from "../shared/mascot.js";
 import type { WindowBoundsDisplay } from "./window-bounds.js";
 
-export const MASCOT_SIZE = { width: 240, height: 240 };
+export const MASCOT_SIZE = { width: 240, height: 316 };
+export const MASCOT_FIGURE = { x: 72, y: 212, width: 96, height: 98 };
+export const MASCOT_ARTWORK = { x: 89, y: 214, width: 60, height: 88 };
+export const MASCOT_BUBBLE_BOTTOM = 192;
+const LEGACY_HEIGHT = 240;
+const POSITION_LIMIT = 8;
+
+export type MascotDisplay = WindowBoundsDisplay & { id?: number };
 
 export function supportsMascotPlacement(
   platform: string, environment: NodeJS.ProcessEnv, ozonePlatform: string,
@@ -12,22 +19,39 @@ export function supportsMascotPlacement(
     || (ozonePlatform !== "wayland" && !environment.WAYLAND_DISPLAY
       && environment.XDG_SESSION_TYPE !== "wayland");
 }
+export interface MascotPosition {
+  display: number | null;
+  x: number;
+  y: number;
+}
+
 export interface MascotWindowState {
   preferences: MascotPreferences;
-  position: { x: number; y: number } | null;
+  positions: MascotPosition[];
+}
+
+function parsePositions(value: unknown): MascotPosition[] | null {
+  if (!Array.isArray(value) || value.length > POSITION_LIMIT) return null;
+  const positions: MascotPosition[] = [];
+  for (const item of value as Array<Partial<MascotPosition> | null>) {
+    if (!item || !Number.isSafeInteger(item.x) || !Number.isSafeInteger(item.y)
+      || (item.display !== null && !Number.isSafeInteger(item.display))) return null;
+    positions.push({ display: item.display!, x: item.x!, y: item.y! });
+  }
+  return positions;
 }
 
 export function readMascotWindowState(path: string): MascotWindowState {
-  const fallback = { preferences: { enabled: false, motion: true }, position: null };
+  const fallback = { preferences: { enabled: false, motion: true }, positions: [] };
   try {
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1_024) return fallback;
-    const value = JSON.parse(readFileSync(path, "utf8")) as Partial<MascotWindowState>;
+    const value = JSON.parse(readFileSync(path, "utf8")) as Partial<MascotWindowState> & { position?: { x?: unknown; y?: unknown } | null };
+    const legacy = value.position && Number.isSafeInteger(value.position.x) && Number.isSafeInteger(value.position.y)
+      ? [{ display: null, x: value.position.x as number, y: (value.position.y as number) - (MASCOT_SIZE.height - LEGACY_HEIGHT) }] : [];
     return {
       preferences: parseMascotPreferences(value.preferences) ?? fallback.preferences,
-      position: value.position && Number.isSafeInteger(value.position.x)
-        && Number.isSafeInteger(value.position.y)
-        ? { x: value.position.x, y: value.position.y } : null,
+      positions: parsePositions(value.positions) ?? legacy,
     };
   } catch { return fallback; }
 }
@@ -41,8 +65,8 @@ export function writeMascotWindowState(path: string, state: MascotWindowState): 
 
 /** Clamp the entire small overlay in DIP coordinates, including negative displays. */
 export function mascotBounds(
-  position: MascotWindowState["position"],
-  displays: readonly WindowBoundsDisplay[],
+  position: { x: number; y: number } | null,
+  displays: readonly MascotDisplay[],
   anchor = position,
 ): Rectangle {
   const areas = displays.map(({ workArea }) => workArea)
@@ -67,4 +91,28 @@ export function mascotBounds(
     y: Math.round(Math.max(area.y, Math.min(point.y, area.y + area.height - height))),
     width, height,
   };
+}
+
+export function mascotPosition(
+  positions: readonly MascotPosition[], displays: readonly MascotDisplay[],
+): { x: number; y: number } | null {
+  const position = positions.find(({ display }) => display !== null && displays.some(({ id }) => id === display)) ?? positions[0];
+  return position ? { x: position.x, y: position.y } : null;
+}
+
+export function mascotDisplay(bounds: Rectangle, displays: readonly MascotDisplay[]): number | null {
+  const x = bounds.x + MASCOT_FIGURE.x + MASCOT_FIGURE.width / 2;
+  const y = bounds.y + MASCOT_FIGURE.y + MASCOT_FIGURE.height / 2;
+  const distance = ({ workArea: area }: MascotDisplay): number => (
+    Math.max(area.x - x, 0, x - area.x - area.width) ** 2 + Math.max(area.y - y, 0, y - area.y - area.height) ** 2
+  );
+  const nearest = displays.reduce<MascotDisplay | undefined>((best, next) => !best || distance(next) < distance(best) ? next : best, undefined);
+  return nearest?.id ?? null;
+}
+
+export function rememberMascotPosition(
+  positions: readonly MascotPosition[], bounds: Rectangle, displays: readonly MascotDisplay[],
+): MascotPosition[] {
+  const display = mascotDisplay(bounds, displays);
+  return [{ display, x: bounds.x, y: bounds.y }, ...positions.filter((position) => position.display !== display)].slice(0, POSITION_LIMIT);
 }

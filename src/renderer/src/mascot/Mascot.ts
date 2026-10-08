@@ -1,10 +1,10 @@
 import {
-  emptyMascotStatus, isLiveMascotPhase, MASCOT_CHAT_LIMIT, MASCOT_LABELS,
+  emptyMascotStatus, isLiveMascotPhase, MASCOT_CHAT_LIMIT, MASCOT_LABELS, mascotBubbleHeight,
   type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot, type MascotStatus,
 } from "../../../shared/mascot";
 import { mascotChatChoices } from "../../../shared/mascot-choices";
 import { mascotArtwork, readMascotAssets } from "./assets";
-import { mascotActionLabel, mascotElapsed, mascotFallback, mascotShortLabel, mascotTone } from "./copy";
+import { mascotActionLabel, mascotElapsed, mascotRowState, mascotShortLabel, mascotTone } from "./copy";
 
 declare global { interface Window { mascot: MascotBridge } }
 
@@ -31,7 +31,12 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const pickerLabel = select(".mascot-picker-label");
   const chooser = select(".mascot-chooser");
   const list = select(".mascot-chats");
+  const rowList = select(".mascot-rows");
+  const more = select(".mascot-more");
+  const announcer = select(".mascot-announce");
   const options = new Map<string, HTMLButtonElement>();
+  const rows = new Map<string, HTMLButtonElement>();
+  let announced = "";
   const media = matchMedia("(prefers-reduced-motion: reduce)");
   const listeners = new AbortController();
   const eventOptions = { signal: listeners.signal };
@@ -90,6 +95,37 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     if (target && document.activeElement !== target) target.focus({ preventScroll: true });
   };
 
+  const renderRows = (chats: readonly MascotStatus[], others: number): void => {
+    const choices = mascotChatChoices(chats);
+    const items = chats.map((chat, index) => {
+      const key = chat.conversationId!;
+      let row = rows.get(key);
+      if (!row) {
+        row = document.createElement("button");
+        row.type = "button";
+        row.className = "mascot-row";
+        row.append(document.createElement("span"), document.createElement("span"));
+        row.addEventListener("click", () => {
+          const target = snapshot.rows?.find((candidate) => candidate.conversationId === key);
+          if (target) void bridge.action("open-chat", target).catch(() => { if (active) label.textContent = "That chat changed. Try again"; });
+        }, eventOptions);
+        rows.set(key, row);
+      }
+      const [name, state] = row.children as unknown as [HTMLElement, HTMLElement];
+      name.textContent = choices[index]!.title;
+      state.textContent = `· ${mascotRowState(chat)}`;
+      row.dataset.tone = mascotTone(chat.phase);
+      row.setAttribute("aria-label", `Open ${name.textContent}, ${mascotRowState(chat)}`);
+      return row;
+    });
+    for (const key of rows.keys()) if (!chats.some(({ conversationId }) => conversationId === key)) rows.delete(key);
+    items.forEach((row, index) => { if (rowList.children[index] !== row) rowList.insertBefore(row, rowList.children[index] ?? null); });
+    while (rowList.children.length > items.length + 1) rowList.children[items.length]!.remove();
+    more.textContent = others > chats.length ? `${others - chats.length} more` : "";
+    more.hidden = !more.textContent;
+    rowList.hidden = !items.length;
+  };
+
   const render = (): void => {
     const { status, preferences } = snapshot;
     const chats = snapshot.chats ?? [];
@@ -113,12 +149,14 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     main.dataset.phase = status.phase;
     main.dataset.tone = mascotTone(status.phase);
     main.dataset.pinned = String(Boolean(pinned));
-    label.textContent = MASCOT_LABELS[status.phase];
+    main.dataset.artwork = mascotArtwork(status.phase);
+    main.dataset.compact = String(!status.conversationId && !choosing);
+    label.textContent = status.quietSince ? `No updates for ${mascotElapsed(status.quietSince, Date.now(), true)}` : MASCOT_LABELS[status.phase];
     time.textContent = status.since ? mascotElapsed(status.since, Date.now(), live) : "";
     button.disabled = !status.conversationId;
     project.textContent = status.projectName ?? "";
     title.textContent = status.chatTitle ?? "Inertia";
-    message.textContent = status.message ?? mascotFallback[status.phase];
+    message.textContent = status.message ?? "";
     actionLabel.textContent = status.conversationId ? mascotActionLabel(status.phase) : "";
     const exact = Boolean(snapshot.counts) || chats.length < MASCOT_CHAT_LIMIT;
     const total = snapshot.counts?.chats ?? chats.length;
@@ -129,11 +167,17 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     const plan = mascotTone(status.phase) === "live" ? status.steps : null;
     steps.hidden = !plan;
     if (plan) stepsFill.style.setProperty("--mascot-steps", String(plan.completed / plan.total));
-    detail.textContent = plan ? `${plan.completed} of ${plan.total} steps`
-      : status.progress ?? (others ? `${counted(others, "other chat needs", "other chats need")} you`
-        : status.activeCount > 1 ? `${status.activeCount} active chats` : "");
+    detail.textContent = plan ? `${plan.completed} of ${plan.total} steps` : status.progress ?? "";
     button.setAttribute("aria-label", [label.textContent, time.textContent, title.textContent, project.textContent, message.textContent, detail.textContent, actionLabel.textContent].filter(Boolean).join(". "));
-    button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${status.activeCount > 1 ? `${status.activeCount} active chats. ` : ""}${actionLabel.textContent}`;
+    button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${actionLabel.textContent}`;
+    const shownRows = snapshot.rows ?? [];
+    const otherCount = snapshot.counts?.others ?? shownRows.length;
+    renderRows(shownRows, otherCount);
+    bubble.style.height = `${main.dataset.compact === "true" ? 31 : mascotBubbleHeight(shownRows.length, otherCount)}px`;
+    const attentionNow = mascotTone(status.phase) === "attention";
+    const announcement = [label.textContent, status.conversationId ? title.textContent : "", attentionNow ? status.message : ""].filter(Boolean).join(". ");
+    const key = `${status.phase}\u0000${status.conversationId}\u0000${attentionNow ? status.message : ""}\u0000${Boolean(status.quietSince)}`;
+    if (key !== announced) { announced = key; announcer.textContent = announcement; }
     const pickerFocused = document.activeElement === picker;
     picker.hidden = !choosing && !pinned && chats.every((chat) => chat.conversationId === status.conversationId);
     picker.dataset.attention = String(others > 0);
@@ -143,6 +187,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     picker.setAttribute("aria-expanded", String(choosing));
     bubble.dataset.view = choosing ? "chats" : "status";
     button.hidden = choosing;
+    rowList.hidden ||= choosing;
     chooser.hidden = !choosing;
     if (pickerFocused && picker.hidden) (button.disabled ? main : button).focus({ preventScroll: true });
     if (choosing) renderChats(chats, pinned);
@@ -212,7 +257,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const blur = (): void => { delete main.dataset.keyboardFocus; drop(); };
   const key = (event: KeyboardEvent): void => {
     const actions: Record<string, MascotAction> = {
-      ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Escape: "hide",
+      ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
     };
     if (choosing && ["ArrowUp", "ArrowDown", "Escape"].includes(event.key)) {
       event.preventDefault();
@@ -223,6 +268,12 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
         ? event.key === "ArrowUp" ? rows.length - 1 : 0
         : (index + (event.key === "ArrowUp" ? rows.length - 1 : 1)) % rows.length;
       rows[next]?.focus({ preventScroll: true });
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      delete main.dataset.keyboardFocus;
+      (document.activeElement as HTMLElement | null)?.blur();
       return;
     }
     const action = actions[event.key];

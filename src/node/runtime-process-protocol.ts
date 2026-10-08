@@ -703,7 +703,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   ) return { type: "runtime.system-suspend-result", id: value.id, recorded: value.recorded };
   if (
     value.type === "runtime.mascot-status"
-    && Object.keys(value).length === 4 + Number(Object.hasOwn(value, "counts")) + Number(Object.hasOwn(value, "request"))
+    && Object.keys(value).length === 5 + Number(Object.hasOwn(value, "counts")) + Number(Object.hasOwn(value, "request"))
   ) {
     const feed = parseMascotFeed(value);
     return feed ? { type: "runtime.mascot-status", ...feed } : null;

@@ -107,7 +107,7 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
         <button className="secondary-button" type="button" disabled={snapshot.placement === "system"} onClick={() => {
           void bridge.action("reset-position").catch(() => setError("Could not reset the position."));
         }}>Reset position</button>
-        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : "Drag to move, or focus and use arrow keys. "}Escape hides it. Right-click for animation and hide controls. Reduced motion uses still artwork.</small>
+        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : "Drag to move, or focus and use arrow keys. "}Right-click to pause or hide it for this session. Reduced motion uses still artwork.</small>
       </div>}
       {snapshot && <section className="mascot-sprites" aria-labelledby="mascot-sprites-heading">
         <div className="mascot-sprites-heading">

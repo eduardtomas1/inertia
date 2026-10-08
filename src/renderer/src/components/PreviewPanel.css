@@ -4,7 +4,6 @@
 .preview-evidence-toggle.is-active { border-color: var(--line-strong); color: var(--accent-strong); background: var(--fill); }
 .preview-evidence-toggle.has-failures:not(.is-active) svg { color: var(--danger); }
 .preview-evidence-toggle small { min-width: 15px; padding: 1px 4px; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--fill); font-size: var(--text-xs); font-variant-numeric: tabular-nums; text-align: center; }
-.preview-evidence-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 @container (max-width: 520px) {
   .preview-browser-label span,

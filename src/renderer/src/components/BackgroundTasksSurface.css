@@ -134,8 +134,6 @@
 .background-task-link:focus-visible,
 .background-tasks-finished-toggle:focus-visible {
   border-radius: var(--radius-xs);
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .background-task-line {

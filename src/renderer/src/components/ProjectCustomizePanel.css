@@ -31,8 +31,7 @@
 .project-customize-panel .project-customize-back { min-height: 26px; }
 .project-customize-panel .project-customize-action { min-height: 28px; }
 .project-customize-back:hover { background: var(--fill); color: var(--text); }
-.project-customize-back:focus-visible,
-.project-customize-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
 .project-customize-panel .project-swatches {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(20px, 1fr));

@@ -317,12 +317,16 @@ describe("visual contrast system", () => {
     expect(css).toMatch(
       /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
     );
-    expect(css).toMatch(
-      /\.message-scroll:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--focus-ring\)/su,
-    );
-    expect(css).toMatch(
-      /\.workspace-repository-file:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
-    );
+    for (const row of [".message-scroll", ".workspace-repository-file"]) {
+      expect(css).toMatch(new RegExp(
+        String.raw`^:is\([^{]*${row.replace(".", String.raw`\.`)},[^{]*\):focus-visible\s*\{\s*outline-offset:\s*-2px;`,
+        "mu",
+      ));
+      expect(css).not.toMatch(new RegExp(
+        String.raw`${row.replace(".", String.raw`\.`)}:focus-visible\s*\{[^}]*outline:\s*(?:0|none)`,
+        "su",
+      ));
+    }
   });
 
   it("pauses maximum reasoning composer frames while hidden and stops them for reduced motion", () => {

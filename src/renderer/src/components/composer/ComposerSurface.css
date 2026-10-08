@@ -27,8 +27,7 @@
     border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .composer-shell .composer:focus-within > .composer-surface {
-  border-color: var(--focus-ring);
-  box-shadow: var(--shadow-float);
+  border-color: var(--line);
 }
 .composer-shell .composer-input-zone {
   position: relative;
@@ -42,7 +41,7 @@
 }
 .composer-shell .composer textarea {
   min-height: 26px;
-  max-height: 176px;
+  max-height: 200px;
 }
 .composer-shell .composer-toolbar {
   position: static;

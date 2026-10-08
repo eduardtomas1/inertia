@@ -448,7 +448,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       (element) => element.getBoundingClientRect().height,
     ), { accept: (height) => height > initialTextareaHeight });
     expect(grownTextareaHeight).toBeGreaterThan(initialTextareaHeight);
-    expect(grownTextareaHeight).toBeLessThanOrEqual(176);
+    expect(grownTextareaHeight).toBeLessThanOrEqual(200);
     await textbox.fill("");
     await capture("composer-dock-light-default-1440x920");
     await exerciseComposerQueue({

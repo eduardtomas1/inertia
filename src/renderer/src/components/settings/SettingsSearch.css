@@ -8,10 +8,6 @@
   width: 100%;
 }
 
-.settings-search-input::placeholder {
-  color: var(--text-muted);
-}
-
 .settings-search-results {
   min-height: 0;
   flex: 1 1 auto;

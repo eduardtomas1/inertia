@@ -19,7 +19,7 @@
 .provider-auth-browser-copy strong { color: var(--text); font-size: var(--text-xs); font-weight: 600; }
 .provider-auth-browser-copy small { color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-chrome); }
 .provider-auth-browser-actions { flex: 0 0 auto; }
-.provider-auth-browser-actions .secondary-button { min-height: 28px; padding: 0 9px; font-size: var(--text-xs); }
+.provider-auth-browser-actions .secondary-button { min-height: var(--control-height-small); padding: 0 10px; }
 @media (max-width: 620px) {
   .provider-auth-browser-assist { align-items: flex-start; flex-direction: column; }
   .provider-auth-browser-actions { width: 100%; }

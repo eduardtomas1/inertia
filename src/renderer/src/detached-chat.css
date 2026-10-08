@@ -81,8 +81,8 @@
 }
 
 .detached-chat-window-actions .icon-button {
-  width: 30px;
-  height: 30px;
+  width: var(--control-height-small);
+  height: var(--control-height-small);
 }
 
 .detached-chat-window-actions .icon-button[aria-pressed="true"] {

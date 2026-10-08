@@ -48,13 +48,8 @@
 }
 
 .completion-sound-choice:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
-}
-
-.completion-sound-choice:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .completion-sound-choice strong,

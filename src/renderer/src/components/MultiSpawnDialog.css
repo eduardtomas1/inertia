@@ -97,7 +97,7 @@
   max-height: 190px;
   resize: vertical;
   padding: 12px 13px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   outline: none;
   color: var(--text);
@@ -108,11 +108,6 @@
   transition:
     border-color var(--dur-fast) var(--ease),
     box-shadow var(--dur-fast) var(--ease);
-}
-
-.multi-spawn-prompt-zone textarea:focus {
-  border-color: var(--focus-ring);
-  box-shadow: var(--shadow-focus);
 }
 
 .multi-spawn-sides {
@@ -240,7 +235,7 @@
   min-width: 0;
   height: 32px;
   padding: 0 9px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   outline: none;
   color: var(--text);
@@ -248,12 +243,6 @@
   font: inherit;
   font-size: var(--text-sm);
   font-weight: 500;
-}
-
-.multi-spawn-field input:focus,
-.multi-spawn-field select:focus {
-  border-color: var(--focus-ring);
-  box-shadow: var(--shadow-focus);
 }
 
 .multi-spawn-route {
@@ -395,11 +384,6 @@
 .multi-spawn-comparison-toggle input:checked::after {
   background: var(--surface-raised);
   transform: translateX(14px);
-}
-
-.multi-spawn-comparison-toggle input:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .multi-spawn-comparison-toggle > span:last-child {
@@ -651,7 +635,6 @@
 .multi-spawn-comparison-status .secondary-button {
   width: max-content;
   max-width: 100%;
-  margin: 0;
 }
 
 .multi-spawn-dialog-footer {
@@ -699,12 +682,6 @@
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
-}
-
-.multi-spawn-dialog-footer .primary-button,
-.multi-spawn-dialog-footer .secondary-button {
-  min-height: 34px;
-  margin: 0;
 }
 
 .multi-spawn-launch {

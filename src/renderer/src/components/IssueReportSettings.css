@@ -40,14 +40,8 @@
   line-height: var(--leading-prose);
 }
 
-.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled, [readonly]) {
+.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled, [readonly], :focus) {
   border-color: var(--line-strong);
-}
-
-.settings-content .issue-report-field :is(input, textarea, select):focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-color: var(--focus-ring);
 }
 
 .issue-report-field :is(input, textarea, select):disabled {
@@ -101,10 +95,6 @@
   min-width: 0;
 }
 
-.issue-report .issue-report-actions .primary-button {
-  margin: 0;
-}
-
 .issue-report-actions > button {
   max-width: 100%;
 }
@@ -133,11 +123,6 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-chrome);
-}
-
-.issue-report-confirm:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .issue-report-messages {

@@ -12,7 +12,9 @@ const css = ["styles.css", "sidebar-work-index.css", "components/sidebar/thread-
 
 describe("sidebar index presentation contracts", () => {
   it("keeps a visible keyboard focus outline on Work rows", () => {
-    expect(css).toMatch(/\.activity-thread-select:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su);
+    expect(css).toMatch(/^:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/mu);
+    expect(css).toMatch(/^:is\([^{]*\.activity-thread-select,[^{]*\):focus-visible\s*\{\s*outline-offset:\s*-2px;/mu);
+    expect(css).not.toMatch(/\.activity-thread-select:focus-visible\s*\{[^}]*outline:\s*(?:0|none)/su);
   });
 
   it("keeps the trailing action hit target stable during press feedback", () => {

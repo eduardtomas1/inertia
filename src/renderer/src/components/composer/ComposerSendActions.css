@@ -103,7 +103,7 @@
 .composer-queue-send:disabled,
 .composer-queue-remove:disabled {
   opacity: .48;
-  cursor: not-allowed;
+  cursor: default;
 }
 
 .composer-queue-remove {

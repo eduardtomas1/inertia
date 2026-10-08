@@ -4,7 +4,7 @@ import {
   type RefObject,
 } from "react";
 
-const MAX_TEXTAREA_HEIGHT_PX = 176;
+const MAX_TEXTAREA_HEIGHT_PX = 200;
 
 export function useTextareaAutosize(
   textareaRef: RefObject<HTMLTextAreaElement | null>,

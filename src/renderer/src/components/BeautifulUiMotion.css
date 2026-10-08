@@ -19,11 +19,6 @@
   animation: beautiful-fade-in var(--dur) ease-out both;
 }
 
-.agent-request-actions .primary-button,
-.agent-request-actions .secondary-button {
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), transform var(--dur) var(--ease);
-}
-.agent-request-actions :is(.primary-button, .secondary-button):active:not(:disabled) { transform: scale(.96); }
 .agent-input-questions { display: grid; gap: 7px; margin-top: 7px; }
 .agent-input-question { min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; animation: beautiful-fade-up var(--dur-slow) var(--ease) both; }
 .agent-input-question[hidden] { display: none; }
@@ -60,8 +55,6 @@
 }
 .agent-input-page-dots > button[data-answered="true"] { border-width: 0; background: var(--status-input); }
 .agent-input-page-dots > button[aria-current="true"] { width: 9px; height: 9px; border: 2.5px solid var(--line-strong); background: transparent; }
-.agent-input-page-dots > button:focus-visible,
-.agent-input-page-arrow:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 .composer-suggestion-menu { transform-origin: bottom center; animation: beautiful-pop-in var(--dur) var(--ease) both; }
 .composer-suggestion-menu button {
@@ -90,7 +83,7 @@
 .diff-review-filter button > span { min-width: 15px; padding: 1px 4px; border-radius: var(--radius-xs); color: inherit; background: var(--fill); font-size: var(--text-xs); text-align: center; }
 .diff-review-filter button[aria-pressed="true"] { color: var(--text); background: var(--fill); }
 .diff-review-filter button[aria-pressed="true"] > span { color: var(--accent-strong); background: var(--fill); }
-.diff-review-filter button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
 .diff-filter-row {
   display: grid; min-width: max-content; grid-template-rows: 1fr; opacity: 1;
   transition: grid-template-rows var(--dur-slow) var(--ease), opacity var(--dur-slow) var(--ease);

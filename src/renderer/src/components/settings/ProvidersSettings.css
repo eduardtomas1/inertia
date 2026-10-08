@@ -66,10 +66,6 @@
   background: var(--fill);
 }
 
-.provider-settings-list-row:focus-visible {
-  outline-offset: -2px;
-}
-
 .provider-settings-list-row > :first-child {
   flex: 0 0 auto;
   margin-top: 1px;
@@ -193,10 +189,6 @@
 .provider-settings-tabs button:hover,
 .provider-settings-tabs button.is-active {
   color: var(--text);
-}
-
-.provider-settings-tabs button:focus-visible {
-  outline-offset: -2px;
 }
 
 .provider-settings-tabs button.is-active::after {

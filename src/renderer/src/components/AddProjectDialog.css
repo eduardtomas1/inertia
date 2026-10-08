@@ -39,10 +39,6 @@
   color: var(--text);
   font-size: var(--text-sm);
 }
-.add-project-dialog input:focus {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
 .add-project-search input {
   padding: 0 10px;
   border: 0;

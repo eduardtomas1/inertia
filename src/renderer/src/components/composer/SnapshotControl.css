@@ -4,6 +4,6 @@
 .snapshot-dialog h2 { margin: 0; font-size: var(--text-md); }
 .snapshot-dialog header button { display: grid; place-items: center; border: 0; background: transparent; color: inherit; padding: 5px; }
 .snapshot-note { color: var(--text-muted); font-size: var(--text-sm); }
-.snapshot-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 .snapshot-alert { margin: 14px 0 0; padding: 9px 12px; border-radius: var(--radius-sm); color: var(--danger); background: var(--fill); }
 .snapshot-alert code { padding: 0.13em 0.34em; border: 1px solid var(--line); border-radius: var(--radius-xs); color: inherit; background: var(--fill); font-family: var(--font-mono); font-size: var(--text-code); white-space: break-spaces; }

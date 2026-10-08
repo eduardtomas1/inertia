@@ -52,7 +52,6 @@
   color: var(--text-muted);
   background: var(--fill);
 }
-.prompt-presets-search:focus-within { border-color: var(--focus-ring); }
 .prompt-presets-search input {
   width: 100%;
   min-width: 0;
@@ -157,8 +156,6 @@
   resize: vertical;
   line-height: var(--leading-chrome);
 }
-.prompt-preset-editor > label > input:focus,
-.prompt-preset-editor > label > textarea:focus { border-color: var(--focus-ring); }
 .prompt-preset-route-toggle {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);

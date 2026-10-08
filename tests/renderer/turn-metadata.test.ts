@@ -171,21 +171,6 @@ function detailValue(turn: ResponseTurn, label: string, now?: number): string | 
     .find((detail) => detail.label === label)?.value;
 }
 
-function cssBlock(source: string, marker: string): string {
-  const markerIndex = source.indexOf(marker);
-  expect(markerIndex, `${marker} should exist`).toBeGreaterThanOrEqual(0);
-  const openIndex = source.indexOf("{", markerIndex);
-  let depth = 0;
-  for (let index = openIndex; index < source.length; index += 1) {
-    if (source[index] === "{") depth += 1;
-    if (source[index] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(openIndex + 1, index);
-    }
-  }
-  throw new Error(`Unclosed CSS block for ${marker}`);
-}
-
 describe("final-answer turn metadata", () => {
   it("keeps completed, failed, stopped, and queued timing concise and truthful", () => {
     const completed = responseTurn(agentTurn());
@@ -340,7 +325,7 @@ describe("final-answer turn metadata", () => {
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
     );
-    expect(cssBlock(css, ".turn-run-details-toggle:focus-visible {"))
-      .toContain("outline: 2px solid var(--accent)");
+    expect(css).toMatch(/^:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/mu);
+    expect(css).not.toMatch(/\.turn-run-details-toggle[^{]*\{[^}]*outline:\s*(?:0|none)/su);
   });
 });

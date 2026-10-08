@@ -35,11 +35,11 @@
 }
 .project-swatch[aria-checked="true"] { box-shadow: 0 0 0 1.5px var(--text); }
 .project-swatch:hover:not(:disabled, [aria-disabled="true"]) { transform: scale(1.08); }
-.project-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.project-swatch:disabled { cursor: not-allowed; opacity: .5; }
+
+.project-swatch:disabled { cursor: default; opacity: .5; }
 .project-swatches > .project-swatch[aria-disabled="true"],
 .project-emphasis-picker > .project-emphasis-option[aria-disabled="true"],
-.project-color-custom [aria-disabled="true"] { cursor: not-allowed; opacity: var(--disabled-opacity); }
+.project-color-custom [aria-disabled="true"] { cursor: default; opacity: var(--disabled-opacity); }
 .project-color-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .project-color-well {
   position: relative;
@@ -72,7 +72,7 @@
   min-width: 0;
   min-height: 26px;
   padding: 3px 8px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   background: var(--fill);
   color: var(--text);
@@ -80,7 +80,7 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-.project-color-hex:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
 .project-color-hex[aria-invalid="true"] { border-color: var(--line-strong); }
 .project-color-error { flex-basis: 100%; color: var(--danger); font-size: var(--text-sm); }
 .project-emphasis-picker {
@@ -108,7 +108,7 @@
   color: var(--text);
   box-shadow: none;
 }
-.project-emphasis-picker > .project-emphasis-option:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
 .project-icon-choices { display: flex; flex-wrap: wrap; gap: 4px; }
 .project-icon-choices > .project-icon-choice {
   display: inline-grid;
@@ -125,7 +125,7 @@
 }
 .project-icon-choices > .project-icon-choice:hover:not(:disabled) { background: var(--fill); }
 .project-icon-choices > .project-icon-choice[aria-checked="true"] { border-color: var(--line-strong); background: var(--fill); }
-.project-icon-choices > .project-icon-choice:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
 @media (prefers-reduced-motion: reduce) {
   .project-swatches > .project-swatch { transition: none; }
   .project-swatch:hover:not(:disabled, [aria-disabled="true"]) { transform: none; }

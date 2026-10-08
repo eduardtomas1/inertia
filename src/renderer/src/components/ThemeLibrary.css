@@ -48,7 +48,7 @@
 }
 
 .appearance-mode-option:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 
@@ -193,14 +193,9 @@
   border-color: var(--line-strong);
 }
 
-.color-theme-mode-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
 .color-theme-mode-button:disabled,
 .color-theme-apply-both:disabled {
-  cursor: not-allowed;
+  cursor: default;
 }
 
 .color-theme-option:has(:disabled) {
@@ -405,7 +400,7 @@
 .custom-theme-inputs input {
   min-width: 0;
   height: var(--control-height-small);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--text);
   background: var(--fill);
@@ -451,15 +446,8 @@
   color: var(--text);
 }
 
-.custom-theme-preview:focus-visible,
-.custom-theme-inputs input:focus-visible,
-.custom-theme-reset:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
 .custom-theme-color :disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 

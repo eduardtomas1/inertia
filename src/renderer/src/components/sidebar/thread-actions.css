@@ -31,7 +31,7 @@
   color: var(--text);
   background: var(--fill);
 }
-.thread-actions-popover button:disabled { opacity: .45; cursor: not-allowed; }
+.thread-actions-popover button:disabled { opacity: .45; cursor: default; }
 .thread-actions-popover [role="separator"] { height: 1px; margin: 5px -5px; background: var(--line); }
 .thread-submenu-chevron { margin-left: auto; }
 .thread-submenu {

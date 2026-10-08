@@ -79,11 +79,6 @@
   background: var(--fill);
 }
 
-.turn-failure-action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .turn-failure-toggle svg {
   transition: transform var(--dur-fast) var(--ease);
 }

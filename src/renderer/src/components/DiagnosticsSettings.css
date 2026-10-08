@@ -94,13 +94,6 @@
   box-sizing: border-box;
 }
 
-.diagnostics-filters input:focus-visible,
-.diagnostics-filters select:focus-visible {
-  border-color: var(--focus-ring);
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
 .diagnostics-filters :disabled {
   opacity: var(--disabled-opacity);
 }
@@ -170,11 +163,6 @@
 
 .diagnostics-event-row:hover {
   background: var(--fill);
-}
-
-.diagnostics-event-row:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
 }
 
 .diagnostics-event-icon {

@@ -63,11 +63,6 @@
   opacity: 1;
 }
 
-.html-render-open:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
 @media (hover: none) {
   .html-render-open {
     opacity: 1;

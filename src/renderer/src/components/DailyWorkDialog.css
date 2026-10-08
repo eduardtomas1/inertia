@@ -590,14 +590,6 @@
   line-height: var(--leading-chrome);
 }
 
-.daily-work-refresh:focus-visible,
-.daily-work-date-input:focus-visible,
-.daily-work-conversation-card:focus-visible,
-.daily-work-error button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .daily-work-skeleton i,
   .daily-work-badge.is-running::before {

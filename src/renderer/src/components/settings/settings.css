@@ -84,10 +84,6 @@
   font-weight: 500;
 }
 
-.settings-navigation nav button:focus-visible {
-  outline-offset: -2px;
-}
-
 .settings-navigation nav button > svg {
   flex: 0 0 auto;
 }
@@ -236,7 +232,7 @@
 }
 
 .response-density-setting > [role="radiogroup"] > button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 
@@ -357,7 +353,7 @@
   min-width: 0;
   min-height: var(--control-height);
   padding: 6px 9px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--text);
   background: var(--fill);
@@ -454,7 +450,7 @@
 }
 
 .setting-select[aria-disabled="true"] {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 
@@ -531,30 +527,6 @@
   line-height: var(--leading-chrome);
 }
 
-.settings-content :is(.primary-button, .secondary-button) {
-  min-height: var(--control-height);
-  border-radius: var(--radius-xs);
-  font-size: var(--text-sm);
-}
-
-.settings-content .secondary-button {
-  padding: 0 10px;
-  font-weight: 500;
-}
-
-.settings-content .primary-button {
-  margin-top: 0;
-}
-
-.settings-content :is(.primary-button, .secondary-button)[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: var(--disabled-opacity);
-}
-
-.settings-content .secondary-button[aria-disabled="true"]:hover {
-  background: var(--surface-raised);
-}
-
 .setting-range {
   display: flex;
   width: min(240px, 100%);
@@ -572,7 +544,7 @@
 }
 
 .setting-range input:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 

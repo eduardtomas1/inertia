@@ -37,14 +37,8 @@
 }
 
 .working-indicator-option:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
-}
-
-.working-indicator-option:focus-visible,
-.working-indicator-swatch:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .working-indicator-stage {
@@ -103,7 +97,7 @@
 }
 
 .working-indicator-swatch:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 

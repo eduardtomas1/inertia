@@ -17,11 +17,6 @@
   padding-bottom: 2px;
 }
 
-.work-thread-section-toggle:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
-}
-
 .work-thread-section.is-no-project > h2 {
   padding-left: 10px;
 }
@@ -247,7 +242,6 @@
     outline-color: Highlight;
   }
 
-  .thread-status-dot,
   .conversation-unread {
     border: 1px solid CanvasText;
     background: Canvas;

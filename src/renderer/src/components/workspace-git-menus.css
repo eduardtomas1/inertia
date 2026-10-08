@@ -13,13 +13,12 @@
 .git-menu-section-label b { color: var(--status-completed); font-weight: 500; margin-left: 6px; }
 .git-menu-section-label i { color: var(--danger); font-style: normal; }
 .branch-popover { width: min(380px, calc(100vw - 24px)); max-height: min(650px, 80vh); }
-.git-branch-search { display: flex; align-items: center; gap: 8px; margin: 6px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); color: var(--text-muted); }
-.git-branch-search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.git-branch-search { display: flex; align-items: center; gap: 8px; margin: 6px; padding: 0 9px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text-muted); }
 .git-branch-search input { width: 100%; min-width: 0; border: 0; outline: 0; padding: 9px 0; color: var(--text); background: transparent; font: inherit; }
 .git-branch-results { max-height: 280px; overflow: auto; scroll-padding: 6px; }
 .git-branch-results button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--ui-control-height); padding: 7px 9px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font-size: var(--text-sm); text-align: left; }
 .git-branch-results button:not(:disabled):hover { color: var(--text); background: var(--fill); }
-.git-branch-results button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 .git-branch-results button:disabled { opacity: .52; cursor: default; }
 .git-branch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .git-branch-results button svg, .git-branch-results button small { flex-shrink: 0; }

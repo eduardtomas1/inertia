@@ -165,11 +165,6 @@
   opacity: var(--disabled-opacity);
 }
 
-.workspace-surface-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
 .workspace-surface-empty {
   margin: 8px 2px 0;
   color: var(--text-muted);

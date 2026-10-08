@@ -64,10 +64,6 @@
   background: var(--fill);
 }
 
-.backend-profile-rail-item:focus-visible {
-  outline-offset: -2px;
-}
-
 .backend-profile-rail-item > strong {
   min-width: 0;
   font-size: var(--text-sm);

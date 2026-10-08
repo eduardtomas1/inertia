@@ -297,7 +297,7 @@ describe("assistant rows around an accepted follow-up", () => {
   afterEach(cleanupTurnControllerTestDirectories);
 
   const flushStreams = (runtime: TurnControllerTestRuntime): void => {
-    for (const [id, callback] of [...runtime.scheduler.callbacks]) {
+    for (const [id, callback] of runtime.scheduler.callbacks) {
       if ((runtime.scheduler.delays.get(id) ?? 0) >= 1_000) continue;
       runtime.scheduler.callbacks.delete(id);
       runtime.scheduler.delays.delete(id);

@@ -576,7 +576,7 @@ describe("durable runtime message queue", () => {
 describe("follow-ups accepted as the agent finishes its answer", () => {
   type QueueFixture = Awaited<ReturnType<typeof fixture>>;
   const flushStreams = (f: QueueFixture) => {
-    for (const [id, callback] of [...f.scheduler.callbacks]) {
+    for (const [id, callback] of f.scheduler.callbacks) {
       if ((f.scheduler.delays.get(id) ?? 0) >= 1_000) continue;
       f.scheduler.callbacks.delete(id); f.scheduler.delays.delete(id); callback();
     }

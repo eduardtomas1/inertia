@@ -4,7 +4,7 @@ import type { PrivateConnectRuntimeAuthorization, PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
-  parseRuntimeWorkerEvent, validSystemBootId,
+  isRuntimeMascotStatusMessage, parseRuntimeWorkerEvent, validSystemBootId,
   type RuntimeDatabaseRecoveryOperation, type RuntimeDatabaseRecoverySummary,
   type RuntimeDatabaseStartupRecoveryReport, type RuntimePrivateConnectForgetScope,
   type RuntimePrivateConnectPromptPreparation, type RuntimeSystemSuspendInterval,
@@ -655,6 +655,7 @@ export class RuntimeSupervisor {
     const event = parseRuntimeWorkerEvent(message);
     if (event?.type === "runtime.incident") return this.incidents.accept(event.incident, record.runtimeGenerationId);
     if (isRuntimeIncidentMessage(message)) return; // Invalid diagnostics cannot break lifecycle.
+    if (!event && isRuntimeMascotStatusMessage(message)) return this.onMascotStatus?.(null);
     if (!event) {
       this.lastError = "The runtime process sent an invalid lifecycle message.";
       this.rejectTestRecycle(record, this.lastError, true);

@@ -319,7 +319,7 @@ export class MascotStatusPublisher {
       if (!value) shownStatuses.set(entry, value = this.display(entry, activeCount, now));
       return value;
     };
-    const status = shown ? show(shown) : emptyMascotStatus();
+    const status = shown ? show(shown) : { ...emptyMascotStatus(), activeCount };
     const feed: MascotFeed = {
       status, chats: listed.map(show), rows: rows.map(show),
       focus: this.focused,

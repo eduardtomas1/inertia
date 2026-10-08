@@ -1090,7 +1090,7 @@ async function bootstrap(): Promise<void> {
       }));
       return child;
     },
-    onMascotStatus: (feed) => mascotMain?.observe(feed),
+    onMascotStatus: (feed) => feed ? mascotMain?.observe(feed) : runtimeDiagnostics?.record("mascot.feed-rejected"),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {

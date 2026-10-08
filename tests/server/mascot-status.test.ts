@@ -170,6 +170,17 @@ describe("mascot lifetimes", () => {
     expect(mascotFeedViolation(feed())).toBeNull();
   });
 
+  it("keeps a valid feed with the chat still counted as active after a lone approval expires", async () => {
+    const { parseRuntimeWorkerEvent } = await import("../../src/node/runtime-process-protocol");
+    const { publisher, feed, clock } = mascotPublisher();
+    publisher.replace([conversation("chat", "waiting-for-approval", { updatedAt: "2026-09-06T10:30:00.000Z" })]);
+    clock.advance(24 * 60 * MINUTE);
+    expect(feed()).toMatchObject({ status: { phase: "idle", conversationId: null, activeCount: 1 }, rows: [], counts: { attention: 0, others: 0 } });
+    expect(feed().chats).toEqual([expect.objectContaining({ conversationId: "chat", activeCount: 1 })]);
+    expect(mascotFeedViolation(feed())).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", ...feed() })).not.toBeNull();
+  });
+
   it("marks a working chat quiet after 10 minutes without an update and clears it on the next one", () => {
     const shell = conversation("chat", "running");
     const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });

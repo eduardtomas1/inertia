@@ -201,7 +201,7 @@ export interface RuntimeSupervisorOptions {
     generation: number,
     recorded: boolean,
   ) => void;
-  onMascotStatus?: (feed: import("../shared/mascot-feed.js").MascotFeed) => void;
+  onMascotStatus?: (feed: import("../shared/mascot-feed.js").MascotFeed | null) => void;
   onRestartRequested?: (event: Extract<RuntimeWorkerEvent, { type: "runtime.restart-requested" }>, generation: number) => void;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
   onIncident?: import("../node/application-incidents.js").IncidentSink;

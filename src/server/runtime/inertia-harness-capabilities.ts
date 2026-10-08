@@ -48,7 +48,7 @@ export function createInertiaHarnessCapabilities(
 ): HarnessCapabilityRegistry {
   const packs: HarnessCapabilityPack[] = [{
     id: "inertia.orchestration",
-    revision: 1,
+    revision: 2,
     title: "Inertia orchestration",
     summary: "Bounded, approval-owned coordination of independent top-level Inertia chats.",
     instructions: [ORCHESTRATION_INSTRUCTION],

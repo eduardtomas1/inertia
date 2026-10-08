@@ -148,13 +148,14 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("provider host-tool MCP transport", () => {
-  it("returns host-owned PNG evidence through the shared Cursor, Kimi, and OpenCode transport", async () => {
+  it("returns host-owned images through the shared Cursor, Kimi, and OpenCode transport", async () => {
     const image = Buffer.from("png-evidence").toString("base64");
+    const photo = Buffer.from("gif-evidence").toString("base64");
     const { post } = await started({
       invoke: async () => ({
         success: true,
         text: "captured",
-        image: { mimeType: "image/png", data: image },
+        images: [{ mimeType: "image/png", data: image }, { mimeType: "image/gif", data: photo }],
       }),
     });
     const response = await post({
@@ -169,9 +170,35 @@ describe("provider host-tool MCP transport", () => {
         content: [
           { type: "text", text: "captured" },
           { type: "image", mimeType: "image/png", data: image },
+          { type: "image", mimeType: "image/gif", data: photo },
         ],
       },
     });
+  });
+
+  it("refuses host images beyond the per-result count, byte, and type bounds", async () => {
+    const small = Buffer.from("png-evidence").toString("base64");
+    const cases = [
+      Array.from({ length: 5 }, () => ({ mimeType: "image/png" as const, data: small })),
+      [
+        { mimeType: "image/png" as const, data: Buffer.alloc(3 * 1024 * 1024, 1).toString("base64") },
+        { mimeType: "image/png" as const, data: Buffer.alloc(1024 * 1024 + 1, 1).toString("base64") },
+      ],
+      [{ mimeType: "image/svg+xml" as "image/png", data: small }],
+    ];
+    for (const images of cases) {
+      const { post } = await started({ invoke: async () => ({ success: true, text: "captured", images }) });
+      const body = await (await post({
+        jsonrpc: "2.0",
+        id: "bounded-images",
+        method: "tools/call",
+        params: { name: "inertia_list_conversations", arguments: {} },
+      })).json() as { result: { content: Array<{ type: string; text?: string }>; isError?: boolean } };
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content).toEqual([
+        { type: "text", text: expect.stringContaining("returned invalid images") },
+      ]);
+    }
   });
 
   it("negotiates Cursor HTTP with an owned stdio fallback and isolates OpenCode config", () => {
@@ -503,7 +530,7 @@ describe("provider host-tool MCP transport", () => {
       invoke: async () => ({
         success: true,
         text: "captured",
-        image: { mimeType: "image/png", data: image },
+        images: [{ mimeType: "image/png", data: image }],
       }),
     });
     const fallback = acpHostMcpServers(connection, false)[0]!;
@@ -540,10 +567,10 @@ describe("provider host-tool MCP transport", () => {
     const invoke = vi.fn(async () => ({
       success: true,
       text: "captured",
-      image: {
+      images: [{
         mimeType: "image/png" as const,
         data: Buffer.alloc(4 * 1024 * 1024, 0x5a).toString("base64"),
-      },
+      }],
     }));
     const { connection } = await started({ invoke });
     const fallback = acpHostMcpServers(connection, false)[0]!;

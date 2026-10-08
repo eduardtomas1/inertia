@@ -657,6 +657,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
+    conversationAttachments: initializedConversationAttachments,
     agentBrowser: options.agentBrowser,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);

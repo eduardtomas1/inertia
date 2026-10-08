@@ -281,7 +281,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     );
     await expect(providerQuestionCard).toBeVisible();
     await expect(providerQuestionCard).toContainText(
-      "Claude needs your input",
+      "Claude has a question",
     );
     await expect(providerQuestionCard).toContainText(
       "Which provider presentation should this fixture preserve?",

@@ -1,0 +1,359 @@
+/* Provider question card. The approval card keeps the shared .agent-request-*
+ * styles in styles.css; everything here is owned by InputRequestCard. */
+.agent-request-card.agent-input-card {
+  --agent-input-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--question-accent) 22%, var(--border));
+  background: var(--question-surface);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--question-accent) 6%, transparent),
+    0 0 26px -6px color-mix(in srgb, var(--question-accent) 42%, transparent);
+  animation: beautiful-fade-up 360ms var(--agent-input-ease) both;
+}
+
+.agent-input-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 9px;
+}
+
+.agent-input-glyph { color: var(--question-accent); }
+
+.agent-input-heading-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-input-heading-copy strong {
+  color: var(--text);
+  font-size: var(--ui-font-main);
+  font-weight: 670;
+  line-height: 1.3;
+}
+
+.agent-input-heading-copy small,
+.agent-input-count,
+.agent-input-hint,
+.agent-input-note {
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.4;
+}
+
+.agent-input-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  animation: beautiful-fade-in 200ms ease both;
+}
+
+.agent-input-steps {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding: 0 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.agent-input-steps > button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+  font-weight: 560;
+  transition: color 180ms ease;
+}
+
+.agent-input-steps > button:hover:not(:disabled),
+.agent-input-steps > button[aria-selected="true"] { color: var(--text); }
+.agent-input-steps > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.agent-input-steps > button:disabled { cursor: default; }
+
+.agent-input-step-mark {
+  position: relative;
+  display: grid;
+  width: 10px;
+  height: 10px;
+  place-items: center;
+  color: var(--question-accent);
+}
+
+.agent-input-step-mark::before {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  content: "";
+  transition: opacity 220ms ease, transform 220ms var(--agent-input-ease);
+}
+
+.agent-input-step-mark svg {
+  opacity: 0;
+  transform: scale(.4);
+  transition: opacity 200ms ease, transform 260ms var(--agent-input-ease);
+}
+
+.agent-input-steps > button[data-answered="true"] .agent-input-step-mark::before { opacity: 0; transform: scale(0); }
+.agent-input-steps > button[data-answered="true"] .agent-input-step-mark svg { opacity: 1; transform: none; }
+
+.agent-input-step-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--question-accent);
+  transition: transform 300ms var(--agent-input-ease), width 300ms var(--agent-input-ease);
+}
+
+.agent-input-stage.is-animating {
+  overflow: hidden;
+  transition: height 300ms var(--agent-input-ease);
+}
+
+.agent-input-panel {
+  min-width: 0;
+  margin: 0;
+  padding: 4px 12px 14px;
+  border: 0;
+  transition: opacity 220ms ease, transform 260ms var(--agent-input-ease);
+}
+
+.agent-input-steps + .agent-input-stage .agent-input-panel { padding-top: 8px; }
+.agent-input-panel.is-out { opacity: 0; transform: translateY(-3px); transition-duration: 150ms; }
+.agent-input-panel.is-in { opacity: 0; transform: translateY(4px); transition: none; }
+.agent-input-panel:disabled { opacity: var(--disabled-opacity); }
+
+/* Floating the legend lays it out inside the fieldset padding like normal content. */
+.agent-input-panel legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 0;
+  color: var(--text);
+  font-size: var(--ui-font-main);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.agent-input-hint { clear: both; margin: 0 0 9px; }
+.agent-input-note { margin: 9px 0 0; }
+
+.agent-input-options { display: grid; gap: 4px; }
+
+.agent-input-option {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: var(--ui-control-height);
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-strong) 72%, transparent);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 220ms ease, box-shadow 260ms ease;
+}
+
+.agent-input-panel:not(:disabled) .agent-input-option:hover { background: var(--surface-hover); }
+.agent-input-panel:disabled .agent-input-option { cursor: not-allowed; }
+
+.agent-input-option > input:is([type="radio"], [type="checkbox"]) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.agent-input-option:has(> input:checked),
+.agent-input-option.is-selected,
+.agent-input-option.is-text:focus-within {
+  border-color: color-mix(in srgb, var(--question-accent) 34%, var(--border));
+  box-shadow: 0 0 14px -4px color-mix(in srgb, var(--question-accent) 50%, transparent);
+}
+
+.agent-input-option:has(> input:is([type="radio"], [type="checkbox"]):focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--question-accent) 72%, transparent);
+  outline-offset: 1px;
+}
+
+.agent-input-indicator {
+  display: grid;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  place-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-strong);
+  transition: border-color 200ms ease;
+}
+
+.agent-input-indicator::before {
+  width: 7px;
+  height: 7px;
+  border-radius: inherit;
+  background: var(--question-accent);
+  content: "";
+  transform: scale(0);
+  transition: transform 220ms var(--agent-input-ease);
+}
+
+.agent-input-option.is-multi .agent-input-indicator { border-radius: 4px; }
+.agent-input-option.is-multi .agent-input-indicator::before { border-radius: 2px; }
+.agent-input-option:has(> input:checked) .agent-input-indicator,
+.agent-input-option.is-selected .agent-input-indicator { border-color: var(--question-accent); }
+.agent-input-option:has(> input:checked) .agent-input-indicator::before,
+.agent-input-option.is-selected .agent-input-indicator::before { transform: scale(1); }
+
+.agent-input-option-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-input-option-copy strong {
+  color: var(--text);
+  font-size: var(--ui-font-main);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.agent-input-option-copy small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.45;
+}
+
+.agent-input-recommended {
+  margin-left: 6px;
+  color: var(--question-accent);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+
+.agent-input-option.is-text {
+  align-items: center;
+  padding-block: 0;
+  cursor: text;
+}
+
+.agent-input-option.is-text .agent-input-indicator { margin-top: 0; }
+
+.agent-input-option.is-text > input {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: calc(var(--ui-control-height) - 2px);
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--ui-font-main);
+}
+
+.agent-input-option.is-text > input::placeholder { color: var(--text-muted); }
+.agent-input-option.is-secret > input { font-family: var(--font-mono); letter-spacing: .04em; }
+.agent-input-option.is-secret > svg { color: var(--text-muted); }
+
+.agent-input-reveal {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  margin-right: -5px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.agent-input-reveal:hover:not(:disabled),
+.agent-input-reveal[aria-pressed="true"] { color: var(--text); background: var(--surface-hover); }
+.agent-input-reveal:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.agent-input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.agent-input-footer button {
+  display: inline-flex;
+  min-height: max(30px, var(--control-height-small));
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+  font-weight: 650;
+  white-space: nowrap;
+  transition: width 280ms var(--agent-input-ease), background-color 120ms ease, color 120ms ease, opacity 200ms ease, visibility 200ms, transform 100ms ease;
+}
+
+.agent-input-footer button:active:not(:disabled) { transform: scale(.96); }
+.agent-input-footer button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.agent-input-back {
+  padding: 0 9px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.agent-input-back:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.agent-input-back.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.agent-input-primary {
+  padding: 0 11px;
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.agent-input-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.agent-input-primary:disabled { opacity: .45; cursor: default; }
+
+.agent-input-primary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  animation: beautiful-fade-in 180ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-request-card.agent-input-card,
+  .agent-request-card.agent-input-card * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

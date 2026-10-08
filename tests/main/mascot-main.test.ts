@@ -903,14 +903,14 @@ describe("mascot window presence, input region and placement memory", () => {
     harness.cursor = { x: 2500, y: 500 };
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
     expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 316 });
-    expect(saved(app.directory).positions).toEqual([{ display: 2, x: 2380, y: 240 }]);
+    expect(saved(app.directory).positions).toEqual([{ display: "2", x: 2380, y: 240 }]);
     harness.displays = [primary];
     harness.displayListeners.get("display-removed")!();
     expect(overlay.getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 316 });
     vi.advanceTimersByTime(400);
-    expect(saved(app.directory).positions).toEqual([{ display: 2, x: 2380, y: 240 }]);
+    expect(saved(app.directory).positions).toEqual([{ display: "2", x: 2380, y: 240 }]);
     await app.invoke(MASCOT_IPC.action, ["left"]);
-    expect(saved(app.directory).positions).toEqual([{ display: 1, x: 1184, y: 240 }, { display: 2, x: 2380, y: 240 }]);
+    expect(saved(app.directory).positions).toEqual([{ display: "1", x: 1184, y: 240 }, { display: "2", x: 2380, y: 240 }]);
     harness.displays = [primary, external];
     harness.displayListeners.get("display-added")!();
     expect(overlay.getBounds()).toEqual({ x: 1184, y: 240, width: 240, height: 316 });

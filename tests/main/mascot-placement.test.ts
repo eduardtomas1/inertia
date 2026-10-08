@@ -33,22 +33,34 @@ describe("mascot placement and contracts", () => {
     const main = { id: 1, ...primary };
     let positions = rememberMascotPosition([], { x: -1000, y: 100, width: 240, height: 316 }, [main, left]);
     positions = rememberMascotPosition(positions, { x: 400, y: 300, width: 240, height: 316 }, [main, left]);
-    expect(positions).toEqual([{ display: 1, x: 400, y: 300 }, { display: 2, x: -1000, y: 100 }]);
+    expect(positions).toEqual([{ display: "1", x: 400, y: 300 }, { display: "2", x: -1000, y: 100 }]);
     positions = rememberMascotPosition(positions, { x: -1500, y: 0, width: 240, height: 316 }, [main, left]);
-    expect(positions).toEqual([{ display: 2, x: -1500, y: 0 }, { display: 1, x: 400, y: 300 }]);
+    expect(positions).toEqual([{ display: "2", x: -1500, y: 0 }, { display: "1", x: 400, y: 300 }]);
     expect(mascotPosition(positions, [main])).toEqual({ x: 400, y: 300 });
     expect(mascotPosition(positions, [main, left])).toEqual({ x: -1500, y: 0 });
     expect(mascotPosition(positions, [{ id: 3, ...primary }])).toEqual({ x: -1500, y: 0 });
     expect(mascotBounds(mascotPosition(positions, [{ id: 3, ...primary }]), [{ id: 3, ...primary }])).toEqual({ x: 0, y: 24, width: 240, height: 316 });
     expect(mascotPosition([], [main])).toBeNull();
-    expect(mascotDisplay({ x: 1300, y: 700, width: 240, height: 316 }, [main, left])).toBe(1);
-    expect(mascotDisplay({ x: -300, y: 0, width: 240, height: 316 }, [main, left])).toBe(2);
+    expect(mascotDisplay({ x: 1300, y: 700, width: 240, height: 316 }, [main, left])).toBe("1");
+    expect(mascotDisplay({ x: -300, y: 0, width: 240, height: 316 }, [main, left])).toBe("2");
     expect(mascotDisplay({ x: 0, y: 0, width: 240, height: 316 }, [primary])).toBeNull();
     const many = Array.from({ length: 10 }, (_, index) => ({ id: index + 10, workArea: { x: index * 2000, y: 0, width: 2000, height: 1000 } }));
     let all: ReturnType<typeof rememberMascotPosition> = [];
     for (const display of many) all = rememberMascotPosition(all, { x: display.workArea.x, y: 0, width: 240, height: 316 }, many);
     expect(all).toHaveLength(8);
-    expect(all[0]!.display).toBe(19);
+    const edid = 0x4c2d * 2 ** 40 + 0x1234 * 2 ** 8 + 1;
+    expect(Number.isSafeInteger(edid)).toBe(false);
+    const linux = [{ id: edid, workArea: { x: 0, y: 0, width: 1920, height: 1080 } }];
+    const remembered = rememberMascotPosition([], { x: 300, y: 400, width: 240, height: 316 }, linux);
+    const directory = mkdtempSync(join(tmpdir(), "mascot-edid-"));
+    try {
+      const path = join(directory, "state.json");
+      writeMascotWindowState(path, { preferences: { enabled: true, motion: true }, positions: remembered });
+      const restored = readMascotWindowState(path).positions;
+      expect(restored).toEqual([{ display: String(edid), x: 300, y: 400 }]);
+      expect(mascotPosition(restored, linux)).toEqual({ x: 300, y: 400 });
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+    expect(all[0]!.display).toBe("19");
   });
 
   it("defaults off and atomically persists enablement, motion, and placement", () => {
@@ -56,15 +68,18 @@ describe("mascot placement and contracts", () => {
     try {
       const path = join(directory, "state.json");
       expect(readMascotWindowState(path).preferences.enabled).toBe(false);
-      const state = { preferences: { enabled: true, motion: false }, positions: [{ display: 7, x: -1800, y: 40 }, { display: null, x: 5, y: 6 }] };
+      const state = { preferences: { enabled: true, motion: false }, positions: [{ display: "7", x: -1800, y: 40 }, { display: null, x: 5, y: 6 }] };
       writeMascotWindowState(path, state);
       expect(readMascotWindowState(path)).toEqual(state);
       writeMascotWindowState(path, { ...state, positions: [] });
       expect(readMascotWindowState(path).positions).toEqual([]);
       writeFileSync(path, JSON.stringify({ preferences: { enabled: true, motion: true }, position: { x: 1200, y: 660 } }));
       expect(readMascotWindowState(path)).toEqual({ preferences: { enabled: true, motion: true }, positions: [{ display: null, x: 1200, y: 584 }] });
-      writeFileSync(path, JSON.stringify({ preferences: { enabled: true, motion: true }, positions: [{ display: "7", x: 1, y: 2 }] }));
-      expect(readMascotWindowState(path).positions).toEqual([]);
+      writeFileSync(path, JSON.stringify({ preferences: { enabled: true, motion: true }, positions: [
+        { display: 7, x: 1, y: 2 }, { display: "8", x: 3, y: 4 }, { display: "9", x: 1.5, y: 2 }, null, { display: "x".repeat(41), x: 1, y: 1 },
+        { display: "1e3", x: 1, y: 1 }, { display: null, x: 5, y: 6 },
+      ] }));
+      expect(readMascotWindowState(path).positions).toEqual([{ display: "8", x: 3, y: 4 }, { display: null, x: 5, y: 6 }]);
       writeFileSync(path, "{");
       expect(readMascotWindowState(path).preferences.enabled).toBe(false);
       writeFileSync(path, " ".repeat(2048));

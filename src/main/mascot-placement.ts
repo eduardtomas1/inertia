@@ -20,7 +20,7 @@ export function supportsMascotPlacement(
       && environment.XDG_SESSION_TYPE !== "wayland");
 }
 export interface MascotPosition {
-  display: number | null;
+  display: string | null;
   x: number;
   y: number;
 }
@@ -31,12 +31,13 @@ export interface MascotWindowState {
 }
 
 function parsePositions(value: unknown): MascotPosition[] | null {
-  if (!Array.isArray(value) || value.length > POSITION_LIMIT) return null;
+  if (!Array.isArray(value)) return null;
   const positions: MascotPosition[] = [];
-  for (const item of value as Array<Partial<MascotPosition> | null>) {
-    if (!item || !Number.isSafeInteger(item.x) || !Number.isSafeInteger(item.y)
-      || (item.display !== null && !Number.isSafeInteger(item.display))) return null;
-    positions.push({ display: item.display!, x: item.x!, y: item.y! });
+  for (const item of value.slice(0, POSITION_LIMIT) as Array<Partial<MascotPosition> | null>) {
+    if (item && Number.isSafeInteger(item.x) && Number.isSafeInteger(item.y)
+      && (item.display === null || (typeof item.display === "string" && /^\d{1,40}$/u.test(item.display)))) {
+      positions.push({ display: item.display, x: item.x!, y: item.y! });
+    }
   }
   return positions;
 }
@@ -96,18 +97,19 @@ export function mascotBounds(
 export function mascotPosition(
   positions: readonly MascotPosition[], displays: readonly MascotDisplay[],
 ): { x: number; y: number } | null {
-  const position = positions.find(({ display }) => display !== null && displays.some(({ id }) => id === display)) ?? positions[0];
+  const position = positions.find(({ display }) => display !== null && displays.some(({ id }) => id !== undefined && String(id) === display))
+    ?? positions[0];
   return position ? { x: position.x, y: position.y } : null;
 }
 
-export function mascotDisplay(bounds: Rectangle, displays: readonly MascotDisplay[]): number | null {
+export function mascotDisplay(bounds: Rectangle, displays: readonly MascotDisplay[]): string | null {
   const x = bounds.x + MASCOT_FIGURE.x + MASCOT_FIGURE.width / 2;
   const y = bounds.y + MASCOT_FIGURE.y + MASCOT_FIGURE.height / 2;
   const distance = ({ workArea: area }: MascotDisplay): number => (
     Math.max(area.x - x, 0, x - area.x - area.width) ** 2 + Math.max(area.y - y, 0, y - area.y - area.height) ** 2
   );
   const nearest = displays.reduce<MascotDisplay | undefined>((best, next) => !best || distance(next) < distance(best) ? next : best, undefined);
-  return nearest?.id ?? null;
+  return nearest?.id === undefined ? null : String(nearest.id);
 }
 
 export function rememberMascotPosition(

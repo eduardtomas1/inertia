@@ -64,6 +64,7 @@ function attachmentReferences(
 }
 
 const SHORTENED_MIDDLE = "…\n\n[middle of message omitted]\n\n";
+const OMITTED_EXCERPT = "[Message excerpt omitted]";
 const MAX_EXCERPT_ESCAPED_BYTES = 40 * 1024;
 
 function cleanExcerptText(value: string): string | null {
@@ -129,7 +130,7 @@ export function scrubAndBoundExcerpt(
   const tail = row.contentTruncated ? cleanExcerptText(row.tail ?? "") ?? "" : head ?? "";
   const boundTo = (limit: number) => head === null
     ? truncateUtf8(
-        row.contentTruncated ? "[Message excerpt omitted]" : "[Empty message omitted]",
+        row.contentTruncated ? OMITTED_EXCERPT : "[Empty message omitted]",
         limit,
       )
     : !row.contentTruncated && byteLength(head) <= limit
@@ -138,9 +139,13 @@ export function scrubAndBoundExcerpt(
   let limit = Math.min(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, remainingBytes);
   let bounded = boundTo(limit);
   while (limit > 0 && escapedBytes(bounded.text) > MAX_EXCERPT_ESCAPED_BYTES) {
-    limit -= escapedBytes(bounded.text) - MAX_EXCERPT_ESCAPED_BYTES;
+    limit = Math.min(
+      limit - 1,
+      Math.floor(limit * MAX_EXCERPT_ESCAPED_BYTES / escapedBytes(bounded.text)),
+    );
     bounded = boundTo(limit);
   }
+  if (!bounded.text) bounded = { text: OMITTED_EXCERPT, truncated: true };
   const attachments = attachmentReferences(row.attachments_json);
   return {
     sourceMessageId: row.id,

@@ -39,7 +39,11 @@ import {
   type ConversationContextTransport,
 } from "./conversation-context-transport";
 import { ConversationContextTurnReads } from "./conversation-context-turn-reads";
-import { parseExcerpts, parseSupplement } from "./conversation-context-packet-codec";
+import {
+  parseExcerpts,
+  parseSupplement,
+  type StoredPacketExcerpts,
+} from "./conversation-context-packet-codec";
 import { changedFileLines } from "./provider-handoff-files";
 import { finalTurnCommands } from "./turn-context-facts";
 import type { CreateMessageOptions } from "./types";
@@ -547,6 +551,15 @@ export class ConversationContextPacketRepository {
     const commands = finalTurnCommands(this.context.database, excerpts);
     const supplement = { ...files, ...(commands.length > 0 ? { commands } : {}) };
     const supplementJson = Object.keys(supplement).length > 0 ? JSON.stringify(supplement) : null;
+    const stored: StoredPacketExcerpts & { supplement_json: string | null } = {
+      excerpts_json: excerptsJson,
+      message_count: excerpts.length,
+      character_count: characterCount,
+      supplement_json: supplementJson,
+      transport_version: CONVERSATION_CONTEXT_TRANSPORT_VERSION,
+    };
+    parseExcerpts(stored);
+    parseSupplement(stored);
     const packet: ConversationContextPacket = {
       id,
       sourceConversationId: source.id,

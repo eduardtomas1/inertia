@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { Check } from "lucide-react";
 import { surfaceIcons } from "./workspacePanelIcons";
 
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
@@ -157,9 +158,11 @@ export function RightPanelLauncher({
 
 export function AddSurfaceMenuItems({
   actions,
+  openSurfaces = [],
   onOpen,
 }: {
   actions: readonly SurfaceAction[];
+  openSurfaces?: readonly WorkspacePanelTab[];
   onOpen: (surface: WorkspacePanelTab) => void;
 }): React.JSX.Element {
   return (
@@ -170,6 +173,7 @@ export function AddSurfaceMenuItems({
           role="menuitem"
           key={action.surface}
           aria-disabled={!action.available || undefined}
+          aria-current={openSurfaces.includes(action.surface) || undefined}
           aria-keyshortcuts={action.shortcut}
           title={action.reason}
           onPointerEnter={() => {
@@ -181,6 +185,7 @@ export function AddSurfaceMenuItems({
         >
           {surfaceIcons[action.surface]}
           <span>{action.label}</span>
+          {openSurfaces.includes(action.surface) && <Check size={14} aria-hidden="true" />}
           <kbd>{action.shortcut}</kbd>
         </button>
       ))}

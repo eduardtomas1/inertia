@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -12,10 +13,13 @@ import { surfaceIcons } from "./workspacePanelIcons";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import {
+  CLOSE_ACTIVE_PANEL_SURFACE_EVENT,
   RIGHT_PANEL_SURFACE_META,
   RIGHT_PANEL_SURFACES,
   surfaceShortcutActionForKey,
 } from "../utils/rightPanelSurfaces";
+import { IconButton } from "./ui";
+import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import type { SurfaceAction } from "./WorkspacePanelLauncher";
 import { FocusFirstMenuItem } from "./workspace-header/FocusFirstMenuItem";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
@@ -41,6 +45,7 @@ export type WorkspacePanelProps = {
   onActivateSurface: (surface: WorkspacePanelTab) => void;
   onOpenSurface: (surface: WorkspacePanelTab) => void;
   onCloseSurface: (surface: WorkspacePanelTab) => void;
+  onMoveSurface?: (surface: WorkspacePanelTab, toIndex: number) => void;
   onClosePanel?: () => void;
 };
 
@@ -78,6 +83,7 @@ export function WorkspacePanel({
   onActivateSurface,
   onOpenSurface,
   onCloseSurface,
+  onMoveSurface,
   onClosePanel,
 }: WorkspacePanelProps): React.JSX.Element {
   const panelId = useId();
@@ -87,6 +93,15 @@ export function WorkspacePanel({
     ? activeSurface
     : null;
   const actions = surfaceActions(unavailable, badges, activeBackgroundTaskCount);
+  const moveSurface = (surface: WorkspacePanelTab, toIndex: number): void => {
+    const target = visibleSurfaces[Math.min(Math.max(toIndex, 0), visibleSurfaces.length - 1)];
+    if (target) onMoveSurface?.(surface, surfaces.indexOf(target));
+  };
+  const tabRow = usePanelTabRow({
+    keys: visibleSurfaces,
+    activeKey: selected,
+    ...(onMoveSurface ? { onMove: moveSurface } : {}),
+  });
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"add">();
   const wasVisibleRef = useRef(visible);
@@ -110,6 +125,24 @@ export function WorkspacePanel({
       window.cancelAnimationFrame(frame);
     };
   }, [selected, visible]);
+
+  const closeActiveRef = useRef<() => boolean>(() => false);
+  useLayoutEffect(() => {
+    closeActiveRef.current = () => {
+      if (!visible || !selected) return false;
+      closeSurface(selected, Boolean(panelRef.current?.contains(document.activeElement)));
+      return true;
+    };
+  });
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const handle = (event: Event): void => {
+      if (closeActiveRef.current()) event.preventDefault();
+    };
+    panel.addEventListener(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, handle);
+    return () => panel.removeEventListener(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, handle);
+  }, []);
 
   const focusTab = (surface: WorkspacePanelTab): void => {
     window.requestAnimationFrame(() => {
@@ -152,6 +185,14 @@ export function WorkspacePanel({
     const currentIndex = visibleSurfaces.indexOf(surface);
     if (currentIndex < 0) return;
     event.preventDefault();
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey) {
+      const toIndex = currentIndex + (event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0);
+      if (onMoveSurface && toIndex !== currentIndex && toIndex >= 0 && toIndex < visibleSurfaces.length) {
+        moveSurface(surface, toIndex);
+        focusTab(surface);
+      }
+      return;
+    }
     const key = (event.key === "ArrowLeft"
       ? "ArrowUp"
       : event.key === "ArrowRight" ? "ArrowDown" : event.key
@@ -200,15 +241,25 @@ export function WorkspacePanel({
     >
       <header className="workspace-panel-tabs drag-region">
         {visibleSurfaces.length > 0 && (
-          <div className="workspace-panel-tablist no-drag" role="tablist" aria-label="Panel surfaces">
-            {visibleSurfaces.map((surface) => {
+          <div
+            className="workspace-panel-tablist no-drag"
+            role="tablist"
+            aria-label="Panel surfaces"
+            data-overflow-start={tabRow.edges.start || undefined}
+            data-overflow-end={tabRow.edges.end || undefined}
+            {...tabRow.listHandlers}
+          >
+            {tabRow.order.map((surface) => {
               const meta = RIGHT_PANEL_SURFACE_META[surface];
               const active = surface === selected;
               const badge = surface === "agents" ? activeBackgroundTaskCount : badges[surface] ?? 0;
+              const rovingTab = active || (!selected && surface === visibleSurfaces[0]);
               return (
                 <div
                   key={surface}
-                  className={active ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
+                  className={`panel-tab workspace-panel-tab${active ? " is-active" : ""}${tabRow.draggingKey === surface ? " is-dragging" : ""}`}
+                  data-tab-key={surface}
+                  onPointerDown={(event) => tabRow.startPointer(event, surface)}
                   onMouseDown={(event) => {
                     if (event.button === 1) event.preventDefault();
                   }}
@@ -231,27 +282,25 @@ export function WorkspacePanel({
                     aria-controls={`${panelId}-content`}
                     aria-keyshortcuts="Delete"
                     data-workspace-tab={surface}
-                    tabIndex={active || (!selected && surface === visibleSurfaces[0]) ? 0 : -1}
-                    title={meta.label}
+                    tabIndex={rovingTab ? 0 : -1}
                     onFocus={() => prefetchWorkspaceTool(surface)}
                     onPointerEnter={() => prefetchWorkspaceTool(surface)}
                     onKeyDown={(event) => handleTabKeyDown(event, surface)}
                     onClick={() => onActivateSurface(surface)}
                   >
                     {surfaceIcons[surface]}
-                    <span>{meta.label}</span>
+                    <span className="panel-tab-label" data-text={meta.label}>{meta.label}</span>
                     {badge > 0 && <span className="workspace-panel-badge" aria-hidden="true">{badge}</span>}
                   </button>
-                  <button
-                    type="button"
-                    className="workspace-panel-tab-close"
-                    aria-label={`Close ${meta.label}`}
-                    title={`Close ${meta.label}`}
-                    tabIndex={-1}
+                  <IconButton
+                    className="panel-tab-close workspace-panel-tab-close"
+                    label={`Close ${meta.label}`}
+                    data-tab-close=""
+                    tabIndex={rovingTab ? 0 : -1}
                     onClick={() => closeSurface(surface, false)}
                   >
                     <X size={14} aria-hidden="true" />
-                  </button>
+                  </IconButton>
                 </div>
               );
             })}
@@ -259,12 +308,10 @@ export function WorkspacePanel({
         )}
         {visibleSurfaces.length > 0 && (
           <div className="workspace-panel-add-anchor no-drag">
-            <button
+            <IconButton
               ref={(node) => setMenuTrigger("add", node)}
-              type="button"
               className="workspace-panel-add"
-              aria-label="Add panel surface"
-              title="Add panel surface"
+              label="Add panel surface"
               aria-haspopup="menu"
               aria-expanded={menu === "add"}
               aria-controls={`${panelId}-add-menu`}
@@ -273,7 +320,7 @@ export function WorkspacePanel({
               onClick={() => toggleMenu("add")}
             >
               <Plus size={14} aria-hidden="true" />
-            </button>
+            </IconButton>
             {menu === "add" && (
               <div
                 ref={(node) => setMenuPopover("add", node)}
@@ -284,7 +331,7 @@ export function WorkspacePanel({
                 onKeyDownCapture={handleAddMenuKeyDown}
               >
                 <Suspense fallback={<p className="header-menu-hint-text" role="status">Loading…</p>}>
-                  <AddSurfaceMenuItems actions={actions} onOpen={openSurface} />
+                  <AddSurfaceMenuItems actions={actions} openSurfaces={visibleSurfaces} onOpen={openSurface} />
                   <FocusFirstMenuItem menuId={`${panelId}-add-menu`} />
                 </Suspense>
               </div>

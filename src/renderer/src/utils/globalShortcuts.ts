@@ -27,6 +27,17 @@ interface ShortcutTarget {
 
 type CurrentActions = { current: GlobalShortcutActions };
 
+function closeActivePanelSurface(ownerDocument: Document, target: EventTarget | null): boolean {
+  const panels = Array.from(ownerDocument.querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])"));
+  const origin = target instanceof Node ? target : null;
+  const panel = panels.find((entry) => entry.contains(origin))
+    ?? panels.find((entry) => entry.parentElement?.contains(origin))
+    ?? panels[0];
+  return panel
+    ? !panel.dispatchEvent(new Event(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, { cancelable: true }))
+    : false;
+}
+
 export function installGlobalShortcuts(
   target: ShortcutTarget,
   actions: CurrentActions,
@@ -63,6 +74,14 @@ export function installGlobalShortcuts(
     const modalOpen = Boolean(ownerDocument?.querySelector(
       '[role="dialog"][aria-modal="true"]',
     ));
+    if (!shortcut && key === "w") {
+      if (terminalTarget || modalOpen || actions.current.suspended || !ownerDocument) return;
+      if (!closeActivePanelSurface(ownerDocument, event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      ownedKeyUps.add(key);
+      return;
+    }
     if (shortcut && (actions.current.suspended || modalOpen)) {
       event.preventDefault();
       event.stopPropagation();
@@ -119,3 +138,4 @@ import type {
   AppKeybindings,
   AppShortcutAction,
 } from "@shared/keybindings";
+import { CLOSE_ACTIVE_PANEL_SURFACE_EVENT } from "./rightPanelSurfaces";

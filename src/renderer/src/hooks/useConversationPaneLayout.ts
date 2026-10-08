@@ -16,6 +16,7 @@ import {
   closeOtherRightPanelSurfaces,
   closeRightPanelSurface,
   legacyRightPanelState,
+  moveRightPanelSurface,
   openRightPanelSurface,
   parseRightPanelState,
   serializeRightPanelState,
@@ -160,6 +161,8 @@ export function useConversationPaneLayout(
       updatePanel((current) => closeRightPanelSurface(current, surface)),
     closeOtherSurfaces: (surface: WorkspacePanelTab) =>
       updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
+    moveSurface: (surface: WorkspacePanelTab, toIndex: number) =>
+      updatePanel((current) => moveRightPanelSurface(current, surface, toIndex)),
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);

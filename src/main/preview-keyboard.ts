@@ -1,6 +1,6 @@
 import type { Input, KeyboardInputEvent } from "electron";
 
-const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
+const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n", "w"]);
 
 export function previewAppShortcutKey(input: Pick<
   Input,

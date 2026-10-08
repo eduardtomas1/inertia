@@ -360,7 +360,6 @@ button:disabled,
   .turn-follow-up-row,
   .usage-limits-panel .limits-account-trigger,
   .work-thread-section-toggle,
-  .workspace-panel-add,
   .workspace-panel-launcher-list > .is-unavailable,
   .workspace-panel-launcher-list > button,
   .workspace-repository-file,
@@ -5807,84 +5806,129 @@ button.turn-agents-line:hover {
   display: none;
 }
 
-.workspace-panel-tab {
+.workspace-panel-tablist[data-overflow-start] {
+  mask-image: linear-gradient(to right, transparent, #000 24px);
+}
+
+.workspace-panel-tablist[data-overflow-end] {
+  mask-image: linear-gradient(to left, transparent, #000 24px);
+}
+
+.workspace-panel-tablist[data-overflow-start][data-overflow-end] {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+.panel-tab {
   position: relative;
-  display: inline-flex;
-  height: 26px;
-  max-width: 184px;
-  flex: 0 0 auto;
+  display: flex;
+  height: var(--ui-control-height);
+  min-width: calc-size(max-content, min(size, 9em));
+  max-width: 200px;
+  flex: 0 1 auto;
   align-items: center;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
+  font-size: var(--text-sm);
+  user-select: none;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-.workspace-panel-tab:hover {
+.panel-tab:hover {
   color: var(--text);
   background: var(--fill);
 }
 
-.workspace-panel-tab.is-active {
+.panel-tab:is(.is-active, .active),
+.panel-tab.is-dragging {
   color: var(--text);
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
-.workspace-panel-tab > [role="tab"] {
-  display: inline-flex;
+.panel-tab > [role="tab"] {
+  display: flex;
   min-width: 0;
   height: 100%;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 6px;
-  padding: 0 2px 0 7px;
+  gap: 8px;
+  padding: 0 12px 0 9px;
   border: 0;
   border-radius: inherit;
   color: inherit;
   background: transparent;
-  font-size: var(--text-sm);
-  font-weight: 500;
+  font-size: inherit;
+  font-weight: 400;
+  line-height: var(--leading-chrome);
   white-space: nowrap;
 }
 
-.workspace-panel-tab > [role="tab"] > span:not(.workspace-panel-badge) {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.panel-tab > [role="tab"]:focus-visible {
+  outline-offset: -2px;
 }
 
-.workspace-panel-tab-close {
-  display: grid;
+.panel-tab:is(.is-active, .active) > [role="tab"] {
+  font-weight: 500;
+}
+
+.panel-tab > [role="tab"] > svg:first-child {
+  flex: 0 0 auto;
+  transition: opacity var(--dur-fast) var(--ease-fade);
+}
+
+.panel-tab-label {
+  display: inline-grid;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  margin-right: -8px;
+  padding-right: 8px;
+  mask-image: linear-gradient(to left, transparent, #000 8px);
+}
+
+.panel-tab-label::after {
+  height: 0;
+  overflow: hidden;
+  content: attr(data-text);
+  font-weight: 500;
+  visibility: hidden;
+}
+
+.panel-tab-close.icon-button {
+  position: absolute;
+  top: 50%;
+  left: 4px;
   width: 24px;
   height: 24px;
-  flex: 0 0 auto;
-  margin-right: 4px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-xs);
+  margin-top: -12px;
   color: inherit;
-  background: transparent;
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-fade), background var(--dur-fast) var(--ease);
 }
 
-.workspace-panel-tab:hover > .workspace-panel-tab-close,
-.workspace-panel-tab:focus-within > .workspace-panel-tab-close,
-.workspace-panel-tab.is-active > .workspace-panel-tab-close {
-  opacity: 0.6;
+.panel-tab-close.icon-button:focus-visible {
+  outline-offset: -2px;
 }
 
-.workspace-panel-tab > .workspace-panel-tab-close:hover {
+.panel-tab:is(:hover, :focus-within) > .panel-tab-close {
   opacity: 1;
+  pointer-events: auto;
+}
+
+.panel-tab:is(:hover, :focus-within) > [role="tab"] > svg:first-child {
+  opacity: 0;
+}
+
+.panel-tab-close.icon-button:hover:not(:disabled) {
   background: var(--fill-strong);
 }
 
 .workspace-panel-badge {
-  min-width: 16px;
-  padding: 1px 4px;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  background: var(--fill);
+  flex: 0 0 auto;
+  color: var(--text-faint);
   font-size: var(--text-xs);
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
-  text-align: center;
 }
 
 .workspace-panel-add-anchor {
@@ -5892,27 +5936,19 @@ button.turn-agents-line:hover {
   flex: 0 0 auto;
 }
 
-.workspace-panel-add {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  background: transparent;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+.workspace-panel-add.icon-button {
+  width: var(--control-height-small);
+  height: var(--control-height-small);
 }
 
-.workspace-panel-add:hover,
 .workspace-panel-add[aria-expanded="true"] {
   color: var(--text);
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .header-popover.workspace-panel-add-menu {
-  right: auto;
-  left: 0;
+  right: 0;
+  left: auto;
   width: 220px;
 }
 
@@ -5930,7 +5966,7 @@ button.turn-agents-line:hover {
 
 .header-popover.workspace-panel-add-menu > button[aria-disabled="true"] {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--disabled-opacity);
 }
 
 .workspace-panel-content {
@@ -6040,16 +6076,10 @@ button.turn-agents-line:hover {
   white-space: normal;
 }
 
-@container (max-width: 360px) {
-  .workspace-panel-tab > [role="tab"] > span:not(.workspace-panel-badge) {
-    display: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .workspace-panel-tab,
-  .workspace-panel-tab-close,
-  .workspace-panel-add,
+  .panel-tab,
+  .panel-tab > [role="tab"] > svg:first-child,
+  .panel-tab-close.icon-button,
   .workspace-panel-launcher-list > button {
     transition: none;
   }

@@ -164,7 +164,7 @@ describe("Codex App Server delegated continuation", () => {
     }
   });
 
-  it("fails closed when settled delegated work has no parent continuation", () => {
+  it("completes the parent turn when settled delegated work starts no fresh parent turn", () => {
     vi.useFakeTimers();
     const harness = eventHarness();
     try {
@@ -182,15 +182,9 @@ describe("Codex App Server delegated continuation", () => {
       expect(harness.finish).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1);
 
-      expect(harness.setLastError).toHaveBeenCalledWith(
-        expect.stringContaining("did not resume"),
-      );
-      expect(harness.rememberFailure).toHaveBeenCalledWith(
-        "codex-error",
-        expect.stringContaining("did not resume"),
-        expect.stringContaining("No fresh parent turn"),
-      );
-      expect(harness.finish).toHaveBeenCalledWith("failed", 1, null);
+      expect(harness.setLastError).not.toHaveBeenCalled();
+      expect(harness.rememberFailure).not.toHaveBeenCalled();
+      expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
     } finally {
       harness.events.dispose();
       vi.useRealTimers();

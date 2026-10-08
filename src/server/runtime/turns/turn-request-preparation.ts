@@ -65,6 +65,7 @@ export interface PreparedTurnRequest {
 export interface ResolvedTurnRequest {
   input: BeginAgentTurnInput;
   importNote: string | null;
+  handoffFromTurnId: string | null;
   adopt(queued: QueuedTurn): PreparedTurnRequest;
 }
 
@@ -77,6 +78,9 @@ export function prepareTurnRequest(
   const resolved = resolveTurnRequest(dependencies, request);
   const queued = dependencies.store.beginAgentTurn(resolved.input);
   try {
+    if (resolved.handoffFromTurnId) {
+      retireUsageLimitSnooze(dependencies, queued.turn.conversationId, resolved.handoffFromTurnId);
+    }
     if (resolved.importNote) {
       const message = dependencies.store.createMessage(queued.turn.conversationId, resolved.importNote, "system", [], queued.turn.id, undefined, { activateConversation: false });
       dependencies.hooks.broadcast({ type: "conversation.message.persisted", message });
@@ -87,6 +91,18 @@ export function prepareTurnRequest(
     onAdoptionFailure?.(queued, error);
     throw error;
   }
+}
+
+function retireUsageLimitSnooze(
+  dependencies: PrepareTurnRequestDependencies,
+  conversationId: string,
+  limitedTurnId: string,
+): void {
+  const { snoozedUntil } = dependencies.store.conversation(conversationId);
+  if (!snoozedUntil || Date.parse(snoozedUntil) <= dependencies.clock().getTime()) return;
+  if (dependencies.store.agentTurn(limitedTurnId).status !== "failed") return;
+  if (!dependencies.store.limitResets.usageLimited(limitedTurnId)) return;
+  dependencies.store.updateConversation(conversationId, { snoozedUntil: null });
 }
 
 export function resolveTurnRequest(
@@ -435,6 +451,7 @@ export function resolveTurnRequest(
   return {
     input,
     importNote,
+    handoffFromTurnId: providerHandoff ? latestTurn.id : null,
     adopt: (queued) => {
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();

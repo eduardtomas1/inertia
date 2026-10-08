@@ -39,6 +39,18 @@ describe("Codex native goal notifications", () => {
     })).toBe("thread-1");
   });
 
+  it("counts the objective limit in characters, as Codex does", () => {
+    const objective = `${"a".repeat(3_990)}${"\u{1F600}".repeat(10)}`;
+    expect(parseCodexGoalUpdatedNotification({
+      threadId: "thread-1",
+      goal: { ...goal, objective },
+    })?.goal.objective).toBe(objective);
+    expect(parseCodexGoalUpdatedNotification({
+      threadId: "thread-1",
+      goal: { ...goal, objective: "a".repeat(4_001) },
+    })).toBeNull();
+  });
+
   it("rejects malformed or internally mismatched goal payloads", () => {
     expect(parseCodexGoalUpdatedNotification({
       threadId: "thread-1",

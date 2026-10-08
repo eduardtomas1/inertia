@@ -39,6 +39,7 @@ import {
   readIndexEntry,
   restoreIndexEntry,
   alignedLineEndings,
+  gitNormalizesLineEndings,
   textBuffer,
   updateIndexEntry,
   writeAtomic,
@@ -381,13 +382,16 @@ async function buildReversalState(
     MAX_DIFF_BYTES,
   );
 
-  const [index, stagedPatch, headContent] = await Promise.all([
+  const [index, stagedPatch, headContent, normalizesLineEndings] = await Promise.all([
     readIndexEntry(root, file.path),
     completeLayerPatch(root, "index", file.path, selection.ignoreWhitespace),
     headFileContent(root, file.path),
+    gitNormalizesLineEndings(root, file.path),
   ]);
   const worktreeContent = worktree.content;
-  const headWorktreeContent = alignedLineEndings(headContent, worktreeContent);
+  const headWorktreeContent = normalizesLineEndings
+    ? alignedLineEndings(headContent, worktreeContent)
+    : headContent;
   textBuffer(worktreeContent);
   textBuffer(index.content);
   const stagedFile = parseUnifiedDiff(stagedPatch).files.find((candidate) => candidate.path === file.path);

@@ -213,6 +213,8 @@ describe("hostToolActivityTitle", () => {
         .toBe("Rendered a page");
       expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "running" })))
         .toBe("Rendering a page");
+      expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "failed" })))
+        .toBe("Could not render a page");
     }
   });
 

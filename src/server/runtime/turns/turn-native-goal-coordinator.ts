@@ -144,6 +144,7 @@ export class TurnNativeGoalCoordinator {
       && (goalStart.objective === undefined
         || event.goal.objective === goalStart.objective)
       && (goalStart.tokenBudget === undefined
+        || goalStart.tokenBudget === null
         || event.goal.tokenBudget === goalStart.tokenBudget)
     ) {
       goalStart.latestGoal = event.goal;

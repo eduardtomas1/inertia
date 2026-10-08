@@ -381,6 +381,37 @@ afterEach(async () => {
 });
 
 describe("app update startup coordinator", () => {
+  it.skipIf(process.platform === "win32")("starts from an AppImage this user cannot replace instead of failing recovery", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-update-startup-readonly-"));
+    roots.push(root);
+    const installDirectory = join(root, "opt");
+    const dataDirectory = join(root, "data");
+    const profileDirectory = join(root, "profile");
+    await Promise.all([
+      mkdir(installDirectory),
+      mkdir(dataDirectory, { mode: 0o700 }),
+      mkdir(profileDirectory, { mode: 0o700 }),
+    ]);
+    const activePath = join(installDirectory, "Inertia-1.2.3.AppImage");
+    await writeFile(activePath, "installed", { mode: 0o755 });
+    await chmod(installDirectory, 0o555);
+    const order: string[] = [];
+    const { application } = applicationFixture(true, order);
+    const bootstrap = vi.fn(async () => undefined);
+    const options = linuxStartupOptions(
+      { activePath, dataDirectory, profileDirectory } as LinuxFixture,
+      application,
+      { bootstrap },
+    );
+    try {
+      await startApplicationWithUpdateHandoff(options);
+      expect(bootstrap).toHaveBeenCalledOnce();
+      expect(options.environment.APPIMAGE).toBe(activePath);
+    } finally {
+      await chmod(installDirectory, 0o755);
+    }
+  });
+
   it("awaits ordinary Linux contention reporting and leaves update state with the owner", async () => {
     const fixture = await windowsFixture();
     const order: string[] = [];

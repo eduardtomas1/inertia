@@ -140,6 +140,20 @@ function identityChangeKind(
   return "none";
 }
 
+export function continuationSelectionMoved(
+  previous: ContinuationIdentity | null,
+  previousModelId: string,
+  next: ContinuationIdentity,
+  nextModelId: string,
+): boolean {
+  if (!previous) return false;
+  const changeKind = identityChangeKind(previous, next);
+  return changeKind === "harness"
+    || changeKind === "backend-profile"
+    || previousModelId !== nextModelId
+    || (previous.performanceModeIdentity ?? null) !== (next.performanceModeIdentity ?? null);
+}
+
 function freshSessionReason(
   changeKind: Exclude<ContinuationChangeKind, "none">,
   previousIdentity?: ContinuationIdentity,

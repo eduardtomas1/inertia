@@ -468,6 +468,41 @@ describe("visual replies in the response timeline", () => {
     expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com/first");
   });
 
+  it("mounts a fresh frame when the page navigates its own frame, so the new bootstrap's token counts", () => {
+    userActivation(true);
+    render(<ResponseTimeline {...timelineProps([renderMessage()])} />);
+    const frame = inlineFrame();
+    const frameWindow = attachFrameWindow(frame);
+    act(() => frame.focus());
+    act(() => {
+      frame.dispatchEvent(new Event("load"));
+    });
+    announce(frameWindow);
+    expect(postedThemes(frameWindow)).toHaveLength(1);
+
+    act(() => {
+      frame.dispatchEvent(new Event("load"));
+    });
+    const replaced = inlineFrame();
+    expect(replaced).not.toBe(frame);
+    expect(frame).not.toBeInTheDocument();
+    const replacedWindow = attachFrameWindow(replaced);
+    act(() => replaced.focus());
+    act(() => {
+      replaced.dispatchEvent(new Event("load"));
+    });
+    expect(postedThemes(replacedWindow)).toHaveLength(1);
+
+    const replacement = "b".repeat(32);
+    requestLink(frameWindow, "https://example.com/old-frame");
+    requestLink(replacedWindow, "https://example.com/before-hello", replacement);
+    announce(replacedWindow, replacement);
+    requestLink(replacedWindow, "https://example.com/old-token");
+    expect(openExternal).not.toHaveBeenCalled();
+    requestLink(replacedWindow, "https://example.com/new-token", replacement);
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com/new-token");
+  });
+
   it("ignores link requests while the user is interacting with the app outside the frame", () => {
     userActivation(true);
     render(<ResponseTimeline {...timelineProps([renderMessage()])} />);

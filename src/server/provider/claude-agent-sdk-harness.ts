@@ -59,7 +59,12 @@ import {
 } from "./claude-skill-operation";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
-import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeSessionUnavailable, claudeStartupFailure } from "./claude-startup-failure";
+import {
+  CLAUDE_STARTUP_FAILURE_RESULTS,
+  CLAUDE_TRANSCRIPT_FLUSH,
+  claudeSessionUnavailable,
+  claudeStartupFailure,
+} from "./claude-startup-failure";
 import { claudeRouteFailureDetail, claudeRouteFailureMessage } from "./claude-custom-backend-failure";
 import {
   ClaudeUsageLedger, readClaudeContextUsage,
@@ -489,7 +494,8 @@ function startClaudeRun(
         if (message.type === "system" && message.subtype === "init"
           && initAttestsRequestedSession) {
           if (requestedFastModeState === "on"
-            && record.fast_mode_state !== requestedFastModeState) {
+            && record.fast_mode_state !== requestedFastModeState
+            && !(fastModeVerified && record.fast_mode_state === "cooldown")) {
             throw new Error(claudeFastModeFailure(record));
           }
           if (requestedFastModeState === "off"
@@ -1090,7 +1096,12 @@ export function claudeSupportsThinkingDisplay(
 function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
 ): NodeJS.ProcessEnv {
-  return { ...CLAUDE_SUBAGENT_LIMITS, ...CLAUDE_STARTUP_FAILURE_RESULTS, ...(environment ?? process.env) };
+  return {
+    ...CLAUDE_SUBAGENT_LIMITS,
+    ...CLAUDE_STARTUP_FAILURE_RESULTS,
+    ...CLAUDE_TRANSCRIPT_FLUSH,
+    ...(environment ?? process.env),
+  };
 }
 
 function stringValue(value: unknown): string | undefined {

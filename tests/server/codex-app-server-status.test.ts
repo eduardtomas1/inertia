@@ -44,8 +44,8 @@ describe("Codex App Server generated lifecycle surfaces", () => {
     expect(codexHookActivityPhase("hook/completed", "future-status")).toBe("failed");
   });
 
-  it("keeps an explicit disposition for every reviewed 0.160.0 notification", () => {
-    expect(Object.keys(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS)).toHaveLength(85);
+  it("keeps an explicit disposition for every reviewed 0.161.0 notification", () => {
+    expect(Object.keys(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS)).toHaveLength(86);
     expect(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS).toMatchObject({
       "account/gatewayOAuth/changed": "ignored",
       "autoApprovalReview/strictReviewRequired": "projected",

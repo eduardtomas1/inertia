@@ -19,9 +19,9 @@ const token=process.env.INERTIA_HOST_MCP_TOKEN;
 delete process.env.INERTIA_HOST_MCP_URL;
 delete process.env.INERTIA_HOST_MCP_TOKEN;
 if(!url||!token)process.exit(1);
-const MAX_LINE=${MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES},MAX_QUEUE=8,MAX_RESPONSE=${MAX_STDIO_PROXY_RESPONSE_BYTES},PREFIX=4096;
+const MAX_LINE=${MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES},MAX_QUEUE=8,MAX_RESPONSE=${MAX_STDIO_PROXY_RESPONSE_BYTES},PREFIX=4096,SUFFIX=256;
 const LIMIT=${JSON.stringify(PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE)};
-let pending=Buffer.alloc(0),dropped=null,queue=[],running=false;
+let pending=Buffer.alloc(0),dropped=null,tail=null,queue=[],running=false;
 async function pump(){
  if(running)return;running=true;
  while(queue.length){
@@ -44,28 +44,31 @@ function enqueue(item){
  if(queue.length>=MAX_QUEUE){process.exit(1);return false;}
  queue.push(item);return true;
 }
-function oversized(prefix){
- const id=/^\s*\{(?:\s*"(?:jsonrpc|method)"\s*:\s*"[^"\\]*"\s*,)*\s*"id"\s*:\s*(-?\d+|"[^"\\]*")/.exec(prefix.toString("utf8"));
+function oversized(prefix,suffix){
+ const id=/^\s*\{(?:\s*"(?:jsonrpc|method)"\s*:\s*"[^"\\]*"\s*,)*\s*"id"\s*:\s*(-?\d+|"[^"\\]*")/.exec(prefix.toString("utf8"))
+  ||/,\s*"id"\s*:\s*(-?\d+|"[^"\\]*")\s*\}\s*$/.exec(suffix.toString("utf8"));
  return !id||enqueue({id:JSON.parse(id[1])});
 }
+function lastBytes(buffer){return Buffer.from(buffer.subarray(Math.max(0,buffer.length-SUFFIX)));}
 process.stdin.on("data",chunk=>{
  let data=Buffer.from(chunk);
  if(dropped){
   const end=data.indexOf(10);
+  tail=lastBytes(Buffer.concat([tail,end<0?data:data.subarray(0,end)]));
   if(end<0)return;
-  const prefix=dropped;dropped=null;data=data.subarray(end+1);
-  if(!oversized(prefix))return;
+  const prefix=dropped,suffix=tail;dropped=null;tail=null;data=data.subarray(end+1);
+  if(!oversized(prefix,suffix))return;
  }
  pending=Buffer.concat([pending,data]);
  let newline;
  while((newline=pending.indexOf(10))>=0){
   const raw=pending.subarray(0,newline);pending=pending.subarray(newline+1);
-  if(raw.length>MAX_LINE){if(!oversized(raw.subarray(0,PREFIX)))return;continue;}
+  if(raw.length>MAX_LINE){if(!oversized(raw.subarray(0,PREFIX),lastBytes(raw)))return;continue;}
   const line=raw.toString("utf8").trim();
   if(!line)continue;
   if(!enqueue(line))return;
  }
- if(pending.length>MAX_LINE){dropped=Buffer.from(pending.subarray(0,PREFIX));pending=Buffer.alloc(0);}
+ if(pending.length>MAX_LINE){dropped=Buffer.from(pending.subarray(0,PREFIX));tail=lastBytes(pending);pending=Buffer.alloc(0);}
  void pump();
 });
 process.stdin.on("end",()=>{if(pending.length>0||dropped)process.exitCode=1;});

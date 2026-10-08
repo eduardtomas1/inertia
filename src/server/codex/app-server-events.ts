@@ -150,6 +150,7 @@ export class CodexAppServerEvents {
   private readonly liveSubagentIds = new Set<string>();
   private subagentSequence = 0;
   private readonly subagentContinuation: CodexSubagentContinuationGate;
+  private subagentContinuationExitCode: number | null = null;
   private goalContinuationTimer: NodeJS.Timeout | undefined;
   private readonly goalContinuationGraceMs: number;
   private pendingGoalMutationCompletion: PendingParentCompletion | null = null;
@@ -167,7 +168,7 @@ export class CodexAppServerEvents {
   constructor(private readonly host: CodexAppServerEventHost) {
     this.subagentContinuation = new CodexSubagentContinuationGate(
       codexSubagentDrainTimeoutMs(host.options.subagentDrainTimeoutMs),
-      () => this.failSubagentContinuation(),
+      () => this.completeSubagentContinuation(),
     );
     this.goalContinuationGraceMs = codexGoalContinuationGraceMs(
       host.options.goalContinuationGraceMs,
@@ -1117,6 +1118,7 @@ export class CodexAppServerEvents {
       return;
     }
     if (!this.subagentContinuation.begin()) return;
+    this.subagentContinuationExitCode = exitCode;
     this.host.setActiveTurnId(undefined);
     this.host.setPhase("awaiting-subagent-continuation");
     this.host.options.onStatus?.(
@@ -1125,17 +1127,13 @@ export class CodexAppServerEvents {
     );
   }
 
-  private failSubagentContinuation(): void {
-    const message =
-      "Codex ended the parent turn before delegated work finished and did not resume after that work settled.";
-    this.host.setLastError(message);
-    this.host.rememberFailure(
-      "codex-error",
-      message,
-      "No fresh parent turn started after the exact delegated-agent lifecycles became terminal.",
+  private completeSubagentContinuation(): void {
+    this.emitActivity(
+      "system",
+      "info",
+      "Delegated work finished after the parent turn ended; its results reach the agent with the next message.",
     );
-    this.emitActivity("system", "failed", message);
-    this.host.finish("failed", 1, null);
+    this.host.finish("completed", this.subagentContinuationExitCode, null);
   }
 
   private emitActivity(

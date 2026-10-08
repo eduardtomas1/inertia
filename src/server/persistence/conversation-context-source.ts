@@ -31,36 +31,44 @@ export interface ContinuationRouteFilter {
   handoff?: { before: string; providerId: ProviderId };
 }
 
+export function continuationRouteTurnSql(
+  turn: string,
+  route: ContinuationRouteFilter,
+): { sql: string; parameters: Array<string | null> } {
+  const handoff = route.handoff === undefined
+    ? ""
+    : ` OR (${turn}.requested_at <= ? AND ${turn}.provider_id <> ?)`;
+  return {
+    sql: `((${turn}.backend_profile_id = ?
+      AND (CASE WHEN json_valid(${turn}.continuation_identity_json)
+        THEN json_extract(${turn}.continuation_identity_json, '$.endpointIdentity')
+      END) IS ?)${handoff})`,
+    parameters: [
+      route.backendProfileId,
+      route.endpointIdentity,
+      ...(route.handoff === undefined ? [] : [route.handoff.before, route.handoff.providerId]),
+    ],
+  };
+}
+
 export function continuationRouteSql(route?: ContinuationRouteFilter): {
   sql: string;
   parameters: Array<string | null>;
 } {
   if (!route) return { sql: "", parameters: [] };
+  const turn = continuationRouteTurnSql("route_turn", route);
+  const unattributed = route.includeUnattributed ? "messages.turn_id IS NULL OR " : "";
   const handoff = route.handoff === undefined
     ? ""
-    : `
-      OR (messages.turn_id IS NULL AND messages.created_at <= ?)
-      OR EXISTS (
-        SELECT 1 FROM agent_turns AS handoff_turn
-        WHERE handoff_turn.id = messages.turn_id
-          AND handoff_turn.requested_at <= ?
-          AND handoff_turn.provider_id <> ?
-      )`;
+    : "(messages.turn_id IS NULL AND messages.created_at <= ?) OR ";
   return {
-    sql: `AND (${route.includeUnattributed ? "messages.turn_id IS NULL OR " : ""}EXISTS (
+    sql: `AND (${unattributed}${handoff}EXISTS (
       SELECT 1 FROM agent_turns AS route_turn
-      WHERE route_turn.id = messages.turn_id
-        AND route_turn.backend_profile_id = ?
-        AND (CASE WHEN json_valid(route_turn.continuation_identity_json)
-          THEN json_extract(route_turn.continuation_identity_json, '$.endpointIdentity')
-        END) IS ?
-    )${handoff})`,
+      WHERE route_turn.id = messages.turn_id AND ${turn.sql}
+    ))`,
     parameters: [
-      route.backendProfileId,
-      route.endpointIdentity,
-      ...(route.handoff === undefined
-        ? []
-        : [route.handoff.before, route.handoff.before, route.handoff.providerId]),
+      ...(route.handoff === undefined ? [] : [route.handoff.before]),
+      ...turn.parameters,
     ],
   };
 }

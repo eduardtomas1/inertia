@@ -807,6 +807,7 @@ export function createOwnedPidProcessTreeTermination(
         rootProcessGroup: true,
         deadlineAt,
         pause: dependencies.pauseSync,
+        platform,
       });
       enumeration = posixTreeEnumeration(killed, false);
       observation = killed;
@@ -1030,6 +1031,7 @@ export async function terminateProcessTreeAndWait(
         rootProcessGroup: true,
         deadlineAt,
         pause: dependencies.pauseSync,
+        platform,
       })
       : {
         descendants: [],

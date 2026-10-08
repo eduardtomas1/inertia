@@ -223,15 +223,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        surfaceBackground: (() => {
-          const surface = getComputedStyle(element.querySelector(".composer-surface")!);
-          const probe = document.createElement("span");
-          probe.style.backgroundColor = "var(--surface-raised)";
-          element.append(probe);
-          const raised = getComputedStyle(probe).backgroundColor;
-          probe.remove();
-          return { image: surface.backgroundImage, color: surface.backgroundColor, raised };
-        })(),
+        surfaceImage: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
+        surfaceColor: getComputedStyle(element.querySelector(".composer-surface")!).backgroundColor,
+        raisedSurface: getComputedStyle(element).getPropertyValue("--surface-raised").trim(),
         inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
@@ -279,8 +273,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
-    expect(wideGeometry.surfaceBackground.image).toBe("none");
-    expect(wideGeometry.surfaceBackground.color).toBe(wideGeometry.surfaceBackground.raised);
+    const raisedChannels = [1, 3, 5].map((offset) => Number.parseInt(wideGeometry.raisedSurface.slice(offset, offset + 2), 16));
+    expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", `rgb(${raisedChannels.join(", ")})`]);
     expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);

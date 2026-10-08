@@ -8635,6 +8635,8 @@ button.turn-agents-line:focus-visible {
 .composer-context-preview li[data-role="gap"] { flex-direction: row; align-items: center; gap: 6px; }
 .composer-context-preview li[data-role="gap"]::before, .composer-context-preview li[data-role="gap"]::after { flex: 1 1 auto; height: 1px; background: var(--border); content: ""; }
 .composer-context-preview li[data-role="gap"] small { flex: 0 0 auto; }
+.composer-context-preview ul { display: flex; flex-direction: column; margin: 0; padding: 0; gap: 2px; list-style: none; }
+.composer-context-preview ul li { overflow-wrap: anywhere; color: var(--text-muted); font-family: var(--font-mono); font-size: 8px; }
 .composer-context-request label { display: flex; flex-direction: column; gap: 3px; }
 .composer-context-request label:has(input[type="checkbox"]) { flex-direction: row; align-items: flex-start; gap: 6px; color: var(--text); font-size: 8.5px; line-height: 1.45; }
 .composer-context-request input[type="checkbox"] { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--accent); }

@@ -8,6 +8,7 @@ import {
   isOwnConversationContext,
   type ConversationContextExcerpt,
   type ConversationContextOmissions,
+  type ConversationContextSupplement,
 } from "@shared/conversation-context";
 import type {
   ConversationContextCommandRunner,
@@ -46,6 +47,7 @@ interface ContextPreviewContent {
   detail: string;
   excerpts: readonly ConversationContextExcerpt[];
   omissions?: ConversationContextOmissions;
+  supplement?: ConversationContextSupplement;
 }
 
 function messageCount(count: number): string {
@@ -67,6 +69,7 @@ function packetPreview(
       packet.droppedMessageCount > 0 ? ` · ${packet.droppedMessageCount} omitted` : ""}`,
     excerpts: packet.excerpts,
     omissions: packet.omissions,
+    supplement: packet.supplement,
   };
 }
 
@@ -128,6 +131,16 @@ function ContextPreview({
     onDismiss();
     if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
   };
+  const supplement = content?.supplement;
+  const supplementLines = supplement
+    ? [
+        ...(supplement.files ?? []),
+        ...(supplement.omittedFiles
+          ? [`${supplement.omittedFiles} more ${supplement.omittedFiles === 1 ? "file" : "files"}`]
+          : []),
+        ...(supplement.commands ?? []),
+      ]
+    : [];
   const gapAt = (index: number): React.JSX.Element | null => (
     content && (content.omissions?.earlierMessages ?? 0) > 0 && content.omissions!.gapIndex === index
       ? (
@@ -181,6 +194,11 @@ function ContextPreview({
               ))}
               {gapAt(content.excerpts.length)}
             </ol>
+            {supplementLines.length > 0 && (
+              <ul>
+                {supplementLines.map((line, index) => <li key={index}>{line}</li>)}
+              </ul>
+            )}
           </>
         )
         : error

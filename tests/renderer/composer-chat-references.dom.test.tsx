@@ -628,6 +628,41 @@ describe("composer chat references", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("unavailable");
   });
 
+  it("lists the changed files and last commands sent with the messages, after them", async () => {
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "preview",
+      result: {
+        kind: "conversation.context.packet",
+        packet: {
+          ...packetSummary({ messageCount: 1 }),
+          excerpts: [{ sourceMessageId: "latest", role: "assistant", content: "Export fixed.", truncated: false }],
+          supplement: {
+            files: ["M src/export.ts +14 -6", "A src/bom.ts +22 -0"],
+            omittedFiles: 3,
+            commands: ["npm run build (ok)", "npm test (exit 1)"],
+          },
+        },
+      },
+    } as unknown as ServerEvent));
+    render(<ConversationContextPreviewCard
+      packetId={packetSummary().id}
+      targetConversationId={packetSummary().targetConversationId}
+      onCommand={onCommand}
+      onDismiss={() => undefined}
+    />);
+    const items = await screen.findAllByRole("listitem");
+    expect(items.map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Export fixed."),
+      "M src/export.ts +14 -6",
+      "A src/bom.ts +22 -0",
+      "3 more files",
+      "npm run build (ok)",
+      "npm test (exit 1)",
+    ]);
+    expect(screen.getAllByRole("list")).toHaveLength(2);
+  });
+
   it("marks omitted later messages after the only retained opening request", async () => {
     const onCommand = vi.fn(async () => ({
       type: "request.result",

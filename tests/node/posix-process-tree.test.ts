@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { forceKillPosixProcessTreeWithStatus } from "../../src/node/posix-process-tree";
+import { forceKillPosixProcessTreeWithStatus, procProcessTable } from "../../src/node/posix-process-tree";
 
 function error(code: string): NodeJS.ErrnoException {
   const failure = new Error(code) as NodeJS.ErrnoException;
@@ -261,5 +264,60 @@ describe("POSIX process tree root observation", () => {
     });
     expect(result.rootState).toBe("absent");
     expect(result.scanStabilized).toBe(true);
+  });
+});
+
+describe("POSIX process table without ps", () => {
+  it("reads the Linux process table from procfs when ps is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-proc-"));
+    try {
+      const stats: Array<[number, string]> = [
+        [1, "1 (systemd) S 0 1 1 0 -1 4194560"],
+        [4242, "4242 (node) S 1 4242 4242 0 -1 4194560"],
+        [4300, "4300 (sh (dash)) T 4242 4242 4242 0 -1 4194304"],
+        [4301, "4301 (sleep) R 4300 4242 4242 0 -1 4194304"],
+      ];
+      for (const [pid, stat] of stats) {
+        mkdirSync(join(root, String(pid)));
+        writeFileSync(join(root, String(pid), "stat"), `${stat}\n`);
+      }
+      writeFileSync(join(root, "uptime"), "12.34 45.67\n");
+      mkdirSync(join(root, "self"));
+      expect(procProcessTable(root)!.trim().split("\n").sort()).toEqual([
+        "1 0 S",
+        "4242 1 S",
+        "4300 4242 T",
+        "4301 4300 R",
+      ]);
+
+      const kill = vi.fn();
+      const spawnProcessSync = vi.fn(() => ({ status: null, stdout: "", error: error("ENOENT") }));
+      const result = forceKillPosixProcessTreeWithStatus(4242, {
+        kill: kill as never,
+        spawnProcessSync: spawnProcessSync as never,
+        platform: "linux",
+        procRoot: root,
+        pause: () => undefined,
+      });
+      expect(spawnProcessSync).toHaveBeenCalled();
+      expect(result.descendants).toEqual([4301, 4300]);
+      expect(result.rootRunningObserved).toBe(true);
+      expect(kill).toHaveBeenCalledWith(4301, "SIGKILL");
+      expect(kill).toHaveBeenCalledWith(4300, "SIGKILL");
+      expect(kill).toHaveBeenCalledWith(4242, "SIGKILL");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stays unconfirmed off Linux when ps is missing", () => {
+    const result = forceKillPosixProcessTreeWithStatus(4242, {
+      kill: vi.fn() as never,
+      spawnProcessSync: vi.fn(() => ({ status: null, stdout: "", error: error("ENOENT") })) as never,
+      platform: "darwin",
+      pause: () => undefined,
+    });
+    expect(result.snapshotConfirmed).toBe(false);
+    expect(result.descendants).toEqual([]);
   });
 });

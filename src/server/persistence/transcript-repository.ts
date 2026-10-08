@@ -65,7 +65,7 @@ export class TranscriptRepository {
       route,
     );
     if (route?.handoff === undefined || !history || history.blocks.length === 0) return history;
-    const files = providerHandoffFilesBlock(this.context.database, conversationId);
+    const files = providerHandoffFilesBlock(this.context.database, conversationId, route);
     if (!files) return history;
     const usedBytes = history.blocks.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0);
     return usedBytes + providerHandoffBlockBytes(files) <= capacityBytes

@@ -4,6 +4,10 @@ export const CLAUDE_STARTUP_FAILURE_RESULTS = {
   CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1",
 } as const;
 
+export const CLAUDE_TRANSCRIPT_FLUSH = {
+  CLAUDE_CODE_EAGER_FLUSH: "1",
+} as const;
+
 const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
   org_pin_api_key_conflict: "Claude Code's API key conflicts with your organization's sign-in policy. Remove the key or sign in with your organization account.",
   provider_not_allowed: "Your organization's Claude Code settings don't allow this chat's API provider. Choose an allowed backend or ask your administrator.",
@@ -22,6 +26,8 @@ const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
   worktree_unverified: "Claude Code couldn't verify the worktree for this chat. Start a new chat to continue.",
   cli_version_too_old: "This Claude Code version is too old. Update Claude Code, then try again.",
   bypass_root: "Claude Code won't run with full access as the root user. Choose another access mode.",
+  org_config_required_unavailable: "Claude Code couldn't load the configuration your organization requires. Check your connection and try again.",
+  org_config_refused: "Your organization's Claude Code configuration doesn't allow this run. Ask your administrator.",
 };
 
 export function claudeSessionUnavailable(message: SDKMessage): boolean {

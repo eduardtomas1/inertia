@@ -13,6 +13,7 @@ import {
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
+  claudeBackgroundTasks,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -33,7 +34,7 @@ describe("Claude provider-native Fast mode", { concurrent: false }, () => {
   });
 
   function managerFor(
-    fastModeState: "on" | "off",
+    fastModeState: "on" | "off" | "cooldown",
     capture: (options: ClaudeOptions | undefined) => void = () => undefined,
     disabledReason: string | null = null,
     sessionId?: string,
@@ -93,6 +94,54 @@ describe("Claude provider-native Fast mode", { concurrent: false }, () => {
     expect(capturedOptions?.settings).toMatchObject({
       fastMode: true,
       fastModePerSessionOptIn: true,
+    });
+  });
+
+  it("keeps a verified Fast session going when a later init reports the rate-limit cooldown", async () => {
+    const root = portableFixtureRoot("Claude SDK Fast cooldown");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      terminalSubagentDrainTimeoutMs: 50,
+      createQuery: () => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+        yield claudeSystem("init", { fast_mode_state: "on" });
+        yield claudeBackgroundTasks(["bash-1"], "local_bash");
+        yield claudeSuccessResult("Started the build in the background", "completed");
+        yield claudeBackgroundTasks([]);
+        yield claudeSystem("init", { fast_mode_state: "cooldown" });
+        yield claudeSuccessResult("The build passed", "completed");
+      })()),
+    });
+    const manager = ProviderManager.createForTests(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    managers.push(manager);
+    const base = input(root);
+    const selection = withModelSelectionFastMode(base.modelSelection, "fast");
+
+    await expect(manager.run({
+      ...base,
+      supportedFastMode: "fast",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(selection),
+    })).resolves.toMatchObject({ status: "completed", text: expect.stringContaining("The build passed") });
+  });
+
+  it("still fails closed when the first init already reports the cooldown", async () => {
+    const root = portableFixtureRoot("Claude SDK Fast cooldown first");
+    roots.push(root);
+    const manager = managerFor("cooldown");
+    const base = input(root);
+    const selection = withModelSelectionFastMode(base.modelSelection, "fast");
+
+    await expect(manager.run({
+      ...base,
+      supportedFastMode: "fast",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(selection),
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("did not activate Fast mode"),
     });
   });
 

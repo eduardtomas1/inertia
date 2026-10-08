@@ -364,9 +364,10 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
 
     for (const [how, path] of [["refresh", "refreshed"], ["location", "navigated"]] as const) {
       const target = `http://127.0.0.1:${navigation.port}/${path}?data=secret`;
-      if (frame.url() !== frameUrl) await frame.goto(frameUrl);
+      const current = await inlineFrame(page, selector);
+      expect(current.url()).toBe(frameUrl);
       await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
-      await frame.evaluate(([kind, url]) => {
+      await current.evaluate(([kind, url]) => {
         if (kind === "location") {
           window.location.href = url;
           return;
@@ -376,7 +377,16 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
         meta.content = `0;url=${url}`;
         document.head.append(meta);
       }, [how, target] as const);
-      await expect.poll(() => frame.url()).toBe("chrome-error://chromewebdata/");
+      // The blocked navigation lands on an error page, so a fresh frame takes its place.
+      await expect.poll(async () => {
+        try {
+          return (await inlineFrame(page, selector)) !== current;
+        } catch {
+          return false;
+        }
+      }).toBe(true);
+      await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
+      expect((await inlineFrame(page, selector)).url()).toBe(frameUrl);
     }
     expect(navigation.connections()).toBe(0);
     const blockedFraming = `Framing 'http://127.0.0.1:${navigation.port}/' violates the following Content Security Policy directive`;

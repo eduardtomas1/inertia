@@ -255,8 +255,8 @@ export function activitySummaryParts(
 // The few tools a reader sees in the work log get plain words.
 const HOST_TOOL_TITLE =
   /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
-const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string]>> = {
-  inertia_render_html: ["Rendering a page", "Rendered a page"],
+const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
+  inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
 };
 
 /** A readable title for a known Inertia host tool call, or null to keep the provider's title. */
@@ -267,7 +267,7 @@ export function hostToolActivityTitle(
   const name = HOST_TOOL_TITLE.exec(activity.title.trim())?.[1];
   const labels = name === undefined ? undefined : HOST_TOOL_LABELS[name];
   if (!labels) return null;
-  return activity.status === "running" ? labels[0] : labels[1];
+  return activity.status === "running" ? labels[0] : activity.status === "failed" ? labels[2] : labels[1];
 }
 
 export function activitySummaryLabel(parts: readonly ActivitySummaryPart[]): string {

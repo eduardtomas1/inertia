@@ -883,10 +883,11 @@ function runPrivilegedCleanup(): Promise<boolean> {
       onDurableAttachmentsClosed: () => { if (conversationAttachments === retainedAttachments) conversationAttachments = null; },
     });
   }
-  const owners = privilegedCleanupOwners; const cleanup = cleanupWithSnapshots(snapshotService, async () => { try {
+  const owners = privilegedCleanupOwners; const cleanup = cleanupWithSnapshots(snapshotService, async () => {
     await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
-    previewBroker.close(); runtimeDiagnostics?.record("app.stop"); return await owners.cleanup();
-  } finally { await disposeWindowsRuntimeJobExecutableLock(); } });
+    previewBroker.close(); runtimeDiagnostics?.record("app.stop"); const confirmed = await owners.cleanup();
+    if (confirmed) await disposeWindowsRuntimeJobExecutableLock();
+    return confirmed; });
   const tracked = cleanup.then((confirmed) => { if (!confirmed && privilegedCleanup === tracked) privilegedCleanup = null; return confirmed;
   }, (error: unknown) => { if (privilegedCleanup === tracked) privilegedCleanup = null;
     throw error; });

@@ -145,12 +145,39 @@ async function fixture() {
   const filesBlock = () => {
     const database = new Database(databasePath, { readonly: true });
     try {
-      return providerHandoffFilesBlock(database, conversation.id);
+      return providerHandoffFilesBlock(database, conversation.id, {
+        backendProfileId: providerNativeModelSelection({ providerId: "codex" }).backendProfileId,
+        endpointIdentity: null,
+        includeUnattributed: true,
+        handoff: { before: "2999-01-01T00:00:00.000Z", providerId: "codex" },
+      });
     } finally {
       database.close();
     }
   };
-  return { store, conversation, tick, resolve, begin, complete, fail, switchProvider, seedClaudeHistory, filesBlock };
+  const update = (payload: Record<string, unknown>) => createConversationCommandHandler({
+    store,
+    providers: { resolveModelRoute: resolveNativeModelRoute },
+    backendProfileController: {
+      isExternalSelection: () => false,
+      validateSelection: (selection: unknown) => selection,
+      supportsNativeFastModeControl: () => false,
+    },
+  } as unknown as ConversationCommandDependencies)({} as never, {
+    type: "conversation.update",
+    requestId: "11111111-1111-4111-8111-111111111111",
+    payload: { conversationId: conversation.id, ...payload },
+  } as never);
+  const clearSession = () => {
+    const database = new Database(databasePath);
+    try {
+      database.exec(`UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE id = '${conversation.id}'`);
+    } finally {
+      database.close();
+    }
+    expect(store.conversation(conversation.id).providerSessionId).toBeNull();
+  };
+  return { store, conversation, tick, resolve, begin, complete, fail, switchProvider, update, clearSession, seedClaudeHistory, filesBlock };
 }
 
 describe("provider handoff continuation", () => {
@@ -209,7 +236,9 @@ describe("provider handoff continuation", () => {
     const handoff = f.begin("Continue on Codex.");
     f.complete(handoff.queued.turn.id, "CODEX_DEFAULT_REPLY", "codex-session");
     const other = f.begin("Continue on another Codex account.", "account-b");
-    f.complete(other.queued.turn.id, "ACCOUNT_B_SECRET", "codex-session-b");
+    f.complete(other.queued.turn.id, "ACCOUNT_B_SECRET", "codex-session-b", [
+      changedFile("src/account-b-secret.ts", "added", 9, 0),
+    ]);
 
     const back = f.begin("Back on the default account.");
     expect(back.queued.turn).toMatchObject({
@@ -220,6 +249,8 @@ describe("provider handoff continuation", () => {
     expect(back.providerInput.prompt).toContain("CODEX_DEFAULT_REPLY");
     expect(back.providerInput.prompt).not.toContain("ACCOUNT_B_SECRET");
     expect(back.providerInput.prompt).not.toContain("Continue on another Codex account.");
+    expect(back.providerInput.prompt).toContain("src/legacy-export.ts");
+    expect(back.providerInput.prompt).not.toContain("src/account-b-secret.ts");
   });
 
   it("keeps the endpoint rule for the target provider's own history across a handoff hop", async () => {
@@ -240,7 +271,10 @@ describe("provider handoff continuation", () => {
     expect(hop.providerInput.prompt).toContain("Continue on Codex.");
     expect(hop.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
     expect(hop.providerInput.prompt).not.toContain("Export the customer list as UTF-8.");
-    f.complete(hop.queued.turn.id, "ENDPOINT_X_REPLY", "claude-x-session");
+    expect(hop.providerInput.prompt).not.toContain("src/legacy-export.ts");
+    f.complete(hop.queued.turn.id, "ENDPOINT_X_REPLY", "claude-x-session", [
+      changedFile("src/endpoint-x.ts", "added", 3, 0),
+    ]);
     f.store.updateConversation(f.conversation.id, { providerSessionId: null, continuationIdentity: null });
 
     const fresh = f.begin("Pick it back up on the other endpoint.", "endpoint-x");
@@ -248,6 +282,8 @@ describe("provider handoff continuation", () => {
     expect(fresh.providerInput.prompt).toContain("CODEX_REPLY_SENTINEL: header added.");
     expect(fresh.providerInput.prompt).toContain("ENDPOINT_X_REPLY");
     expect(fresh.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
+    expect(fresh.providerInput.prompt).toContain("src/endpoint-x.ts");
+    expect(fresh.providerInput.prompt).not.toContain("src/legacy-export.ts");
   });
 
   it("does not treat a later same-provider harness change as a handoff", async () => {
@@ -365,6 +401,29 @@ describe("provider handoff continuation", () => {
       sessionRecovery: null,
     });
     expect(next.providerInput.prompt).not.toContain("CLAUDE_REPLY_SENTINEL");
+  });
+
+  it("leaves a session that a migration cleared alone when the same model is picked again", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    f.clearSession();
+    await f.update({ modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "claude" })) });
+    expect(f.store.conversation(f.conversation.id)).toMatchObject({ providerSessionId: null, continuationIdentity: null });
+    const next = f.begin("Carry on.");
+    expect(next.providerInput.sessionId).toBeUndefined();
+  });
+
+  it("leaves a cleared Codex thread alone when only the reasoning effort changes", async () => {
+    const f = await fixture();
+    await f.switchProvider("codex");
+    const first = f.begin("Start on Codex.");
+    f.complete(first.queued.turn.id, "Codex reply.", "codex-old-thread");
+    f.clearSession();
+    await f.update({ reasoningEffort: "high" });
+    expect(f.store.conversation(f.conversation.id)).toMatchObject({ providerSessionId: null, continuationIdentity: null });
+    expect(f.store.conversation(f.conversation.id).modelSelection.reasoningEffort).toBe("high");
+    const next = f.begin("Carry on.");
+    expect(next.providerInput.sessionId).toBeUndefined();
   });
 
   it("does not resume a session the latest turn never finished", async () => {

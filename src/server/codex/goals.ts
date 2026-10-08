@@ -14,8 +14,9 @@ function exactBoundedText(
   if (
     typeof value !== "string"
     || value.length === 0
-    || value.length > maximum
+    || value.length > maximum * 2
     || value.includes("\0")
+    || [...value].length > maximum
   ) return null;
   return value;
 }

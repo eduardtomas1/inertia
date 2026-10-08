@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const MAX_FREEZE_PASSES = 8;
 const MAX_STOP_OBSERVATION_READS = 8;
@@ -13,6 +15,8 @@ export interface PosixProcessTreeDependencies {
   deadlineAt: number;
   now: () => number;
   pause: (ms: number) => void;
+  platform: NodeJS.Platform;
+  procRoot: string;
 }
 
 export type PosixRootStopResult = "sent" | "absent" | "denied" | "failed";
@@ -63,6 +67,31 @@ export function posixDescendantPids(
   return descendants;
 }
 
+export function procProcessTable(root: string): string | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return null;
+  }
+  const lines: string[] = [];
+  for (const entry of entries) {
+    if (!/^\d+$/u.test(entry)) continue;
+    let stat: string;
+    try {
+      stat = readFileSync(join(root, entry, "stat"), "utf8");
+    } catch {
+      continue;
+    }
+    const fields = stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/u);
+    const state = fields[0];
+    const parent = fields[1];
+    if (!state || !parent || !/^\d+$/u.test(parent)) continue;
+    lines.push(`${entry} ${parent} ${state}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function liveProcessState(rootPid: number, processTable: string): boolean {
   for (const line of processTable.split(/\r?\n/gu)) {
     const match = line.trim().match(/^(\d+)\s+\d+\s+(\S+)$/u);
@@ -110,6 +139,8 @@ export function forceKillPosixProcessTreeWithStatus(
   const deadlineAt = dependencies.deadlineAt ?? Number.POSITIVE_INFINITY;
   const now = dependencies.now ?? Date.now;
   const pause = dependencies.pause ?? pauseSynchronously;
+  const platform = dependencies.platform ?? process.platform;
+  const procRoot = dependencies.procRoot ?? "/proc";
 
   const sendStop = (target: number): void => {
     try {
@@ -167,8 +198,17 @@ export function forceKillPosixProcessTreeWithStatus(
       if (!table.error && table.status === 0 && typeof table.stdout === "string") {
         snapshotRead = true;
         processTable = table.stdout;
-        descendants = posixDescendantPids(rootPid, table.stdout);
+      } else if (
+        platform === "linux"
+        && (table.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT"
+      ) {
+        const fromProc = procProcessTable(procRoot);
+        if (fromProc !== null) {
+          snapshotRead = true;
+          processTable = fromProc;
+        }
       }
+      if (snapshotRead) descendants = posixDescendantPids(rootPid, processTable);
     } catch {
       // Callers treat a missing stabilized snapshot as unconfirmed cleanup.
     }

@@ -1,7 +1,7 @@
 /**
  * Holds a parent terminal candidate while exact delegated work is live.
- * Clearing the live set starts a bounded grace for a fresh parent turn; it
- * never promotes the stale candidate into a successful completion.
+ * Clearing the live set starts a bounded grace for a fresh parent turn; when
+ * none starts, the owner decides what the settled candidate means.
  */
 export class CodexSubagentContinuationGate {
   private pending = false;

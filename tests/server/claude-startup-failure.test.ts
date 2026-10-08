@@ -73,6 +73,7 @@ describe("Claude startup failures", () => {
     });
     expect(capturedOptions?.env).toMatchObject({
       CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1",
+      CLAUDE_CODE_EAGER_FLUSH: "1",
       HTTPS_PROXY: "invalid",
     });
   });
@@ -123,6 +124,18 @@ describe("Claude startup failures", () => {
       reason: "provider_not_allowed",
       message: "Your organization's Claude Code settings don't allow this chat's API provider. Choose an allowed backend or ask your administrator.",
     });
+    expect(claudeSessionUnavailable(result)).toBe(false);
+  });
+
+  it.each([
+    ["org_config_required_unavailable", "Claude Code couldn't load the configuration your organization requires. Check your connection and try again."],
+    ["org_config_refused", "Your organization's Claude Code configuration doesn't allow this run. Ask your administrator."],
+  ] as const)("explains the organization configuration gate %s", (reason, message) => {
+    const result = failedResult({
+      startup_failure_reason: reason,
+      errors: ["Organization configuration gate"],
+    }) as Extract<SDKMessage, { type: "result" }>;
+    expect(claudeStartupFailure(result)).toEqual({ reason, message });
     expect(claudeSessionUnavailable(result)).toBe(false);
   });
 

@@ -46,18 +46,26 @@ function packageMarker(appPath: string): unknown {
   }
 }
 
+export function appImageReplaceable(appImagePath: string): boolean {
+  try {
+    const actualPath = realpathSync(appImagePath);
+    accessSync(actualPath, constants.W_OK);
+    accessSync(dirname(actualPath), constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function linuxAppImageCapability(appImagePath: string | undefined): AppUpdateCapability {
   if (!appImagePath || !isAbsolute(appImagePath)) return manual("appimage-unavailable");
   try {
     const metadata = lstatSync(appImagePath);
     if (!metadata.isFile() || metadata.isSymbolicLink()) return manual("appimage-invalid");
-    const actualPath = realpathSync(appImagePath);
-    accessSync(actualPath, constants.W_OK);
-    accessSync(dirname(actualPath), constants.W_OK);
-    return { delivery: "in-app" };
   } catch {
     return manual("appimage-not-replaceable");
   }
+  return appImageReplaceable(appImagePath) ? { delivery: "in-app" } : manual("appimage-not-replaceable");
 }
 
 /** Fail closed unless the packaged artifact explicitly attests update support. */

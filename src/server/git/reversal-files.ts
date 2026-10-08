@@ -40,6 +40,23 @@ export function alignedLineEndings(original: Buffer, current: Buffer): Buffer {
   return Buffer.from(original.toString("latin1").replaceAll("\n", "\r\n"), "latin1");
 }
 
+export async function gitNormalizesLineEndings(root: string, path: string): Promise<boolean> {
+  const [listed, autocrlf] = await Promise.all([
+    runGitInspection(root, ["ls-files", "--eol", "-z", "--", ...literalPathspecs([path])], {
+      maxOutputBytes: MAX_PATH_LENGTH + 256,
+      failureMessage: "Unable to inspect the selected file's line ending rules.",
+    }),
+    runGitInspection(root, ["config", "--default", "false", "--get", "core.autocrlf"], {
+      maxOutputBytes: 256,
+      failureMessage: "Unable to inspect the repository's line ending configuration.",
+    }),
+  ]);
+  const attributes = /\battr\/([^\t]*)\t/u.exec(listed.stdout.toString("utf8"))?.[1] ?? "";
+  if (attributes.includes("-text")) return false;
+  if (attributes.includes("text") || attributes.includes("eol=")) return true;
+  return /^(?:true|input)$/iu.test(autocrlf.stdout.toString("utf8").trim());
+}
+
 export function textBuffer(content: Buffer): string {
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);

@@ -587,6 +587,65 @@ describe("Codex App Server interaction ownership", () => {
     }
   });
 
+  it.each(["openaiForm", "openai/userVerification"])("declines owned MCP elicitation in Codex's %s mode", (mode) => {
+    const harness = interactionHarness();
+    try {
+      harness.events.handleServerRequest(
+        "mcp-elicitation",
+        "mcpServer/elicitation/request",
+        {
+          threadId: ROOT_THREAD_ID,
+          turnId: ROOT_TURN_ID,
+          serverName: "example-mcp",
+          mode,
+          message: "Approve the request",
+          requestedSchema: { type: "object", properties: {} },
+          _meta: null,
+          ...(mode === "openai/userVerification"
+            ? { title: "Verify", description: "Confirm it is you", challenge: "challenge" }
+            : {}),
+        },
+      );
+
+      expect(harness.inputs).toEqual([]);
+      expect(harness.writes).toContainEqual({
+        id: "mcp-elicitation",
+        result: { action: "decline", content: null, _meta: null },
+      });
+      expect(harness.cancel).not.toHaveBeenCalled();
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
+  it("shows a question with the option count and description length Codex itself accepts", () => {
+    const harness = interactionHarness();
+    try {
+      harness.events.handleServerRequest(
+        "wide-input",
+        "item/tool/requestUserInput",
+        {
+          ...inputParams(),
+          questions: [{
+            id: "approach",
+            header: "Approach",
+            question: "Which approach should Codex take?",
+            options: ["A (Recommended)", "B", "C", "D", "E"].map((label) => ({
+              label,
+              description: "x".repeat(600),
+            })),
+          }],
+        },
+      );
+
+      expect(harness.inputs).toHaveLength(1);
+      expect(harness.inputs[0]?.questions[0]?.options).toHaveLength(5);
+      expect(harness.cancel).not.toHaveBeenCalled();
+    } finally {
+      harness.events.dispose();
+    }
+  });
+
   it.each([
     ["foreign-thread", ROOT_TURN_ID],
     [ROOT_THREAD_ID, "foreign-turn"],

@@ -120,6 +120,8 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(cleanupHandler.indexOf("conversationAttachments = null"))
       .toBeGreaterThan(cleanupHandler.indexOf("closeConversationAttachmentAccess"));
+    expect(cleanupHandler).toContain("if (confirmed) await disposeWindowsRuntimeJobExecutableLock();");
+    expect(cleanupHandler).not.toContain("finally { await disposeWindowsRuntimeJobExecutableLock()");
 
     const quitStart = updateStartup.indexOf('application.on("before-quit"');
     const quitEnd = updateStartup.indexOf("\n  });", quitStart);

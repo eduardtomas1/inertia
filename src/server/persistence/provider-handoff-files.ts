@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 
 import type { ContinuationHistoryBlock } from "./continuation-history";
+import { continuationRouteTurnSql, type ContinuationRouteFilter } from "./conversation-context-source";
 import { byteLength } from "./bounded-message-text";
 import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
 
@@ -37,16 +38,19 @@ function filesContent(files: ProviderHandoffFile[], omittedFileCount: number): s
 function changedFilesNewestFirst(
   database: Database.Database,
   conversationId: string,
+  route: ContinuationRouteFilter,
 ): ProviderHandoffFile[] {
+  const routed = continuationRouteTurnSql("turn", route);
   const rows = database.prepare(`
     SELECT artifact.files_json FROM turn_git_artifacts AS artifact
     JOIN agent_turns AS turn ON turn.id = artifact.turn_id
     WHERE artifact.conversation_id = ?
       AND turn.association = 'authoritative'
       AND artifact.status IN ('ready', 'partial')
+      AND ${routed.sql}
     ORDER BY artifact.created_at DESC, artifact.id DESC
     LIMIT ?
-  `).all(conversationId, MAX_PROVIDER_HANDOFF_ARTIFACTS) as Array<{ files_json: string }>;
+  `).all(conversationId, ...routed.parameters, MAX_PROVIDER_HANDOFF_ARTIFACTS) as Array<{ files_json: string }>;
   const files = new Map<string, ProviderHandoffFile>();
   const deletedLater = new Set<string>();
   for (const row of rows) {
@@ -72,13 +76,15 @@ function changedFilesNewestFirst(
 
 /**
  * Lists the paths this chat changed so a provider handoff carries the
- * workspace story without file contents. Null when nothing was recorded.
+ * workspace story without file contents. Only turns whose messages the route
+ * may carry contribute. Null when nothing was recorded.
  */
 export function providerHandoffFilesBlock(
   database: Database.Database,
   conversationId: string,
+  route: ContinuationRouteFilter,
 ): ContinuationHistoryBlock | null {
-  const files = changedFilesNewestFirst(database, conversationId);
+  const files = changedFilesNewestFirst(database, conversationId, route);
   if (files.length === 0) return null;
   const included: ProviderHandoffFile[] = [];
   let bytes = byteLength(filesContent([], files.length));

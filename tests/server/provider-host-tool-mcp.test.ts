@@ -399,34 +399,36 @@ describe("provider host-tool MCP transport", () => {
     expect(received).toBe(WORST_CASE_PAGE);
   });
 
-  it("fails only an over-bound stdio request and keeps serving the run's other calls", async () => {
+  it("fails only an over-bound stdio request, whichever end carries its id, and keeps serving the run's other calls", async () => {
     const { connection } = await started();
     const proxy = stdioProxy(connection);
-    const oversized = JSON.stringify({
+    const idFirst = JSON.stringify({
       jsonrpc: "2.0",
       id: 41,
       method: "tools/call",
       params: { name: "inertia_list_conversations", arguments: { padding: "x".repeat(BODY_LIMIT) } },
     });
-    const withoutId = JSON.stringify({
+    const idLast = JSON.stringify({
       method: "tools/call",
-      params: { name: "inertia_list_conversations", arguments: { padding: "x".repeat(BODY_LIMIT) } },
+      params: { name: "inertia_list_conversations", arguments: { padding: "x".repeat(BODY_LIMIT), id: 7 } },
       jsonrpc: "2.0",
-      id: 42,
+      id: "sdk-order",
     });
-    const half = Math.floor(oversized.length / 2);
-    proxy.child.stdin.write(oversized.slice(0, half));
-    proxy.child.stdin.write(`${oversized.slice(half)}\n${withoutId}\n`);
+    const idLastWhole = idLast.replace("\"sdk-order\"", "43");
+    const half = Math.floor(idFirst.length / 2);
+    proxy.child.stdin.write(idFirst.slice(0, half));
+    proxy.child.stdin.write(`${idFirst.slice(half)}\n${idLast.slice(0, half)}`);
+    proxy.child.stdin.write(idLast.slice(half, -5));
+    proxy.child.stdin.write(`${idLast.slice(-5)}\n${idLastWhole}\n`);
     proxy.child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: "after", method: "tools/list" })}\n`);
     const [code] = await proxy.closed;
     expect(code).toBe(0);
     const responses = proxy.responses();
-    expect(responses).toHaveLength(2);
-    expect(responses).toContainEqual({
-      jsonrpc: "2.0",
-      id: 41,
-      error: { code: -32600, message: "MCP request body exceeds the 1600 KiB limit." },
-    });
+    expect(responses).toHaveLength(4);
+    const limit = { code: -32600, message: "MCP request body exceeds the 1600 KiB limit." };
+    expect(responses).toContainEqual({ jsonrpc: "2.0", id: 41, error: limit });
+    expect(responses).toContainEqual({ jsonrpc: "2.0", id: "sdk-order", error: limit });
+    expect(responses).toContainEqual({ jsonrpc: "2.0", id: 43, error: limit });
     expect(responses).toContainEqual(expect.objectContaining({ id: "after", result: { tools: expect.any(Array) } }));
   });
 

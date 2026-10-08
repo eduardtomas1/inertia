@@ -24,6 +24,7 @@ import {
   recoverAppImageUpdateForHandoff,
   type AppImageHandoffRecoveryExpectation,
 } from "./appimage-installed-identity.js";
+import { appImageReplaceable } from "./app-update-capability.js";
 import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
 import {
   recoverLinuxAppUpdateCandidateClaim,
@@ -280,6 +281,7 @@ async function reconcileUnclaimedLinuxAppUpdate(
     return;
   }
   if (!journal || !pending) {
+    if (!appImageReplaceable(activePath)) return;
     options.environment.APPIMAGE = await recoverAppImageUpdate({
       channel: options.channel,
       activePath,

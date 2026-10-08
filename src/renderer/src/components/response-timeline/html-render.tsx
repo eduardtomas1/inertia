@@ -70,6 +70,7 @@ export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element 
   const [seenStatus, setSeenStatus] = useState(runtimeStatus);
   const [unavailable, setUnavailable] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [reloads, setReloads] = useState(0);
   if (runtimeStatus !== seenStatus) {
     setSeenStatus(runtimeStatus);
     if (runtimeStatus === "online" && unavailable) {
@@ -78,14 +79,23 @@ export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element 
     }
   }
   const markUnavailable = useCallback(() => setUnavailable(true), []);
-  return <HtmlRenderDocumentFrame key={attempt} {...props} onUnavailable={markUnavailable} />;
+  const remount = useCallback(() => setReloads((value) => value + 1), []);
+  return (
+    <HtmlRenderDocumentFrame
+      key={`${attempt}:${reloads}`}
+      {...props}
+      onUnavailable={markUnavailable}
+      onReload={remount}
+    />
+  );
 }
 
 function HtmlRenderDocumentFrame({
   reference,
   onOpenFullSize,
   onUnavailable,
-}: HtmlRenderFrameProps & { onUnavailable: () => void }): React.JSX.Element {
+  onReload,
+}: HtmlRenderFrameProps & { onUnavailable: () => void; onReload: () => void }): React.JSX.Element {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   // The fragment themes first paint; later changes arrive as messages so the
@@ -103,7 +113,13 @@ function HtmlRenderDocumentFrame({
     else if (message.type === "unavailable") onUnavailable();
     // `escape` only closes the full-size dialog.
   }, [onUnavailable, openLink, reportHeight]);
-  const handleLoad = useHtmlRenderFrameBridge(frameRef, theme, receive);
+  const bridgeLoad = useHtmlRenderFrameBridge(frameRef, theme, receive);
+  const loadsRef = useRef(0);
+  const handleLoad = useCallback(() => {
+    loadsRef.current += 1;
+    if (loadsRef.current > 1) onReload();
+    else bridgeLoad();
+  }, [bridgeLoad, onReload]);
 
   useEffect(() => {
     if (revealed) return;

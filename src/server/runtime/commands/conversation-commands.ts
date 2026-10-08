@@ -4,10 +4,12 @@ import { resolve } from "node:path";
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 
 import {
+  type AgentTurn,
   type Conversation,
   type ServerEvent,
 } from "../../../shared/contracts";
 import {
+  continuationSelectionMoved,
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
@@ -44,6 +46,23 @@ type ConversationUpdatePayload = Extract<
   Parameters<RuntimeCommandHandler>[1],
   { type: "conversation.update" }
 >["payload"];
+
+function selectionMovedSinceTurn(
+  dependencies: ConversationCommandDependencies,
+  current: Conversation,
+  turn: AgentTurn,
+): boolean {
+  try {
+    return continuationSelectionMoved(
+      turn.continuationIdentity,
+      turn.modelSelection.modelId,
+      dependencies.providers.resolveModelRoute(current.modelSelection).continuationIdentity,
+      current.modelSelection.modelId,
+    );
+  } catch {
+    return false;
+  }
+}
 
 function requestedConversationModelSelection(
   current: Conversation,
@@ -408,6 +427,7 @@ export function createConversationCommandHandler(
             .latestAgentTurnForConversation(conversationId);
           const savedSessionId = current.providerSessionId
             ?? (latestTurn && isAgentTurnTerminalStatus(latestTurn.status)
+              && selectionMovedSinceTurn(dependencies, current, latestTurn)
               ? latestTurn.providerSessionAfter
               : null);
           const latestTurnMatchesSession = latestTurn !== null

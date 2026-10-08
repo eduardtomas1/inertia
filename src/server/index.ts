@@ -1202,6 +1202,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
         projectIdentities.dispose();
         snapshotBroadcasts.close();
+        mascotStatus.close();
         secureFileAuthorities.clear();
         try {
           await runRuntimeShutdownPhases({

@@ -79,6 +79,7 @@ export class MascotStatusPublisher {
   private shown: string | null = null;
   private request: number | null = null;
   private pending = false;
+  private closed = false;
   private last = "";
   private wakeAt = Number.POSITIVE_INFINITY;
   private nextWake = Number.POSITIVE_INFINITY;
@@ -230,8 +231,15 @@ export class MascotStatusPublisher {
     });
   }
 
+  close(): void {
+    this.closed = true;
+    this.cancelWake?.();
+    this.cancelWake = null;
+    this.wakeAt = Number.POSITIVE_INFINITY;
+  }
+
   private emit(): void {
-    if (!this.publish || this.pending) return;
+    if (!this.publish || this.pending || this.closed) return;
     this.pending = true;
     this.schedule(() => {
       this.pending = false;

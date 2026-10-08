@@ -439,6 +439,19 @@ describe("mascot bubble words", () => {
     expect(feed().chats).toEqual([expect.objectContaining({ phase: "failed", message: expect.stringContaining("TimeoutError") })]);
   });
 
+  it("cancels its wake timer and stops publishing once closed", () => {
+    const { publisher, publish, clock } = mascotPublisher();
+    publisher.replace([conversation("done", "completed"), conversation("busy", "running")]);
+    expect(clock.pending()).toBe(1);
+    const published = publish.mock.calls.length;
+    publisher.close();
+    expect(clock.pending()).toBe(0);
+    publisher.update(conversation("late", "failed"));
+    clock.advance(8 * 24 * 60 * MINUTE);
+    expect(publish).toHaveBeenCalledTimes(published);
+    expect(clock.pending()).toBe(0);
+  });
+
   it("uses the injected clock for every deadline", () => {
     const clock = mascotTestClock(Date.parse("2026-09-13T10:00:00.000Z"));
     const { publisher, feed } = mascotPublisher({ clock });

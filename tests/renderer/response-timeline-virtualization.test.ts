@@ -304,9 +304,9 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       },
     };
     expect(responseTimelineArticleLabel(handoff))
-      .toBe("Context handoff: Claude · claude-sonnet to Codex · 1 earlier message restored");
+      .toBe("Context handoff: Claude · claude-sonnet to Codex · 1 earlier message carried");
     expect(responseTimelineArticleLabel(handoff, { codex: "Team Codex" }))
-      .toBe("Context handoff: Claude · claude-sonnet to Team Codex · 1 earlier message restored");
+      .toBe("Context handoff: Claude · claude-sonnet to Team Codex · 1 earlier message carried");
     expect(estimateTimelineRowSize(handoff)).toBeLessThan(estimateTimelineRowSize(buildItem({ id: "sized" })));
     expect(estimateTimelineRenderWeight([handoff])).toBe(1);
   });

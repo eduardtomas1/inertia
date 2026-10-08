@@ -339,14 +339,11 @@ describe("Quiet Ledger user request layer", () => {
     })).toBe("2 earlier messages restored · 1 omitted · Earlier messages from another model endpoint were not restored");
   });
 
-  it("names a harness change as a provider change only when the provider changed", () => {
-    const turn = {
-      continuationReasonCode: "harness-changed" as const,
+  it("names a same-provider harness change", () => {
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "harness-changed",
       sessionRecovery: { restoredMessageCount: 3, omittedMessageCount: 0 },
-    };
-    expect(sessionRecoveryDetail(turn, true)).toBe("Provider changed · 3 earlier messages restored");
-    expect(sessionRecoveryDetail(turn, false)).toBe("Agent harness changed · 3 earlier messages restored");
-    expect(sessionRecoveryDetail(turn)).toBe("Agent harness changed · 3 earlier messages restored");
+    })).toBe("Agent harness changed · 3 earlier messages restored");
   });
 
   it("renders reloaded context provenance and states a deleted source truthfully", () => {

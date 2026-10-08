@@ -114,11 +114,11 @@ describe("provider handoff divider", () => {
     sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 0 },
   });
 
-  it("names the switch, both routes, and the restored messages between the two turns", () => {
+  it("names the switch, both routes, and the carried messages between the two turns", () => {
     const { container } = timeline([codex, claude]);
 
     const separator = screen.getByRole("separator", {
-      name: "Context handoff: Claude · claude-sonnet-4-6 to Codex · gpt-5.6 · 2 earlier messages restored",
+      name: "Context handoff: Claude · claude-sonnet-4-6 to Codex · gpt-5.6 · 2 earlier messages carried",
     });
     const row = separator.closest<HTMLElement>("section.provider-handoff-row")!;
     expect(row).toHaveAttribute("data-response-row-id", "handoff:turn-codex");
@@ -126,7 +126,7 @@ describe("provider handoff divider", () => {
     expect(row).toHaveAttribute("aria-label", separator.getAttribute("aria-label"));
     const pill = row.querySelector(".provider-handoff-marker")!;
     expect(pill).toHaveAttribute("aria-hidden", "true");
-    expect(pill).toHaveTextContent("Context handoff·Claude · claude-sonnet-4-6Codex · gpt-5.6·2 earlier messages restored");
+    expect(pill).toHaveTextContent("Context handoff·Claude · claude-sonnet-4-6Codex · gpt-5.6·2 earlier messages carried");
 
     const before = container.querySelector('[data-turn-id="turn-claude"]')!;
     const after = container.querySelector('[data-turn-id="turn-codex"]')!;
@@ -134,19 +134,33 @@ describe("provider handoff divider", () => {
     expect(row.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps the recovery chip on the receiving turn", () => {
+  it("leaves the session recovery note off the receiving turn because the divider carries it", () => {
     timeline([claude, codex]);
     const receiving = document.querySelector<HTMLElement>('[data-turn-id="turn-codex"]')!;
-    expect(within(receiving).getByText(/Provider changed · 2 earlier messages restored/u)).toBeInTheDocument();
+    expect(receiving.querySelector("[data-session-recovery]")).toBeNull();
+    expect(within(receiving).queryByText(/New provider session|Provider changed/u)).not.toBeInTheDocument();
   });
 
-  it("uses configured provider labels and says when nothing was restored", () => {
+  it("uses configured provider labels and says when nothing was carried", () => {
     timeline([claude, { ...codex, sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0 } }], {
       codex: "Team Codex",
     });
     expect(screen.getByRole("separator", {
-      name: "Context handoff: Claude · claude-sonnet-4-6 to Team Codex · gpt-5.6 · earlier messages were not restored",
+      name: "Context handoff: Claude · claude-sonnet-4-6 to Team Codex · gpt-5.6 · nothing carried",
     })).toBeInTheDocument();
+  });
+
+  it.each([
+    [{ restoredMessageCount: 11, omittedMessageCount: 2 }, "11 earlier messages carried · 2 left behind"],
+    [{ restoredMessageCount: 1, omittedMessageCount: 0, withheldMessageCount: 3 }, "1 earlier message carried · 3 left behind"],
+    [{ restoredMessageCount: 4, omittedMessageCount: 1, withheldMessageCount: 2 }, "4 earlier messages carried · 3 left behind"],
+    [{ restoredMessageCount: 0, omittedMessageCount: 7 }, "nothing carried · 7 left behind"],
+  ])("counts what stayed behind on the divider for %o", (sessionRecovery, detail) => {
+    timeline([claude, { ...codex, sessionRecovery }]);
+    const separator = screen.getByRole("separator", {
+      name: `Context handoff: Claude · claude-sonnet-4-6 to Codex · gpt-5.6 · ${detail}`,
+    });
+    expect(separator.querySelector(".provider-handoff-marker")).toHaveTextContent(detail);
   });
 
   it("draws no divider and names a same-provider harness switch as such", () => {
@@ -183,14 +197,14 @@ describe("provider handoff divider", () => {
     const into = screen.getByRole("separator", { name: `Context handoff: Codex · gpt-5.6 to ${label} · k3` });
     expect(into.querySelector(".provider-handoff-marker")).toHaveTextContent(`${label} · k3`);
     expect(screen.getByRole("separator", {
-      name: `Context handoff: ${label} · k3 to Codex · gpt-5.6 · 4 earlier messages restored`,
+      name: `Context handoff: ${label} · k3 to Codex · gpt-5.6 · 4 earlier messages carried`,
     })).toBeInTheDocument();
   });
 
   it("labels each route with its model alias when the turn recorded one", () => {
     timeline([{ ...claude, modelAlias: "Claude Sonnet 4.6" }, { ...codex, modelAlias: "GPT-5.6" }]);
     expect(screen.getByRole("separator", {
-      name: "Context handoff: Claude · Claude Sonnet 4.6 to Codex · GPT-5.6 · 2 earlier messages restored",
+      name: "Context handoff: Claude · Claude Sonnet 4.6 to Codex · GPT-5.6 · 2 earlier messages carried",
     })).toBeInTheDocument();
   });
 });

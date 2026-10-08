@@ -101,7 +101,7 @@ export function UserRequestLayer({
   const contextPackets = props.contextPackets?.filter(
     ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
   ) ?? [];
-  const sessionRecovery = sessionRecoveryDetail(turn.agentTurn, turn.providerChanged === true);
+  const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}

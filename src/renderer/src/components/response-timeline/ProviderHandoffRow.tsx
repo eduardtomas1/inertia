@@ -8,8 +8,8 @@ import "./ProviderHandoffRow.css";
 
 /**
  * Marks where a chat continued on another provider. The divider is derived
- * from the two turns' immutable identities; its restored-message count comes
- * from the receiving turn's recorded session recovery.
+ * from the two turns' immutable identities; its carried and left-behind
+ * counts come from the receiving turn's recorded session recovery.
  */
 export function ProviderHandoffRow({
   id,

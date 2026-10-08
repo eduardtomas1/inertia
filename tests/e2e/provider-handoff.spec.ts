@@ -14,7 +14,7 @@ import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { closeWorkspaceTools } from "./support/workspace-tools";
 
 const evidenceDirectory = join(process.cwd(), "docs", "pr-evidence", "provider-handoff");
-const handoffName = /^Context handoff: Claude · claude-sonnet-4-6 to Codex · gpt-5\.5 · 2 earlier messages restored$/u;
+const handoffName = /^Context handoff: Claude · claude-sonnet-4-6 to Codex · gpt-5\.5 · 2 earlier messages carried$/u;
 
 function seedCompletedTurn(
   store: RuntimeStore,
@@ -103,7 +103,8 @@ for (const theme of ["dark", "light"] as const) test(`shows a context handoff di
     const codexRequest = await page.getByText("Continue from that checklist").boundingBox();
     expect(claudeAnswer!.y).toBeLessThan(divider!.y);
     expect(divider!.y).toBeLessThan(codexRequest!.y);
-    await expect(page.getByText(/Provider changed · 2 earlier messages restored/u)).toBeVisible();
+    await expect(row.locator(".provider-handoff-marker")).toContainText("2 earlier messages carried");
+    await expect(page.getByLabel("Provider session")).toHaveCount(0);
 
     await separator.scrollIntoViewIfNeeded();
     const name = `handoff-${theme}`;

@@ -94,6 +94,8 @@ in the same chat.
 - Migration 93 stores visual replies.
 - Sidebar repository labels and context-sharing labels show the project path
   as you chose it, and Antigravity turns are no longer labelled OpenCode.
+- CI only: the stalled ACP cancellation test allows 4 seconds instead of 1 for
+  a slow Windows runner to stop the provider's process tree.
 
 ## 0.0.70 — 2026-10-06
 

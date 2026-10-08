@@ -94,6 +94,18 @@ On this branch, on Linux x64:
 | `playwright test app-shell html-render conversation-continuation` | 0 | On Electron 44.7.0. One app-shell launch first failed with `spawn ETXTBSY` while the unit suite ran, then passed 4 of 4 on its own. |
 | `npm audit --omit=dev`, `npm audit` | 0 | 0 vulnerabilities. |
 
+## Main's CI on `e5c28844`
+
+Main's run 37735631748 on `e5c28844` failed in Windows unit tests (2/4):
+`acp-adapter-drift.test.ts` "cursor ACP drift regressions > cancels a resumed
+session stalled at session/load" saw the run "still running" 1 s after a
+graceful cancel. The same tree passed all four Windows shards in #593's CI
+(`2e776ad5`), and the shard passed on every other run since v0.0.70. The test
+gave a Windows process-tree stop 1 s; this PR allows 4 s, which stays below the
+fixture's 5 s control-RPC deadline whose failed result would not match, so a
+cancel that does not settle the run still fails the test. The failed job on
+main was rerun without code changes.
+
 ## Not exercised
 
 Windows and macOS packaging, installers and signing, and the macOS
@@ -108,6 +120,7 @@ not on this machine.
   `.github/workflows/provider-contract-drift.yml` and
   `.github/actions/install-dependencies/action.yml`: the Actions pins.
 - `CHANGELOG.md`: the curated 0.0.71 section.
+- `tests/server/acp-adapter-drift.test.ts`: the cancellation window.
 - This release preparation evidence report.
 
 ## Publication boundary

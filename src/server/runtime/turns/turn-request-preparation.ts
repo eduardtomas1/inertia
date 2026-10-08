@@ -518,7 +518,7 @@ export function resolveTurnRequest(
           assistantMessageId: null,
           latestAssistantMessageId: null,
           followUpBoundary: null,
-          pendingFollowUpBoundaryAt: null,
+          pendingFollowUpBoundary: null,
           reasoningText: "",
           reasoningPendingHighSurrogate: "",
           reasoningId: null,

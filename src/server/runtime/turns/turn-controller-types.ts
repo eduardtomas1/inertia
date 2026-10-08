@@ -326,7 +326,7 @@ export interface ActiveTurn {
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
   followUpBoundary: { at: string; text: string; messageId: string | null } | null;
-  pendingFollowUpBoundaryAt: string | null;
+  pendingFollowUpBoundary: { at: string; messageId: string | null } | null;
   assistantStream: TurnStreamChannel;
   reasoningText: string;
   reasoningPendingHighSurrogate: string;

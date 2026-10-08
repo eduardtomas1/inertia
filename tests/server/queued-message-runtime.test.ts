@@ -16,11 +16,15 @@ import {
 import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
 import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller";
 import { join } from "node:path";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 afterEach(cleanupTurnControllerTestDirectories);
-async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
+async function fixture(
+  hookOverrides: Partial<TurnControllerHooks> = {},
+  options: Parameters<typeof createTurnControllerTestRuntime>[1] = {},
+) {
   let queue: ReturnType<typeof createQueuedMessageRuntime> | undefined;
-  const runtime = await createTurnControllerTestRuntime({ onTurnSettled: (turn) => queue?.onTurnSettled(turn), ...hookOverrides });
+  const runtime = await createTurnControllerTestRuntime({ onTurnSettled: (turn) => queue?.onTurnSettled(turn), ...hookOverrides }, options);
   const attachments = await ConversationAttachmentStore.open(runtime.directory);
   const abort = new AbortController();
   const tasks = new Set<Promise<unknown>>();
@@ -629,6 +633,37 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
         .filter((message) => message.content === "Also rename the file.")
         .map(({ role, turnId }) => ({ role, turnId }))).toEqual([{ role: "user", turnId: initial.turn.id }]);
       expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it.each([
+    ["codex", "cancelled"],
+    ["codex", "failed"],
+    ["opencode", "cancelled"],
+    ["opencode", "failed"],
+  ] as const)("queues a %s follow-up confirmed as its turn ended %s instead of showing it unanswered", async (providerId, status) => {
+    const f = await fixture({}, providerId === "opencode"
+      ? { modelSelection: providerNativeModelSelection({ providerId: "opencode", modelId: "provider-default" }) }
+      : {});
+    try {
+      const initial = startRunning(f);
+      let acknowledge!: (accepted: boolean) => void;
+      vi.spyOn(f.provider, "steer").mockImplementation(() => new Promise<boolean>((resolve) => { acknowledge = resolve; }));
+      const requestId = randomUUID();
+      const sending = f.queue.turnInteractionHandler(null as unknown as WebSocket, {
+        type: "message.send", requestId, payload: { conversationId: f.conversationId, content: "Also rename the file.", attachments: [] },
+      });
+      await flushTurnControllerTestPromises();
+      expect(f.store.agentTurn(initial.turn.id).harnessId).toBe(providerId === "opencode" ? "opencode-sdk" : "codex-app-server");
+      f.provider.resolve({ status });
+      acknowledge(true);
+      await expect(sending).resolves.toBe("handled");
+      await f.drain();
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, state: "waiting" } } });
+      expect(f.store.agentTurn(initial.turn.id).status).toBe(status);
+      expect(f.store.conversationDetail(f.conversationId)!.messages
+        .some((message) => message.content === "Also rename the file.")).toBe(false);
       expect(f.provider.runCount).toBe(1);
     } finally { await f.close(); }
   });

@@ -11,6 +11,7 @@ import { snapshotFixture } from "../helpers/snapshot-fixture";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime,
+  flushTurnControllerTestPromises,
   type TurnControllerTestRuntime,
   turnControllerTestIdentity,
 } from "../support/turn-controller-runtime";
@@ -249,17 +250,23 @@ describe("TurnFollowUpCoordinator", () => {
     admission.release();
   });
 
-  it.each([true, false])("records only a confirmed follow-up (%s) against a settled owner", async (accepted) => {
+  it.each([
+    [true, "completed", "accepted"],
+    [true, "cancelled", "unconfirmed"],
+    [true, "failed", "unconfirmed"],
+    [false, "cancelled", "refused"],
+  ] as const)("settles a follow-up acknowledged %s as its owner ends %s as %s", async (accepted, ending, kind) => {
     let accept!: (accepted: boolean) => void;
     const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {
       accept = resolve;
     }));
-    const persist = vi.fn();
+    const persist = vi.fn(() => ({ content: "Sent while the turn ended" }) as ChatMessage);
     const acknowledged = vi.fn();
     const active = activeTurn();
     const coordinator = new TurnFollowUpCoordinator({
       store: {
         createAcknowledgedFollowUpMessage: persist,
+        agentTurn: () => ({ status: "running" }),
       } as never,
       providers: { steer } as never,
       now: () => "2026-08-21T10:00:00.000Z",
@@ -268,23 +275,21 @@ describe("TurnFollowUpCoordinator", () => {
     const admission = coordinator.acquire(active)!;
     const pending = coordinator.steer(
       admission,
-      { content: "Do not persist after Stop", imagePaths: [] },
+      { content: "Sent while the turn ended", imagePaths: [] },
       [],
       acknowledged,
     );
 
     await flushPromises();
     expect(steer).toHaveBeenCalledTimes(1);
-    active.runState.requestTerminal("cancelled", "test-cancelled");
+    active.runState.requestTerminal(ending, "test-ended");
     accept(accepted);
 
-    if (accepted) {
-      await expect(pending).resolves.toMatchObject({ kind: "accepted" });
-      expect(acknowledged).toHaveBeenCalledOnce();
-      expect(persist).toHaveBeenCalledExactlyOnceWith("conversation-1", "turn-1", "Do not persist after Stop", admission.submittedAt, "2026-08-21T10:00:00.000Z", []);
+    await expect(pending).resolves.toMatchObject({ kind });
+    expect(acknowledged).toHaveBeenCalledTimes(accepted ? 1 : 0);
+    if (kind === "accepted") {
+      expect(persist).toHaveBeenCalledExactlyOnceWith("conversation-1", "turn-1", "Sent while the turn ended", admission.submittedAt, "2026-08-21T10:00:00.000Z", []);
     } else {
-      await expect(pending).resolves.toEqual({ kind: "refused" });
-      expect(acknowledged).not.toHaveBeenCalled();
       expect(persist).not.toHaveBeenCalled();
     }
     admission.release();
@@ -350,27 +355,66 @@ describe("assistant rows around an accepted follow-up", () => {
   });
 
   it.each([
-    ["extends", "Answer to the first task.Renamed it and updated imports.", "assistant:Renamed it and updated imports."],
-    ["rewrites", "A corrected reply.", "assistant:A corrected reply."],
-  ])("keeps the earlier answer when a provider snapshot %s the text after a follow-up", async (_case, snapshot, reply) => {
+    ["extends", "Answer to the first task.", "Answer to the first task.Renamed it and updated imports.", "Renamed it and updated imports."],
+    ["drops a trailing space from", "Answer. ", "Answer.Renamed it.", "Renamed it."],
+    ["rewrites", "Answer to the first task.", "Answer to the second task. Renamed it.", "second task. Renamed it."],
+  ])("keeps the earlier answer once when a provider snapshot %s the text before a follow-up", async (_case, earlier, snapshot, reply) => {
     const { runtime, turnId } = await running();
     try {
       const identity = turnControllerTestIdentity(runtime);
-      runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      runtime.provider.emit({ ...identity, type: "text", text: earlier });
       const accepted = await followUp(runtime, "Also rename the file.") as { message: ChatMessage };
       runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
       flushStreams(runtime);
       runtime.provider.emit({ ...identity, type: "text-snapshot", itemId: "item-1", text: snapshot });
-      expect(rows(runtime, turnId)).toEqual([
-        "assistant:Answer to the first task.",
-        "user:Also rename the file.",
-        reply,
-      ]);
+      const expected = [`assistant:${earlier}`, "user:Also rename the file.", `assistant:${reply}`];
+      expect(rows(runtime, turnId)).toEqual(expected);
       const replaced = runtime.events.findLast((event) => event.type === "agent.text.replaced");
-      expect(replaced).toMatchObject({
-        message: { content: reply.slice("assistant:".length) },
-        after: accepted.message.createdAt,
-      });
+      expect(replaced).toMatchObject({ message: { content: reply }, after: accepted.message.createdAt });
+      runtime.provider.resolve({ text: snapshot });
+      await flushTurnControllerTestPromises();
+      flushStreams(runtime);
+      expect(rows(runtime, turnId)).toEqual(expected);
+      expect(runtime.store.agentTurn(turnId).status).toBe("completed");
+    } finally {
+      runtime.provider.resolve();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps the earlier answer once when the final provider text drops a trailing space before a follow-up", async () => {
+    const { runtime, turnId } = await running();
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer. " });
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
+      flushStreams(runtime);
+      runtime.provider.resolve({ text: "Answer.Renamed it." });
+      await flushTurnControllerTestPromises();
+      flushStreams(runtime);
+      expect(rows(runtime, turnId)).toEqual(["assistant:Answer. ", "user:Also rename the file.", "assistant:Renamed it."]);
+    } finally {
+      runtime.provider.resolve();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps a Claude answer written after an empty correction while the follow-up waits for its boundary", async () => {
+    const { runtime, turnId } = await running(true);
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Draft" });
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text-snapshot", itemId: "retracted", text: "" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Fallback answer." });
+      flushStreams(runtime);
+      runtime.provider.emit({ ...identity, type: "text-boundary" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Reply." });
+      flushStreams(runtime);
+      runtime.provider.emit({ ...identity, type: "text-snapshot", itemId: "corrected", text: "Fallback answer.Reply!" });
+      expect(rows(runtime, turnId).join("|")).toContain("Fallback answer.");
+      expect(rows(runtime, turnId).slice(0, 2)).toEqual(["assistant:Draft", "user:Also rename the file."]);
     } finally {
       runtime.provider.resolve();
       runtime.store.close();

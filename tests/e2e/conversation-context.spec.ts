@@ -448,13 +448,27 @@ test("references this chat beside two other chats and keeps what was sent", asyn
   await expect(importerChip).toHaveCount(0);
   await expect(page.getByText("Pick up the importer plan", { exact: true })).toBeVisible();
 
-  const receipts = page.getByRole("article", { name: "Your request" })
-    .filter({ hasText: "Pick up the importer plan where we left it." })
-    .getByLabel("Shared chat context");
+  const sentRequest = page.getByRole("article", { name: "Your request" })
+    .filter({ hasText: "Pick up the importer plan where we left it." });
+  const receipts = sentRequest.getByLabel("Shared chat context");
   await expect(receipts).toContainText("Earlier messages from this chat");
   await expect(receipts).toContainText("Context from Importer rollout");
   await expect(receipts).toContainText(/omitted/u);
   await receipts.scrollIntoViewIfNeeded();
   await capture("sent-receipts");
+
+  const sentImporter = sentRequest.getByRole("button", { name: /Context from Importer rollout/u });
+  await expect(sentImporter).toHaveAttribute("aria-expanded", "false");
+  await sentImporter.click();
+  const sentPreview = sentRequest.getByRole("region", { name: "Shared chat context" });
+  await expect(sentPreview).toBeFocused();
+  await expect(sentImporter).toHaveAttribute("aria-expanded", "true");
+  await expect(sentPreview.locator("li").first()).toContainText("Plan the importer rollout");
+  await sentPreview.scrollIntoViewIfNeeded();
+  await capture("sent-receipt-preview");
+  await page.keyboard.press("Escape");
+  await expect(sentPreview).toHaveCount(0);
+  await expect(sentImporter).toBeFocused();
+  await expect(sentImporter).toHaveAttribute("aria-expanded", "false");
   expect(app.rendererErrors).toEqual([]);
 });

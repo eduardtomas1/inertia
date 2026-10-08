@@ -33,7 +33,6 @@ export function ChatReferenceConfirmation({ source, onConfirm }: {
       <p>“{source.conversationTitle}”</p>
       <p>From: {source.projectName} · {source.workspaceLabel}</p>
       <p>To: this chat · {source.targetWorkspaceLabel}</p>
-      <p>Shares a size-limited copy with the agent. The original chat stays unchanged.</p>
       <footer>
         <button ref={cancel} type="button" className="secondary-button" onClick={() => onConfirm(false)}>Cancel</button>
         <button type="button" className="primary-button" onClick={() => onConfirm(true)}>Share chat</button>
@@ -322,7 +321,6 @@ export function ConversationContextRequestCard({
       >
         <header>
           <strong>The agent asked to read another chat</strong>
-          <small>It receives a size-limited, redacted copy of the chat only if you share it. Older messages and long text may be shortened.</small>
         </header>
         {preselected
           ? <p>{source?.conversationTitle ?? "That chat is unavailable."}</p>

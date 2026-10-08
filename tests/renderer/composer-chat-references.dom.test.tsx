@@ -78,6 +78,7 @@ describe("composer chat references", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Share context from another workspace?" });
     expect(dialog).toHaveTextContent("/workspace/other");
     expect(dialog).toHaveTextContent("/workspace/inertia");
+    expect(dialog).not.toHaveTextContent(/size-limited|stays unchanged/u);
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     await user.keyboard("{Escape}");
@@ -393,6 +394,8 @@ describe("composer chat references", () => {
     const card = await screen.findByRole("region", {
       name: "Agent requested chat context",
     });
+    expect(card).toHaveTextContent(/^The agent asked to read another chat/u);
+    expect(card).not.toHaveTextContent(/size-limited|redacted|shortened/u);
     await user.click(within(card).getByRole("button", { name: "Share chat" }));
 
     expect(onCommand).toHaveBeenCalledWith("conversation.context.agent.respond", {

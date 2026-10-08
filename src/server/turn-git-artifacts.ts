@@ -30,9 +30,10 @@ import { CheckpointError, createCheckpoint, deleteCheckpoint } from "./checkpoin
 import {
   captureGitArtifactState,
   compareGitSnapshots,
-  getRepositoryStatus,
   GitError,
+  repositoryChangeCounts,
 } from "./git";
+import { gitInspectionSettlementValues } from "./git/runner";
 import { isGitProcessTreeTerminationFailure } from "./git/types";
 import {
   checkpointFailureReason,
@@ -212,6 +213,7 @@ export class TurnGitArtifactManager {
           turnCheckpoint.checkpointId = checkpointId;
         } catch (error) {
           if (isExpectedCheckpointAbsence(error)) throw error;
+          this.#recordCleanupFailure(error);
           turnCheckpoint.failure = checkpointFailureReason(error);
         }
         operation = this.#operationOptions(this.#preCaptureTimeoutMs);
@@ -271,27 +273,32 @@ export class TurnGitArtifactManager {
     repositoryPath: string,
   ): Promise<string> {
     const operation = this.#operationOptions(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
-    const status = await getRepositoryStatus(repositoryPath, operation);
-    const captured = await createCheckpoint(
-      repositoryPath,
-      this.#checkpointDirectory,
-      turn.conversationId,
-      operation,
-    );
+    const [counts, captured] = await Promise.allSettled([
+      repositoryChangeCounts(repositoryPath, operation),
+      createCheckpoint(
+        repositoryPath,
+        this.#checkpointDirectory,
+        turn.conversationId,
+        operation,
+      ),
+    ]);
+    if (captured.status === "fulfilled" && counts.status === "rejected") {
+      await deleteCheckpoint(repositoryPath, captured.value.ref, turn.conversationId)
+        .catch(() => undefined);
+    }
+    const [changes, checkpoint] = gitInspectionSettlementValues([counts, captured]);
     try {
       const turnIndex = this.store.checkpointCount(turn.conversationId) + 1;
       return this.store.addCheckpoint({
         conversationId: turn.conversationId,
         turnId: turn.id,
-        ref: captured.ref,
+        ref: checkpoint.ref,
         label: `Before turn ${turnIndex}`,
         turnIndex,
-        filesChanged: status.files.length,
-        insertions: status.insertions,
-        deletions: status.deletions,
+        ...changes,
       }).id;
     } catch (error) {
-      await deleteCheckpoint(repositoryPath, captured.ref, turn.conversationId)
+      await deleteCheckpoint(repositoryPath, checkpoint.ref, turn.conversationId)
         .catch(() => undefined);
       throw error;
     }

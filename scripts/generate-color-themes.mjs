@@ -25,8 +25,8 @@ export function swatchSelector(family, appearance) {
 export function buildSwatchTokens(family, appearance) {
   const tokens = Object.fromEntries(buildPaletteTokens(family, appearance));
   return [
-    ["theme-preview-canvas", tokens["app-bg"]],
-    ["theme-preview-sidebar", tokens["sidebar-bg"]],
+    ["theme-preview-canvas", tokens["surface-strong"]],
+    ["theme-preview-sidebar", tokens.surface],
     ["theme-preview-surface", tokens["surface-strong"]],
     ["theme-preview-accent", tokens.accent],
     ["theme-preview-accent-soft", tokens["accent-soft"]],

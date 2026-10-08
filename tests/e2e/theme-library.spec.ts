@@ -55,10 +55,10 @@ test("applies paired color themes and restores them after restart", async ({
   await expect.poll(() => page.locator("html").evaluate((element) => {
     const styles = getComputedStyle(element);
     return {
-      background: styles.getPropertyValue("--app-bg").trim(),
+      background: styles.getPropertyValue("--bg").trim(),
       accent: styles.getPropertyValue("--accent").trim(),
     };
-  })).toEqual({ background: oceanLight["app-bg"], accent: oceanLight.accent });
+  })).toEqual({ background: oceanLight["surface-strong"], accent: oceanLight.accent });
   await expect.poll(() => {
     const database = new Database(join(app.testDirectory, "data", "inertia.sqlite"), {
       readonly: true,

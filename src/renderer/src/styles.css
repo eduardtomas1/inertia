@@ -69,7 +69,7 @@
   --text-md: 16px;
   --text-lg: 19px;
   --text-xl: 24px;
-  --text-code: 0.9em;
+  --text-code: max(12px, 0.9em);
   --text-diff: 12.5px;
   --leading-prose: 1.6;
   --leading-chrome: 1.4;
@@ -86,6 +86,8 @@
   --line-soft: color-mix(in srgb, var(--text) 6%, transparent);
   --line: color-mix(in srgb, var(--text) 10%, transparent);
   --line-strong: color-mix(in srgb, var(--text) 16%, transparent);
+  --fill-solid: color-mix(in srgb, var(--text) 4%, var(--bg));
+  --line-solid: color-mix(in srgb, var(--text) 10%, var(--bg));
   --shadow-float-alpha: 0.24;
   --shadow-overlay-alpha: 0.36;
   --shadow-float: inset 0 1px 0 var(--raised-edge), 0 12px 32px -14px rgb(0 0 0 / var(--shadow-float-alpha)), 0 2px 6px -2px rgb(0 0 0 / calc(var(--shadow-float-alpha) / 3));
@@ -3812,6 +3814,7 @@ button.header-breadcrumb-project:hover {
   min-width: 0;
   flex-direction: column;
   gap: 2px;
+  line-height: var(--leading-heading);
 }
 
 .composer-attachment-copy strong,
@@ -7699,7 +7702,7 @@ button.turn-agents-line:hover {
 }
 
 .file-editor-dialog textarea:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 
 .file-editor-dialog > footer {

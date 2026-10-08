@@ -16,6 +16,7 @@ import {
   buildPaletteTokens,
 } from "../../scripts/color-theme-spec.mjs";
 import {
+  buildSwatchTokens,
   renderFiles,
   windowBackground,
 } from "../../scripts/generate-color-themes.mjs";
@@ -68,6 +69,15 @@ describe("generated color palettes", () => {
       expect(repoFile(path), `${path} is stale; run npm run generate:color-themes`)
         .toBe(expected);
     }
+  });
+
+  it.each(cases)("previews the %s %s canvas and sidebar the stylesheet paints", (family, appearance) => {
+    const tokens = palette(family, appearance);
+    const styles = repoFile("src/renderer/src/styles.css");
+    expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);/u);
+    const preview = Object.fromEntries(buildSwatchTokens(family, appearance));
+    expect(preview["theme-preview-canvas"]).toBe(tokens["surface-strong"]);
+    expect(preview["theme-preview-sidebar"]).toBe(tokens.surface);
   });
 
   it("covers exactly the shipped color theme identities", () => {

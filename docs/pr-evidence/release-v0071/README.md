@@ -107,6 +107,21 @@ fixture's 5 s control-RPC deadline whose failed result would not match, so a
 cancel that does not settle the run still fails the test. The failed job on
 main was rerun without code changes.
 
+## PR CI on `009d929b`
+
+macOS x64 failed two unit tests that this release does not touch:
+
+- `issue-report.test.ts` "scrubs a full body of repeated "a_" in linear time"
+  took 166 ms against a 100 ms limit. The full 24,000-character body takes
+  about 15 ms on this Linux host (the slowest unit, `a_`) and a quarter of it
+  about 3 ms, so the scan is linear; the Intel macOS runner is about eleven
+  times slower. The limit is now 1 s: about six times that runner's time,
+  while a quadratic scan of this body would still take far longer.
+- `document-attachment-preview.dom.test.tsx` "keeps the truncated-text notice
+  in its own row" read the first `status` element, which on a slow runner was
+  still the "Preparing secure preview…" loading status. It now waits for the
+  notice text and checks that element is the status row.
+
 ## Claude turns cut off by a notification reply
 
 A local Claude turn on 2026-10-08 completed at "Waiting for `update.database`
@@ -150,6 +165,9 @@ not on this machine.
   `.github/actions/install-dependencies/action.yml`: the Actions pins.
 - `CHANGELOG.md`: the curated 0.0.71 section.
 - `tests/server/acp-adapter-drift.test.ts`: the cancellation window.
+- `tests/shared/issue-report.test.ts` and
+  `tests/renderer/document-attachment-preview.dom.test.tsx`: the two macOS x64
+  test fixes.
 - `src/server/provider/claude-delegate-lifecycle.ts` and its lifecycle and
   harness tests: the background level across notification turns.
 - This release preparation evidence report.

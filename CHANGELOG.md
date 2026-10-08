@@ -99,7 +99,10 @@ in the same chat.
 - Sidebar repository labels and context-sharing labels show the project path
   as you chose it, and Antigravity turns are no longer labelled OpenCode.
 - CI only: the stalled ACP cancellation test allows 4 seconds instead of 1 for
-  a slow Windows runner to stop the provider's process tree.
+  a slow Windows runner to stop the provider's process tree, the report
+  scrubbing test allows 1 second instead of 100 ms on a slow runner, and the
+  truncated-text preview test waits for its notice instead of the loading
+  status.
 
 ## 0.0.70 — 2026-10-06
 

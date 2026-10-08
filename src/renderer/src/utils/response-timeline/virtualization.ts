@@ -7,6 +7,7 @@ import type {
 } from "@shared/contracts";
 import {
   buildTurnExecutionStream,
+  followUpAnswerIds,
   isTranscriptActivity,
   type TurnExecutionStreamEntry,
 } from "./execution";
@@ -494,6 +495,13 @@ function estimateTurnRowSize(
       : 0
   );
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const followUpAnswers = turn.isActive ? new Set<string>() : followUpAnswerIds(turn);
+  const settledExchangeHeight = turn.isActive
+    ? 0
+    : activeFollowUpHeight + turn.commentaryMessages.reduce((total, message) =>
+      followUpAnswers.has(message.id)
+        ? total + 18 + estimateMarkdownHeight(message.content, answerColumns)
+        : total, 0);
   const executionHeight = turn.isActive
     ? 43
       + activeCommentaryHeight
@@ -502,7 +510,7 @@ function estimateTurnRowSize(
       + (hasSupplementalWork ? 27 : 0)
     : consolidatesSettledWork
       ? 0
-      : 30 + importantHeight;
+      : 30 + importantHeight + settledExchangeHeight;
   const expandedWorkHeight = (
     options.workDetailsExpanded
       || (consolidatesSettledWork && options.runDetailsExpanded)

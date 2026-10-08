@@ -64,6 +64,7 @@ export function shouldConsolidateSettledWorkIntoRunDetails(
     | "isActive"
     | "agentTurn"
     | "terminalAssistantMessage"
+    | "followUpMessages"
     | "importantActivities"
     | "approvals"
     | "inputRequests"
@@ -73,6 +74,7 @@ export function shouldConsolidateSettledWorkIntoRunDetails(
   return !turn.isActive
     && turn.agentTurn.status === "completed"
     && turn.terminalAssistantMessage !== null
+    && turn.followUpMessages.length === 0
     && turn.importantActivities.length === 0
     && turn.approvals.length === 0
     && turn.inputRequests.length === 0

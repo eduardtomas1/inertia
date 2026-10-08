@@ -23,6 +23,7 @@ import {
   buildTimelineMinimapMarkers,
   formatElapsed,
   resolveTimelineKeyboardIntent,
+  shouldConsolidateSettledWorkIntoRunDetails,
   shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldVirtualizeTimeline,
@@ -258,6 +259,67 @@ describe("authoritative response timeline", () => {
       "call-after",
       "commentary-after",
     ]);
+  });
+
+  it("keeps a settled follow-up exchange visible with the earlier answer presented as an answer", () => {
+    const turn = agentTurn("turn-exchange", "user-exchange", { terminalAssistantMessageId: "reply" });
+    const messages = [
+      message("user-exchange", turn.id, "user", "Fix the parser.", "2026-07-23T10:00:00.000Z"),
+      message("note", turn.id, "assistant", "Reading the parser.", "2026-07-23T10:00:01.000Z"),
+      message("earlier-answer", turn.id, "assistant", "The parser is fixed.", "2026-07-23T10:00:03.000Z"),
+      message("follow-up", turn.id, "user", "Also rename the file.", "2026-07-23T10:00:04.000Z"),
+      message("reply", turn.id, "assistant", "Renamed it.", "2026-07-23T10:00:06.000Z"),
+    ];
+    const activities = [
+      activity("read", turn.id, { createdAt: "2026-07-23T10:00:02.000Z" }),
+      activity("rename", turn.id, { kind: "command", title: "mv a b", createdAt: "2026-07-23T10:00:05.000Z" }),
+    ];
+    const response = timelineTurn(buildResponseTimeline({
+      turns: [turn], messages, activities, reasonings: [], checkpoints: [],
+    }), turn.id);
+
+    expect(shouldConsolidateSettledWorkIntoRunDetails(response)).toBe(false);
+    expect(buildTurnExecutionStream(response).flatMap((entry) =>
+      entry.kind === "commentary" ? [`${entry.id}:${entry.answer === true ? "answer" : "commentary"}`] : []))
+      .toEqual(["note:commentary", "earlier-answer:answer"]);
+
+    const html = renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns: [turn],
+      messages,
+      activities,
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      streamingText: "",
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: false,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: false,
+      checkpointRestoreDisabled: false,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+    const detailsEnd = html.indexOf("</details>");
+    const earlierAnswer = html.indexOf("The parser is fixed.");
+    const followUp = html.indexOf('data-follow-up-message-id="follow-up"');
+    const finalAnswer = html.indexOf('data-turn-layer="final-answer"');
+    expect(html).not.toContain("Reading the parser.");
+    expect(html).toContain('class="turn-commentary-row is-answer"');
+    expect(earlierAnswer).toBeGreaterThan(detailsEnd);
+    expect(followUp).toBeGreaterThan(earlierAnswer);
+    expect(finalAnswer).toBeGreaterThan(followUp);
   });
 
   it("renders accepted follow-up images with the shared sent-media treatment", () => {

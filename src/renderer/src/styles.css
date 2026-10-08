@@ -10954,6 +10954,16 @@ button.sent-attachment-open:focus-visible {
   text-wrap: pretty;
 }
 
+.turn-commentary-row.is-answer,
+.turn-commentary-row.is-answer .response-markdown {
+  color: var(--final-answer-text);
+}
+
+.turn-commentary-row.is-answer .response-markdown {
+  font-size: var(--answer-font-size);
+  line-height: var(--answer-line-height);
+}
+
 .turn-commentary-row .response-markdown.is-plain-stream > p {
   margin: 0;
   overflow-wrap: anywhere;

@@ -86,6 +86,7 @@ export type TurnExecutionStreamEntry =
       message: ChatMessage | null;
       content: string;
       streaming: boolean;
+      answer?: true;
     }
   | {
       kind: "follow-up";
@@ -106,6 +107,21 @@ export type TurnExecutionStreamEntry =
       activities: AgentActivity[];
     };
 
+export function followUpAnswerIds(
+  turn: Pick<ResponseTurn, "followUpMessages" | "commentaryMessages">,
+): Set<string> {
+  const answers = new Set<string>();
+  for (const followUp of turn.followUpMessages) {
+    const askedAt = timestamp(followUp.createdAt);
+    let answer: ChatMessage | undefined;
+    for (const message of turn.commentaryMessages) {
+      if (timestamp(message.createdAt) <= askedAt) answer = message;
+    }
+    if (answer) answers.add(answer.id);
+  }
+  return answers;
+}
+
 interface BuildTurnExecutionStreamOptions {
   liveContent?: string;
   includeImportantActivities?: boolean;
@@ -124,6 +140,7 @@ export function buildTurnExecutionStream(
   options: BuildTurnExecutionStreamOptions = {},
 ): TurnExecutionStreamEntry[] {
   const includeImportant = options.includeImportantActivities ?? true;
+  const answers = followUpAnswerIds(turn);
   const items: Array<
     | {
         kind: "commentary";
@@ -132,6 +149,7 @@ export function buildTurnExecutionStream(
         message: ChatMessage | null;
         content: string;
         streaming: boolean;
+        answer?: true;
         order: number;
       }
     | {
@@ -159,6 +177,7 @@ export function buildTurnExecutionStream(
       message,
       content: message.content,
       streaming: false,
+      ...(answers.has(message.id) ? { answer: true as const } : {}),
       order: 0,
     });
   }

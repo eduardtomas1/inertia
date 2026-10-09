@@ -430,6 +430,11 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await transcript.focus();
     await page.keyboard.press("Alt+ArrowUp");
     await expect(page.locator(".response-turn:focus")).toHaveCount(1);
+    expect(await page.locator(".response-turn:focus").evaluate((element) => ({
+      visible: element.matches(":focus-visible"),
+      width: getComputedStyle(element).outlineWidth,
+      style: getComputedStyle(element).outlineStyle,
+    }))).toEqual({ visible: true, width: "2px", style: "solid" });
     await page.keyboard.press("Alt+Home");
     await expect(page.locator('[data-turn-jump-target="request"]:focus')).toHaveCount(1);
     await page.keyboard.press("Alt+End");

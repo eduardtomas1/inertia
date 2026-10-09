@@ -3,7 +3,7 @@
 .context-compaction-separator { display: flex; align-items: center; gap: 12px; color: var(--text-faint); padding-block: 4px; }
 .context-compaction-separator > span { height: 1px; flex: 1; background: var(--line-soft); }
 .turn-execution-stream .context-compaction-separator, .turn-agent-execution > .context-compaction-separator { margin-block: 8px; }
-.context-compaction-marker { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; line-height: var(--leading-chrome); text-align: center; white-space: nowrap; }
+.context-compaction-marker { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
 .context-compaction-marker > i { font-style: normal; }
 @media (forced-colors: active) {
   .context-compaction-separator > span { background: CanvasText; }

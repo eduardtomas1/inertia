@@ -11299,7 +11299,6 @@ button.sent-attachment-open:hover {
   display: block;
   min-width: 0;
   color: var(--text-faint);
-  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 

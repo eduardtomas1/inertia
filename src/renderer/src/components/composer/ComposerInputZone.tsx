@@ -34,6 +34,7 @@ import {
 } from "../../utils/sidebarModel";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
+import { TooltipButton } from "../ui";
 import {
   RouteRepairIcon,
   routeRepairLabel,
@@ -408,15 +409,15 @@ export function ComposerInputZone({
               </span>
               <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
             </button>
-            <button
+            <TooltipButton
               type="button"
               className="composer-preview-context-dismiss"
               aria-label={previewDismissLabel}
-              title={previewDismissLabel}
+              tooltip={previewDismissLabel}
               onClick={onDismissPreviewContext}
             >
               <X size={14} />
-            </button>
+            </TooltipButton>
           </div>
         )}
         <ComposerAttachmentList

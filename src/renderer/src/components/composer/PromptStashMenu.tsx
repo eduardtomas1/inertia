@@ -4,6 +4,7 @@ import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
 import { readPromptStash, type PromptStashEntry } from "../../utils/promptStash";
 import { menuId } from "./config";
 import type { ComposerMenuController } from "./useComposerMenus";
+import { TooltipButton } from "../ui";
 
 const LegacyPromptStash = lazy(() => import("./LegacyPromptStash"));
 
@@ -52,7 +53,7 @@ export function PromptStashMenu({
   };
   return (
     <div className="popover-anchor prompt-stash-control">
-      <button
+      <TooltipButton
         ref={(node) => setMenuTrigger("stash", node)}
         type="button"
         className="icon-button"
@@ -60,7 +61,7 @@ export function PromptStashMenu({
         aria-haspopup="menu"
         aria-controls={menuId("stash")}
         aria-expanded={menu === "stash"}
-        title={label}
+        tooltip={label}
         onClick={() => { focusLegacy.current = false; toggleMenu("stash"); }}
         onKeyDown={(event) => {
           focusLegacy.current = false;
@@ -68,7 +69,7 @@ export function PromptStashMenu({
         }}
       >
         <Archive size={16} />
-      </button>
+      </TooltipButton>
       {menu === "stash" && (
         <div
           ref={(node) => setMenuPopover("stash", node)}

@@ -5,6 +5,7 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { expectGitStatusInHeader } from "./support/composer-tools";
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
@@ -276,7 +277,7 @@ test("positions a completed answer at the viewport start by default", async () =
     })).toBeLessThanOrEqual(4);
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
-    await expect(page.getByRole("group", { name: "Git actions" })).toBeVisible();
+    await expectGitStatusInHeader(page);
     await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
     const evidence = test.info().outputPath("inertia-final-answer-anchor.png");
     await page.screenshot({ animations: "disabled", path: evidence });

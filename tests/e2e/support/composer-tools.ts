@@ -8,3 +8,10 @@ export async function openComposerTools(scope: Page | Locator): Promise<void> {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
   }
 }
+
+export async function expectGitStatusInHeader(page: Page): Promise<void> {
+  const header = page.locator(".workspace-header");
+  await expect(header.getByRole("group", { name: "Git actions" })
+    .or(header.getByRole("menuitem", { name: "Git actions", includeHidden: true }))
+    .first()).toBeAttached();
+}

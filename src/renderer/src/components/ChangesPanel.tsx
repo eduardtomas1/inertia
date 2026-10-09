@@ -115,6 +115,12 @@ export function changedFileWorkingState(file: ChangedFile): string {
   return "unstaged";
 }
 
+export function changedFileStatusTitle(file: ChangedFile): string {
+  return file.untracked
+    ? changedFileStatusLabel(file)
+    : `${changedFileStatusLabel(file)}, ${changedFileWorkingState(file)}`;
+}
+
 function actionLabel(action: ReviewAction): string {
   if (action === "ask") return "Ask agent";
   if (action === "revise") return "Request revision";
@@ -588,7 +594,7 @@ export function ChangesPanel({
       )}
 
       {files.length === 0 && !fileNavigator ? (
-        <div className="panel-empty changes-empty"><h3>{emptyState?.title ?? "No local changes"}</h3><p>{emptyState?.detail ?? "Edits made in this workspace will appear here."}</p></div>
+        <div className="panel-empty changes-empty"><h3>{emptyState?.title ?? "No local changes"}</h3>{emptyState?.detail && <p>{emptyState.detail}</p>}{onRefresh && <button type="button" className="secondary-button" onClick={onRefresh} disabled={diffBusy}>Refresh</button>}</div>
       ) : (
         <div className="changes-layout">
           {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
@@ -598,13 +604,13 @@ export function ChangesPanel({
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
               const language = sourceLanguageForFile(file.path);
               return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
-                  <span>{changedFileWorkingState(file)}</span>
-                  <span><span className="file-insertions">+{file.insertions}</span> <span className="file-deletions">−{file.deletions}</span></span>
-                  {diffFile && fileReviewed(diffFile) && <Check size={14} aria-label="File reviewed" />}
+                  <span className="file-insertions">+{file.insertions}</span>
+                  <span className="file-deletions">−{file.deletions}</span>
                 </span>
+                {diffFile && fileReviewed(diffFile) && <Check className="change-file-reviewed" size={14} aria-label="File reviewed" />}
               </button>;
             })}
           </nav>}
@@ -638,7 +644,6 @@ export function ChangesPanel({
                     <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => void deleteNote(note)}><Trash2 size={14} /></IconButton>
                   </div>
                 ))}
-                <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
                 {reviewLockReason && <p className="panel-notice diff-review-paused" role="status">{reviewLockMessages[reviewLockReason]}</p>}
                 {!selection && comment && <p className="panel-notice diff-review-held" role="status">The diff changed while it refreshed. Select lines again to continue your draft.</p>}
                 {selectedFile.hunks.map((hunk) => {
@@ -686,6 +691,7 @@ export function ChangesPanel({
                         }}
                         disabled={line.kind === "meta"}
                         aria-disabled={reviewLocked || undefined}
+                        aria-keyshortcuts="Shift+Enter"
                       >
                         <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span><span className="diff-line-content">{line.content || " "}</span>
                       </button>
@@ -743,7 +749,7 @@ export function ChangesPanel({
                 })}
                 {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}
               </div>
-            ) : <div className="panel-empty changes-empty"><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3><p>{selectedPath ? "This file is outside the bounded diff preview. Refresh after reducing the change set." : diffEmptyState?.detail ?? "Choose a changed file to inspect it."}</p></div>}
+            ) : <div className="panel-empty changes-empty"><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3>{selectedPath ? <p>This file is outside the bounded diff preview. Refresh after reducing the change set.</p> : diffEmptyState?.detail && <p>{diffEmptyState.detail}</p>}</div>}
             {diff?.truncated && <p className="panel-notice diff-truncated">This diff is truncated to keep the workspace responsive.</p>}
           </div>
         </div>

@@ -5,7 +5,7 @@ import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, ListChecks,
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
 import { ResponseMarkdown } from "./ResponseMarkdown";
-import { LoadingMark } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 
 export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked" | "cancelled";
 
@@ -91,16 +91,15 @@ export function PlanPanel({
         </div>
         <div className="plan-toolbar-actions">
           {document?.trim() && (
-            <button
-              type="button"
+            <IconButton
               className="plan-copy-button"
+              label={planCopy.error ?? (planCopy.copied ? "Copied plan" : "Copy plan")}
               aria-label={planCopy.copied ? "Copied plan" : "Copy plan"}
-              title={planCopy.error ?? (planCopy.copied ? "Copied plan" : "Copy plan")}
               disabled={planCopy.pending}
               onClick={() => void planCopy.copy(document.trim())}
             >
               {planCopy.copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-            </button>
+            </IconButton>
           )}
           <span className="plan-percent" aria-label={`${progress}% complete`}>{progress}%</span>
         </div>
@@ -136,7 +135,6 @@ export function PlanPanel({
         {steps.length === 0 ? !body && (
           <div className="panel-empty plan-empty">
             <h3>No plan yet</h3>
-            <p>Switch the agent to Plan mode to build a step-by-step approach.</p>
           </div>
         ) : (
           <>

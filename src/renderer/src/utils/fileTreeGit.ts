@@ -76,6 +76,6 @@ export function buildFileTreeGitIndex(state?: FileTreeGitState): FileTreeGitInde
   }
   const notice = limited ? "Git status is partial. Files without badges may still have changes."
     : repositories.length === 0 ? "No Git repository detected. File browsing remains available."
-    : "Git changes from the latest scan. M modified · A added · ? untracked · ! conflict. Refresh to check again.";
+    : "";
   return { files, directories, notice };
 }

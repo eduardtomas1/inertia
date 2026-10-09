@@ -19,6 +19,7 @@ import {
   closeRightPanelSurface,
   EMPTY_RIGHT_PANEL_STATE,
   legacyRightPanelState,
+  moveRightPanelSurface,
   openRightPanelSurface,
   parseRightPanelState,
   RIGHT_PANEL_SIBLING_MIN_WIDTH,
@@ -156,6 +157,7 @@ export interface WorkspacePanelActions extends TerminalDockActions {
   activateSurface: (surface: WorkspacePanelTab) => void;
   closeSurface: (surface: WorkspacePanelTab) => void;
   closeOtherSurfaces: (surface: WorkspacePanelTab) => void;
+  moveSurface: (surface: WorkspacePanelTab, toIndex: number) => void;
   closeAllSurfaces: () => void;
   toggleWorkspaceTools: () => void;
 }
@@ -300,6 +302,8 @@ export function useWorkspaceLayout(
       updatePanel((current) => closeRightPanelSurface(current, surface)),
     closeOtherSurfaces: (surface: WorkspacePanelTab) =>
       updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
+    moveSurface: (surface: WorkspacePanelTab, toIndex: number) =>
+      updatePanel((current) => moveRightPanelSurface(current, surface, toIndex)),
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);

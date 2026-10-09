@@ -120,7 +120,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const address = page.getByRole("textbox", { name: "Preview address" });
   await address.fill(previewUrl);
-  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await address.press("Enter");
   await expect.poll(() => electronApp.evaluate(({ webContents }, url) => webContents.getAllWebContents().some((contents) => contents.getURL() === url), previewUrl)).toBe(true);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Plan");
   await openTerminalDock(page);
@@ -209,7 +209,7 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   const hostilePreviewUrl = `${previewUrl}trusted-overlays`;
   await page.getByRole("textbox", { name: "Preview address" })
     .fill(hostilePreviewUrl);
-  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await page.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await expect.poll(async () => ({
     alerts: await page.getByRole("alert").allTextContents(),
     native: await app.nativePreviewSnapshot(hostilePreviewUrl),
@@ -304,7 +304,7 @@ test("keeps app shortcuts active while the native preview owns focus", async () 
   const focusedPreviewUrl = `${previewUrl}shortcut-focus`;
   await page.getByRole("textbox", { name: "Preview address" })
     .fill(focusedPreviewUrl);
-  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await page.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await expect.poll(
     () => electronApp.evaluate(({ webContents }, url) =>
       webContents.getAllWebContents().some(

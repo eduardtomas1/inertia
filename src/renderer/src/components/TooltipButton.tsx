@@ -32,7 +32,7 @@ export function TooltipButton({
   return (
     <>
       <button ref={setButton} type="button" {...props} {...tooltip.handlers} />
-      {tooltip.open && <Tooltip anchor={button} label={label} />}
+      {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} />}
     </>
   );
 }

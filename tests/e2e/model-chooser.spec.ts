@@ -613,7 +613,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const catalogAx = await modelResults.ariaSnapshot();
   expect(catalogAx).toContain('- grid "Model results"');
   expect(catalogAx).toMatch(/- '?row "/u);
-  expect(catalogAx).toContain('- button "Add Catalog Model');
+  expect(catalogAx).toContain('- button "Pin Catalog Model');
   await searchModels.press("Escape");
   await expect(modelChooser).toBeHidden();
   await resizeWindow(1440, 720);

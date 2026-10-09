@@ -83,7 +83,7 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
 
     for (const size of [
       { width: 1440, height: 920, label: "wide", sheet: false },
-      { width: 900, height: 700, label: "sheet", sheet: true },
+      { width: 860, height: 700, label: "sheet", sheet: true },
       { width: 760, height: 600, label: "compact", sheet: false },
     ]) {
       await resizeWindow(size.width, size.height);

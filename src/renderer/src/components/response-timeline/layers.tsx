@@ -477,7 +477,19 @@ export function SupportingLedgerLayer({
     () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
     [consolidatesSettledWork, turn],
   );
-  if (turn.isActive) return null;
+  if (turn.isActive) {
+    return props.showTimestamps
+      ? (
+          <section
+            className="turn-supporting-ledger"
+            aria-label="Supporting turn ledger"
+            data-turn-layer="supporting-ledger"
+          >
+            <TurnMetadata turn={turn} terminalAnswer={null} showTimestamp />
+          </section>
+        )
+      : null;
+  }
   const includesReasoning = consolidatesSettledWork
     && props.showThinking
     && Boolean(turn.reasoning?.content);
@@ -487,7 +499,9 @@ export function SupportingLedgerLayer({
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
-  if (!turn.terminalAssistantMessage && !showChangedFiles) return null;
+  const showsFooter = turn.terminalAssistantMessage !== null
+    || turn.agentTurn.status !== "completed";
+  if (!showsFooter && !showChangedFiles) return null;
 
   return (
     <section
@@ -495,7 +509,7 @@ export function SupportingLedgerLayer({
       aria-label="Supporting turn ledger"
       data-turn-layer="supporting-ledger"
     >
-      {turn.terminalAssistantMessage && (
+      {showsFooter && (
         <TurnMetadata
           turn={turn}
           terminalAnswer={turn.terminalAssistantMessage}

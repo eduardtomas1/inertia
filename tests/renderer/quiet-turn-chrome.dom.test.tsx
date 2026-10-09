@@ -72,11 +72,13 @@ function turn(
 function messages(agentTurn: AgentTurn, request: string, answer: string): ChatMessage[] {
   return [
     { id: agentTurn.userMessageId, conversationId, turnId: agentTurn.id, role: "user", content: request, attachments: [], createdAt: agentTurn.requestedAt },
-    { id: agentTurn.terminalAssistantMessageId!, conversationId, turnId: agentTurn.id, role: "assistant", content: answer, attachments: [], createdAt: agentTurn.completedAt! },
+    ...(agentTurn.terminalAssistantMessageId
+      ? [{ id: agentTurn.terminalAssistantMessageId, conversationId, turnId: agentTurn.id, role: "assistant" as const, content: answer, attachments: [], createdAt: agentTurn.completedAt! }]
+      : []),
   ];
 }
 
-function timeline(turns: AgentTurn[], providerIdentityLabels?: Record<string, string>) {
+function timeline(turns: AgentTurn[], providerIdentityLabels?: Record<string, string>, showTimestamps = false) {
   return render(<ResponseTimeline
     turns={turns}
     messages={turns.flatMap((agentTurn) => messages(agentTurn, `Request ${agentTurn.id}`, `Answer ${agentTurn.id}`))}
@@ -92,7 +94,7 @@ function timeline(turns: AgentTurn[], providerIdentityLabels?: Record<string, st
     streamingChannel={null}
     approvals={[]}
     inputRequests={[]}
-    showTimestamps={false}
+    showTimestamps={showTimestamps}
     showThinking
     defaultCodeWrap={false}
     autoCollapseWorkLog
@@ -193,5 +195,56 @@ describe("quiet turn chrome", () => {
     const fields = document.getElementById(diagnostics.getAttribute("aria-controls")!)!;
     expect([...fields.querySelectorAll("dt")].map(({ textContent }) => textContent)).toContain("Harness ID");
     expect(fields).toHaveTextContent("codex-app-server");
+  });
+
+  it("keeps a timestamp on turns that end without an answer and on a running turn", () => {
+    timeline([
+      turn("turn-failed", "codex", "2026-09-01T10:00:00.000Z", {
+        status: "failed",
+        terminalReason: "provider-failed",
+        terminalAssistantMessageId: null,
+        startedAt: "2026-09-01T10:00:02.000Z",
+        completedAt: "2026-09-01T10:00:44.000Z",
+      }),
+      turn("turn-stopped", "codex", "2026-09-01T10:01:00.000Z", {
+        status: "cancelled",
+        terminalReason: "user-cancelled",
+        terminalAssistantMessageId: null,
+        startedAt: "2026-09-01T10:01:02.000Z",
+        completedAt: "2026-09-01T10:01:12.000Z",
+      }),
+      turn("turn-running", "codex", "2026-09-01T10:02:00.000Z", {
+        status: "running",
+        terminalReason: null,
+        terminalAssistantMessageId: null,
+        startedAt: "2026-09-01T10:02:02.000Z",
+        completedAt: null,
+      }),
+    ], undefined, true);
+
+    const failed = within(turnElement("turn-failed")).getByRole("contentinfo");
+    expect(failed.querySelector("time")).toHaveAttribute("dateTime", "2026-09-01T10:00:44.000Z");
+    expect(failed.querySelector('[data-turn-status="failed"]')).toHaveTextContent("Failed");
+    expect(within(failed).getByRole("button", { name: "Run details" })).toBeInTheDocument();
+    expect(within(failed).queryByRole("button", { name: /Copy/u })).toBeNull();
+
+    const stopped = within(turnElement("turn-stopped")).getByRole("contentinfo");
+    expect(stopped.querySelector("time")).toHaveAttribute("dateTime", "2026-09-01T10:01:12.000Z");
+    expect(stopped.querySelector('[data-turn-status="cancelled"]')).toHaveTextContent("Stopped");
+
+    const running = within(turnElement("turn-running")).getByRole("contentinfo");
+    expect(running.querySelector("time")).toHaveAttribute("dateTime", "2026-09-01T10:02:02.000Z");
+    expect(running.querySelector("[data-turn-status]")).toBeNull();
+    expect(within(running).queryByRole("button", { name: "Run details" })).toBeNull();
+  });
+
+  it("adds no footer to a running turn while message timestamps are off", () => {
+    timeline([turn("turn-running-quiet", "codex", "2026-09-01T10:02:00.000Z", {
+      status: "running",
+      terminalReason: null,
+      terminalAssistantMessageId: null,
+      completedAt: null,
+    })]);
+    expect(within(turnElement("turn-running-quiet")).queryByRole("contentinfo")).toBeNull();
   });
 });

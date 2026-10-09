@@ -229,6 +229,17 @@ export function TurnMetadata({
     setDetailsExpanded(workDetailsExpandedByDefault === true);
   }, [workDetailsExpandedByDefault]);
   const completed = agentTurn.status === "completed";
+  const time = terminalAnswer?.createdAt
+    ?? (turn.isActive ? turn.startedAt ?? turn.requestedAt : turn.completedAt ?? turn.requestedAt);
+  if (turn.isActive) {
+    return (
+      <footer className="turn-meta" aria-label="Turn time">
+        <div className="turn-meta-primary">
+          <time dateTime={time} title={formatFullDateTime(time)}>{formatMessageTime(time)}</time>
+        </div>
+      </footer>
+    );
+  }
   return (
     <footer
       className="turn-meta"
@@ -239,8 +250,8 @@ export function TurnMetadata({
         {terminalAnswer && (
           <CopyAnswerButton content={terminalAnswer.content} answerId={terminalAnswer.id} ariaLabel="Copy final answer" />
         )}
-        {showTimestamp && terminalAnswer && (
-          <time dateTime={terminalAnswer.createdAt} title={formatFullDateTime(terminalAnswer.createdAt)}>{formatMessageTime(terminalAnswer.createdAt)}</time>
+        {showTimestamp && (
+          <time dateTime={time} title={formatFullDateTime(time)}>{formatMessageTime(time)}</time>
         )}
         {!completed && <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>}
         <span className="turn-duration" data-turn-status={completed ? agentTurn.status : undefined}>{presentation.durationLabel}</span>

@@ -244,6 +244,24 @@ describe("Quiet Ledger user request layer", () => {
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
   });
 
+  it("moves the request time into the turn footer when the turn ends without an answer", () => {
+    const html = renderRequest("Run the checks.", {
+      turn: {
+        status: "failed",
+        terminalReason: "provider-failed",
+        completedAt: "2026-07-23T10:00:02.000Z",
+      },
+    });
+    const request = html.slice(
+      html.indexOf('data-turn-layer="user-request"'),
+      html.indexOf("</article>"),
+    );
+
+    expect(request).not.toContain("<time");
+    expect(html).toMatch(/<footer class="turn-meta"[^>]*>[\s\S]*<time dateTime="2026-07-23T10:00:02.000Z"/u);
+    expect(html).toContain('data-turn-status="failed">Failed</span>');
+  });
+
   it("labels historical documents truthfully without exposing their private path", () => {
     const html = renderRequest("Review the attached brief.", {
       attachment: {

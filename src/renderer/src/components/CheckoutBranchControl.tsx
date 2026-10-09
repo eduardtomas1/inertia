@@ -13,7 +13,7 @@ export type { CheckoutBranchControlModel } from "./checkoutBranchControlModel";
 
 const CheckoutBranchMenuButton = lazy(() => import("./CheckoutBranchMenuButton"));
 
-const CheckoutBranchControlContext = createContext<CheckoutBranchControlModel | null>(null);
+export const CheckoutBranchControlContext = createContext<CheckoutBranchControlModel | null>(null);
 
 export function CheckoutBranchControlProvider({
   value,

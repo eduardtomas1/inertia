@@ -154,8 +154,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await setWorkspaceTools(false);
 
     const dock = page.getByRole("region", { name: "Message composer" });
-    await expect(dock.getByRole("group", { name: "Chat checkout context" }))
-      .toContainText(expectedCheckoutLabel);
+    const checkoutStrip = dock.getByRole("group", { name: "Chat checkout context" });
+    if (expectedCheckoutLabel === "Detached HEAD") await expect(checkoutStrip).toContainText(expectedCheckoutLabel);
+    else await expect(checkoutStrip).toHaveCount(0);
     await expectComposerEndsAtDock(dock);
     await expectComposerReadinessContained(dock);
     const model = dock.getByRole("button", { name: /^Choose model\./u });
@@ -287,9 +288,13 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.inputPaddingBlock).toBe("15px 4px");
     expect(wideGeometry.toolbarBorderTop).toBe("0px");
     expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
-    expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
-    expect(wideGeometry.checkoutText).toContain("Current checkout");
-    expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
+    expect(wideGeometry.toolbarGroups).toEqual(["options", "actions"]);
+    if (expectedCheckoutLabel === "Detached HEAD") {
+      expect(wideGeometry.checkoutText).toContain("Current checkout");
+      expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
+    } else {
+      expect(wideGeometry.checkoutText).toBe("");
+    }
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);

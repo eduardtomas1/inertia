@@ -1,7 +1,7 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useContext, useId, useState } from "react";
 import {
   ChevronDown,
-  Folder,
+  Ellipsis,
   FolderGit2,
   MessagesSquare,
   Paperclip,
@@ -37,7 +37,9 @@ import {
   contextUsageQualityForTurn,
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
-import { CheckoutBranchSlot } from "../CheckoutBranchControl";
+import { CheckoutBranchControlContext, CheckoutBranchSlot } from "../CheckoutBranchControl";
+import { conversationContextMismatch } from "../../lib/newConversation";
+import { layoutStorage } from "../../utils/layoutStorage";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
@@ -72,6 +74,28 @@ const SnapshotControl = lazy(async () => ({ default: (await import("./SnapshotCo
 const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
+
+const COMPOSER_TOOLS_STORAGE_KEY = "inertia:composer-tools:v1";
+const COMPOSER_TOOL_MENUS: ReadonlySet<string> = new Set(["presets", "stash", "action"]);
+
+export function composerCheckoutStripVisible({
+  showCheckoutContext,
+  scratchWorkspace,
+  newChatProjectPicker,
+  worktreePath,
+  checkoutDiffers,
+}: {
+  showCheckoutContext: boolean;
+  scratchWorkspace: boolean;
+  newChatProjectPicker: boolean;
+  worktreePath: string | null;
+  checkoutDiffers: boolean;
+}): boolean {
+  if (!showCheckoutContext) return false;
+  if (newChatProjectPicker) return true;
+  if (scratchWorkspace) return false;
+  return Boolean(worktreePath) || checkoutDiffers;
+}
 
 export function composerCheckoutBranch(
   conversation: Pick<Conversation, "branch" | "worktreePath">,
@@ -248,6 +272,21 @@ export function ComposerToolbar({
     handleComposerMenuNavigation,
     handleComposerMenuTriggerKeyDown,
   } = menuController;
+  const checkoutModel = useContext(CheckoutBranchControlContext);
+  const checkoutGitStatus = checkoutModel?.gitStatus ?? null;
+  const checkoutStripVisible = composerCheckoutStripVisible({
+    showCheckoutContext,
+    scratchWorkspace,
+    newChatProjectPicker: Boolean(newChatProjectPicker),
+    worktreePath: conversation.worktreePath,
+    checkoutDiffers: Boolean(checkoutGitStatus?.isRepository && (
+      checkoutGitStatus.branch === null
+      || conversationContextMismatch(checkoutModel?.project ?? null, conversation, checkoutGitStatus)
+    )),
+  });
+  const toolsId = useId();
+  const [toolsOpen, setToolsOpen] = useState(() => layoutStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open");
+  const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
   return (
     <div
       className="composer-toolbar"
@@ -338,6 +377,35 @@ export function ComposerToolbar({
               conversationUpdatePending={conversationUpdatePending}
             />
           </Suspense>
+        </div>
+        {attachmentImporting && (
+          <span className="provider-status is-ready" role="status">
+            <LoadingMark size={14} aria-hidden="true" />
+            <span>Adding attachments…</span>
+          </span>
+        )}
+        <Suspense fallback={null}>
+          <ComposerSkillsMenu
+            skills={skills}
+            capability={skillsCapability}
+            loading={skillsLoading}
+            error={skillsError}
+            completion={skillQuery}
+            listboxId={skillListboxId}
+            activeSkillId={activeSkillId}
+            disabled={disabled}
+            running={running}
+            menuController={menuController}
+            onList={onListSkills}
+            onInsert={onInsertSkill}
+          />
+        </Suspense>
+        <div id={toolsId} className="composer-more-tools" hidden={!toolsVisible}>
+        <div
+          className="composer-tools"
+          role="group"
+          aria-label="Add context"
+        >
           {selectedProvider?.agentThreadManagement && (
             <span
               className={clsx(
@@ -353,18 +421,6 @@ export function ComposerToolbar({
               <span>Chat tools</span>
             </span>
           )}
-        </div>
-        <div
-          className="composer-tools"
-          role="group"
-          aria-label="Add context"
-        >
-        {attachmentImporting && (
-          <span className="provider-status is-ready" role="status">
-            <LoadingMark size={14} aria-hidden="true" />
-            <span>Adding attachments…</span>
-          </span>
-        )}
         {promptPresetsEnabled && (
           <Suspense fallback={null}>
             <PromptPresetMenu
@@ -407,22 +463,6 @@ export function ComposerToolbar({
             />
           </Suspense>
         )}
-        <Suspense fallback={null}>
-          <ComposerSkillsMenu
-            skills={skills}
-            capability={skillsCapability}
-            loading={skillsLoading}
-            error={skillsError}
-            completion={skillQuery}
-            listboxId={skillListboxId}
-            activeSkillId={activeSkillId}
-            disabled={disabled}
-            running={running}
-            menuController={menuController}
-            onList={onListSkills}
-            onInsert={onInsertSkill}
-          />
-        </Suspense>
         {actions.length > 0 ? (
           <div className="popover-anchor composer-action-control">
             <button
@@ -476,6 +516,21 @@ export function ComposerToolbar({
           </div>
         ) : null}
         </div>
+        </div>
+        <IconButton
+          label="More tools"
+          className="composer-tools-toggle"
+          aria-expanded={toolsVisible}
+          aria-controls={toolsId}
+          onClick={() => {
+            const next = !toolsVisible;
+            if (!next && menu !== null && COMPOSER_TOOL_MENUS.has(menu)) dismissMenu("context-change");
+            setToolsOpen(next);
+            layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, next ? "open" : "closed");
+          }}
+        >
+          <Ellipsis size={16} />
+        </IconButton>
         <div
           className="composer-actions"
           role="group"
@@ -500,7 +555,6 @@ export function ComposerToolbar({
             onModeChange={onUsageDisplayModeChange}
           />
         ) : null}
-
         </div>
       </div>
       <div className="composer-input-actions" role="group" aria-label="Message actions">
@@ -529,7 +583,7 @@ export function ComposerToolbar({
           />
         </Suspense>
       </div>
-      {showCheckoutContext && (
+      {checkoutStripVisible && (
         <div
           className="composer-checkout-strip"
           role="group"
@@ -539,8 +593,8 @@ export function ComposerToolbar({
             <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
-              {scratchWorkspace ? <Folder size={14} aria-hidden="true" /> : <FolderGit2 size={14} aria-hidden="true" />}
-              <span>{scratchWorkspace ? "Chat folder" : conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+              <FolderGit2 size={14} aria-hidden="true" />
+              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}
           {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}

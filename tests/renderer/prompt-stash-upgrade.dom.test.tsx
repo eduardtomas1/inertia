@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Composer } from "../../src/renderer/src/components/composer/Composer";
 import { addPromptStashEntry, readPromptStash, writePromptStash } from "../../src/renderer/src/utils/promptStash";
-import { composerProps, conversation } from "./composer-fixtures";
+import { composerProps, conversation, openComposerTools } from "./composer-fixtures";
 
 const bridge = window.inertia;
 
@@ -19,6 +19,7 @@ it("keeps a prompt saved by v0.0.54 accessible after upgrading", async () => {
   const entries = addPromptStashEntry([], text, chat.modelSelection);
   writePromptStash(window.localStorage, entries);
   render(<Composer {...composerProps(chat)} />);
+  openComposerTools();
   fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
   expect(await screen.findByText(text)).toBeInTheDocument();
   // The upgrade must not silently assign a legacy prompt to this chat.
@@ -37,6 +38,7 @@ it.each([true, "reject"])("copies legacy text explicitly without changing either
   window.inertia = { ...bridge, copyText };
   render(<Composer {...composerProps(chat)} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Unfinished current draft" } });
+  openComposerTools();
   fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
   expect(copyText).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole("menuitem", { name: /^Keep my old prompt/u }));

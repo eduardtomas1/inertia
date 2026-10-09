@@ -358,10 +358,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     timeout: 10_000,
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Git actions" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {
@@ -396,10 +394,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   }, MODEL_FAVORITES_STORAGE_KEY);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Git actions" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {

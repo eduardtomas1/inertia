@@ -130,7 +130,7 @@ test("shows project-free chats, the selector and the palette entries in both the
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(page.getByRole("heading", { name: "Plan a relaxed weekend", level: 1 })).toBeVisible();
     await expect(page.getByRole("heading", { name: "No project 4", exact: true })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveText("Chat folder");
+    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
     await expandSection(page, "done");
     await expandSection(page, "no-project-done");
     await expandSection(page, "no-project-snoozed");

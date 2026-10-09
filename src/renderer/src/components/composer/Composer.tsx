@@ -944,6 +944,7 @@ export const Composer = memo(function Composer({
       >
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
+        <div className="composer-queue-slot" />
         {limitResetRow}
         {goal && (
           <Suspense fallback={null}>
@@ -996,7 +997,7 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
-          running={running} imageInputUnavailable={imageInputUnavailableReason !== null}
+          running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
           stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
           submissionPending={submissionPending}
           followUpPending={followUpPending}

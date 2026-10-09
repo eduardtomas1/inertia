@@ -7,6 +7,7 @@ import {
   continuationIdentityForSelection,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   closeWorkspaceTools,
@@ -543,6 +544,7 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       contentType: "image/png",
     });
 
+    await openComposerTools(composer);
     await resizeWindow(744, 800);
     const compactMore = composer.getByRole("button", {
       name: "More composer options",

@@ -79,7 +79,7 @@ export interface ComposerInputZoneProps {
   onQueue: () => void;
   running: boolean;
   stopsBeforeSending: boolean;
-  imageInputUnavailable: boolean;
+  hasHistory: boolean;
   submissionPending: boolean;
   followUpPending: boolean;
   typedMessageLimit: number;
@@ -142,7 +142,7 @@ export function ComposerInputZone({
   onQueue,
   running,
   stopsBeforeSending,
-  imageInputUnavailable,
+  hasHistory,
   submissionPending,
   followUpPending,
   typedMessageLimit,
@@ -580,9 +580,7 @@ export function ComposerInputZone({
             ? "Enter stops and sends · Tab queues"
             : running
             ? "Enter sends · Tab queues"
-            : imageInputUnavailable
-              ? "Ask for follow-up changes"
-              : "Ask for follow-up changes or attach images"}
+            : hasHistory ? "Follow up" : "Message"}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">

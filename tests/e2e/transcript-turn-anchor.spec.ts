@@ -276,9 +276,8 @@ test("positions a completed answer at the viewport start by default", async () =
     })).toBeLessThanOrEqual(4);
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
-    const checkout = page.getByRole("group", { name: "Chat checkout context" });
-    await expect(checkout).toBeVisible();
-    await expect(checkout.getByText(/^Checking/u)).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Git actions" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
     const evidence = test.info().outputPath("inertia-final-answer-anchor.png");
     await page.screenshot({ animations: "disabled", path: evidence });
     await test.info().attach("inertia-final-answer-anchor", {

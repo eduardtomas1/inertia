@@ -178,14 +178,18 @@ export async function exerciseComposerQueue({
       const dockBounds = element.getBoundingClientRect();
       const queueBounds = element.querySelector<HTMLElement>(".composer-queue")
         ?.getBoundingClientRect();
+      const inputBounds = element.querySelector<HTMLElement>("textarea")
+        ?.getBoundingClientRect();
       return {
-        queueAboveDock: Boolean(queueBounds && queueBounds.bottom <= dockBounds.top),
+        queueInsideTop: Boolean(queueBounds && inputBounds
+          && queueBounds.top >= dockBounds.top
+          && queueBounds.bottom <= inputBounds.top),
         queueFitsDock: Boolean(queueBounds
           && queueBounds.left >= dockBounds.left - 1
           && queueBounds.right <= dockBounds.right + 1),
         dockFits: element.scrollWidth <= element.clientWidth + 1,
       };
-    })).toEqual({ queueAboveDock: true, queueFitsDock: true, dockFits: true });
+    })).toEqual({ queueInsideTop: true, queueFitsDock: true, dockFits: true });
     await capture("composer-queue-light-default-1440x920");
   } finally {
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {

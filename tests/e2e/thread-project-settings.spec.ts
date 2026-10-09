@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { defaultProjectPreferences, type ProjectPreferences } from "../../src/shared/project-preferences";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app: AppFixture;
@@ -159,6 +160,7 @@ test("scratch prompts belong only to their original chat, including after restar
   await expect(owner).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Review the authentication tests before the next change.");
+  await openComposerTools(page);
   await page.getByRole("button", { name: "Scratch prompts", exact: true }).click();
   await page.getByRole("menuitem", { name: /Save current prompt/u }).click();
   await page.getByRole("button", { name: "Scratch prompts, 1 saved", exact: true }).click();

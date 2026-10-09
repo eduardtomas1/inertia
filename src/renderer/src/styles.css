@@ -3940,9 +3940,9 @@ button.turn-agents-line:hover {
 }
 
 .send-button:disabled {
-  border-color: var(--line);
-  color: var(--text-muted);
-  background: var(--fill);
+  border-color: transparent;
+  color: var(--accent-text);
+  background: var(--accent);
   box-shadow: none;
   filter: none;
   opacity: var(--disabled-opacity);

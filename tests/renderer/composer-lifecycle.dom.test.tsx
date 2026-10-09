@@ -42,7 +42,7 @@ import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 
-import { composerProps, conversation, deferred, provider } from "./composer-fixtures";
+import { composerProps, conversation, deferred, openComposerTools, provider } from "./composer-fixtures";
 
 function attachment(id: string): ChatAttachment {
   return {
@@ -105,6 +105,7 @@ describe("composer asynchronous ownership", () => {
       });
     };
     fireEvent.change(input, { target: { value: "Owned scratch prompt" } });
+    openComposerTools();
     fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Save current prompt/u }));
     expect(input).toHaveFocus();
@@ -434,6 +435,7 @@ describe("composer asynchronous ownership", () => {
 
     expect(input.compareDocumentPosition(toolbar)
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    openComposerTools(toolbar);
     expect(within(toolbar).getByRole("group", { name: "Add context" }))
       .toBeInTheDocument();
     expect(within(toolbar).getByRole("group", {
@@ -1141,6 +1143,7 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
 
     fireEvent.change(input, { target: { value: "Stash this Fast prompt" } });
+    openComposerTools();
     fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Save current prompt/u }));
     expect(readPromptStash(window.localStorage, current.id)[0]?.route.fastMode).toBe(true);
@@ -2248,6 +2251,7 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
 
     fireEvent.change(input, { target: { value: "Temporary unfinished draft" } });
+    openComposerTools();
     fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(screen.getByRole("menuitem", {
       name: /Save current prompt/u,
@@ -2302,6 +2306,7 @@ describe("composer asynchronous ownership", () => {
     });
     fireEvent.change(primaryInput, { target: { value: "Primary draft" } });
     fireEvent.change(secondaryInput, { target: { value: "Secondary draft" } });
+    openComposerTools(secondaryPane);
 
     fireEvent.click(within(secondaryPane).getByRole("button", {
       name: "Prompt presets, 1 saved",

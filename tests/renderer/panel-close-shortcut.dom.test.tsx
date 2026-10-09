@@ -89,6 +89,39 @@ describe("closing the active panel tab from the keyboard", () => {
     expect(secondary.closes).toEqual(["secondary", "secondary"]);
   });
 
+  it("does nothing when focus is in a pane whose panel is closed", () => {
+    const primary = pane("primary");
+    const secondary = pane("secondary");
+    secondary.root.querySelector(".workspace-panel")!.setAttribute("hidden", "");
+    dispose = installGlobalShortcuts(window, actions(), "darwin");
+
+    expect(press(secondary.input, { metaKey: true }).defaultPrevented).toBe(false);
+    expect(primary.closes).toEqual([]);
+    expect(secondary.closes).toEqual([]);
+    secondary.root.querySelector(".workspace-panel")!.remove();
+    expect(press(secondary.input, { metaKey: true }).defaultPrevented).toBe(false);
+    expect(primary.closes).toEqual([]);
+  });
+
+  it("treats an open native dialog as a modal", () => {
+    const primary = pane("primary");
+    dispose = installGlobalShortcuts(window, actions(), "darwin");
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.append(dialog);
+    expect(press(primary.input, { metaKey: true }).defaultPrevented).toBe(false);
+    expect(primary.closes).toEqual([]);
+  });
+
+  it("matches the typed W rather than the physical key", () => {
+    const primary = pane("primary");
+    dispose = installGlobalShortcuts(window, actions(), "darwin");
+    expect(press(primary.input, { metaKey: true, key: ",", code: "KeyW" }).defaultPrevented).toBe(false);
+    expect(primary.closes).toEqual([]);
+    expect(press(primary.input, { metaKey: true, key: "w", code: "KeyZ" }).defaultPrevented).toBe(true);
+    expect(primary.closes).toEqual(["primary"]);
+  });
+
   it("does nothing inside a terminal, under a modal, or with no tab to close", () => {
     const primary = pane("primary");
     const terminal = document.createElement("div");

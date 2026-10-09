@@ -609,8 +609,8 @@ export function ChangesPanel({
                 <span className="change-file-stats">
                   <span className="file-insertions">+{file.insertions}</span>
                   <span className="file-deletions">−{file.deletions}</span>
-                  {diffFile && fileReviewed(diffFile) && <Check size={14} aria-label="File reviewed" />}
                 </span>
+                {diffFile && fileReviewed(diffFile) && <Check className="change-file-reviewed" size={14} aria-label="File reviewed" />}
               </button>;
             })}
           </nav>}

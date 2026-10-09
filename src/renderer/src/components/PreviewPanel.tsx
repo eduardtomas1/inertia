@@ -303,7 +303,7 @@ export function PreviewPanel({
             aria-label="Preview address"
             aria-invalid={Boolean(validationError)}
             aria-describedby={validationError ? "preview-url-error" : undefined}
-            placeholder="localhost:3000 or https://example.com"
+            placeholder="localhost:3000"
             spellCheck={false}
             autoCapitalize="none"
             autoCorrect="off"

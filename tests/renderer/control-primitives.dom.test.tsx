@@ -117,7 +117,8 @@ describe("field primitives", () => {
     for (const field of [".setting-input", ".setting-select", ".commit-dialog > label input", ".multi-spawn-prompt-zone textarea"]) {
       expect(fields?.fields).toContain(field);
     }
-    expect(fields?.wraps).toContain(".preview-address-form");
+    expect(fields?.wraps).toContain(".file-search-wrap");
+    expect(css).toMatch(/^\.preview-address-form:focus-within \{ box-shadow: inset 0 0 0 1px var\(--accent\); \}/mu);
     expect(css).not.toMatch(/--shadow-focus|--focus-ring-soft/u);
     expect(css).toMatch(/^::placeholder \{\n  color: var\(--text-muted\);/mu);
   });

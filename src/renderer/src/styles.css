@@ -5860,10 +5860,6 @@ button.turn-agents-line:hover {
   white-space: nowrap;
 }
 
-.panel-tab > [role="tab"]:focus-visible {
-  outline-offset: -2px;
-}
-
 .panel-tab:is(.is-active, .active) > [role="tab"] {
   font-weight: 500;
 }
@@ -6713,7 +6709,8 @@ button.turn-agents-line:hover {
 .change-file-copy, .file-entry-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
 .change-file-name, .file-entry-name { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .change-file-path, .file-entry-path { overflow: hidden; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.change-file-stats { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 4px; margin-left: auto; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.change-file-reviewed { flex: 0 0 auto; color: var(--text-muted); }
+.change-file-stats { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; margin-left: auto; font-size: var(--text-xs); font-variant-numeric: tabular-nums; line-height: var(--leading-heading); }
 
 .workspace-repository-list {
   background: var(--surface);
@@ -7176,6 +7173,7 @@ button.turn-agents-line:hover {
 .diff-review-toolbar .icon-button { width: 27px; height: 27px; }
 .diff-file-review-heading { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font: var(--text-xs)/var(--leading-chrome) var(--font-sans); }
 .diff-file-review-heading > span { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.diff-file-review-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .diff-file-review-heading small { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
 .diff-file-review-heading button, .diff-hunk-actions button, .diff-review-note > button { display: inline-flex; min-height: 25px; align-items: center; gap: 4px; padding: 0 7px; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--fill); font-size: var(--text-xs); white-space: nowrap; }
 .diff-file-review-heading button.is-reviewed, .diff-hunk-actions button.is-reviewed { color: var(--accent-strong); background: var(--fill); }

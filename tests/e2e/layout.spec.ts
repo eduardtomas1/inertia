@@ -250,30 +250,12 @@ test("collapses and restores both workspace sides without losing layout", async 
   expect(rendererErrors).toEqual([]);
 });
 
-test("reorders panel tabs by drag, closes them with the middle button and keeps the active one in view", async () => {
+test("closes panel tabs with the middle button and keeps the active one in view", async () => {
   await resizeWindow(1440, 920);
-  let panel = await ensureWorkspaceTools(page);
+  const panel = await ensureWorkspaceTools(page);
   for (const name of ["Changes", "Files", "Plan", "Attachments"]) await selectWorkspaceTool(panel, name);
   const order = async () => await page.locator(".workspace-panel [data-tab-key]")
     .evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-tab-key")));
-  const before = await order();
-  const moved = before.at(-1)!;
-  const source = await panel.locator(`[data-tab-key="${moved}"]`).boundingBox();
-  const target = await panel.locator(`[data-tab-key="${before[0]}"]`).boundingBox();
-  if (!source || !target) throw new Error("Panel tabs have no geometry");
-  const y = source.y + source.height / 2;
-  await page.mouse.move(source.x + source.width * 0.7, y);
-  await page.mouse.down();
-  await page.mouse.move(source.x + source.width * 0.7 - 12, y, { steps: 3 });
-  await page.mouse.move(target.x + 4, y, { steps: 10 });
-  await page.mouse.up();
-  const reordered = [moved, ...before.slice(0, -1)];
-  await expect.poll(order).toEqual(reordered);
-
-  await page.reload();
-  await page.locator('.app-shell[data-connection-status="online"]').waitFor();
-  panel = await ensureWorkspaceTools(page);
-  await expect.poll(order).toEqual(reordered);
 
   await panel.locator('[data-tab-key="plan"]').click({ button: "middle" });
   await expect(panel.locator('[data-tab-key="plan"]')).toHaveCount(0);

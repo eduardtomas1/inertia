@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -120,5 +122,12 @@ describe("Changes repository actions", () => {
     sizes.actionsScroll = 420;
     render(actionsRow());
     expect(screen.getByRole("button", { name: "More actions for inertia" })).toBeInTheDocument();
+  });
+
+  it("keeps the counts in the row name while the open action covers them", () => {
+    const css = readFileSync("src/renderer/src/styles.css", "utf8");
+    const rule = /\.workspace-repository-files > li:is\(:hover, :focus-within\) \.workspace-repository-file-stats \{(?<body>[^}]*)\}/u.exec(css)?.groups?.body ?? "";
+    expect(rule).toContain("opacity: 0");
+    expect(rule).not.toContain("visibility");
   });
 });

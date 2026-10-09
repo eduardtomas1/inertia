@@ -7021,7 +7021,7 @@ button.turn-agents-line:hover {
 }
 
 .workspace-repository-files > li:is(:hover, :focus-within) .workspace-repository-file-stats {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .workspace-repository-files .icon-button {

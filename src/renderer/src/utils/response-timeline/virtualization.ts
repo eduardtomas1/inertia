@@ -389,6 +389,45 @@ function estimateActivityGroupHeight(
   return 28 + visibleRows.length * 26 + (hiddenRunning > 0 ? 28 : 0);
 }
 
+const FAILURE_PROVIDER_FACTS = /^(?:reason|phase|exit code|signal|terminal event|turn|activity|cleanup|last protocol method):/iu;
+const FAILURE_CAUSE_FIELDS = /^(?:cause|error|stack):/iu;
+
+function estimateFailurePanelHeight(
+  activity: AgentActivity,
+  availableWidth: number,
+): number {
+  let providerFacts = 0;
+  let causeLines = 0;
+  let contextLines = 0;
+  let inContext = false;
+  let inStack = false;
+  for (const line of (activity.detail ?? "").replace(/\r\n?/gu, "\n").trim().split("\n")) {
+    const trimmed = line.trim();
+    if (/^Recent provider context:$/iu.test(trimmed)) {
+      inContext = true;
+      inStack = false;
+    } else if (!inContext && FAILURE_PROVIDER_FACTS.test(trimmed)) {
+      providerFacts += 1;
+      inStack = false;
+    } else if (!inContext && FAILURE_CAUSE_FIELDS.test(trimmed)) {
+      causeLines += 1;
+      inStack = /^stack:/iu.test(trimmed);
+    } else if (!inContext && inStack) {
+      causeLines += 1;
+    } else if (trimmed || contextLines > 0) {
+      contextLines += 1;
+    }
+  }
+  const factsHeight = (rows: number): number => rows > 0 ? 16 + rows * 21 : 0;
+  const factsGrid = availableWidth <= 664
+    ? factsHeight(8) + (providerFacts > 0 ? 12 + factsHeight(providerFacts) : 0)
+    : Math.max(factsHeight(8), factsHeight(providerFacts));
+  const block = (lines: number): number => lines > 0
+    ? 12 + 20 + Math.min(220, 16 + lines * 17)
+    : 0;
+  return 8 + 28 + 12 + factsGrid + block(causeLines) + block(contextLines) + 29;
+}
+
 function estimateExpandedWorkHeight(
   turn: ResponseTurn,
   columns: number,
@@ -473,7 +512,8 @@ function estimateTurnRowSize(
   const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
   const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
   const importantHeight = estimateActivityGroupHeight(
-    turn.importantActivities,
+    turn.importantActivities.filter((activity) =>
+      activity.kind !== "error" || activity.status !== "failed"),
     false,
   ) + (
     turn.agentTurn.status === "failed"
@@ -483,11 +523,15 @@ function estimateTurnRowSize(
       : 0
   );
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const failureActivities = turn.importantActivities.filter((activity) =>
+    activity.kind === "error" && activity.status === "failed");
   const settledFailureFolded = !turn.isActive
     && !options.workDetailsExpanded
-    && (turn.agentTurn.status === "failed"
-      || turn.importantActivities.some((activity) =>
-        activity.kind === "error" && activity.status === "failed"));
+    && (turn.agentTurn.status === "failed" || failureActivities.length > 0);
+  const openFailureHeight = turn.isActive || settledFailureFolded
+    ? 0
+    : failureActivities.reduce((total, activity) =>
+      total + estimateFailurePanelHeight(activity, availableWidth), 0);
   let settledExchangeHeight = 0;
   if (!turn.isActive) {
     settledExchangeHeight = activeFollowUpHeight;
@@ -504,7 +548,7 @@ function estimateTurnRowSize(
     : consolidatesSettledWork
       ? 0
       : 30
-        + (settledFailureFolded ? 0 : importantHeight)
+        + (settledFailureFolded ? 0 : importantHeight + openFailureHeight)
         + settledExchangeHeight;
   const expandedWorkHeight = (
     options.workDetailsExpanded
@@ -535,6 +579,7 @@ function estimateTurnRowSize(
     ? (turn.providerChanged ? 26 : 0) + estimateMarkdownHeight(answerContent, answerColumns)
     : 0;
   const metadataHeight = turn.terminalAssistantMessage
+    || (!turn.isActive && turn.agentTurn.status !== "completed")
     ? 33 + (options.runDetailsExpanded
       ? 34
       : 0)

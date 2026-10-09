@@ -675,10 +675,46 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(approvalItem)).toBeGreaterThan(baseEstimate + 100);
     expect(estimateTimelineRowSize(questionItem)).toBeGreaterThan(baseEstimate + 180);
     expect(estimateTimelineRowSize(failedItem)).toBe(estimateTimelineRowSize(failedBase));
-    const openedFailureDelta = estimateTimelineRowSize(failedItem, { workDetailsExpanded: true })
-      - estimateTimelineRowSize(failedBase, { workDetailsExpanded: true });
-    expect(openedFailureDelta).toBeGreaterThan(0);
-    expect(openedFailureDelta).toBeLessThanOrEqual(80);
+    const opened = { workDetailsExpanded: true };
+    expect(estimateTimelineRowSize(failedItem, opened))
+      .toBeGreaterThan(estimateTimelineRowSize(failedBase, opened));
+    const answered = Array.from({ length: 6 }, () =>
+      "The verification stopped at one actionable renderer failure.").join("\n\n");
+    const answeredBase = buildItem({ id: "answered-base", status: "failed", answer: answered });
+    const diagnosedItem = buildItem({
+      id: "diagnosed",
+      status: "failed",
+      answer: answered,
+      activities: [activity("diagnosed-error", "diagnosed", {
+        kind: "error",
+        title: "The provider connection closed before verification completed.",
+        status: "failed",
+        detail: [
+          "Reason: transport-closed",
+          "Phase: running",
+          "Exit code: 17",
+          "Signal: not reported",
+          "Terminal event: not received",
+          "Activity: renderer-verification",
+          "Cleanup: confirmed",
+          "Cause: RPC transport closed",
+          "Stack:",
+          "    at verify (<workspace>/src/renderer/verification.ts:41:9)",
+          "",
+          "Recent provider context:",
+          "Renderer assertion 17 did not settle before the transport closed.",
+          "The diagnostic tail was retained after redaction.",
+        ].join("\n"),
+      })],
+    });
+    expect(estimateTimelineRowSize(diagnosedItem)).toBe(estimateTimelineRowSize(answeredBase));
+    const openPanel = estimateTimelineRowSize(diagnosedItem, opened)
+      - estimateTimelineRowSize(answeredBase, opened);
+    expect(openPanel).toBeGreaterThanOrEqual(420);
+    expect(openPanel).toBeLessThanOrEqual(506);
+    const narrowPanel = estimateTimelineRowSize(diagnosedItem, { ...opened, availableWidth: 600 })
+      - estimateTimelineRowSize(answeredBase, { ...opened, availableWidth: 600 });
+    expect(narrowPanel).toBeGreaterThan(openPanel + 100);
   });
 
   it("does not reserve a hidden row for an expected non-Git artifact absence", () => {

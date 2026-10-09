@@ -28,6 +28,7 @@ let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
 const measureComposerRail = async (composer: Locator): Promise<{
   dockWidth: number;
+  columnWidth: number;
   containerType: string;
   toolbarFits: boolean;
   groupsContained: boolean;
@@ -35,6 +36,8 @@ const measureComposerRail = async (composer: Locator): Promise<{
   attachmentBeforeMessage: boolean | null;
 }> => composer.evaluate((dock) => {
   const toolbar = dock.querySelector<HTMLElement>(".composer-toolbar");
+  const shell = dock.closest<HTMLElement>(".composer-shell");
+  const shellStyle = shell ? getComputedStyle(shell) : null;
   const groups = [
     dock.querySelector<HTMLElement>(".composer-options"),
     dock.querySelector<HTMLElement>(".composer-tools"),
@@ -49,6 +52,11 @@ const measureComposerRail = async (composer: Locator): Promise<{
   )?.getBoundingClientRect();
   return {
     dockWidth: dock.getBoundingClientRect().width,
+    columnWidth: shell && shellStyle
+      ? shell.getBoundingClientRect().width
+        - Number.parseFloat(shellStyle.paddingLeft)
+        - Number.parseFloat(shellStyle.paddingRight)
+      : Number.NaN,
     containerType: getComputedStyle(dock).containerType,
     toolbarFits: Boolean(
       toolbar
@@ -585,7 +593,8 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       .toBeHidden();
     const constrainedRailGeometry = await measureComposerRail(composer);
     expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(775);
-    expect(constrainedRailGeometry.dockWidth).toBeLessThanOrEqual(785);
+    expect(constrainedRailGeometry.dockWidth).toBeLessThanOrEqual(constrainedRailGeometry.columnWidth + 0.5);
+    expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(constrainedRailGeometry.columnWidth - 1);
     expect(constrainedRailGeometry.toolbarFits).toBe(true);
     expect(constrainedRailGeometry.groupsContained).toBe(true);
     expect(Math.min(...constrainedRailGeometry.groupGaps))

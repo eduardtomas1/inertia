@@ -154,19 +154,37 @@ export function LiveElapsed({
 
 /**
  * Keeps the live fast path as escaped plain text. Each paragraph is a stable
- * keyed block, so text appended to a paragraph updates it in place and only a
- * newly started paragraph mounts and fades in.
+ * keyed block: settled paragraphs are split once and memoised, so an update
+ * only re-renders the tail paragraph, and a newly started one fades in.
  */
+const StreamBlock = memo(function StreamBlock({ text }: { text: string }): React.JSX.Element {
+  return <span className="response-stream-block">{text}</span>;
+});
+
+function settledStreamEnd(content: string): number {
+  const separator = content.lastIndexOf("\n\n");
+  if (separator < 0) return 0;
+  let end = separator + 2;
+  while (content[end] === "\n") end += 1;
+  return end;
+}
+
 export function StreamingPlainText({
   content,
 }: {
   content: string;
 }): React.JSX.Element {
+  const settledEnd = settledStreamEnd(content);
+  const settled = content.slice(0, settledEnd);
+  const settledParts = useMemo(() => settled.split(/(\n{2,})/u).slice(0, -1), [settled]);
   return (
     <p>
-      {content.split(/(\n{2,})/u).map((block, index) => index % 2 === 1
-        ? block
-        : <span className="response-stream-block" key={index}>{block}</span>)}
+      {[
+        ...settledParts.map((part, index) => index % 2 === 1
+          ? part
+          : <StreamBlock key={index} text={part} />),
+        <StreamBlock key={settledParts.length} text={content.slice(settledEnd)} />,
+      ]}
     </p>
   );
 }

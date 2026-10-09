@@ -116,7 +116,7 @@ describe("model source rail", () => {
     });
 
     expect(items.map(({ label }) => label)).toEqual([
-      "Favorites",
+      "Pinned",
       "Codex",
       "Claude",
       "Cursor",

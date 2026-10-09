@@ -51,7 +51,7 @@ export function IconButton({
       >
         {children}
       </button>
-      {tooltip.open && <Tooltip anchor={button} label={label} shortcut={shortcut} />}
+      {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
     </>
   );
 }

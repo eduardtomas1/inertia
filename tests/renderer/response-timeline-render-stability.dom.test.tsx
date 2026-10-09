@@ -210,4 +210,21 @@ describe("response timeline render stability", () => {
     expect(document.querySelector("p")?.textContent).toBe("First paragraph keeps growing\n\nSecond");
     expect(document.querySelectorAll(".response-stream-word")).toHaveLength(0);
   });
+
+  it("splits only the newly streamed tail of a long live answer on each update", () => {
+    const paragraphs = Array.from({ length: 400 }, (_, index) => `paragraph ${index} ${"word ".repeat(20)}`);
+    const content = paragraphs.join("\n\n");
+    const view = render(<StreamingPlainText content={content} />);
+    const split = vi.spyOn(String.prototype, "split");
+    try {
+      view.rerender(<StreamingPlainText content={`${content} more`} />);
+      view.rerender(<StreamingPlainText content={`${content} more words`} />);
+      const longest = Math.max(0, ...split.mock.contexts.map((value) => String(value).length));
+      expect(longest).toBeLessThan(content.length / 10);
+    } finally {
+      split.mockRestore();
+    }
+    expect(document.querySelectorAll(".response-stream-block")).toHaveLength(400);
+    expect(document.querySelector("p")?.textContent).toBe(`${content} more words`);
+  });
 });

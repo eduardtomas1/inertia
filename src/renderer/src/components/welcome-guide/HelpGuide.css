@@ -26,7 +26,6 @@
   overflow-y: auto;
   padding: 2px 4px 18px 2px;
   border-radius: var(--radius-xs);
-  outline: none;
 }
 
 .help-guide-search {

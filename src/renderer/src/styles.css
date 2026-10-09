@@ -361,6 +361,7 @@ button:disabled,
   .usage-limits-panel .limits-account-trigger,
   .work-thread-section-toggle,
   .workspace-panel-add,
+  .workspace-panel-launcher,
   .workspace-panel-launcher-list > .is-unavailable,
   .workspace-panel-launcher-list > button,
   .workspace-repository-file,
@@ -553,9 +554,44 @@ button:disabled,
   .palette-group button,
   .project-menu button,
   .thread-submenu button
-):is(:hover, :focus-visible, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"]) {
-  outline: none;
+):is(:hover, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"]) {
   background: var(--fill);
+}
+
+:where(
+  .composer-command-list button,
+  .composer-popover button,
+  .composer-suggestion-menu button,
+  .conversation-menu button,
+  .git-branch-results button,
+  .header-menu-item,
+  .header-popover .header-action-item,
+  .header-popover > button,
+  .palette-group button,
+  .project-menu button,
+  .thread-submenu button
+):focus-visible:not(:disabled, [aria-disabled="true"]) {
+  outline: none;
+  background: var(--fill-strong);
+}
+
+@media (forced-colors: active) {
+  :where(
+    .composer-command-list button,
+    .composer-popover button,
+    .composer-suggestion-menu button,
+    .conversation-menu button,
+    .git-branch-results button,
+    .header-menu-item,
+    .header-popover .header-action-item,
+    .header-popover > button,
+    .palette-group button,
+    .project-menu button,
+    .thread-submenu button
+  ):focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 :where(.command-palette, .composer-command-menu, .composer-popover, .composer-suggestion-menu, .conversation-menu, .header-popover, .header-usage-popover, .model-chooser-palette, .project-menu, .terminal-resume-popover, .thread-hover-preview, .thread-submenu, .usage-popover) [role="separator"] {
@@ -647,6 +683,22 @@ button:disabled,
   right: calc(12px + var(--titlebar-overlay-inset));
 }
 
+:root[data-platform="win32"] .database-recovery-notice {
+  top: calc(env(titlebar-area-height, 48px) + 8px);
+}
+
+:root[data-platform="win32"] :is(.dialog-backdrop, .multi-spawn-backdrop, .daily-work-backdrop, .attachment-preview-backdrop, .snapshot-backdrop) {
+  padding-top: calc(env(titlebar-area-height, 48px) + 8px);
+}
+
+:root[data-platform="win32"] :is(.dialog-backdrop, .attachment-preview-backdrop) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+:root[data-platform="win32"] :is(.dialog-backdrop, .attachment-preview-backdrop) > * {
+  max-height: 100%;
+}
+
 .app-shell.is-sidebar-collapsed {
   grid-template-columns: 0 0 minmax(0, 1fr);
 }
@@ -697,6 +749,7 @@ textarea {
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
+  font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: var(--leading-chrome);
@@ -5946,7 +5999,6 @@ button.turn-agents-line:hover {
   justify-content: center;
   overflow-y: auto;
   padding: 24px 24px 76px;
-  outline: none;
 }
 
 .workspace-panel.is-stacked > .workspace-panel-launcher {

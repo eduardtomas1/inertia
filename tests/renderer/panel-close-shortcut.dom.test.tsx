@@ -103,6 +103,20 @@ describe("closing the active panel tab from the keyboard", () => {
     expect(primary.closes).toEqual([]);
   });
 
+  it("closes in the pane whose browser page holds focus, not the pane focused last", () => {
+    const primary = pane("primary");
+    const secondary = pane("secondary");
+    const page = document.createElement("section");
+    page.className = "preview-panel";
+    page.dataset.pageFocused = "true";
+    secondary.root.querySelector(".workspace-panel")!.append(page);
+    dispose = installGlobalShortcuts(window, actions(), "darwin");
+
+    press(primary.input, { metaKey: true });
+    expect(secondary.closes).toEqual(["secondary"]);
+    expect(primary.closes).toEqual([]);
+  });
+
   it("treats an open native dialog as a modal", () => {
     const primary = pane("primary");
     dispose = installGlobalShortcuts(window, actions(), "darwin");

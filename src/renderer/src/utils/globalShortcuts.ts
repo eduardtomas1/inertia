@@ -42,7 +42,8 @@ function isCloseTabChord(event: KeyboardEvent, platform: string): boolean {
 }
 
 function closeActivePanelSurface(ownerDocument: Document, target: EventTarget | null): boolean {
-  const origin = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  const origin = ownerDocument.querySelector(".preview-panel[data-page-focused]")
+    ?? (target instanceof Element ? target : target instanceof Node ? target.parentElement : null);
   const pane = origin?.closest(PANE_SELECTOR) ?? null;
   const panel = pane
     ? Array.from(pane.querySelectorAll<HTMLElement>(".workspace-panel"))

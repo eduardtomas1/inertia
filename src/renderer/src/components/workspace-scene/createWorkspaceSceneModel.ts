@@ -1036,6 +1036,7 @@ export function createWorkspaceSceneModel({
         tabs: desktopTools.previewNavigation.tabs,
         activeTabId: desktopTools.previewNavigation.activeTabId,
         evidence: desktopTools.previewNavigation.evidence,
+        pageFocused: desktopTools.previewNavigation.pageFocused ?? false,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),

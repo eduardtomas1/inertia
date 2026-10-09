@@ -251,6 +251,8 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     setTitle(title: string): void { this.title = title; }
     loading = false;
     crashed = false;
+    focused = false;
+    isFocused(): boolean { return this.focused; }
     isLoading(): boolean { return this.loading; }
     isLoadingMainFrame(): boolean { return this.loading; }
     isCrashed(): boolean { return this.crashed; }

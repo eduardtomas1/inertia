@@ -84,6 +84,8 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
     if (!target || target.isDestroyed()) return;
     target.sendInputEvent(forwardedKeyboardInput(input));
   });
+  contents.on("focus", () => options.publish());
+  contents.on("blur", () => options.publish());
   contents.on("will-prevent-unload", (event) => {
     if (options.allowUnload?.(tab) === true) event.preventDefault();
   });

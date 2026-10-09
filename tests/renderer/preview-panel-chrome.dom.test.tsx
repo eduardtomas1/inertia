@@ -86,4 +86,12 @@ describe("browser chrome", () => {
     expect(strip).toHaveAttribute("data-overflow-start");
     expect(strip).toHaveAttribute("data-overflow-end");
   });
+
+  it("marks the panel whose native page holds keyboard focus", () => {
+    const view = render(panel());
+    const section = screen.getByRole("region", { name: "Browser preview" });
+    expect(section).not.toHaveAttribute("data-page-focused");
+    view.rerender(panel({ pageFocused: true }));
+    expect(section).toHaveAttribute("data-page-focused", "true");
+  });
 });

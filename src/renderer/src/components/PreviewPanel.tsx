@@ -36,6 +36,7 @@ export type PreviewPanelProps = {
   tabs?: PreviewTabState[];
   activeTabId?: string | null;
   evidence?: BrowserEvidenceSnapshot;
+  pageFocused?: boolean;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -108,6 +109,7 @@ export function PreviewPanel({
   tabs = [],
   activeTabId = null,
   evidence = { revision: 0, entries: [], omitted: false },
+  pageFocused = false,
   onNavigate,
   onOpenExternal,
   onBack,
@@ -219,7 +221,12 @@ export function PreviewPanel({
   };
 
   return (
-    <section className="preview-panel" aria-label="Browser preview" aria-busy={loading}>
+    <section
+      className="preview-panel"
+      aria-label="Browser preview"
+      aria-busy={loading}
+      data-page-focused={pageFocused || undefined}
+    >
       {tabs.length > 1 && (
         <div className="preview-tab-strip" aria-label="Inertia Browser pages">
           <div

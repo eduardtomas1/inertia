@@ -607,17 +607,14 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expectIsolatedConversation(count);
   const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspaceDirectory })).stdout.trim();
-  const checkoutContext = page.getByRole("group", { name: "Chat checkout context" });
-  await expect(checkoutContext.getByRole("button", {
-    name: /Checkout context differs/u,
-  })).toHaveCount(0);
-  const currentBranchTrigger = checkoutContext.getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  });
-  await currentBranchTrigger.click();
-  await expect(page.getByRole("menu", { name: "Branches" }).getByRole("menuitem", { name: `New chat on ${currentBranch}` })).toBeVisible();
-  await currentBranchTrigger.click();
+  await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Checkout context differs/u })).toHaveCount(0);
+  await page.getByRole("button", { name: "More Git actions" }).click();
+  await page.getByRole("menu", { name: "Git actions" }).getByRole("menuitem", { name: /^Switch branch/u }).click();
+  const headerBranches = page.getByRole("menu", { name: "Branches" });
+  await expect(headerBranches.getByRole("menuitem", { name: `New chat on ${currentBranch}` })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(headerBranches).toHaveCount(0);
 
   count = await seedViewedConversationContext(
     page,

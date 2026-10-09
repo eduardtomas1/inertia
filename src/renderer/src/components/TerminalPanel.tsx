@@ -395,16 +395,16 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       <header className="terminal-tabbar">
         <div className="terminal-tablist" role="tablist" aria-label="Terminals">
           {tabs.map((tab) => (
-            <div role="presentation" className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}>
+            <div role="presentation" className={tab.id === activeId ? "panel-tab terminal-tab is-active" : "panel-tab terminal-tab"} key={tab.id}>
               <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
                 title={`${tab.label} · ${props.projectName}`}
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
-                <TerminalSquare size={14} /><span>{tab.label}</span>
+                <TerminalSquare size={14} /><span className="panel-tab-label" data-text={tab.label}>{tab.label}</span>
               </button>
-              <button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
-                onClick={() => closeTerminal(tab.id)}><X size={14} /></button>
+              <IconButton className="panel-tab-close" label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
+                onClick={() => closeTerminal(tab.id)}><X size={14} /></IconButton>
             </div>
           ))}
         </div>

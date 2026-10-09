@@ -6906,6 +6906,7 @@ button.turn-agents-line:hover {
 }
 
 .workspace-repository-files > li {
+  position: relative;
   display: flex;
   min-width: 0;
   align-items: center;
@@ -6985,27 +6986,35 @@ button.turn-agents-line:hover {
   flex: 0 0 auto;
   flex-direction: column;
   align-items: flex-end;
-  gap: 1px;
+  min-width: var(--control-height-small);
   color: var(--text-muted);
-  font: var(--text-xs)/var(--leading-heading) "SFMono-Regular", Consolas, monospace;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .workspace-repository-file-stats > span {
   display: inline-flex;
-  gap: 3px;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.workspace-repository-files > li:is(:hover, :focus-within) .workspace-repository-file-stats {
+  visibility: hidden;
 }
 
 .workspace-repository-files .icon-button {
+  position: absolute;
+  top: 50%;
+  right: 3px;
   width: var(--control-height-small);
   height: var(--control-height-small);
-  flex: 0 0 auto;
+  margin-top: calc(var(--control-height-small) / -2);
   color: var(--text-muted);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-.workspace-repository-files > li:hover .icon-button,
-.workspace-repository-files .icon-button:focus-visible {
+.workspace-repository-files > li:is(:hover, :focus-within) .icon-button {
   opacity: 1;
 }
 

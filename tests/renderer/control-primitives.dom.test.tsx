@@ -177,8 +177,11 @@ describe("popover primitives", () => {
     for (const menuItem of [".conversation-menu button", ".header-menu-item", ".palette-group button", ".composer-command-list button", ".thread-submenu button"]) {
       expect(item?.list.split("|"), menuItem).toContain(menuItem);
     }
-    expect(whereRule(".project-menu button", ':is(:hover, :focus-visible, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"])')?.body)
-      .toBe("  outline: none;\n  background: var(--fill);");
+    expect(whereRule(".project-menu button", ':is(:hover, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"])')?.body)
+      .toBe("  background: var(--fill);");
+    expect(whereRule(".project-menu button", ":focus-visible:not(:disabled, [aria-disabled=\"true\"])")?.body)
+      .toBe("  outline: none;\n  background: var(--fill-strong);");
+    expect(css).toMatch(/@media \(forced-colors: active\) \{\n  :where\(\n[^{]*\.project-menu button[^{]*\):focus-visible \{\n    outline: 2px solid Highlight;\n    outline-offset: -2px;\n  \}\n\}/u);
     expect(whereRule(".project-menu button", " > svg")?.body).toContain("color: var(--text-muted);");
   });
 

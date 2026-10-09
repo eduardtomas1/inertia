@@ -269,7 +269,7 @@ describe("model chooser active route", () => {
     const initial = render(<ModelChooser routes={[fastRoute]} selectedRoute={fastRoute}
       configuration={{ accessMode: "full", interactionMode: "plan", fastMode: true }} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^Pin Team Alpha on .+$/u }));
     initial.unmount();
 
     const normalRoute: ComposerModelRoute = { ...fastRoute, responseSpeed: "Standard",
@@ -296,7 +296,7 @@ describe("model chooser active route", () => {
     const initial = render(<ModelChooser routes={[route]} selectedRoute={route}
       configuration={{ accessMode: "full", interactionMode: "plan" }} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^Pin Team Alpha on .+$/u }));
     initial.unmount();
 
     const onSelect = vi.fn();

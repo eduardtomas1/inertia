@@ -545,14 +545,14 @@ export function ChangesPanel({
             <button
               type="button"
               className="subtle-button"
-              aria-label={summaryLoading ? "Cancel change summary" : activeSummary ? "Refresh agent summaries" : "Summarize changes"}
+              aria-label={summaryLoading ? "Stop summarizing" : "Summarize changes"}
               onClick={() => {
                 const action = summaryLoading ? onCancelSummary?.() : onGenerateSummary();
                 if (action) void action.catch(() => undefined);
               }}
               disabled={Boolean(diffParsingError) || diffBusy || (summaryLoading && !onCancelSummary)}
             >
-              {summaryLoading ? <><LoadingMark label="Summarizing changes" />Stop</> : "Summarize"}
+              {summaryLoading ? <><LoadingMark aria-hidden="true" />Stop</> : "Summarize"}
             </button>
           )}
           {questionRunning && !(reviewAction === "ask" && submitting) && onCancelAsk && (

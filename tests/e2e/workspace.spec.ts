@@ -1,5 +1,7 @@
 // @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { capturePageWebSockets, refreshCapturedRuntimeSnapshot } from "./support/browser-websocket-fixture";
 
 import {
@@ -12,6 +14,8 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+
+const execFileAsync = promisify(execFile);
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -58,10 +62,9 @@ test("filters Work by project and manages chat history", async () => {
   await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: "Project actions for Inertia" }).first().click();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
-  const branchName = (await page
-    .locator(".checkout-branch-button code")
-    .first()
-    .textContent())?.trim();
+  const branchName = (await execFileAsync("git", ["branch", "--show-current"], {
+    cwd: app.workspaceDirectory,
+  })).stdout.trim();
   if (!branchName) {
     throw new Error("Current Git branch is unavailable");
   }

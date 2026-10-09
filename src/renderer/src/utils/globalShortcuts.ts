@@ -38,6 +38,29 @@ function closeActivePanelSurface(ownerDocument: Document, target: EventTarget | 
     : false;
 }
 
+export function installWindowCloseShortcut(
+  target: Window,
+  platform: string,
+  closeWindow: () => void,
+): () => void {
+  const handleKeyDown = (event: KeyboardEvent): void => {
+    const primaryModifier = platform === "darwin"
+      ? event.metaKey && !event.ctrlKey
+      : event.ctrlKey && !event.metaKey;
+    const key = /^Key[A-Z]$/u.test(event.code ?? "") ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
+    if (!primaryModifier || key !== "w" || event.altKey || event.shiftKey || event.isComposing) return;
+    if (event.defaultPrevented) return;
+    if (event.target instanceof Element && event.target.closest(".xterm")) return;
+    const ownerDocument = target.document;
+    if (ownerDocument.querySelector('[role="dialog"][aria-modal="true"]')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!closeActivePanelSurface(ownerDocument, event.target)) closeWindow();
+  };
+  target.addEventListener("keydown", handleKeyDown, true);
+  return () => target.removeEventListener("keydown", handleKeyDown, true);
+}
+
 export function installGlobalShortcuts(
   target: ShortcutTarget,
   actions: CurrentActions,

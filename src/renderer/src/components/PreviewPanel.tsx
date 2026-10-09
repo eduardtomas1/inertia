@@ -21,6 +21,7 @@ import {
 } from "../utils/workspacePreviewFocus";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
+import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import "./PreviewPanel.css";
 
 const BrowserEvidenceTimeline = lazy(() => import("./BrowserEvidenceTimeline"));
@@ -132,6 +133,7 @@ export function PreviewPanel({
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
   const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs, addressElementRef);
+  const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeTabId });
 
   useEffect(() => {
     setDraftUrl(url);
@@ -220,13 +222,19 @@ export function PreviewPanel({
     <section className="preview-panel" aria-label="Browser preview" aria-busy={loading}>
       {tabs.length > 1 && (
         <div className="preview-tab-strip" aria-label="Inertia Browser pages">
-          <div className="preview-tabs" role="tablist" aria-label="Browser pages">
+          <div
+            className="panel-tab-row preview-tabs"
+            role="tablist"
+            aria-label="Browser pages"
+            {...tabRow.listHandlers}
+          >
             {tabs.map((tab) => {
               const title = tab.title || (tab.url ? previewTabHost(tab.url) : "New page");
               return (
                 <div
                   key={tab.id}
                   className={`panel-tab preview-tab-shell${tab.id === activeTabId ? " active" : ""}`}
+                  data-tab-key={tab.id}
                 >
                   <button
                     id={`preview-tab-${owner}-${tab.id}`}

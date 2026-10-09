@@ -11,11 +11,6 @@ import {
 const DRAG_THRESHOLD = 4;
 const EDGE_MARGIN = 24;
 
-export interface TabRowEdges {
-  start: boolean;
-  end: boolean;
-}
-
 interface DragState<K extends string> {
   key: K;
   pointerId: number;
@@ -45,21 +40,19 @@ export function usePanelTabRow<K extends string>({
   activeKey: K | null;
   onMove?: (key: K, toIndex: number) => void;
 }) {
-  const [list, setList] = useState<HTMLElement | null>(null);
-  const [edges, setEdges] = useState<TabRowEdges>({ start: false, end: false });
+  const listRef = useRef<HTMLElement | null>(null);
   const [drag, setDrag] = useState<{ key: K; toIndex: number } | null>(null);
   const dragRef = useRef<DragState<K> | null>(null);
 
   const measure = useCallback(() => {
+    const list = listRef.current;
     if (!list) return;
-    const start = list.scrollLeft > 1;
-    const end = list.scrollLeft + list.clientWidth < list.scrollWidth - 1;
-    setEdges((current) => (
-      current.start === start && current.end === end ? current : { start, end }
-    ));
-  }, [list]);
+    list.toggleAttribute("data-overflow-start", list.scrollLeft > 1);
+    list.toggleAttribute("data-overflow-end", list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+  }, []);
 
   const revealActive = useCallback(() => {
+    const list = listRef.current;
     if (!list) return;
     const tab = activeKey
       ? tabElements(list).find((element) => element.dataset.tabKey === activeKey)
@@ -67,32 +60,43 @@ export function usePanelTabRow<K extends string>({
     if (tab) {
       const bounds = list.getBoundingClientRect();
       const box = tab.getBoundingClientRect();
-      if (box.left < bounds.left + EDGE_MARGIN) {
-        list.scrollLeft = Math.max(0, list.scrollLeft - (bounds.left + EDGE_MARGIN - box.left));
-      } else if (box.right > bounds.right - EDGE_MARGIN) {
-        list.scrollLeft += box.right - bounds.right + EDGE_MARGIN;
-      }
+      const target = box.left < bounds.left + EDGE_MARGIN
+        ? Math.max(0, list.scrollLeft - (bounds.left + EDGE_MARGIN - box.left))
+        : box.right > bounds.right - EDGE_MARGIN
+          ? list.scrollLeft + box.right - bounds.right + EDGE_MARGIN
+          : list.scrollLeft;
+      if (target !== list.scrollLeft) list.scrollLeft = target;
     }
     measure();
-  }, [activeKey, list, measure]);
+  }, [activeKey, measure]);
 
   useLayoutEffect(revealActive, [keys.length, revealActive]);
 
-  useEffect(() => {
-    if (!list || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(revealActive);
-    observer.observe(list);
-    return () => observer.disconnect();
-  }, [list, revealActive]);
+  const revealActiveRef = useRef(revealActive);
+  useLayoutEffect(() => {
+    revealActiveRef.current = revealActive;
+  }, [revealActive]);
+
+  const setList = useCallback((node: HTMLElement | null) => {
+    listRef.current = node;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => revealActiveRef.current());
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      listRef.current = null;
+    };
+  }, []);
 
   const endDrag = useCallback((commit: boolean) => {
     const current = dragRef.current;
     dragRef.current = null;
     setDrag(null);
     if (!current?.started) return;
+    const list = listRef.current;
     if (list?.hasPointerCapture?.(current.pointerId)) list.releasePointerCapture(current.pointerId);
     if (commit && current.toIndex !== keys.indexOf(current.key)) onMove?.(current.key, current.toIndex);
-  }, [keys, list, onMove]);
+  }, [keys, onMove]);
 
   useEffect(() => {
     if (!drag) return;
@@ -158,7 +162,6 @@ export function usePanelTabRow<K extends string>({
   };
 
   return {
-    edges,
     order: drag ? moveKey(keys, drag.key, drag.toIndex) : [...keys],
     draggingKey: drag?.key ?? null,
     listHandlers,

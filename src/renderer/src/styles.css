@@ -5858,15 +5858,15 @@ button.turn-agents-line:hover {
   display: none;
 }
 
-.workspace-panel-tablist[data-overflow-start] {
+.panel-tab-row[data-overflow-start] {
   mask-image: linear-gradient(to right, transparent, black 24px);
 }
 
-.workspace-panel-tablist[data-overflow-end] {
+.panel-tab-row[data-overflow-end] {
   mask-image: linear-gradient(to left, transparent, black 24px);
 }
 
-.workspace-panel-tablist[data-overflow-start][data-overflow-end] {
+.panel-tab-row[data-overflow-start][data-overflow-end] {
   mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
 }
 

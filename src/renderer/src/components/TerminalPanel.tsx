@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { ChevronDown, Columns2, Plus, TerminalSquare, X } from "lucide-react";
+import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -389,13 +390,19 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const [sessionActionsHost, setSessionActionsHost] = useState<HTMLDivElement | null>(null);
   const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
   const panelError = actionRoutingError ?? closeError?.[1];
+  const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeId });
 
   return (
     <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
       <header className="terminal-tabbar">
-        <div className="terminal-tablist" role="tablist" aria-label="Terminals">
+        <div
+          className="panel-tab-row terminal-tablist"
+          role="tablist"
+          aria-label="Terminals"
+          {...tabRow.listHandlers}
+        >
           {tabs.map((tab) => (
-            <div role="presentation" className={tab.id === activeId ? "panel-tab terminal-tab is-active" : "panel-tab terminal-tab"} key={tab.id}>
+            <div role="presentation" className={tab.id === activeId ? "panel-tab terminal-tab is-active" : "panel-tab terminal-tab"} data-tab-key={tab.id} key={tab.id}>
               <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
                 title={`${tab.label} · ${props.projectName}`}
                 tabIndex={tab.id === activeId ? 0 : -1}

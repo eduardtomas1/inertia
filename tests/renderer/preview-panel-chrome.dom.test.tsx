@@ -74,4 +74,16 @@ describe("browser chrome", () => {
     rerender(panel({ loading: false }));
     expect(container.querySelector(".preview-loading-bar")).toBeNull();
   });
+
+  it("scrolls the page strip with the wheel and fades the edge that hides pages", () => {
+    render(panel({ tabs: [page("one", "One"), page("two", "Two"), page("three", "Three")] }));
+    const strip = screen.getByRole("tablist", { name: "Browser pages" });
+    Object.defineProperty(strip, "clientWidth", { configurable: true, value: 120 });
+    Object.defineProperty(strip, "scrollWidth", { configurable: true, value: 300 });
+    fireEvent.wheel(strip, { deltaY: 60 });
+    expect(strip.scrollLeft).toBe(60);
+    fireEvent.scroll(strip);
+    expect(strip).toHaveAttribute("data-overflow-start");
+    expect(strip).toHaveAttribute("data-overflow-end");
+  });
 });

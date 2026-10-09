@@ -242,11 +242,9 @@ export function WorkspacePanel({
       <header className="workspace-panel-tabs drag-region">
         {visibleSurfaces.length > 0 && (
           <div
-            className="workspace-panel-tablist no-drag"
+            className="panel-tab-row workspace-panel-tablist no-drag"
             role="tablist"
             aria-label="Panel surfaces"
-            data-overflow-start={tabRow.edges.start || undefined}
-            data-overflow-end={tabRow.edges.end || undefined}
             {...tabRow.listHandlers}
           >
             {tabRow.order.map((surface) => {

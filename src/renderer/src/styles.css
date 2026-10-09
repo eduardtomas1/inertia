@@ -9645,8 +9645,9 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .response-turn:focus-visible {
+  border-radius: var(--radius-sm);
   outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
+  outline-offset: 6px;
 }
 
 .timeline-minimap-anchor {

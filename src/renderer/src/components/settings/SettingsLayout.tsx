@@ -31,10 +31,12 @@ export function SettingsGroup({
   description,
   icon: Icon,
   notice,
+  titleHidden = false,
   className,
   children,
 }: {
   title: string;
+  titleHidden?: boolean;
   headingId?: string;
   settingId?: string;
   description?: ReactNode;
@@ -51,8 +53,8 @@ export function SettingsGroup({
         {Icon && <div><Icon size={16} aria-hidden="true" /></div>}
         <span>
           {notice === undefined
-            ? <h3 id={headingId}>{title}</h3>
-            : <span className="setting-title"><h3 id={headingId}>{title}</h3><SettingStatus notice={notice} /></span>}
+            ? <h3 id={headingId} className={clsx(titleHidden && "visually-hidden")}>{title}</h3>
+            : <span className="setting-title"><h3 id={headingId} className={clsx(titleHidden && "visually-hidden")}>{title}</h3><SettingStatus notice={notice} /></span>}
           {description && <p>{description}</p>}
         </span>
       </div>

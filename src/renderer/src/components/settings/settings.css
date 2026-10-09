@@ -36,7 +36,7 @@
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  background: var(--surface-raised);
+  background: var(--bg);
 }
 
 .settings-navigation {
@@ -46,7 +46,7 @@
   min-height: 0;
   flex-direction: column;
   padding: 18px 10px;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-soft);
   background: var(--surface);
 }
 
@@ -66,7 +66,7 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
   font-size: var(--text-sm);
@@ -80,7 +80,7 @@
 
 .settings-navigation nav button.is-active {
   color: var(--text);
-  background: var(--fill);
+  background: var(--fill-strong);
   font-weight: 500;
 }
 
@@ -102,11 +102,11 @@
 }
 
 .settings-page-title {
-  margin: 0 0 20px;
+  margin: 0 0 16px;
   padding: 0 4px;
   color: var(--text);
-  font-size: var(--text-base);
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: 600;
   line-height: var(--leading-heading);
 }
 
@@ -142,7 +142,7 @@
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 400;
   line-height: var(--leading-chrome);
 }
 
@@ -173,7 +173,7 @@
 }
 
 :where(.setting-row, .response-density-setting, .settings-rows, .completion-sound-settings) + :where(.setting-row, .response-density-setting, .settings-rows, .completion-sound-settings) {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .setting-copy,
@@ -189,7 +189,7 @@
 .response-density-setting > span > strong {
   color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 400;
   line-height: var(--leading-chrome);
 }
 
@@ -204,11 +204,8 @@
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
+  gap: 2px;
   margin-left: auto;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--fill);
 }
 
 .response-density-setting > [role="radiogroup"] > button {
@@ -218,17 +215,18 @@
   color: var(--text-muted);
   background: transparent;
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .response-density-setting > [role="radiogroup"] > button:hover:not(:disabled) {
   color: var(--text);
+  background: var(--fill);
 }
 
 .response-density-setting > [role="radiogroup"] > button.is-active {
   color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--fill-strong);
+  font-weight: 500;
 }
 
 .response-density-setting > [role="radiogroup"] > button:disabled {
@@ -246,8 +244,10 @@
 }
 
 @media (forced-colors: active) {
-  .response-density-setting > [role="radiogroup"] > button.is-active {
+  .response-density-setting > [role="radiogroup"] > button.is-active,
+  .settings-navigation nav button.is-active {
     outline: 1px solid CanvasText;
+    outline-offset: -2px;
   }
 
   .settings-content .switch-thumb {
@@ -282,7 +282,7 @@
     flex: 0 0 auto;
     padding: 6px 8px;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .settings-navigation nav {

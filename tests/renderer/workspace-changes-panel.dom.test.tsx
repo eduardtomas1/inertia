@@ -559,8 +559,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     const rootFile = screen.getByText("README.md", { exact: true })
       .closest("button");
     expect(rootFile).not.toBeNull();
-    expect(rootFile!.querySelector(".change-file-status"))
-      .toHaveAttribute("title", "Modified, unstaged");
+    expect(rootFile).toHaveAccessibleName(/^M?\s*Modified, unstaged README\.md/u);
     expect(screen.queryByText("Main.java", { exact: true })).not.toBeInTheDocument();
 
     fireEvent.change(repositoryScope, { target: { value: "modules/alpha" } });

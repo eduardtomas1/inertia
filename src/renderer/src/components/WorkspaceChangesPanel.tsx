@@ -864,7 +864,7 @@ export function WorkspaceChangesPanel({
                     onContextMenu={menu?.onContextMenu}
                     onKeyDown={menu?.onKeyDown}
                   >
-                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span></span>
+                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
                     <span className="workspace-repository-file-stats"><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>

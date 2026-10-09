@@ -1,9 +1,10 @@
-import { useRef, type ComponentPropsWithoutRef } from "react";
+import { useCallback, useRef, type ComponentPropsWithRef } from "react";
 
 import { Tooltip, useTooltip } from "./Tooltip";
 
 export function TooltipButton({
   tooltip: label,
+  ref,
   onPointerEnter,
   onPointerLeave,
   onPointerDown,
@@ -11,7 +12,7 @@ export function TooltipButton({
   onBlur,
   onKeyDown,
   ...props
-}: ComponentPropsWithoutRef<"button"> & {
+}: ComponentPropsWithRef<"button"> & {
   tooltip: string;
 }): React.JSX.Element {
   const button = useRef<HTMLButtonElement | null>(null);
@@ -23,9 +24,14 @@ export function TooltipButton({
     onBlur,
     onKeyDown,
   });
+  const setButton = useCallback((node: HTMLButtonElement | null) => {
+    button.current = node;
+    if (typeof ref === "function") ref(node);
+    else if (ref) ref.current = node;
+  }, [ref]);
   return (
     <>
-      <button ref={button} type="button" {...props} {...tooltip.handlers} />
+      <button ref={setButton} type="button" {...props} {...tooltip.handlers} />
       {tooltip.open && <Tooltip anchor={button} label={label} />}
     </>
   );

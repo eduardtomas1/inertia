@@ -118,8 +118,11 @@ describe("workspace panel tab row", () => {
     const preview = screen.getByRole("tab", { name: "Browser" });
     preview.focus();
 
+    expect(preview.getAttribute("aria-keyshortcuts")?.split(" "))
+      .toEqual(expect.arrayContaining(["Delete", "Control+Shift+ArrowLeft", "Meta+Shift+ArrowRight"]));
     fireEvent.keyDown(preview, { key: "ArrowRight", metaKey: true, shiftKey: true });
     expect(onMove).toHaveBeenLastCalledWith("preview", 2);
+    expect(screen.getByRole("status")).toHaveTextContent("Browser moved to position 3 of 3");
     expect(tabNames()).toEqual(["changes", "terminal", "preview"]);
     expect(screen.getByRole("tab", { name: "Browser" })).toHaveFocus();
 
@@ -231,8 +234,16 @@ describe("workspace panel tab row", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
     const menu = await screen.findByRole("menu", { name: "Add panel surface" });
     const browser = await within(menu).findByRole("menuitem", { name: /^Browser/u });
-    expect(browser).toHaveAttribute("aria-current", "true");
-    expect(within(menu).getByRole("menuitem", { name: /^Terminal/u })).not.toHaveAttribute("aria-current");
+    expect(browser).not.toHaveAttribute("aria-current");
+    expect(browser).toHaveAccessibleName(/^Browser\s*, open/u);
+    expect(within(menu).getByRole("menuitem", { name: /^Terminal/u })).not.toHaveAccessibleName(/open/u);
+  });
+
+  it("swaps the tab icon for the close control on hover or keyboard focus only", () => {
+    const css = readFileSync("src/renderer/src/styles.css", "utf8");
+    expect(css).toContain(".panel-tab:is(:hover, :has(:focus-visible)) > .panel-tab-close {");
+    expect(css).toContain(".panel-tab:is(:hover, :has(:focus-visible)) > [role=\"tab\"] > svg:first-child {");
+    expect(css).not.toContain(".panel-tab:is(:hover, :focus-within)");
   });
 
   it("keeps the add button on the 2px outside button ring", () => {

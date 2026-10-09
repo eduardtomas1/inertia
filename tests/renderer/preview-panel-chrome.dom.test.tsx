@@ -61,6 +61,7 @@ describe("browser chrome", () => {
   it("shows the page strip only with two or more pages", () => {
     const view = render(panel());
     expect(screen.queryByRole("tablist", { name: "Browser pages" })).toBeNull();
+    expect(screen.getByRole("tabpanel", { name: "Browser page" })).toBeInTheDocument();
     view.rerender(panel({ tabs: [page("one", "One"), page("two", "Two")] }));
     const strip = screen.getByRole("tablist", { name: "Browser pages" });
     expect(within(strip).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["One", "Two"]);

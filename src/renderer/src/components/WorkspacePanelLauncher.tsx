@@ -173,7 +173,6 @@ export function AddSurfaceMenuItems({
           role="menuitem"
           key={action.surface}
           aria-disabled={!action.available || undefined}
-          aria-current={openSurfaces.includes(action.surface) || undefined}
           aria-keyshortcuts={action.shortcut}
           title={action.reason}
           onPointerEnter={() => {
@@ -184,7 +183,10 @@ export function AddSurfaceMenuItems({
           }}
         >
           {surfaceIcons[action.surface]}
-          <span>{action.label}</span>
+          <span>
+            {action.label}
+            {openSurfaces.includes(action.surface) && <span className="visually-hidden">, open</span>}
+          </span>
           {openSurfaces.includes(action.surface) && <Check size={14} aria-hidden="true" />}
           <kbd>{action.shortcut}</kbd>
         </button>

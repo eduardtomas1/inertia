@@ -372,6 +372,7 @@ export function PreviewPanel({
           ref={stageRef}
           role="tabpanel"
           aria-labelledby={tabs.length > 1 && activeTabId ? `preview-tab-${owner}-${activeTabId}` : undefined}
+          aria-label={tabs.length > 1 && activeTabId ? undefined : "Browser page"}
         >
           {loading ? (
             <div className="panel-loading"><LoadingMark label="Connecting to preview" /><span>Connecting to preview…</span></div>

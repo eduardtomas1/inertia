@@ -5956,11 +5956,11 @@ button.turn-agents-line:hover {
   outline-offset: -2px;
 }
 
-.panel-tab:is(:hover, :focus-within) > .panel-tab-close {
+.panel-tab:is(:hover, :has(:focus-visible)) > .panel-tab-close {
   opacity: 1;
 }
 
-.panel-tab:is(:hover, :focus-within) > [role="tab"] > svg:first-child {
+.panel-tab:is(:hover, :has(:focus-visible)) > [role="tab"] > svg:first-child {
   opacity: 0;
 }
 

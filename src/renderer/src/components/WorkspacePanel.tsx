@@ -5,6 +5,7 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
@@ -48,6 +49,15 @@ export type WorkspacePanelProps = {
   onMoveSurface?: (surface: WorkspacePanelTab, toIndex: number) => void;
   onClosePanel?: () => void;
 };
+
+const TAB_KEYSHORTCUTS_WITH_MOVE = [
+  "Delete",
+  "Backspace",
+  "Control+Shift+ArrowLeft",
+  "Control+Shift+ArrowRight",
+  "Meta+Shift+ArrowLeft",
+  "Meta+Shift+ArrowRight",
+].join(" ");
 
 const loadWorkspacePanelLauncher = () => import("./WorkspacePanelLauncher");
 const RightPanelLauncher = lazy(async () => ({
@@ -93,9 +103,13 @@ export function WorkspacePanel({
     ? activeSurface
     : null;
   const actions = surfaceActions(unavailable, badges, activeBackgroundTaskCount);
+  const [moveAnnouncement, setMoveAnnouncement] = useState("");
   const moveSurface = (surface: WorkspacePanelTab, toIndex: number): void => {
-    const target = visibleSurfaces[Math.min(Math.max(toIndex, 0), visibleSurfaces.length - 1)];
-    if (target) onMoveSurface?.(surface, surfaces.indexOf(target));
+    const position = Math.min(Math.max(toIndex, 0), visibleSurfaces.length - 1);
+    const target = visibleSurfaces[position];
+    if (!target || !onMoveSurface) return;
+    onMoveSurface(surface, surfaces.indexOf(target));
+    setMoveAnnouncement(`${RIGHT_PANEL_SURFACE_META[surface].label} moved to position ${position + 1} of ${visibleSurfaces.length}`);
   };
   const tabRow = usePanelTabRow({
     keys: visibleSurfaces,
@@ -278,7 +292,7 @@ export function WorkspacePanel({
                         : `${meta.label} ${badge}`}
                     aria-selected={active}
                     aria-controls={`${panelId}-content`}
-                    aria-keyshortcuts="Delete"
+                    aria-keyshortcuts={onMoveSurface ? TAB_KEYSHORTCUTS_WITH_MOVE : "Delete Backspace"}
                     data-workspace-tab={surface}
                     tabIndex={rovingTab ? 0 : -1}
                     onFocus={() => prefetchWorkspaceTool(surface)}
@@ -336,6 +350,7 @@ export function WorkspacePanel({
             )}
           </div>
         )}
+        <p className="visually-hidden" role="status">{moveAnnouncement}</p>
       </header>
       {!selected && (
         <Suspense fallback={<div className="workspace-panel-launcher" aria-busy="true" />}>

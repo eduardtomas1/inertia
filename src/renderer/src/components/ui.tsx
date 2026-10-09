@@ -1,4 +1,4 @@
-import { useCallback, useRef, type ComponentPropsWithRef, type ReactNode, type Ref } from "react";
+import { useCallback, useId, useRef, type ComponentPropsWithRef, type ReactNode, type Ref } from "react";
 import clsx from "clsx";
 
 import { Tooltip, useTooltip } from "./Tooltip";
@@ -27,6 +27,7 @@ export function IconButton({
   children: ReactNode;
 }): React.JSX.Element {
   const button = useRef<HTMLButtonElement | null>(null);
+  const shortcutId = useId();
   const tooltip = useTooltip(button, {
     onPointerEnter,
     onPointerLeave,
@@ -45,11 +46,13 @@ export function IconButton({
         ref={setButton}
         type="button"
         aria-label={label}
+        aria-describedby={shortcut ? shortcutId : undefined}
         className={clsx("icon-button", className)}
         {...props}
         {...tooltip.handlers}
       >
         {children}
+        {shortcut && <span id={shortcutId} className="visually-hidden">{shortcut}</span>}
       </button>
       {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
     </>

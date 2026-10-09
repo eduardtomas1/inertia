@@ -1,10 +1,11 @@
-import { useCallback, useRef, type ComponentPropsWithRef } from "react";
+import { useCallback, useId, useRef, type ComponentPropsWithRef } from "react";
 
 import { Tooltip, useTooltip } from "./Tooltip";
 
 export function TooltipButton({
   tooltip: label,
   ref,
+  children,
   onPointerEnter,
   onPointerLeave,
   onPointerDown,
@@ -16,6 +17,7 @@ export function TooltipButton({
   tooltip: string;
 }): React.JSX.Element {
   const button = useRef<HTMLButtonElement | null>(null);
+  const descriptionId = useId();
   const tooltip = useTooltip(button, {
     onPointerEnter,
     onPointerLeave,
@@ -29,9 +31,24 @@ export function TooltipButton({
     if (typeof ref === "function") ref(node);
     else if (ref) ref.current = node;
   }, [ref]);
+  const named = props["aria-label"];
+  const described = label !== (named ?? (typeof children === "string" ? children : undefined));
+  const description = described
+    ? <span id={descriptionId} className="visually-hidden">{label}</span>
+    : null;
   return (
     <>
-      <button ref={setButton} type="button" {...props} {...tooltip.handlers} />
+      <button
+        ref={setButton}
+        type="button"
+        aria-describedby={described ? descriptionId : undefined}
+        {...props}
+        {...tooltip.handlers}
+      >
+        {children}
+        {named !== undefined && description}
+      </button>
+      {named === undefined && description}
       {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} />}
     </>
   );

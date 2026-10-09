@@ -40,4 +40,33 @@ describe("text button tooltip", () => {
     render(<TooltipButton ref={ref} tooltip="Close" aria-label="Close preview">x</TooltipButton>);
     expect(ref.current).toBe(screen.getByRole("button", { name: "Close preview" }));
   });
+
+  it("describes a hint that differs from the visible name to assistive technology", () => {
+    render(
+      <div>
+        <TooltipButton tooltip="Copy code">Copy</TooltipButton>
+        <TooltipButton tooltip="Stop the active run before restoring a checkpoint" disabled>Revert</TooltipButton>
+        <TooltipButton tooltip="Copy scrubbed diagnostics" aria-label="Copy diagnostics">C</TooltipButton>
+        <TooltipButton tooltip="Close" aria-label="Close">x</TooltipButton>
+      </div>,
+    );
+    const copy = screen.getByRole("button", { name: "Copy" });
+    const revert = screen.getByRole("button", { name: "Revert" });
+    const diagnostics = screen.getByRole("button", { name: "Copy diagnostics" });
+    expect(copy).toHaveAccessibleDescription("Copy code");
+    expect(revert).toBeDisabled();
+    expect(revert).toHaveAccessibleDescription("Stop the active run before restoring a checkpoint");
+    expect(diagnostics).toHaveAccessibleDescription("Copy scrubbed diagnostics");
+    expect(screen.getByRole("button", { name: "Close" })).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("opens the hint over a disabled button", () => {
+    render(<TooltipButton tooltip="The stored patch is unavailable" disabled>src/a.ts</TooltipButton>);
+    const button = screen.getByRole("button", { name: "src/a.ts" });
+    fireEvent.pointerEnter(button, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent("The stored patch is unavailable");
+  });
 });

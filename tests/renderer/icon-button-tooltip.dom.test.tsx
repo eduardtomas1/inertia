@@ -35,6 +35,12 @@ describe("icon button tooltip", () => {
     expect(button).not.toHaveAttribute("title");
   });
 
+  it("describes the shortcut its tooltip shows without changing the name", () => {
+    render(<IconButton label="New chat" shortcut="⌘N">N</IconButton>);
+    const button = screen.getByRole("button", { name: "New chat" });
+    expect(button).toHaveAccessibleDescription("⌘N");
+  });
+
   it("opens after 500ms of hover and shows the shortcut as faint text", () => {
     render(<IconButton label="New chat" shortcut="⌘N">N</IconButton>);
     const button = screen.getByRole("button", { name: "New chat" });

@@ -405,6 +405,12 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(changedFilesSummary).toHaveAttribute("aria-expanded", "true");
     await expect(changedFiles.locator('[role="listitem"]')).toHaveCount(3);
     await expect(changedFiles.getByRole("button", { name: "Open exact turn diff" })).toBeDisabled();
+    const unavailablePatch = changedFiles.locator('[role="listitem"] > button').first();
+    await expect(unavailablePatch).toBeDisabled();
+    await expect(unavailablePatch).toHaveAccessibleDescription("The stored patch is unavailable");
+    await unavailablePatch.hover();
+    await expect(page.locator('[role="tooltip"]')).toHaveText("The stored patch is unavailable");
+    await page.mouse.move(1, 1);
     await expect(changedFiles).toContainText(
       "The historical file summary is available without a stored patch.",
     );

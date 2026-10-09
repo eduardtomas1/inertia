@@ -59,7 +59,7 @@ export function usePanelTabRow<K extends string>({
     ));
   }, [list]);
 
-  useLayoutEffect(() => {
+  const revealActive = useCallback(() => {
     if (!list) return;
     const tab = activeKey
       ? tabElements(list).find((element) => element.dataset.tabKey === activeKey)
@@ -74,14 +74,16 @@ export function usePanelTabRow<K extends string>({
       }
     }
     measure();
-  }, [activeKey, keys.length, list, measure]);
+  }, [activeKey, list, measure]);
+
+  useLayoutEffect(revealActive, [keys.length, revealActive]);
 
   useEffect(() => {
     if (!list || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(revealActive);
     observer.observe(list);
     return () => observer.disconnect();
-  }, [list, measure]);
+  }, [list, revealActive]);
 
   const endDrag = useCallback((commit: boolean) => {
     const current = dragRef.current;

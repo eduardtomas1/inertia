@@ -160,6 +160,25 @@ describe("workspace panel tab row", () => {
     expect(list.scrollLeft).toBe(0);
   });
 
+  it("scrolls the active tab back into view when the hidden row is shown again", () => {
+    const observers: Array<() => void> = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) {
+        observers.push(callback);
+      }
+      observe(): void {}
+      disconnect(): void {}
+    });
+    render(<Host initial={state("plan", "changes", "preview", "terminal", "files", "plan")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list, 100, 220);
+    list.scrollLeft = 0;
+    act(() => {
+      for (const observer of observers) observer();
+    });
+    expect(list.scrollLeft).toBe(304);
+  });
+
   it("puts a focusable close control over the tab icon and closes with it", () => {
     render(<Host initial={state("preview", "changes", "preview")} />);
     const tab = screen.getByRole("tab", { name: "Browser" }).closest<HTMLElement>(".panel-tab")!;

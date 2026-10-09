@@ -428,6 +428,10 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect.poll(() => transcript.evaluate((element) =>
       element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(120);
     await transcript.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(transcript).toBeFocused();
+    expect(await transcript.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
     await page.keyboard.press("Alt+ArrowUp");
     await expect(page.locator(".response-turn:focus")).toHaveCount(1);
     expect(await page.locator(".response-turn:focus").evaluate((element) => ({

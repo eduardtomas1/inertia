@@ -433,8 +433,8 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
   const csvCopy = useCopiedState();
   return (
     <div className="response-table-shell">
+      <div className="response-table-scroll"><table {...props}>{children}</table></div>
       <div className="response-table-toolbar">
-        <span>Table</span>
         <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
         <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
       </div>
@@ -452,7 +452,6 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
               : ""}
         </span>
       )}
-      <div className="response-table-scroll"><table {...props}>{children}</table></div>
     </div>
   );
 }
@@ -574,7 +573,7 @@ function CodeBlock({
       data-language-family={sourceLanguage.family}
       onContextMenu={codeMenu.onContextMenu}
     >
-      <header className={meta.file ? "has-file" : undefined}>
+      <header>
         {fileTarget?.kind === "local"
           ? <LocalFileLink path={fileTarget.path} url={fileTarget.url} className="response-code-file-link">{meta.file}</LocalFileLink>
           : fileTarget?.kind === "project" && onOpenProjectFile

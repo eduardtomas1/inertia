@@ -11688,7 +11688,6 @@ button.sent-attachment-open:hover {
 }
 
 .response-code-block {
-  position: relative;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -11697,52 +11696,46 @@ button.sent-attachment-open:hover {
   background: var(--fill);
 }
 
-.response-code-block > header,
-.response-table-toolbar {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: 0;
+.response-code-block > header {
   display: flex;
   user-select: none;
-  max-width: 100%;
+  min-height: 28px;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 0 14px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.response-code-block > header > div {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-fade);
+}
+
+.response-code-block:is(:hover, :focus-within) > header > div {
+  opacity: 1;
+}
+
+.response-table-toolbar {
+  display: flex;
+  user-select: none;
+  min-height: 24px;
+  align-items: center;
+  justify-content: flex-end;
   gap: 2px;
-  padding: 4px 4px 4px 8px;
-  border-radius: 0 0 0 var(--radius-xs);
   color: var(--text-muted);
-  background: var(--fill-solid);
   font-size: var(--text-xs);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-fade);
 }
 
-.response-code-block:is(:hover, :focus-within) > header,
-.response-table-shell:is(:hover, :focus-within) > .response-table-toolbar,
-.response-code-block > header.has-file {
-  opacity: 1;
-}
-
-.response-code-block > header.has-file {
-  position: static;
-  max-width: none;
-  justify-content: space-between;
-  padding: 4px 4px 0 10px;
-  background: transparent;
-}
-
-.response-code-block > header.has-file > div {
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-fade);
-}
-
-.response-code-block:is(:hover, :focus-within) > header.has-file > div {
+.response-table-shell:is(:hover, :focus-within) > .response-table-toolbar {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .response-code-block > header,
-  .response-code-block > header.has-file > div,
+  .response-code-block > header > div,
   .response-table-toolbar {
     opacity: 1;
   }
@@ -11808,7 +11801,7 @@ button.sent-attachment-open:hover {
 .response-code-block pre code {
   display: block;
   min-width: max-content;
-  padding: 13px 14px;
+  padding: 2px 14px 12px;
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: var(--leading-prose);
@@ -11854,16 +11847,10 @@ button.sent-attachment-open:hover {
   overflow: hidden;
 }
 
-.response-table-toolbar > span,
 .response-table-toolbar button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-
-.response-table-toolbar > span {
-  margin-right: auto;
-  font-weight: 500;
 }
 
 .response-table-toolbar button {
@@ -12064,8 +12051,7 @@ button.sent-attachment-open:hover {
   }
 
   .turn-meta-primary,
-  .response-code-block > header,
-  .response-code-block > header.has-file > div,
+  .response-code-block > header > div,
   .response-table-toolbar {
     transition: none;
   }
@@ -12150,9 +12136,13 @@ button.sent-attachment-open:hover {
   font-size: var(--text-sm);
 }
 
-.response-code-block > header button,
-.response-table-toolbar button {
+.response-code-block > header button {
   min-height: max(28px, calc(var(--ui-control-height) - 4px));
+  font-size: var(--text-xs);
+}
+
+.response-table-toolbar button {
+  min-height: 24px;
   font-size: var(--text-xs);
 }
 

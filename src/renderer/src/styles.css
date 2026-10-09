@@ -749,6 +749,7 @@ textarea {
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
+  font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: var(--leading-chrome);

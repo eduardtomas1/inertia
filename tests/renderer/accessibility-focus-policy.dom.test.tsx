@@ -150,7 +150,7 @@ describe("model search active descendant", () => {
       .toHaveTextContent("Team Alpha");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Model favorite actions" })).not.toBeInTheDocument();
-    expect(within(results).getByRole("button", { name: /Add Team Alpha .* to favorites/u }))
+    expect(within(results).getByRole("button", { name: /^Pin Team Alpha on .+$/u }))
       .toBeInTheDocument();
   });
 });

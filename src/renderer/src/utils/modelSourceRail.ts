@@ -160,7 +160,7 @@ export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
     : routes.filter(({ key }) => favoriteRouteKeys.has(key));
   if (favoriteRoutes.length > 0) {
     items.push(railItem({
-      label: "Favorites",
+      label: "Pinned",
       detail: null,
       filter: { kind: "favorites" },
       routes: favoriteRoutes,

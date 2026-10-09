@@ -48,7 +48,7 @@ export function TooltipButton({
       >
         {children}
       </button>
-      {tooltipState.open && <Tooltip anchor={button} label={tooltip} shortcut={shortcut} />}
+      {tooltipState.layer && <Tooltip anchor={button} layer={tooltipState.layer} label={tooltip} shortcut={shortcut} />}
     </>
   );
 }

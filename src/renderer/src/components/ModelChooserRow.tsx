@@ -289,9 +289,9 @@ export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButt
     <button
       type="button"
       className="model-chooser-row-favorite"
-      aria-label={`${row.favorite ? "Remove" : "Add"} ${row.displayName} on ${row.backendProfileName} ${row.favorite ? "from" : "to"} favorites`}
+      aria-label={`${row.favorite ? "Unpin" : "Pin"} ${row.displayName} on ${row.backendProfileName}`}
       aria-pressed={row.favorite}
-      title={row.favorite ? "Remove from favorites" : "Add to favorites"}
+      title={row.favorite ? "Unpin model" : "Pin model"}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => activateModelChooserFavorite(event, row, onFavoriteToggle)}
     >

@@ -9,7 +9,7 @@ import { PanelBottom, PanelRight } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../../utils/environmentSummary";
 import { activeBackgroundTasksLabel } from "../../utils/backgroundTaskRuns";
-import { TooltipButton } from "../ui";
+import { IconButton } from "../ui";
 
 const HeaderUsageMeter = lazy(async () => ({
   default: (await import("./HeaderUsageMeter")).HeaderUsageMeter,
@@ -62,9 +62,6 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   const tasksLabel = activeBackgroundTaskCount > 0
     ? activeBackgroundTasksLabel(activeBackgroundTaskCount)
     : null;
-  const terminalLabel = terminalAvailable
-    ? `Toggle terminal${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-    : terminalUnavailableLabel;
   const rightPanelLabel = rightPanelAvailable
     ? `Toggle right panel${tasksLabel ? `, ${tasksLabel}` : ""}`
     : rightPanelUnavailableLabel;
@@ -79,21 +76,20 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           <HeaderUsageMeter usage={usage} onOpenUsage={onOpenUsage} />
         </Suspense>
       )}
-      <TooltipButton
+      <IconButton
         className="corner-toggle"
-        tooltip={terminalLabel}
-        aria-label={terminalAvailable ? "Toggle terminal" : terminalLabel}
-        title={terminalAvailable ? undefined : terminalLabel}
+        label={terminalAvailable ? "Toggle terminal" : terminalUnavailableLabel}
+        shortcut={terminalAvailable ? terminalShortcutLabel ?? undefined : undefined}
+        title={terminalAvailable ? undefined : terminalUnavailableLabel}
         aria-pressed={terminalOpen}
         disabled={!terminalAvailable}
         onClick={onToggleTerminal}
       >
         <PanelBottom size={16} aria-hidden="true" />
-      </TooltipButton>
-      <TooltipButton
+      </IconButton>
+      <IconButton
         className="corner-toggle"
-        tooltip={rightPanelLabel}
-        aria-label={rightPanelLabel}
+        label={rightPanelLabel}
         title={rightPanelAvailable ? undefined : rightPanelLabel}
         aria-pressed={rightPanelOpen}
         disabled={!rightPanelAvailable}
@@ -104,7 +100,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         {activeBackgroundTaskCount > 0 && (
           <span className="corner-toggle-count" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}
-      </TooltipButton>
+      </IconButton>
     </div>
   );
 });

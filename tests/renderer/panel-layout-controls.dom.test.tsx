@@ -1,10 +1,9 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PanelLayoutControls } from "../../src/renderer/src/components/workspace-header/PanelLayoutControls";
 import type { EnvironmentUsageSummary } from "../../src/renderer/src/utils/environmentSummary";
-import { hoverTooltipText } from "./tooltip-fixtures";
 
 function usage(fiveHourRemaining: number): EnvironmentUsageSummary {
   return {
@@ -96,7 +95,22 @@ describe("corner panel controls and header meter", () => {
     const terminal = screen.getByRole("button", { name: "Toggle terminal" });
     expect(terminal).toHaveAttribute("aria-pressed", "true");
     expect(terminal).not.toHaveAttribute("title");
-    expect(hoverTooltipText(terminal)).toBe("Toggle terminal (Ctrl+J)");
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(terminal, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      const hint = document.querySelector('[role="tooltip"]');
+      expect(hint).toHaveTextContent("Toggle terminalCtrl+J");
+      expect(hint?.querySelector("kbd")).toHaveTextContent("Ctrl+J");
+      fireEvent.pointerLeave(terminal, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     fireEvent.click(terminal);
     expect(props.onToggleTerminal).toHaveBeenCalledOnce();
 

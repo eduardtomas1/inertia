@@ -81,6 +81,7 @@ type WorkspaceHeaderProps = {
   isServerConversation?: boolean;
   view: AppView;
   sidebarCollapsed: boolean;
+  sidebarShortcut?: string;
   compact?: boolean;
   gitStatus: GitStatusSnapshot | null;
   gitNotice?: string | null;
@@ -124,6 +125,7 @@ export function WorkspaceHeader({
   isServerConversation = Boolean(conversation),
   view,
   sidebarCollapsed,
+  sidebarShortcut,
   compact = false,
   gitStatus,
   gitNotice = null,
@@ -309,7 +311,7 @@ export function WorkspaceHeader({
   return (
     <header ref={headerRef} className="workspace-header drag-region">
       <div className="header-leading no-drag">
-        <IconButton label="Toggle project navigation" className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
+        <IconButton label="Toggle project navigation" shortcut={sidebarShortcut} className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </IconButton>
         <nav className="header-breadcrumb" aria-label="Chat breadcrumb">

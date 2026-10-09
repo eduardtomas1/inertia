@@ -118,6 +118,38 @@ describe("icon button tooltip", () => {
     expect(onPointerLeave).toHaveBeenCalledTimes(1);
   });
 
+  it("lets Escape close an open tooltip without closing the surrounding dialog, then reach the dialog", () => {
+    const dialogEscape = vi.fn();
+    render(
+      <div role="dialog" aria-label="Settings dialog" onKeyDown={(event) => { if (event.key === "Escape") dialogEscape(); }}>
+        <IconButton label="Refresh">R</IconButton>
+      </div>,
+    );
+    const button = screen.getByRole("button", { name: "Refresh" });
+    hover(button);
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(tooltip()).not.toBeNull();
+    fireEvent.keyDown(button, { key: "Escape" });
+    expect(tooltip()).toBeNull();
+    expect(dialogEscape).not.toHaveBeenCalled();
+    fireEvent.keyDown(button, { key: "Escape" });
+    expect(dialogEscape).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a popover", (children: React.ReactNode) => <div popover="auto" data-testid="layer">{children}</div>],
+    ["a dialog", (children: React.ReactNode) => <dialog open data-testid="layer">{children}</dialog>],
+  ] as const)("renders the tooltip inside %s so the top layer does not hide it", (_name, wrap) => {
+    render(wrap(<IconButton label="Pin project">P</IconButton>));
+    hover(screen.getByRole("button", { name: "Pin project" }));
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(tooltip()?.parentElement).toBe(screen.getByTestId("layer"));
+  });
+
   it("lets a labelled button keep its own accessible name beside a shorter tooltip", () => {
     render(<TooltipButton tooltip="Snooze thread" aria-label="Snooze Draft the notes" className="row-action">Z</TooltipButton>);
     const button = screen.getByRole("button", { name: "Snooze Draft the notes" });

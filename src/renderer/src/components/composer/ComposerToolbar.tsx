@@ -287,6 +287,8 @@ export function ComposerToolbar({
   const toolsId = useId();
   const [toolsOpen, setToolsOpen] = useState(() => layoutStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open");
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
+  const hasTools = promptPresetsEnabled || promptStashEnabled || actions.length > 0
+    || Boolean(selectedProvider?.agentThreadManagement);
   return (
     <div
       className="composer-toolbar"
@@ -400,7 +402,7 @@ export function ComposerToolbar({
             onInsert={onInsertSkill}
           />
         </Suspense>
-        <div id={toolsId} className="composer-more-tools" hidden={!toolsVisible}>
+        <div id={toolsId} className="composer-more-tools" hidden={!hasTools || !toolsVisible}>
         <div
           className="composer-tools"
           role="group"
@@ -517,7 +519,7 @@ export function ComposerToolbar({
         ) : null}
         </div>
         </div>
-        <IconButton
+        {hasTools && <IconButton
           label="More tools"
           className="composer-tools-toggle"
           aria-expanded={toolsVisible}
@@ -530,7 +532,7 @@ export function ComposerToolbar({
           }}
         >
           <Ellipsis size={16} />
-        </IconButton>
+        </IconButton>}
         <div
           className="composer-actions"
           role="group"

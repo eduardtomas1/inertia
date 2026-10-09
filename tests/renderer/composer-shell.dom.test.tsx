@@ -120,6 +120,12 @@ describe("composer shell", () => {
     expect(window.localStorage.getItem("inertia:composer-tools:v1")).toBe("closed");
   });
 
+  it("offers no More tools toggle when the composer has no extra tools", () => {
+    render(<Composer {...composerProps(conversation("no-tools-chat"), { promptPresetsEnabled: false, promptStashEnabled: false })} />);
+    expect(screen.queryByRole("button", { name: "More tools" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeVisible();
+  });
+
   it("renders queued messages as plain rows at the top of the composer", async () => {
     const current = conversation("queued-chat");
     window.localStorage.setItem(

@@ -10938,12 +10938,12 @@ button.sent-attachment-open:hover {
   content: "·";
 }
 
-.turn-meta-primary [data-turn-status="failed"] {
+.turn-meta-primary > span[data-turn-status="failed"] {
   color: var(--status-failed);
 }
 
-.turn-meta-primary [data-turn-status="cancelled"],
-.turn-meta-primary [data-turn-status="interrupted"] {
+.turn-meta-primary > span[data-turn-status="cancelled"],
+.turn-meta-primary > span[data-turn-status="interrupted"] {
   color: var(--warning);
 }
 
@@ -11652,15 +11652,15 @@ button.sent-attachment-open:hover {
 .response-table-toolbar {
   position: absolute;
   z-index: 2;
-  top: 4px;
-  right: 4px;
+  top: 0;
+  right: 0;
   display: flex;
   user-select: none;
-  max-width: calc(100% - 8px);
+  max-width: 100%;
   align-items: center;
   gap: 2px;
-  padding: 0 0 0 8px;
-  border-radius: var(--radius-xs);
+  padding: 4px 4px 4px 8px;
+  border-radius: 0 0 0 var(--radius-xs);
   color: var(--text-muted);
   background: var(--fill-solid);
   font-size: var(--text-xs);

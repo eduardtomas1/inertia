@@ -5948,6 +5948,11 @@ button.turn-agents-line:hover {
   width: 220px;
 }
 
+.workspace-panel.is-stacked .header-popover.workspace-panel-add-menu {
+  right: auto;
+  left: 0;
+}
+
 .header-popover.workspace-panel-add-menu > button {
   justify-content: flex-start;
 }

@@ -683,6 +683,22 @@ button:disabled,
   right: calc(12px + var(--titlebar-overlay-inset));
 }
 
+:root[data-platform="win32"] .database-recovery-notice {
+  top: calc(env(titlebar-area-height, 48px) + 8px);
+}
+
+:root[data-platform="win32"] :is(.dialog-backdrop, .multi-spawn-backdrop, .daily-work-backdrop, .attachment-preview-backdrop, .snapshot-backdrop) {
+  padding-top: calc(env(titlebar-area-height, 48px) + 8px);
+}
+
+:root[data-platform="win32"] :is(.dialog-backdrop, .attachment-preview-backdrop) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+:root[data-platform="win32"] :is(.dialog-backdrop, .attachment-preview-backdrop) > * {
+  max-height: 100%;
+}
+
 .app-shell.is-sidebar-collapsed {
   grid-template-columns: 0 0 minmax(0, 1fr);
 }

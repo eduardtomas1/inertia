@@ -118,7 +118,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const modelResultsAx = await modelResults.ariaSnapshot();
   expect(modelResultsAx).toContain('- grid "Model results"');
   expect(modelResultsAx).toContain('- row "');
-  expect(modelResultsAx).toContain('- button "Add ');
+  expect(modelResultsAx).toContain('- button "Pin ');
   await expect(modelResults.locator(
     ".model-chooser-row.is-active .model-chooser-row-option",
   )).toHaveAttribute("aria-current", "true");
@@ -195,14 +195,14 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await captureChooserScenario("anchored-model-chooser-1440x720");
 
   const firstFavorite = modelResults.getByRole("button", {
-    name: /^Add .+ to favorites$/u,
+    name: /^Pin .+ on .+$/u,
   }).first();
   await firstFavorite.click();
   await expect(modelResults.getByRole("button", {
-    name: /^Remove .+ from favorites$/u,
+    name: /^Unpin .+ on .+$/u,
   }).first()).toHaveAttribute("aria-pressed", "true");
   const favoritesSource = modelChooser.getByRole("button", {
-    name: /^Favorites, 1 model$/u,
+    name: /^Pinned, 1 model$/u,
   });
   await expect(favoritesSource).toBeVisible();
   await favoritesSource.click();

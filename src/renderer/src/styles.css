@@ -6895,6 +6895,29 @@ button.turn-agents-line:hover {
   background: var(--fill);
 }
 
+.workspace-repository-more-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.workspace-repository-more-anchor > .icon-button {
+  width: var(--control-height-small);
+  height: var(--control-height-small);
+}
+
+.header-popover.workspace-repository-more-menu {
+  width: 200px;
+}
+
+.header-popover.workspace-repository-more-menu > button {
+  justify-content: flex-start;
+}
+
+.header-popover.workspace-repository-more-menu > button[aria-disabled="true"] {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+
 .workspace-repository-files {
   padding: 0;
   margin: 0;
@@ -7090,7 +7113,6 @@ button.turn-agents-line:hover {
   }
 
   .workspace-repository-scope-actions {
-    flex-wrap: wrap;
     justify-content: flex-end;
     padding: 3px 0 0 21px;
     border-left: 0;

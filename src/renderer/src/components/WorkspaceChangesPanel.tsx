@@ -49,6 +49,11 @@ import {
 import { IconButton } from "./ui";
 import { projectPathContextMenu } from "../utils/contextMenu";
 import { CommitDialog } from "./CommitDialog";
+import {
+  confidenceTitle,
+  RepositoryScopeActions,
+  type MergeDialogRequest,
+} from "./RepositoryScopeActions";
 
 const PreMergeConfidenceLauncher = lazy(async () => {
   const module = await import("./PreMergeConfidenceLauncher");
@@ -605,6 +610,7 @@ export function WorkspaceChangesPanel({
     snapshot,
   ]);
 
+  const [mergeDialogRequest, setMergeDialogRequest] = useState<MergeDialogRequest | null>(null);
   const scopeNavigator = useMemo(() => {
     if (!snapshot || !activeRepository) return undefined;
     const label = workspaceGitRepositoryLabel(
@@ -682,73 +688,99 @@ export function WorkspaceChangesPanel({
           )}
         </span>
         {canRunRepositoryActions && (
-          <span className="workspace-repository-scope-actions" aria-label={`Actions for ${label}`}>
-            <button
-              type="button"
-              disabled={
-                commitDiffLoading
-                || !authorityRef
-                || Boolean(commitAction?.disabled)
-                || activeRepository.truncated
-              }
-              title={!authorityRef
-                ? "Refresh this repository before changing it."
-                : activeRepository.truncated
-                ? "Refresh this repository before committing its complete change set."
-                : commitAction?.detail}
-              onClick={prepareActiveCommit}
-            >
-              <GitCommitHorizontal size={14} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
-            </button>
-            <button type="button" disabled={!authorityRef || Boolean(busyAction) || !activeRepository.hasRemote} title="Refresh remote branches while preserving local changes" onClick={() => {
-              void run("git.fetch", { type: "git.fetch", payload: { projectId, conversationId, repositoryPath: activeRepository.repositoryPath, authorityRef } }).then(onRefresh).catch(() => undefined);
-            }}><RefreshCw size={14} aria-hidden="true" /><span>Fetch</span></button>
-            <button
-              type="button"
-              disabled={!authorityRef || (pullAction?.disabled ?? true)}
-              title={!authorityRef ? "Refresh this repository before changing it." : pullAction?.detail}
-              onClick={() => {
-                void run("git.pull", {
-                  type: "git.pull",
-                  payload: {
+          <RepositoryScopeActions
+            label={label}
+            commit={(
+              <button
+                type="button"
+                disabled={
+                  commitDiffLoading
+                  || !authorityRef
+                  || Boolean(commitAction?.disabled)
+                  || activeRepository.truncated
+                }
+                title={!authorityRef
+                  ? "Refresh this repository before changing it."
+                  : activeRepository.truncated
+                  ? "Refresh this repository before committing its complete change set."
+                  : commitAction?.detail}
+                onClick={prepareActiveCommit}
+              >
+                <GitCommitHorizontal size={14} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
+              </button>
+            )}
+            actions={[
+              {
+                id: "fetch",
+                label: "Fetch",
+                icon: <RefreshCw size={14} aria-hidden="true" />,
+                disabled: !authorityRef || Boolean(busyAction) || !activeRepository.hasRemote,
+                title: "Refresh remote branches while preserving local changes",
+                onSelect: () => {
+                  void run("git.fetch", { type: "git.fetch", payload: { projectId, conversationId, repositoryPath: activeRepository.repositoryPath, authorityRef } }).then(onRefresh).catch(() => undefined);
+                },
+              },
+              {
+                id: "pull",
+                label: pullAction?.label ?? "Pull",
+                icon: <CloudDownload size={14} aria-hidden="true" />,
+                disabled: !authorityRef || (pullAction?.disabled ?? true),
+                ...(!authorityRef ? { title: "Refresh this repository before changing it." } : pullAction?.detail ? { title: pullAction.detail } : {}),
+                onSelect: () => {
+                  void run("git.pull", {
+                    type: "git.pull",
+                    payload: {
+                      projectId,
+                      conversationId,
+                      repositoryPath: activeRepository.repositoryPath,
+                      authorityRef,
+                    },
+                  }).then(onRefresh).catch(() => undefined);
+                },
+              },
+              {
+                id: "push",
+                label: pushAction?.label ?? "Push",
+                icon: <CloudUpload size={14} aria-hidden="true" />,
+                disabled: !authorityRef || (pushAction?.disabled ?? true),
+                ...(!authorityRef ? { title: "Refresh this repository before changing it." } : pushAction?.detail ? { title: pushAction.detail } : {}),
+                onSelect: pushActiveRepository,
+              },
+            ]}
+            confidence={{
+              disabled: !authorityRef || activeRepository.pullRequest?.forge !== "github",
+              title: confidenceTitle(authorityRef, activeRepository.pullRequest?.forge ?? undefined),
+            }}
+            pullRequest={{
+              disabled: !authorityRef || (pullRequestAction?.disabled ?? true),
+              ...(!authorityRef ? { title: "Refresh this repository before changing it." } : pullRequestAction?.detail ? { title: pullRequestAction.detail } : {}),
+            }}
+            onRequestMergeDialog={(kind) => setMergeDialogRequest((current) => ({ kind, id: (current?.id ?? 0) + 1 }))}
+          >
+            {(compact) => (
+              <Suspense fallback={null}>
+                <PreMergeConfidenceLauncher
+                  key={JSON.stringify([
                     projectId,
-                    conversationId,
-                    repositoryPath: activeRepository.repositoryPath,
-                    authorityRef,
-                  },
-                }).then(onRefresh).catch(() => undefined);
-              }}
-            >
-              <CloudDownload size={14} aria-hidden="true" /><span>{pullAction?.label ?? "Pull"}</span>
-            </button>
-            <button
-              type="button"
-              disabled={!authorityRef || (pushAction?.disabled ?? true)}
-              title={!authorityRef ? "Refresh this repository before changing it." : pushAction?.detail}
-              onClick={pushActiveRepository}
-            >
-              <CloudUpload size={14} aria-hidden="true" /><span>{pushAction?.label ?? "Push"}</span>
-            </button>
-            <Suspense fallback={null}>
-              <PreMergeConfidenceLauncher
-                key={JSON.stringify([
-                  projectId,
-                  conversationId ?? null,
-                  activePullRequestActionRevision,
-                ])}
-                projectId={projectId}
-                conversationId={conversationId}
-                repositoryPath={activeRepository.repositoryPath}
-                authorityRef={authorityRef}
-                forge={activeRepository.pullRequest?.forge ?? undefined}
-                initialTitle={activeRepository.branch ?? "Pull request"}
-                pullRequestBusy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
-                pullRequestDisabled={pullRequestAction?.disabled ?? true}
-                pullRequestDetail={pullRequestAction?.detail}
-                run={run}
-              />
-            </Suspense>
-          </span>
+                    conversationId ?? null,
+                    activePullRequestActionRevision,
+                  ])}
+                  projectId={projectId}
+                  conversationId={conversationId}
+                  repositoryPath={activeRepository.repositoryPath}
+                  authorityRef={authorityRef}
+                  forge={activeRepository.pullRequest?.forge ?? undefined}
+                  initialTitle={activeRepository.branch ?? "Pull request"}
+                  pullRequestBusy={busyAction === "git.pr.create" || busyAction === "git.pr.open"}
+                  pullRequestDisabled={pullRequestAction?.disabled ?? true}
+                  pullRequestDetail={pullRequestAction?.detail}
+                  run={run}
+                  buttons={!compact}
+                  openRequest={mergeDialogRequest}
+                />
+              </Suspense>
+            )}
+          </RepositoryScopeActions>
         )}
       </div>
     );
@@ -758,6 +790,7 @@ export function WorkspaceChangesPanel({
     busyAction,
     commitDiffLoading,
     conversationId,
+    mergeDialogRequest,
     nestedGitActions,
     onRefresh,
     prepareActiveCommit,

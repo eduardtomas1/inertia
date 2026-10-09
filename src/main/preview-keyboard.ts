@@ -26,3 +26,15 @@ export function forwardedKeyboardInput(input: Input): KeyboardInputEvent {
     modifiers,
   };
 }
+
+export function closesSecondaryWindow(
+  input: Pick<Input, "alt" | "control" | "key" | "meta" | "shift" | "type">,
+  platform: NodeJS.Platform | string,
+): boolean {
+  if (input.type !== "keyDown" || input.alt || input.shift) return false;
+  if (input.key === "Escape") return !input.meta && !input.control;
+  const primary = platform === "darwin"
+    ? input.meta && !input.control
+    : input.control && !input.meta;
+  return primary && input.key.toLowerCase() === "w";
+}

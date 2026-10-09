@@ -62,7 +62,7 @@ describe("Changes repository actions", () => {
     for (const name of ["Commit", "Fetch", "Pull", "Publish branch"]) {
       expect(within(group).getByRole("button", { name })).toBeInTheDocument();
     }
-    expect(screen.queryByRole("button", { name: "More Git actions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More actions for inertia" })).toBeNull();
     expect(screen.getByTestId("launcher")).toHaveTextContent("buttons");
   });
 
@@ -76,31 +76,41 @@ describe("Changes repository actions", () => {
     expect(within(group).queryByRole("button", { name: "Fetch" })).toBeNull();
     expect(screen.getByTestId("launcher")).toHaveTextContent("dialogs only");
 
-    fireEvent.click(screen.getByRole("button", { name: "More Git actions" }));
-    const menu = screen.getByRole("menu", { name: "More Git actions" });
+    fireEvent.click(screen.getByRole("button", { name: "More actions for inertia" }));
+    const menu = screen.getByRole("menu", { name: "More actions for inertia" });
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent))
       .toEqual(["Fetch", "Pull", "Publish branch", "Confidence", "PR"]);
     expect(within(menu).getByRole("menuitem", { name: "Pull" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Pull" }));
-    expect(screen.getByRole("menu", { name: "More Git actions" })).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "More actions for inertia" })).toBeInTheDocument();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Fetch" }));
     expect(onFetch).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("menu", { name: "More Git actions" })).toBeNull();
+    expect(screen.queryByRole("menu", { name: "More actions for inertia" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "More Git actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for inertia" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Confidence" }));
     expect(onMergeDialog).toHaveBeenCalledWith("confidence");
 
     sizes.rowClient = 700;
     act(() => resize?.());
-    expect(screen.queryByRole("button", { name: "More Git actions" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "More actions for inertia" })).not.toBeNull();
 
     sizes.rowClient = 760;
     sizes.rowScroll = 760;
     act(() => resize?.());
     expect(within(group).getByRole("button", { name: "Fetch" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "More Git actions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More actions for inertia" })).toBeNull();
     expect(screen.getByTestId("launcher")).toHaveTextContent("buttons");
+  });
+
+  it("collapses when lazily loaded actions arrive after the row was measured", async () => {
+    render(actionsRow());
+    expect(screen.queryByRole("button", { name: "More actions for inertia" })).toBeNull();
+    sizes.rowScroll = 760;
+    await act(async () => {
+      screen.getByLabelText("Actions for inertia").append(document.createElement("span"));
+    });
+    expect(screen.getByRole("button", { name: "More actions for inertia" })).toBeInTheDocument();
   });
 
   it("collapses when the stacked action line itself would overflow", () => {
@@ -109,6 +119,6 @@ describe("Changes repository actions", () => {
     sizes.actionsClient = 280;
     sizes.actionsScroll = 420;
     render(actionsRow());
-    expect(screen.getByRole("button", { name: "More Git actions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions for inertia" })).toBeInTheDocument();
   });
 });

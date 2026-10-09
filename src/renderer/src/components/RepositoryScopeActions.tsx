@@ -56,7 +56,7 @@ export function useCollapsedActions(actions: HTMLElement | null): boolean {
 
   useLayoutEffect(() => {
     const row = actions?.parentElement;
-    if (!actions || !row || typeof ResizeObserver === "undefined") return;
+    if (!actions || !row || typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (compactRef.current && row.clientWidth >= expandedWidth.current) {
         compactRef.current = false;
@@ -66,7 +66,13 @@ export function useCollapsedActions(actions: HTMLElement | null): boolean {
       collapseIfOverflowing();
     });
     observer.observe(row);
-    return () => observer.disconnect();
+    observer.observe(actions);
+    const mutations = new MutationObserver(collapseIfOverflowing);
+    mutations.observe(actions, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      mutations.disconnect();
+    };
   }, [actions, collapseIfOverflowing]);
 
   useLayoutEffect(collapseIfOverflowing);
@@ -127,7 +133,7 @@ export function RepositoryScopeActions({
         <span className="workspace-repository-more-anchor">
           <IconButton
             ref={(node) => setMenuTrigger("more", node)}
-            label="More Git actions"
+            label={`More actions for ${label}`}
             aria-haspopup="menu"
             aria-expanded={menu === "more"}
             aria-controls={menuId}
@@ -141,7 +147,7 @@ export function RepositoryScopeActions({
               id={menuId}
               className="header-popover workspace-repository-more-menu"
               role="menu"
-              aria-label="More Git actions"
+              aria-label={`More actions for ${label}`}
               onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]:not([aria-disabled="true"])')}
             >
               {items.map((item) => (

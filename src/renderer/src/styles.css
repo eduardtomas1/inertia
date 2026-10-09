@@ -7112,8 +7112,11 @@ button.turn-agents-line:hover {
     min-width: 24px;
   }
 
+  .workspace-repository-scope-actions > :first-child {
+    margin-left: auto;
+  }
+
   .workspace-repository-scope-actions {
-    justify-content: flex-end;
     padding: 3px 0 0 21px;
     border-left: 0;
   }

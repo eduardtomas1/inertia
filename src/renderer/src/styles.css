@@ -9820,9 +9820,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   margin-left: auto;
 }
 
-.message.turn-user-request {
+.message.is-user {
   width: fit-content;
   max-width: var(--user-request-max-width);
+  margin-right: 0;
+  margin-left: auto;
   padding: 12px 16px;
   border: 0;
   border-radius: var(--radius-md);
@@ -9839,7 +9841,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: var(--user-request-max-width);
 }
 
-.turn-user-request .message-meta {
+.message.is-user .message-meta {
   justify-content: flex-end;
   gap: 8px;
   margin: -4px -8px 4px 0;
@@ -9849,7 +9851,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   line-height: var(--leading-chrome);
 }
 
-.message.is-user.turn-user-request .message-body {
+.message.is-user .message-body {
   padding: 0;
   border: 0;
   border-radius: 0;

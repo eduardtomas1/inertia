@@ -247,4 +247,58 @@ describe("quiet turn chrome", () => {
     })]);
     expect(within(turnElement("turn-running-quiet")).queryByRole("contentinfo")).toBeNull();
   });
+
+  it("gives legacy history requests the same bubble as turn requests", () => {
+    loadStyles();
+    const legacyTurn = turn("turn-legacy-shape", "codex", "2026-09-01T09:00:00.000Z");
+    const { container } = render(<ResponseTimeline
+      turns={[legacyTurn]}
+      messages={[
+        ...messages(legacyTurn, "Request turn-legacy-shape", "Answer turn-legacy-shape"),
+        { id: "legacy-user", conversationId, turnId: null, role: "user", content: "An older request", attachments: [], createdAt: "2026-09-01T08:00:00.000Z" },
+      ]}
+      activities={[]}
+      reasonings={[]}
+      plans={[]}
+      checkpoints={[]}
+      projectRoot="/workspace"
+      projectId="project-quiet-turn-chrome"
+      conversationId={conversationId}
+      streamingText=""
+      streamingReasoning=""
+      streamingChannel={null}
+      approvals={[]}
+      inputRequests={[]}
+      showTimestamps={false}
+      showThinking
+      defaultCodeWrap={false}
+      autoCollapseWorkLog
+      showChangedFileSummaries={false}
+      checkpointRestoreDisabled
+      onRespondToApproval={async () => undefined}
+      onRespondToInput={async () => undefined}
+      onRevertCheckpoint={() => undefined}
+      onOpenTurnDiff={() => undefined}
+      onCompareTurnArtifacts={() => undefined}
+      onOpenTurnFile={() => undefined}
+      onStop={() => undefined}
+    />);
+    const legacy = container.querySelector<HTMLElement>('article.message.is-user[data-message-search-id="legacy-user"]')!;
+    const current = container.querySelector<HTMLElement>("article.turn-user-request")!;
+    expect(legacy).not.toBeNull();
+    expect(legacy.classList.contains("turn-user-request")).toBe(false);
+    const bubble = (element: HTMLElement) => {
+      const declared = [...stylesheet!.sheet!.cssRules]
+        .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && element.matches(rule.selectorText))
+        .map((rule) => rule.style);
+      const last = (property: string) => declared.map((style) => style.getPropertyValue(property)).filter(Boolean).at(-1);
+      return { background: last("background"), radius: last("border-radius"), padding: last("padding") };
+    };
+    expect(bubble(legacy)).toEqual(bubble(current));
+    expect(bubble(legacy)).toEqual({
+      background: "var(--fill)",
+      radius: "var(--radius-md)",
+      padding: "12px 16px",
+    });
+  });
 });

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -212,5 +214,12 @@ describe("workspace panel tab row", () => {
     const browser = await within(menu).findByRole("menuitem", { name: /^Browser/u });
     expect(browser).toHaveAttribute("aria-current", "true");
     expect(within(menu).getByRole("menuitem", { name: /^Terminal/u })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the add button on the 2px outside button ring", () => {
+    const css = readFileSync("src/renderer/src/styles.css", "utf8");
+    const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
+    expect(inset).toContain('[role="tab"]');
+    expect(inset).not.toContain(".workspace-panel-add");
   });
 });
